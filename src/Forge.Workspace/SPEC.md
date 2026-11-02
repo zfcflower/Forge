@@ -1,0 +1,33 @@
+---
+id: forge-workspace
+type: module-design
+status: draft
+title: Forge.Workspace
+parent: forge-architecture
+---
+
+# Forge.Workspace
+
+Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。只依赖 `Forge.Abstractions` 与 BCL + Microsoft.Data.Sqlite;不含 UI。
+
+## 边界
+
+- 所有文件写入(规格、评审)被限制在所属工作区内;创建/更新/删除前解析符号链接与 junction 的真实目标,越界即拒绝。
+- 经 `Forge.Abstractions` 暴露 7 个规格工具:`spec_grep`/`spec_get`/`spec_graph`/`spec_validate`(只读)、`spec_create`/`spec_update`/`spec_delete`(写)。
+**评审意见存储。** 评审意见存应用数据目录的 SQLite,不入仓库;`MarkSentAsync` 幂等——对已发送评论重复标记不改写原始 `sent_at`。
+
+## 关键决策
+
+**Git 走系统 `git` 命令行。** 用 `ProcessStartInfo.ArgumentList`(不 shell 拼接);所有接受引用/范围的类型化接口拒绝以 `-` 开头的参数并加 `--end-of-options`,防止选项注入。底层 `RunAsync` 保持不受限。
+
+**捕获字节级且诚实。** 输出按原始字节流读取(不按行重拼),保留 CRLF 与末尾无换行;超过上限时结构化接口抛 `GitOutputTruncatedException`,不把截断数据当完整结果。统一 Diff 解析器校验 hunk 声明的行数与内容一致,损坏块标记而非猜测。
+
+**Worktree 安全。** 每会话一个 `forge/<slug>` worktree;非强制删除在有未提交改动、未合入提交、游离 HEAD 独有提交、或无法确定基线分支时拒绝。会话结束后 worktree 保留,由用户手动清理。
+
+**规格 frontmatter 往返无损。** 列表解析与序列化互逆(引号、逗号、转义);解析器不支持的语法保留 `RawText` 原样回写,不静默重写。
+
+**AOT 兼容。** 工具 JSON 输出走反射无关的 `JsonPayload`;持久化的 `DiffAnchor` 走 `WorkspaceJsonContext` 源生成。五个主程序项目 `IsAotCompatible=true`,分析器 0 警告。
+
+## 未决
+
+- 索引刷新默认信任长度+mtime;外部工具保留时间戳的同长度修改需 `force` 刷新才可见(已提供强制刷新路径)。
