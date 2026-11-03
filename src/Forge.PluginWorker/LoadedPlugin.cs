@@ -83,9 +83,10 @@ internal sealed class LoadedPlugin
     }
 }
 
-/// <summary>Collects the plugin's registrations. The worker serves tools; commands, workflows, panels
-/// and permissions are recorded by the Extension Host and main program, not here.</summary>
-internal sealed class RegistrationRecorder : IRegistrationContext
+/// <summary>Collects the plugin's registrations. The worker serves tools; commands, workflows, panels and
+/// permissions are recorded by the Extension Host and main program, not here, so a plugin that declares one is
+/// rejected instead of having that contribution silently dropped.</summary>
+internal sealed class RegistrationRecorder(string pluginId) : IRegistrationContext
 {
     private readonly List<IPluginTool> tools = [];
     private readonly HashSet<string> names = new(StringComparer.Ordinal);
@@ -112,17 +113,30 @@ internal sealed class RegistrationRecorder : IRegistrationContext
 
     public void AddCommand(CommandDeclaration command)
     {
+        ArgumentNullException.ThrowIfNull(command);
+        throw Unsupported($"command '{command.Name}'");
     }
 
     public void AddWorkflow(WorkflowDeclaration workflow)
     {
+        ArgumentNullException.ThrowIfNull(workflow);
+        throw Unsupported($"workflow '{workflow.Name}'");
     }
 
     public void AddPanel(PanelDeclaration panel)
     {
+        ArgumentNullException.ThrowIfNull(panel);
+        throw Unsupported($"panel '{panel.Id}'");
     }
 
     public void RequirePermission(Permission permission)
     {
+        ArgumentNullException.ThrowIfNull(permission);
+        throw Unsupported(string.IsNullOrWhiteSpace(permission.Scope)
+            ? $"permission '{permission.Kind}'"
+            : $"permission '{permission.Kind}' for scope '{permission.Scope}'");
     }
+
+    private PluginLoadException Unsupported(string contribution) => new(
+        $"Plugin '{pluginId}' declares {contribution}, but this worker serves tools only, so the load fails instead of dropping it.");
 }

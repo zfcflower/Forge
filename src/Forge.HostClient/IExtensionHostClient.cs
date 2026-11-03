@@ -38,6 +38,8 @@ public interface IExtensionHostClient : IAsyncDisposable
 
     event Action<HostStatus, string?>? StatusChanged;
 
+    /// <summary>Connects to (or starts) the host. Valid from <see cref="HostStatus.Stopped"/> and from
+    /// <see cref="HostStatus.Failed"/>; a failed client recovers by starting again on the same instance.</summary>
     Task StartAsync(CancellationToken ct);
 
     Task StopAsync(CancellationToken ct);

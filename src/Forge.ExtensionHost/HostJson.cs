@@ -61,7 +61,12 @@ internal sealed record ToolsRegisterNotification(string PluginId, IReadOnlyList<
 internal sealed record ToolsUnregisterNotification(string PluginId);
 
 // Host ↔ worker.
-internal sealed record WorkerLoadRequest(string PluginId, string Version, string AssemblyPath);
+internal sealed record WorkerLoadRequest(
+    string PluginId,
+    string Version,
+    string AssemblyPath,
+    string AssemblySha256,
+    IReadOnlyDictionary<string, string> Files);
 
 internal sealed record WorkerLoadResponse(IReadOnlyList<ToolDeclaration> Tools);
 
@@ -71,6 +76,7 @@ internal sealed record WorkerExecuteRequest(
     JsonElement? Args,
     string SessionId,
     string WorkingDir,
+    int Depth,
     string HostPipeName);
 
 internal sealed record ToolCallResult(string Content, bool IsError);

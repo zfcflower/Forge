@@ -106,7 +106,7 @@ internal static class PluginManifestReader
             if (!PluginIds.IsSafeSegment(id) || !PluginIds.IsSafeSegment(version))
             {
                 kind = PluginIssueKind.ManifestInvalid;
-                error = $"'{path}' must declare a usable id and version (1-{PluginIds.MaxSegmentLength} characters, no path separators).";
+                error = $"'{path}' must declare a usable id and version (1-{PluginIds.MaxSegmentLength} characters, no path separators, no invalid file-name characters, no '..').";
                 return false;
             }
 
@@ -156,12 +156,28 @@ internal static class PluginManifestReader
     }
 }
 
-/// <summary>Validation helpers for the identifiers that become file system segments, assembly names and pipe names.</summary>
+/// <summary>Validation helpers for the identifiers that become file system segments, assembly names and pipe names.
+/// The rules are the ones <see cref="VersionedOutputStore"/> applies to a path segment, so a manifest the reader accepts
+/// can never make the host throw while it composes an output path.</summary>
 internal static class PluginIds
 {
     public const int MaxSegmentLength = 64;
 
     private const int MaxPipeTokenLength = 40;
+
+    private static readonly char[] InvalidSegmentChars =
+    [
+        .. Path.GetInvalidFileNameChars(),
+        '/',
+        '\\',
+        ':',
+        '"',
+        '<',
+        '>',
+        '|',
+        '*',
+        '?',
+    ];
 
     public static bool IsSafeSegment(string? value)
     {
@@ -175,9 +191,14 @@ internal static class PluginIds
             return false;
         }
 
+        if (value.Contains("..", StringComparison.Ordinal) || value.AsSpan().IndexOfAny(InvalidSegmentChars) >= 0)
+        {
+            return false;
+        }
+
         foreach (var character in value)
         {
-            if (character < ' ' || character is '/' or '\\' or ':' or '"' or '<' or '>' or '|' or '*' or '?')
+            if (character < ' ')
             {
                 return false;
             }

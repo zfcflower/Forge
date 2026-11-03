@@ -5,16 +5,30 @@ using Forge.Plugin.Sdk;
 namespace Forge.PluginWorker;
 
 /// <summary>Relays <see cref="IHostFacade.CallToolAsync"/> to the host over the worker's own pipe as a
-/// <c>host.tool_call</c> request. The worker performs no permission checks: the main program decides and
-/// its answer is returned verbatim.</summary>
-internal sealed class HostCallFacade(IIpcPeer peer) : IHostFacade
+/// <c>host.tool_call</c> request. One instance belongs to exactly one <c>worker.execute</c>: the session, working
+/// directory and depth it reports are that invocation's, so concurrent executions never share mutable context.
+/// The worker performs no permission checks: the main program decides and its answer is returned verbatim.</summary>
+internal sealed class HostCallFacade(IIpcPeer peer, string sessionId, string workingDirectory, int depth) : IHostFacade
 {
+    public string SessionId { get; } = sessionId;
+
+    public string WorkingDirectory { get; } = workingDirectory;
+
+    public int Depth { get; } = depth;
+
     public async Task<HostToolResult> CallToolAsync(string name, JsonElement arguments, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         var request = WorkerJson.Serialize(
-            new HostToolCallRequest { Name = name, Arguments = WorkerJson.ObjectOrEmpty(arguments) },
+            new HostToolCallRequest
+            {
+                Name = name,
+                Arguments = WorkerJson.ObjectOrEmpty(arguments),
+                SessionId = SessionId,
+                WorkingDirectory = WorkingDirectory,
+                Depth = Depth,
+            },
             WorkerJsonContext.Default.HostToolCallRequest);
 
         try

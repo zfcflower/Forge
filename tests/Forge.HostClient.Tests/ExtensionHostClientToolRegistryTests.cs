@@ -130,8 +130,7 @@ public sealed class ExtensionHostClientToolRegistryTests
         Assert.Equal(2, previous.Count);
     }
 
-    [Fact(Skip = "BUG: re-registering a plugin with an identical declaration set replaces every proxy and raises " +
-                 "ToolsChanged although the set of tools did not change; the event is required only when the set changes.")]
+    [Fact]
     public async Task Identical_re_registration_does_not_fire_ToolsChanged()
     {
         await using var host = new FakeHost();
@@ -331,9 +330,7 @@ public sealed class ExtensionHostClientToolRegistryTests
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
-    [Fact(Skip = "BUG: a single declaration whose name or description has the wrong JSON type makes the whole " +
-                 "tools.register payload undecodable, so the valid sibling declarations are dropped too; the protocol " +
-                 "contract says invalid entries are dropped rather than failing the whole message.")]
+    [Fact]
     public async Task Declaration_with_a_wrongly_typed_field_does_not_drop_its_valid_siblings()
     {
         await using var host = new FakeHost();
@@ -349,6 +346,26 @@ public sealed class ExtensionHostClientToolRegistryTests
         await host.SyncAsync();
 
         Assert.Equal(new[] { "valid" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task A_wrongly_typed_description_keeps_the_declaration_with_an_empty_description()
+    {
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host);
+        await client.StartConnectedAsync(host);
+
+        await host.NotifyClientAsync("tools.register", """
+            {"pluginId":"alpha","tools":[
+              {"name":"odd","description":5,"inputSchemaJson":"{}","sideEffect":0},
+              {"name":"valid","description":"d","sideEffect":1}
+            ]}
+            """);
+        await host.SyncAsync();
+
+        Assert.Equal(new[] { "odd", "valid" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
+        Assert.Equal(string.Empty, client.Tools[0].Definition.Description);
+        Assert.Equal(ToolSideEffect.Write, client.Tools[1].SideEffect);
     }
 
     private static string Register(string pluginId, params string[] declarations) =>

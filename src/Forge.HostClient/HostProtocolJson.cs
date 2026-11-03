@@ -29,8 +29,8 @@ internal sealed record PluginRevokeArgs(
     [property: JsonPropertyName("version")] string Version);
 
 /// <summary>Host → main program: a plugin calls a main-program tool. <c>args</c> is read tolerantly
-/// (object, or a JSON string holding the object); <c>workingDir</c>/<c>sessionId</c>/<c>depth</c> are
-/// accepted when the host supplies them.</summary>
+/// (object, or a JSON string holding the object); <c>workingDir</c>/<c>sessionId</c>/<c>depth</c> are the
+/// originating invocation's context and <c>workingDir</c> must be a rooted path.</summary>
 internal sealed record HostToolCallArgs(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("args")] JsonElement Args,
@@ -42,23 +42,6 @@ internal sealed record HostToolCallOutput(
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("isError")] bool IsError);
 
-/// <summary><c>{content, isError}</c> response of <c>plugin.execute</c>.</summary>
-internal sealed record ToolOutput(
-    [property: JsonPropertyName("content")] string? Content,
-    [property: JsonPropertyName("isError")] bool IsError);
-
-/// <summary>A <see cref="SdkToolDeclaration"/> as received from the host; <c>sideEffect</c> stays raw so a
-/// numeric or a named value both decode.</summary>
-internal sealed record ToolDeclarationWire(
-    [property: JsonPropertyName("name")] string? Name,
-    [property: JsonPropertyName("description")] string? Description,
-    [property: JsonPropertyName("inputSchemaJson")] string? InputSchemaJson,
-    [property: JsonPropertyName("sideEffect")] JsonElement SideEffect);
-
-internal sealed record ToolsRegisterArgs(
-    [property: JsonPropertyName("pluginId")] string? PluginId,
-    [property: JsonPropertyName("tools")] ToolDeclarationWire[]? Tools);
-
 internal sealed record ToolsUnregisterArgs(
     [property: JsonPropertyName("pluginId")] string? PluginId);
 
@@ -67,11 +50,7 @@ internal sealed record ToolsUnregisterArgs(
 [JsonSerializable(typeof(PluginRevokeArgs))]
 [JsonSerializable(typeof(HostToolCallArgs))]
 [JsonSerializable(typeof(HostToolCallOutput))]
-[JsonSerializable(typeof(ToolOutput))]
-[JsonSerializable(typeof(ToolsRegisterArgs))]
 [JsonSerializable(typeof(ToolsUnregisterArgs))]
-[JsonSerializable(typeof(ToolDeclarationWire))]
-[JsonSerializable(typeof(ToolDeclarationWire[]))]
 internal sealed partial class HostClientJsonContext : JsonSerializerContext
 {
 }
@@ -124,44 +103,71 @@ internal static class HostProtocolJson
         }
     }
 
-    /// <summary>Reads <c>{pluginId, tools}</c>; invalid entries are dropped rather than failing the whole message.</summary>
+    /// <summary>Reads <c>{pluginId, tools}</c>; every declaration is decoded on its own so one invalid entry is
+    /// dropped instead of failing the whole message.</summary>
     public static bool TryReadToolsRegister(
         JsonElement? payload, out string pluginId, out IReadOnlyList<SdkToolDeclaration> tools)
     {
         pluginId = string.Empty;
         tools = [];
-        var message = Deserialize<ToolsRegisterArgs>(payload, HostClientJsonContext.Default.ToolsRegisterArgs);
-        if (message?.PluginId is not { Length: > 0 } id)
+        if (payload is not { ValueKind: JsonValueKind.Object } message)
+        {
+            return false;
+        }
+
+        if (!message.TryGetProperty("pluginId", out var idElement) || idElement.ValueKind != JsonValueKind.String ||
+            idElement.GetString() is not { Length: > 0 } id)
         {
             return false;
         }
 
         pluginId = id;
-        if (message.Tools is not { Length: > 0 } declared)
+        if (!message.TryGetProperty("tools", out var list) || list.ValueKind == JsonValueKind.Null)
         {
             tools = [];
             return true;
         }
 
-        var parsed = new List<SdkToolDeclaration>(declared.Length);
-        foreach (var wire in declared)
+        if (list.ValueKind != JsonValueKind.Array)
         {
-            if (wire?.Name is not { Length: > 0 } name)
-            {
-                continue;
-            }
+            return false;
+        }
 
-            var schema = string.IsNullOrWhiteSpace(wire.InputSchemaJson) ? "{}" : wire.InputSchemaJson;
-            parsed.Add(new SdkToolDeclaration(
-                name,
-                wire.Description ?? string.Empty,
-                schema,
-                ReadSideEffect(wire.SideEffect)));
+        var parsed = new List<SdkToolDeclaration>(list.GetArrayLength());
+        foreach (var entry in list.EnumerateArray())
+        {
+            if (ReadDeclaration(entry) is { } declaration)
+            {
+                parsed.Add(declaration);
+            }
         }
 
         tools = parsed;
         return true;
     }
+
+    private static SdkToolDeclaration? ReadDeclaration(JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object ||
+            !entry.TryGetProperty("name", out var nameElement) ||
+            nameElement.ValueKind != JsonValueKind.String ||
+            nameElement.GetString() is not { Length: > 0 } name)
+        {
+            return null;
+        }
+
+        var schema = ReadString(entry, "inputSchemaJson");
+        return new SdkToolDeclaration(
+            name,
+            ReadString(entry, "description") ?? string.Empty,
+            string.IsNullOrWhiteSpace(schema) ? "{}" : schema,
+            ReadSideEffect(entry.TryGetProperty("sideEffect", out var sideEffect) ? sideEffect : default));
+    }
+
+    private static string? ReadString(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     public static bool TryReadToolsUnregister(JsonElement? payload, out string pluginId)
     {
@@ -205,9 +211,11 @@ internal static class HostProtocolJson
         return true;
     }
 
-    /// <summary>Reads the <c>{content, isError}</c> response of <c>plugin.execute</c>.</summary>
+    /// <summary>Reads the <c>{content, isError}</c> response of <c>plugin.execute</c> field by field; a field of the
+    /// wrong JSON type makes the whole result an error instead of a successful empty result.</summary>
     public static bool TryReadToolOutput(JsonElement? result, out string content, out bool isError)
     {
+        const string Undecodable = "The Extension Host returned a tool result that cannot be decoded.";
         content = string.Empty;
         isError = true;
         if (result is not { ValueKind: JsonValueKind.Object } element)
@@ -216,9 +224,30 @@ internal static class HostProtocolJson
             return false;
         }
 
-        var output = Deserialize<ToolOutput>(element, HostClientJsonContext.Default.ToolOutput);
-        content = output?.Content ?? string.Empty;
-        isError = output?.IsError ?? false;
+        if (element.TryGetProperty("content", out var contentElement))
+        {
+            if (contentElement.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            {
+                content = Undecodable;
+                return false;
+            }
+
+            content = contentElement.GetString() ?? string.Empty;
+        }
+
+        var reportedError = false;
+        if (element.TryGetProperty("isError", out var errorElement))
+        {
+            if (errorElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                content = Undecodable;
+                return false;
+            }
+
+            reportedError = errorElement.GetBoolean();
+        }
+
+        isError = reportedError;
         return true;
     }
 

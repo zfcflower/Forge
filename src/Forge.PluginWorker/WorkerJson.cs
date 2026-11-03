@@ -15,6 +15,14 @@ internal sealed record WorkerLoadRequest
 
     [JsonPropertyName("assemblyPath")]
     public string? AssemblyPath { get; init; }
+
+    /// <summary>SHA-256 of the entry assembly, hex; absent means the host cannot prove what it asked for.</summary>
+    [JsonPropertyName("assemblySha256")]
+    public string? AssemblySha256 { get; init; }
+
+    /// <summary>SHA-256 of every file of the plugin directory, keyed by its <c>/</c>-separated relative name.</summary>
+    [JsonPropertyName("files")]
+    public Dictionary<string, string>? Files { get; init; }
 }
 
 internal sealed record WorkerExecuteRequest
@@ -33,6 +41,10 @@ internal sealed record WorkerExecuteRequest
 
     [JsonPropertyName("workingDir")]
     public string? WorkingDir { get; init; }
+
+    /// <summary>Nesting depth of the originating invocation; absent means the top level.</summary>
+    [JsonPropertyName("depth")]
+    public int? Depth { get; init; }
 
     [JsonPropertyName("hostPipeName")]
     public string? HostPipeName { get; init; }
@@ -66,6 +78,15 @@ internal sealed record HostToolCallRequest
 
     [JsonPropertyName("args")]
     public JsonElement Arguments { get; init; }
+
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; init; } = "";
+
+    [JsonPropertyName("workingDir")]
+    public string WorkingDirectory { get; init; } = "";
+
+    [JsonPropertyName("depth")]
+    public int Depth { get; init; }
 }
 
 /// <summary>Wire helpers for the worker operations: one source-generated context and the shared

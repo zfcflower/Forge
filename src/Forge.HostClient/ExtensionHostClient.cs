@@ -100,12 +100,13 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
             var current = Status;
-            if (current != HostStatus.Stopped)
+            if (current is not (HostStatus.Stopped or HostStatus.Failed))
             {
                 throw new InvalidOperationException(
-                    $"The Extension Host client is {current}; a new instance is required to connect again.");
+                    $"The Extension Host client is {current}; stop it before starting it again.");
             }
 
+            var recovering = current == HostStatus.Failed;
             Interlocked.Exchange(ref stopping, 0);
             Volatile.Write(ref protocolProblem, null);
             var launchesHost = !string.IsNullOrWhiteSpace(connection.HostExecutablePath);
@@ -134,6 +135,10 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                 }
 
                 SetStatus(HostStatus.Running, null);
+                if (recovering)
+                {
+                    ClearTools();
+                }
             }
             catch (Exception ex) when (ex is OperationCanceledException && ct.IsCancellationRequested)
             {
@@ -143,7 +148,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             }
             catch (Exception ex)
             {
-                SetStatus(HostStatus.Failed, DescribeFailure(ex));
+                FailStatus(DescribeFailure(ex));
                 await TeardownAsync(sendHostStop: false, clearTools: false).ConfigureAwait(false);
                 throw;
             }
@@ -493,18 +498,22 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
     private void SetPluginTools(string pluginId, IReadOnlyList<ExtensionHostTool>? proxies)
     {
+        var changed = false;
         lock (toolsGate)
         {
             if (proxies is null || proxies.Count == 0)
             {
-                if (!toolsByPlugin.Remove(pluginId))
-                {
-                    return;
-                }
+                changed = toolsByPlugin.Remove(pluginId);
             }
-            else
+            else if (!toolsByPlugin.TryGetValue(pluginId, out var registered) || !SameDeclarations(registered, proxies))
             {
                 toolsByPlugin[pluginId] = proxies;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                return;
             }
 
             RebuildToolSnapshots();
@@ -512,6 +521,30 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
         RaiseToolsChanged();
     }
+
+    private static bool SameDeclarations(
+        IReadOnlyList<ExtensionHostTool> registered, IReadOnlyList<ExtensionHostTool> incoming)
+    {
+        if (registered.Count != incoming.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < registered.Count; index++)
+        {
+            if (!SameDeclaration(registered[index], incoming[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool SameDeclaration(ExtensionHostTool registered, ExtensionHostTool incoming) =>
+        string.Equals(registered.PluginId, incoming.PluginId, StringComparison.Ordinal) &&
+        registered.Definition == incoming.Definition &&
+        registered.SideEffect == incoming.SideEffect;
 
     private void ClearTools()
     {
@@ -573,6 +606,17 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             return;
         }
 
+        if (workingDirectory is not null && !Path.IsPathRooted(workingDirectory))
+        {
+            await RespondToolOutputAsync(
+                    active, request.Id,
+                    $"'{name}' was not run: the working directory '{workingDirectory}' carried by the host is not a " +
+                    "rooted path.",
+                    isError: true)
+                .ConfigureAwait(false);
+            return;
+        }
+
         var tool = toolResolver?.Invoke(name);
         if (tool is null)
         {
@@ -591,7 +635,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             return;
         }
 
-        var directory = ResolveWorkingDirectory(workingDirectory);
+        var directory = workingDirectory ?? FallbackWorkingDirectory();
         ApprovalDecision decision;
         try
         {
@@ -637,10 +681,10 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         await RespondToolOutputAsync(active, request.Id, result.Content ?? string.Empty, result.IsError).ConfigureAwait(false);
     }
 
-    private string ResolveWorkingDirectory(string? fromHost) =>
-        !string.IsNullOrWhiteSpace(fromHost) ? fromHost
-        : !string.IsNullOrWhiteSpace(options.HostToolWorkingDirectory) ? options.HostToolWorkingDirectory
-        : Environment.CurrentDirectory;
+    private string FallbackWorkingDirectory() =>
+        !string.IsNullOrWhiteSpace(options.HostToolWorkingDirectory)
+            ? options.HostToolWorkingDirectory
+            : Environment.CurrentDirectory;
 
     private static Task RespondToolOutputAsync(IpcPeer active, long requestId, string content, bool isError) =>
         active.IsClosed ? Task.CompletedTask : RespondAsync(active, requestId, content, isError);
@@ -696,20 +740,24 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         };
     }
 
-    private void SetStatus(HostStatus next, string? detail)
+    private void SetStatus(HostStatus next, string? detail, bool forceDetail = false)
     {
         lock (statusGate)
         {
-            if ((HostStatus)status == next)
+            if ((HostStatus)status != next)
+            {
+                Volatile.Write(ref status, (int)next);
+            }
+            else if (!forceDetail)
             {
                 return;
             }
-
-            Volatile.Write(ref status, (int)next);
         }
 
         RaiseStatus(next, detail);
     }
+
+    private void FailStatus(string detail) => SetStatus(HostStatus.Failed, detail, forceDetail: true);
 
     private void RaiseStatus(HostStatus next, string? detail)
     {

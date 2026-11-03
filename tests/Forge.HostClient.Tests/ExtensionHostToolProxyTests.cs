@@ -121,9 +121,7 @@ public sealed class ExtensionHostToolProxyTests
         Assert.Equal("The Extension Host returned no tool result.", result.Content);
     }
 
-    [Fact(Skip = "BUG: a plugin.execute result whose fields have the wrong JSON type fails to decode and is reported as " +
-                 "a successful call with empty content (isError defaults to false); a malformed response must surface as " +
-                 "an error result.")]
+    [Fact]
     public async Task A_malformed_result_object_becomes_an_error_result()
     {
         await using var host = new FakeHost();

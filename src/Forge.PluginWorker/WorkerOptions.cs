@@ -5,7 +5,9 @@ using Forge.Scripting;
 namespace Forge.PluginWorker;
 
 /// <summary>Command line of the worker executable: <c>--pipe &lt;name&gt;</c> (required, the Extension
-/// Host's worker pipe) and <c>--max-concurrency &lt;n&gt;</c> (bounded parallel tool execution).</summary>
+/// Host's worker pipe) and <c>--max-concurrency &lt;n&gt;</c> (bounded parallel tool execution).
+/// <c>--dotnet &lt;path&gt;</c> is accepted and ignored: the worker launches no child process, and an older host
+/// still passes the runtime it would use for a <c>.dll</c>.</summary>
 public sealed record WorkerOptions
 {
     public const int DefaultMaxConcurrency = 8;
@@ -71,6 +73,18 @@ public sealed record WorkerOptions
                     concurrency > MaxAllowedConcurrency)
                 {
                     error = $"'--max-concurrency' expects an integer between 1 and {MaxAllowedConcurrency}.";
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (TryMatch(argument, "--dotnet", out var inlineRuntime))
+            {
+                var value = inlineRuntime ?? NextValue(args, ref index);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    error = "'--dotnet' requires a runtime path.";
                     return false;
                 }
 

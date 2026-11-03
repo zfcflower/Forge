@@ -70,16 +70,17 @@ public sealed class ExtensionHostClientLifecycleTests
     }
 
     [Fact]
-    public async Task Start_after_a_failed_start_is_rejected_because_a_new_instance_is_required()
+    public async Task Start_after_a_failed_start_recovers_on_the_same_instance()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromMilliseconds(300));
+        await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromMilliseconds(500));
         using var limit = TestLimit.Create();
         await Assert.ThrowsAsync<TimeoutException>(() => client.StartAsync(limit.Token));
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync(limit.Token));
-
         Assert.Equal(HostStatus.Failed, client.Status);
+
+        await client.StartConnectedAsync(host);
+
+        Assert.Equal(HostStatus.Running, client.Status);
     }
 
     [Fact]
@@ -218,9 +219,7 @@ public sealed class ExtensionHostClientLifecycleTests
         Assert.Equal([HostStatus.Starting, HostStatus.Running], sequence);
     }
 
-    [Fact(Skip = "BUG: when startup times out, the transient Failed raised by the closed connection attempt is kept as the " +
-                 "status detail because the final SetStatus(Failed, timeout message) is a no-op; the reported reason is " +
-                 "the closed-connection text instead of the timeout.")]
+    [Fact]
     public async Task Start_timeout_reports_the_timeout_as_the_failure_detail()
     {
         await using var host = new FakeHost();

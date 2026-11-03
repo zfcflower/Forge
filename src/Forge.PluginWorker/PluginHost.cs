@@ -5,8 +5,8 @@ using Forge.Scripting;
 
 namespace Forge.PluginWorker;
 
-/// <summary>A plugin failed to load: the assembly is missing or malformed, no entry type was found,
-/// registration threw, or the declarations are invalid.</summary>
+/// <summary>A plugin failed to load: the assembly is missing, unverified or malformed, no entry type was found,
+/// registration threw, a contribution cannot be honoured, or the declarations are invalid.</summary>
 internal sealed class PluginLoadException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>Owns the one plugin this worker runs. Loading a second plugin unloads the first; the load
@@ -23,12 +23,14 @@ internal sealed class PluginHost
         string pluginId,
         string version,
         string assemblyPath,
+        string? assemblySha256,
+        IReadOnlyDictionary<string, string>? files,
         CancellationToken ct)
     {
         await mutation.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var created = await CreateAsync(pluginId, version, assemblyPath, ct).ConfigureAwait(false);
+            var created = await CreateAsync(pluginId, version, assemblyPath, assemblySha256, files, ct).ConfigureAwait(false);
             await FinishUnloadAsync(PublishAndDetach(created)).ConfigureAwait(false);
             return created.Declarations;
         }
@@ -60,9 +62,7 @@ internal sealed class PluginHost
         string? pluginId,
         string toolName,
         JsonElement arguments,
-        string sessionId,
-        string workingDirectory,
-        IHostFacade host,
+        HostCallFacade host,
         CancellationToken ct)
     {
         var current = Volatile.Read(ref loaded);
@@ -81,7 +81,7 @@ internal sealed class PluginHost
             return Error($"the plugin does not declare a tool named '{toolName}'");
         }
 
-        var invocation = new ToolInvocation(sessionId, workingDirectory, arguments, host);
+        var invocation = new ToolInvocation(host.SessionId, host.WorkingDirectory, arguments, host);
         try
         {
             var result = await tool.InvokeAsync(invocation, ct).ConfigureAwait(false);
@@ -101,6 +101,8 @@ internal sealed class PluginHost
         string pluginId,
         string version,
         string assemblyPath,
+        string? assemblySha256,
+        IReadOnlyDictionary<string, string>? files,
         CancellationToken ct)
     {
         var fullPath = Path.GetFullPath(assemblyPath);
@@ -115,13 +117,17 @@ internal sealed class PluginHost
             throw new PluginLoadException($"Cannot determine the plugin directory of '{fullPath}'.");
         }
 
+        // Verify before a load context exists, so no plugin code can run against unverified bytes.
+        var image = await PluginIntegrity
+            .VerifyAsync(fullPath, directory, assemblySha256, files, ct)
+            .ConfigureAwait(false);
+
         var context = new PluginLoadContext(directory, fullPath, $"forge-worker-plugin:{pluginId}");
         try
         {
-            var image = await File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
             var assembly = context.LoadPluginAssembly(image);
             var plugin = CreateEntry(context, assembly, pluginId);
-            var recorder = new RegistrationRecorder();
+            var recorder = new RegistrationRecorder(pluginId);
             plugin.Register(recorder);
             return LoadedPlugin.Create(pluginId, version, fullPath, context, plugin, recorder.Tools);
         }

@@ -8,16 +8,23 @@ namespace Forge.ExtensionHost;
 
 /// <summary>
 /// One <c>Forge.PluginWorker</c> process for one plugin. Loads are serialized, executions run concurrently up to
-/// <see cref="HostOptions.MaxConcurrentExecutionsPerWorker"/>, and a timeout, a crash or an uncooperative tool kills the
-/// whole process tree before the worker is restarted and re-loaded (a cancellation token cannot stop hostile code).
+/// <see cref="HostOptions.MaxConcurrentExecutionsPerWorker"/>, and a timeout, a crash, a cancelled call that does not
+/// stop cooperatively, or an uncooperative tool kills the whole process tree before the worker is restarted and
+/// re-loaded (a cancellation token cannot stop hostile code). Every abnormal event is charged against the plugin's
+/// failure budget in <see cref="PluginState"/>, which survives this slot being replaced.
 /// </summary>
 /// <param name="forwardToolCall">Routes a worker's <c>host.tool_call</c> to the main program and returns its response.</param>
 internal sealed class WorkerSlot(
     string pluginId,
     HostOptions options,
+    PluginState state,
     Func<IpcMessage, CancellationToken, Task<IpcMessage>> forwardToolCall) : IAsyncDisposable
 {
-    private const int MaxConsecutiveFailures = 3;
+    /// <summary>How long a cancelled execution may keep running before its process tree is killed.</summary>
+    internal static readonly TimeSpan CancelGraceWindow = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a stopping worker gets to answer <c>worker.stop</c> before the tree is killed regardless.</summary>
+    private static readonly TimeSpan StopGraceWindow = TimeSpan.FromSeconds(2);
 
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -25,11 +32,9 @@ internal sealed class WorkerSlot(
 
     private WorkerSession? current;
 
+    private PluginImage? image;
+
     private string version = string.Empty;
-
-    private string assemblyPath = string.Empty;
-
-    private int failures;
 
     private int disposed;
 
@@ -40,27 +45,24 @@ internal sealed class WorkerSlot(
 
     public IReadOnlyList<ToolDeclaration> Tools => Volatile.Read(ref current)?.Tools ?? [];
 
-    /// <summary>Starts the worker when it is not running for exactly this version and assembly, and loads the plugin into
+    /// <summary>Starts the worker when it is not running for exactly this version and image, and loads the plugin into
     /// it. Returns <c>true</c> when a new worker process was started.</summary>
-    public async Task<bool> EnsureLoadedAsync(string pluginVersion, string pluginAssemblyPath, CancellationToken ct)
+    public async Task<bool> EnsureLoadedAsync(string pluginVersion, PluginImage image, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(image);
+
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
-            if (Volatile.Read(ref failures) > MaxConsecutiveFailures)
-            {
-                throw new HostOperationException(
-                    "worker_disabled",
-                    $"The plugin worker for '{PluginId}' failed {MaxConsecutiveFailures + 1} times in a row and stays stopped until the plugins are refreshed.");
-            }
+            ThrowIfDisabled();
 
             var session = Volatile.Read(ref current);
             if (session is not null &&
                 session.IsAlive &&
                 session.Loaded &&
                 string.Equals(version, pluginVersion, StringComparison.Ordinal) &&
-                string.Equals(assemblyPath, pluginAssemblyPath, StringComparison.Ordinal))
+                SameImage(Volatile.Read(ref image), image))
             {
                 return false;
             }
@@ -72,9 +74,20 @@ internal sealed class WorkerSlot(
             }
 
             version = pluginVersion;
-            assemblyPath = pluginAssemblyPath;
-            await StartAndLoadAsync(ct).ConfigureAwait(false);
-            failures = 0;
+            try
+            {
+                await StartAndLoadAsync(pluginVersion, image, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                state.ChargeFailure();
+                throw;
+            }
+
             return true;
         }
         finally
@@ -90,6 +103,8 @@ internal sealed class WorkerSlot(
         await concurrency.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            ThrowIfDisabled();
+
             var session = Volatile.Read(ref current) ??
                 throw new HostOperationException("worker_not_loaded", $"The plugin worker for '{PluginId}' is not running.");
 
@@ -107,29 +122,10 @@ internal sealed class WorkerSlot(
                 request.Args,
                 request.SessionId,
                 request.WorkingDir,
+                request.Depth,
                 hostPipeName));
 
-            IpcMessage response;
-            try
-            {
-                response = await session.Peer.SendRequestAsync(ExtensionProtocol.WorkerExecute, payload, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception) when (exception is IpcTimeoutException or IpcConnectionClosedException)
-            {
-                var cause = exception is IpcTimeoutException ? RecoveryCause.TimedOut : RecoveryCause.Exited;
-                var reason = exception is IpcTimeoutException
-                    ? $"Tool '{request.Tool}' of plugin '{PluginId}' exceeded {options.ToolTimeout.TotalSeconds:0.#} s; the whole worker process tree was killed"
-                    : $"The plugin worker of '{PluginId}' exited during tool '{request.Tool}'";
-                var restartNote = await RecoverAsync(session, cause).ConfigureAwait(false);
-                throw new HostOperationException(
-                    cause == RecoveryCause.TimedOut ? "tool_timeout" : "worker_failed",
-                    restartNote is null ? reason + " and restarted; the call failed." : reason + "; " + restartNote);
-            }
-
+            var response = await DispatchAsync(session, request, payload, ct).ConfigureAwait(false);
             ToolCallResult? result;
             try
             {
@@ -140,7 +136,7 @@ internal sealed class WorkerSlot(
                 throw new HostOperationException("worker_protocol", $"The plugin worker of '{PluginId}' returned an unreadable result: {exception.Message}");
             }
 
-            failures = 0;
+            state.RecordSuccess();
             return result ?? new ToolCallResult(string.Empty, false);
         }
         finally
@@ -178,31 +174,118 @@ internal sealed class WorkerSlot(
     {
         Exited = 0,
         TimedOut = 1,
+        Cancelled = 2,
+    }
+
+    /// <summary>
+    /// Sends <c>worker.execute</c> and supervises it: the caller's cancellation gets a cooperative grace window before
+    /// the process tree is killed, while the worker's own deadline keeps running independently of it, so a hung tool is
+    /// killed even when nobody cancels.
+    /// </summary>
+    private async Task<IpcMessage> DispatchAsync(
+        WorkerSession session,
+        PluginExecuteRequest request,
+        JsonElement payload,
+        CancellationToken ct)
+    {
+        using var execution = new CancellationTokenSource();
+        ct.ThrowIfCancellationRequested();
+        var pending = session.Peer.SendRequestAsync(ExtensionProtocol.WorkerExecute, payload, execution.Token);
+        try
+        {
+            try
+            {
+                return await pending.WaitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return await AwaitCancelGraceAsync(session, request, pending, execution).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception) when (exception is IpcTimeoutException or IpcConnectionClosedException)
+        {
+            var cause = exception is IpcTimeoutException ? RecoveryCause.TimedOut : RecoveryCause.Exited;
+            var reason = exception is IpcTimeoutException
+                ? $"Tool '{request.Tool}' of plugin '{PluginId}' exceeded {options.ToolTimeout.TotalSeconds:0.#} s; the whole worker process tree was killed"
+                : $"The plugin worker of '{PluginId}' exited during tool '{request.Tool}'";
+            var restartNote = await RecoverAsync(session, cause).ConfigureAwait(false);
+            throw new HostOperationException(
+                cause == RecoveryCause.TimedOut ? "tool_timeout" : "worker_failed",
+                restartNote is null ? reason + " and restarted; the call failed." : reason + "; " + restartNote);
+        }
+        finally
+        {
+            if (!pending.IsCompleted)
+            {
+                await execution.CancelAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Waits the grace window for a cancelled call to finish on its own; kills and restarts the worker when it
+    /// does not, which is what actually stops a plugin that ignores cancellation.</summary>
+    private async Task<IpcMessage> AwaitCancelGraceAsync(
+        WorkerSession session,
+        PluginExecuteRequest request,
+        Task<IpcMessage> pending,
+        CancellationTokenSource execution)
+    {
+        try
+        {
+            return await pending.WaitAsync(CancelGraceWindow, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+        catch (Exception exception) when (exception is IpcTimeoutException or IpcConnectionClosedException)
+        {
+            var timedOut = exception is IpcTimeoutException;
+            var restartNote = await RecoverAsync(session, timedOut ? RecoveryCause.TimedOut : RecoveryCause.Cancelled).ConfigureAwait(false);
+            throw new HostOperationException(
+                timedOut ? "tool_timeout" : "worker_failed",
+                (timedOut
+                    ? $"Tool '{request.Tool}' of plugin '{PluginId}' exceeded {options.ToolTimeout.TotalSeconds:0.#} s while being cancelled"
+                    : $"The plugin worker of '{PluginId}' exited while tool '{request.Tool}' was being cancelled")
+                + (restartNote is null ? "; the call failed." : "; " + restartNote));
+        }
+
+        await execution.CancelAsync().ConfigureAwait(false);
+        await DrainAsync(pending).ConfigureAwait(false);
+        state.ChargeFailure();
+        await RecoverAsync(session, RecoveryCause.Cancelled, charge: false).ConfigureAwait(false);
+        throw new HostOperationException(
+            "cancelled",
+            $"Tool '{request.Tool}' of plugin '{PluginId}' was cancelled and did not finish within {CancelGraceWindow.TotalSeconds:0.#} s; its worker process tree was killed.");
     }
 
     /// <summary>Kills the given session, restarts the worker and re-loads the plugin. Returns <c>null</c> when the worker
     /// is running again, or a note explaining why it is not.</summary>
-    private async Task<string?> RecoverAsync(WorkerSession session, RecoveryCause cause)
+    private async Task<string?> RecoverAsync(WorkerSession session, RecoveryCause cause, bool charge = true)
     {
         await gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
             if (!ReferenceEquals(Volatile.Read(ref current), session))
             {
-                return null;
+                return $"the worker for '{PluginId}' is no longer running.";
             }
 
             Volatile.Write(ref current, null);
             await session.DisposeAsync().ConfigureAwait(false);
-            failures++;
-            if (failures > MaxConsecutiveFailures)
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return $"the worker for '{PluginId}' was stopped.";
+            }
+
+            var failures = charge ? state.ChargeFailure() : state.Failures;
+            if (failures >= PluginState.FailureBudget)
             {
                 return $"the worker for '{PluginId}' failed {failures} times in a row and stays stopped until the plugins are refreshed";
             }
 
             try
             {
-                var tools = await StartAndLoadAsync(CancellationToken.None).ConfigureAwait(false);
+                var tools = await StartAndLoadAsync(version, LoadImage(), CancellationToken.None).ConfigureAwait(false);
                 if (Reloaded is { } reloaded)
                 {
                     await reloaded(tools, CancellationToken.None).ConfigureAwait(false);
@@ -212,7 +295,9 @@ internal sealed class WorkerSlot(
             }
             catch (Exception exception) when (exception is HostOperationException or IpcTimeoutException or IpcConnectionClosedException or IOException)
             {
-                return $"restarting the worker for '{PluginId}' failed ({cause.ToString().ToLowerInvariant()}): {exception.Message}";
+                var total = state.ChargeFailure();
+                return $"restarting the worker for '{PluginId}' failed ({cause.ToString().ToLowerInvariant()}): {exception.Message}"
+                    + (total >= PluginState.FailureBudget ? " It stays stopped until the plugins are refreshed." : string.Empty);
             }
         }
         finally
@@ -221,17 +306,65 @@ internal sealed class WorkerSlot(
         }
     }
 
-    private async Task<IReadOnlyList<ToolDeclaration>> StartAndLoadAsync(CancellationToken ct)
+    /// <summary>The image of the version the slot was last loaded for; recovery re-loads exactly that.</summary>
+    private PluginImage LoadImage() => Volatile.Read(ref image) ??
+        throw new HostOperationException("worker_not_loaded", $"Plugin '{PluginId}' has no recorded image to reload.");
+
+    /// <summary>True when the worker already holds exactly these bytes, so nothing has to be reloaded.</summary>
+    private static bool SameImage(PluginImage? loaded, PluginImage wanted)
+    {
+        if (loaded is null ||
+            !string.Equals(loaded.AssemblyPath, wanted.AssemblyPath, StringComparison.Ordinal) ||
+            !string.Equals(loaded.AssemblySha256, wanted.AssemblySha256, StringComparison.Ordinal) ||
+            loaded.Files.Count != wanted.Files.Count)
+        {
+            return false;
+        }
+
+        foreach (var file in wanted.Files)
+        {
+            if (!loaded.Files.TryGetValue(file.Key, out var digest) ||
+                !string.Equals(digest, file.Value, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void ThrowIfDisabled()
+    {
+        if (!state.IsExhausted)
+        {
+            return;
+        }
+
+        throw new HostOperationException(
+            "worker_disabled",
+            $"The plugin worker for '{PluginId}' failed {state.Failures} times in a row and stays stopped until the plugins are refreshed.");
+    }
+
+    private async Task<IReadOnlyList<ToolDeclaration>> StartAndLoadAsync(
+        string pluginVersion,
+        PluginImage pluginImage,
+        CancellationToken ct)
     {
         var session = await StartAsync(ct).ConfigureAwait(false);
         var loaded = false;
         try
         {
-            var payload = HostJson.ToElement(new WorkerLoadRequest(PluginId, version, assemblyPath));
+            var payload = HostJson.ToElement(new WorkerLoadRequest(
+                PluginId,
+                pluginVersion,
+                pluginImage.AssemblyPath,
+                pluginImage.AssemblySha256,
+                pluginImage.Files));
             var response = await session.Peer.SendRequestAsync(ExtensionProtocol.WorkerLoad, payload, ct).ConfigureAwait(false);
             session.Tools = ReadTools(response);
             session.Loaded = true;
             loaded = true;
+            Volatile.Write(ref image, pluginImage);
         }
         catch (OperationCanceledException)
         {
@@ -288,8 +421,6 @@ internal sealed class WorkerSlot(
 
         startInfo.ArgumentList.Add("--pipe");
         startInfo.ArgumentList.Add(pipeName);
-        startInfo.ArgumentList.Add("--dotnet");
-        startInfo.ArgumentList.Add(options.RuntimePath);
 
         var log = new TailBuffer(4096);
         Process process;
@@ -330,8 +461,8 @@ internal sealed class WorkerSlot(
         return session;
     }
 
-    /// <summary>Serves the worker's <c>host.tool_call</c>: forwarded to the main program over the main pipe, and its
-    /// result relayed back to the worker.</summary>
+    /// <summary>Serves the worker's <c>host.tool_call</c>: forwarded to the main program over the main pipe with its
+    /// originating context intact, and its result relayed back to the worker.</summary>
     private async Task HandleWorkerRequestAsync(WorkerSession session, IpcMessage message, CancellationToken ct)
     {
         if (!string.Equals(message.Operation, ExtensionProtocol.HostToolCall, StringComparison.Ordinal))
@@ -376,6 +507,18 @@ internal sealed class WorkerSlot(
         var payload = element.Deserialize<WorkerLoadResponse>(HostJson.Options);
         var tools = payload?.Tools;
         return tools is { Count: > 0 } ? [.. tools] : [];
+    }
+
+    /// <summary>Observes a request that was already cancelled so its failure is not left unobserved.</summary>
+    private static async Task DrainAsync(Task pending)
+    {
+        try
+        {
+            await pending.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private static string BuildPipeName(string pluginId)
@@ -444,6 +587,9 @@ internal sealed class WorkerSlot(
 
         public string LogSuffix() => log.Suffix();
 
+        /// <summary>Asks the worker to stop and then kills its process tree while that worker is still the live parent.
+        /// Killing first — while the process can still be enumerated — is the guarantee; waiting for a graceful exit
+        /// first would leave descendants behind whenever the worker exits on its own.</summary>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0)
@@ -453,15 +599,10 @@ internal sealed class WorkerSlot(
 
             if (!Peer.IsClosed)
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                try
-                {
-                    await Peer.SendRequestAsync(ExtensionProtocol.WorkerStop, HostJson.EmptyObject, deadline.Token).ConfigureAwait(false);
-                }
-                catch (Exception)
-                {
-                }
+                RequestStop();
             }
+
+            KillProcessTree(Process);
 
             try
             {
@@ -479,8 +620,22 @@ internal sealed class WorkerSlot(
             {
             }
 
-            KillProcessTree(Process);
             Process.Dispose();
+        }
+
+        private void RequestStop()
+        {
+            _ = Task.Run(async () =>
+            {
+                using var deadline = new CancellationTokenSource(StopGraceWindow);
+                try
+                {
+                    await Peer.SendRequestAsync(ExtensionProtocol.WorkerStop, HostJson.EmptyObject, deadline.Token).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                }
+            });
         }
     }
 

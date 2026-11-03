@@ -158,6 +158,65 @@ public sealed class HostToolCallRelayTests
     }
 
     [Fact]
+    public async Task The_carried_working_directory_session_and_depth_win_over_the_options()
+    {
+        var tool = new StubTool("echo");
+        ApprovalRequest? approved = null;
+        await using var host = new FakeHost();
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = "D:/configured" };
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (request, _) =>
+            {
+                approved = request;
+                return ValueTask.FromResult(ApprovalDecision.Allow);
+            },
+            options: options);
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+
+        var response = await host.CallClientAsync(
+            Operation,
+            """{"name":"echo","args":{"a":1},"sessionId":"sess-7","workingDir":"D:/repo/sub","depth":4}""",
+            limit.Token);
+
+        Assert.Equal(new ToolOutput("ran echo", false), Output(response));
+        Assert.Equal("D:/repo/sub", approved?.WorkingDirectory);
+        var invocation = Assert.Single(tool.Invocations);
+        Assert.Equal(new ToolContext("sess-7", "D:/repo/sub", 4), invocation.Context);
+    }
+
+    [Fact]
+    public async Task A_non_rooted_working_directory_fails_closed_before_approval_and_invocation()
+    {
+        var tool = new StubTool("echo");
+        var approvals = 0;
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) =>
+            {
+                Interlocked.Increment(ref approvals);
+                return ValueTask.FromResult(ApprovalDecision.Allow);
+            });
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+
+        var response = await host.CallClientAsync(
+            Operation,
+            """{"name":"echo","args":{},"sessionId":"sess-7","workingDir":"relative/dir","depth":1}""",
+            limit.Token);
+
+        var output = Output(response);
+        Assert.True(output.IsError);
+        Assert.Contains("not a rooted path", output.Content);
+        Assert.Equal(0, approvals);
+        Assert.Equal(0, tool.InvocationCount);
+    }
+
+    [Fact]
     public async Task The_approval_request_carries_the_tool_side_effect_arguments_and_working_directory()
     {
         var tool = new StubTool("writer", ToolSideEffect.Execute);

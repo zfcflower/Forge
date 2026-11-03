@@ -8,13 +8,18 @@ internal sealed record PluginScanResult(IReadOnlyList<PluginEntry> Plugins, IRea
 
 /// <summary>
 /// Scans <c>&lt;plugins&gt;/&lt;id&gt;/</c> for <c>manifest.json</c>, resolves each plugin's content and records every
-/// problem as an issue instead of throwing. A source-only plugin is compiled with <see cref="ScriptCompiler"/> and its
-/// image is stored through <see cref="VersionedOutputStore"/> under the plugin's own <c>bin</c> directory, keyed by the
-/// compilation cache key, so an unchanged plugin never pays Roslyn twice.
+/// problem as an issue instead of throwing, so one unusable package never keeps the healthy ones from registering. A
+/// source-only plugin is compiled with <see cref="ScriptCompiler"/> and its image is stored through
+/// <see cref="VersionedOutputStore"/> under the plugin's own <c>bin</c> directory, keyed by the compilation cache key,
+/// so an unchanged plugin never pays Roslyn twice.
 /// </summary>
 internal sealed class PluginCatalog
 {
     private const int MaxSourceBytes = 1024 * 1024;
+
+    /// <summary>Prefix that keeps a file digest from ever colliding with a manifest dependency inside the folded
+    /// dependency hash.</summary>
+    private const string FileDependencyPrefix = "file:";
 
     private readonly ScriptCompiler compiler;
 
@@ -59,52 +64,143 @@ internal sealed class PluginCatalog
         foreach (var directory in directories)
         {
             ct.ThrowIfCancellationRequested();
-            var directoryName = Path.GetFileName(directory);
-            if (!PluginIds.IsSafeSegment(directoryName))
+            try
+            {
+                await DiscoverOneAsync(directory, seen, plugins, issues, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
             {
                 issues.Add(new PluginIssue(
-                    directoryName,
-                    PluginIssueKind.DirectoryNameInvalid,
-                    $"'{directory}' is not a usable plugin directory name; it was skipped.",
-                    directory));
-                continue;
-            }
-
-            if (!PluginManifestReader.TryRead(directory, out var manifest, out var kind, out var error))
-            {
-                issues.Add(new PluginIssue(directoryName, kind, error, directory));
-                continue;
-            }
-
-            if (!string.Equals(manifest.Id, directoryName, StringComparison.Ordinal))
-            {
-                issues.Add(new PluginIssue(
-                    manifest.Id,
-                    PluginIssueKind.IdMismatch,
-                    $"Plugin id '{manifest.Id}' does not match its directory name '{directoryName}'.",
+                    Path.GetFileName(directory),
+                    PluginIssueKind.InvalidPackage,
+                    $"'{directory}' could not be discovered: {exception.Message}",
                     directory));
             }
-
-            if (!seen.Add(manifest.Id))
-            {
-                issues.Add(new PluginIssue(
-                    manifest.Id,
-                    PluginIssueKind.DuplicateId,
-                    $"Plugin '{manifest.Id}' is declared by more than one directory; '{directory}' was ignored.",
-                    directory));
-                continue;
-            }
-
-            var entry = new PluginEntry(manifest);
-            await PrepareAsync(entry, ct).ConfigureAwait(false);
-            issues.AddRange(entry.Issues);
-            plugins.Add(entry);
         }
 
         return new PluginScanResult(plugins, issues);
     }
 
-    /// <summary>Resolves the content behind one manifest: source text plus hash, or a prebuilt image plus its hash.</summary>
+    /// <summary>
+    /// Reads the plugin's content from disk now and returns it with the hashes the approval has to cover. Every file of
+    /// the loadable directory is read and hashed afresh, so an artifact is never trusted because of the directory it
+    /// sits in, and the returned image is the exact set of bytes the caller then hands to the worker.
+    /// </summary>
+    public static async Task<PluginContent> SnapshotAsync(PluginEntry entry, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (entry.Image is not { } image)
+        {
+            throw new InvalidOperationException($"Plugin '{entry.Id}' has no loadable image.");
+        }
+
+        var files = await ReadLoadableFilesAsync(image.Directory, ct).ConfigureAwait(false);
+        if (!files.TryGetValue(image.AssemblyFileName, out var assemblySha256))
+        {
+            throw new FileNotFoundException(
+                $"Plugin assembly '{image.AssemblyPath}' is missing.",
+                image.AssemblyPath);
+        }
+
+        var sourceHash = entry.ContentIsBinary
+            ? assemblySha256
+            : await SourceHashAsync(entry, ct).ConfigureAwait(false);
+        var current = new PluginImage(image.Directory, image.AssemblyFileName, assemblySha256, files);
+        return new PluginContent(current, sourceHash, DependencyFingerprint(entry.Manifest.Dependencies, files));
+    }
+
+    /// <summary>Folds the private-dependency digests together with the manifest dependencies: sorted, prefixed entries
+    /// hashed by <see cref="Hashing.DependencyHash"/>, so replacing any loaded file invalidates the approval.</summary>
+    internal static string DependencyFingerprint(
+        IReadOnlyList<Dependency> dependencies,
+        IReadOnlyDictionary<string, string> files)
+    {
+        var entries = new List<Dependency>(dependencies.Count + files.Count);
+        entries.AddRange(dependencies);
+        foreach (var file in files)
+        {
+            entries.Add(new Dependency(FileDependencyPrefix + file.Key, file.Value));
+        }
+
+        return Hashing.DependencyHash(entries);
+    }
+
+    /// <summary>The stored image for a compilation version: the store layout, then the literal
+    /// <c>bin/&lt;version&gt;/</c> layout, so an image produced elsewhere is still picked up.</summary>
+    private static string? FindOutput(VersionedOutputStore store, string pluginId, string version, string fileName)
+    {
+        string[] candidates =
+        [
+            store.GetOutputPath(pluginId, version, fileName),
+            Path.Combine(store.BaseDirectory, version, fileName),
+        ];
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return Path.GetFullPath(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task DiscoverOneAsync(
+        string directory,
+        HashSet<string> seen,
+        List<PluginEntry> plugins,
+        List<PluginIssue> issues,
+        CancellationToken ct)
+    {
+        var directoryName = Path.GetFileName(directory);
+        if (!PluginIds.IsSafeSegment(directoryName))
+        {
+            issues.Add(new PluginIssue(
+                directoryName,
+                PluginIssueKind.DirectoryNameInvalid,
+                $"'{directory}' is not a usable plugin directory name; it was skipped.",
+                directory));
+            return;
+        }
+
+        if (!PluginManifestReader.TryRead(directory, out var manifest, out var kind, out var error))
+        {
+            issues.Add(new PluginIssue(directoryName, kind, error, directory));
+            return;
+        }
+
+        if (!string.Equals(manifest.Id, directoryName, StringComparison.Ordinal))
+        {
+            issues.Add(new PluginIssue(
+                manifest.Id,
+                PluginIssueKind.IdMismatch,
+                $"Plugin id '{manifest.Id}' does not match its directory name '{directoryName}'.",
+                directory));
+        }
+
+        if (!seen.Add(manifest.Id))
+        {
+            issues.Add(new PluginIssue(
+                manifest.Id,
+                PluginIssueKind.DuplicateId,
+                $"Plugin '{manifest.Id}' is declared by more than one directory; '{directory}' was ignored.",
+                directory));
+            return;
+        }
+
+        var entry = new PluginEntry(manifest);
+        await PrepareAsync(entry, ct).ConfigureAwait(false);
+        issues.AddRange(entry.Issues);
+        plugins.Add(entry);
+    }
+
+    /// <summary>Resolves the content behind one manifest: source text plus hash, or a prebuilt image, and then binds the
+    /// bytes it is loaded from into <see cref="PluginEntry.Image"/> and the dependency hash.</summary>
     private async Task PrepareAsync(PluginEntry entry, CancellationToken ct)
     {
         var manifest = entry.Manifest;
@@ -125,12 +221,16 @@ internal sealed class PluginCatalog
 
             entry.ContentPath = sourcePath;
             entry.ContentIsBinary = false;
+            entry.InlineSource = sourcePath is null ? sourceText : null;
             entry.SourceHash = Hashing.SourceHash(sourceText);
             await CompileAsync(entry, sourceText, sourcePath, ct).ConfigureAwait(false);
-            return;
+        }
+        else
+        {
+            ResolvePrebuilt(entry);
         }
 
-        await ResolvePrebuiltAsync(entry, ct).ConfigureAwait(false);
+        await BindImageAsync(entry, ct).ConfigureAwait(false);
     }
 
     private async Task CompileAsync(PluginEntry entry, string sourceText, string? sourcePath, CancellationToken ct)
@@ -148,9 +248,10 @@ internal sealed class PluginCatalog
 
         var version = VersionedOutputStore.VersionFor(request.CacheKey);
         var fileName = manifest.OutputFileName;
-        if (FindOutput(store, manifest.Id, version, fileName) is { } cached)
+        var cached = FindOutput(store, manifest.Id, version, fileName);
+        if (cached is not null)
         {
-            entry.AssemblyPath = cached;
+            entry.Image = ImageAt(cached);
             return;
         }
 
@@ -185,7 +286,7 @@ internal sealed class PluginCatalog
 
         try
         {
-            entry.AssemblyPath = await store.SaveAsync(manifest.Id, result, version, fileName, ct).ConfigureAwait(false);
+            entry.Image = ImageAt(await store.SaveAsync(manifest.Id, result, version, fileName, ct).ConfigureAwait(false));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -197,7 +298,7 @@ internal sealed class PluginCatalog
         }
     }
 
-    private static async Task ResolvePrebuiltAsync(PluginEntry entry, CancellationToken ct)
+    private static void ResolvePrebuilt(PluginEntry entry)
     {
         var manifest = entry.Manifest;
         var store = new VersionedOutputStore(Path.Combine(manifest.Directory, "bin"));
@@ -216,24 +317,9 @@ internal sealed class PluginCatalog
                 continue;
             }
 
-            var full = Path.GetFullPath(candidate);
-            try
-            {
-                entry.SourceHash = await HashFileAsync(full, ct).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                entry.Issues.Add(new PluginIssue(
-                    manifest.Id,
-                    PluginIssueKind.EntryAssemblyMissing,
-                    $"Plugin assembly '{full}' could not be read: {exception.Message}",
-                    manifest.Directory));
-                return;
-            }
-
-            entry.AssemblyPath = full;
-            entry.ContentPath = full;
             entry.ContentIsBinary = true;
+            entry.ContentPath = Path.GetFullPath(candidate);
+            entry.Image = ImageAt(candidate);
             return;
         }
 
@@ -244,25 +330,92 @@ internal sealed class PluginCatalog
             manifest.Directory));
     }
 
-    /// <summary>The stored image for a compilation version: the store layout, then the literal
-    /// <c>bin/&lt;version&gt;/</c> layout, so an image produced elsewhere is still picked up.</summary>
-    private static string? FindOutput(VersionedOutputStore store, string pluginId, string version, string fileName)
+    /// <summary>Hashes every file of the image's loadable directory — the entry assembly and its siblings — and folds
+    /// the digests into the dependency hash, so replacing any of them invalidates the approval.</summary>
+    private static async Task BindImageAsync(PluginEntry entry, CancellationToken ct)
     {
-        string[] candidates =
-        [
-            store.GetOutputPath(pluginId, version, fileName),
-            Path.Combine(store.BaseDirectory, version, fileName),
-        ];
-
-        foreach (var candidate in candidates)
+        if (entry.Image is not { } image)
         {
-            if (File.Exists(candidate))
-            {
-                return Path.GetFullPath(candidate);
-            }
+            return;
         }
 
-        return null;
+        try
+        {
+            var files = await ReadLoadableFilesAsync(image.Directory, ct).ConfigureAwait(false);
+            if (!files.TryGetValue(image.AssemblyFileName, out var assemblySha256))
+            {
+                entry.Issues.Add(new PluginIssue(
+                    entry.Id,
+                    PluginIssueKind.EntryAssemblyMissing,
+                    $"Plugin assembly '{image.AssemblyPath}' disappeared while it was being read.",
+                    image.Directory));
+                return;
+            }
+
+            entry.Image = image with { AssemblySha256 = assemblySha256, Files = files };
+            if (entry.ContentIsBinary)
+            {
+                entry.SourceHash = assemblySha256;
+            }
+
+            entry.DependencyHash = DependencyFingerprint(entry.Manifest.Dependencies, files);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            entry.Issues.Add(new PluginIssue(
+                entry.Id,
+                PluginIssueKind.EntryAssemblyMissing,
+                $"The loadable files of '{entry.Id}' could not be read: {exception.Message}",
+                image.Directory));
+        }
+    }
+
+    private static PluginImage ImageAt(string assemblyPath)
+    {
+        var full = Path.GetFullPath(assemblyPath);
+        return new PluginImage(
+            Path.GetDirectoryName(full) ?? full,
+            Path.GetFileName(full),
+            string.Empty,
+            new Dictionary<string, string>(StringComparer.Ordinal));
+    }
+
+    /// <summary>Hashes every file under the entry assembly's directory — the entry assembly, its siblings and anything
+    /// in sub-directories — with <c>/</c>-separated relative names. These are exactly the names a verifying worker
+    /// compares against, so nothing the loader can reach stays undeclared.</summary>
+    private static async Task<IReadOnlyDictionary<string, string>> ReadLoadableFilesAsync(
+        string directory,
+        CancellationToken ct)
+    {
+        string[] files;
+        try
+        {
+            files = [.. Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException($"'{directory}' could not be listed: {exception.Message}", exception);
+        }
+
+        var digests = new Dictionary<string, string>(files.Length, StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            var bytes = await File.ReadAllBytesAsync(file, ct).ConfigureAwait(false);
+            digests[Path.GetRelativePath(directory, file).Replace('\\', '/')] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        }
+
+        return digests;
+    }
+
+    private static async Task<string> SourceHashAsync(PluginEntry entry, CancellationToken ct)
+    {
+        if (entry.ContentPath is { } path)
+        {
+            return Hashing.SourceHash(StripBom(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)));
+        }
+
+        return Hashing.SourceHash(entry.InlineSource ?? string.Empty);
     }
 
     private static bool TryLoadSource(PluginManifest manifest, out string? path, out string text)
@@ -299,10 +452,4 @@ internal sealed class PluginCatalog
 
     /// <summary>Drops a leading byte-order mark so the approval hash and the compiler's own source hash agree.</summary>
     internal static string StripBom(string text) => text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
-
-    private static async Task<string> HashFileAsync(string path, CancellationToken ct)
-    {
-        var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
-        return Convert.ToHexStringLower(SHA256.HashData(bytes));
-    }
 }

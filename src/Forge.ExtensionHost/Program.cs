@@ -15,7 +15,7 @@ public static class Program
           --pipe <name>           named pipe the main program connects to (required)
           --plugins <dir>         directory with one sub-directory per plugin (default <data>/plugins)
           --data <dir>            host state directory, holds approvals.json (default %LOCALAPPDATA%/Forge/extension-host)
-          --dotnet <path>         runtime used to launch workers from a .dll (default: the dotnet that runs the host)
+          --dotnet <path>         runtime used to launch a worker that is a .dll (default: the dotnet that runs the host); never passed on to the worker
           --worker <path>         Forge.PluginWorker.dll/.exe (default: $FORGE_PLUGIN_WORKER, then next to the host)
           --tool-timeout <s>      per-call deadline before the worker process tree is killed (default 120)
           --concurrency <n>       in-flight calls per worker (default 4)

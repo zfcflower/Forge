@@ -1,9 +1,7 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Forge.Approval;
 using Forge.Ipc;
 using Forge.Plugin.Sdk;
-using Forge.Scripting;
 
 namespace Forge.ExtensionHost;
 
@@ -19,6 +17,7 @@ public sealed class ExtensionHost : IAsyncDisposable
     private readonly PluginCatalog catalog;
     private readonly Dictionary<string, PluginEntry> plugins = new(StringComparer.Ordinal);
     private readonly Dictionary<string, WorkerSlot> workers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PluginState> states = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> registrations = new(StringComparer.Ordinal);
     private readonly List<PluginIssue> issues = [];
     private readonly Lock sync = new();
@@ -177,31 +176,47 @@ public sealed class ExtensionHost : IAsyncDisposable
         var entry = Find(request.PluginId) ??
             throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
 
-        var decision = await EvaluateAsync(entry, ct).ConfigureAwait(false);
-        if (!decision.IsAllowed)
+        var state = StateOf(entry.Id);
+        WorkerSlot slot;
+        PluginState.Lease lease;
+        await state.EnterAsync(ct).ConfigureAwait(false);
+        try
         {
-            throw new HostOperationException("plugin_not_approved", $"Plugin '{entry.Id}' {entry.Version} must not run: {decision.Reason}.");
+            var evaluation = await EvaluateAsync(entry, ct).ConfigureAwait(false);
+            RequireAllowed(entry, evaluation.Decision);
+            if (evaluation.Image is not { } image)
+            {
+                throw new HostOperationException("plugin_not_loadable", $"Plugin '{entry.Id}' {entry.Version} has no loadable assembly.");
+            }
+
+            slot = GetWorker(entry);
+            if (await slot.EnsureLoadedAsync(entry.Version, image, ct).ConfigureAwait(false))
+            {
+                entry.Tools = slot.Tools;
+            }
+
+            var rechecked = ApprovalEngine.Evaluate(Candidate(entry, evaluation), approvals);
+            entry.Decision = rechecked;
+            RequireAllowed(entry, rechecked);
+
+            await RegisterToolsAsync(entry, slot.Tools, ct).ConfigureAwait(false);
+            if (!Contains(slot.Tools, request.Tool))
+            {
+                throw new HostOperationException("unknown_tool", $"Plugin '{entry.Id}' does not declare a tool named '{request.Tool}'.");
+            }
+
+            lease = state.BeginExecution();
+        }
+        finally
+        {
+            state.Exit();
         }
 
-        if (entry.AssemblyPath is not { } assemblyPath)
+        using (lease)
         {
-            throw new HostOperationException("plugin_not_loadable", $"Plugin '{entry.Id}' {entry.Version} has no loadable assembly.");
+            var result = await slot.ExecuteAsync(request, options.PipeName, ct).ConfigureAwait(false);
+            return HostJson.ToElement(new PluginExecuteResponse(result.Content, result.IsError));
         }
-
-        var slot = GetWorker(entry);
-        if (await slot.EnsureLoadedAsync(entry.Version, assemblyPath, ct).ConfigureAwait(false))
-        {
-            entry.Tools = slot.Tools;
-        }
-
-        await RegisterToolsAsync(entry, slot.Tools, ct).ConfigureAwait(false);
-        if (!Contains(slot.Tools, request.Tool))
-        {
-            throw new HostOperationException("unknown_tool", $"Plugin '{entry.Id}' does not declare a tool named '{request.Tool}'.");
-        }
-
-        var result = await slot.ExecuteAsync(request, options.PipeName, ct).ConfigureAwait(false);
-        return HostJson.ToElement(new PluginExecuteResponse(result.Content, result.IsError));
     }
 
     private async Task<JsonElement> ApproveAsync(PluginApproveRequest request, CancellationToken ct)
@@ -232,8 +247,17 @@ public sealed class ExtensionHost : IAsyncDisposable
         var sourceHash = string.IsNullOrWhiteSpace(request.SourceHash) ? entry.SourceHash : request.SourceHash;
         var dependencyHash = string.IsNullOrWhiteSpace(request.DependencyHash) ? entry.DependencyHash : request.DependencyHash;
         var sdkVersion = string.IsNullOrWhiteSpace(request.SdkVersion) ? entry.SdkVersion : request.SdkVersion;
-        approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
-        await ApplyAsync(entry, ct).ConfigureAwait(false);
+        var state = StateOf(entry.Id);
+        await state.EnterAsync(ct).ConfigureAwait(false);
+        try
+        {
+            approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
+            await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            state.Exit();
+        }
 
         if (!entry.Decision.IsAllowed)
         {
@@ -263,8 +287,25 @@ public sealed class ExtensionHost : IAsyncDisposable
                 $"Plugin '{entry.Id}' is installed at version '{entry.Version}', not '{version}'.");
         }
 
-        approvals.Revoke(entry.Id, version);
-        await ApplyAsync(entry, ct).ConfigureAwait(false);
+        var state = StateOf(entry.Id);
+        await state.EnterAsync(ct).ConfigureAwait(false);
+        try
+        {
+            approvals.Revoke(entry.Id, version);
+            await UnregisterToolsAsync(entry.Id, CancellationToken.None).ConfigureAwait(false);
+
+            // Killing the worker is what ends the executions already in flight; draining them afterwards guarantees
+            // that nothing this plugin dispatched is still running when the revoke returns, so no worker of a revoked
+            // plugin can be left behind and no later call can be recovered into a new one.
+            await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+            await state.WaitForIdleAsync(RevokeDrainWindow, ct).ConfigureAwait(false);
+            await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            state.Exit();
+        }
+
         return HostJson.EmptyObject;
     }
 
@@ -278,13 +319,25 @@ public sealed class ExtensionHost : IAsyncDisposable
             foreach (var entry in scan.Plugins)
             {
                 present.Add(entry.Id);
-                SyncRecord(entry);
-                lock (sync)
+                try
                 {
-                    plugins[entry.Id] = entry;
-                }
+                    StateOf(entry.Id).ResetFailures();
+                    SyncRecord(entry);
+                    lock (sync)
+                    {
+                        plugins[entry.Id] = entry;
+                    }
 
-                await ApplyAsync(entry, ct).ConfigureAwait(false);
+                    await ApplyAsync(entry, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    entry.Issues.Add(new PluginIssue(entry.Id, PluginIssueKind.InvalidPackage, exception.Message, entry.Directory));
+                }
             }
 
             foreach (var id in KnownPluginIds())
@@ -297,6 +350,7 @@ public sealed class ExtensionHost : IAsyncDisposable
                 lock (sync)
                 {
                     plugins.Remove(id);
+                    states.Remove(id);
                 }
 
                 await UnregisterToolsAsync(id, ct).ConfigureAwait(false);
@@ -340,11 +394,26 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
     }
 
-    /// <summary>Re-evaluates approval for one plugin and brings its worker and tool registration in line with the result.</summary>
+    /// <summary>Re-evaluates approval for one plugin and brings its worker and tool registration in line with the result,
+    /// serialized against the plugin's executions and its other approval changes.</summary>
     private async Task ApplyAsync(PluginEntry entry, CancellationToken ct)
     {
-        var decision = await EvaluateAsync(entry, ct).ConfigureAwait(false);
-        if (!decision.IsAllowed || entry.AssemblyPath is null)
+        var state = StateOf(entry.Id);
+        await state.EnterAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            state.Exit();
+        }
+    }
+
+    private async Task ApplyCoreAsync(PluginEntry entry, CancellationToken ct)
+    {
+        var evaluation = await EvaluateAsync(entry, ct).ConfigureAwait(false);
+        if (!evaluation.Decision.IsAllowed || evaluation.Image is not { } image)
         {
             await UnregisterToolsAsync(entry.Id, ct).ConfigureAwait(false);
             await StopWorkerAsync(entry.Id).ConfigureAwait(false);
@@ -354,7 +423,7 @@ public sealed class ExtensionHost : IAsyncDisposable
         try
         {
             var slot = GetWorker(entry);
-            if (await slot.EnsureLoadedAsync(entry.Version, entry.AssemblyPath, ct).ConfigureAwait(false))
+            if (await slot.EnsureLoadedAsync(entry.Version, image, ct).ConfigureAwait(false))
             {
                 entry.Tools = slot.Tools;
             }
@@ -371,63 +440,47 @@ public sealed class ExtensionHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Builds the plugin's approval candidate from the hashes recorded at discovery, after confirming the content on
-    /// disk still hashes to the same value; a plugin whose source or image changed on disk needs a refresh.
+    /// Builds the plugin's approval candidate from the bytes on disk now. The image is re-hashed and all of its file
+    /// digests are folded into the dependency hash, so an approval only holds for exactly the files a call would load:
+    /// a replaced artifact, a replaced private dependency or an edited source all need a refresh and a new approval.
     /// </summary>
-    private async Task<ApprovalDecision> EvaluateAsync(PluginEntry entry, CancellationToken ct)
+    private async Task<PluginEvaluation> EvaluateAsync(PluginEntry entry, CancellationToken ct)
     {
-        ApprovalDecision decision;
         if (!entry.HasContent)
         {
-            decision = ApprovalDecision.Block($"plugin {entry.Id} {entry.Version} has no loadable content");
-        }
-        else if (!await ContentUnchangedAsync(entry, ct).ConfigureAwait(false))
-        {
-            decision = ApprovalDecision.Require($"the content of {entry.Id} {entry.Version} changed on disk; refresh before running it");
-        }
-        else
-        {
-            var candidate = new PluginRecord
-            {
-                PluginId = entry.Id,
-                Version = entry.Version,
-                SourceHash = entry.SourceHash,
-                DependencyHash = entry.DependencyHash,
-                SdkVersion = entry.SdkVersion,
-            };
-            decision = ApprovalEngine.Evaluate(candidate, approvals);
+            var blocked = ApprovalDecision.Block($"plugin {entry.Id} {entry.Version} has no loadable content");
+            entry.Decision = blocked;
+            return new PluginEvaluation(blocked, null, entry.SourceHash, entry.DependencyHash);
         }
 
-        entry.Decision = decision;
-        return decision;
-    }
-
-    private static async Task<bool> ContentUnchangedAsync(PluginEntry entry, CancellationToken ct)
-    {
-        if (entry.ContentPath is not { } path)
-        {
-            return true;
-        }
-
+        PluginContent content;
         try
         {
-            string hash;
-            if (entry.ContentIsBinary)
-            {
-                var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
-                hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-            }
-            else
-            {
-                hash = Hashing.SourceHash(PluginCatalog.StripBom(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)));
-            }
-
-            return string.Equals(hash, entry.SourceHash, StringComparison.Ordinal);
+            content = await PluginCatalog.SnapshotAsync(entry, ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return false;
+            var unreadable = ApprovalDecision.Require(
+                $"the content of {entry.Id} {entry.Version} could not be read: {exception.Message}");
+            entry.Decision = unreadable;
+            return new PluginEvaluation(unreadable, null, entry.SourceHash, entry.DependencyHash);
         }
+
+        var decision = string.Equals(content.SourceHash, entry.SourceHash, StringComparison.Ordinal)
+            ? ApprovalEngine.Evaluate(
+                new PluginRecord
+                {
+                    PluginId = entry.Id,
+                    Version = entry.Version,
+                    SourceHash = content.SourceHash,
+                    DependencyHash = content.DependencyHash,
+                    SdkVersion = entry.SdkVersion,
+                },
+                approvals)
+            : ApprovalDecision.Require($"the content of {entry.Id} {entry.Version} changed on disk; refresh before running it");
+
+        entry.Decision = decision;
+        return new PluginEvaluation(decision, content.Image, content.SourceHash, content.DependencyHash);
     }
 
     /// <summary>
@@ -567,6 +620,9 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Bound on waiting for the executions a revoke just killed to unwind before it returns.</summary>
+    private static readonly TimeSpan RevokeDrainWindow = TimeSpan.FromSeconds(10);
+
     private WorkerSlot GetWorker(PluginEntry entry)
     {
         lock (sync)
@@ -576,7 +632,7 @@ public sealed class ExtensionHost : IAsyncDisposable
                 return existing;
             }
 
-            var slot = new WorkerSlot(entry.Id, options, ForwardToolCallAsync)
+            var slot = new WorkerSlot(entry.Id, options, StateOf(entry.Id), ForwardToolCallAsync)
             {
                 Reloaded = (tools, token) => RegisterToolsAsync(entry, tools, token),
             };
@@ -584,6 +640,40 @@ public sealed class ExtensionHost : IAsyncDisposable
             return slot;
         }
     }
+
+    /// <summary>The per-plugin state the host keeps for as long as the plugin is discovered.</summary>
+    private PluginState StateOf(string pluginId)
+    {
+        lock (sync)
+        {
+            if (!states.TryGetValue(pluginId, out var state))
+            {
+                state = new PluginState();
+                states[pluginId] = state;
+            }
+
+            return state;
+        }
+    }
+
+    private static void RequireAllowed(PluginEntry entry, ApprovalDecision decision)
+    {
+        if (!decision.IsAllowed)
+        {
+            throw new HostOperationException(
+                "plugin_not_approved",
+                $"Plugin '{entry.Id}' {entry.Version} must not run: {decision.Reason}.");
+        }
+    }
+
+    private static PluginRecord Candidate(PluginEntry entry, PluginEvaluation evaluation) => new()
+    {
+        PluginId = entry.Id,
+        Version = entry.Version,
+        SourceHash = evaluation.SourceHash,
+        DependencyHash = evaluation.DependencyHash,
+        SdkVersion = entry.SdkVersion,
+    };
 
     /// <summary>Relays a worker's <c>host.tool_call</c> to the main program, which owns permission checks and auditing.</summary>
     private Task<IpcMessage> ForwardToolCallAsync(IpcMessage message, CancellationToken ct)

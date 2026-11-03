@@ -11,7 +11,6 @@ internal sealed class WorkerSession
 {
     private readonly IIpcPeer peer;
     private readonly PluginHost plugins;
-    private readonly HostCallFacade hostFacade;
     private readonly SemaphoreSlim executionGate;
     private readonly TaskCompletionSource stopRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<Exception?> disconnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -20,7 +19,6 @@ internal sealed class WorkerSession
     {
         this.peer = peer;
         plugins = new PluginHost { UnloadTimeout = options.UnloadTimeout };
-        hostFacade = new HostCallFacade(peer);
         var limit = Math.Clamp(options.MaxConcurrency, 1, WorkerOptions.MaxAllowedConcurrency);
         executionGate = new SemaphoreSlim(limit, limit);
 
@@ -84,7 +82,13 @@ internal sealed class WorkerSession
         try
         {
             var tools = await plugins
-                .LoadAsync(request.PluginId, request.Version ?? "", request.AssemblyPath, ct)
+                .LoadAsync(
+                    request.PluginId,
+                    request.Version ?? "",
+                    request.AssemblyPath,
+                    request.AssemblySha256,
+                    request.Files,
+                    ct)
                 .ConfigureAwait(false);
             var result = WorkerJson.Serialize(
                 new WorkerLoadResult { Tools = tools },
@@ -136,6 +140,13 @@ internal sealed class WorkerSession
 
         try
         {
+            // Per invocation: one facade per execution, so concurrent calls never share session, directory or depth.
+            var host = new HostCallFacade(
+                peer,
+                request.SessionId ?? "",
+                request.WorkingDir ?? "",
+                request.Depth ?? 0);
+
             ToolResult result;
             try
             {
@@ -144,9 +155,7 @@ internal sealed class WorkerSession
                         request.PluginId,
                         request.Tool,
                         WorkerJson.ObjectOrEmpty(request.Arguments),
-                        request.SessionId ?? "",
-                        request.WorkingDir ?? "",
-                        hostFacade,
+                        host,
                         ct)
                     .ConfigureAwait(false);
             }

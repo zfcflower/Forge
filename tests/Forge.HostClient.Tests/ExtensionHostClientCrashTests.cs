@@ -59,7 +59,7 @@ public sealed class ExtensionHostClientCrashTests
     }
 
     [Fact]
-    public async Task After_a_crash_calls_fail_with_connection_closed_until_the_client_is_stopped()
+    public async Task After_a_crash_calls_fail_with_connection_closed_while_the_client_is_Failed()
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host);
@@ -100,6 +100,64 @@ public sealed class ExtensionHostClientCrashTests
         Assert.Empty(client.ToolsByPlugin);
         Assert.Empty(host.Requests("host.stop"));
         Assert.Equal((HostStatus.Stopped, (string?)null), statuses.Snapshot()[^1]);
+    }
+
+    [Fact]
+    public async Task StartAsync_after_a_crash_recovers_on_the_same_instance_and_drops_the_stale_snapshot()
+    {
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host);
+        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
+        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        await client.StartConnectedAsync(host);
+        await RegisterEchoAsync(client, host);
+        await host.DropConnectionAsync();
+        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        var toolChanges = new EventLog<int>();
+        client.ToolsChanged += () => toolChanges.Add(1);
+        using var limit = TestLimit.Create();
+
+        var accepting = host.AcceptAsync();
+        await client.StartAsync(limit.Token).Bounded();
+        await accepting.Bounded();
+
+        Assert.Equal(HostStatus.Running, client.Status);
+        Assert.Empty(client.Tools);
+        Assert.Empty(client.ToolsByPlugin);
+        Assert.Single(toolChanges.Snapshot());
+        Assert.Equal((HostStatus.Running, (string?)null), statuses.Snapshot()[^1]);
+
+        await RegisterEchoAsync(client, host);
+        Assert.Equal(new[] { "echo" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task StopAsync_during_a_recovery_start_leaves_the_client_stopped()
+    {
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromSeconds(10));
+        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
+        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        await client.StartConnectedAsync(host);
+        await RegisterEchoAsync(client, host);
+        await host.DropConnectionAsync();
+        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        using var limit = TestLimit.Create();
+
+        var recovering = client.StartAsync(limit.Token);
+        await statuses.UntilAsync(seen => seen.Count(e => e.Status == HostStatus.Starting) == 2);
+        var stopping = client.StopAsync(limit.Token);
+        var accepting = host.AcceptAsync();
+        await recovering.Bounded();
+        await accepting.Bounded();
+        await stopping.Bounded();
+
+        Assert.Equal(HostStatus.Stopped, client.Status);
+        Assert.Empty(client.Tools);
+        var sequence = statuses.Snapshot().Select(e => e.Status).ToArray();
+        Assert.Equal(HostStatus.Stopped, sequence[^1]);
+        Assert.Equal(2, sequence.Count(status => status == HostStatus.Running));
+        Assert.Single(host.Requests("host.stop"));
     }
 
     [Fact]
