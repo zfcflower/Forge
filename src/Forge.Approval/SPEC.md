@@ -32,17 +32,19 @@ parent: forge-architecture
 
 **WAL 回退规则。** `PRAGMA journal_mode = WAL` 会返回 SQLite 实际选中的模式,代码读返回值而不是假定成功:返回 `wal` 即用 WAL;返回其他值(如共享内存不可用的网络/重定向目录)则按返回的回滚日志模式继续,并在 stderr 写一行 `forge-approval: '<db>' cannot run in WAL mode (...)`,store 的 `JournalMode` 属性给出实际值。两种模式都正确,差别只在并发读的阻塞;测试不得断言 `-wal`/`-shm` 文件存在。
 
-**读路径与跨进程可见性。** `Count`/`Get`/`List` 从内存快照作答,先读 `PRAGMA data_version`(约 3 µs)再决定是否重读全表:值未变就命中字典;变了就整表重读并换快照(200 行约 400 µs)。`data_version` 先读、行后读:若另一进程的提交落在这两次读之间,本次快照比记录的版本更新,下次只会多重载一次而不会漏掉一次提交。`Reload()` 是无条件重读全表、成功才换快照(失败保留旧快照),语义仍是“重启会看到的内容”。
+**读路径与跨进程可见性。** `Count`/`Get`/`List` 从内存快照作答,先读 `PRAGMA data_version`(约 3 µs)再决定是否重读全表:值未变就命中字典;变了就整表重读并换快照(200 行约 400 µs)。`data_version` 先读、行后读:若另一进程的提交落在这两次读之间,本次快照比记录的版本更新,下次只会多重载一次而不会漏掉一次提交。构造期、`Reload()` 与失效重读三条快照路径共用这一顺序,构造期不得反过来:先读行再读版本时,两次读之间落地的外部 `Revoke` 会让版本追上陈旧行,该快照此后永久被当作当前。三条路径都在整表读成功后才同时替换快照与版本;读失败时两者都不动。`Reload()` 是无条件重读全表、成功才换快照(失败保留旧快照),语义仍是“重启会看到的内容”。
 
 **一次性 legacy 导入。** 旧版本写 `<directory>/approvals.json`。打开时若 `user_version = 0`,在**同一个 IMMEDIATE 事务**里建表、导入、写 `approval_meta.legacy_import=<utc>` 并把 `user_version` 置 1:导入条件是无标记、`plugin_approval` 为空、且 JSON 存在;空 `pluginId`/`version` 的行跳过(与旧 `ToMap` 一致);同键后者胜。提交成功后仅尽力把文件改名为 `approvals.json.migrated`(改名失败不影响正确性)。**标记是权威**:导入成功后即使旧 JSON 被旧版本程序或备份还原写回,也不会再被导入,已撤销的审批不会复活——用“表空就导入”的规则会整批复活它们,所以不用。导入只发生在 `user_version` 0→1 的那一次事务里,所以已经是版本 1 的库永远不会再读 JSON(手工拷贝进来的、没有标记的库因此只会补写标记、视作已导入)。`ApprovalStoreOptions.ImportLegacyJson = false` 时跳过读取但同样写标记,即对该库永久放弃导入。
 
-**失败即封闭。** 构造期把不可用的状态统一包成 `InvalidDataException`(消息含路径),绝不返回一个空 store:数据库文件是垃圾字节/被截断(`SQLite 26 NOTADB`)、路径是目录(`14/526 CANTOPEN`)、schema 版本高于本程序、`status` 文本无法识别、legacy JSON 不是合法审批列表(inner `JsonException`)。legacy 导入失败时事务回滚:库仍 `user_version = 0`、无表、JSON 原样保留,下次打开重试(修复 JSON 或删掉它即可)。`ExtensionHost` 的 `Program` 已把 `InvalidDataException`/`IOException`/`UnauthorizedAccessException` 映射为“state … is unusable”并 exit 1。运行期失败(写时只读、磁盘满、busy 超时)以 `SqliteException`(8/13/5)上抛,内存不变。
+**失败即封闭。** 构造期把不可用的状态统一包成 `InvalidDataException`(消息含路径),绝不返回一个空 store:数据库文件是垃圾字节/被截断(`SQLite 26 NOTADB`)、路径是目录(`14/526 CANTOPEN`)、schema 版本高于本程序、`status` 文本无法识别、legacy JSON 不是合法审批列表(inner `JsonException`)。行值一律按“坏数据”归类而不是泄漏底层异常:时间戳列只接受 `"O"` 写出的规范文本——带 offset、固定 7 位小数、且与 `ToString("O")` 逐字符相等;无 offset(会被当成本机时区)、`Z`、`-00:00`、精度不足、空值、非文本值都抛 `InvalidDataException`,消息指名库路径、行(`pluginId version`)与列名,不再从 `DateTimeOffset.Parse` 泄漏 `FormatException`。`status` 与文本列不可读同此归类。构造期因此 fail-closed;`Reload()` 与读路径(失效重读)遇到同一失败时抛同一异常且不换快照,即库修好前 store 保持不可用,而不是回退到旧数据;写路径在事务内读到的行损坏时同样上抛,事务回滚,库与内存不变。legacy 导入失败时事务回滚:库仍 `user_version = 0`、无表、JSON 原样保留,下次打开重试(修复 JSON 或删掉它即可)。`ExtensionHost` 的 `Program` 已把 `InvalidDataException`/`IOException`/`UnauthorizedAccessException` 映射为“state … is unusable”并 exit 1。运行期失败(写时只读、磁盘满、busy 超时)以 `SqliteException`(8/13/5)上抛,内存不变。
 
 **单属主是被期望、不是必需。** 逐行事务使两个 `ApprovalStore`(两个 ExtensionHost 用同一个 `--data`)在存储层是安全的:各自只读改自己那一行、提交后另一方的 `data_version` 失效并重读到新值,旧的“整文件 last-writer-wins”不再存在。约定仍然是一个数据目录只有一个 ExtensionHost 写审批记录:多实例同时跑会在语义层(谁的 approve 先到)竞争,而且每次跨进程碰撞要多等一个定时器 tick(Windows 约 15 ms)。同一实例内的修改全部在 `lock(gate)` 下,不会丢更新。
 
 **读不到文件这条路径不存在。** 旧实现里 `Reload` 要打开文件,于是有一个“另一个句柄以 `FileShare.None` 持有状态文件时该抛还是该成功”的平台分叉测试(Linux 上 .NET 用 `flock` 强制 `FileShare.None`,该用例期望的“读仍成功”不成立)。SQLite 版读的是已经打开的长连接上的表:WAL 快照读不需要写锁,别的进程持写锁时读也不会失败;真正不可访问的库在构造期就 fail-closed。因此不再有任何 `OperatingSystem.IsWindows()` 分支,该测试的前提随旧契约一起移除。
 
 **破坏面。** `ApprovalStore(string, TimeSpan replaceBudget)` → `ApprovalStore(string, ApprovalStoreOptions?)`;`FilePath` → `DatabasePath`,`FileName` 值改为 `approvals.db`(新增 `LegacyFileName`、`MigratedSuffix`);新增 `IDisposable`(调用方必须 `Dispose`/`using`)。`Upsert`/`SetApproved`/`Revoke`/`Disable`/`Enable`/`Get`/`List`/`Count`/`Reload` 的签名与语义不变。
+
+**测试接缝(仅 Debug)。** 让并发与失效路径的测试不依赖机器计时:`ApprovalStoreOptions` 在 `DEBUG` 构建里多两个 `internal` 钩子——`AfterInitialSnapshotRead`(构造期整表读之后、快照与版本赋值之前调用,与版本/行读取顺序无关)与 `SnapshotRead`(每次真实整表读后调用一次:构造、`Reload()`、失效重读)。两者经 `src/Forge.Approval/AssemblyInfo.cs` 的 `InternalsVisibleTo("Forge.Approval.Tests")`(同样只在 `DEBUG`)对测试可见;`Release` 构建里既无属性也无 `InternalsVisibleTo`,不引入环境变量、静态可变全局状态或公共 API。钩子抛异常等同该路径失败:构造期释放连接并上抛,`Reload()`/读路径不换快照。用它们可以“在初始快照加载后立刻外部 Revoke”,并数出真实整表读次数。
 
 ## 未决
 

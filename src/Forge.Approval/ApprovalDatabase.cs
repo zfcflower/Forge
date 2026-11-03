@@ -168,26 +168,91 @@ internal static class ApprovalDatabase
         command.ExecuteNonQuery();
     }
 
+    public const string TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffffffzzz";
+
     public static string FormatTimestamp(DateTimeOffset value) => value.ToString("O", CultureInfo.InvariantCulture);
 
-    public static DateTimeOffset ParseTimestamp(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    public static DateTimeOffset ParseTimestamp(
+        string value,
+        string column,
+        string pluginId,
+        string version,
+        string databasePath)
+    {
+        if (!DateTimeOffset.TryParseExact(value, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ||
+            !string.Equals(FormatTimestamp(parsed), value, StringComparison.Ordinal))
+        {
+            throw Malformed(
+                databasePath,
+                column,
+                pluginId,
+                version,
+                $"'{value}' is not the offset-carrying round-trip timestamp Forge writes ('O')",
+                null);
+        }
+
+        return parsed;
+    }
+
+    private static string Text(
+        SqliteDataReader reader,
+        int ordinal,
+        string column,
+        string databasePath,
+        string? pluginId,
+        string? version)
+    {
+        try
+        {
+            return reader.GetString(ordinal);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidCastException)
+        {
+            throw Malformed(databasePath, column, pluginId, version, "the value is not readable text", exception);
+        }
+    }
+
+    private static InvalidDataException Malformed(
+        string databasePath,
+        string column,
+        string? pluginId,
+        string? version,
+        string reason,
+        Exception? innerException)
+    {
+        var row = pluginId is null ? "a row whose identity cannot be read" : $"{pluginId} {version}";
+        return new InvalidDataException(
+            $"Approval database '{databasePath}' holds a malformed {column} value for {row}: {reason}.",
+            innerException);
+    }
 
     private static PluginRecord ToRecord(SqliteDataReader reader, string databasePath)
     {
-        var pluginId = reader.GetString(0);
-        var version = reader.GetString(1);
+        var pluginId = Text(reader, 0, "plugin_id", databasePath, null, null);
+        var version = Text(reader, 1, "version", databasePath, pluginId, null);
         return new PluginRecord
         {
             PluginId = pluginId,
             Version = version,
-            Status = ParseStatus(reader.GetString(2), pluginId, version, databasePath),
-            SourceHash = reader.GetString(3),
-            DependencyHash = reader.GetString(4),
-            SdkVersion = reader.GetString(5),
-            ApprovedHash = reader.IsDBNull(6) ? null : reader.GetString(6),
-            CreatedAt = ParseTimestamp(reader.GetString(7)),
-            UpdatedAt = ParseTimestamp(reader.GetString(8)),
+            Status = ParseStatus(Text(reader, 2, "status", databasePath, pluginId, version), pluginId, version, databasePath),
+            SourceHash = Text(reader, 3, "source_hash", databasePath, pluginId, version),
+            DependencyHash = Text(reader, 4, "dependency_hash", databasePath, pluginId, version),
+            SdkVersion = Text(reader, 5, "sdk_version", databasePath, pluginId, version),
+            ApprovedHash = reader.IsDBNull(6)
+                ? null
+                : Text(reader, 6, "approved_hash", databasePath, pluginId, version),
+            CreatedAt = ParseTimestamp(
+                Text(reader, 7, "created_at", databasePath, pluginId, version),
+                "created_at",
+                pluginId,
+                version,
+                databasePath),
+            UpdatedAt = ParseTimestamp(
+                Text(reader, 8, "updated_at", databasePath, pluginId, version),
+                "updated_at",
+                pluginId,
+                version,
+                databasePath),
         };
     }
 
@@ -197,7 +262,12 @@ internal static class ApprovalDatabase
         nameof(PluginStatus.Approved) => PluginStatus.Approved,
         nameof(PluginStatus.Disabled) => PluginStatus.Disabled,
         nameof(PluginStatus.Uninstalled) => PluginStatus.Uninstalled,
-        _ => throw new InvalidDataException(
-            $"Approval database '{databasePath}' holds the unknown status '{value}' for {pluginId} {version}."),
+        _ => throw Malformed(
+            databasePath,
+            "status",
+            pluginId,
+            version,
+            $"'{value}' is not one of Draft, Approved, Disabled, Uninstalled",
+            null),
     };
 }

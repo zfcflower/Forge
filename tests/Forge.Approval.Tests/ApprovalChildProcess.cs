@@ -14,7 +14,9 @@ internal static class ApprovalChildProcess
     internal const string StressMode = "stress";
     internal const string ImportMode = "import";
     internal const string CrashMode = "crash";
+    internal const string BlockRaceMode = "blockrace";
     internal const string ArmedLine = "armed";
+    internal const string ReadyLine = "ready";
 
     internal static Process Start(string mode, string directory, string tag = "", int count = 0)
     {
@@ -68,8 +70,49 @@ internal static class ApprovalChildProcess
         StressMode => Stress(directory, tag, count),
         ImportMode => Import(directory),
         CrashMode => Crash(directory),
+        BlockRaceMode => BlockRace(directory, tag, count),
         _ => throw new InvalidOperationException($"Unknown child test mode '{mode}'."),
     };
+
+    private static int BlockRace(string directory, string tag, int count)
+    {
+        using var store = new ApprovalStore(directory);
+        Console.Out.WriteLine(ReadyLine);
+        Console.Out.Flush();
+        Console.In.ReadLine();
+        var busy = 0;
+        var fail = 0;
+        string? first = null;
+        for (var i = 0; i < count; i++)
+        {
+            try
+            {
+                if (string.Equals(tag, "approver", StringComparison.Ordinal))
+                {
+                    store.SetApproved("race.plugin", "1.0.0", $"content-{i}", "dep", "10.0.100");
+                }
+                else
+                {
+                    store.Disable("race.plugin", "1.0.0");
+                }
+            }
+            catch (SqliteException exception) when (exception.SqliteErrorCode is 5 or 6)
+            {
+                busy++;
+                first ??= exception.GetType().Name + " " + exception.SqliteErrorCode + ": " + exception.Message;
+            }
+            catch (Exception exception)
+            {
+                fail++;
+                first ??= exception.GetType().Name + ": " + exception.Message;
+            }
+        }
+
+        var status = store.Get("race.plugin", "1.0.0")?.Status.ToString() ?? "missing";
+        Console.Out.WriteLine($"blockrace {tag} ok={count - busy - fail} busy={busy} fail={fail} status={status} first={first ?? "-"}");
+        Console.Out.Flush();
+        return busy == 0 && fail == 0 ? 0 : 1;
+    }
 
     private static int Stress(string directory, string tag, int count)
     {

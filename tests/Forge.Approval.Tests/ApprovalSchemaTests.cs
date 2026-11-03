@@ -51,6 +51,70 @@ public class ApprovalSchemaTests
     }
 
     [Fact]
+    public void Journal_mode_reports_the_mode_sqlite_actually_selected()
+    {
+        using var directory = new TempApprovalDirectory();
+        using var store = new ApprovalStore(directory.Path);
+        store.SetApproved("j.plugin", "1.0.0", "s", "dep", "sdk");
+
+        using var raw = ApprovalStoreTestSupport.OpenDatabase(directory.Path);
+        try
+        {
+            Assert.Equal("wal", store.JournalMode);
+            Assert.True(
+                string.Equals(
+                    ApprovalStoreTestSupport.Scalar(raw, "PRAGMA journal_mode"),
+                    store.JournalMode,
+                    StringComparison.OrdinalIgnoreCase),
+                "JournalMode '" + store.JournalMode + "' does not match PRAGMA journal_mode.");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
+    [Fact]
+    public void Read_only_database_keeps_the_seeded_wal_journal_mode()
+    {
+        using var directory = new TempApprovalDirectory();
+        using (var seed = new ApprovalStore(directory.Path))
+        {
+            seed.SetApproved("ro.keep", "1.0.0", "keep", "dep", "sdk");
+        }
+
+        var databasePath = Path.Combine(directory.Path, ApprovalStore.FileName);
+        ApprovalStoreTestSupport.SetReadOnly(databasePath, true);
+        ApprovalStore? store = null;
+        try
+        {
+            store = new ApprovalStore(directory.Path);
+            Assert.Equal("wal", store.JournalMode);
+            Assert.Equal(1, store.Count);
+
+            using var raw = ApprovalStoreTestSupport.OpenDatabase(directory.Path, SqliteOpenMode.ReadOnly);
+            try
+            {
+                Assert.True(
+                    string.Equals(
+                        ApprovalStoreTestSupport.Scalar(raw, "PRAGMA journal_mode"),
+                        store.JournalMode,
+                        StringComparison.OrdinalIgnoreCase),
+                    "JournalMode '" + store.JournalMode + "' does not match PRAGMA journal_mode.");
+            }
+            finally
+            {
+                SqliteConnection.ClearAllPools();
+            }
+        }
+        finally
+        {
+            store?.Dispose();
+            ApprovalStoreTestSupport.SetReadOnly(databasePath, false);
+        }
+    }
+
+    [Fact]
     public void Database_path_that_is_a_directory_fails_construction()
     {
         using var directory = new TempApprovalDirectory();

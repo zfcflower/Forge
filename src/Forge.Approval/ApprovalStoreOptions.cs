@@ -13,4 +13,12 @@ public sealed record ApprovalStoreOptions
 
     /// <summary>Whether a <see cref="ApprovalStore.LegacyFileName"/> file left by an earlier version is imported.</summary>
     public bool ImportLegacyJson { get; init; } = true;
+
+#if DEBUG
+    /// <summary>Debug-only test seam invoked after the constructor's full-table read and before the snapshot is assigned.</summary>
+    internal Action? AfterInitialSnapshotRead { get; init; }
+
+    /// <summary>Debug-only test seam invoked once after every full-table snapshot read (constructor, reload, refresh).</summary>
+    internal Action? SnapshotRead { get; init; }
+#endif
 }

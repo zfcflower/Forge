@@ -36,6 +36,11 @@ public sealed class ApprovalStore : IDisposable
     private long dataVersion;
     private bool disposed;
 
+#if DEBUG
+    private readonly Action? afterInitialSnapshotRead;
+    private readonly Action? snapshotRead;
+#endif
+
     public ApprovalStore(string directory)
         : this(directory, null)
     {
@@ -57,14 +62,22 @@ public sealed class ApprovalStore : IDisposable
         legacyPath = Path.Combine(root, LegacyFileName);
         JournalMode = ApprovalDatabase.RollbackJournalMode;
 
+#if DEBUG
+        afterInitialSnapshotRead = options.AfterInitialSnapshotRead;
+        snapshotRead = options.SnapshotRead;
+#endif
+
         SqliteConnection? opened = null;
         try
         {
             Directory.CreateDirectory(root);
             opened = ApprovalDatabase.Open(databasePath, options, out var journalMode);
             var imported = ApprovalMigration.EnsureSchema(opened, databasePath, legacyPath, options);
-            var loaded = ApprovalDatabase.ReadAll(opened, null, databasePath);
             var version = ApprovalDatabase.DataVersion(opened);
+            var loaded = ReadSnapshot(opened, null);
+#if DEBUG
+            afterInitialSnapshotRead?.Invoke();
+#endif
 
             connection = opened;
             records = loaded;
@@ -310,7 +323,7 @@ public sealed class ApprovalStore : IDisposable
         {
             ThrowIfDisposed();
             var version = ApprovalDatabase.DataVersion(connection);
-            var loaded = ApprovalDatabase.ReadAll(connection, null, databasePath);
+            var loaded = ReadSnapshot(connection, null);
             records = loaded;
             dataVersion = version;
         }
@@ -387,8 +400,19 @@ public sealed class ApprovalStore : IDisposable
             return;
         }
 
-        records = ApprovalDatabase.ReadAll(connection, null, databasePath);
+        records = ReadSnapshot(connection, null);
         dataVersion = version;
+    }
+
+    private Dictionary<(string PluginId, string Version), PluginRecord> ReadSnapshot(
+        SqliteConnection source,
+        SqliteTransaction? transaction)
+    {
+        var loaded = ApprovalDatabase.ReadAll(source, transaction, databasePath);
+#if DEBUG
+        snapshotRead?.Invoke();
+#endif
+        return loaded;
     }
 
     private void TryMigrateLegacyFile()

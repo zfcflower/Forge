@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -81,7 +80,7 @@ public class ApprovalDataVersionTests
     }
 
     [Fact]
-    public void Repeated_reads_without_external_writes_stay_cached()
+    public void Repeated_reads_without_external_writes_return_stable_results()
     {
         using var directory = new TempApprovalDirectory();
         using (var seed = new ApprovalStore(directory.Path))
@@ -93,12 +92,6 @@ public class ApprovalDataVersionTests
         }
 
         using var store = new ApprovalStore(directory.Path);
-        for (var i = 0; i < 200; i++)
-        {
-            Assert.Equal($"hash-{i}", store.Get($"p{i}.plugin", "1.0.0")?.SourceHash);
-        }
-
-        var elapsed = Stopwatch.StartNew();
         for (var round = 0; round < 5; round++)
         {
             for (var i = 0; i < 200; i++)
@@ -107,8 +100,55 @@ public class ApprovalDataVersionTests
             }
         }
 
-        elapsed.Stop();
         Assert.Equal(200, store.Count);
-        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(30), $"1000 cached reads took {elapsed.Elapsed}");
+        Assert.Equal(200, store.List().Count);
     }
+#if DEBUG
+    [Fact]
+    public void Snapshot_is_read_once_until_an_external_commit_or_reload()
+    {
+        using var directory = new TempApprovalDirectory();
+        int snapshotReads = 0;
+        var options = new ApprovalStoreOptions { SnapshotRead = () => Interlocked.Increment(ref snapshotReads) };
+        using var store = new ApprovalStore(directory.Path, options);
+        Assert.Equal(1, snapshotReads);
+
+        for (var i = 0; i < 50; i++)
+        {
+            Assert.Null(store.Get("missing.plugin", "1.0.0"));
+        }
+
+        Assert.Equal(0, store.Count);
+        Assert.Empty(store.List());
+        Assert.Equal(1, snapshotReads);
+
+        var approved = store.SetApproved("p.plugin", "1.0.0", "s", "dep", "sdk");
+        Assert.NotNull(approved);
+        var revoked = store.Revoke("p.plugin", "1.0.0");
+        Assert.NotNull(revoked);
+        Assert.Equal(PluginStatus.Draft, store.Get("p.plugin", "1.0.0")?.Status);
+        Assert.Equal(1, store.Count);
+        Assert.Single(store.List());
+        Assert.Equal(1, snapshotReads);
+
+        using (var other = new ApprovalStore(directory.Path))
+        {
+            other.SetApproved("q.plugin", "1.0.0", "s", "dep", "sdk");
+        }
+
+        Assert.NotNull(store.Get("q.plugin", "1.0.0"));
+        Assert.Equal(2, store.Count);
+        Assert.Equal(2, store.List().Count);
+        Assert.Equal(2, snapshotReads);
+
+        store.Reload();
+        Assert.Equal(2, store.Count);
+        Assert.Equal(3, snapshotReads);
+
+        Assert.NotNull(store.Get("q.plugin", "1.0.0"));
+        Assert.Equal(2, store.Count);
+        Assert.Equal(2, store.List().Count);
+        Assert.Equal(3, snapshotReads);
+    }
+#endif
 }
