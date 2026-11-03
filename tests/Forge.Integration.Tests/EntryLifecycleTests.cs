@@ -35,6 +35,7 @@ public sealed class EntryLifecycleTests
     [Fact]
     public async Task Execute_paused_before_its_gate_never_runs_a_plugin_that_refresh_removed()
     {
+        HostTestHooks.Require();
         await using var fx = new E2eFixture();
         using var hook = EntryCaptureHook.Activate(fx.Root, fx.PipeName);
         var loadLog = Path.Combine(fx.Root, "loads.txt");
@@ -71,6 +72,7 @@ public sealed class EntryLifecycleTests
     [Fact]
     public async Task Execute_paused_before_its_gate_never_runs_the_version_a_prebuilt_switch_replaced()
     {
+        HostTestHooks.Require();
         await using var fx = new E2eFixture();
         using var hook = EntryCaptureHook.Activate(fx.Root, fx.PipeName);
         fx.WritePlugin("bodyold", PluginSources.Standard("bodyold", echoPrefix: "old"));

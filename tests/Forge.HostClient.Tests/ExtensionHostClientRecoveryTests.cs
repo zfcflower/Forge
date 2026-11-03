@@ -208,6 +208,48 @@ public sealed class ExtensionHostClientRecoveryTests
         Assert.Equal(HostStatus.Failed, events[^1].Status);
     }
 
+#if DEBUG
+    /// <summary>A host that drops the connection inside the connect-to-Running window leaves the client Failed and the
+    /// start failed; the same instance starts again against a healthy host.</summary>
+    [Fact]
+    public async Task A_connection_that_closes_before_the_Running_commit_fails_the_start_and_stays_startable()
+    {
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host);
+        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
+        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        using var limit = TestLimit.Create();
+        client.AfterConnectedHook = async () =>
+        {
+            await host.WhenAcceptedAsync(1).WaitAsync(TestLimit.Span).ConfigureAwait(false);
+            await host.DropConnectionAsync().ConfigureAwait(false);
+            await statuses.UntilAsync(seen => seen.Any(entry => entry.Status == HostStatus.Failed))
+                .ConfigureAwait(false);
+        };
+
+        var accepting = host.AcceptAsync();
+        var starting = client.StartAsync(limit.Token);
+        await accepting.Bounded();
+        var failed = await Assert.ThrowsAsync<IpcConnectionClosedException>(() => starting);
+
+        Assert.Contains(host.PipeName, failed.Message, StringComparison.Ordinal);
+        Assert.Equal(HostStatus.Failed, client.Status);
+        var events = statuses.Snapshot();
+        Assert.Single(events, entry => entry.Status == HostStatus.Failed);
+        Assert.Equal(HostStatus.Failed, events[^1].Status);
+        Assert.DoesNotContain(events, entry => entry.Status == HostStatus.Running);
+
+        client.AfterConnectedHook = null;
+        var acceptingAgain = host.AcceptAsync();
+        await client.StartAsync(limit.Token).Bounded();
+        await acceptingAgain.Bounded();
+
+        Assert.Equal(HostStatus.Running, client.Status);
+        await client.RefreshPluginsAsync(limit.Token);
+        Assert.Single(host.Requests("plugins.refresh"));
+    }
+#endif
+
     /// <summary>Blocks the caller until the host has accepted the recovering connection, sent its on-accept
     /// registration, and the client has processed it.</summary>
     private static bool HoldsUntilTheWindowRegistrationLanded(FakeHost host)

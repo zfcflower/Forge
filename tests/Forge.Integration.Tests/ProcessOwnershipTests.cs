@@ -129,6 +129,7 @@ public sealed class ProcessOwnershipTests
     [Fact]
     public async Task A_worker_that_cannot_be_contained_is_killed_and_the_start_fails()
     {
+        HostTestHooks.Require();
         var root = Path.Combine(Path.GetTempPath(), "forge-e2e-owner-" + Guid.NewGuid().ToString("N")[..10]);
         var plugins = Path.Combine(root, "plugins");
         var data = Path.Combine(root, "data");

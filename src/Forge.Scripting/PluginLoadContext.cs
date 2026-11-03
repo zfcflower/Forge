@@ -12,7 +12,9 @@ namespace Forge.Scripting;
 /// directory (via <c>.deps.json</c> when a component path is supplied, then a flat directory probe); in verified-image
 /// mode (<see cref="FromVerifiedImages"/>) every managed dependency resolves from bytes supplied up front and nothing
 /// is read from the plugin directory. <c>Forge.Plugin.Sdk</c> and the shared framework always bind to the host copy, so
-/// <see cref="IPlugin"/> keeps a single type identity. Nothing is shared between two contexts.
+/// <see cref="IPlugin"/> keeps a single type identity. Nothing is shared between two contexts. In verified-image mode
+/// a native library request fails with <see cref="DllNotFoundException"/> instead of falling back to the default
+/// probing that would read the plugin directory or the operating system.
 /// </summary>
 public sealed class PluginLoadContext : AssemblyLoadContext
 {
@@ -274,12 +276,25 @@ public sealed class PluginLoadContext : AssemblyLoadContext
 
     protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
     {
-        if (string.IsNullOrWhiteSpace(unmanagedDllName) || Volatile.Read(ref verifiedDependencyImages) is not null)
+        if (Volatile.Read(ref verifiedDependencyImages) is not null)
+        {
+            throw new DllNotFoundException(NativeLibraryRefusedMessage(unmanagedDllName));
+        }
+
+        if (string.IsNullOrWhiteSpace(unmanagedDllName))
         {
             return IntPtr.Zero;
         }
 
         return unmanagedProbes.GetOrAdd(unmanagedDllName, static (name, context) => context.ResolveUnmanaged(name), this);
+    }
+
+    private string NativeLibraryRefusedMessage(string? unmanagedDllName)
+    {
+        var requested = string.IsNullOrWhiteSpace(unmanagedDllName) ? "(unnamed)" : $"'{unmanagedDllName}'";
+        return
+            $"The plugin requested the native library {requested}, which is not loaded: native libraries are not supported " +
+            $"for verified plugins, so nothing is resolved from '{directory}' or from the operating system.";
     }
 
     private Assembly Publish(Assembly assembly)

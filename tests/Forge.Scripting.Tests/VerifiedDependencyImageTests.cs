@@ -70,6 +70,22 @@ public class VerifiedDependencyImageTests
     }
 
     [Fact]
+    public void A_native_binary_is_recognised_by_its_header_signature_whatever_the_extension()
+    {
+        var managed = Build.Image(PluginSources.Dependency, "TestDep");
+
+        Assert.Equal("PE without a CLI header", ManagedImage.ReadNativeBinaryFormat(WithoutCliHeader(managed)));
+        Assert.Equal("ELF", ManagedImage.ReadNativeBinaryFormat([0x7F, (byte)'E', (byte)'L', (byte)'F', 2, 1, 1, 0, .. new byte[124]]));
+        Assert.Equal("Mach-O", ManagedImage.ReadNativeBinaryFormat([0xCF, 0xFA, 0xED, 0xFE, 7, 0, 0, 1]));
+        Assert.Equal("Mach-O", ManagedImage.ReadNativeBinaryFormat([0xCE, 0xFA, 0xED, 0xFE, 7, 0, 0, 1]));
+        Assert.Equal("Mach-O universal", ManagedImage.ReadNativeBinaryFormat([0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2]));
+        Assert.Equal("Mach-O universal", ManagedImage.ReadNativeBinaryFormat([0xCA, 0xFE, 0xBA, 0xBF, 0, 0, 0, 2]));
+        Assert.Null(ManagedImage.ReadNativeBinaryFormat(managed));
+        Assert.Null(ManagedImage.ReadNativeBinaryFormat("{\"data\":true}"u8.ToArray()));
+        Assert.Null(ManagedImage.ReadNativeBinaryFormat([]));
+    }
+
+    [Fact]
     public void A_pe_without_managed_metadata_is_not_a_managed_image()
     {
         var managed = Build.Image(PluginSources.Dependency, "TestDep");

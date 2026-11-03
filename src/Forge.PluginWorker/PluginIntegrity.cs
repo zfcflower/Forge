@@ -13,8 +13,9 @@ internal sealed record VerifiedPluginContent(
 /// its bytes: the entry image is read once, hashed, and handed to the context from that same memory, and every
 /// declared file must exist and match while every other file of the plugin directory must be declared. A missing
 /// or mismatching digest fails the load; nothing is downgraded to a warning. Each declared file is read once and
-/// kept, so the managed dependencies the context loads later are the very bytes that were hashed, and a <c>.dll</c>
-/// without managed metadata is rejected because such bytes cannot be loaded from memory.</summary>
+/// kept, so the managed dependencies the context loads later are the very bytes that were hashed, a declared file
+/// whose header signature is native (PE without a CLI header, ELF, Mach-O) is rejected by name whatever its
+/// extension, and a <c>.dll</c> without managed metadata is rejected because such bytes cannot be loaded from memory.</summary>
 internal static class PluginIntegrity
 {
     private const int ReportedUndeclaredFiles = 5;
@@ -89,6 +90,12 @@ internal static class PluginIntegrity
                     $"Plugin file '{relative}' does not match the declared SHA-256 (computed {fileDigest}).");
             }
 
+            if (ManagedImage.ReadNativeBinaryFormat(bytes) is { } nativeFormat)
+            {
+                throw new PluginLoadException(
+                    $"Plugin file '{relative}' in '{pluginDirectory}' is a native binary ({nativeFormat}); the worker loads verified plugins from memory only, so a native binary is refused whatever its extension.");
+            }
+
             contents.Add(relative, bytes);
         }
 
@@ -98,7 +105,7 @@ internal static class PluginIntegrity
 
     /// <summary>Keys the declared managed images by assembly simple name, which is what the load context asks for. A
     /// declared <c>.dll</c> without managed metadata cannot be loaded from memory, so it fails the load by name rather
-    /// than being left for the loader to reach on disk.</summary>
+    /// than being left for the loader to reach on disk. Files with any other extension are data, and stay permitted.</summary>
     private static Dictionary<string, byte[]> ManagedDependencyImages(
         string pluginDirectory,
         string entryName,

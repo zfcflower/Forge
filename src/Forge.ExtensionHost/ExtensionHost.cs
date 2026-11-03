@@ -22,7 +22,9 @@ public sealed class ExtensionHost : IAsyncDisposable
     private readonly List<PluginIssue> issues = [];
     private readonly Lock sync = new();
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+#if DEBUG
     private readonly IHostTestHook? testHook;
+#endif
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IIpcPeer? mainPeer;
@@ -36,7 +38,9 @@ public sealed class ExtensionHost : IAsyncDisposable
         Directory.CreateDirectory(options.DataDirectory);
         approvals = new ApprovalStore(options.DataDirectory);
         catalog = new PluginCatalog(options.PluginsDirectory);
+#if DEBUG
         testHook = FileHostTestHook.Activate(options.PipeName);
+#endif
     }
 
     /// <summary>Every issue the last discovery reported, newest last.</summary>
@@ -804,8 +808,12 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
     }
 
+#if DEBUG
     private ValueTask CaptureAsync(string pluginId, CancellationToken ct) =>
         testHook is { } hook ? hook.AfterEntryCapturedAsync(pluginId, ct) : ValueTask.CompletedTask;
+#else
+    private static ValueTask CaptureAsync(string pluginId, CancellationToken ct) => ValueTask.CompletedTask;
+#endif
 
     /// <summary>
     /// Resolves the entry a request must use once it holds the plugin's gate: a refresh that replaced or removed the

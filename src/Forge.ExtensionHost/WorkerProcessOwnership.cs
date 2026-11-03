@@ -13,9 +13,11 @@ namespace Forge.ExtensionHost;
 /// </summary>
 internal sealed class WorkerProcessOwnership : IDisposable
 {
-    /// <summary>Set to <c>1</c> to make <see cref="Assign"/> fail; read only by this class, used by the integration
-    /// tests to exercise the fail-closed start path.</summary>
+#if DEBUG
+    /// <summary>Set to <c>1</c> to make <see cref="Assign"/> fail; read only by this class, read only by a Debug build, and
+    /// used by the integration tests to exercise the fail-closed start path.</summary>
     internal const string FailAssignmentEnvironmentVariable = "FORGE_HOST_TEST_FAIL_JOB_ASSIGN";
+#endif
 
     /// <summary><c>JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE</c>: every process in the job dies when the last handle to it
     /// closes, which includes the host process ending for any reason.</summary>
@@ -84,6 +86,7 @@ internal sealed class WorkerProcessOwnership : IDisposable
     {
         ArgumentNullException.ThrowIfNull(process);
 
+#if DEBUG
         if (string.Equals(
                 Environment.GetEnvironmentVariable(FailAssignmentEnvironmentVariable),
                 "1",
@@ -93,6 +96,7 @@ internal sealed class WorkerProcessOwnership : IDisposable
                 "worker_start_failed",
                 $"The plugin worker could not be assigned to its containment ({FailAssignmentEnvironmentVariable}=1).");
         }
+#endif
 
         processId = process.Id;
         if (job is null)

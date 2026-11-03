@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Reflection;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.HostClient;
@@ -267,6 +268,28 @@ internal sealed class E2eFixture : IAsyncDisposable
 
                 Thread.Sleep(100);
             }
+        }
+    }
+}
+
+/// <summary>
+/// The host's integration-test hooks (<c>FORGE_HOST_TEST_HOOK</c>, <c>FORGE_HOST_TEST_FAIL_JOB_ASSIGN</c>) are compiled
+/// into Debug builds of <c>Forge.ExtensionHost</c> only, so a Release build of the host cannot serve the tests that need
+/// them: those tests must fail with this message instead of timing out or passing for the wrong reason.
+/// </summary>
+internal static class HostTestHooks
+{
+    public const string DebugRequired = "integration tests require a Debug build of Forge.ExtensionHost";
+
+    /// <summary>Fails the calling test unless the host assembly under test was built as Debug.</summary>
+    public static void Require()
+    {
+        var host = typeof(Forge.ExtensionHost.Program).Assembly;
+        var configuration = host.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration;
+        if (!string.Equals(configuration, "Debug", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"{DebugRequired}: '{host.Location}' was built as '{configuration ?? "unknown"}'.");
         }
     }
 }

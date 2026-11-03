@@ -1,3 +1,4 @@
+#if DEBUG
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -19,7 +20,8 @@ internal interface IHostTestHook
 /// <c>{"pipe":"&lt;pipe name&gt;","directory":"&lt;dir&gt;"}</c>; the hook only activates for the host whose pipe name
 /// matches, so a host started by a concurrently running test is never paused. A captured request writes
 /// <c>&lt;dir&gt;/&lt;n&gt;.captured</c> (containing the plugin id) and then waits for <c>&lt;dir&gt;/&lt;n&gt;.release</c>,
-/// bounded so a forgotten release can never wedge the host.
+/// bounded so a forgotten release can never wedge the host. Only a Debug build contains this hook, so a Release host
+/// never reads <see cref="EnvironmentVariable"/> and never pauses a request.
 /// </summary>
 internal sealed class FileHostTestHook(string directory) : IHostTestHook
 {
@@ -105,3 +107,4 @@ internal sealed class FileHostTestHook(string directory) : IHostTestHook
         public string? Directory { get; set; }
     }
 }
+#endif

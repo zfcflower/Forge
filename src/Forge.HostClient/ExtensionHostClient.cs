@@ -73,6 +73,12 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         this.options = options ?? new ExtensionHostClientOptions();
     }
 
+#if DEBUG
+    /// <summary>Seam for tests: runs on the starting task after the pipe connected and before the Running transition is
+    /// committed, so a test can close the connection inside that window.</summary>
+    internal Func<Task>? AfterConnectedHook { get; set; }
+#endif
+
     public HostStatus Status => (HostStatus)Volatile.Read(ref status);
 
     public IReadOnlyList<ITool> Tools => Volatile.Read(ref tools);
@@ -143,8 +149,19 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                     transport = connected.Transport;
                 }
 
+#if DEBUG
+                if (AfterConnectedHook is { } hook)
+                {
+                    await hook().ConfigureAwait(false);
+                }
+#endif
+
                 Interlocked.Exchange(ref registeredGeneration, connected.Generation);
-                SetStatus(HostStatus.Running, null);
+                if (!TryCommitRunning(connected, out var closeFailure))
+                {
+                    throw new IpcConnectionClosedException(closeFailure);
+                }
+
                 if (recovering)
                 {
                     DropToolsOfEarlierConnections();
@@ -158,7 +175,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             }
             catch (Exception ex)
             {
-                FailStatus(DescribeFailure(ex));
+                ReportStartFailure(DescribeFailure(ex));
                 await TeardownAsync(sendHostStop: false, clearTools: false).ConfigureAwait(false);
                 throw;
             }
@@ -867,7 +884,63 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         RaiseStatus(next, detail);
     }
 
-    private void FailStatus(string detail) => SetStatus(HostStatus.Failed, detail, forceDetail: true);
+    /// <summary>Commits the Running transition of <paramref name="connected"/> under the status lock the close callback
+    /// uses, after re-checking that the connection is still the active one, still open and that the start is still in
+    /// <see cref="HostStatus.Starting"/>. A connection that closed in the connect-to-Running window therefore never ends
+    /// up reported as running: the client is Failed with the close cause and the start fails.</summary>
+    private bool TryCommitRunning(PeerBundle connected, out string failure)
+    {
+        bool committed;
+        bool announce;
+        lock (statusGate)
+        {
+            var current = (HostStatus)status;
+            committed = current == HostStatus.Starting &&
+                connected.Generation == Volatile.Read(ref activeGeneration) &&
+                !connected.Peer.IsClosed;
+            announce = !committed && current == HostStatus.Starting;
+            if (committed)
+            {
+                Volatile.Write(ref status, (int)HostStatus.Running);
+            }
+            else if (announce)
+            {
+                Volatile.Write(ref status, (int)HostStatus.Failed);
+            }
+        }
+
+        if (committed)
+        {
+            RaiseStatus(HostStatus.Running, null);
+            failure = string.Empty;
+            return true;
+        }
+
+        failure = DescribeClose(null);
+        if (announce)
+        {
+            RaiseStatus(HostStatus.Failed, failure);
+        }
+
+        return false;
+    }
+
+    /// <summary>Reports a start failure exactly once: when the connection's close callback already moved the status out of
+    /// <see cref="HostStatus.Starting"/>, that callback reported the cause and this reports nothing.</summary>
+    private void ReportStartFailure(string detail)
+    {
+        lock (statusGate)
+        {
+            if ((HostStatus)status != HostStatus.Starting)
+            {
+                return;
+            }
+
+            Volatile.Write(ref status, (int)HostStatus.Failed);
+        }
+
+        RaiseStatus(HostStatus.Failed, detail);
+    }
 
     private void RaiseStatus(HostStatus next, string? detail)
     {
