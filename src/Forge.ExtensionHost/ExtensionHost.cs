@@ -108,6 +108,7 @@ public sealed class ExtensionHost : IAsyncDisposable
 
         await lifetime.CancelAsync().ConfigureAwait(false);
         await ShutdownWorkersAsync().ConfigureAwait(false);
+        approvals.Dispose();
     }
 
     private async Task OnRequestAsync(IpcMessage message, CancellationToken ct)

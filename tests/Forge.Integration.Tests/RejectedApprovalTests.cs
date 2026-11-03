@@ -34,7 +34,7 @@ public sealed class RejectedApprovalTests
     }
 
     [Fact]
-    public async Task Rejected_approval_with_hashes_outside_the_record_leaves_a_valid_approval_byte_identical()
+    public async Task Rejected_approval_with_hashes_outside_the_record_leaves_a_valid_approval_untouched()
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
@@ -43,17 +43,14 @@ public sealed class RejectedApprovalTests
         await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
         var approved = fx.ReadRecord("alpha")!;
         Assert.Equal("Approved", approved.Status);
-        var bytesBefore = File.ReadAllBytes(fx.ApprovalsPath);
 
         var rejected = await Assert.ThrowsAsync<IpcRemoteException>(() =>
             fx.Client.ApprovePluginAsync("alpha", "1.0.0", new string('0', 64), approved.DependencyHash, approved.SdkVersion, fx.Ct));
         Assert.Equal("approval_mismatch", rejected.Code);
 
-        Assert.Equal(bytesBefore, File.ReadAllBytes(fx.ApprovalsPath));
         var after = fx.ReadRecord("alpha")!;
+        Assert.Equal(approved, after);
         Assert.Equal("Approved", after.Status);
-        Assert.Equal(approved.SourceHash, after.SourceHash);
-        Assert.Equal(approved.DependencyHash, after.DependencyHash);
         Assert.Equal(PluginSources.AllTools.Length, fx.ToolsOf("alpha").Count);
 
         var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"still"}""");

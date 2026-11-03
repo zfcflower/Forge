@@ -89,7 +89,8 @@ public sealed class CrashRecoveryTests
         try
         {
             await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, Empty(), ct);
-            var record = ReadApprovalRecord(data, "alpha");
+            var record = ApprovalDatabase.ReadRecord(data, "alpha", "1.0.0")
+                ?? throw new InvalidOperationException("the host persisted no approval record for alpha 1.0.0");
             await peer.SendRequestAsync(ExtensionProtocol.PluginApprove, ApproveArgs(record), ct);
             await WaitForCountAsync(registers, 1, ct, "the first tools.register");
             Assert.Equal(PluginSources.AllTools.Length, DeclaredTools(registers[0]));
@@ -185,22 +186,14 @@ public sealed class CrashRecoveryTests
 
     private static JsonElement Empty() => JsonDocument.Parse("{}").RootElement.Clone();
 
-    private static JsonElement ApproveArgs(JsonElement record) => JsonSerializer.SerializeToElement(new
+    private static JsonElement ApproveArgs(ApprovalRecord record) => JsonSerializer.SerializeToElement(new
     {
         pluginId = "alpha",
         version = "1.0.0",
-        sourceHash = record.GetProperty("sourceHash").GetString(),
-        dependencyHash = record.GetProperty("dependencyHash").GetString(),
-        sdkVersion = record.GetProperty("sdkVersion").GetString(),
+        sourceHash = record.SourceHash,
+        dependencyHash = record.DependencyHash,
+        sdkVersion = record.SdkVersion,
     });
-
-    private static JsonElement ReadApprovalRecord(string dataDirectory, string pluginId)
-    {
-        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(dataDirectory, "approvals.json")));
-        return document.RootElement.EnumerateArray()
-            .Single(element => element.GetProperty("pluginId").GetString() == pluginId)
-            .Clone();
-    }
 
     private static async Task<string> ExecuteAsync(IpcPeer peer, string pluginId, string tool, string argsJson, string workingDir, CancellationToken ct)
     {

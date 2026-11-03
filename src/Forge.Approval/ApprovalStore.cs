@@ -1,57 +1,103 @@
-using System.Diagnostics;
-using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace Forge.Approval;
 
 /// <summary>
-/// Approval records for every plugin version, mirrored to <c>&lt;directory&gt;/approvals.json</c>. The file is the
-/// authority across restarts: it is read once when the store is created, and every mutation rewrites it through a
-/// temporary file plus a replace so a crash cannot leave a half-written state file. All members are thread-safe and
-/// snapshot-based; the records themselves are immutable.
+/// Approval records for every plugin version, persisted in <c>&lt;directory&gt;/approvals.db</c> (SQLite, WAL,
+/// <c>synchronous=FULL</c>). Every mutation is one <c>BEGIN IMMEDIATE</c> transaction that reads the row it changes and
+/// upserts it back, so two hosts on one directory cannot lose each other's updates and a record is published to the
+/// in-memory snapshot only after its commit succeeded. Reads are served from that snapshot and revalidated with
+/// <c>PRAGMA data_version</c>, so a commit made by another process becomes visible without a reload. All members are
+/// thread-safe; the records themselves are immutable.
 /// </summary>
-public sealed class ApprovalStore
+public sealed class ApprovalStore : IDisposable
 {
-    public const string FileName = "approvals.json";
+    /// <summary>File name of the approval database inside the store directory.</summary>
+    public const string FileName = "approvals.db";
 
-    private static readonly TimeSpan DefaultReplaceBudget = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan ReplaceSpinPhase = TimeSpan.FromMilliseconds(10);
+    /// <summary>File name of the single-file state an earlier version wrote and this store imports once.</summary>
+    public const string LegacyFileName = "approvals.json";
+
+    /// <summary>Suffix the imported legacy file is moved to; the import marker, not this rename, prevents re-imports.</summary>
+    public const string MigratedSuffix = ".migrated";
+
     private static readonly Comparison<PluginRecord> OrderByPlugin = static (left, right) =>
     {
         var byId = string.CompareOrdinal(left.PluginId, right.PluginId);
         return byId != 0 ? byId : string.CompareOrdinal(left.Version, right.Version);
     };
 
-    private const int RetryDelayMilliseconds = 1;
-    private const int ReadAttempts = 8;
-    private const int ReadSpinAttempts = 3;
-    private const int SharingViolation = 32;
-    private const int LockViolation = 33;
-
     private readonly Lock gate = new();
-    private readonly TimeSpan replaceBudget;
+    private readonly SqliteConnection connection;
+    private readonly string databasePath;
+    private readonly string legacyPath;
+
     private Dictionary<(string PluginId, string Version), PluginRecord> records;
+    private long dataVersion;
+    private bool disposed;
 
     public ApprovalStore(string directory)
-        : this(directory, DefaultReplaceBudget)
+        : this(directory, null)
     {
     }
 
-    /// <summary>Creates a store that gives up on an un-replaceable state file after <paramref name="replaceBudget"/>.</summary>
-    /// <param name="replaceBudget">
-    /// Total time <see cref="FilePath"/> may stay un-replaceable before the failing write is reported to the caller.
-    /// </param>
-    public ApprovalStore(string directory, TimeSpan replaceBudget)
+    /// <summary>
+    /// Opens (or creates) the database in <paramref name="directory"/>. Throws <see cref="InvalidDataException"/> when
+    /// the database cannot be opened, its schema is newer than this build, it holds an unknown status, or the legacy
+    /// <c>approvals.json</c> file that was about to be imported is unreadable.
+    /// </summary>
+    public ApprovalStore(string directory, ApprovalStoreOptions? options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(replaceBudget, TimeSpan.Zero);
+        options ??= new ApprovalStoreOptions();
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.BusyTimeout, TimeSpan.Zero);
+
         var root = Path.GetFullPath(directory);
-        FilePath = Path.Combine(root, FileName);
-        this.replaceBudget = replaceBudget;
-        records = ToMap(ReadFile());
+        databasePath = Path.Combine(root, FileName);
+        legacyPath = Path.Combine(root, LegacyFileName);
+        JournalMode = ApprovalDatabase.RollbackJournalMode;
+
+        SqliteConnection? opened = null;
+        try
+        {
+            Directory.CreateDirectory(root);
+            opened = ApprovalDatabase.Open(databasePath, options, out var journalMode);
+            var imported = ApprovalMigration.EnsureSchema(opened, databasePath, legacyPath, options);
+            var loaded = ApprovalDatabase.ReadAll(opened, null, databasePath);
+            var version = ApprovalDatabase.DataVersion(opened);
+
+            connection = opened;
+            records = loaded;
+            dataVersion = version;
+            JournalMode = journalMode;
+            if (!string.Equals(journalMode, ApprovalDatabase.WalJournalMode, StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine(
+                    $"forge-approval: '{databasePath}' cannot run in WAL mode ('{journalMode}'); writes use the rollback journal.");
+            }
+
+            if (imported)
+            {
+                TryMigrateLegacyFile();
+            }
+        }
+        catch (SqliteException exception)
+        {
+            opened?.Dispose();
+            throw new InvalidDataException($"Approval database '{databasePath}' is unusable: {exception.Message}", exception);
+        }
+        catch
+        {
+            opened?.Dispose();
+            throw;
+        }
     }
 
-    /// <summary>Full path of the JSON state file this store reads and writes.</summary>
-    public string FilePath { get; }
+    /// <summary>Full path of the approval database this store reads and writes.</summary>
+    public string DatabasePath => databasePath;
+
+    /// <summary>Journal mode SQLite selected for this database: <c>wal</c>, or <c>delete</c> where WAL is unavailable.</summary>
+    public string JournalMode { get; }
 
     public int Count
     {
@@ -59,6 +105,8 @@ public sealed class ApprovalStore
         {
             lock (gate)
             {
+                ThrowIfDisposed();
+                Refresh();
                 return records.Count;
             }
         }
@@ -73,14 +121,13 @@ public sealed class ApprovalStore
         ArgumentNullException.ThrowIfNull(record);
         ValidateIdentity(record.PluginId, record.Version);
 
-        lock (gate)
+        var stored = Change(record.PluginId, record.Version, cancellationToken, current =>
         {
-            var key = (record.PluginId, record.Version);
             var now = DateTimeOffset.UtcNow;
             var createdAt = record.CreatedAt;
             if (createdAt == default)
             {
-                createdAt = records.TryGetValue(key, out var existing) ? existing.CreatedAt : now;
+                createdAt = current is null ? now : current.CreatedAt;
             }
 
             if (createdAt == default)
@@ -88,14 +135,13 @@ public sealed class ApprovalStore
                 createdAt = now;
             }
 
-            var stored = record with
+            return record with
             {
                 CreatedAt = createdAt,
                 UpdatedAt = record.UpdatedAt == default ? now : record.UpdatedAt,
             };
-            Apply(key, stored, cancellationToken);
-            return stored;
-        }
+        });
+        return stored!;
     }
 
     /// <summary>One version's record, or the most recently updated version when <paramref name="version"/> is null.</summary>
@@ -105,6 +151,8 @@ public sealed class ApprovalStore
 
         lock (gate)
         {
+            ThrowIfDisposed();
+            Refresh();
             if (version is not null)
             {
                 return records.TryGetValue((pluginId, version), out var exact) ? exact : null;
@@ -135,6 +183,8 @@ public sealed class ApprovalStore
     {
         lock (gate)
         {
+            ThrowIfDisposed();
+            Refresh();
             return OrderedSnapshot(records);
         }
     }
@@ -159,19 +209,16 @@ public sealed class ApprovalStore
         ArgumentException.ThrowIfNullOrWhiteSpace(dependencyHash);
         ArgumentException.ThrowIfNullOrWhiteSpace(sdkVersion);
 
-        lock (gate)
+        return Change(pluginId, version, cancellationToken, current =>
         {
-            var key = (pluginId, version);
             var now = DateTimeOffset.UtcNow;
-            var record = records.TryGetValue(key, out var existing)
-                ? existing
-                : new PluginRecord
-                {
-                    PluginId = pluginId,
-                    Version = version,
-                    CreatedAt = now,
-                    UpdatedAt = now,
-                };
+            var record = current ?? new PluginRecord
+            {
+                PluginId = pluginId,
+                Version = version,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
 
             var status = record.Status switch
             {
@@ -180,7 +227,7 @@ public sealed class ApprovalStore
                 _ => PluginStatus.Approved,
             };
 
-            var approved = record with
+            return record with
             {
                 SourceHash = sourceHash,
                 DependencyHash = dependencyHash,
@@ -190,9 +237,7 @@ public sealed class ApprovalStore
                 CreatedAt = record.CreatedAt == default ? now : record.CreatedAt,
                 UpdatedAt = now,
             };
-            Apply(key, approved, cancellationToken);
-            return approved;
-        }
+        });
     }
 
     /// <summary>
@@ -204,28 +249,20 @@ public sealed class ApprovalStore
     {
         ValidateIdentity(pluginId, version);
 
-        lock (gate)
+        return Change(pluginId, version, cancellationToken, current =>
         {
-            var key = (pluginId, version);
-            if (!records.TryGetValue(key, out var record))
+            if (current is null || current.Status is PluginStatus.Disabled or PluginStatus.Uninstalled)
             {
-                return null;
+                return current;
             }
 
-            if (record.Status is PluginStatus.Disabled or PluginStatus.Uninstalled)
-            {
-                return record;
-            }
-
-            var revoked = record with
+            return current with
             {
                 ApprovedHash = null,
                 Status = PluginStatus.Draft,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            Apply(key, revoked, cancellationToken);
-            return revoked;
-        }
+        });
     }
 
     /// <summary>Marks the version <see cref="PluginStatus.Disabled"/>; the approval hash is kept for <see cref="Enable"/>.</summary>
@@ -233,18 +270,9 @@ public sealed class ApprovalStore
     {
         ValidateIdentity(pluginId, version);
 
-        lock (gate)
-        {
-            var key = (pluginId, version);
-            if (!records.TryGetValue(key, out var record))
-            {
-                return null;
-            }
-
-            var disabled = record with { Status = PluginStatus.Disabled, UpdatedAt = DateTimeOffset.UtcNow };
-            Apply(key, disabled, cancellationToken);
-            return disabled;
-        }
+        return Change(pluginId, version, cancellationToken, current => current is null
+            ? null
+            : current with { Status = PluginStatus.Disabled, UpdatedAt = DateTimeOffset.UtcNow });
     }
 
     /// <summary>
@@ -257,70 +285,124 @@ public sealed class ApprovalStore
     {
         ValidateIdentity(pluginId, version);
 
-        lock (gate)
+        return Change(pluginId, version, cancellationToken, current =>
         {
-            var key = (pluginId, version);
-            if (!records.TryGetValue(key, out var record))
+            if (current is null || current.Status != PluginStatus.Disabled)
             {
-                return null;
+                return current;
             }
 
-            if (record.Status != PluginStatus.Disabled)
+            return current with
             {
-                return record;
-            }
-
-            var enabled = record with
-            {
-                Status = string.IsNullOrEmpty(record.ApprovedHash) ? PluginStatus.Draft : PluginStatus.Approved,
+                Status = string.IsNullOrEmpty(current.ApprovedHash) ? PluginStatus.Draft : PluginStatus.Approved,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            Apply(key, enabled, cancellationToken);
-            return enabled;
-        }
+        });
     }
 
     /// <summary>
-    /// Re-reads the file, as a restart would. The records are loaded into a fresh map that replaces the in-memory
-    /// state only once the read succeeded, so a failed reload keeps the previously loaded records.
+    /// Re-reads the whole table, as a restart would. The rows are loaded into a fresh map that replaces the in-memory
+    /// snapshot only once the read succeeded, so a failed reload keeps the previously loaded records.
     /// </summary>
     public void Reload()
     {
         lock (gate)
         {
-            records = ToMap(ReadFile());
+            ThrowIfDisposed();
+            var version = ApprovalDatabase.DataVersion(connection);
+            var loaded = ApprovalDatabase.ReadAll(connection, null, databasePath);
+            records = loaded;
+            dataVersion = version;
+        }
+    }
+
+    /// <summary>Closes the connection so the database files can be deleted or moved.</summary>
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            try
+            {
+                ApprovalDatabase.Checkpoint(connection);
+            }
+            catch (SqliteException)
+            {
+            }
+
+            connection.Dispose();
+            SqliteConnection.ClearAllPools();
         }
     }
 
     /// <summary>
-    /// Persists <paramref name="candidate"/> and only then publishes it, so a failed write leaves the in-memory state
-    /// equal to what the file holds.
+    /// Runs one read-modify-write in a single <c>BEGIN IMMEDIATE</c> transaction: the row is read inside the
+    /// transaction, the transition decides the new value, and the upsert commits before the snapshot is touched. A
+    /// transition that returns the record it was given — or <c>null</c> — writes nothing.
     /// </summary>
-    private void Apply((string PluginId, string Version) key, PluginRecord record, CancellationToken cancellationToken)
+    private PluginRecord? Change(
+        string pluginId,
+        string version,
+        CancellationToken cancellationToken,
+        Func<PluginRecord?, PluginRecord?> transition)
     {
-        var candidate = new Dictionary<(string PluginId, string Version), PluginRecord>(records)
-        {
-            [key] = record,
-        };
-        Persist(candidate, cancellationToken);
-        records = candidate;
-    }
+        cancellationToken.ThrowIfCancellationRequested();
 
-    private static Dictionary<(string PluginId, string Version), PluginRecord> ToMap(PluginRecord[] source)
-    {
-        var map = new Dictionary<(string PluginId, string Version), PluginRecord>(source.Length);
-        foreach (var record in source)
+        lock (gate)
         {
-            if (string.IsNullOrWhiteSpace(record.PluginId) || string.IsNullOrWhiteSpace(record.Version))
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var key = (pluginId, version);
+            using var transaction = connection.BeginTransaction(deferred: false);
+            var current = ApprovalDatabase.ReadRow(connection, transaction, pluginId, version, databasePath);
+            var record = transition(current);
+            if (record is not null && !ReferenceEquals(record, current))
             {
-                continue;
+                ApprovalDatabase.Write(connection, transaction, record);
+                transaction.Commit();
+                records[key] = record;
+                return record;
             }
 
-            map[(record.PluginId, record.Version)] = record;
+            transaction.Commit();
+            return record;
+        }
+    }
+
+    /// <summary>
+    /// Reloads the snapshot when another connection committed since it was taken. The version is read before the rows
+    /// so a commit that lands between the two reads can only cause one extra reload, never a missed one.
+    /// </summary>
+    private void Refresh()
+    {
+        var version = ApprovalDatabase.DataVersion(connection);
+        if (version == dataVersion)
+        {
+            return;
         }
 
-        return map;
+        records = ApprovalDatabase.ReadAll(connection, null, databasePath);
+        dataVersion = version;
     }
+
+    private void TryMigrateLegacyFile()
+    {
+        try
+        {
+            File.Move(legacyPath, legacyPath + MigratedSuffix, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 
     private static PluginRecord[] OrderedSnapshot(Dictionary<(string PluginId, string Version), PluginRecord> source)
     {
@@ -328,176 +410,6 @@ public sealed class ApprovalStore
         source.Values.CopyTo(snapshot, 0);
         Array.Sort(snapshot, OrderByPlugin);
         return snapshot;
-    }
-
-    private PluginRecord[] ReadFile()
-    {
-        using var stream = OpenForReading();
-        if (stream is null)
-        {
-            return [];
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize(stream, ApprovalJsonContext.Default.PluginRecordArray) ?? [];
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException($"Approval file '{FilePath}' is not a valid plugin approval list.", exception);
-        }
-    }
-
-    /// <summary>
-    /// Opens the state file for reading, retrying a bounded number of times while another store swaps the file in:
-    /// Windows reports a file that is being replaced as access denied until the swap finished, and a file that
-    /// momentarily disappeared reads as no state file at all, which is what <c>File.Exists</c> means for a fresh store.
-    /// </summary>
-    private FileStream? OpenForReading()
-    {
-        for (var attempt = 0; ; attempt++)
-        {
-            if (!File.Exists(FilePath))
-            {
-                return null;
-            }
-
-            try
-            {
-                return new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            }
-            catch (Exception exception) when (attempt < ReadAttempts && IsRetryableRead(exception))
-            {
-                if (attempt < ReadSpinAttempts)
-                {
-                    Thread.Yield();
-                }
-                else
-                {
-                    Thread.Sleep(RetryDelayMilliseconds);
-                }
-            }
-        }
-    }
-
-    private bool IsRetryableRead(Exception exception) =>
-        exception is FileNotFoundException or DirectoryNotFoundException || IsReplaceRace(exception);
-
-    private void Persist(Dictionary<(string PluginId, string Version), PluginRecord> candidate, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var directory = Path.GetDirectoryName(FilePath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var temporary = $"{FilePath}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096))
-            {
-                JsonSerializer.Serialize(stream, OrderedSnapshot(candidate), ApprovalJsonContext.Default.PluginRecordArray);
-                stream.Flush(flushToDisk: true);
-            }
-
-            Replace(temporary, cancellationToken);
-        }
-        catch
-        {
-            TryDelete(temporary);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Replaces the state file with the finished temporary file. Windows refuses to replace a file while another
-    /// handle still has it open, so the replace is retried within <see cref="replaceBudget"/>: first by yielding the
-    /// CPU, then by sleeping a millisecond at a time. The temporary file is renamed onto the state file, which keeps
-    /// the state file's name present for readers.
-    /// </summary>
-    private void Replace(string temporary, CancellationToken cancellationToken)
-    {
-        var start = Stopwatch.GetTimestamp();
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                File.Move(temporary, FilePath, overwrite: true);
-                return;
-            }
-            catch (Exception exception) when (IsReplaceRace(exception))
-            {
-                if (Stopwatch.GetElapsedTime(start) >= replaceBudget)
-                {
-                    throw;
-                }
-
-                if (Stopwatch.GetElapsedTime(start) < ReplaceSpinPhase)
-                {
-                    Thread.Yield();
-                }
-                else
-                {
-                    WaitForRetry(cancellationToken);
-                }
-            }
-        }
-    }
-
-    private static void WaitForRetry(CancellationToken cancellationToken)
-    {
-        if (cancellationToken.CanBeCanceled)
-        {
-            _ = cancellationToken.WaitHandle.WaitOne(RetryDelayMilliseconds);
-            return;
-        }
-
-        Thread.Sleep(RetryDelayMilliseconds);
-    }
-
-    /// <summary>
-    /// True only for the Windows "state file temporarily not replaceable" race: the platform is Windows, the failure
-    /// is an access denial or a sharing/lock violation, and the state file is still there, is not a directory and is
-    /// not read-only. Anything else — a missing directory, a path that is a directory, a read-only file, a full disk,
-    /// a real ACL denial — is reported without retrying.
-    /// </summary>
-    private bool IsReplaceRace(Exception exception)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return false;
-        }
-
-        var isRace = exception is UnauthorizedAccessException ||
-            (exception is IOException io && (io.HResult & 0xFFFF) is SharingViolation or LockViolation);
-        return isRace && IsReplaceableStateFile();
-    }
-
-    /// <summary>True when the state file exists, is not a directory and is not read-only.</summary>
-    private bool IsReplaceableStateFile()
-    {
-        try
-        {
-            return (File.GetAttributes(FilePath) & (FileAttributes.Directory | FileAttributes.ReadOnly)) == 0;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            return false;
-        }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
     }
 
     private static void ValidateIdentity(string pluginId, string version)

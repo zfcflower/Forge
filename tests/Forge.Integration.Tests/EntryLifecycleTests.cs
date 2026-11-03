@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Forge.Integration.Tests;
@@ -247,7 +248,7 @@ public sealed class EntryLifecycleTests
         }
     }
 
-    /// <summary>Reads <c>approvals.json</c> while other tasks rewrite it.</summary>
+    /// <summary>Reads the approval database while other tasks commit to it.</summary>
     private static ApprovalRecord? ReadRecord(E2eFixture fx, string pluginId)
     {
         for (var attempt = 0; ; attempt++)
@@ -256,7 +257,7 @@ public sealed class EntryLifecycleTests
             {
                 return fx.ReadRecord(pluginId);
             }
-            catch (Exception exception) when (attempt < 20 && exception is IOException or JsonException)
+            catch (SqliteException exception) when (attempt < 20 && exception.SqliteErrorCode is 5 or 6)
             {
                 Thread.Sleep(5);
             }

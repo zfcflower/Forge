@@ -25,7 +25,7 @@ public sealed record HostOptions
     /// <summary>Directory holding one sub-directory per plugin.</summary>
     public required string PluginsDirectory { get; init; }
 
-    /// <summary>Writable host state directory; holds <c>approvals.json</c>.</summary>
+    /// <summary>Writable host state directory; holds the approval database <c>approvals.db</c>.</summary>
     public required string DataDirectory { get; init; }
 
     /// <summary>Runtime used to launch a worker started from a <c>.dll</c> (<c>--dotnet</c>).</summary>

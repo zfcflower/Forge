@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Forge.Integration.Tests;
 
-/// <summary>Approval record as persisted in <c>approvals.json</c> under the host's data directory.</summary>
+/// <summary>Approval record as persisted in <c>approvals.db</c> under the host's data directory.</summary>
 internal sealed record ApprovalRecord(
     string PluginId,
     string Version,
@@ -74,7 +74,7 @@ internal sealed class E2eFixture : IAsyncDisposable
 
     public CancellationToken Ct => budget.Token;
 
-    public string ApprovalsPath => Path.Combine(DataDirectory, "approvals.json");
+    public string ApprovalsPath => ApprovalDatabase.PathOf(DataDirectory);
 
     public string PluginDirectory(string id) => Path.Combine(PluginsDirectory, id);
 
@@ -99,32 +99,9 @@ internal sealed class E2eFixture : IAsyncDisposable
         await Client.RefreshPluginsAsync(Ct);
     }
 
-    /// <summary>Reads the persisted record for one plugin version; null when <c>approvals.json</c> has none.</summary>
-    public ApprovalRecord? ReadRecord(string id, string version = "1.0.0")
-    {
-        if (!File.Exists(ApprovalsPath))
-        {
-            return null;
-        }
-
-        using var document = JsonDocument.Parse(File.ReadAllText(ApprovalsPath));
-        foreach (var element in document.RootElement.EnumerateArray())
-        {
-            if (element.GetProperty("pluginId").GetString() == id &&
-                element.GetProperty("version").GetString() == version)
-            {
-                return new ApprovalRecord(
-                    id,
-                    version,
-                    element.GetProperty("sourceHash").GetString() ?? string.Empty,
-                    element.GetProperty("dependencyHash").GetString() ?? string.Empty,
-                    element.GetProperty("sdkVersion").GetString() ?? string.Empty,
-                    element.GetProperty("status").GetString() ?? string.Empty);
-            }
-        }
-
-        return null;
-    }
+    /// <summary>Reads the persisted record for one plugin version; null when the approval database has none.</summary>
+    public ApprovalRecord? ReadRecord(string id, string version = "1.0.0") =>
+        ApprovalDatabase.ReadRecord(DataDirectory, id, version);
 
     /// <summary>Approves the version recorded for <paramref name="id"/> with the hashes the host persisted.</summary>
     public async Task ApproveAsync(string id, string version = "1.0.0")
