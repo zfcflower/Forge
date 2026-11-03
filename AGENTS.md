@@ -8,12 +8,21 @@
 |---|---|---|
 | 主 Agent(规划/调度) | `anthropic/claude-sonnet-5.5` | 读代码与 spec、拆解任务、写接口与骨架、派活、复核结果、合并、更新 spec、提交。不写实现代码。 |
 | 实现 Worker | `opencode-go/deepseek-v4.1-flash:high` | 按任务写实现代码。只在自己副本里工作,测试通过后只拷回自己负责的路径。 |
-| 测试 | `opencode/claude-haiku-5-5`;不可用(如余额不足)时降级到 `openrouter/anthropic/claude-haiku-5.5` | 只编写测试,不做 review。 |
-| Review | `openai/gpt-6.1-sol:medium`(经 openrouter 派发) | 只读评审,输出实质性问题与结论。 |
+| 测试 | `opencode-go/claude-haiku-5-5` | 只编写测试,不做 review。 |
+| Review | `opencode-go/gpt-6-luna:high` | 只读评审,输出实质性问题与结论。 |
+
+## 评审标准
+
+评审不止于找代码 Bug,三项按优先级排序:
+1. **实现是否符合架构约束**——对照 `architecture.md`/`goal-and-requirements.md`/模块 SPEC 检查边界、依赖方向、性能第一、Native AOT 兼容、扩展点契约等是否被遵守,偏差是否已记录或征得同意。
+2. **测试是否足以证明实现正确**——测试是否覆盖关键路径、边界、失败/取消/并发、错误状态,而非只测 happy path;Skip 是否都在记录真实缺陷。
+3. **代码质量**——正确性、资源、并发、性能陷阱。
+
+第 1、2 项比第 3 项更重要。
 
 ## 派活规则
 
-- 每个 Worker 任务必须显式带上模型 `opencode-go/deepseek-v4.1-flash:high`;测试任务必须带 Haiku 5.5,评审任务必须带 GPT 6.1 Sol(medium)。不要用主 Agent 的模型派子 Agent。
+- 每个 Worker 任务必须显式带上模型 `opencode-go/deepseek-v4.1-flash:high`;测试任务必须带 Haiku 5.5(`opencode-go/claude-haiku-5-5`),评审任务必须带 GPT 6 Luna(`opencode-go/gpt-6-luna:high`)。不要用主 Agent 的模型派子 Agent。
 - Worker 在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),`dotnet test` 全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节交给 Worker。
 - 主 Agent 复核:构建、跑全量测试、检查是否越界改动,再决定是否采纳。

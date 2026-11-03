@@ -1,23 +1,33 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Forge.Abstractions/Forge.Abstractions.csproj" />
+    <Project Path="src/Forge.Approval/Forge.Approval.csproj" />
     <Project Path="src/Forge.CodeMode/Forge.CodeMode.csproj" />
     <Project Path="src/Forge.Core/Forge.Core.csproj" />
     <Project Path="src/Forge.Editor/Forge.Editor.csproj" />
+    <Project Path="src/Forge.ExtensionHost/Forge.ExtensionHost.csproj" />
+    <Project Path="src/Forge.HostClient/Forge.HostClient.csproj" />
     <Project Path="src/Forge.Ipc/Forge.Ipc.csproj" />
     <Project Path="src/Forge.Mcp/Forge.Mcp.csproj" />
     <Project Path="src/Forge.Plugin.Sdk/Forge.Plugin.Sdk.csproj" />
     <Project Path="src/Forge.Plugins/Forge.Plugins.csproj" />
+    <Project Path="src/Forge.PluginWorker/Forge.PluginWorker.csproj" />
+    <Project Path="src/Forge.Scripting/Forge.Scripting.csproj" />
+    <Project Path="src/Forge.Workflows/Forge.Workflows.csproj" />
     <Project Path="src/Forge.Workspace/Forge.Workspace.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Forge.Approval.Tests/Forge.Approval.Tests.csproj" />
     <Project Path="tests/Forge.CodeMode.Tests/Forge.CodeMode.Tests.csproj" />
     <Project Path="tests/Forge.Core.Tests/Forge.Core.Tests.csproj" />
     <Project Path="tests/Forge.Editor.Tests/Forge.Editor.Tests.csproj" />
+    <Project Path="tests/Forge.HostClient.Tests/Forge.HostClient.Tests.csproj" />
     <Project Path="tests/Forge.Ipc.Tests/Forge.Ipc.Tests.csproj" />
     <Project Path="tests/Forge.Mcp.Tests/Forge.Mcp.Tests.csproj" />
     <Project Path="tests/Forge.Plugin.Sdk.Tests/Forge.Plugin.Sdk.Tests.csproj" />
     <Project Path="tests/Forge.Plugins.Tests/Forge.Plugins.Tests.csproj" />
+    <Project Path="tests/Forge.Scripting.Tests/Forge.Scripting.Tests.csproj" />
+    <Project Path="tests/Forge.Workflows.Tests/Forge.Workflows.Tests.csproj" />
     <Project Path="tests/Forge.Workspace.Tests/Forge.Workspace.Tests.csproj" />
   </Folder>
 </Solution>

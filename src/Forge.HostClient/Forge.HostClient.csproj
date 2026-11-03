@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Forge.Ipc\Forge.Ipc.csproj" />
+    <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
+    <ProjectReference Include="..\Forge.Plugin.Sdk\Forge.Plugin.Sdk.csproj" />
+  </ItemGroup>
+</Project>
