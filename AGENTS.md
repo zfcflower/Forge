@@ -8,8 +8,8 @@
 |---|---|---|
 | 主 Agent(规划/调度) | `anthropic/claude-sonnet-5.5` | 读代码与 spec、拆解任务、写接口与骨架、派活、复核结果、合并、更新 spec、提交。不写实现代码。 |
 | 实现 Worker | `opencode-go/deepseek-v4.1-flash:high` | 按任务写实现代码。只在自己副本里工作,测试通过后只拷回自己负责的路径。 |
-| 测试 | `opencode-go/claude-haiku-5-5` | 只编写测试,不做 review。 |
-| Review | `opencode-go/gpt-6-luna:high` | 只读评审,输出实质性问题与结论。 |
+| 测试 | `opencode-go/muse-spark-1.3-contributor:high`(Muse Spark 1.3 Contributor,高推理) | 只编写测试,不做 review。 |
+| Review | `openrouter/openai/gpt-6.1-sol:medium` | 只读评审,输出实质性问题与结论。 |
 
 ## 评审标准
 
@@ -22,7 +22,7 @@
 
 ## 派活规则
 
-- 每个 Worker 任务必须显式带上模型 `opencode-go/deepseek-v4.1-flash:high`;测试任务必须带 Haiku 5.5(`opencode-go/claude-haiku-5-5`),评审任务必须带 GPT 6 Luna(`opencode-go/gpt-6-luna:high`)。不要用主 Agent 的模型派子 Agent。
+- 每个 Worker 任务必须显式带上模型 `opencode-go/deepseek-v4.1-flash:high`;测试任务必须带 Muse Spark 1.3 Contributor(`opencode-go/muse-spark-1.3-contributor:high`),评审任务必须带 GPT 6.1 Sol(`openrouter/openai/gpt-6.1-sol:medium`)。不要用主 Agent 的模型派子 Agent。
 - Worker 在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),`dotnet test` 全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节交给 Worker。
 - 主 Agent 复核:构建、跑全量测试、检查是否越界改动,再决定是否采纳。
