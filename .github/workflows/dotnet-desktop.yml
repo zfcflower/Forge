@@ -1,12 +1,24 @@
-# .NET 10 / C# 14 / Avalonia 跨平台构建、测试、打包、发布
+# .NET 10 / C# 14 / Avalonia —— 构建、测试、打包、发布
 #
-# 放置路径：.github/workflows/dotnet-avalonia.yml
+# 放置路径：.github/workflows/dotnet-desktop.yml
 #
-# 设计要点（为了省分钟数，私有仓库尤其重要）：
-#   - 测试只在 ubuntu 上跑一次（Avalonia 的 Headless 测试在 Linux 上即可）
-#   - 所有平台的 publish 都在 ubuntu 上交叉发布：纯托管的 JIT 应用不需要各平台自己的 runner
-#   - 不使用 Native AOT；Host 与 Worker 都是普通 JIT 发布
-#   - 没有 MSIX / WAP / 签名流程（那是 WPF/WinForms 模板的内容，Avalonia 用不上）
+# 与模板的差异（按本项目 spec 调整，勿照抄通用模板）：
+#   - 主程序 Forge.App 按 architecture.md 第 44 条要求 **Native AOT 发布**，不是 JIT。
+#     Native AOT 不能跨操作系统交叉编译（链接器只能用目标平台的），所以 App 的发布
+#     必须分别在 Windows / Linux / macOS 的 runner 上跑；只有跨架构（linux-x64→arm64）
+#     才需要额外工具链，故矩阵先只收原生组合。
+#   - Forge.ExtensionHost / Forge.PluginWorker 是 **framework-dependent 的普通 JIT 进程**
+#     （architecture.md 第 52 条：要求用户已安装 .NET 运行时，启动时自检并报错），
+#     所以不打 self-contained，也不进 AOT。
+#   - 测试在 ubuntu + windows 上各跑一次：NamedPipe / Unix 域套接字、FileLock、
+#     Microsoft.Data.Sqlite 原生库在这些平台上的行为不同，只测 Linux 会漏掉真实缺陷。
+#   - PR 只验证，不产包；main 的 push、v* 标签、手动触发才打包；v* 标签才建 Release。
+#   - Forge.App 尚未落地时（src/Forge.App 不存在）publish 自动只打包 JIT 侧并给出
+#     warning annotation，等 App 进来后无需再改本文件。
+#   - SDK 版本由仓库根的 global.json 钉死（10.0.403，rollForward latestPatch），
+#     环境变量 DOTNET_SDK_VERSION 与它保持一致；改版本时两处一起改。
+#   - macOS 产物未签名/未公证（无 Apple Developer 证书），用户首次运行需去隔离属性；
+#     等有证书再补 codesign + notarytool 步骤。
 
 name: Build and Release
 
@@ -28,74 +40,92 @@ permissions:
   contents: read
 
 env:
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: true
-  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
-  App_Name: MyApp                                  # 替换：产物文件名前缀
-  Solution_Path: your-solution.sln                 # 替换：解决方案路径
-  Host_Project: src/MyApp.Host/MyApp.Host.csproj   # 替换：Avalonia 主程序（Host）
-  Worker_Project: src/MyApp.Worker/MyApp.Worker.csproj  # 替换：Worker 进程
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  # 与 global.json（10.0.403 / rollForward latestPatch）对齐；改 SDK 时两处一起改。
+  DOTNET_SDK_VERSION: 10.0.403
+  FORGE_SOLUTION: Forge.slnx
+  FORGE_APP_PROJECT: src/Forge.App/Forge.App.csproj              # 主程序（Native AOT）
+  FORGE_EXTENSION_HOST_PROJECT: src/Forge.ExtensionHost/Forge.ExtensionHost.csproj   # 常驻 Host（JIT）
+  FORGE_PLUGIN_WORKER_PROJECT: src/Forge.PluginWorker/Forge.PluginWorker.csproj       # 插件 Worker（JIT）
+  FORGE_ARTIFACT_PREFIX: Forge
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
-          # 如果仓库有 global.json，可改用：global-json-file: global.json
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
-        run: dotnet restore "$Solution_Path"
+        run: dotnet restore "${{ env.FORGE_SOLUTION }}"
 
       - name: Build
-        run: dotnet build "$Solution_Path" -c Release --no-restore
+        run: dotnet build "${{ env.FORGE_SOLUTION }}" -c Release --no-restore
 
+      # 16 个测试项目：VSTest 模式（无 global.json 的 SDK 10 默认），xunit v2。
       - name: Test
-        run: dotnet test "$Solution_Path" -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+        run: dotnet test "${{ env.FORGE_SOLUTION }}" -c Release --no-build --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results
+          name: test-results-${{ matrix.os }}
           path: TestResults/
           if-no-files-found: ignore
+          retention-days: 7
 
   publish:
+    name: Publish (${{ matrix.rid }})
     needs: test
     # PR 只验证构建和测试，不产出发布包；main 的 push、tag、手动触发才打包
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        rid: [ win-x64, win-arm64, linux-x64, linux-arm64, osx-arm64 ]
+        # 一个条目 = 一个原生 runner + 该 runner 上原生可编译的 RID。
+        # Native AOT 只能在本平台链接，所以不在这里做跨平台/跨架构交叉发布。
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Compute version
@@ -108,25 +138,66 @@ jobs:
             echo "version=0.0.0-ci.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Host 和 Worker 发布到同一目录，保证它们并排部署。
-      # 两个项目引用的共享程序集版本必须一致，否则后发布的会覆盖先发布的。
-      - name: Publish Host and Worker
+      # Forge.App 还没落地时不要整个 publish 挂掉：只打包 JIT 侧，并留下 warning。
+      - name: Detect main app project
+        id: app
+        shell: bash
+        run: |
+          if [ -f "$FORGE_APP_PROJECT" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Forge.App missing::$FORGE_APP_PROJECT 不存在，本次只发布 ExtensionHost / PluginWorker。"
+          fi
+
+      # Native AOT 需要目标平台的 C 工具链；Windows/macOS runner 自带 MSVC / Xcode CLT。
+      - name: Install Native AOT prerequisites
+        if: runner.os == 'Linux' && steps.app.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      # Host 与 Worker 发布到同一目录，保证它们与主程序并排部署。
+      # framework-dependent：不包 .NET 运行时，体积小；运行期缺失由 Host 自检并报错。
+      - name: Publish ExtensionHost and PluginWorker (JIT)
         shell: bash
         env:
           RID: ${{ matrix.rid }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          for proj in "$Host_Project" "$Worker_Project"; do
+          set -euo pipefail
+          for proj in "$FORGE_EXTENSION_HOST_PROJECT" "$FORGE_PLUGIN_WORKER_PROJECT"; do
             dotnet publish "$proj" \
               -c Release \
               -r "$RID" \
-              --self-contained true \
+              --self-contained false \
               -p:Version="$VERSION" \
               -p:DebugType=embedded \
               -o "publish/$RID"
-            # 可选：减少启动时 JIT 耗时（仍是 JIT 进程，只是预编译了一部分）
-            #   加上 -p:PublishReadyToRun=true
           done
+
+      - name: Publish Forge.App (Native AOT)
+        if: steps.app.outputs.present == 'true'
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          strip_flag=""
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            strip_flag="-p:StripSymbols=true"
+          fi
+          dotnet publish "$FORGE_APP_PROJECT" \
+            -c Release \
+            -r "$RID" \
+            -p:PublishAot=true \
+            -p:SelfContained=true \
+            -p:Version="$VERSION" \
+            $strip_flag \
+            -o "publish/$RID"
+          # TODO(冒烟): architecture.md 第 44 条要求 CI 做三平台冒烟。等 Forge.App 定下
+          # headless/--version 之类的非交互入口后，在这里跑一次产物并断言退出码。
 
       - name: Package
         shell: bash
@@ -134,14 +205,26 @@ jobs:
           RID: ${{ matrix.rid }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          NAME="${App_Name}-${VERSION}-${RID}"
+          NAME="${FORGE_ARTIFACT_PREFIX}-${VERSION}-${RID}"
+          # 调试符号不进发布包
+          find "publish/$RID" -type f \( -name '*.pdb' -o -name '*.dbg' \) -delete
           if [[ "$RID" == win-* ]]; then
-            (cd "publish/$RID" && zip -qr "$GITHUB_WORKSPACE/dist/$NAME.zip" .)
+            # windows runner 的 bash 里 zip 不保证存在，7z 是镜像自带的；两者都试一次。
+            if command -v 7z >/dev/null 2>&1; then
+              (cd "publish/$RID" && 7z a -tzip "$GITHUB_WORKSPACE/dist/$NAME.zip" "./*" >/dev/null)
+            elif command -v zip >/dev/null 2>&1; then
+              (cd "publish/$RID" && zip -qr "$GITHUB_WORKSPACE/dist/$NAME.zip" .)
+            else
+              echo "::error::既没有 7z 也没有 zip，无法打包 $RID"
+              exit 1
+            fi
           else
             tar -C "publish/$RID" -czf "dist/$NAME.tar.gz" .
           fi
           ls -lh dist
+          ls -1 "publish/$RID"
 
       - name: Upload package
         uses: actions/upload-artifact@v7
