@@ -8,6 +8,7 @@
     <Project Path="src/Forge.ExtensionHost/Forge.ExtensionHost.csproj" />
     <Project Path="src/Forge.HostClient/Forge.HostClient.csproj" />
     <Project Path="src/Forge.Ipc/Forge.Ipc.csproj" />
+    <Project Path="src/Forge.IO/Forge.IO.csproj" />
     <Project Path="src/Forge.Mcp/Forge.Mcp.csproj" />
     <Project Path="src/Forge.Plugin.Sdk/Forge.Plugin.Sdk.csproj" />
     <Project Path="src/Forge.Plugins/Forge.Plugins.csproj" />
@@ -24,6 +25,7 @@
     <Project Path="tests/Forge.HostClient.Tests/Forge.HostClient.Tests.csproj" />
     <Project Path="tests/Forge.Integration.Tests/Forge.Integration.Tests.csproj" />
     <Project Path="tests/Forge.Ipc.Tests/Forge.Ipc.Tests.csproj" />
+    <Project Path="tests/Forge.IO.Tests/Forge.IO.Tests.csproj" />
     <Project Path="tests/Forge.Mcp.Tests/Forge.Mcp.Tests.csproj" />
     <Project Path="tests/Forge.Plugin.Sdk.Tests/Forge.Plugin.Sdk.Tests.csproj" />
     <Project Path="tests/Forge.Plugins.Tests/Forge.Plugins.Tests.csproj" />
