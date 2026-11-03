@@ -22,6 +22,7 @@ public sealed class ExtensionHost : IAsyncDisposable
     private readonly List<PluginIssue> issues = [];
     private readonly Lock sync = new();
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+    private readonly IHostTestHook? testHook;
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IIpcPeer? mainPeer;
@@ -35,6 +36,7 @@ public sealed class ExtensionHost : IAsyncDisposable
         Directory.CreateDirectory(options.DataDirectory);
         approvals = new ApprovalStore(options.DataDirectory);
         catalog = new PluginCatalog(options.PluginsDirectory);
+        testHook = FileHostTestHook.Activate(options.PipeName);
     }
 
     /// <summary>Every issue the last discovery reported, newest last.</summary>
@@ -173,15 +175,17 @@ public sealed class ExtensionHost : IAsyncDisposable
             throw new HostOperationException("invalid_request", "pluginId and tool are required.");
         }
 
-        var entry = Find(request.PluginId) ??
+        var captured = Find(request.PluginId) ??
             throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
+        await CaptureAsync(captured.Id, ct).ConfigureAwait(false);
 
-        var state = StateOf(entry.Id);
+        var state = StateOf(captured.Id);
         WorkerSlot slot;
         PluginState.Lease lease;
         await state.EnterAsync(ct).ConfigureAwait(false);
         try
         {
+            var entry = Current(captured);
             var evaluation = await EvaluateAsync(entry, ct).ConfigureAwait(false);
             RequireAllowed(entry, evaluation.Decision);
             if (evaluation.Image is not { } image)
@@ -199,7 +203,7 @@ public sealed class ExtensionHost : IAsyncDisposable
             entry.Decision = rechecked;
             RequireAllowed(entry, rechecked);
 
-            await RegisterToolsAsync(entry, slot.Tools, ct).ConfigureAwait(false);
+            await RegisterToolsAsync(entry.Id, slot.Tools, ct).ConfigureAwait(false);
             if (!Contains(slot.Tools, request.Tool))
             {
                 throw new HostOperationException("unknown_tool", $"Plugin '{entry.Id}' does not declare a tool named '{request.Tool}'.");
@@ -226,31 +230,32 @@ public sealed class ExtensionHost : IAsyncDisposable
             throw new HostOperationException("invalid_request", "pluginId is required.");
         }
 
-        var entry = Find(request.PluginId) ??
+        var captured = Find(request.PluginId) ??
             throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
 
-        var version = string.IsNullOrWhiteSpace(request.Version) ? entry.Version : request.Version;
-        if (!string.Equals(version, entry.Version, StringComparison.Ordinal))
-        {
-            throw new HostOperationException(
-                "version_mismatch",
-                $"Plugin '{entry.Id}' is installed at version '{entry.Version}', not '{version}'.");
-        }
-
-        if (!entry.HasContent)
-        {
-            throw new HostOperationException(
-                "plugin_not_loadable",
-                $"Plugin '{entry.Id}' {entry.Version} has no compiled content to approve.");
-        }
-
-        var sourceHash = string.IsNullOrWhiteSpace(request.SourceHash) ? entry.SourceHash : request.SourceHash;
-        var dependencyHash = string.IsNullOrWhiteSpace(request.DependencyHash) ? entry.DependencyHash : request.DependencyHash;
-        var sdkVersion = string.IsNullOrWhiteSpace(request.SdkVersion) ? entry.SdkVersion : request.SdkVersion;
-        var state = StateOf(entry.Id);
+        var state = StateOf(captured.Id);
         await state.EnterAsync(ct).ConfigureAwait(false);
         try
         {
+            var entry = Current(captured);
+            var version = string.IsNullOrWhiteSpace(request.Version) ? entry.Version : request.Version;
+            if (!string.Equals(version, entry.Version, StringComparison.Ordinal))
+            {
+                throw new HostOperationException(
+                    "version_mismatch",
+                    $"Plugin '{entry.Id}' is installed at version '{entry.Version}', not '{version}'.");
+            }
+
+            if (!entry.HasContent)
+            {
+                throw new HostOperationException(
+                    "plugin_not_loadable",
+                    $"Plugin '{entry.Id}' {entry.Version} has no compiled content to approve.");
+            }
+
+            var sourceHash = string.IsNullOrWhiteSpace(request.SourceHash) ? entry.SourceHash : request.SourceHash;
+            var dependencyHash = string.IsNullOrWhiteSpace(request.DependencyHash) ? entry.DependencyHash : request.DependencyHash;
+            var sdkVersion = string.IsNullOrWhiteSpace(request.SdkVersion) ? entry.SdkVersion : request.SdkVersion;
             if (await RefusalReasonAsync(entry, sourceHash, dependencyHash, sdkVersion, ct).ConfigureAwait(false) is { } refusal)
             {
                 WithdrawUnusableApproval(entry.Id, version);
@@ -261,17 +266,17 @@ public sealed class ExtensionHost : IAsyncDisposable
 
             approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
             await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+
+            if (!entry.Decision.IsAllowed)
+            {
+                throw new HostOperationException(
+                    "approval_mismatch",
+                    $"The approval does not cover the current content of '{entry.Id}': {entry.Decision.Reason}.");
+            }
         }
         finally
         {
             state.Exit();
-        }
-
-        if (!entry.Decision.IsAllowed)
-        {
-            throw new HostOperationException(
-                "approval_mismatch",
-                $"The approval does not cover the current content of '{entry.Id}': {entry.Decision.Reason}.");
         }
 
         return HostJson.EmptyObject;
@@ -354,21 +359,22 @@ public sealed class ExtensionHost : IAsyncDisposable
             throw new HostOperationException("invalid_request", "pluginId is required.");
         }
 
-        var entry = Find(request.PluginId) ??
+        var captured = Find(request.PluginId) ??
             throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
 
-        var version = string.IsNullOrWhiteSpace(request.Version) ? entry.Version : request.Version;
-        if (!string.Equals(version, entry.Version, StringComparison.Ordinal))
-        {
-            throw new HostOperationException(
-                "version_mismatch",
-                $"Plugin '{entry.Id}' is installed at version '{entry.Version}', not '{version}'.");
-        }
-
-        var state = StateOf(entry.Id);
+        var state = StateOf(captured.Id);
         await state.EnterAsync(ct).ConfigureAwait(false);
         try
         {
+            var entry = Current(captured);
+            var version = string.IsNullOrWhiteSpace(request.Version) ? entry.Version : request.Version;
+            if (!string.Equals(version, entry.Version, StringComparison.Ordinal))
+            {
+                throw new HostOperationException(
+                    "version_mismatch",
+                    $"Plugin '{entry.Id}' is installed at version '{entry.Version}', not '{version}'.");
+            }
+
             approvals.Revoke(entry.Id, version);
             await UnregisterToolsAsync(entry.Id, CancellationToken.None).ConfigureAwait(false);
 
@@ -397,6 +403,8 @@ public sealed class ExtensionHost : IAsyncDisposable
             foreach (var entry in scan.Plugins)
             {
                 present.Add(entry.Id);
+                var state = StateOf(entry.Id);
+                await state.EnterAsync(ct).ConfigureAwait(false);
                 try
                 {
                     SyncRecord(entry);
@@ -405,7 +413,7 @@ public sealed class ExtensionHost : IAsyncDisposable
                         plugins[entry.Id] = entry;
                     }
 
-                    await ApplyAsync(entry, ct).ConfigureAwait(false);
+                    await ApplyLockedAsync(entry, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -414,6 +422,10 @@ public sealed class ExtensionHost : IAsyncDisposable
                 catch (Exception exception)
                 {
                     entry.Issues.Add(new PluginIssue(entry.Id, PluginIssueKind.InvalidPackage, exception.Message, entry.Directory));
+                }
+                finally
+                {
+                    state.Exit();
                 }
             }
 
@@ -424,14 +436,22 @@ public sealed class ExtensionHost : IAsyncDisposable
                     continue;
                 }
 
-                lock (sync)
+                var state = StateOf(id);
+                await state.EnterAsync(ct).ConfigureAwait(false);
+                try
                 {
-                    plugins.Remove(id);
-                    states.Remove(id);
-                }
+                    lock (sync)
+                    {
+                        plugins.Remove(id);
+                    }
 
-                await UnregisterToolsAsync(id, ct).ConfigureAwait(false);
-                await StopWorkerAsync(id).ConfigureAwait(false);
+                    await UnregisterToolsAsync(id, ct).ConfigureAwait(false);
+                    await StopWorkerAsync(id).ConfigureAwait(false);
+                }
+                finally
+                {
+                    state.Exit();
+                }
             }
 
             lock (sync)
@@ -474,26 +494,18 @@ public sealed class ExtensionHost : IAsyncDisposable
     /// <summary>Re-evaluates approval for one plugin and brings its worker and tool registration in line with the result,
     /// serialized against the plugin's executions and its other approval changes. A refresh also lifts an exhausted
     /// failure budget: a disabled slot and its published tools are dropped first, so the reload starts a fresh worker
-    /// and registers its tools again.</summary>
-    private async Task ApplyAsync(PluginEntry entry, CancellationToken ct)
+    /// and registers its tools again. The caller holds the plugin's gate.</summary>
+    private async Task ApplyLockedAsync(PluginEntry entry, CancellationToken ct)
     {
         var state = StateOf(entry.Id);
-        await state.EnterAsync(ct).ConfigureAwait(false);
-        try
+        if (state.IsExhausted)
         {
-            if (state.IsExhausted)
-            {
-                ForgetRegistration(entry.Id);
-                await StopWorkerAsync(entry.Id).ConfigureAwait(false);
-            }
+            ForgetRegistration(entry.Id);
+            await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+        }
 
-            state.ResetFailures();
-            await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            state.Exit();
-        }
+        state.ResetFailures();
+        await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
     }
 
     private async Task ApplyCoreAsync(PluginEntry entry, CancellationToken ct)
@@ -514,7 +526,7 @@ public sealed class ExtensionHost : IAsyncDisposable
                 entry.Tools = slot.Tools;
             }
 
-            await RegisterToolsAsync(entry, slot.Tools, ct).ConfigureAwait(false);
+            await RegisterToolsAsync(entry.Id, slot.Tools, ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is HostOperationException or IpcTimeoutException or IpcConnectionClosedException or IOException)
         {
@@ -613,17 +625,17 @@ public sealed class ExtensionHost : IAsyncDisposable
         });
     }
 
-    private async Task RegisterToolsAsync(PluginEntry entry, IReadOnlyList<ToolDeclaration> tools, CancellationToken ct)
+    private async Task RegisterToolsAsync(string pluginId, IReadOnlyList<ToolDeclaration> tools, CancellationToken ct)
     {
         var payload = HostJson.ToElement(tools).GetRawText();
         lock (sync)
         {
-            if (registrations.TryGetValue(entry.Id, out var previous) && string.Equals(previous, payload, StringComparison.Ordinal))
+            if (registrations.TryGetValue(pluginId, out var previous) && string.Equals(previous, payload, StringComparison.Ordinal))
             {
                 return;
             }
 
-            registrations[entry.Id] = payload;
+            registrations[pluginId] = payload;
         }
 
         if (mainPeer is not { } peer)
@@ -635,7 +647,7 @@ public sealed class ExtensionHost : IAsyncDisposable
         {
             await peer.SendNotificationAsync(
                 ExtensionProtocol.ToolsRegister,
-                HostJson.ToElement(new ToolsRegisterNotification(entry.Id, tools)),
+                HostJson.ToElement(new ToolsRegisterNotification(pluginId, tools)),
                 ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException or OperationCanceledException)
@@ -721,23 +733,25 @@ public sealed class ExtensionHost : IAsyncDisposable
 
     private WorkerSlot GetWorker(PluginEntry entry)
     {
+        var pluginId = entry.Id;
         lock (sync)
         {
-            if (workers.TryGetValue(entry.Id, out var existing))
+            if (workers.TryGetValue(pluginId, out var existing))
             {
                 return existing;
             }
 
-            var slot = new WorkerSlot(entry.Id, options, StateOf(entry.Id), ForwardToolCallAsync)
+            var slot = new WorkerSlot(pluginId, options, StateOf(pluginId), ForwardToolCallAsync)
             {
-                Reloaded = (tools, token) => RegisterToolsAsync(entry, tools, token),
+                Reloaded = (tools, token) => RegisterToolsAsync(pluginId, tools, token),
             };
-            workers[entry.Id] = slot;
+            workers[pluginId] = slot;
             return slot;
         }
     }
 
-    /// <summary>The per-plugin state the host keeps for as long as the plugin is discovered.</summary>
+    /// <summary>The per-plugin state the host keeps for the whole run of the host. It is never discarded, so the gate a
+    /// request is waiting on stays the same one every approval change and every refresh takes for that plugin id.</summary>
     private PluginState StateOf(string pluginId)
     {
         lock (sync)
@@ -788,6 +802,34 @@ public sealed class ExtensionHost : IAsyncDisposable
         {
             return plugins.TryGetValue(pluginId, out var entry) ? entry : null;
         }
+    }
+
+    private ValueTask CaptureAsync(string pluginId, CancellationToken ct) =>
+        testHook is { } hook ? hook.AfterEntryCapturedAsync(pluginId, ct) : ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Resolves the entry a request must use once it holds the plugin's gate: a refresh that replaced or removed the
+    /// plugin while the request was waiting invalidates the entry it captured before the gate, so the request fails
+    /// instead of running bytes nobody approved any more.
+    /// </summary>
+    private PluginEntry Current(PluginEntry captured)
+    {
+        var current = Find(captured.Id);
+        if (current is null)
+        {
+            throw new HostOperationException(
+                "unknown_plugin",
+                $"Plugin '{captured.Id}' was removed by a refresh; the request was dropped.");
+        }
+
+        if (!ReferenceEquals(current, captured))
+        {
+            throw new HostOperationException(
+                "plugin_changed",
+                $"Plugin '{captured.Id}' was replaced by a refresh ('{captured.Version}' -> '{current.Version}'); the request was dropped.");
+        }
+
+        return current;
     }
 
     private string[] KnownPluginIds()

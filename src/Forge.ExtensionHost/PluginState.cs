@@ -1,10 +1,12 @@
 namespace Forge.ExtensionHost;
 
 /// <summary>
-/// Per-plugin state that outlives any single worker process. The gate serializes approval changes
-/// (approve/revoke/refresh) against the approval-check-through-dispatch section of an execution, so a revoke can never
-/// overlap the moment a call decides to run and start a worker. Executions register a lease before they leave that
-/// section, which is what lets a revoke wait until nothing is in flight any more.
+/// Per-plugin state that outlives any single worker process and every refresh of the plugin's entry: it is keyed by
+/// plugin id and never discarded, so a request that waits on its gate always waits on the gate that every approval
+/// change and every refresh takes for that id. The gate serializes approval changes (approve/revoke/refresh) against
+/// the approval-check-through-dispatch section of an execution, so a revoke can never overlap the moment a call decides
+/// to run and start a worker. Executions register a lease before they leave that section, which is what lets a revoke
+/// wait until nothing is in flight any more.
 /// </summary>
 internal sealed class PluginState
 {
