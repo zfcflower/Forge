@@ -117,20 +117,30 @@ public class LanguageSessionTests
         Assert.False(await session.TryStartAsync());
     }
 
-    [Fact]
-    public async Task Server_that_exits_during_initialisation_leaves_the_session_unavailable()
+    [Theory]
+    [InlineData(FakeInitialisationExit.ExitBeforeClose)]
+    [InlineData(FakeInitialisationExit.CloseBeforeExit)]
+    public async Task Server_that_exits_during_initialisation_leaves_the_session_unavailable(FakeInitialisationExit exit)
     {
         var logs = new List<string>();
+        var process = new FakeLanguageServerProcess(initialisationExit: exit);
         await using var session = new LanguageSession(
-            new LanguageServerLaunch("dotnet", ["--version"]),
-            new LanguageSessionOptions { Log = logs.Add });
+            new LanguageServerLaunch(FakeServerCommand),
+            new LanguageSessionOptions { LanguageId = "x", Log = logs.Add, ProcessFactory = (_, _) => process });
+        var states = new List<LanguageSessionState>();
+        session.StateChanged += (_, _) => states.Add(session.State);
 
-        var started = await session.TryStartAsync(new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        var started = await session.TryStartAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+        if (exit == FakeInitialisationExit.CloseBeforeExit)
+        {
+            process.Exit(exitCode: 3);
+        }
 
         Assert.False(started);
         Assert.Equal(LanguageSessionState.Unavailable, session.State);
         Assert.Null(session.Client);
         Assert.Contains(logs, line => line.Contains("failed to initialize", StringComparison.Ordinal));
+        Assert.DoesNotContain(LanguageSessionState.Stopped, states);
     }
 
     [Fact]

@@ -16,6 +16,7 @@ internal sealed class FakeLanguageServer : IAsyncDisposable
     private readonly Stream _toClient;
     private readonly Stream _clientWrites;
     private readonly Stream _clientReads;
+    private int _outputClosed;
 
     public FakeLanguageServer()
     {
@@ -95,7 +96,13 @@ internal sealed class FakeLanguageServer : IAsyncDisposable
     public Task RequestAsync(int id, string method, string paramsJson) =>
         SendAsync($"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{paramsJson}}}");
 
-    public void CloseOutput() => _serverToClient.Writer.Complete();
+    public void CloseOutput()
+    {
+        if (Interlocked.Exchange(ref _outputClosed, 1) == 0)
+        {
+            _serverToClient.Writer.Complete();
+        }
+    }
 
     public ValueTask DisposeAsync()
     {

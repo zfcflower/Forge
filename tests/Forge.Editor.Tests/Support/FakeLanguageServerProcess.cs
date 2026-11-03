@@ -3,6 +3,19 @@ using Forge.Editor.Lsp;
 
 namespace Forge.Editor.Tests.Support;
 
+/// <summary>How the fake server reacts to the client's initialize request; public so theories can name the ordering.</summary>
+public enum FakeInitialisationExit
+{
+    /// <summary>Answers the handshake like a working server.</summary>
+    None,
+
+    /// <summary>Raises the unexpected exit before the client can observe the closed stream, so the exit event is seen first.</summary>
+    ExitBeforeClose,
+
+    /// <summary>Closes the client-facing stream without raising the exit; the test raises it afterwards, so the close is seen first.</summary>
+    CloseBeforeExit,
+}
+
 /// <summary>
 /// A <see cref="LanguageServerProcess"/> whose "child process" is an in-process <see cref="FakeLanguageServer"/>: it
 /// answers the handshake, records every message the client sends and can be crashed or held mid-write.
@@ -16,15 +29,17 @@ internal sealed class FakeLanguageServerProcess : LanguageServerProcess
     private readonly SemaphoreSlim _arrived = new(0);
     private readonly SemaphoreSlim _writes = new(1, 1);
     private TaskCompletionSource _writeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly FakeInitialisationExit _initialisationExit;
 
     private FakeLanguageServer? _server;
     private CancellationTokenSource? _lifetime;
     private Task? _serve;
     private bool _running;
 
-    public FakeLanguageServerProcess(RestartPolicy? policy = null)
+    public FakeLanguageServerProcess(RestartPolicy? policy = null, FakeInitialisationExit initialisationExit = FakeInitialisationExit.None)
         : base(new LanguageServerLaunch("fake-language-server"), policy ?? new RestartPolicy())
     {
+        _initialisationExit = initialisationExit;
     }
 
     public override event EventHandler<LanguageServerExitedEventArgs>? Exited;
@@ -117,6 +132,20 @@ internal sealed class FakeLanguageServerProcess : LanguageServerProcess
         await StopAsync().ConfigureAwait(false);
         _writes.Dispose();
         _arrived.Dispose();
+    }
+
+    /// <summary>Exits the fake process the way a child process that ends on its own does: the exit is raised first, then the stream ends.</summary>
+    public void Exit(int exitCode = 1)
+    {
+        FakeLanguageServer? server;
+        lock (_gate)
+        {
+            server = _server;
+            _running = false;
+        }
+
+        Exited?.Invoke(this, new LanguageServerExitedEventArgs(exitCode, expected: false));
+        server?.CloseOutput();
     }
 
     /// <summary>Simulates a crash: a frame the client cannot parse closes its connection, the pipes stay open.</summary>
@@ -213,6 +242,20 @@ internal sealed class FakeLanguageServerProcess : LanguageServerProcess
                 if (!root.TryGetProperty("method", out var method) || !root.TryGetProperty("id", out var id))
                 {
                     continue;
+                }
+
+                if (method.GetString() == "initialize" && _initialisationExit != FakeInitialisationExit.None)
+                {
+                    if (_initialisationExit == FakeInitialisationExit.ExitBeforeClose)
+                    {
+                        Exit(exitCode: 3);
+                    }
+                    else
+                    {
+                        server.CloseOutput();
+                    }
+
+                    return;
                 }
 
                 var result = method.GetString() == "initialize"

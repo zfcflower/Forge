@@ -21,7 +21,7 @@ parent: forge-architecture
 
 **保存流式且原子。** `TextFileCodec.WriteAsync` 不在内存里拼整份文件:按快照 rope 分块编码写入目标目录下的 `<文件名>.<guid:N>.tmp`(`FileMode.CreateNew` + `FileShare.None`),`FlushAsync` 之后再 `Flush(flushToDisk: true)`,然后用 `AtomicFile.ReplaceFileAsync` 发布;失败或取消删除临时文件、原文件保持原字节。替换阶段复用 `Forge.IO` 的有界重试契约(目标被其他句柄占用时重试,目标是 `ReadOnly`/目录时立即失败),保存因此不再自己 `File.Move`。
 
-**LSP。** 自写 JSON-RPC over stdio(Content-Length 分帧,收发头缓冲分离);同步泵按文档维护单一有序状态,增量变更携带不可变截止快照,功能请求前建立同步屏障;服务器请求 id 按 JSON 类型原样回传;进程启动支持 `.cmd`/`.bat` 的 `cmd /d /s /c` 引号规则;进程工厂可注入以便测试。
+**LSP。** 自写 JSON-RPC over stdio(Content-Length 分帧,收发头缓冲分离);同步泵按文档维护单一有序状态,增量变更携带不可变截止快照,功能请求前建立同步屏障;服务器请求 id 按 JSON 类型原样回传;进程启动支持 `.cmd`/`.bat` 的 `cmd /d /s /c` 引号规则;进程工厂可注入以便测试。会话状态机以 initialize 握手是否完成为界:启动中观察到服务器退出(进程退出事件早于或晚于连接关闭都一样)一律落到 `Unavailable` 并记 `failed to initialize`,`Stopped` 只表示已 `Running` 的服务器崩溃、等待重启;两种观察顺序的测试用可注入的进程内假服务器固定顺序,不依赖真实进程启动时序。
 
 **Diff。** 行 Diff 默认比较行终止符(`CRLF` vs `LF` 是变更),`IgnoreLineEndings` 可关闭;评论锚点按内容哈希重定位(精确/移动/模糊/丢失),移动搜索建每 hunk 索引,避免平方级扫描。
 

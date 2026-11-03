@@ -60,6 +60,7 @@ public sealed class LanguageSession : IAsyncDisposable
     private Task? _syncPump;
     private LanguageSessionState _state = LanguageSessionState.Stopped;
     private bool _crashed;
+    private int _handshakeCompleted;
     private int _restartCount;
     private int _disposed;
     private int _leases;
@@ -286,6 +287,7 @@ public sealed class LanguageSession : IAsyncDisposable
     public async Task RestartAsync(CancellationToken ct = default)
     {
         _crashed = true;
+        Volatile.Write(ref _handshakeCompleted, 0);
         var client = Client;
         if (client is not null)
         {
@@ -493,6 +495,7 @@ public sealed class LanguageSession : IAsyncDisposable
             }
 
             SetState(LanguageSessionState.Starting);
+            Volatile.Write(ref _handshakeCompleted, 0);
             ProcessStreams streams;
             try
             {
@@ -557,6 +560,7 @@ public sealed class LanguageSession : IAsyncDisposable
             return null;
         }
 
+        Volatile.Write(ref _handshakeCompleted, 1);
         Volatile.Write(ref _client, client);
         _crashed = false;
         LastError = null;
@@ -895,6 +899,14 @@ public sealed class LanguageSession : IAsyncDisposable
         }
 
         _crashed = true;
+        if (Volatile.Read(ref _handshakeCompleted) == 0)
+        {
+            _options.Log?.Invoke(
+                $"Language server '{Launch.Command}' failed to initialize: the server exited with code {e.ExitCode} before the initialize handshake completed.");
+            SetState(LanguageSessionState.Unavailable);
+            return;
+        }
+
         SetState(LanguageSessionState.Stopped);
     }
 
