@@ -265,26 +265,22 @@ public class TextFileCodecTests
         var document = new TextDocument("replacement");
         document.Insert(0, "x");
         File.SetAttributes(path, FileAttributes.ReadOnly);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        }
 
         try
         {
-            if (OperatingSystem.IsWindows())
-            {
-                var start = Stopwatch.GetTimestamp();
-                await Assert.ThrowsAsync<UnauthorizedAccessException>(() => document.SaveAsync(path).AsTask());
-                var elapsed = Stopwatch.GetElapsedTime(start);
+            var start = Stopwatch.GetTimestamp();
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => document.SaveAsync(path).AsTask());
+            var elapsed = Stopwatch.GetElapsedTime(start);
 
-                Assert.True(elapsed < TimeSpan.FromSeconds(1), $"the failed save returned after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
-                Assert.Equal(original, await File.ReadAllBytesAsync(path));
-                Assert.Equal(new[] { path }, Directory.GetFiles(dir.Root));
-                Assert.True(document.IsDirty);
-            }
-            else
-            {
-                await document.SaveAsync(path);
-                Assert.Equal("xreplacement", await File.ReadAllTextAsync(path));
-                Assert.Equal(new[] { path }, Directory.GetFiles(dir.Root));
-            }
+            Assert.True(elapsed < TimeSpan.FromSeconds(1), $"the failed save returned after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.Equal(new[] { path }, Directory.GetFiles(dir.Root));
+            Assert.True(document.IsDirty);
+            Assert.True((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0, "the file lost its ReadOnly attribute");
         }
         finally
         {

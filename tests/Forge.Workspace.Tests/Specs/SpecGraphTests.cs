@@ -45,6 +45,31 @@ public sealed class SpecGraphTests
     private static string[] Ids(SpecGrepPage page) =>
         page.Matches.Select(static match => match.Id).Distinct().OrderBy(static id => id, StringComparer.Ordinal).ToArray();
 
+    private static void MakeReadOnly(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            return;
+        }
+
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+    }
+
+    private static void MakeWritable(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+            return;
+        }
+
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+    }
+
+    private static UnixFileMode UnixMode(string path) =>
+        OperatingSystem.IsWindows() ? default : File.GetUnixFileMode(path);
+
     [Fact]
     public async Task Index_skips_ignored_directories_and_non_spec_files()
     {
@@ -667,13 +692,14 @@ public sealed class SpecGraphTests
     }
 
     [Fact]
-    public async Task An_update_never_leaves_a_truncated_file_when_the_target_cannot_be_replaced()
+    public async Task Update_of_a_read_only_spec_fails_and_keeps_the_original_bytes()
     {
         using var workspace = new SpecWorkspace();
         workspace.Write("docs/module-a.md", SpecFixture.Spec("module-a", "module-design", "status: active\n"));
         var path = workspace.Combine("docs", "module-a.md");
         var original = await File.ReadAllBytesAsync(path);
-        File.SetAttributes(path, FileAttributes.ReadOnly);
+        MakeReadOnly(path);
+        var mode = UnixMode(path);
 
         try
         {
@@ -685,25 +711,52 @@ public sealed class SpecGraphTests
             var exception = await Record.ExceptionAsync(() => workspace.Graph().UpdateFrontmatterAsync("module-a", update));
             stopwatch.Stop();
 
-            Assert.Empty(Directory.GetFiles(workspace.Root, "*.tmp", SearchOption.AllDirectories));
-
-            if (!OperatingSystem.IsWindows())
-            {
-                Assert.Null(exception);
-                Assert.Contains("status: done", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
-                return;
-            }
-
             Assert.IsType<UnauthorizedAccessException>(exception);
             Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"the failed update returned after {stopwatch.ElapsedMilliseconds} ms, so it was retried");
             Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.Equal(mode, UnixMode(path));
+            Assert.Empty(Directory.GetFiles(workspace.Root, "*.tmp", SearchOption.AllDirectories));
             var reloaded = await workspace.Graph().GetAsync("module-a");
             Assert.NotNull(reloaded);
             Assert.Equal("active", reloaded.Node.Status);
         }
         finally
         {
-            File.SetAttributes(path, FileAttributes.Normal);
+            MakeWritable(path);
+        }
+    }
+
+    [Fact]
+    public async Task A_refused_update_leaves_the_spec_read_only_and_keeps_the_old_frontmatter()
+    {
+        using var workspace = Populated();
+        var path = workspace.Combine("docs", "module-b.md");
+        var before = await File.ReadAllBytesAsync(path);
+        MakeReadOnly(path);
+
+        try
+        {
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => workspace.Graph().UpdateFrontmatterAsync("module-b", new SpecFrontmatterUpdate
+            {
+                Add = new Dictionary<string, IReadOnlyList<string>> { ["tags"] = ["cache"] },
+            }));
+
+            Assert.Equal(before, await File.ReadAllBytesAsync(path));
+            Assert.True((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0, "the spec lost its read-only state");
+            if (!OperatingSystem.IsWindows())
+            {
+                const UnixFileMode write = UnixFileMode.UserWrite | UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
+                Assert.Equal(0, (int)(File.GetUnixFileMode(path) & write));
+            }
+
+            Assert.Empty(Directory.GetFiles(workspace.Root, "*.tmp", SearchOption.AllDirectories));
+            var view = await workspace.Graph().GetAsync("module-b");
+            Assert.NotNull(view);
+            Assert.Equal(["ui"], view.Frontmatter.Tags);
+        }
+        finally
+        {
+            MakeWritable(path);
         }
     }
 

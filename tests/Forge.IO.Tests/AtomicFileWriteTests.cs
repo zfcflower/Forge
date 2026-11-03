@@ -256,7 +256,8 @@ public class AtomicFileWriteTests
         File.WriteAllBytes(path, original);
         var budget = TimeSpan.FromSeconds(5);
         var options = new AtomicFileOptions { RetryBudget = budget };
-        File.SetAttributes(path, FileAttributes.ReadOnly);
+        MakeReadOnly(path);
+        var mode = UnixMode(path);
 
         Exception? exception;
         TimeSpan elapsed;
@@ -265,25 +266,41 @@ public class AtomicFileWriteTests
             var start = Stopwatch.GetTimestamp();
             exception = await Record.ExceptionAsync(() => WriteAsync(useAsync, path, Encode(2), options));
             elapsed = Stopwatch.GetElapsedTime(start);
-        }
-        finally
-        {
-            File.SetAttributes(path, FileAttributes.Normal);
-        }
 
-        if (OperatingSystem.IsWindows())
-        {
             Assert.IsType<UnauthorizedAccessException>(exception);
             Assert.True(elapsed < budget / 10, $"the write gave up after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
             Assert.Equal(original, File.ReadAllBytes(path));
             Assert.Equal(1, Decode(File.ReadAllBytes(path)).Count);
+            AssertStillReadOnly(path);
+            Assert.Equal(mode, UnixMode(path));
         }
-        else
+        finally
         {
-            Assert.Null(exception);
-            Assert.Equal(Encode(2), File.ReadAllBytes(path));
+            MakeWritable(path);
         }
 
+        Assert.Empty(directory.TemporaryFiles());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_successful_rewrite_keeps_the_destination_unix_mode(bool useAsync)
+    {
+        using var directory = new TestDirectory();
+        var path = directory.File("state.json");
+        File.WriteAllBytes(path, Encode(1));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead);
+        }
+
+        var mode = UnixMode(path);
+
+        await WriteAsync(useAsync, path, Encode(2));
+
+        Assert.Equal(Encode(2), File.ReadAllBytes(path));
+        Assert.Equal(mode, UnixMode(path));
         Assert.Empty(directory.TemporaryFiles());
     }
 

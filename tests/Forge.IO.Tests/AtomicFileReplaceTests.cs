@@ -31,6 +31,30 @@ public class AtomicFileReplaceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task A_published_file_keeps_the_destination_unix_mode(bool useAsync)
+    {
+        using var directory = new TestDirectory();
+        var path = directory.File("state.json");
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes("original"));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        }
+
+        var mode = UnixMode(path);
+        var temporary = directory.File("state.json.abcd.tmp");
+        File.WriteAllBytes(temporary, Encoding.UTF8.GetBytes("replacement"));
+
+        await ReplaceAsync(useAsync, temporary, path);
+
+        Assert.Equal(Encoding.UTF8.GetBytes("replacement"), File.ReadAllBytes(path));
+        Assert.Equal(mode, UnixMode(path));
+        Assert.Empty(directory.TemporaryFiles());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task A_destination_that_does_not_exist_yet_is_created(bool useAsync)
     {
         using var directory = new TestDirectory();
@@ -59,7 +83,8 @@ public class AtomicFileReplaceTests
         File.WriteAllBytes(temporary, replacement);
         var budget = TimeSpan.FromSeconds(5);
         var options = new AtomicFileOptions { RetryBudget = budget };
-        File.SetAttributes(path, FileAttributes.ReadOnly);
+        MakeReadOnly(path);
+        var mode = UnixMode(path);
 
         Exception? exception;
         TimeSpan elapsed;
@@ -68,22 +93,16 @@ public class AtomicFileReplaceTests
             var start = Stopwatch.GetTimestamp();
             exception = await Record.ExceptionAsync(() => ReplaceAsync(useAsync, temporary, path, options));
             elapsed = Stopwatch.GetElapsedTime(start);
-        }
-        finally
-        {
-            File.SetAttributes(path, FileAttributes.Normal);
-        }
 
-        if (OperatingSystem.IsWindows())
-        {
             Assert.IsType<UnauthorizedAccessException>(exception);
             Assert.True(elapsed < budget / 10, $"the replace gave up after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
             Assert.Equal(original, File.ReadAllBytes(path));
+            AssertStillReadOnly(path);
+            Assert.Equal(mode, UnixMode(path));
         }
-        else
+        finally
         {
-            Assert.Null(exception);
-            Assert.Equal(replacement, File.ReadAllBytes(path));
+            MakeWritable(path);
         }
 
         Assert.False(File.Exists(temporary));

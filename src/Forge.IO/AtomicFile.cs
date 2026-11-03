@@ -3,7 +3,8 @@ using System.Diagnostics;
 namespace Forge.IO;
 
 /// <summary>Crash-safe whole-file replacement for files other programs may have open. No locking:
-/// it is safe for user workspace files. See <c>SPEC.md</c> for the retry policy.</summary>
+/// it is safe for user workspace files. A read-only destination is refused before any rename, and on Unix a
+/// replacement keeps the destination's file mode. See <c>SPEC.md</c> for the retry policy.</summary>
 public static class AtomicFile
 {
     private const int BufferSize = 4096;
@@ -21,7 +22,8 @@ public static class AtomicFile
     /// then replaces <paramref name="path"/>. The destination is either the old or the new content, never partial.
     /// Only the confirmed Windows file-in-use replace race is retried, within <paramref name="options"/>' budget;
     /// when it is exhausted the last original exception is rethrown. On failure or cancellation the temporary file
-    /// is removed and the destination is untouched.</summary>
+    /// is removed and the destination is untouched. A read-only destination fails immediately with
+    /// <see cref="UnauthorizedAccessException" /> and keeps its bytes and attributes.</summary>
     public static void WriteAllBytes(string path, ReadOnlySpan<byte> data, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -57,8 +59,8 @@ public static class AtomicFile
     }
 
     /// <summary>Publishes an already-written and already-flushed temporary file onto <paramref name="destinationPath"/>
-    /// with the same retry policy and cleanup as <see cref="WriteAllBytes"/>. On failure or cancellation
-    /// <paramref name="tempPath"/> is deleted and the destination keeps its previous content.</summary>
+    /// with the same retry policy, read-only refusal and cleanup as <see cref="WriteAllBytes"/>. On failure or
+    /// cancellation <paramref name="tempPath"/> is deleted and the destination keeps its previous content.</summary>
     public static void ReplaceFile(string tempPath, string destinationPath, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tempPath);
@@ -170,6 +172,7 @@ public static class AtomicFile
 
     private static async Task PublishAsync(string temporary, string destination, TimeSpan budget, CancellationToken cancellationToken)
     {
+        PreparePublication(temporary, destination);
         var start = Stopwatch.GetTimestamp();
         if (!File.Exists(destination))
         {
@@ -212,6 +215,7 @@ public static class AtomicFile
 
     private static void Publish(string temporary, string destination, TimeSpan budget, CancellationToken cancellationToken)
     {
+        PreparePublication(temporary, destination);
         var start = Stopwatch.GetTimestamp();
         if (!File.Exists(destination))
         {
@@ -284,6 +288,93 @@ public static class AtomicFile
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return false;
+        }
+    }
+
+    /// <summary>Refuses a destination that rejects writes before any rename, and carries the destination's Unix
+    /// mode onto <paramref name="temporary"/> so the replacement keeps the file's permissions. See <c>SPEC.md</c>.</summary>
+    private static void PreparePublication(string temporary, string destination)
+    {
+        if (!File.Exists(destination))
+        {
+            return;
+        }
+
+        if (IsReadOnlyTarget(destination))
+        {
+            throw new UnauthorizedAccessException($"Could not replace '{destination}': the destination is read-only.");
+        }
+
+        PreserveUnixMode(temporary, destination);
+    }
+
+    /// <summary>True when <paramref name="path"/> rejects writes: the <c>ReadOnly</c> attribute on every platform,
+    /// plus a write-refusing Unix mode or a refused write open on Unix. A path that cannot be inspected (it vanished
+    /// during the replace) is not treated as read-only; the rename below decides.</summary>
+    private static bool IsReadOnlyTarget(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0)
+            {
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+
+        return IsReadOnlyOnUnix(path);
+    }
+
+    private static bool IsReadOnlyOnUnix(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        const UnixFileMode Writable = UnixFileMode.UserWrite | UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
+        try
+        {
+            if ((File.GetUnixFileMode(path) & Writable) == 0)
+            {
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+        }
+
+        try
+        {
+            using var probe = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static void PreserveUnixMode(string temporary, string destination)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(temporary, File.GetUnixFileMode(destination));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
         }
     }
 
