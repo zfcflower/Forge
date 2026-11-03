@@ -17,11 +17,11 @@ public static class ExtensionProtocol
     public const string HostStop = "host.stop";               // {} → {}
 
     // Worker/plugin → Host → main program (request: a plugin calls a main-program tool)
-    public const string HostToolCall = "host.tool_call";      // {name, args} → {content, isError}
+    public const string HostToolCall = "host.tool_call";      // {name, args, sessionId, workingDir, depth} → {content, isError}; context is the originating plugin invocation's, never a shared field
 
     // Host → Worker
-    public const string WorkerLoad = "worker.load";           // {pluginId, version, assemblyPath} → {tools:[ToolDeclaration]}
-    public const string WorkerExecute = "worker.execute";     // {pluginId, tool, args, sessionId, workingDir, hostPipeName} → {content, isError}
+    public const string WorkerLoad = "worker.load";           // {pluginId, version, assemblyPath, assemblySha256, files:{relativeName: sha256}} → {tools:[ToolDeclaration]}; the worker must load exactly the bytes that match assemblySha256 and reject any file of the plugin directory not listed or not matching
+    public const string WorkerExecute = "worker.execute";     // {pluginId, tool, args, sessionId, workingDir, depth, hostPipeName} → {content, isError}
     public const string WorkerUnload = "worker.unload";       // {pluginId} → {}
     public const string WorkerStop = "worker.stop";           // {} → {}
 }
