@@ -28,4 +28,5 @@ depends-on: [forge-ipc, forge-scripting]
 - 并发上限默认 8;工具异常只返回错误结果,不拖垮进程;取消向上抛出而不回复。
 - 入口类型:唯一公开 `IPlugin` 实现,多个则按 `Info.Id` 匹配,零或多匹配即 `load_failed`。
 - 连接先订阅处理器再连管道,避免 Host 在接入瞬间发出的 `worker.load` 丢失。
+- **自管进程组。** 非 Windows 上,进程启动后的第一个动作是 `setpgid(0, 0)`(`WorkerProcessGroup`,本项目的唯一 P/Invoke:`DllImport("libc", SetLastError = true)`,不用 unsafe),在解析命令行与连管道之前完成。从此 Worker 以自己的 pid 为组号自成一组,其后代默认留在组内,Host 用 `kill(-pgid, SIGKILL)` 整组清理。`setpgid` 失败或平台无 libc 时只往 stderr 写一行诊断并继续运行(Host 退回按句柄枚举杀树);Windows 上该方法不做任何事(子进程自动继承 Host 的 Job Object)。
 - 退出码:0 正常/Host 关闭,1 协议或连接失败,2 命令行错误。

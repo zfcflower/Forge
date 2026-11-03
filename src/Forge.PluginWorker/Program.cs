@@ -8,6 +8,8 @@ public static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        WorkerProcessGroup.JoinOwnGroup();
+
         if (!WorkerOptions.TryParse(args, out var options, out var error))
         {
             await Console.Error.WriteLineAsync(error).ConfigureAwait(false);

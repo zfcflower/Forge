@@ -3,7 +3,8 @@ namespace Forge.Integration.Tests;
 /// <summary>C# source of the test plugins. Every plugin exposes the same six tools:
 /// <c>echo</c> (returns "&lt;prefix&gt;:&lt;text&gt;"), <c>pid</c> (worker process id), <c>sleep</c> (ignores cancellation for
 /// <c>ms</c> milliseconds, writing <c>marker</c> first when given), <c>throw</c>, <c>callHost</c> (calls the host tool
-/// <c>target</c> with <c>args</c> through <see cref="Forge.Plugin.Sdk.IHostFacade"/>) and <c>crash</c> (ends the worker).</summary>
+/// <c>target</c> with <c>args</c> through <see cref="Forge.Plugin.Sdk.IHostFacade"/>) and <c>crash</c> (ends the worker).
+/// <see cref="Spawnable"/> adds the two tools that start a long-lived child process.</summary>
 internal static class PluginSources
 {
     public const string EchoTool = "echo";
@@ -14,6 +15,16 @@ internal static class PluginSources
     public const string CrashTool = "crash";
 
     public static readonly string[] AllTools = [EchoTool, PidTool, SleepTool, ThrowTool, CallHostTool, CrashTool];
+
+    /// <summary>Tools declared by <see cref="Spawnable"/>.</summary>
+    public static readonly string[] SpawnableTools = [EchoTool, PidTool, SpawnTool, SpawnAndCrashTool];
+
+    /// <summary><c>spawn</c>: starts a long-lived child process, writes its pid to the <c>marker</c> argument when it is
+    /// non-empty, reports it, and then hangs for <c>ms</c> milliseconds when that argument is positive.</summary>
+    public const string SpawnTool = "spawn";
+
+    /// <summary><c>spawnAndCrash</c>: starts that child process and then ends the worker.</summary>
+    public const string SpawnAndCrashTool = "spawnAndCrash";
 
     public static string Standard(string id, string echoPrefix = "echo", string version = "1.0.0") =>
         $$"""
@@ -109,6 +120,120 @@ internal static class PluginSources
             {
                 Environment.Exit(3);
                 return Task.FromResult(new ToolResult("unreachable"));
+            }
+        }
+
+        """;
+
+    /// <summary>A plugin whose <c>spawn</c> tool starts a long-lived child process (a <c>ping</c> on Windows, a
+    /// <c>sleep</c> elsewhere) and reports its pid, and whose <c>spawnAndCrash</c> tool does the same and then ends the
+    /// worker. Plugin source is compiled against the BCL subset in <c>ScriptCompiler</c>, which does not reference
+    /// <c>System.Diagnostics.Process</c>, so the child is started through reflection.</summary>
+    public static string Spawnable(string id, string echoPrefix = "a", string version = "1.0.0") =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "{{version}}", "process-tree test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddTool(new EchoTool());
+                context.AddTool(new PidTool());
+                context.AddTool(new SpawnTool());
+                context.AddTool(new SpawnAndCrashTool());
+            }
+
+            internal static string Arg(JsonElement args, string name) =>
+                args.ValueKind == JsonValueKind.Object && args.TryGetProperty(name, out var value) ? value.ToString() : "";
+        }
+
+        public sealed class EchoTool : IPluginTool
+        {
+            private const string Prefix = "{{echoPrefix}}";
+
+            public ToolDeclaration Declaration { get; } =
+                new("echo", "Echoes the text argument", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult(Prefix + ":" + TestPlugin.Arg(invocation.Arguments, "text")));
+        }
+
+        public sealed class PidTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("pid", "Reports the worker process id", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult(Environment.ProcessId.ToString()));
+        }
+
+        public sealed class SpawnTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("spawn", "Starts a long-lived child process and reports its pid", "{\"type\":\"object\"}", ToolSideEffect.Execute);
+
+            public async Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
+            {
+                var pid = SpawnedChild.Start(TestPlugin.Arg(invocation.Arguments, "marker"));
+                var milliseconds = int.TryParse(TestPlugin.Arg(invocation.Arguments, "ms"), out var parsed) ? parsed : 0;
+                if (milliseconds > 0)
+                {
+                    await Task.Delay(milliseconds);
+                }
+
+                return new ToolResult(pid.ToString());
+            }
+        }
+
+        public sealed class SpawnAndCrashTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("spawnAndCrash", "Starts a long-lived child process and then terminates the worker", "{\"type\":\"object\"}", ToolSideEffect.Execute);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
+            {
+                SpawnedChild.Start(TestPlugin.Arg(invocation.Arguments, "marker"));
+                Environment.Exit(3);
+                return Task.FromResult(new ToolResult("unreachable"));
+            }
+        }
+
+        internal static class SpawnedChild
+        {
+            internal static int Start(string marker)
+            {
+                var processType = Type.GetType("System.Diagnostics.Process, System.Diagnostics.Process", throwOnError: true);
+                var startInfoType = Type.GetType("System.Diagnostics.ProcessStartInfo, System.Diagnostics.Process", throwOnError: true);
+                var startInfo = Activator.CreateInstance(startInfoType);
+                startInfoType.GetProperty("UseShellExecute").SetValue(startInfo, false);
+                startInfoType.GetProperty("CreateNoWindow").SetValue(startInfo, true);
+                var arguments = (System.Collections.IList)startInfoType.GetProperty("ArgumentList").GetValue(startInfo);
+                if (OperatingSystem.IsWindows())
+                {
+                    startInfoType.GetProperty("FileName").SetValue(startInfo, "ping");
+                    arguments.Add("-n");
+                    arguments.Add("600");
+                    arguments.Add("127.0.0.1");
+                }
+                else
+                {
+                    startInfoType.GetProperty("FileName").SetValue(startInfo, "sleep");
+                    arguments.Add("600");
+                }
+
+                var child = processType.GetMethod("Start", new[] { startInfoType }).Invoke(null, new object[] { startInfo });
+                if (child is null)
+                {
+                    throw new InvalidOperationException("the child process did not start");
+                }
+
+                var pid = (int)processType.GetProperty("Id").GetValue(child);
+                if (marker.Length > 0)
+                {
+                    File.WriteAllText(marker, pid.ToString());
+                }
+
+                return pid;
             }
         }
         """;

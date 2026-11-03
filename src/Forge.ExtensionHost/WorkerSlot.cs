@@ -423,17 +423,36 @@ internal sealed class WorkerSlot(
         startInfo.ArgumentList.Add(pipeName);
 
         var log = new TailBuffer(4096);
-        Process process;
+        var ownership = WorkerProcessOwnership.Create();
+        Process? started;
         try
         {
-            process = Process.Start(startInfo) ??
-                throw new HostOperationException("worker_start_failed", $"Starting '{startInfo.FileName}' produced no process.");
+            started = Process.Start(startInfo);
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            ownership.Dispose();
             throw new HostOperationException(
                 "worker_start_failed",
                 $"The plugin worker '{startInfo.FileName}' could not be started: {exception.Message}");
+        }
+
+        if (started is null)
+        {
+            ownership.Dispose();
+            throw new HostOperationException("worker_start_failed", $"Starting '{startInfo.FileName}' produced no process.");
+        }
+
+        var process = started;
+        try
+        {
+            ownership.Assign(process);
+        }
+        catch
+        {
+            KillProcessTree(ownership, process);
+            ownership.Dispose();
+            throw;
         }
 
         process.ErrorDataReceived += (_, args) => log.Append(args.Data);
@@ -443,7 +462,7 @@ internal sealed class WorkerSlot(
 
         var transport = new NamedPipeServerTransport(pipeName, new IpcPipeOptions { ConnectTimeout = options.ConnectTimeout });
         var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = options.ToolTimeout });
-        var session = new WorkerSession(pipeName, process, transport, peer, log);
+        var session = new WorkerSession(pipeName, process, ownership, transport, peer, log);
         peer.RequestReceived += (message, token) => HandleWorkerRequestAsync(session, message, token);
         peer.ProtocolError += error => log.Append("protocol error: " + error.Message);
         try
@@ -528,16 +547,18 @@ internal sealed class WorkerSlot(
         return $"forge-worker-{token}-{unique}";
     }
 
-    private static void KillProcessTree(Process process)
+    /// <summary>Kills a worker together with everything it started: the job object or process group first, so remnants
+    /// of a worker that already exited are still owned, then <see cref="Process.Kill(bool)"/> as the fallback.</summary>
+    private static void KillProcessTree(WorkerProcessOwnership ownership, Process process)
     {
         try
         {
-            if (process.HasExited)
+            ownership.Kill();
+            if (!process.HasExited)
             {
-                return;
+                process.Kill(entireProcessTree: true);
             }
 
-            process.Kill(entireProcessTree: true);
             process.WaitForExit(5000);
         }
         catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception or IOException)
@@ -545,10 +566,11 @@ internal sealed class WorkerSlot(
         }
     }
 
-    /// <summary>One worker connection: its process, pipe, peer and the tools the plugin registered.</summary>
+    /// <summary>One worker connection: its process, its containment, pipe, peer and the tools the plugin registered.</summary>
     private sealed class WorkerSession(
         string pipeName,
         Process process,
+        WorkerProcessOwnership ownership,
         NamedPipeServerTransport transport,
         IpcPeer peer,
         TailBuffer log) : IAsyncDisposable
@@ -587,9 +609,9 @@ internal sealed class WorkerSlot(
 
         public string LogSuffix() => log.Suffix();
 
-        /// <summary>Asks the worker to stop and then kills its process tree while that worker is still the live parent.
-        /// Killing first — while the process can still be enumerated — is the guarantee; waiting for a graceful exit
-        /// first would leave descendants behind whenever the worker exits on its own.</summary>
+        /// <summary>Offers <c>worker.stop</c> and lets the worker leave within the grace window, then kills the whole
+        /// contained tree through the job object or process group and closes that containment. The containment, not the
+        /// worker being alive, is what makes descendants die — including when the worker already exited on its own.</summary>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0)
@@ -597,12 +619,9 @@ internal sealed class WorkerSlot(
                 return;
             }
 
-            if (!Peer.IsClosed)
-            {
-                RequestStop();
-            }
-
-            KillProcessTree(Process);
+            await StopGracefullyAsync().ConfigureAwait(false);
+            KillProcessTree(ownership, Process);
+            ownership.Dispose();
 
             try
             {
@@ -623,19 +642,24 @@ internal sealed class WorkerSlot(
             Process.Dispose();
         }
 
-        private void RequestStop()
+        /// <summary>Best-effort <c>worker.stop</c> plus the wait for the worker to exit, both bounded by
+        /// <see cref="StopGraceWindow"/>; the kill that follows does not depend on the outcome.</summary>
+        private async Task StopGracefullyAsync()
         {
-            _ = Task.Run(async () =>
+            if (Peer.IsClosed)
             {
-                using var deadline = new CancellationTokenSource(StopGraceWindow);
-                try
-                {
-                    await Peer.SendRequestAsync(ExtensionProtocol.WorkerStop, HostJson.EmptyObject, deadline.Token).ConfigureAwait(false);
-                }
-                catch (Exception)
-                {
-                }
-            });
+                return;
+            }
+
+            using var deadline = new CancellationTokenSource(StopGraceWindow);
+            try
+            {
+                await Peer.SendRequestAsync(ExtensionProtocol.WorkerStop, HostJson.EmptyObject, deadline.Token).ConfigureAwait(false);
+                await Process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 
