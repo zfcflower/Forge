@@ -1,0 +1,176 @@
+# .NET 10 / C# 14 / Avalonia 跨平台构建、测试、打包、发布
+#
+# 放置路径：.github/workflows/dotnet-avalonia.yml
+#
+# 设计要点（为了省分钟数，私有仓库尤其重要）：
+#   - 测试只在 ubuntu 上跑一次（Avalonia 的 Headless 测试在 Linux 上即可）
+#   - 所有平台的 publish 都在 ubuntu 上交叉发布：纯托管的 JIT 应用不需要各平台自己的 runner
+#   - 不使用 Native AOT；Host 与 Worker 都是普通 JIT 发布
+#   - 没有 MSIX / WAP / 签名流程（那是 WPF/WinForms 模板的内容，Avalonia 用不上）
+
+name: Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# 同一分支/PR 有新提交时取消旧的运行，省分钟数
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# 默认只读，需要写权限的 job 再单独提升
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  App_Name: MyApp                                  # 替换：产物文件名前缀
+  Solution_Path: your-solution.sln                 # 替换：解决方案路径
+  Host_Project: src/MyApp.Host/MyApp.Host.csproj   # 替换：Avalonia 主程序（Host）
+  Worker_Project: src/MyApp.Worker/MyApp.Worker.csproj  # 替换：Worker 进程
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          # 如果仓库有 global.json，可改用：global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore "$Solution_Path"
+
+      - name: Build
+        run: dotnet build "$Solution_Path" -c Release --no-restore
+
+      - name: Test
+        run: dotnet test "$Solution_Path" -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+          if-no-files-found: ignore
+
+  publish:
+    needs: test
+    # PR 只验证构建和测试，不产出发布包；main 的 push、tag、手动触发才打包
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [ win-x64, win-arm64, linux-x64, linux-arm64, osx-arm64 ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-ci.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Host 和 Worker 发布到同一目录，保证它们并排部署。
+      # 两个项目引用的共享程序集版本必须一致，否则后发布的会覆盖先发布的。
+      - name: Publish Host and Worker
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          for proj in "$Host_Project" "$Worker_Project"; do
+            dotnet publish "$proj" \
+              -c Release \
+              -r "$RID" \
+              --self-contained true \
+              -p:Version="$VERSION" \
+              -p:DebugType=embedded \
+              -o "publish/$RID"
+            # 可选：减少启动时 JIT 耗时（仍是 JIT 进程，只是预编译了一部分）
+            #   加上 -p:PublishReadyToRun=true
+          done
+
+      - name: Package
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p dist
+          NAME="${App_Name}-${VERSION}-${RID}"
+          if [[ "$RID" == win-* ]]; then
+            (cd "publish/$RID" && zip -qr "$GITHUB_WORKSPACE/dist/$NAME.zip" .)
+          else
+            tar -C "publish/$RID" -czf "dist/$NAME.tar.gz" .
+          fi
+          ls -lh dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    # 只在推送 v* 标签时创建 GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
