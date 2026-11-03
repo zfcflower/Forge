@@ -21,7 +21,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     private readonly Lock toolsGate = new();
     private readonly Lock statusGate = new();
     private readonly Lock peerGate = new();
-    private readonly Dictionary<string, IReadOnlyList<ExtensionHostTool>> toolsByPlugin = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PluginTools> toolsByPlugin = new(StringComparer.Ordinal);
     private IReadOnlyList<ITool> tools = [];
     private IReadOnlyDictionary<string, IReadOnlyList<ITool>> toolsByPluginView =
         new Dictionary<string, IReadOnlyList<ITool>>(StringComparer.Ordinal);
@@ -30,6 +30,8 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     private HostProcess? hostProcess;
     private string? protocolProblem;
     private long nextCallId;
+    private long nextGeneration;
+    private long registeredGeneration;
     private int status = (int)HostStatus.Stopped;
     private int stopping;
     private int disposed;
@@ -134,10 +136,11 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                     transport = connected.Transport;
                 }
 
+                Interlocked.Exchange(ref registeredGeneration, connected.Generation);
                 SetStatus(HostStatus.Running, null);
                 if (recovering)
                 {
-                    ClearTools();
+                    DropToolsOfEarlierConnections();
                 }
             }
             catch (Exception ex) when (ex is OperationCanceledException && ct.IsCancellationRequested)
@@ -285,6 +288,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             peer = null;
         }
 
+        var stopAcknowledged = false;
         if (active is not null)
         {
             if (sendHostStop && !active.IsClosed)
@@ -297,6 +301,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                 {
                     await active.SendRequestAsync(Sdk.ExtensionProtocol.HostStop, IpcJsonTypes.EmptyObject, stopTimeout.Token)
                         .ConfigureAwait(false);
+                    stopAcknowledged = true;
                 }
                 catch (Exception ex) when (ex is IpcConnectionClosedException or IpcTimeoutException
                     or IpcRemoteException or IOException or ObjectDisposedException or OperationCanceledException
@@ -337,7 +342,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         {
             try
             {
-                await pendingHost.TerminateAsync(options.ProcessExitTimeout).ConfigureAwait(false);
+                await pendingHost.TerminateAsync(options.ProcessExitTimeout, waitForSelfExit: stopAcknowledged).ConfigureAwait(false);
             }
             finally
             {
@@ -424,11 +429,12 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         {
             DefaultTimeout = options.RequestTimeout ?? Timeout.InfiniteTimeSpan,
         });
+        var generation = Interlocked.Increment(ref nextGeneration);
         created.Closed += OnPeerClosed;
         created.RequestReceived += (message, ct) => OnRequestAsync(created, message, ct);
-        created.NotificationReceived += OnNotification;
+        created.NotificationReceived += message => OnNotification(generation, message);
         created.VersionMismatch += OnVersionMismatch;
-        return new PeerBundle(created, pipe);
+        return new PeerBundle(created, pipe, generation);
     }
 
     private void OnPeerClosed(Exception? cause)
@@ -452,19 +458,24 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     private void OnVersionMismatch(IpcVersionMismatchException mismatch) =>
         Volatile.Write(ref protocolProblem, mismatch.Message);
 
-    private void OnNotification(IpcMessage message)
+    private void OnNotification(long generation, IpcMessage message)
     {
+        if (generation < Volatile.Read(ref registeredGeneration))
+        {
+            return;
+        }
+
         if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ToolsRegister, StringComparison.Ordinal))
         {
-            RegisterTools(message.Arguments);
+            RegisterTools(generation, message.Arguments);
         }
         else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ToolsUnregister, StringComparison.Ordinal))
         {
-            UnregisterTools(message.Arguments);
+            UnregisterTools(generation, message.Arguments);
         }
     }
 
-    private void RegisterTools(JsonElement? payload)
+    private void RegisterTools(long generation, JsonElement? payload)
     {
         if (!HostProtocolJson.TryReadToolsRegister(payload, out var pluginId, out var declarations))
         {
@@ -473,7 +484,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
         if (declarations.Count == 0)
         {
-            SetPluginTools(pluginId, null);
+            SetPluginTools(pluginId, null, generation);
             return;
         }
 
@@ -483,37 +494,79 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             proxies[index] = new ExtensionHostTool(this, pluginId, declarations[index]);
         }
 
-        SetPluginTools(pluginId, proxies);
+        SetPluginTools(pluginId, proxies, generation);
     }
 
-    private void UnregisterTools(JsonElement? payload)
+    private void UnregisterTools(long generation, JsonElement? payload)
     {
         if (!HostProtocolJson.TryReadToolsUnregister(payload, out var pluginId))
         {
             return;
         }
 
-        SetPluginTools(pluginId, null);
+        SetPluginTools(pluginId, null, generation);
     }
 
-    private void SetPluginTools(string pluginId, IReadOnlyList<ExtensionHostTool>? proxies)
+    private void SetPluginTools(string pluginId, IReadOnlyList<ExtensionHostTool>? proxies, long generation)
     {
         var changed = false;
         lock (toolsGate)
         {
+            toolsByPlugin.TryGetValue(pluginId, out var registered);
+            if (registered.Tools is not null && registered.Generation > generation)
+            {
+                return;
+            }
+
             if (proxies is null || proxies.Count == 0)
             {
                 changed = toolsByPlugin.Remove(pluginId);
             }
-            else if (!toolsByPlugin.TryGetValue(pluginId, out var registered) || !SameDeclarations(registered, proxies))
+            else if (registered.Tools is null || !SameDeclarations(registered.Tools, proxies))
             {
-                toolsByPlugin[pluginId] = proxies;
+                toolsByPlugin[pluginId] = new PluginTools(generation, proxies);
                 changed = true;
+            }
+            else
+            {
+                toolsByPlugin[pluginId] = registered with { Generation = generation };
             }
 
             if (!changed)
             {
                 return;
+            }
+
+            RebuildToolSnapshots();
+        }
+
+        RaiseToolsChanged();
+    }
+
+    /// <summary>Drops the entries an earlier connection registered; entries the current connection published - even
+    /// ones that arrived before the Running transition - survive.</summary>
+    private void DropToolsOfEarlierConnections()
+    {
+        var current = Volatile.Read(ref registeredGeneration);
+        lock (toolsGate)
+        {
+            List<string>? stale = null;
+            foreach (var (pluginId, registered) in toolsByPlugin)
+            {
+                if (registered.Generation < current)
+                {
+                    (stale ??= []).Add(pluginId);
+                }
+            }
+
+            if (stale is null)
+            {
+                return;
+            }
+
+            foreach (var pluginId in stale)
+            {
+                toolsByPlugin.Remove(pluginId);
             }
 
             RebuildToolSnapshots();
@@ -573,8 +626,9 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
         var view = new Dictionary<string, IReadOnlyList<ITool>>(toolsByPlugin.Count, StringComparer.Ordinal);
         var flat = new List<ITool>(toolsByPlugin.Count);
-        foreach (var (pluginId, proxies) in toolsByPlugin)
+        foreach (var (pluginId, published) in toolsByPlugin)
         {
+            var proxies = published.Tools;
             var copy = new ITool[proxies.Count];
             for (var index = 0; index < proxies.Count; index++)
             {
@@ -838,5 +892,8 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         return string.IsNullOrWhiteSpace(tail) ? string.Empty : Environment.NewLine + tail;
     }
 
-    private readonly record struct PeerBundle(IpcPeer Peer, NamedPipeClientTransport Transport);
+    private readonly record struct PeerBundle(IpcPeer Peer, NamedPipeClientTransport Transport, long Generation);
+
+    /// <summary>One plugin's tool proxies plus the connection generation that registered them.</summary>
+    private readonly record struct PluginTools(long Generation, IReadOnlyList<ExtensionHostTool> Tools);
 }

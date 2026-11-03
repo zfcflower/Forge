@@ -251,6 +251,14 @@ public sealed class ExtensionHost : IAsyncDisposable
         await state.EnterAsync(ct).ConfigureAwait(false);
         try
         {
+            if (await RefusalReasonAsync(entry, sourceHash, dependencyHash, sdkVersion, ct).ConfigureAwait(false) is { } refusal)
+            {
+                WithdrawUnusableApproval(entry.Id, version);
+                throw new HostOperationException(
+                    "approval_mismatch",
+                    $"The approval does not cover the current content of '{entry.Id}': {refusal}.");
+            }
+
             approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
             await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
         }
@@ -267,6 +275,76 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
 
         return HostJson.EmptyObject;
+    }
+
+    /// <summary>
+    /// Compares the approval the main program sent with the plugin's content on disk now. An approval may only be
+    /// recorded when its hashes describe exactly the bytes a run would load, so this runs before anything is persisted.
+    /// Returns the reason the approval does not cover the content, or <c>null</c> when it does.
+    /// </summary>
+    private async Task<string?> RefusalReasonAsync(
+        PluginEntry entry,
+        string sourceHash,
+        string dependencyHash,
+        string sdkVersion,
+        CancellationToken ct)
+    {
+        if (approvals.Get(entry.Id, entry.Version) is { Status: PluginStatus.Disabled or PluginStatus.Uninstalled } blocked)
+        {
+            return $"plugin {entry.Id} {entry.Version} is {blocked.Status.ToString().ToLowerInvariant()}";
+        }
+
+        PluginContent content;
+        try
+        {
+            content = await PluginCatalog.SnapshotAsync(entry, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"the content of {entry.Id} {entry.Version} could not be read: {exception.Message}";
+        }
+
+        if (!string.Equals(content.SourceHash, sourceHash, StringComparison.Ordinal))
+        {
+            return "the source hash does not match the content on disk";
+        }
+
+        if (!string.Equals(content.DependencyHash, dependencyHash, StringComparison.Ordinal))
+        {
+            return "the dependency hash does not match the files on disk";
+        }
+
+        if (!string.Equals(entry.SdkVersion, sdkVersion, StringComparison.Ordinal))
+        {
+            return $"the plugin is installed against SDK '{entry.SdkVersion}', not '{sdkVersion}'";
+        }
+
+        return null;
+    }
+
+    /// <summary>Returns a record whose status claims approval for content its own hashes no longer describe to
+    /// <see cref="PluginStatus.Draft"/>; a record that still holds a usable approval is left untouched.</summary>
+    private void WithdrawUnusableApproval(string pluginId, string version)
+    {
+        if (approvals.Get(pluginId, version) is not { Status: PluginStatus.Approved } record)
+        {
+            return;
+        }
+
+        var decision = ApprovalEngine.Evaluate(
+            new PluginRecord
+            {
+                PluginId = record.PluginId,
+                Version = record.Version,
+                SourceHash = record.SourceHash,
+                DependencyHash = record.DependencyHash,
+                SdkVersion = record.SdkVersion,
+            },
+            record);
+        if (!decision.IsAllowed)
+        {
+            approvals.Revoke(pluginId, version);
+        }
     }
 
     private async Task<JsonElement> RevokeAsync(PluginRevokeRequest request, CancellationToken ct)
@@ -321,7 +399,6 @@ public sealed class ExtensionHost : IAsyncDisposable
                 present.Add(entry.Id);
                 try
                 {
-                    StateOf(entry.Id).ResetFailures();
                     SyncRecord(entry);
                     lock (sync)
                     {
@@ -395,13 +472,22 @@ public sealed class ExtensionHost : IAsyncDisposable
     }
 
     /// <summary>Re-evaluates approval for one plugin and brings its worker and tool registration in line with the result,
-    /// serialized against the plugin's executions and its other approval changes.</summary>
+    /// serialized against the plugin's executions and its other approval changes. A refresh also lifts an exhausted
+    /// failure budget: a disabled slot and its published tools are dropped first, so the reload starts a fresh worker
+    /// and registers its tools again.</summary>
     private async Task ApplyAsync(PluginEntry entry, CancellationToken ct)
     {
         var state = StateOf(entry.Id);
         await state.EnterAsync(ct).ConfigureAwait(false);
         try
         {
+            if (state.IsExhausted)
+            {
+                ForgetRegistration(entry.Id);
+                await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+            }
+
+            state.ResetFailures();
             await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
         }
         finally
@@ -554,6 +640,16 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException or OperationCanceledException)
         {
+        }
+    }
+
+    /// <summary>Drops what the main program was told about a plugin's tools, so the next registration is sent even when
+    /// the declarations are unchanged.</summary>
+    private void ForgetRegistration(string pluginId)
+    {
+        lock (sync)
+        {
+            registrations.Remove(pluginId);
         }
     }
 

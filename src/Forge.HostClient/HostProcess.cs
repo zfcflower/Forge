@@ -114,11 +114,26 @@ internal sealed class HostProcess : IAsyncDisposable
         }
     }
 
-    /// <summary>Ends the process tree: kill when it is still running, then wait for it and its output readers.</summary>
-    public async Task TerminateAsync(TimeSpan grace)
+    /// <summary>Ends the process tree: kill when it is still running, then wait for it and its output readers. A host
+    /// that acknowledged <c>host.stop</c> first gets <paramref name="grace"/> to run its own shutdown and exit, and its
+    /// tree is killed only when it does not.</summary>
+    public async Task TerminateAsync(TimeSpan grace, bool waitForSelfExit)
     {
         try
         {
+            var bound = grace > TimeSpan.Zero ? grace : TimeSpan.FromSeconds(5);
+            if (waitForSelfExit && !HasExited)
+            {
+                using var selfExit = new CancellationTokenSource(bound);
+                try
+                {
+                    await process.WaitForExitAsync(selfExit.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
+                {
+                }
+            }
+
             if (!HasExited)
             {
                 try
@@ -130,7 +145,6 @@ internal sealed class HostProcess : IAsyncDisposable
                 }
             }
 
-            var bound = grace > TimeSpan.Zero ? grace : TimeSpan.FromSeconds(5);
             using var timeout = new CancellationTokenSource(bound);
             try
             {
