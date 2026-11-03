@@ -13,6 +13,7 @@ internal sealed class FakeHost : IAsyncDisposable
         new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<IpcMessage> requests = new();
     private readonly ConcurrentQueue<IpcMessage> notifications = new();
+    private readonly List<(string Operation, string ArgsJson)> onAccept = [];
     private readonly CancellationTokenSource lifetime = new();
     private IpcPeer? peer;
     private NamedPipeServerTransport? transport;
@@ -37,6 +38,16 @@ internal sealed class FakeHost : IAsyncDisposable
     public void On(string operation, Func<IpcMessage, CancellationToken, Task<JsonElement>> handler) =>
         handlers[operation] = handler;
 
+    /// <summary>Queues a notification the host emits the moment it accepts the next connection, before the test
+    /// resumes. It lands in the connect-to-Running window, which is what recovery-generation tests need.</summary>
+    public void NotifyOnAccept(string operation, string argsJson)
+    {
+        lock (onAccept)
+        {
+            onAccept.Add((operation, argsJson));
+        }
+    }
+
     /// <summary>Creates the pipe and waits for the client. Call before the client starts so it can connect.</summary>
     public async Task<IpcPeer> AcceptAsync()
     {
@@ -47,6 +58,17 @@ internal sealed class FakeHost : IAsyncDisposable
         await created.StartAsync(CancellationToken.None).ConfigureAwait(false);
         transport = server;
         peer = created;
+        List<(string Operation, string ArgsJson)> pending;
+        lock (onAccept)
+        {
+            pending = [.. onAccept];
+        }
+
+        foreach (var (operation, argsJson) in pending)
+        {
+            await NotifyClientAsync(operation, argsJson).ConfigureAwait(false);
+        }
+
         return created;
     }
 

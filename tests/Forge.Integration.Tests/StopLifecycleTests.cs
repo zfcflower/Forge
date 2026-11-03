@@ -62,10 +62,7 @@ public sealed class StopLifecycleTests
         Assert.Null(fx.Client.HostProcessId);
     }
 
-    [Fact(Skip = "BUG: ExtensionHostClient.StopAsync sends host.stop, then HostProcess.TerminateAsync kills the host process "
-        + "tree at once (exit code -1) without waiting for ProcessExitTimeout, which its own contract describes as the time the "
-        + "host gets to exit on its own. Expected: after host.stop the host runs its shutdown (workers stopped) and exits with code 0 "
-        + "within ProcessExitTimeout.")]
+    [Fact]
     public async Task Stop_request_lets_the_host_exit_on_its_own_with_code_zero()
     {
         await using var fx = new E2eFixture();
