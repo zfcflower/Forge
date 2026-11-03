@@ -14,6 +14,10 @@ public interface IIpcTransport : IAsyncDisposable
     /// <summary>Raised for each complete frame; the buffer is valid only during the callback.</summary>
     event Action<ReadOnlyMemory<byte>>? FrameReceived;
 
+    /// <summary>Raised once for each inbound frame the transport rejects (zero-length body or above the frame limit);
+    /// the frame is dropped and the connection stays usable.</summary>
+    event Action<IpcProtocolException>? ProtocolError;
+
     Task StartAsync(CancellationToken ct);
 
     ValueTask SendAsync(ReadOnlyMemory<byte> frame, CancellationToken ct);
@@ -36,6 +40,46 @@ public static class IpcPipe
                 throw new ArgumentException("Pipe name must not contain path separators or ':'.", nameof(name));
         return name;
     }
+
+    /// <summary>Creates a server transport and waits for one client, bounded by <see cref="IpcPipeOptions.ConnectTimeout"/>.</summary>
+    public static async Task<NamedPipeServerTransport> CreateServer(string name, CancellationToken ct, IpcPipeOptions? options = null)
+    {
+        var server = new NamedPipeServerTransport(name, options);
+        try
+        {
+            await server.StartAsync(ct).ConfigureAwait(false);
+            return server;
+        }
+        catch
+        {
+            await server.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Creates a server transport and waits for one client without a caller cancellation token.</summary>
+    public static Task<NamedPipeServerTransport> CreateServer(string name, IpcPipeOptions? options = null) =>
+        CreateServer(name, CancellationToken.None, options);
+
+    /// <summary>Creates a client transport and connects, bounded by <see cref="IpcPipeOptions.ConnectTimeout"/>.</summary>
+    public static async Task<NamedPipeClientTransport> CreateClient(string name, CancellationToken ct, IpcPipeOptions? options = null)
+    {
+        var client = new NamedPipeClientTransport(name, options);
+        try
+        {
+            await client.StartAsync(ct).ConfigureAwait(false);
+            return client;
+        }
+        catch
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Creates a client transport and connects without a caller cancellation token.</summary>
+    public static Task<NamedPipeClientTransport> CreateClient(string name, IpcPipeOptions? options = null) =>
+        CreateClient(name, CancellationToken.None, options);
 }
 
 public sealed class IpcTimeoutException(string operation, TimeSpan timeout, Exception? inner = null)

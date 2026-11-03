@@ -30,12 +30,16 @@ public sealed record IpcMessage
     public System.Text.Json.JsonElement? Arguments { get; init; }
 
     [JsonPropertyName("result")]
+    [JsonConverter(typeof(JsonElementPresenceConverter))]
     public System.Text.Json.JsonElement? Result { get; init; }
 
     [JsonPropertyName("error")]
     public IpcError? Error { get; init; }
 
+    [JsonIgnore]
     public bool IsNotification => Id == 0;
+
+    [JsonIgnore]
     public bool IsResponse => Error is not null || Result.HasValue;
 
     public static IpcMessage Request(long id, string operation, System.Text.Json.JsonElement? args = null) =>
@@ -55,4 +59,22 @@ public sealed record IpcMessage
 [JsonSerializable(typeof(IpcError))]
 public partial class IpcJsonContext : System.Text.Json.Serialization.JsonSerializerContext
 {
+}
+
+/// <summary>A business error carried by the remote peer (its <c>result</c> is an error envelope).
+/// Distinct from <see cref="IpcProtocolException"/> which means the wire format itself was violated.</summary>
+public sealed class IpcRemoteException(string operation, string code, string message, string? data = null)
+    : Exception($"IPC remote error '{code}' from '{operation}': {message}")
+{
+    public string Operation { get; } = operation;
+    public string Code { get; } = code;
+    public string? DataJson { get; } = data;
+}
+
+/// <summary>The peer's protocol version does not match this side.</summary>
+public sealed class IpcVersionMismatchException(int received, int expected)
+    : Exception($"IPC protocol version mismatch: received {received}, expected {expected}.")
+{
+    public int Received { get; } = received;
+    public int Expected { get; } = expected;
 }
