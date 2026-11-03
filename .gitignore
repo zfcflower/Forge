@@ -4,3 +4,6 @@ obj/
 *.user
 .thinkrail/context/
 .pi/
+publish/
+dist/
+TestResults/
