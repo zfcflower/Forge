@@ -1,0 +1,1 @@
+namespace Forge.Integration.Tests;

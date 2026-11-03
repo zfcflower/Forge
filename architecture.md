@@ -26,6 +26,7 @@ depends-on: [forge-goal]
 | `Forge.Editor` | 文本缓冲、LSP 客户端(含语义 token)、TextMate 着色、补全、Diff 模型;不含 UI |
 | `Forge.ExtensionHost`(新增,JIT) | 常驻进程:插件发现与注册、生命周期、Roslyn 编译与缓存、声明式工作流执行、Worker 管理、版本与依赖管理 |
 | `Forge.PluginWorker`(新增,JIT) | 独立进程:加载并执行动态 C# 插件与 run_code 脚本;可被整体终止 |
+| `Forge.HostClient`(新增,AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Plugin.Sdk |
 | `Forge.CodeMode` / `Forge.Plugins` | 现有进程内实现(Roslyn 脚本、ALC 宿主)迁入 `ExtensionHost`/`PluginWorker`;迁移前不得被 `App` 引用(迁移方案见 Stage 2) |
 | `Forge.App` | Avalonia 桌面 UI 与组合根(含 `ExtensionHostClient`);唯一知道所有主程序项目的层 |
 
