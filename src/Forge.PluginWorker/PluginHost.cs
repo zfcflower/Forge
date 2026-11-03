@@ -118,14 +118,17 @@ internal sealed class PluginHost
         }
 
         // Verify before a load context exists, so no plugin code can run against unverified bytes.
-        var image = await PluginIntegrity
+        var verified = await PluginIntegrity
             .VerifyAsync(fullPath, directory, assemblySha256, files, ct)
             .ConfigureAwait(false);
 
-        var context = new PluginLoadContext(directory, fullPath, $"forge-worker-plugin:{pluginId}");
+        var context = PluginLoadContext.FromVerifiedImages(
+            directory,
+            verified.DependencyImages,
+            $"forge-worker-plugin:{pluginId}");
         try
         {
-            var assembly = context.LoadPluginAssembly(image);
+            var assembly = context.LoadPluginAssembly(verified.EntryImage);
             var plugin = CreateEntry(context, assembly, pluginId);
             var recorder = new RegistrationRecorder(pluginId);
             plugin.Register(recorder);

@@ -8,10 +8,11 @@ using Forge.Plugin.Sdk;
 namespace Forge.Scripting;
 
 /// <summary>
-/// One collectible context per plugin. The plugin's own dependencies resolve from its directory (via
-/// <c>.deps.json</c> when a component path is supplied, then a flat directory probe) while
-/// <c>Forge.Plugin.Sdk</c> and the shared framework always bind to the host copy, so <see cref="IPlugin"/> keeps a
-/// single type identity. Nothing is shared between two contexts.
+/// One collectible context per plugin. In the default path mode the plugin's own dependencies resolve from its
+/// directory (via <c>.deps.json</c> when a component path is supplied, then a flat directory probe); in verified-image
+/// mode (<see cref="FromVerifiedImages"/>) every managed dependency resolves from bytes supplied up front and nothing
+/// is read from the plugin directory. <c>Forge.Plugin.Sdk</c> and the shared framework always bind to the host copy, so
+/// <see cref="IPlugin"/> keeps a single type identity. Nothing is shared between two contexts.
 /// </summary>
 public sealed class PluginLoadContext : AssemblyLoadContext
 {
@@ -27,11 +28,14 @@ public sealed class PluginLoadContext : AssemblyLoadContext
     private readonly FrozenSet<string> sharedAssemblyNames;
     private readonly ConcurrentDictionary<string, string?> assemblyProbes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, IntPtr> unmanagedProbes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Assembly> verifiedDependencyAssemblies = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock verifiedDependencyGate = new();
 
     private static readonly ConcurrentDictionary<TrackedFile, byte> TrackedFiles = new();
 
     private const int ReleasePollMilliseconds = 5;
 
+    private FrozenDictionary<string, byte[]>? verifiedDependencyImages;
     private Assembly? pluginAssembly;
     private Task<bool>? unloadTask;
     private int unloadStarted;
@@ -46,12 +50,38 @@ public sealed class PluginLoadContext : AssemblyLoadContext
         string? dependencyAssemblyPath = null,
         string? name = null,
         IEnumerable<string>? sharedAssemblyNames = null)
+        : this(pluginDirectory, dependencyAssemblyPath, name, sharedAssemblyNames, verifiedDependencyImages: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a context whose private dependencies come only from already verified in-memory images, keyed by
+    /// assembly simple name. In this mode no path fallback and no <c>.deps.json</c> lookup happens: an assembly that is
+    /// neither shared nor supplied fails the load that needs it instead of being read from the mutable plugin directory.
+    /// </summary>
+    public static PluginLoadContext FromVerifiedImages(
+        string pluginDirectory,
+        IReadOnlyDictionary<string, byte[]> verifiedDependencyImages,
+        string? name = null,
+        IEnumerable<string>? sharedAssemblyNames = null)
+    {
+        ArgumentNullException.ThrowIfNull(verifiedDependencyImages);
+        return new PluginLoadContext(pluginDirectory, null, name, sharedAssemblyNames, verifiedDependencyImages);
+    }
+
+    private PluginLoadContext(
+        string pluginDirectory,
+        string? dependencyAssemblyPath,
+        string? name,
+        IEnumerable<string>? sharedAssemblyNames,
+        IReadOnlyDictionary<string, byte[]>? verifiedDependencyImages)
         : base(name ?? ContextName(pluginDirectory), isCollectible: true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginDirectory);
         directory = Path.GetFullPath(pluginDirectory);
+        this.verifiedDependencyImages = IndexVerifiedImages(verifiedDependencyImages);
 
-        if (!string.IsNullOrWhiteSpace(dependencyAssemblyPath))
+        if (this.verifiedDependencyImages is null && !string.IsNullOrWhiteSpace(dependencyAssemblyPath))
         {
             var componentPath = Path.GetFullPath(dependencyAssemblyPath);
             resolver = File.Exists(componentPath) ? new AssemblyDependencyResolver(componentPath) : null;
@@ -78,6 +108,10 @@ public sealed class PluginLoadContext : AssemblyLoadContext
     }
 
     public string PluginDirectory => directory;
+
+    /// <summary>True when private dependencies resolve only from the verified images supplied at construction and the
+    /// plugin directory is never consulted.</summary>
+    public bool UsesVerifiedDependencyImages => Volatile.Read(ref verifiedDependencyImages) is not null;
 
     /// <summary>The assembly loaded into this context, or <c>null</c> before loading and after unload.</summary>
     public Assembly? PluginAssembly => Volatile.Read(ref pluginAssembly);
@@ -223,6 +257,11 @@ public sealed class PluginLoadContext : AssemblyLoadContext
             return null;
         }
 
+        if (Volatile.Read(ref verifiedDependencyImages) is not null)
+        {
+            return LoadVerifiedDependency(simpleName);
+        }
+
         var path = assemblyProbes.GetOrAdd(simpleName, static (name, context) => context.ResolveAssembly(name), this);
         if (path is null)
         {
@@ -235,7 +274,7 @@ public sealed class PluginLoadContext : AssemblyLoadContext
 
     protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
     {
-        if (string.IsNullOrWhiteSpace(unmanagedDllName))
+        if (string.IsNullOrWhiteSpace(unmanagedDllName) || Volatile.Read(ref verifiedDependencyImages) is not null)
         {
             return IntPtr.Zero;
         }
@@ -265,9 +304,78 @@ public sealed class PluginLoadContext : AssemblyLoadContext
         }
 
         Volatile.Write(ref pluginAssembly, null);
+        Volatile.Write(ref verifiedDependencyImages, null);
         assemblyProbes.Clear();
         unmanagedProbes.Clear();
+        verifiedDependencyAssemblies.Clear();
         base.Unload();
+    }
+
+    private Assembly? LoadVerifiedDependency(string simpleName)
+    {
+        if (simpleName.EndsWith(".resources", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        lock (verifiedDependencyGate)
+        {
+            if (verifiedDependencyAssemblies.TryGetValue(simpleName, out var cached))
+            {
+                return cached;
+            }
+
+            var images = Volatile.Read(ref verifiedDependencyImages) ??
+                throw new InvalidOperationException("The plugin load context is unloading; load a new context instead.");
+            if (!images.TryGetValue(simpleName, out var image))
+            {
+                throw new FileNotFoundException(
+                    $"Plugin dependency '{simpleName}' is not among the verified images supplied for this context, so it is not loaded from '{directory}'.",
+                    simpleName);
+            }
+
+            using var stream = new MemoryStream(image, writable: false);
+            var assembly = LoadFromStream(stream);
+            verifiedDependencyAssemblies[simpleName] = assembly;
+            return assembly;
+        }
+    }
+
+    private static FrozenDictionary<string, byte[]>? IndexVerifiedImages(
+        IReadOnlyDictionary<string, byte[]>? images)
+    {
+        if (images is null)
+        {
+            return null;
+        }
+
+        var index = new Dictionary<string, byte[]>(images.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, image) in images)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException(
+                    "A verified dependency image was supplied without an assembly simple name.",
+                    nameof(images));
+            }
+
+            ArgumentNullException.ThrowIfNull(image, name);
+            if (!ManagedImage.IsManaged(image))
+            {
+                throw new BadImageFormatException(
+                    $"The verified dependency image '{name}' is not a managed assembly, so it cannot be loaded from memory.",
+                    name);
+            }
+
+            if (!index.TryAdd(name.Trim(), image))
+            {
+                throw new ArgumentException(
+                    $"The verified dependency image '{name}' was supplied more than once.",
+                    nameof(images));
+            }
+        }
+
+        return index.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
     private string? ResolveAssembly(string simpleName)

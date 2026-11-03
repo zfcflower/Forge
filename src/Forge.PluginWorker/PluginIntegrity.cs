@@ -1,18 +1,29 @@
 using System.Security.Cryptography;
+using Forge.Scripting;
 
 namespace Forge.PluginWorker;
+
+/// <summary>The verified bytes a load may use: the entry image and the managed dependency images, both read and
+/// hashed from the same memory so what runs is exactly what was checked.</summary>
+internal sealed record VerifiedPluginContent(
+    byte[] EntryImage,
+    IReadOnlyDictionary<string, byte[]> DependencyImages);
 
 /// <summary>Checks a plugin against the digests <c>worker.load</c> declares before a load context ever receives
 /// its bytes: the entry image is read once, hashed, and handed to the context from that same memory, and every
 /// declared file must exist and match while every other file of the plugin directory must be declared. A missing
-/// or mismatching digest fails the load; nothing is downgraded to a warning.</summary>
+/// or mismatching digest fails the load; nothing is downgraded to a warning. Each declared file is read once and
+/// kept, so the managed dependencies the context loads later are the very bytes that were hashed, and a <c>.dll</c>
+/// without managed metadata is rejected because such bytes cannot be loaded from memory.</summary>
 internal static class PluginIntegrity
 {
     private const int ReportedUndeclaredFiles = 5;
 
-    /// <summary>Verifies the entry assembly and the plugin directory and returns the verified entry image, so the
-    /// caller loads exactly the bytes that were checked. Runs to completion before any plugin code can execute.</summary>
-    public static async Task<byte[]> VerifyAsync(
+    private const string AssemblyExtension = ".dll";
+
+    /// <summary>Verifies the entry assembly and the plugin directory and returns the verified images, so the caller
+    /// loads exactly the bytes that were checked. Runs to completion before any plugin code can execute.</summary>
+    public static async Task<VerifiedPluginContent> VerifyAsync(
         string assemblyPath,
         string pluginDirectory,
         string? assemblySha256,
@@ -49,6 +60,7 @@ internal static class PluginIntegrity
 
         var entryName = Normalize(Path.GetRelativePath(pluginDirectory, assemblyPath));
         var declared = new Dictionary<string, string>(files.Count, StringComparer.OrdinalIgnoreCase);
+        var contents = new Dictionary<string, byte[]>(files.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var (name, digest) in files)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -69,16 +81,56 @@ internal static class PluginIntegrity
                     $"Plugin file '{relative}' is declared in worker.load but missing from '{pluginDirectory}'.");
             }
 
-            var fileDigest = await HashFileAsync(path, ct).ConfigureAwait(false);
+            var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+            var fileDigest = Sha256(bytes);
             if (!string.Equals(fileDigest, (digest ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 throw new PluginLoadException(
                     $"Plugin file '{relative}' does not match the declared SHA-256 (computed {fileDigest}).");
             }
+
+            contents.Add(relative, bytes);
         }
 
         RejectUndeclared(pluginDirectory, entryName, declared);
-        return image;
+        return new VerifiedPluginContent(image, ManagedDependencyImages(pluginDirectory, entryName, contents));
+    }
+
+    /// <summary>Keys the declared managed images by assembly simple name, which is what the load context asks for. A
+    /// declared <c>.dll</c> without managed metadata cannot be loaded from memory, so it fails the load by name rather
+    /// than being left for the loader to reach on disk.</summary>
+    private static Dictionary<string, byte[]> ManagedDependencyImages(
+        string pluginDirectory,
+        string entryName,
+        Dictionary<string, byte[]> contents)
+    {
+        var images = new Dictionary<string, byte[]>(contents.Count, StringComparer.OrdinalIgnoreCase);
+        var origins = new Dictionary<string, string>(contents.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (relative, bytes) in contents)
+        {
+            if (string.Equals(relative, entryName, StringComparison.OrdinalIgnoreCase) ||
+                !relative.EndsWith(AssemblyExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var assemblyName = ManagedImage.ReadAssemblyName(bytes);
+            if (string.IsNullOrEmpty(assemblyName))
+            {
+                throw new PluginLoadException(
+                    $"Plugin file '{relative}' in '{pluginDirectory}' is not a managed assembly; the worker loads verified dependencies only from memory, so native libraries and malformed DLLs cannot be loaded.");
+            }
+
+            if (!images.TryAdd(assemblyName, bytes))
+            {
+                throw new PluginLoadException(
+                    $"Plugin files '{origins[assemblyName]}' and '{relative}' both hold the assembly '{assemblyName}', so that dependency cannot be resolved unambiguously.");
+            }
+
+            origins.Add(assemblyName, relative);
+        }
+
+        return images;
     }
 
     /// <summary>Rejects a plugin directory holding anything the declaration does not cover: an undeclared file is
@@ -153,18 +205,6 @@ internal static class PluginIntegrity
         }
 
         return path;
-    }
-
-    private static async Task<string> HashFileAsync(string path, CancellationToken ct)
-    {
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 64 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false));
     }
 
     private static string Sha256(ReadOnlySpan<byte> bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
