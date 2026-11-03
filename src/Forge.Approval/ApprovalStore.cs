@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace Forge.Approval;
@@ -12,20 +13,40 @@ public sealed class ApprovalStore
 {
     public const string FileName = "approvals.json";
 
+    private static readonly TimeSpan DefaultReplaceBudget = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ReplaceSpinPhase = TimeSpan.FromMilliseconds(10);
     private static readonly Comparison<PluginRecord> OrderByPlugin = static (left, right) =>
     {
         var byId = string.CompareOrdinal(left.PluginId, right.PluginId);
         return byId != 0 ? byId : string.CompareOrdinal(left.Version, right.Version);
     };
 
+    private const int RetryDelayMilliseconds = 1;
+    private const int ReadAttempts = 8;
+    private const int ReadSpinAttempts = 3;
+    private const int SharingViolation = 32;
+    private const int LockViolation = 33;
+
     private readonly Lock gate = new();
+    private readonly TimeSpan replaceBudget;
     private Dictionary<(string PluginId, string Version), PluginRecord> records;
 
     public ApprovalStore(string directory)
+        : this(directory, DefaultReplaceBudget)
+    {
+    }
+
+    /// <summary>Creates a store that gives up on an un-replaceable state file after <paramref name="replaceBudget"/>.</summary>
+    /// <param name="replaceBudget">
+    /// Total time <see cref="FilePath"/> may stay un-replaceable before the failing write is reported to the caller.
+    /// </param>
+    public ApprovalStore(string directory, TimeSpan replaceBudget)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(replaceBudget, TimeSpan.Zero);
         var root = Path.GetFullPath(directory);
         FilePath = Path.Combine(root, FileName);
+        this.replaceBudget = replaceBudget;
         records = ToMap(ReadFile());
     }
 
@@ -47,7 +68,7 @@ public sealed class ApprovalStore
     /// Inserts or replaces one version's record. A supplied <see cref="PluginRecord.CreatedAt"/> wins; otherwise the
     /// existing creation time, or now, is kept. A default <see cref="PluginRecord.UpdatedAt"/> becomes now.
     /// </summary>
-    public PluginRecord Upsert(PluginRecord record)
+    public PluginRecord Upsert(PluginRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
         ValidateIdentity(record.PluginId, record.Version);
@@ -72,7 +93,7 @@ public sealed class ApprovalStore
                 CreatedAt = createdAt,
                 UpdatedAt = record.UpdatedAt == default ? now : record.UpdatedAt,
             };
-            Apply(key, stored);
+            Apply(key, stored, cancellationToken);
             return stored;
         }
     }
@@ -130,7 +151,8 @@ public sealed class ApprovalStore
         string version,
         string sourceHash,
         string dependencyHash,
-        string sdkVersion)
+        string sdkVersion,
+        CancellationToken cancellationToken = default)
     {
         ValidateIdentity(pluginId, version);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceHash);
@@ -168,7 +190,7 @@ public sealed class ApprovalStore
                 CreatedAt = record.CreatedAt == default ? now : record.CreatedAt,
                 UpdatedAt = now,
             };
-            Apply(key, approved);
+            Apply(key, approved, cancellationToken);
             return approved;
         }
     }
@@ -178,7 +200,7 @@ public sealed class ApprovalStore
     /// <see cref="PluginStatus.Disabled"/> or <see cref="PluginStatus.Uninstalled"/> record is left untouched, so
     /// revoking never lifts a block.
     /// </summary>
-    public PluginRecord? Revoke(string pluginId, string version)
+    public PluginRecord? Revoke(string pluginId, string version, CancellationToken cancellationToken = default)
     {
         ValidateIdentity(pluginId, version);
 
@@ -201,13 +223,13 @@ public sealed class ApprovalStore
                 Status = PluginStatus.Draft,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            Apply(key, revoked);
+            Apply(key, revoked, cancellationToken);
             return revoked;
         }
     }
 
     /// <summary>Marks the version <see cref="PluginStatus.Disabled"/>; the approval hash is kept for <see cref="Enable"/>.</summary>
-    public PluginRecord? Disable(string pluginId, string version)
+    public PluginRecord? Disable(string pluginId, string version, CancellationToken cancellationToken = default)
     {
         ValidateIdentity(pluginId, version);
 
@@ -220,7 +242,7 @@ public sealed class ApprovalStore
             }
 
             var disabled = record with { Status = PluginStatus.Disabled, UpdatedAt = DateTimeOffset.UtcNow };
-            Apply(key, disabled);
+            Apply(key, disabled, cancellationToken);
             return disabled;
         }
     }
@@ -231,7 +253,7 @@ public sealed class ApprovalStore
     /// <see cref="PluginStatus.Draft"/> record keeps needing approval even when it still carries an old hash and
     /// <see cref="PluginStatus.Uninstalled"/> stays uninstalled because enable cannot resurrect a removed plugin.
     /// </summary>
-    public PluginRecord? Enable(string pluginId, string version)
+    public PluginRecord? Enable(string pluginId, string version, CancellationToken cancellationToken = default)
     {
         ValidateIdentity(pluginId, version);
 
@@ -253,7 +275,7 @@ public sealed class ApprovalStore
                 Status = string.IsNullOrEmpty(record.ApprovedHash) ? PluginStatus.Draft : PluginStatus.Approved,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            Apply(key, enabled);
+            Apply(key, enabled, cancellationToken);
             return enabled;
         }
     }
@@ -274,13 +296,13 @@ public sealed class ApprovalStore
     /// Persists <paramref name="candidate"/> and only then publishes it, so a failed write leaves the in-memory state
     /// equal to what the file holds.
     /// </summary>
-    private void Apply((string PluginId, string Version) key, PluginRecord record)
+    private void Apply((string PluginId, string Version) key, PluginRecord record, CancellationToken cancellationToken)
     {
         var candidate = new Dictionary<(string PluginId, string Version), PluginRecord>(records)
         {
             [key] = record,
         };
-        Persist(candidate);
+        Persist(candidate, cancellationToken);
         records = candidate;
     }
 
@@ -310,14 +332,14 @@ public sealed class ApprovalStore
 
     private PluginRecord[] ReadFile()
     {
-        if (!File.Exists(FilePath))
+        using var stream = OpenForReading();
+        if (stream is null)
         {
             return [];
         }
 
         try
         {
-            using var stream = OpenForReading(FilePath);
             return JsonSerializer.Deserialize(stream, ApprovalJsonContext.Default.PluginRecordArray) ?? [];
         }
         catch (JsonException exception)
@@ -327,27 +349,44 @@ public sealed class ApprovalStore
     }
 
     /// <summary>
-    /// Opens the state file for reading, retrying while another store swaps the file in: Windows reports a file that
-    /// is being replaced as access denied until the swap finished.
+    /// Opens the state file for reading, retrying a bounded number of times while another store swaps the file in:
+    /// Windows reports a file that is being replaced as access denied until the swap finished, and a file that
+    /// momentarily disappeared reads as no state file at all, which is what <c>File.Exists</c> means for a fresh store.
     /// </summary>
-    private static FileStream OpenForReading(string path)
+    private FileStream? OpenForReading()
     {
-        const int attempts = 8;
         for (var attempt = 0; ; attempt++)
         {
+            if (!File.Exists(FilePath))
+            {
+                return null;
+            }
+
             try
             {
-                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                return new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             }
-            catch (UnauthorizedAccessException) when (attempt < attempts)
+            catch (Exception exception) when (attempt < ReadAttempts && IsRetryableRead(exception))
             {
-                Thread.Sleep(1);
+                if (attempt < ReadSpinAttempts)
+                {
+                    Thread.Yield();
+                }
+                else
+                {
+                    Thread.Sleep(RetryDelayMilliseconds);
+                }
             }
         }
     }
 
-    private void Persist(Dictionary<(string PluginId, string Version), PluginRecord> candidate)
+    private bool IsRetryableRead(Exception exception) =>
+        exception is FileNotFoundException or DirectoryNotFoundException || IsReplaceRace(exception);
+
+    private void Persist(Dictionary<(string PluginId, string Version), PluginRecord> candidate, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var directory = Path.GetDirectoryName(FilePath);
         if (!string.IsNullOrEmpty(directory))
         {
@@ -363,7 +402,7 @@ public sealed class ApprovalStore
                 stream.Flush(flushToDisk: true);
             }
 
-            Replace(temporary);
+            Replace(temporary, cancellationToken);
         }
         catch
         {
@@ -374,31 +413,66 @@ public sealed class ApprovalStore
 
     /// <summary>
     /// Replaces the state file with the finished temporary file. Windows refuses to replace a file while another
-    /// handle still has it open, so the replacement is retried for up to two seconds before the failure surfaces.
-    /// The temporary file is renamed onto the state file, which keeps the state file's name present for readers.
+    /// handle still has it open, so the replace is retried within <see cref="replaceBudget"/>: first by yielding the
+    /// CPU, then by sleeping a millisecond at a time. The temporary file is renamed onto the state file, which keeps
+    /// the state file's name present for readers.
     /// </summary>
-    private void Replace(string temporary)
+    private void Replace(string temporary, CancellationToken cancellationToken)
     {
-        const int timeoutMilliseconds = 2000;
-        const int retryDelayMilliseconds = 1;
-        var deadline = Environment.TickCount64 + timeoutMilliseconds;
+        var start = Stopwatch.GetTimestamp();
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 File.Move(temporary, FilePath, overwrite: true);
                 return;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (IsReplaceRace(exception))
             {
-                if (Environment.TickCount64 >= deadline)
+                if (Stopwatch.GetElapsedTime(start) >= replaceBudget)
                 {
                     throw;
                 }
 
-                Thread.Sleep(retryDelayMilliseconds);
+                if (Stopwatch.GetElapsedTime(start) < ReplaceSpinPhase)
+                {
+                    Thread.Yield();
+                }
+                else
+                {
+                    WaitForRetry(cancellationToken);
+                }
             }
         }
+    }
+
+    private static void WaitForRetry(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.CanBeCanceled)
+        {
+            _ = cancellationToken.WaitHandle.WaitOne(RetryDelayMilliseconds);
+            return;
+        }
+
+        Thread.Sleep(RetryDelayMilliseconds);
+    }
+
+    /// <summary>
+    /// True only for the Windows "state file temporarily not replaceable" race: the platform is Windows, the failure
+    /// is an access denial or a sharing/lock violation, and the state file is still there. Anything else — a missing
+    /// directory, a path that is a directory, a full disk, a real ACL denial — is reported without retrying.
+    /// </summary>
+    private bool IsReplaceRace(Exception exception)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        var isRace = exception is UnauthorizedAccessException ||
+            (exception is IOException io && (io.HResult & 0xFFFF) is SharingViolation or LockViolation);
+        return isRace && File.Exists(FilePath);
     }
 
     private static void TryDelete(string path)
