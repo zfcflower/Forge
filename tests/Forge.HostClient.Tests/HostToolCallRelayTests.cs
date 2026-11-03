@@ -133,9 +133,10 @@ public sealed class HostToolCallRelayTests
     }
 
     [Fact]
-    public async Task An_approved_call_runs_the_tool_with_the_arguments_and_context_from_the_host()
+    public async Task A_fully_qualified_working_directory_from_the_host_is_approved_and_used_verbatim()
     {
         var tool = new StubTool("echo", ToolSideEffect.Write, (_, _, _) => ValueTask.FromResult(new ToolResult("42")));
+        var workingDirectory = AbsoluteDirectory("host-dir");
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(
             host,
@@ -146,7 +147,7 @@ public sealed class HostToolCallRelayTests
 
         var response = await host.CallClientAsync(
             Operation,
-            """{"name":"echo","args":{"a":1},"workingDir":"C:/host-dir","sessionId":"s-9","depth":2}""",
+            $$"""{"name":"echo","args":{"a":1},"workingDir":"{{workingDirectory}}","sessionId":"s-9","depth":2}""",
             limit.Token);
 
         Assert.Equal(new ToolOutput("42", false), Output(response));
@@ -154,16 +155,17 @@ public sealed class HostToolCallRelayTests
         Assert.Equal("echo", invocation.Call.Name);
         Assert.Equal("""{"a":1}""", invocation.Call.ArgumentsJson);
         Assert.StartsWith("hostcall-", invocation.Call.Id, StringComparison.Ordinal);
-        Assert.Equal(new ToolContext("s-9", "C:/host-dir", 2), invocation.Context);
+        Assert.Equal(new ToolContext("s-9", workingDirectory, 2), invocation.Context);
     }
 
     [Fact]
     public async Task The_carried_working_directory_session_and_depth_win_over_the_options()
     {
         var tool = new StubTool("echo");
+        var workingDirectory = AbsoluteDirectory("repo/sub");
         ApprovalRequest? approved = null;
         await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = "D:/configured" };
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = AbsoluteDirectory("configured") };
         await using var client = ClientFactory.Create(
             host,
             resolver: name => name == "echo" ? tool : null,
@@ -178,17 +180,22 @@ public sealed class HostToolCallRelayTests
 
         var response = await host.CallClientAsync(
             Operation,
-            """{"name":"echo","args":{"a":1},"sessionId":"sess-7","workingDir":"D:/repo/sub","depth":4}""",
+            $$"""{"name":"echo","args":{"a":1},"sessionId":"sess-7","workingDir":"{{workingDirectory}}","depth":4}""",
             limit.Token);
 
         Assert.Equal(new ToolOutput("ran echo", false), Output(response));
-        Assert.Equal("D:/repo/sub", approved?.WorkingDirectory);
+        Assert.Equal(workingDirectory, approved?.WorkingDirectory);
         var invocation = Assert.Single(tool.Invocations);
-        Assert.Equal(new ToolContext("sess-7", "D:/repo/sub", 4), invocation.Context);
+        Assert.Equal(new ToolContext("sess-7", workingDirectory, 4), invocation.Context);
     }
 
-    [Fact]
-    public async Task A_non_rooted_working_directory_fails_closed_before_approval_and_invocation()
+    [Theory]
+    [InlineData("relative/dir")]
+    [InlineData("sub")]
+    [InlineData("C:relative")]
+    [InlineData("\\relative")]
+    public async Task A_working_directory_that_is_not_fully_qualified_fails_closed_before_approval_and_invocation(
+        string workingDirectory)
     {
         var tool = new StubTool("echo");
         var approvals = 0;
@@ -206,12 +213,46 @@ public sealed class HostToolCallRelayTests
 
         var response = await host.CallClientAsync(
             Operation,
-            """{"name":"echo","args":{},"sessionId":"sess-7","workingDir":"relative/dir","depth":1}""",
+            $$"""{"name":"echo","args":{},"sessionId":"sess-7","workingDir":"{{workingDirectory}}","depth":1}""",
             limit.Token);
 
         var output = Output(response);
         Assert.True(output.IsError);
-        Assert.Contains("not a rooted path", output.Content);
+        Assert.Contains("not a fully qualified path", output.Content);
+        Assert.Equal(0, approvals);
+        Assert.Equal(0, tool.InvocationCount);
+    }
+
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("\"   \"")]
+    [InlineData("null")]
+    public async Task A_present_but_blank_working_directory_fails_closed_instead_of_falling_back(string workingDirJson)
+    {
+        var tool = new StubTool("echo");
+        var approvals = 0;
+        await using var host = new FakeHost();
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = AbsoluteDirectory("configured") };
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) =>
+            {
+                Interlocked.Increment(ref approvals);
+                return ValueTask.FromResult(ApprovalDecision.Allow);
+            },
+            options: options);
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+
+        var response = await host.CallClientAsync(
+            Operation,
+            "{\"name\":\"echo\",\"args\":{},\"workingDir\":" + workingDirJson + "}",
+            limit.Token);
+
+        var output = Output(response);
+        Assert.True(output.IsError);
+        Assert.Contains("working directory carried by the host is blank", output.Content);
         Assert.Equal(0, approvals);
         Assert.Equal(0, tool.InvocationCount);
     }
@@ -220,6 +261,7 @@ public sealed class HostToolCallRelayTests
     public async Task The_approval_request_carries_the_tool_side_effect_arguments_and_working_directory()
     {
         var tool = new StubTool("writer", ToolSideEffect.Execute);
+        var workingDirectory = AbsoluteDirectory("proj");
         ApprovalRequest? seen = null;
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(
@@ -233,18 +275,22 @@ public sealed class HostToolCallRelayTests
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
 
-        await host.CallClientAsync(Operation, """{"name":"writer","args":{"path":"a.txt"},"workingDir":"C:/proj"}""", limit.Token);
+        await host.CallClientAsync(
+            Operation,
+            $$"""{"name":"writer","args":{"path":"a.txt"},"workingDir":"{{workingDirectory}}"}""",
+            limit.Token);
 
-        Assert.Equal(new ApprovalRequest("writer", """{"path":"a.txt"}""", ToolSideEffect.Execute, "C:/proj"), seen);
+        Assert.Equal(new ApprovalRequest("writer", """{"path":"a.txt"}""", ToolSideEffect.Execute, workingDirectory), seen);
     }
 
     [Fact]
-    public async Task Working_directory_falls_back_to_the_option_and_then_to_the_process_directory()
+    public async Task An_absent_working_directory_falls_back_to_the_option()
     {
         var requests = new ConcurrentQueue<ApprovalRequest>();
         var tool = new StubTool("echo");
+        var configured = AbsoluteDirectory("configured");
         await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = "C:/configured" };
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = configured };
         await using var client = ClientFactory.Create(
             host,
             resolver: name => name == "echo" ? tool : null,
@@ -258,10 +304,41 @@ public sealed class HostToolCallRelayTests
         using var limit = TestLimit.Create();
 
         await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
-        await host.CallClientAsync(Operation, ToolCallPayload("echo", workingDir: "  "), limit.Token);
 
-        var directories = requests.Select(request => request.WorkingDirectory).ToArray();
-        Assert.Equal(new[] { "C:/configured", "C:/configured" }, directories);
+        Assert.Equal(new[] { configured }, requests.Select(request => request.WorkingDirectory).ToArray());
+    }
+
+    [Theory]
+    [InlineData("relative/dir")]
+    [InlineData("C:relative")]
+    [InlineData("\\relative")]
+    public async Task An_absent_working_directory_with_a_non_fully_qualified_option_fails_closed(
+        string configured)
+    {
+        var tool = new StubTool("echo");
+        var approvals = 0;
+        await using var host = new FakeHost();
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = configured };
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) =>
+            {
+                Interlocked.Increment(ref approvals);
+                return ValueTask.FromResult(ApprovalDecision.Allow);
+            },
+            options: options);
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+
+        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+
+        var output = Output(response);
+        Assert.True(output.IsError);
+        Assert.Contains("the fallback working directory", output.Content);
+        Assert.Contains("is not a fully qualified path", output.Content);
+        Assert.Equal(0, approvals);
+        Assert.Equal(0, tool.InvocationCount);
     }
 
     [Fact]
@@ -422,11 +499,12 @@ public sealed class HostToolCallRelayTests
         Assert.Contains(statuses, e => e.Status == HostStatus.Failed && e.Detail is not null);
     }
 
-    private static string ToolCallPayload(string name, string? workingDir = null)
-    {
-        var location = workingDir is null ? string.Empty : ",\"workingDir\":\"" + workingDir + "\"";
-        return "{\"name\":\"" + name + "\",\"args\":{}" + location + "}";
-    }
+    private static string AbsoluteDirectory(string name) =>
+        Path.Combine(Path.GetTempPath(), "forge-hc", name).Replace('\\', '/');
+
+    /// <summary>A call that carries no <c>workingDir</c> at all, as an old host sends it.</summary>
+    private static string ToolCallPayload(string name) =>
+        "{\"name\":\"" + name + "\",\"args\":{}}";
 
     private static ToolOutput Output(IpcMessage response)
     {

@@ -60,11 +60,10 @@ public sealed class HostStopHandlingTests
     [Fact]
     public async Task Acknowledged_stop_waits_the_exit_timeout_before_killing_a_host_that_stays_alive()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "forge-hc-stop-" + Guid.NewGuid().ToString("N")[..10]);
-        Directory.CreateDirectory(directory);
+        var directory = SleeperHost.NewDirectory();
         await using var host = new FakeHost();
         var options = new ExtensionHostClientOptions { ProcessExitTimeout = TimeSpan.FromSeconds(1) };
-        await using var client = new ExtensionHostClient(SleeperConnection(host, directory), options: options);
+        await using var client = new ExtensionHostClient(SleeperHost.Connection(host, directory), options: options);
         try
         {
             var accepting = host.AcceptAsync();
@@ -72,12 +71,12 @@ public sealed class HostStopHandlingTests
             await client.StartAsync(limit.Token);
             await accepting.Bounded();
             var pid = client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host process.");
-            Assert.True(IsRunning(pid));
+            Assert.True(SleeperHost.IsRunning(pid));
 
             var clock = Stopwatch.StartNew();
             await client.StopAsync(limit.Token);
             clock.Stop();
-            await WaitForExitAsync(pid);
+            await SleeperHost.WaitForExitAsync(pid);
 
             Assert.Equal(HostStatus.Stopped, client.Status);
             Assert.Single(host.Requests("host.stop"));
@@ -87,15 +86,14 @@ public sealed class HostStopHandlingTests
         finally
         {
             await client.DisposeAsync();
-            DeleteDirectory(directory);
+            SleeperHost.DeleteDirectory(directory);
         }
     }
 
     [Fact]
     public async Task Unanswered_stop_kills_the_host_without_waiting_for_self_exit()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "forge-hc-stop-" + Guid.NewGuid().ToString("N")[..10]);
-        Directory.CreateDirectory(directory);
+        var directory = SleeperHost.NewDirectory();
         await using var host = new FakeHost();
         host.On("host.stop", FakeHost.NeverAnswer);
         var options = new ExtensionHostClientOptions
@@ -103,7 +101,7 @@ public sealed class HostStopHandlingTests
             StopRequestTimeout = TimeSpan.FromMilliseconds(300),
             ProcessExitTimeout = TimeSpan.FromSeconds(30),
         };
-        await using var client = new ExtensionHostClient(SleeperConnection(host, directory), options: options);
+        await using var client = new ExtensionHostClient(SleeperHost.Connection(host, directory), options: options);
         try
         {
             var accepting = host.AcceptAsync();
@@ -111,12 +109,12 @@ public sealed class HostStopHandlingTests
             await client.StartAsync(limit.Token);
             await accepting.Bounded();
             var pid = client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host process.");
-            Assert.True(IsRunning(pid));
+            Assert.True(SleeperHost.IsRunning(pid));
 
             var clock = Stopwatch.StartNew();
             await client.StopAsync(limit.Token).Bounded();
             clock.Stop();
-            await WaitForExitAsync(pid);
+            await SleeperHost.WaitForExitAsync(pid);
 
             Assert.Equal(HostStatus.Stopped, client.Status);
             Assert.Single(host.Requests("host.stop"));
@@ -126,71 +124,7 @@ public sealed class HostStopHandlingTests
         finally
         {
             await client.DisposeAsync();
-            DeleteDirectory(directory);
-        }
-    }
-
-    private static HostConnection SleeperConnection(FakeHost host, string directory)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            var script = Path.Combine(directory, "sleeper.cmd");
-            File.WriteAllText(script, "@echo off\r\nping -n 60 127.0.0.1 > NUL\r\n");
-            return new HostConnection
-            {
-                PipeName = host.PipeName,
-                HostExecutablePath = "cmd.exe",
-                RuntimePath = string.Empty,
-                HostArguments = ["/c", script],
-                StartTimeout = TimeSpan.FromSeconds(10),
-            };
-        }
-
-        var shell = Path.Combine(directory, "sleeper.sh");
-        File.WriteAllText(shell, "#!/bin/sh\nsleep 60\n");
-        File.SetUnixFileMode(shell, UnixFileMode.UserExecute | UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        return new HostConnection
-        {
-            PipeName = host.PipeName,
-            HostExecutablePath = shell,
-            RuntimePath = string.Empty,
-            StartTimeout = TimeSpan.FromSeconds(10),
-        };
-    }
-
-    private static bool IsRunning(int processId)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
-    private static async Task WaitForExitAsync(int processId)
-    {
-        using var limit = TestLimit.Create();
-        while (IsRunning(processId))
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(20), limit.Token);
-        }
-    }
-
-    private static void DeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
+            SleeperHost.DeleteDirectory(directory);
         }
     }
 }

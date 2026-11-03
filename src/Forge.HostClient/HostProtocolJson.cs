@@ -30,13 +30,24 @@ internal sealed record PluginRevokeArgs(
 
 /// <summary>Host → main program: a plugin calls a main-program tool. <c>args</c> is read tolerantly
 /// (object, or a JSON string holding the object); <c>workingDir</c>/<c>sessionId</c>/<c>depth</c> are the
-/// originating invocation's context and <c>workingDir</c> must be a rooted path.</summary>
+/// originating invocation's context and <c>workingDir</c> must be a fully qualified path.</summary>
 internal sealed record HostToolCallArgs(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("args")] JsonElement Args,
     [property: JsonPropertyName("workingDir")] string? WorkingDirectory,
     [property: JsonPropertyName("sessionId")] string? SessionId,
     [property: JsonPropertyName("depth")] int Depth);
+
+/// <summary>A decoded <c>host.tool_call</c>. <see cref="WorkingDirectoryProvided"/> separates an absent
+/// <c>workingDir</c> (an old host, the only case that may fall back) from one that is present but blank or not
+/// fully qualified.</summary>
+internal readonly record struct HostToolCallRequest(
+    string Name,
+    string ArgumentsJson,
+    string? WorkingDirectory,
+    bool WorkingDirectoryProvided,
+    string SessionId,
+    int Depth);
 
 internal sealed record HostToolCallOutput(
     [property: JsonPropertyName("content")] string Content,
@@ -182,32 +193,24 @@ internal static class HostProtocolJson
         return true;
     }
 
-    /// <summary>Reads a <c>host.tool_call</c> request; the arguments JSON is normalized to a text form.</summary>
-    public static bool TryReadHostToolCall(
-        JsonElement? payload,
-        out string name,
-        out string argumentsJson,
-        out string? workingDirectory,
-        out string sessionId,
-        out int depth)
+    /// <summary>Reads a <c>host.tool_call</c> request; the arguments JSON is normalized to a text form and
+    /// <c>workingDir</c> is returned verbatim, so the caller can reject a blank value instead of defaulting it.</summary>
+    public static bool TryReadHostToolCall(JsonElement? payload, out HostToolCallRequest call)
     {
-        name = string.Empty;
-        argumentsJson = "{}";
-        workingDirectory = null;
-        sessionId = string.Empty;
-        depth = 0;
-
+        call = default;
         var message = Deserialize<HostToolCallArgs>(payload, HostClientJsonContext.Default.HostToolCallArgs);
         if (message?.Name is not { Length: > 0 } toolName)
         {
             return false;
         }
 
-        name = toolName;
-        workingDirectory = string.IsNullOrWhiteSpace(message.WorkingDirectory) ? null : message.WorkingDirectory;
-        sessionId = message.SessionId ?? string.Empty;
-        depth = Math.Max(0, message.Depth);
-        argumentsJson = NormalizeArguments(message.Args);
+        call = new HostToolCallRequest(
+            toolName,
+            NormalizeArguments(message.Args),
+            message.WorkingDirectory,
+            payload.HasValue && payload.Value.TryGetProperty("workingDir", out _),
+            message.SessionId ?? string.Empty,
+            Math.Max(0, message.Depth));
         return true;
     }
 

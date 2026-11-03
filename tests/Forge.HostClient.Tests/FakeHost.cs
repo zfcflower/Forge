@@ -14,6 +14,7 @@ internal sealed class FakeHost : IAsyncDisposable
     private readonly ConcurrentQueue<IpcMessage> requests = new();
     private readonly ConcurrentQueue<IpcMessage> notifications = new();
     private readonly List<(string Operation, string ArgsJson)> onAccept = [];
+    private readonly EventLog<int> accepts = new();
     private readonly CancellationTokenSource lifetime = new();
     private IpcPeer? peer;
     private NamedPipeServerTransport? transport;
@@ -48,6 +49,10 @@ internal sealed class FakeHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Completes once the host has accepted <paramref name="count"/> connections and sent every queued
+    /// on-accept notification of the latest one; lets a test hold the client until those frames are in flight.</summary>
+    public Task WhenAcceptedAsync(int count) => accepts.UntilAsync(seen => seen.Count >= count);
+
     /// <summary>Creates the pipe and waits for the client. Call before the client starts so it can connect.</summary>
     public async Task<IpcPeer> AcceptAsync()
     {
@@ -69,6 +74,7 @@ internal sealed class FakeHost : IAsyncDisposable
             await NotifyClientAsync(operation, argsJson).ConfigureAwait(false);
         }
 
+        accepts.Add(1);
         return created;
     }
 

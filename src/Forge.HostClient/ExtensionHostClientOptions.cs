@@ -22,7 +22,8 @@ public sealed record ExtensionHostClientOptions
     /// <summary>How long a stopped host process has to exit on its own before its process tree is killed.</summary>
     public TimeSpan ProcessExitTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
-    /// <summary>Working directory used for <c>host.tool_call</c> relays only when the request carries none (an old
-    /// host); null means the main program's current directory.</summary>
+    /// <summary>Working directory used for <c>host.tool_call</c> relays only when the request carries no
+    /// <c>workingDir</c> at all (an old host); null means the main program's current directory. It must be fully
+    /// qualified, otherwise relayed calls fail closed instead of running in it.</summary>
     public string? HostToolWorkingDirectory { get; init; }
 }

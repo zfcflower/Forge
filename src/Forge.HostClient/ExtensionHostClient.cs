@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
@@ -32,6 +33,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     private long nextCallId;
     private long nextGeneration;
     private long registeredGeneration;
+    private long activeGeneration;
     private int status = (int)HostStatus.Stopped;
     private int stopping;
     private int disposed;
@@ -118,6 +120,11 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
             try
             {
+                if (recovering)
+                {
+                    await TeardownAsync(sendHostStop: false, clearTools: false).ConfigureAwait(false);
+                }
+
                 var pipeName = IpcPipe.ValidatePipeName(connection.PipeName);
                 HostProcess? started = null;
                 if (launchesHost)
@@ -277,10 +284,11 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         }
     }
 
-    /// <summary>Drops the peer, transport and host process. The peers' own close path faults pending requests
-    /// with <see cref="IpcConnectionClosedException"/>.</summary>
+    /// <summary>Drops the peer, transport and host process of the current connection generation. The peers' own
+    /// close path faults pending requests with <see cref="IpcConnectionClosedException"/>.</summary>
     private async Task TeardownAsync(bool sendHostStop, bool clearTools)
     {
+        RetireActiveGeneration();
         IpcPeer? active;
         lock (peerGate)
         {
@@ -377,6 +385,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                 or OperationCanceledException or UnauthorizedAccessException or PlatformNotSupportedException)
             {
                 last = ex;
+                RetireActiveGeneration();
                 await DisposeQuietlyAsync(candidate.Peer).ConfigureAwait(false);
                 try
                 {
@@ -430,15 +439,26 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             DefaultTimeout = options.RequestTimeout ?? Timeout.InfiniteTimeSpan,
         });
         var generation = Interlocked.Increment(ref nextGeneration);
-        created.Closed += OnPeerClosed;
+        Volatile.Write(ref activeGeneration, generation);
+        created.Closed += cause => OnPeerClosed(generation, cause);
         created.RequestReceived += (message, ct) => OnRequestAsync(created, message, ct);
         created.NotificationReceived += message => OnNotification(generation, message);
         created.VersionMismatch += OnVersionMismatch;
         return new PeerBundle(created, pipe, generation);
     }
 
-    private void OnPeerClosed(Exception? cause)
+    /// <summary>Stops the current connection generation from reporting: a close callback of a torn-down
+    /// connection must not move the status of the connection that replaced it.</summary>
+    private void RetireActiveGeneration() =>
+        Volatile.Write(ref activeGeneration, Interlocked.Increment(ref nextGeneration));
+
+    private void OnPeerClosed(long generation, Exception? cause)
     {
+        if (generation != Volatile.Read(ref activeGeneration))
+        {
+            return;
+        }
+
         var intentional = Volatile.Read(ref stopping) != 0;
         var next = intentional ? HostStatus.Stopped : HostStatus.Failed;
         lock (statusGate)
@@ -651,30 +671,26 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     /// <summary>A plugin (via the host) calls a main-program tool: resolve, apply the caller's approval path, run.</summary>
     private async Task HandleHostToolCallAsync(IpcPeer active, IpcMessage request, CancellationToken ct)
     {
-        if (!HostProtocolJson.TryReadHostToolCall(
-                request.Arguments, out var name, out var argumentsJson, out var workingDirectory, out var sessionId,
-                out var depth))
+        if (!HostProtocolJson.TryReadHostToolCall(request.Arguments, out var hostCall))
         {
             await RespondToolOutputAsync(active, request.Id, "The host.tool_call request has no tool name.", isError: true)
                 .ConfigureAwait(false);
             return;
         }
 
-        if (workingDirectory is not null && !Path.IsPathRooted(workingDirectory))
+        if (!TryResolveWorkingDirectory(hostCall, out var directory, out var directoryProblem))
         {
             await RespondToolOutputAsync(
-                    active, request.Id,
-                    $"'{name}' was not run: the working directory '{workingDirectory}' carried by the host is not a " +
-                    "rooted path.",
-                    isError: true)
+                    active, request.Id, $"'{hostCall.Name}' was not run: {directoryProblem}", isError: true)
                 .ConfigureAwait(false);
             return;
         }
 
-        var tool = toolResolver?.Invoke(name);
+        var tool = toolResolver?.Invoke(hostCall.Name);
         if (tool is null)
         {
-            await RespondToolOutputAsync(active, request.Id, $"Unknown tool '{name}'.", isError: true).ConfigureAwait(false);
+            await RespondToolOutputAsync(active, request.Id, $"Unknown tool '{hostCall.Name}'.", isError: true)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -683,17 +699,17 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         {
             await RespondToolOutputAsync(
                     active, request.Id,
-                    $"'{name}' was not run: the main program has no approval path for plugin tool calls.",
+                    $"'{hostCall.Name}' was not run: the main program has no approval path for plugin tool calls.",
                     isError: true)
                 .ConfigureAwait(false);
             return;
         }
 
-        var directory = workingDirectory ?? FallbackWorkingDirectory();
         ApprovalDecision decision;
         try
         {
-            decision = await approval(new ApprovalRequest(name, argumentsJson, tool.SideEffect, directory), ct)
+            decision = await approval(
+                    new ApprovalRequest(hostCall.Name, hostCall.ArgumentsJson, tool.SideEffect, directory), ct)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -703,23 +719,26 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         catch (Exception ex)
         {
             await RespondToolOutputAsync(
-                    active, request.Id, $"'{name}' was not run: the approval path failed: {ex.Message}", isError: true)
+                    active, request.Id, $"'{hostCall.Name}' was not run: the approval path failed: {ex.Message}",
+                    isError: true)
                 .ConfigureAwait(false);
             return;
         }
 
         if (decision != ApprovalDecision.Allow)
         {
-            await RespondToolOutputAsync(active, request.Id, $"The main program denied '{name}'.", isError: true)
+            await RespondToolOutputAsync(active, request.Id, $"The main program denied '{hostCall.Name}'.", isError: true)
                 .ConfigureAwait(false);
             return;
         }
 
-        var call = new ToolCall($"hostcall-{Interlocked.Increment(ref nextCallId)}", name, argumentsJson);
+        var call = new ToolCall($"hostcall-{Interlocked.Increment(ref nextCallId)}", hostCall.Name, hostCall.ArgumentsJson);
         ToolResult result;
         try
         {
-            result = await tool.InvokeAsync(call, new ToolContext(sessionId, directory, depth), ct).ConfigureAwait(false);
+            result = await tool.InvokeAsync(
+                    call, new ToolContext(hostCall.SessionId, directory, hostCall.Depth), ct)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -734,6 +753,43 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
         await RespondToolOutputAsync(active, request.Id, result.Content ?? string.Empty, result.IsError).ConfigureAwait(false);
     }
+
+    /// <summary>Picks the directory a relayed call runs in: the fully qualified <c>workingDir</c> the host carried,
+    /// or - only when the request carries none at all (an old host) - the fallback, which must itself be fully
+    /// qualified. Anything else is reported instead of approved and run.</summary>
+    private bool TryResolveWorkingDirectory(HostToolCallRequest call, out string directory, out string problem)
+    {
+        if (call.WorkingDirectoryProvided)
+        {
+            if (IsFullyQualified(call.WorkingDirectory))
+            {
+                directory = call.WorkingDirectory;
+                problem = string.Empty;
+                return true;
+            }
+
+            directory = string.Empty;
+            problem = string.IsNullOrWhiteSpace(call.WorkingDirectory)
+                ? "the working directory carried by the host is blank."
+                : $"the working directory '{call.WorkingDirectory}' carried by the host is not a fully qualified path.";
+            return false;
+        }
+
+        var fallback = FallbackWorkingDirectory();
+        if (IsFullyQualified(fallback))
+        {
+            directory = fallback;
+            problem = string.Empty;
+            return true;
+        }
+
+        directory = string.Empty;
+        problem = $"the fallback working directory '{fallback}' is not a fully qualified path.";
+        return false;
+    }
+
+    private static bool IsFullyQualified([NotNullWhen(true)] string? path) =>
+        !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path);
 
     private string FallbackWorkingDirectory() =>
         !string.IsNullOrWhiteSpace(options.HostToolWorkingDirectory)

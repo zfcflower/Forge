@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
@@ -140,5 +141,78 @@ internal static class ToolFixtures
             """{"pluginId":"alpha","tools":[{"name":"echo","description":"Echoes","inputSchemaJson":"{}","sideEffect":0}]}""");
         await host.SyncAsync();
         return Assert.IsType<ExtensionHostTool>(Assert.Single(client.Tools));
+    }
+}
+
+/// <summary>A self-started "host" that speaks no protocol and stays alive until it is killed, so tests can tell a
+/// torn-down generation from a leaked one by its process id.</summary>
+internal static class SleeperHost
+{
+    public static string NewDirectory() =>
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "forge-hc-proc-" + Guid.NewGuid().ToString("N")[..10]))
+            .FullName;
+
+    public static HostConnection Connection(FakeHost host, string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var script = Path.Combine(directory, "sleeper.cmd");
+            File.WriteAllText(script, "@echo off" + Environment.NewLine + "ping -n 60 127.0.0.1 > NUL" + Environment.NewLine);
+            return new HostConnection
+            {
+                PipeName = host.PipeName,
+                HostExecutablePath = "cmd.exe",
+                RuntimePath = string.Empty,
+                HostArguments = ["/c", script],
+                StartTimeout = TimeSpan.FromSeconds(10),
+            };
+        }
+
+        var shell = Path.Combine(directory, "sleeper.sh");
+        File.WriteAllText(shell, "#!/bin/sh" + Environment.NewLine + "sleep 60" + Environment.NewLine);
+        File.SetUnixFileMode(shell, UnixFileMode.UserExecute | UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        return new HostConnection
+        {
+            PipeName = host.PipeName,
+            HostExecutablePath = shell,
+            RuntimePath = string.Empty,
+            StartTimeout = TimeSpan.FromSeconds(10),
+        };
+    }
+
+    public static bool IsRunning(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    public static async Task WaitForExitAsync(int processId)
+    {
+        using var limit = TestLimit.Create();
+        while (IsRunning(processId))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), limit.Token).ConfigureAwait(false);
+        }
+    }
+
+    public static void DeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+        }
     }
 }
