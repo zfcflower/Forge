@@ -1,26 +1,291 @@
+using System.Diagnostics;
+
 namespace Forge.IO;
 
 /// <summary>Crash-safe whole-file replacement for files other programs may have open. No locking:
 /// it is safe for user workspace files. See <c>SPEC.md</c> for the retry policy.</summary>
 public static class AtomicFile
 {
+    private const int BufferSize = 4096;
+    private const int SharingViolation = 32;
+    private const int LockViolation = 33;
+    private const int UnixAlreadyExists = 17;
+    private const int FileExists = 80;
+    private const int AlreadyExists = 183;
+    private const int RetryDelayMilliseconds = 1;
+    private const int MissingRecheckLimit = 16;
+
+    private static readonly TimeSpan SpinPhase = TimeSpan.FromMilliseconds(10);
+
     /// <summary>Writes <paramref name="data"/> to a temporary file in the destination directory, flushes it to disk,
     /// then replaces <paramref name="path"/>. The destination is either the old or the new content, never partial.
     /// Only the confirmed Windows file-in-use replace race is retried, within <paramref name="options"/>' budget;
     /// when it is exhausted the last original exception is rethrown. On failure or cancellation the temporary file
     /// is removed and the destination is untouched.</summary>
     public static void WriteAllBytes(string path, ReadOnlySpan<byte> data, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
-        => throw new NotImplementedException();
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var budget = ResolveBudget(options);
+        var destination = Path.GetFullPath(path);
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureDirectory(destination);
+
+        var temporary = TemporaryPath(destination);
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize))
+            {
+                stream.Write(data);
+                stream.Flush(flushToDisk: true);
+            }
+
+            Publish(temporary, destination, budget, cancellationToken);
+        }
+        catch
+        {
+            TryDelete(temporary);
+            throw;
+        }
+    }
 
     /// <summary>Async variant of <see cref="WriteAllBytes"/>; the retry wait is cancellable.</summary>
     public static Task WriteAllBytesAsync(string path, ReadOnlyMemory<byte> data, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
-        => throw new NotImplementedException();
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var budget = ResolveBudget(options);
+        return WriteAllBytesCoreAsync(Path.GetFullPath(path), data, budget, cancellationToken);
+    }
 
     /// <summary>Reads a file with <c>FileShare.ReadWrite | FileShare.Delete</c> so it never blocks a writer's replace.
     /// Returns <c>null</c> only when the file definitely does not exist after bounded re-checks; a transient
     /// disappearance during a replace is retried, never reported as missing data.</summary>
     public static byte[]? ReadAllBytesShared(string path, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
-        => throw new NotImplementedException();
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var budget = ResolveBudget(options);
+        var fullPath = Path.GetFullPath(path);
+        var start = Stopwatch.GetTimestamp();
+
+        for (var missingAttempts = 0; ;)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize, FileOptions.SequentialScan);
+                return ReadAll(stream);
+            }
+            catch (Exception exception) when (IsMissing(exception))
+            {
+                if (++missingAttempts >= MissingRecheckLimit || Stopwatch.GetElapsedTime(start) >= budget)
+                {
+                    return null;
+                }
+
+                Wait(start, cancellationToken);
+            }
+            catch (Exception exception) when (IsReplaceRace(exception, fullPath))
+            {
+                if (Stopwatch.GetElapsedTime(start) >= budget)
+                {
+                    throw;
+                }
+
+                Wait(start, cancellationToken);
+            }
+        }
+    }
+
+    private static async Task WriteAllBytesCoreAsync(string destination, ReadOnlyMemory<byte> data, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureDirectory(destination);
+
+        var temporary = TemporaryPath(destination);
+        try
+        {
+            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous))
+            {
+                await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
+            }
+
+            await PublishAsync(temporary, destination, budget, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            TryDelete(temporary);
+            throw;
+        }
+    }
+
+    private static async Task PublishAsync(string temporary, string destination, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        var start = Stopwatch.GetTimestamp();
+        if (!File.Exists(destination))
+        {
+            try
+            {
+                File.Move(temporary, destination, overwrite: false);
+                return;
+            }
+            catch (IOException exception) when (IsDestinationAppeared(exception, destination))
+            {
+            }
+        }
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                File.Move(temporary, destination, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (IsReplaceRace(exception, destination))
+            {
+                if (Stopwatch.GetElapsedTime(start) >= budget)
+                {
+                    throw;
+                }
+
+                if (Stopwatch.GetElapsedTime(start) < SpinPhase)
+                {
+                    Thread.Yield();
+                }
+                else
+                {
+                    await Task.Delay(RetryDelayMilliseconds, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    private static void Publish(string temporary, string destination, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        var start = Stopwatch.GetTimestamp();
+        if (!File.Exists(destination))
+        {
+            try
+            {
+                File.Move(temporary, destination, overwrite: false);
+                return;
+            }
+            catch (IOException exception) when (IsDestinationAppeared(exception, destination))
+            {
+            }
+        }
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                File.Move(temporary, destination, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (IsReplaceRace(exception, destination))
+            {
+                if (Stopwatch.GetElapsedTime(start) >= budget)
+                {
+                    throw;
+                }
+
+                Wait(start, cancellationToken);
+            }
+        }
+    }
+
+    private static void Wait(long start, CancellationToken cancellationToken)
+    {
+        if (Stopwatch.GetElapsedTime(start) < SpinPhase)
+        {
+            Thread.Yield();
+            return;
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            _ = cancellationToken.WaitHandle.WaitOne(RetryDelayMilliseconds);
+            return;
+        }
+
+        Thread.Sleep(RetryDelayMilliseconds);
+    }
+
+    private static bool IsReplaceRace(Exception exception, string destination)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        var isRace = exception is UnauthorizedAccessException ||
+            (exception is IOException io && (io.HResult & 0xFFFF) is SharingViolation or LockViolation);
+        return isRace && File.Exists(destination);
+    }
+
+    private static bool IsDestinationAppeared(IOException exception, string destination) =>
+        ((exception.HResult & 0xFFFF) is AlreadyExists or FileExists or UnixAlreadyExists) && File.Exists(destination);
+    private static bool IsMissing(Exception exception) =>
+        exception is FileNotFoundException or DirectoryNotFoundException;
+
+    private static byte[] ReadAll(FileStream stream)
+    {
+        var length = stream.Length;
+        if (length == 0)
+        {
+            return [];
+        }
+
+        if (length > Array.MaxLength)
+        {
+            throw new IOException($"'{stream.Name}' is too large to read into memory.");
+        }
+
+        var buffer = new byte[length];
+        var read = 0;
+        while (read < buffer.Length)
+        {
+            var count = stream.Read(buffer, read, buffer.Length - read);
+            if (count == 0)
+            {
+                break;
+            }
+
+            read += count;
+        }
+
+        return read == buffer.Length ? buffer : buffer[..read];
+    }
+
+    private static TimeSpan ResolveBudget(AtomicFileOptions? options)
+    {
+        var budget = (options ?? new AtomicFileOptions()).RetryBudget;
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(budget, TimeSpan.Zero, nameof(options));
+        return budget;
+    }
+
+    private static void EnsureDirectory(string destination)
+    {
+        var directory = Path.GetDirectoryName(destination);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+    }
+
+    private static string TemporaryPath(string destination) => $"{destination}.{Guid.NewGuid():N}.tmp";
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 }
 
 /// <summary>Retry budget for <see cref="AtomicFile"/>.</summary>
