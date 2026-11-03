@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Forge.Editor.Tests.Support;
 using Forge.Editor.Text;
@@ -222,6 +223,73 @@ public class TextFileCodecTests
         var reloaded = await TextDocument.LoadAsync(path);
         Assert.Equal(text, reloaded.Snapshot.GetText());
         Assert.Equal(20001, reloaded.Snapshot.LineCount);
+    }
+
+    [Fact]
+    public async Task Saving_while_another_handle_holds_the_file_succeeds_once_it_is_released()
+    {
+        using var dir = new TempDirectory();
+        var path = dir.WriteText("held.txt", "original");
+        var document = new TextDocument("replacement");
+        document.Insert(0, "x");
+        var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        long finished = 0;
+
+        var save = Task.Run(async () =>
+        {
+            await document.SaveAsync(path);
+            finished = Stopwatch.GetTimestamp();
+        });
+        await Task.Delay(TimeSpan.FromMilliseconds(300));
+        var released = Stopwatch.GetTimestamp();
+        held.Dispose();
+
+        await save.WaitAsync(TimeSpan.FromSeconds(30));
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(finished >= released, "the save completed while the holder still had the file open");
+        }
+
+        Assert.Equal("xreplacement", await File.ReadAllTextAsync(path));
+        Assert.Equal(new[] { path }, Directory.GetFiles(dir.Root));
+        Assert.False(document.IsDirty);
+    }
+
+    [Fact]
+    public async Task A_failed_save_leaves_the_original_bytes_and_no_temporary_file()
+    {
+        using var dir = new TempDirectory();
+        var path = dir.WriteText("readonly.txt", "original\r\ncontent");
+        var original = await File.ReadAllBytesAsync(path);
+        var document = new TextDocument("replacement");
+        document.Insert(0, "x");
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var start = Stopwatch.GetTimestamp();
+                await Assert.ThrowsAsync<UnauthorizedAccessException>(() => document.SaveAsync(path).AsTask());
+                var elapsed = Stopwatch.GetElapsedTime(start);
+
+                Assert.True(elapsed < TimeSpan.FromSeconds(1), $"the failed save returned after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+                Assert.Equal(original, await File.ReadAllBytesAsync(path));
+                Assert.Equal(new[] { path }, Directory.GetFiles(dir.Root));
+                Assert.True(document.IsDirty);
+            }
+            else
+            {
+                await document.SaveAsync(path);
+                Assert.Equal("xreplacement", await File.ReadAllTextAsync(path));
+                Assert.Equal(new[] { path }, Directory.GetFiles(dir.Root));
+            }
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
     }
 
     [Fact]

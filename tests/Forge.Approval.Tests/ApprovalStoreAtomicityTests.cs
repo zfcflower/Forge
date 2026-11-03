@@ -219,6 +219,48 @@ public class ApprovalStoreAtomicityTests
     }
 
     [Fact]
+    public void A_read_only_state_file_fails_immediately_instead_of_being_retried()
+    {
+        using var directory = new TempApprovalDirectory();
+        var store = ApprovalFixtures.StoreWithApproval(directory.Path, "version 0");
+        var before = File.ReadAllBytes(store.FilePath);
+        var recordsBefore = Describe(store.List());
+        var budget = TimeSpan.FromSeconds(5);
+        File.SetAttributes(store.FilePath, FileAttributes.ReadOnly);
+
+        Exception? exception;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            exception = Record.Exception(() => store.SetApproved(
+                ApprovalFixtures.PluginId,
+                ApprovalFixtures.Version,
+                Hashing.SourceHash("version 1"),
+                ApprovalFixtures.ApprovedDependencyHash,
+                ApprovalFixtures.Sdk));
+            stopwatch.Stop();
+        }
+        finally
+        {
+            File.SetAttributes(store.FilePath, FileAttributes.Normal);
+        }
+
+        Assert.Empty(Directory.GetFiles(directory.Path, "*.tmp"));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Null(exception);
+            Assert.Equal(Hashing.SourceHash("version 1"), store.Get(ApprovalFixtures.PluginId, ApprovalFixtures.Version)?.SourceHash);
+            return;
+        }
+
+        Assert.IsType<UnauthorizedAccessException>(exception);
+        Assert.True(stopwatch.Elapsed < budget / 10, $"the failure took {stopwatch.ElapsedMilliseconds} ms, so it was retried");
+        Assert.Equal(before, File.ReadAllBytes(store.FilePath));
+        Assert.Equal(recordsBefore, Describe(store.List()));
+        Assert.Equal(Hashing.SourceHash("version 0"), store.Get(ApprovalFixtures.PluginId, ApprovalFixtures.Version)?.SourceHash);
+    }
+
+    [Fact]
     public void Cancelling_before_the_write_leaves_the_file_and_memory_untouched()
     {
         using var directory = new TempApprovalDirectory();

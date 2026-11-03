@@ -38,14 +38,14 @@ public static class AtomicFile
                 stream.Write(data);
                 stream.Flush(flushToDisk: true);
             }
-
-            Publish(temporary, destination, budget, cancellationToken);
         }
         catch
         {
             TryDelete(temporary);
             throw;
         }
+
+        ReplaceFileCore(temporary, destination, budget, cancellationToken);
     }
 
     /// <summary>Async variant of <see cref="WriteAllBytes"/>; the retry wait is cancellable.</summary>
@@ -54,6 +54,26 @@ public static class AtomicFile
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var budget = ResolveBudget(options);
         return WriteAllBytesCoreAsync(Path.GetFullPath(path), data, budget, cancellationToken);
+    }
+
+    /// <summary>Publishes an already-written and already-flushed temporary file onto <paramref name="destinationPath"/>
+    /// with the same retry policy and cleanup as <see cref="WriteAllBytes"/>. On failure or cancellation
+    /// <paramref name="tempPath"/> is deleted and the destination keeps its previous content.</summary>
+    public static void ReplaceFile(string tempPath, string destinationPath, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tempPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        var budget = ResolveBudget(options);
+        ReplaceFileCore(Path.GetFullPath(tempPath), Path.GetFullPath(destinationPath), budget, cancellationToken);
+    }
+
+    /// <summary>Async variant of <see cref="ReplaceFile"/>; the retry wait is cancellable.</summary>
+    public static ValueTask ReplaceFileAsync(string tempPath, string destinationPath, AtomicFileOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tempPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        var budget = ResolveBudget(options);
+        return ReplaceFileCoreAsync(Path.GetFullPath(tempPath), Path.GetFullPath(destinationPath), budget, cancellationToken);
     }
 
     /// <summary>Reads a file with <c>FileShare.ReadWrite | FileShare.Delete</c> so it never blocks a writer's replace.
@@ -108,7 +128,37 @@ public static class AtomicFile
                 await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
                 stream.Flush(flushToDisk: true);
             }
+        }
+        catch
+        {
+            TryDelete(temporary);
+            throw;
+        }
 
+        await ReplaceFileCoreAsync(temporary, destination, budget, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void ReplaceFileCore(string temporary, string destination, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureDirectory(destination);
+            Publish(temporary, destination, budget, cancellationToken);
+        }
+        catch
+        {
+            TryDelete(temporary);
+            throw;
+        }
+    }
+
+    private static async ValueTask ReplaceFileCoreAsync(string temporary, string destination, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureDirectory(destination);
             await PublishAsync(temporary, destination, budget, cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -221,7 +271,20 @@ public static class AtomicFile
 
         var isRace = exception is UnauthorizedAccessException ||
             (exception is IOException io && (io.HResult & 0xFFFF) is SharingViolation or LockViolation);
-        return isRace && File.Exists(destination);
+        return isRace && IsReplaceableTarget(destination);
+    }
+
+    /// <summary>True when <paramref name="path"/> exists, is not a directory and is not read-only.</summary>
+    private static bool IsReplaceableTarget(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReadOnly)) == 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static bool IsDestinationAppeared(IOException exception, string destination) =>

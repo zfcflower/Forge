@@ -8,7 +8,7 @@ parent: forge-architecture
 
 # Forge.Workspace
 
-Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。只依赖 `Forge.Abstractions` 与 BCL + Microsoft.Data.Sqlite;不含 UI。
+Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。只依赖 `Forge.Abstractions`、`Forge.IO`(规格写入的原子替换)与 BCL + Microsoft.Data.Sqlite;不含 UI。
 
 ## 边界
 
@@ -23,6 +23,8 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 **捕获字节级且诚实。** 输出按原始字节流读取(不按行重拼),保留 CRLF 与末尾无换行;超过上限时结构化接口抛 `GitOutputTruncatedException`,不把截断数据当完整结果。统一 Diff 解析器校验 hunk 声明的行数与内容一致,损坏块标记而非猜测。
 
 **Worktree 安全。** 每会话一个 `forge/<slug>` worktree;非强制删除在有未提交改动、未合入提交、游离 HEAD 独有提交、或无法确定基线分支时拒绝。会话结束后 worktree 保留,由用户手动清理。
+
+**规格写入原子。** `SpecGraph` 更新 frontmatter 时把整份 markdown(UTF-8 无 BOM、沿用文件原有行尾)交给 `AtomicFile.WriteAllBytesAsync`:同目录临时文件 + `fsync` + 改名覆盖,读者不会看到半文件;目标是 `ReadOnly` 文件或目录时立即失败且原文件逐字节不变,临时文件被删除。新建规格仍是 `FileMode.CreateNew` 的独占创建(已存在即拒绝)。
 
 **规格 frontmatter 往返无损。** 列表解析与序列化互逆(引号、逗号、转义);解析器不支持的语法保留 `RawText` 原样回写,不静默重写。
 

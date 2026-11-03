@@ -8,7 +8,7 @@ parent: forge-architecture
 
 # Forge.Editor
 
-文本缓冲、LSP 客户端、TextMate 词法着色、Diff 模型。不含 UI;只依赖 BCL。TextMate 组件内化自 Tint(MIT,保留署名,见 `THIRD_PARTY_NOTICES.md`)。
+文本缓冲、LSP 客户端、TextMate 词法着色、Diff 模型。不含 UI;只依赖 BCL 与 `Forge.IO`(仅保存时的原子替换)。TextMate 组件内化自 Tint(MIT,保留署名,见 `THIRD_PARTY_NOTICES.md`)。
 
 ## 边界
 
@@ -18,6 +18,8 @@ parent: forge-architecture
 ## 关键决策
 
 **文本模型。** Rope 加不可变快照;批量编辑原子提交为单版本;撤销/重做分组;锚点随编辑迁移;事件在提交后按版本顺序派发(重入安全)。保存记录实际写入的快照版本,保存期间的新编辑保持 `IsDirty`。
+
+**保存流式且原子。** `TextFileCodec.WriteAsync` 不在内存里拼整份文件:按快照 rope 分块编码写入目标目录下的 `<文件名>.<guid:N>.tmp`(`FileMode.CreateNew` + `FileShare.None`),`FlushAsync` 之后再 `Flush(flushToDisk: true)`,然后用 `AtomicFile.ReplaceFileAsync` 发布;失败或取消删除临时文件、原文件保持原字节。替换阶段复用 `Forge.IO` 的有界重试契约(目标被其他句柄占用时重试,目标是 `ReadOnly`/目录时立即失败),保存因此不再自己 `File.Move`。
 
 **LSP。** 自写 JSON-RPC over stdio(Content-Length 分帧,收发头缓冲分离);同步泵按文档维护单一有序状态,增量变更携带不可变截止快照,功能请求前建立同步屏障;服务器请求 id 按 JSON 类型原样回传;进程启动支持 `.cmd`/`.bat` 的 `cmd /d /s /c` 引号规则;进程工厂可注入以便测试。
 

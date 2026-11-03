@@ -19,7 +19,8 @@ public sealed class FileLock : IDisposable
 
     /// <summary>Acquires the lock with jittered exponential backoff. Throws <see cref="TimeoutException"/>
     /// when <paramref name="timeout"/> elapses and <see cref="OperationCanceledException"/> on cancellation.
-    /// Only sharing/lock violations are retried; other IO errors propagate immediately.</summary>
+    /// Only sharing/lock violations are retried; a lock path that can never be opened (a directory, a read-only
+    /// file) and other IO errors propagate immediately.</summary>
     public static FileLock Acquire(string lockPath, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lockPath);
@@ -41,7 +42,7 @@ public sealed class FileLock : IDisposable
                 var locked = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None);
                 return new FileLock(locked);
             }
-            catch (Exception exception) when (IsContention(exception))
+            catch (Exception exception) when (IsContention(exception) && !IsPermanentlyUnavailable(fullPath))
             {
                 var elapsed = Stopwatch.GetElapsedTime(start);
                 if (elapsed >= timeout)
@@ -73,6 +74,19 @@ public sealed class FileLock : IDisposable
         }
 
         return OperatingSystem.IsWindows() && exception is UnauthorizedAccessException;
+    }
+
+    /// <summary>True when the lock path is a directory or a read-only file.</summary>
+    private static bool IsPermanentlyUnavailable(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReadOnly)) != 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static int Jitter(int delay, TimeSpan remaining)

@@ -460,8 +460,9 @@ public sealed class ApprovalStore
 
     /// <summary>
     /// True only for the Windows "state file temporarily not replaceable" race: the platform is Windows, the failure
-    /// is an access denial or a sharing/lock violation, and the state file is still there. Anything else — a missing
-    /// directory, a path that is a directory, a full disk, a real ACL denial — is reported without retrying.
+    /// is an access denial or a sharing/lock violation, and the state file is still there, is not a directory and is
+    /// not read-only. Anything else — a missing directory, a path that is a directory, a read-only file, a full disk,
+    /// a real ACL denial — is reported without retrying.
     /// </summary>
     private bool IsReplaceRace(Exception exception)
     {
@@ -472,7 +473,20 @@ public sealed class ApprovalStore
 
         var isRace = exception is UnauthorizedAccessException ||
             (exception is IOException io && (io.HResult & 0xFFFF) is SharingViolation or LockViolation);
-        return isRace && File.Exists(FilePath);
+        return isRace && IsReplaceableStateFile();
+    }
+
+    /// <summary>True when the state file exists, is not a directory and is not read-only.</summary>
+    private bool IsReplaceableStateFile()
+    {
+        try
+        {
+            return (File.GetAttributes(FilePath) & (FileAttributes.Directory | FileAttributes.ReadOnly)) == 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static void TryDelete(string path)

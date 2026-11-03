@@ -124,6 +124,43 @@ public class FileLockTests
         Assert.True(File.Exists(lockPath));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_lock_path_that_can_never_be_opened_fails_immediately_with_the_original_exception(bool asDirectory)
+    {
+        using var directory = new TestDirectory();
+        var lockPath = directory.File("state.lock");
+        if (asDirectory)
+        {
+            Directory.CreateDirectory(lockPath);
+        }
+        else
+        {
+            File.WriteAllText(lockPath, string.Empty);
+            File.SetAttributes(lockPath, FileAttributes.ReadOnly);
+        }
+
+        var budget = TimeSpan.FromSeconds(5);
+        try
+        {
+            var start = Stopwatch.GetTimestamp();
+            var exception = Assert.ThrowsAny<Exception>(() => FileLock.Acquire(lockPath, budget));
+            var elapsed = Stopwatch.GetElapsedTime(start);
+
+            Assert.IsType<UnauthorizedAccessException>(exception);
+            Assert.True(elapsed < budget / 10, $"the acquire gave up after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+            Assert.True(asDirectory ? Directory.Exists(lockPath) : File.Exists(lockPath));
+        }
+        finally
+        {
+            if (!asDirectory)
+            {
+                File.SetAttributes(lockPath, FileAttributes.Normal);
+            }
+        }
+    }
+
     [Fact]
     public void A_negative_timeout_is_rejected()
     {

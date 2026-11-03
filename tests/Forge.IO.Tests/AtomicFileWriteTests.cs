@@ -248,6 +248,48 @@ public class AtomicFileWriteTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task A_read_only_destination_fails_immediately_without_retrying(bool useAsync)
+    {
+        using var directory = new TestDirectory();
+        var path = directory.File("state.json");
+        var original = Encode(1);
+        File.WriteAllBytes(path, original);
+        var budget = TimeSpan.FromSeconds(5);
+        var options = new AtomicFileOptions { RetryBudget = budget };
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+
+        Exception? exception;
+        TimeSpan elapsed;
+        try
+        {
+            var start = Stopwatch.GetTimestamp();
+            exception = await Record.ExceptionAsync(() => WriteAsync(useAsync, path, Encode(2), options));
+            elapsed = Stopwatch.GetElapsedTime(start);
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.IsType<UnauthorizedAccessException>(exception);
+            Assert.True(elapsed < budget / 10, $"the write gave up after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.Equal(1, Decode(File.ReadAllBytes(path)).Count);
+        }
+        else
+        {
+            Assert.Null(exception);
+            Assert.Equal(Encode(2), File.ReadAllBytes(path));
+        }
+
+        Assert.Empty(directory.TemporaryFiles());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task A_destination_that_is_a_directory_fails_fast_and_is_not_retried(bool useAsync)
     {
         using var directory = new TestDirectory();
@@ -261,7 +303,7 @@ public class AtomicFileWriteTests
         var elapsed = Stopwatch.GetElapsedTime(start);
 
         Assert.True(exception is IOException or UnauthorizedAccessException, exception?.GetType().FullName);
-        Assert.True(elapsed < budget / 5, $"the failure took {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+        Assert.True(elapsed < budget / 10, $"the failure took {elapsed.TotalMilliseconds:F0} ms, so it was retried");
         Assert.True(Directory.Exists(path));
         Assert.Empty(directory.TemporaryFiles());
     }

@@ -7,5 +7,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
+    <ProjectReference Include="..\Forge.IO\Forge.IO.csproj" />
   </ItemGroup>
 </Project>

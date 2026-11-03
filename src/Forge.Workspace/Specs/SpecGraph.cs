@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Forge.IO;
 
 namespace Forge.Workspace;
 
@@ -302,7 +303,7 @@ public sealed class SpecGraph
             }
 
             var lineEnding = entry.RawText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-            await File.WriteAllTextAsync(entry.FullPath, frontmatter.ToMarkdown(entry.Body, lineEnding), Utf8NoBom, ct).ConfigureAwait(false);
+            await AtomicFile.WriteAllBytesAsync(entry.FullPath, Utf8NoBom.GetBytes(frontmatter.ToMarkdown(entry.Body, lineEnding)), cancellationToken: ct).ConfigureAwait(false);
             stalePaths.Add(entry.FullPath);
             await ScanAsync(force: false, ct).ConfigureAwait(false);
             return BuildView(snapshot, frontmatter.Id!);

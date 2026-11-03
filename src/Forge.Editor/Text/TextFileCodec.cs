@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Text;
+using Forge.IO;
 
 namespace Forge.Editor.Text;
 
@@ -18,8 +19,9 @@ public sealed record TextFileFormat(Encoding Encoding, bool HasBom, LineEnding L
 public sealed record TextFileData(string Text, TextFileFormat Format, bool IsBinary);
 
 /// <summary>
-/// Reads and writes text files with BOM/encoding/line-ending detection. Writes go to a temporary file in the same
-/// directory and are moved into place, so a cancelled save never truncates the original.
+/// Reads and writes text files with BOM/encoding/line-ending detection. Writes stream to a temporary file in the
+/// same directory, flush it to disk, and replace the destination through <see cref="AtomicFile"/>, so a cancelled or
+/// failed save never truncates the original.
 /// </summary>
 public static class TextFileCodec
 {
@@ -142,9 +144,10 @@ public static class TextFileCodec
             {
                 await WriteContentAsync(stream, snapshot, format, ct).ConfigureAwait(false);
                 await stream.FlushAsync(ct).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temporary, path, overwrite: true);
+            await AtomicFile.ReplaceFileAsync(temporary, path, cancellationToken: ct).ConfigureAwait(false);
         }
         catch
         {

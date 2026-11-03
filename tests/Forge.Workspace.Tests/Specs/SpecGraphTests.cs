@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Xunit;
 
 namespace Forge.Workspace.Tests.Specs;
@@ -663,6 +664,47 @@ public sealed class SpecGraphTests
         }));
 
         Assert.Equal(before, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task An_update_never_leaves_a_truncated_file_when_the_target_cannot_be_replaced()
+    {
+        using var workspace = new SpecWorkspace();
+        workspace.Write("docs/module-a.md", SpecFixture.Spec("module-a", "module-design", "status: active\n"));
+        var path = workspace.Combine("docs", "module-a.md");
+        var original = await File.ReadAllBytesAsync(path);
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+
+        try
+        {
+            var update = new SpecFrontmatterUpdate
+            {
+                Set = new Dictionary<string, string?> { ["status"] = "done" },
+            };
+            var stopwatch = Stopwatch.StartNew();
+            var exception = await Record.ExceptionAsync(() => workspace.Graph().UpdateFrontmatterAsync("module-a", update));
+            stopwatch.Stop();
+
+            Assert.Empty(Directory.GetFiles(workspace.Root, "*.tmp", SearchOption.AllDirectories));
+
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Null(exception);
+                Assert.Contains("status: done", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+                return;
+            }
+
+            Assert.IsType<UnauthorizedAccessException>(exception);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"the failed update returned after {stopwatch.ElapsedMilliseconds} ms, so it was retried");
+            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            var reloaded = await workspace.Graph().GetAsync("module-a");
+            Assert.NotNull(reloaded);
+            Assert.Equal("active", reloaded.Node.Status);
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
     }
 
     [Fact]
