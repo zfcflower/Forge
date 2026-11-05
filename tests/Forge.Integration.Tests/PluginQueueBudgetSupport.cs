@@ -223,22 +223,20 @@ internal sealed class PluginQueueBudgetHost : IAsyncDisposable
     /// <summary>Connects a raw peer, retrying while the host is still coming up.</summary>
     public async Task<IpcPeer> ConnectAsync(CancellationToken ct)
     {
-        while (true)
-        {
-            var transport = new NamedPipeClientTransport(Pipe, new IpcPipeOptions { ConnectTimeout = TimeSpan.FromSeconds(2) });
-            try
-            {
-                await transport.StartAsync(ct);
-                var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
-                await peer.StartAsync(ct);
-                return peer;
-            }
-            catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
-            {
-                await transport.DisposeAsync();
-                await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
-            }
-        }
+        var transport = await PipeWait.ConnectAsync(Pipe, DescribeState, ct);
+        var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
+        await peer.StartAsync(ct);
+        return peer;
+    }
+
+    private string DescribeState()
+    {
+        var exited = process.HasExited
+            ? $"exited with code {process.ExitCode}"
+            : $"still running as pid {process.Id}";
+        return Output.Count == 0
+            ? $"The host {exited} and wrote nothing."
+            : $"The host {exited}; output: " + string.Join(" | ", Output);
     }
 
     /// <summary>Waits for the host process to exit on its own and returns its exit code; the bound is the caller's.</summary>
@@ -378,11 +376,24 @@ internal static class PluginQueueBudgetWire
     public static async Task ApproveAsync(IpcPeer peer, string pluginId, CancellationToken ct)
     {
         await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, Empty(), ct);
+        var start = Stopwatch.GetTimestamp();
+        var limit = TestBudgets.Condition;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(limit);
         while (true)
         {
-            var response = await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsStatus, Empty(), deadline.Token);
+            IpcMessage response;
+            try
+            {
+                response = await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsStatus, Empty(), deadline.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"no plugins.status row for '{pluginId}' appeared within {limit.TotalSeconds:0} s " +
+                    $"({Stopwatch.GetElapsedTime(start).TotalSeconds:0.###} s waited).");
+            }
+
             foreach (var entry in response.Result!.Value.GetProperty("plugins").EnumerateArray())
             {
                 if (entry.GetProperty("pluginId").GetString() != pluginId)
@@ -404,7 +415,16 @@ internal static class PluginQueueBudgetWire
                 return;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"no plugins.status row for '{pluginId}' appeared within {limit.TotalSeconds:0} s " +
+                    $"({Stopwatch.GetElapsedTime(start).TotalSeconds:0.###} s waited).");
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Forge.Abstractions;
 using Xunit;
@@ -21,8 +22,16 @@ public sealed class ShortScriptBudgetTests
         Assert.False(prewarmed.IsError, prewarmed.Content);
         Assert.Equal("budget-ok", prewarmed.Content);
 
+        // A caller budget kept as it is: 1.5 s is what the caller asked the product for, and the warm path (compiled
+        // image reused, one executor process) is expected to serve a 100 ms script well inside it. The measurement is
+        // what separates "the product missed the caller's budget" from "this machine stalls a process start".
+        var clock = Stopwatch.StartNew();
         var small = await InvokeScriptAsync(fx, runCode, BriefScript, TimeSpan.FromSeconds(1.5));
-        Assert.False(small.IsError, small.Content);
+        clock.Stop();
+        Assert.False(
+            small.IsError,
+            $"a 100 ms script did not finish inside its own 1.5 s caller budget after the pool was warm: it took " +
+            $"{clock.Elapsed.TotalSeconds:0.###} s. {small.Content}");
         Assert.Equal("budget-ok", small.Content);
 
         var healthy = await InvokeScriptAsync(fx, runCode, BriefScript, TimeSpan.FromSeconds(60));

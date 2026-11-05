@@ -9,7 +9,7 @@ namespace Forge.Integration.Tests;
 /// share nothing. Every script is compiler-built and every run goes over the wire.</summary>
 public sealed class SingleUseExecutorIsolationTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(90), TimeSpan.FromMinutes(10));
     private static readonly CodeExecutionOptions Options = new();
     private const int RunTimeoutMilliseconds = 15000;
 

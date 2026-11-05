@@ -488,7 +488,7 @@ public sealed class NonUiContributionTests
     public async Task Legacy_plugin_json_diagnostic_is_written_to_host_stderr()
     {
         await using var host = RawHost.StartNew();
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(120), TimeSpan.FromMinutes(10)));
         var legacy = Path.Combine(host.Plugins, "legacy");
         Directory.CreateDirectory(legacy);
         File.WriteAllText(
@@ -499,7 +499,7 @@ public sealed class NonUiContributionTests
         await peer.SendRequestAsync(
             Sdk.ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), budget.Token);
 
-        var diagnostic = await host.WaitForStderrAsync("legacy plugin.json", TimeSpan.FromSeconds(30));
+        var diagnostic = await host.WaitForStderrAsync("legacy plugin.json", TestBudgets.Condition);
         Assert.Contains("not compatible", diagnostic, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("manifest.json", diagnostic, StringComparison.OrdinalIgnoreCase);
     }

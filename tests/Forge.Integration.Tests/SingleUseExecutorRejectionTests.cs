@@ -343,7 +343,7 @@ internal static class SingleUseExecutorArtifacts
 /// first image; there is no marker file because the images are not real assemblies and cannot run.</summary>
 public sealed class SingleUseExecutorRejectionTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10));
 
     [Fact]
     public async Task Load_WithLengthMismatch_IsRejectedAndRunsNothing()

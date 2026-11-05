@@ -241,7 +241,7 @@ internal static class ShutdownFenceOracle
 /// pid plus the worker's start time, so a recycled pid on a busy machine can never fake a survivor.</summary>
 public sealed class HostShutdownChildProcessTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10));
 
     private static readonly string[] ShutdownProbeSourceTools = ["echo", "sleep", "identity"];
 
@@ -424,7 +424,7 @@ public sealed class HostShutdownChildProcessTests
         // The host publishes its initial discovery asynchronously after the pipe accepts the
         // client, so the entry is awaited instead of assumed.
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (true)
         {
             var match = (await client.GetPluginStatusesAsync(deadline.Token))
@@ -449,7 +449,7 @@ public sealed class HostShutdownChildProcessTests
         ExtensionHostClient client, string pluginId, string[] tools, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (true)
         {
             var names = ToolsOf(client, pluginId).Select(tool => tool.Definition.Name).ToArray();
@@ -472,7 +472,7 @@ public sealed class HostShutdownChildProcessTests
     private static async Task WaitForFileAsync(string path, string what, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (!File.Exists(path))
         {
             try

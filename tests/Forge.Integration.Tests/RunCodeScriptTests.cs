@@ -388,7 +388,7 @@ public sealed class RunCodeScriptTests
     private static async Task WaitForAsync(ConcurrentQueue<string> queue, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (queue.IsEmpty)
         {
             await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
@@ -398,7 +398,7 @@ public sealed class RunCodeScriptTests
     private static async Task WaitForCountAsync(ConcurrentQueue<string> queue, int count, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (queue.Count < count)
         {
             await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);

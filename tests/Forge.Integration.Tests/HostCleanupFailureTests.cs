@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Forge.Ipc;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
@@ -10,7 +11,7 @@ public sealed class HostCleanupFailureTests
     /// <summary>Bound on the host's exit after <c>host.stop</c>; a stalled start must be aborted well inside it.</summary>
     private static readonly TimeSpan ExitLimit = TimeSpan.FromSeconds(15);
 
-    private static readonly TimeSpan BarrierLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan BarrierLimit = TestBudgets.Condition;
 
     [Theory]
     [InlineData(nameof(FakeWorkerMode.NeverConnect), FakeScriptWorker.ReadyFile)]
@@ -22,7 +23,7 @@ public sealed class HostCleanupFailureTests
         try
         {
             var fakeWorker = FakeScriptWorker.Build(fakeDirectory, Enum.Parse<FakeWorkerMode>(mode));
-            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+            using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10)));
             var ct = budget.Token;
 
             await using (var approving = PluginQueueBudgetHost.Start(["--tool-timeout", "120"], tag: "cleanup-approve", root: root))
@@ -30,8 +31,12 @@ public sealed class HostCleanupFailureTests
                 approving.WritePlugin("gate", PluginQueueBudgetSources.Gated("gate"));
                 await using var peer = await approving.ConnectAsync(ct);
                 await PluginQueueBudgetWire.ApproveAsync(peer, "gate", ct);
-                await StopAsync(peer, ct);
-                Assert.Equal(0, await ExitAsync(approving, ct));
+                await StopAsync(peer, ct, approving);
+                var approvingExit = await ExitAsync(approving, ct);
+                Assert.True(
+                    approvingExit == 0,
+                    $"the host that approved 'gate' exited with {approvingExit}; the second phase would start from an " +
+                    $"unapproved plugin. {Describe(approving)}");
             }
 
             await using var host = PluginQueueBudgetHost.Start(
@@ -44,7 +49,10 @@ public sealed class HostCleanupFailureTests
             await PluginQueueBudgetWait.UntilAsync(
                 () => File.Exists(Path.Combine(fakeDirectory, barrierFile)), BarrierLimit, ct, "the fake worker to reach its barrier");
             var workerPid = FakeScriptWorker.ReadPid(fakeDirectory);
-            Assert.True(E2eFixture.IsRunning(workerPid), $"the fake worker (pid {workerPid}) exited before the stop");
+            Assert.True(
+                E2eFixture.IsRunning(workerPid),
+                $"the fake worker (pid {workerPid}) exited before the stop, so the load it stalls was never in flight. " +
+                Describe(host));
 
             var queued = stalled.SendRequestAsync(
                 Sdk.ExtensionProtocol.PluginExecute,
@@ -53,16 +61,21 @@ public sealed class HostCleanupFailureTests
                     "cleanup-run-1", "cleanup-run-1", [], 120_000),
                 ct);
 
-            await StopAsync(stalled, ct);
+            await StopAsync(stalled, ct, host);
             var exitCode = await ExitAsync(host, ct);
 
-            Assert.Equal(0, exitCode);
+            Assert.True(
+                exitCode == 0,
+                $"the host exited with {exitCode} after host.stop had to kill a worker stalled in its start. {Describe(host)}");
             Assert.False(
                 E2eFixture.IsRunning(workerPid),
-                $"the host exited while its plugin worker (pid {workerPid}) was still running; the worker must be gone before the host is.");
-            Assert.False(File.Exists(Path.Combine(host.Root, "ran.txt")), "the plugin handler ran on a worker that never loaded");
+                $"the host exited while its plugin worker (pid {workerPid}) was still running; the worker must be gone before the host is. " +
+                Describe(host));
+            Assert.False(
+                File.Exists(Path.Combine(host.Root, "ran.txt")),
+                $"the plugin handler ran on a worker that never loaded. {Describe(host)}");
 
-            await AssertFailedWithoutResultAsync(queued, ct);
+            await AssertFailedWithoutResultAsync(queued, ct, host);
         }
         finally
         {
@@ -72,8 +85,9 @@ public sealed class HostCleanupFailureTests
         }
     }
 
-    private static async Task StopAsync(IpcPeer peer, CancellationToken ct)
+    private static async Task StopAsync(IpcPeer peer, CancellationToken ct, PluginQueueBudgetHost host)
     {
+        var clock = Stopwatch.StartNew();
         try
         {
             using var answer = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -83,6 +97,12 @@ public sealed class HostCleanupFailureTests
         catch (IpcConnectionClosedException)
         {
             // The host may close its pipe before answering host.stop; the exit is what is asserted.
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"host.stop was neither answered nor followed by a closed pipe within {BarrierLimit.TotalSeconds:0} s " +
+                $"({clock.Elapsed.TotalSeconds:0.###} s waited). {Describe(host)}");
         }
     }
 
@@ -97,11 +117,17 @@ public sealed class HostCleanupFailureTests
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             throw new TimeoutException(
-                $"The Extension Host did not exit within {ExitLimit.TotalSeconds:0} s of host.stop while a plugin worker was starting.");
+                $"The Extension Host did not exit within {ExitLimit.TotalSeconds:0} s of host.stop while a plugin worker was " +
+                $"starting; this machine's slowest observed process start took " +
+                $"{TestBudgets.ObservedHostStart.TotalSeconds:0.###} s. {Describe(host)}");
         }
     }
 
-    private static async Task AssertFailedWithoutResultAsync(Task<IpcMessage> pending, CancellationToken ct)
+    /// <summary>The host's own stdout/stderr, which names a cleanup failure the exit code only reports as non-zero.</summary>
+    private static string Describe(PluginQueueBudgetHost host) =>
+        host.Output.Count == 0 ? "The host wrote nothing to stdout or stderr." : "Host output: " + string.Join(" | ", host.Output);
+
+    private static async Task AssertFailedWithoutResultAsync(Task<IpcMessage> pending, CancellationToken ct, PluginQueueBudgetHost host)
     {
         try
         {
@@ -115,7 +141,7 @@ public sealed class HostCleanupFailureTests
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TimeoutException("the call waiting on the stopped worker never ended");
+            throw new TimeoutException($"the call waiting on the stopped worker never ended. {Describe(host)}");
         }
     }
 

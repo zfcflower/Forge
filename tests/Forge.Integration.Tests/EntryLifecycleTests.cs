@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
@@ -15,6 +16,12 @@ public sealed class EntryLifecycleTests
 {
     private const int TaskCount = 8;
     private const int Iterations = 50;
+
+    /// <summary>Operations the churn below issues: every task runs <see cref="Iterations" /> mixed operations.</summary>
+    private const int ChurnOperations = TaskCount * Iterations;
+
+    /// <summary>How many of the four kinds of operation one measured round covers.</summary>
+    private const int OperationsPerRound = 4;
 
     /// <summary>Errors the host documents for concurrent approval changes, refreshes and executions.</summary>
     private static readonly string[] DocumentedCodes =
@@ -135,8 +142,9 @@ public sealed class EntryLifecycleTests
         await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "the tools of alpha");
 
         var staleEcho = fx.ToolOf("alpha", PluginSources.EchoTool);
+        var (limit, perRound) = await MeasureChurnAsync(fx, staleEcho);
         using var bound = CancellationTokenSource.CreateLinkedTokenSource(fx.Ct);
-        bound.CancelAfter(TimeSpan.FromSeconds(110));
+        bound.CancelAfter(limit);
 
         var churn = new Task[TaskCount];
         for (var index = 0; index < churn.Length; index++)
@@ -145,14 +153,17 @@ public sealed class EntryLifecycleTests
             churn[index] = Task.Run(() => ChurnAsync(fx, staleEcho, seed, bound.Token), CancellationToken.None);
         }
 
+        var clock = Stopwatch.StartNew();
         try
         {
-            await Task.WhenAll(churn).WaitAsync(TimeSpan.FromSeconds(115), fx.Ct);
+            await Task.WhenAll(churn).WaitAsync(limit, fx.Ct);
         }
         catch (TimeoutException)
         {
             throw new TimeoutException(
-                "The approve/revoke/refresh/execute churn did not finish within 115 s; the host stopped making progress.");
+                $"The approve/revoke/refresh/execute churn did not finish within {limit.TotalSeconds:0} s " +
+                $"({clock.Elapsed.TotalSeconds:0} s elapsed, {ChurnOperations} operations); one measured round of the four " +
+                $"kinds of operation took {perRound.TotalMilliseconds:0} ms on this machine, so the host stopped making progress.");
         }
 
         await fx.Client.RefreshPluginsAsync(fx.Ct);
@@ -174,6 +185,41 @@ public sealed class EntryLifecycleTests
         var blocked = await fx.InvokeAsync(staleEcho, """{"text":"final"}""");
         Assert.True(blocked.IsError, blocked.Content);
         Assert.Equal("plugin_not_approved", ErrorCode(blocked.Content));
+    }
+
+    /// <summary>
+    /// Bound for the churn, measured on this machine instead of assumed: one serial round of the four kinds of
+    /// operation the churn mixes (median of three probes in the same fixture), times the rounds it runs, with room for
+    /// eight tasks contending for one host. This is a progress safety net, not a speed claim: the assertions are about
+    /// the states a call may end in, and the bound only catches a host that stopped making progress.
+    /// </summary>
+    private static async Task<(TimeSpan Limit, TimeSpan PerRound)> MeasureChurnAsync(E2eFixture fx, ITool echo)
+    {
+        const int Probes = 3;
+        var samples = new List<TimeSpan>(Probes);
+        for (var probe = 0; probe < Probes; probe++)
+        {
+            var start = Stopwatch.GetTimestamp();
+            await fx.InvokeAsync(echo, """{"text":"probe"}""");
+            await fx.Client.RefreshPluginsAsync(fx.Ct);
+            await ApproveAsync(fx, fx.Ct);
+            await RevokeAsync(fx, fx.Ct);
+            samples.Add(Stopwatch.GetElapsedTime(start));
+        }
+
+        // The probes end with the plugin revoked; the churn starts from the approved state it was set up in.
+        await ApproveAsync(fx, fx.Ct);
+        await fx.WaitUntilAsync(
+            () => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length,
+            "the tools of alpha after the calibration");
+
+        samples.Sort();
+        var perRound = samples[samples.Count / 2];
+        var limit = TimeSpan.FromTicks(Math.Clamp(
+            perRound.Ticks * (ChurnOperations / OperationsPerRound) * 8,
+            TimeSpan.FromSeconds(110).Ticks,
+            TimeSpan.FromMinutes(10).Ticks));
+        return (limit, perRound);
     }
 
     private static async Task ChurnAsync(E2eFixture fx, ITool echo, int seed, CancellationToken ct)

@@ -16,7 +16,7 @@ namespace Forge.Integration.Tests;
 /// refused so the executor never serves the plugin surface.</summary>
 public sealed class SingleUseExecutorProtocolTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10));
 
     private static JsonElement EmptyArgs() => JsonDocument.Parse("{}").RootElement.Clone();
 
@@ -93,7 +93,7 @@ public sealed class SingleUseExecutorProtocolTests
 [Collection("SingleUseExecutorFilesystem")]
 public sealed class SingleUseExecutorHygieneTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10));
 
     [Fact]
     public void ExecutorDependencyManifest_DeclaresNoRoslynOrScriptingDependencies()

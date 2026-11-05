@@ -13,12 +13,12 @@ public sealed class PluginQueueBudgetTests
     private const string QueueTimeoutCode = "plugin_queue_timeout";
 
     /// <summary>Upper bound on how long a queued call may take to answer when it should have failed already.</summary>
-    private static readonly TimeSpan AnswerLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan AnswerLimit = TestBudgets.Condition;
 
     /// <summary>Upper bound on the holder's own answer once the test releases it.</summary>
-    private static readonly TimeSpan HolderLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan HolderLimit = TestBudgets.Condition;
 
-    private static readonly TimeSpan MarkerLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MarkerLimit = TestBudgets.Condition;
 
     private static readonly string[] NestedChain = ["$run_code"];
 
@@ -49,7 +49,7 @@ public sealed class PluginQueueBudgetTests
     {
         await using var host = PluginQueueBudgetHost.Start(["--concurrency", "1", "--tool-timeout", "120"]);
         host.WritePlugin("gate", PluginQueueBudgetSources.Gated("gate"));
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
         await using var peer = await host.ConnectAsync(ct);
         await PluginQueueBudgetWire.ApproveAsync(peer, "gate", ct);
@@ -201,7 +201,7 @@ public sealed class PluginQueueBudgetTests
     {
         await using var host = PluginQueueBudgetHost.Start(["--concurrency", "1", "--tool-timeout", "120"]);
         host.WritePlugin("gate", PluginQueueBudgetSources.Gated("gate"));
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
         await using var peer = await host.ConnectAsync(ct);
         await PluginQueueBudgetWire.ApproveAsync(peer, "gate", ct);

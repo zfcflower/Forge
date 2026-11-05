@@ -19,7 +19,7 @@ internal sealed class SameRootResourceCycleRelay(E2eFixture fx) : ITool
 {
     public const string Name = "cycleRelay";
 
-    private static readonly TimeSpan BarrierLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan BarrierLimit = TestBudgets.Condition;
 
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly TaskCompletionSource crossBarrier = new(TaskCreationOptions.RunContinuationsAsynchronously);

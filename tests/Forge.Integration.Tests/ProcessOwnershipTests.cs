@@ -14,8 +14,9 @@ namespace Forge.Integration.Tests;
 /// </summary>
 public sealed class ProcessOwnershipTests
 {
-    /// <summary>How long a grandchild may outlive the event that should have killed it.</summary>
-    private static readonly TimeSpan DeathLimit = TimeSpan.FromSeconds(10);
+    /// <summary>How long a grandchild may outlive the event that should have killed it. A safety net for an event the
+    /// product starts on its own, so it grows with what this run's process starts cost.</summary>
+    private static readonly TimeSpan DeathLimit = TestBudgets.Safety(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(120));
 
     [Fact]
     public async Task A_worker_that_exits_after_starting_a_child_leaves_no_child_behind()
@@ -141,7 +142,7 @@ public sealed class ProcessOwnershipTests
         File.WriteAllText(Path.Combine(plugin, "manifest.json"), """{"id":"alpha","version":"1.0.0","source":"Plugin.cs"}""");
         File.WriteAllText(Path.Combine(plugin, "Plugin.cs"), PluginSources.Spawnable("alpha"));
 
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
         var output = new List<string>();
         using var host = StartRawHost(pipe, plugins, data, output, new Dictionary<string, string>(StringComparer.Ordinal)
@@ -194,6 +195,7 @@ public sealed class ProcessOwnershipTests
     private static async Task WaitForDeathAsync(E2eFixture fx, int processId, string what)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(fx.Ct);
+        var clock = Stopwatch.StartNew();
         deadline.CancelAfter(DeathLimit);
         while (E2eFixture.IsRunning(processId))
         {
@@ -203,7 +205,10 @@ public sealed class ProcessOwnershipTests
             }
             catch (OperationCanceledException) when (!fx.Ct.IsCancellationRequested)
             {
-                throw new TimeoutException($"{what} (pid {processId}) was still running {DeathLimit.TotalSeconds:0} s after it should have exited.");
+                throw new TimeoutException(
+                    $"{what} (pid {processId}) was still running {clock.Elapsed.TotalSeconds:0.###} s after it should have " +
+                    $"exited; the limit is {DeathLimit.TotalSeconds:0} s on a machine whose slowest observed process start " +
+                    $"took {TestBudgets.ObservedHostStart.TotalSeconds:0.###} s.");
             }
         }
     }
@@ -304,23 +309,8 @@ public sealed class ProcessOwnershipTests
         return process;
     }
 
-    private static async Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct)
-    {
-        while (true)
-        {
-            var transport = new NamedPipeClientTransport(pipe, new IpcPipeOptions { ConnectTimeout = TimeSpan.FromSeconds(2) });
-            try
-            {
-                await transport.StartAsync(ct);
-                return transport;
-            }
-            catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
-            {
-                await transport.DisposeAsync();
-                await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
-            }
-        }
-    }
+    private static Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct) =>
+        PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
 
     private static void KillQuietly(Process process)
     {

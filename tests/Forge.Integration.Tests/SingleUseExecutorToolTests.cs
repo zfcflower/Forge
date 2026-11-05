@@ -10,7 +10,7 @@ namespace Forge.Integration.Tests;
 /// internal APIs.</summary>
 public sealed class SingleUseExecutorToolTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10));
     private static readonly CodeExecutionOptions Options = new();
     private const int RunTimeoutMilliseconds = 15000;
 

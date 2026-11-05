@@ -11,7 +11,9 @@ namespace Forge.Integration.Tests;
 /// absence of the handler's marker file.</summary>
 public sealed class HostBindingValidationTests
 {
-    private static readonly TimeSpan Budget = TimeSpan.FromSeconds(60);
+    /// <summary>Whole-test budget: one raw host start, its refresh and the calls this test makes. A safety net, so it
+    /// follows this run's measured process cost and keeps the floor the other raw-host tests use.</summary>
+    private static readonly TimeSpan Budget = TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10));
 
     [Fact]
     public async Task Nested_call_without_rootRunId_is_invalid_context()
@@ -224,12 +226,22 @@ public sealed class HostBindingValidationTests
     private static async Task<(string SourceHash, string DependencyHash, string SdkVersion)> FirstStatusAsync(
         IpcPeer peer, string id, CancellationToken ct)
     {
+        var limit = TestBudgets.Condition;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(limit);
         while (true)
         {
-            var response = await peer.SendRequestAsync(
-                Sdk.ExtensionProtocol.PluginsStatus, RawHost.EmptyObject(), deadline.Token);
+            IpcMessage response;
+            try
+            {
+                response = await peer.SendRequestAsync(
+                    Sdk.ExtensionProtocol.PluginsStatus, RawHost.EmptyObject(), deadline.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException($"no plugins.status row for '{id}' appeared within {limit.TotalSeconds:0} s.");
+            }
+
             var element = response.Result!.Value;
             foreach (var entry in element.GetProperty("plugins").EnumerateArray())
             {
@@ -243,17 +255,32 @@ public sealed class HostBindingValidationTests
                 }
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException($"no plugins.status row for '{id}' appeared within {limit.TotalSeconds:0} s.");
+            }
         }
     }
 
     private static async Task WaitForFileAsync(string path, CancellationToken ct)
     {
+        var limit = TestBudgets.Condition;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(limit);
         while (!File.Exists(path))
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(25), deadline.Token);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25), deadline.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException($"'{path}' did not appear within {limit.TotalSeconds:0} s.");
+            }
         }
     }
 }

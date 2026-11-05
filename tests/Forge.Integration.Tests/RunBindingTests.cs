@@ -339,8 +339,9 @@ public sealed class RunBindingTests
 
         public async Task<string> WaitForExecuteAsync(string pluginId, string tool)
         {
+            var limit = TestBudgets.Condition;
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Ct);
-            deadline.CancelAfter(TimeSpan.FromSeconds(30));
+            deadline.CancelAfter(limit);
             while (true)
             {
                 if (runIds.TryPeek(out var runId))
@@ -348,7 +349,15 @@ public sealed class RunBindingTests
                     return runId;
                 }
 
-                await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(20), deadline.Token);
+                }
+                catch (OperationCanceledException) when (!Ct.IsCancellationRequested)
+                {
+                    throw new TimeoutException(
+                        $"the host never relayed a '{tool}' call for '{pluginId}' within {limit.TotalSeconds:0} s.");
+                }
             }
         }
 
@@ -370,8 +379,9 @@ public sealed class RunBindingTests
 
         public async Task WaitUntilAsync(Func<bool> condition, string what)
         {
+            var limit = TestBudgets.Condition;
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Ct);
-            deadline.CancelAfter(TimeSpan.FromSeconds(30));
+            deadline.CancelAfter(limit);
             while (!condition())
             {
                 try
@@ -380,7 +390,7 @@ public sealed class RunBindingTests
                 }
                 catch (OperationCanceledException) when (!Ct.IsCancellationRequested)
                 {
-                    throw new TimeoutException($"Timed out after 30 s waiting for {what}.");
+                    throw new TimeoutException($"Timed out after {limit.TotalSeconds:0} s waiting for {what}.");
                 }
             }
         }

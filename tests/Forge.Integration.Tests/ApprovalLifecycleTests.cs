@@ -59,7 +59,7 @@ public sealed class ApprovalLifecycleTests
         File.WriteAllText(Path.Combine(plugin, "manifest.json"), """{"id":"alpha","version":"1.0.0","source":"Plugin.cs"}""");
         File.WriteAllText(Path.Combine(plugin, "Plugin.cs"), PluginSources.Standard("alpha", echoPrefix: "a"));
 
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(120), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
         using var hostProcess = StartRawHost(pipe, plugins, data);
         await using var transport = await ConnectRawAsync(pipe, ct);
@@ -208,23 +208,8 @@ public sealed class ApprovalLifecycleTests
         return process;
     }
 
-    private static async Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct)
-    {
-        while (true)
-        {
-            var transport = new NamedPipeClientTransport(pipe, new IpcPipeOptions { ConnectTimeout = TimeSpan.FromSeconds(2) });
-            try
-            {
-                await transport.StartAsync(ct);
-                return transport;
-            }
-            catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
-            {
-                await transport.DisposeAsync();
-                await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
-            }
-        }
-    }
+    private static Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct) =>
+        PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
 
     private static void KillQuietly(Process process)
     {

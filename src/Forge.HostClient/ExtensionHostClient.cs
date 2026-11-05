@@ -917,15 +917,30 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
         {
             token.ThrowIfCancellationRequested();
             var candidate = CreatePeer(pipeName);
+
+            // One attempt owns the connect it starts. The pipe layer gives up on a connect that has not finished within
+            // IpcPipeOptions.ConnectTimeout but leaves it running, so an attempt that was already abandoned can still
+            // reach the host later - and the host reads a connection that closes without a request as its main program
+            // having left, which shuts it down. Cancelling the attempt under the same token before the transport is
+            // disposed is what stops that connect instead of orphaning it.
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(token);
             try
             {
-                await candidate.Peer.StartAsync(token).ConfigureAwait(false);
+                await candidate.Peer.StartAsync(attempt.Token).ConfigureAwait(false);
                 return candidate;
             }
             catch (Exception ex) when (ex is IpcTimeoutException or IOException or InvalidOperationException
                 or OperationCanceledException or UnauthorizedAccessException or PlatformNotSupportedException)
             {
                 last = ex;
+                try
+                {
+                    await attempt.CancelAsync().ConfigureAwait(false);
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+
                 RetireActiveGeneration();
                 await DisposeQuietlyAsync(candidate.Peer).ConfigureAwait(false);
                 try

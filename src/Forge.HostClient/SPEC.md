@@ -84,7 +84,7 @@ depends-on: [forge-ipc]
   连接”,再给出自启进程当时的状态:仍在运行(带 pid)的是启动慢,已退出(带退出码)的是启动前就死了,
   两种都不需要再靠猜;随后附上同一进程的标准输出/标准错误尾部(有则附)。只连接外部 Host、自身没启动进程时
   这两段为空:`HostConnection.HostExecutablePath` 为空就没有可报告的进程。一个连接尝试的时长为
-  `IpcPipeOptions.ConnectTimeout`,因此它决定了客户端发现“自启进程已退出”的最慢延迟。
+  `IpcPipeOptions.ConnectTimeout`,因此它决定了客户端发现“自启进程已退出”的最慢延迟。**放弃的尝试必须被取消**:管道层在 `ConnectTimeout` 到期后只停止等待,底层连接仍会继续重试并可能在之后连上 Host;Host 把“连上却不发请求、随即断开”当作主程序已离开并自行退出(退出码 0、无输出),于是重试方再也连不上。因此本客户端在处置该次尝试的 peer/transport 之前,先用同一令牌取消这次尝试,让被放弃的连接停下来。
 - **崩溃保留快照,同实例重连。** Host 崩溃置 `Failed` 但保留最后已知 `Tools` 与贡献快照;主动 `StopAsync` 清空。
   `StartAsync` 在 `Stopped` 与 `Failed` 均合法:从 `Failed` 是重连(新连接,必要时新进程)。重连在建立新连接
   **之前**先拆掉上一条连接:不发 `host.stop`、不清快照,只处置旧 peer/transport,并按

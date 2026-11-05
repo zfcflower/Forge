@@ -15,7 +15,7 @@ namespace Forge.Integration.Tests;
 /// </summary>
 public sealed class HostShutdownFenceTests
 {
-    private static readonly TimeSpan StepLimit = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(90), TimeSpan.FromMinutes(10));
 
     [Fact]
     public async Task Dispose_waits_for_a_starting_script_worker_and_starts_no_new_one()
@@ -323,7 +323,7 @@ public sealed class HostShutdownFenceTests
     private static async Task WaitForConditionAsync(Func<bool> condition, string what, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (!condition())
         {
             try
@@ -340,7 +340,7 @@ public sealed class HostShutdownFenceTests
     private static async Task WaitForFileAsync(string path, string what, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(TestBudgets.Condition);
         while (!File.Exists(path))
         {
             try

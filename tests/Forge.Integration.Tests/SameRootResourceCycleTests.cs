@@ -15,9 +15,9 @@ public sealed class SameRootResourceCycleTests
     private static readonly TimeSpan RefusalLimit = TimeSpan.FromSeconds(10);
 
     /// <summary>Bound on a whole script; a script that reaches it is hung.</summary>
-    private static readonly TimeSpan ScriptLimit = TimeSpan.FromSeconds(40);
+    private static readonly TimeSpan ScriptLimit = TestBudgets.Safety(TimeSpan.FromSeconds(40), TimeSpan.FromMinutes(10));
 
-    private static readonly TimeSpan MarkerLimit = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MarkerLimit = TestBudgets.Condition;
 
     private const string CrossForksScript = """
         var forks = new[]

@@ -25,11 +25,13 @@ internal sealed record ApprovalRecord(
 /// </summary>
 internal sealed class E2eFixture : IAsyncDisposable
 {
-    public static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(30);
+    /// <summary>Bound on a wait for a state the host has to reach. A safety net, so it follows what this run's host
+    /// starts cost rather than a fixed number.</summary>
+    public static TimeSpan WaitLimit => TestBudgets.Condition;
 
     /// <summary>Overall budget of one fixture, a safety net for a test that never finishes rather than a
     /// performance assertion: it has to leave room for the host start below on a loaded runner.</summary>
-    private readonly CancellationTokenSource budget = new(TimeSpan.FromSeconds(240));
+    private readonly CancellationTokenSource budget = new(TestBudgets.Fixture);
 
     public E2eFixture(
         IReadOnlyList<string>? hostArguments = null,
@@ -54,7 +56,7 @@ internal sealed class E2eFixture : IAsyncDisposable
             // Starting a host is bounded by how fast the machine creates a process and pages in a .NET app, not by
             // this number: a runner that already runs a dozen test assemblies at once can take far longer than a
             // quiet desktop. It stays a bound, so a host that never listens still fails the test.
-            StartTimeout = TimeSpan.FromSeconds(120),
+            StartTimeout = TestBudgets.HostStart,
         };
         var options = new ExtensionHostClientOptions
         {
@@ -62,7 +64,9 @@ internal sealed class E2eFixture : IAsyncDisposable
             DataDirectory = DataDirectory,
             RequestTimeout = TimeSpan.FromSeconds(60),
             StopRequestTimeout = TimeSpan.FromSeconds(5),
-            ProcessExitTimeout = TimeSpan.FromSeconds(10),
+            // Safety net: a host that does not exit on its own is killed after it. StopLifecycleTests asserts the host
+            // exits by itself, so the bound must not expire on a loaded runner first.
+            ProcessExitTimeout = TestBudgets.Condition,
         };
         Client = new ExtensionHostClient(connection, toolResolver, approvalPath, options);
     }
@@ -148,7 +152,9 @@ internal sealed class E2eFixture : IAsyncDisposable
 
     public async Task StartAsync()
     {
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         await Client.StartAsync(Ct);
+        TestBudgets.NoteHostStart(System.Diagnostics.Stopwatch.GetElapsedTime(start));
         await Client.RefreshPluginsAsync(Ct);
     }
 
@@ -262,7 +268,7 @@ internal sealed class E2eFixture : IAsyncDisposable
         {
             if (Client.Status != HostStatus.Stopped)
             {
-                using var stopBudget = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var stopBudget = new CancellationTokenSource(TestBudgets.Condition);
                 await Client.StopAsync(stopBudget.Token);
             }
         }

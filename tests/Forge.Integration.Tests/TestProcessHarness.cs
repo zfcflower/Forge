@@ -71,22 +71,10 @@ internal sealed class RawHost : IAsyncDisposable
     /// <summary>Connects a raw peer to the host, retrying while the host is still coming up.</summary>
     public static async Task<IpcPeer> ConnectAsync(string pipe, CancellationToken ct)
     {
-        while (true)
-        {
-            var transport = new NamedPipeClientTransport(pipe, new IpcPipeOptions { ConnectTimeout = TimeSpan.FromSeconds(2) });
-            try
-            {
-                await transport.StartAsync(ct);
-                var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
-                await peer.StartAsync(ct);
-                return peer;
-            }
-            catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
-            {
-                await transport.DisposeAsync();
-                await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
-            }
-        }
+        var transport = await PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
+        var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
+        await peer.StartAsync(ct);
+        return peer;
     }
 
     public static JsonElement EmptyObject() => JsonDocument.Parse("{}").RootElement.Clone();
@@ -199,6 +187,7 @@ internal sealed class DirectWorker : IAsyncDisposable
 
     private static async Task<DirectWorker> StartProcessAsync(string assemblyPath, string pipePrefix, CancellationToken ct)
     {
+        var start = Stopwatch.GetTimestamp();
         var pipe = pipePrefix + Guid.NewGuid().ToString("N")[..20];
         var server = new NamedPipeServerTransport(pipe, new IpcPipeOptions { ConnectTimeout = TimeSpan.FromSeconds(30) });
         var accept = server.StartAsync(ct);
@@ -233,6 +222,7 @@ internal sealed class DirectWorker : IAsyncDisposable
                 JsonDocument.Parse("{\"content\":\"the test host provides no tools.\",\"isError\":true}").RootElement.Clone(),
                 requestCt);
             await peer.StartAsync(ct);
+            TestBudgets.NoteHostStart(Stopwatch.GetElapsedTime(start));
             return new DirectWorker(process, peer, captured, server);
         }
         catch (Exception ex)
@@ -246,8 +236,36 @@ internal sealed class DirectWorker : IAsyncDisposable
         }
     }
 
-    public Task<IpcMessage> SendAsync(string operation, JsonElement args, CancellationToken ct) =>
-        Peer.SendRequestAsync(operation, args, ct);
+    public async Task<IpcMessage> SendAsync(string operation, JsonElement args, CancellationToken ct)
+    {
+        try
+        {
+            return await Peer.SendRequestAsync(operation, args, ct);
+        }
+        catch (IpcConnectionClosedException exception)
+        {
+            throw new IpcConnectionClosedException(exception.Message + " " + DescribeProcess(), exception);
+        }
+    }
+
+    /// <summary>What the child was doing when a request found its pipe closed: an exited process with its exit code and
+    /// stderr says this is the child, not the test.</summary>
+    private string DescribeProcess()
+    {
+        string state;
+        try
+        {
+            state = process.HasExited ? $"exited with code {process.ExitCode}" : $"is still running as pid {process.Id}";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
+        {
+            state = "is no longer observable";
+        }
+
+        return Stderr.Count == 0
+            ? $"The child process {state} and wrote no stderr."
+            : $"The child process {state}; stderr: " + string.Join(" | ", Stderr);
+    }
 
     public async ValueTask DisposeAsync()
     {

@@ -72,10 +72,18 @@ public sealed class StopLifecycleTests
         await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
         Assert.Null(fx.Client.HostExitCode);
 
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         await fx.Client.StopAsync(fx.Ct);
+        clock.Stop();
 
         Assert.Equal(HostStatus.Stopped, fx.Client.Status);
-        // Exit code 0 proves the host ran its own shutdown after host.stop instead of being killed by the client.
-        Assert.Equal(0, fx.Client.HostExitCode);
+        // Exit code 0 proves the host ran its own shutdown after host.stop instead of being killed by the client. The
+        // stop time is reported because a client that ran out of its exit window kills the host, which is the other way
+        // this assertion fails.
+        Assert.True(
+            fx.Client.HostExitCode == 0,
+            $"the host did not run its own shutdown: host.stop answered in {clock.Elapsed.TotalSeconds:0.###} s with " +
+            $"exit code {fx.Client.HostExitCode?.ToString() ?? "none"}; the client kills a host that does not exit " +
+            $"within {TestBudgets.Condition.TotalSeconds:0} s.");
     }
 }
