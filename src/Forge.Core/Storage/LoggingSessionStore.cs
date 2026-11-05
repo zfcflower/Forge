@@ -4,15 +4,27 @@ namespace Forge.Core.Storage;
 
 /// <summary>
 /// Decorates an <see cref="ISessionStore"/> with a JSONL event log: the authoritative store is
-/// written first and the log line mirrors the sequence number it assigned.
+/// written first and the log line mirrors the sequence number it assigned. Catalog members are forwarded
+/// to the inner store when it implements <see cref="ISessionCatalog"/>; there is nothing to log for them.
 /// </summary>
-public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) : ISessionStore, IAsyncDisposable, IDisposable
+public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) : ISessionStore, ISessionCatalog, IAsyncDisposable, IDisposable
 {
     private int _disposed;
 
     public ISessionStore Inner { get; } = inner ?? throw new ArgumentNullException(nameof(inner));
 
     public JsonlEventLog Log { get; } = log ?? throw new ArgumentNullException(nameof(log));
+
+    /// <summary>
+    /// The inner store's catalog surface. Reading this throws when the decorated store has no catalog, so a host
+    /// that hands this decorator to a caller expecting metadata fails at composition time instead of silently.
+    /// </summary>
+    public ISessionCatalog Catalog => Inner as ISessionCatalog
+        ?? throw new InvalidOperationException(
+            $"The decorated session store ({Inner.GetType().Name}) does not implement {nameof(ISessionCatalog)}.");
+
+    /// <summary>True when the decorated store exposes <see cref="ISessionCatalog"/>.</summary>
+    public bool SupportsCatalog => Inner is ISessionCatalog;
 
     /// <summary>Raised when a log line could not be written; the message itself is already committed.</summary>
     public event Action<Exception>? LogFailed;
@@ -54,6 +66,21 @@ public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) 
     public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Inner.LastSeqAsync(sessionId, ct);
 
     public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Inner.PutSummaryAsync(summary, ct);
+
+    Task<SessionInfo> ISessionCatalog.CreateAsync(SessionCreate request, CancellationToken ct) =>
+        Catalog.CreateAsync(request, ct);
+
+    Task<IReadOnlyList<SessionInfo>> ISessionCatalog.QueryAsync(SessionQuery query, CancellationToken ct) =>
+        Catalog.QueryAsync(query, ct);
+
+    Task<bool> ISessionCatalog.SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) =>
+        Catalog.SetStatusAsync(sessionId, status, ct);
+
+    Task<bool> ISessionCatalog.RenameAsync(string sessionId, string title, CancellationToken ct) =>
+        Catalog.RenameAsync(sessionId, title, ct);
+
+    Task ISessionCatalog.TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) =>
+        Catalog.TouchAsync(sessionId, at, ct);
 
     public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
         Inner.GetSummariesAsync(sessionId, ct);

@@ -162,10 +162,12 @@ public class CacheDisciplineTests
         var root = host.CreateRoot("session", Workspace);
 
         var registry = host.Tools;
-        var scoutTools = registry.Select(scout.Definition.ToolNames, canSpawn: true, SpawnAgentTool.Name);
-        var rootTools = registry.Select(root.Definition.ToolNames, canSpawn: true, SpawnAgentTool.Name);
+        var scoutTools = registry.Select(scout.Definition.ToolNames, canSpawn: true, SubAgentTools.Names);
+        var rootTools = registry.Select(root.Definition.ToolNames, canSpawn: true, SubAgentTools.Names);
 
-        Assert.Equal(new[] { "grep", "read", "spawn_agent" }, scoutTools.Definitions.Select(definition => definition.Name).ToArray());
+        Assert.Equal(
+            new[] { "grep", "read", "spawn_agent", "subagent_followup", "subagent_steer", "subagent_stop" },
+            scoutTools.Definitions.Select(definition => definition.Name).ToArray());
         Assert.Contains("write-file", rootTools.Definitions.Select(definition => definition.Name));
     }
 

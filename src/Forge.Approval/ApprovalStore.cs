@@ -126,6 +126,50 @@ public sealed class ApprovalStore : IDisposable
     }
 
     /// <summary>
+    /// Counts the approval records in <paramref name="databasePath"/> over a read-only, unpooled connection that never
+    /// writes: a missing file returns zero without opening anything, and so does an existing database without the
+    /// <c>plugin_approval</c> table (probed in <c>sqlite_master</c> first). Any other SQLite failure propagates, so a
+    /// corrupt or locked database is reported instead of being shown as "no plugins".
+    /// </summary>
+    public static async Task<int> CountReadOnlyAsync(string databasePath, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        if (!File.Exists(databasePath))
+        {
+            return 0;
+        }
+
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString();
+
+        try
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+            await using var probe = connection.CreateCommand();
+            probe.CommandText = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'plugin_approval'";
+            var found = await probe.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (found is not long tables || tables == 0)
+            {
+                return 0;
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM plugin_approval";
+            var count = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            return count is long records ? (int)records : 0;
+        }
+        catch (FileNotFoundException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
     /// Inserts or replaces one version's record. A supplied <see cref="PluginRecord.CreatedAt"/> wins; otherwise the
     /// existing creation time, or now, is kept. A default <see cref="PluginRecord.UpdatedAt"/> becomes now.
     /// </summary>

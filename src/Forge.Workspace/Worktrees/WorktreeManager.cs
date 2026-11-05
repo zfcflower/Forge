@@ -1,13 +1,30 @@
 namespace Forge.Workspace;
 
+/// <summary>How a worktree path is derived from the repository.</summary>
+public enum WorktreeLayout
+{
+    /// <summary><c>&lt;RootDirectory&gt;/&lt;repoName&gt;/&lt;slug&gt;</c>, with <c>RootDirectory</c> defaulting to <c>&lt;repo&gt;/../.forge-worktrees</c>.</summary>
+    NestedByRepository,
+
+    /// <summary>
+    /// <c>&lt;repoParent&gt;/&lt;repoName&gt;.worktrees/&lt;slug&gt;</c>, so each repository's worktrees sit next to it under a name
+    /// derived from the repository. An explicit <c>RootDirectory</c> is the directory those per-repository folders are
+    /// created in.
+    /// </summary>
+    SiblingOfRepository,
+}
+
 public sealed record WorktreeOptions
 {
     /// <summary>
-    /// Base directory for worktrees; the worktree itself lands in <c>&lt;RootDirectory&gt;/&lt;repoName&gt;/&lt;slug&gt;</c>.
-    /// Defaults to <c>&lt;repo&gt;/../.forge-worktrees</c>, and a relative value is resolved against the repository's
-    /// parent directory, so worktrees live outside the repository and are never committed.
+    /// Base directory for worktrees; the worktree itself lands in <c>&lt;RootDirectory&gt;/&lt;repoName&gt;/&lt;slug&gt;</c> (see
+    /// <see cref="Layout"/>) and defaults to <c>&lt;repo&gt;/../.forge-worktrees</c>. A relative value is resolved against
+    /// the repository's parent directory, so worktrees live outside the repository and are never committed.
     /// </summary>
     public string? RootDirectory { get; init; }
+
+    /// <summary>Whether worktrees nest under the repository name or sit in a sibling <c>&lt;repoName&gt;.worktrees</c> folder.</summary>
+    public WorktreeLayout Layout { get; init; } = WorktreeLayout.NestedByRepository;
 
     public string BranchPrefix { get; init; } = "forge/";
 
@@ -49,6 +66,57 @@ public sealed class WorktreeManager
 {
     private const string DefaultDirectoryName = ".forge-worktrees";
 
+    private const int MaxAddAttempts = 20;
+
+    private static readonly Dictionary<string, CreateGate> CreateGates =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    private static readonly Lock CreateGatesLock = new();
+
+    internal static int ActiveCreateGates
+    {
+        get
+        {
+            lock (CreateGatesLock)
+            {
+                return CreateGates.Count;
+            }
+        }
+    }
+
+    private sealed class CreateGate
+    {
+        internal readonly SemaphoreSlim Semaphore = new(1, 1);
+        internal int Users;
+    }
+
+    private static CreateGate AcquireGate(string key)
+    {
+        lock (CreateGatesLock)
+        {
+            if (!CreateGates.TryGetValue(key, out var gate))
+            {
+                gate = new CreateGate();
+                CreateGates[key] = gate;
+            }
+
+            gate.Users++;
+            return gate;
+        }
+    }
+
+    private static void ReleaseGate(string key, CreateGate gate)
+    {
+        lock (CreateGatesLock)
+        {
+            if (--gate.Users == 0)
+            {
+                CreateGates.Remove(key);
+                gate.Semaphore.Dispose();
+            }
+        }
+    }
+
     private readonly GitCli git;
 
     public WorktreeManager(GitCli git, WorktreeOptions? options = null)
@@ -70,34 +138,80 @@ public sealed class WorktreeManager
         var baseCommit = await git.RevParseAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false)
             ?? throw new GitException($"Start point '{startPoint}' does not resolve to a commit.", [], -1, string.Empty);
 
-        var branches = await git.GetBranchesAsync(repositoryRoot, ct: ct).ConfigureAwait(false);
-        var existing = new HashSet<string>(branches.Select(static branch => branch.Name), StringComparer.Ordinal);
-
         var baseSlug = Slugify(title, Options.MaxSlugLength);
         var attempts = Math.Max(1, Options.MaxSlugAttempts);
-        for (var attempt = 1; attempt <= attempts; attempt++)
+        var gateKey = WorkspacePaths.Normalize(repositoryRoot);
+        var gate = AcquireGate(gateKey);
+        var entered = false;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var slug = attempt == 1 ? baseSlug : $"{baseSlug}-{attempt}";
-            var branch = Options.BranchPrefix + slug;
-            var path = ResolveWorktreePath(repositoryRoot, slug);
-            if (existing.Contains(branch) || Directory.Exists(path) || File.Exists(path))
+            await gate.Semaphore.WaitAsync(ct).ConfigureAwait(false);
+            entered = true;
+            var existing = await GetBranchNamesAsync(repositoryRoot, ct).ConfigureAwait(false);
+            var addAttempts = 0;
+            GitException? lastFailure = null;
+            for (var attempt = 1; attempt <= attempts; attempt++)
             {
-                continue;
+                ct.ThrowIfCancellationRequested();
+                var slug = attempt == 1 ? baseSlug : $"{baseSlug}-{attempt}";
+                var branch = Options.BranchPrefix + slug;
+                var path = ResolveWorktreePath(repositoryRoot, slug);
+                if (existing.Contains(branch) || WorkspacePaths.Exists(path))
+                {
+                    continue;
+                }
+
+                var parent = System.IO.Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(parent))
+                {
+                    Directory.CreateDirectory(parent);
+                }
+
+                try
+                {
+                    var worktree = await git.AddWorktreeAsync(repositoryRoot, path, branch, startPoint, ct).ConfigureAwait(false);
+                    return new WorktreeSession(repositoryRoot, worktree.Path, branch, slug, baseCommit);
+                }
+                catch (GitException exception) when (addAttempts < MaxAddAttempts && IsCollision(exception, path))
+                {
+                    addAttempts++;
+                    lastFailure = exception;
+                    existing = await GetBranchNamesAsync(repositoryRoot, ct).ConfigureAwait(false);
+                }
             }
 
-            var parent = System.IO.Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(parent))
+            if (lastFailure is not null)
             {
-                Directory.CreateDirectory(parent);
+                throw new GitException(
+                    $"Could not create a worktree branch for '{baseSlug}' after {addAttempts} attempts: {lastFailure.Message}",
+                    lastFailure.Arguments,
+                    lastFailure.ExitCode,
+                    lastFailure.StandardError);
             }
 
-            var worktree = await git.AddWorktreeAsync(repositoryRoot, path, branch, startPoint, ct).ConfigureAwait(false);
-            return new WorktreeSession(repositoryRoot, worktree.Path, branch, slug, baseCommit);
+            throw new GitException($"Could not find an unused branch name for '{baseSlug}'.", [], -1, string.Empty);
         }
+        finally
+        {
+            if (entered)
+            {
+                gate.Semaphore.Release();
+            }
 
-        throw new GitException($"Could not find an unused branch name for '{baseSlug}'.", [], -1, string.Empty);
+            ReleaseGate(gateKey, gate);
+        }
     }
+
+    private async Task<HashSet<string>> GetBranchNamesAsync(string repositoryRoot, CancellationToken ct)
+    {
+        var branches = await git.GetBranchesAsync(repositoryRoot, ct: ct).ConfigureAwait(false);
+        return new HashSet<string>(branches.Select(static branch => branch.Name), StringComparer.Ordinal);
+    }
+
+    private static bool IsCollision(GitException exception, string path) =>
+        WorkspacePaths.Exists(path)
+        || exception.StandardError.Contains("already exists", StringComparison.OrdinalIgnoreCase)
+        || exception.StandardError.Contains("cannot lock ref", StringComparison.OrdinalIgnoreCase);
 
     public Task<IReadOnlyList<GitWorktree>> ListAsync(string repositoryPath, CancellationToken ct = default) =>
         git.ListWorktreesAsync(repositoryPath, ct);
@@ -170,16 +284,26 @@ public sealed class WorktreeManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(slug);
-        var parent = System.IO.Path.GetDirectoryName(WorkspacePaths.Normalize(repositoryRoot));
-        var root = Options.RootDirectory;
-        root = string.IsNullOrWhiteSpace(root)
-            ? System.IO.Path.Combine(parent ?? repositoryRoot, DefaultDirectoryName)
-            : System.IO.Path.IsPathRooted(root)
-                ? root
-                : System.IO.Path.Combine(parent ?? repositoryRoot, root);
-
+        var repository = WorkspacePaths.Normalize(repositoryRoot);
+        var parent = System.IO.Path.GetDirectoryName(repository);
         var repositoryName = WorkspacePaths.FileName(repositoryRoot);
-        return System.IO.Path.GetFullPath(System.IO.Path.Combine(root, repositoryName, slug));
+        var configured = string.IsNullOrWhiteSpace(Options.RootDirectory)
+            ? null
+            : System.IO.Path.IsPathRooted(Options.RootDirectory)
+                ? Options.RootDirectory
+                : System.IO.Path.Combine(parent ?? repository, Options.RootDirectory);
+
+        return Options.Layout switch
+        {
+            WorktreeLayout.SiblingOfRepository => System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                configured ?? parent ?? repository,
+                repositoryName + ".worktrees",
+                slug)),
+            _ => System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                configured ?? System.IO.Path.Combine(parent ?? repository, DefaultDirectoryName),
+                repositoryName,
+                slug)),
+        };
     }
 
     /// <summary>Lowercases and reduces a title to characters that are safe in a branch name and a directory name.</summary>

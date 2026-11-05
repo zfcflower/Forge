@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using Forge.Abstractions;
 using Forge.Core.Prompts;
@@ -8,20 +10,24 @@ namespace Forge.Core.Agents;
 public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError);
 
 /// <summary>
-/// Owns sub-agent instances: id allocation, the run gate per instance and the depth limit. Each instance
-/// keeps its own context, so a spawn by id continues where that agent stopped while a fresh spawn starts
-/// from the shared stable prefix alone.
+/// Owns sub-agent instances: id allocation, the run gate per instance, the depth limit and the control surface
+/// (<see cref="ISubAgentControl"/>) the parent tools and the UI stop button share. Each spawn is one run with
+/// its own cancellation source, so stopping a child never reaches the caller or its siblings.
 /// </summary>
-public sealed class SubAgentScheduler
+public sealed class SubAgentScheduler : ISubAgentControl
 {
     private const int TitleLimit = 80;
+    private const string ParentCancelled = "parent cancelled";
 
     private readonly AgentCatalog catalog;
     private readonly PromptLayers layers;
     private readonly IPromptComposer composer;
     private readonly ISessionStore? store;
+    private readonly ISessionCatalog? sessions;
     private readonly AgentOptions options;
     private readonly Dictionary<string, AgentInstance> instances = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SubAgentRun> runs = new(StringComparer.Ordinal);
+    private readonly HashSet<string> finished = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> counters = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
 
@@ -40,6 +46,7 @@ public sealed class SubAgentScheduler
         this.layers = layers;
         this.composer = composer;
         this.store = store;
+        sessions = SessionCatalogs.From(store);
         this.options = options;
     }
 
@@ -64,6 +71,34 @@ public sealed class SubAgentScheduler
         lock (gate)
         {
             return instances.TryGetValue(id, out instance!);
+        }
+    }
+
+    public SubAgentControlResult Steer(string agentId, string instruction)
+    {
+        ArgumentNullException.ThrowIfNull(instruction);
+        return TryGetRun(agentId, out var run) ? run.Steer(instruction) : Missing(agentId);
+    }
+
+    public SubAgentControlResult FollowUp(string agentId, string instruction)
+    {
+        ArgumentNullException.ThrowIfNull(instruction);
+        return TryGetRun(agentId, out var run) ? run.FollowUp(instruction) : Missing(agentId);
+    }
+
+    public SubAgentControlResult Stop(string agentId, string? reason) =>
+        TryGetRun(agentId, out var run) ? run.Stop(reason) : Missing(agentId);
+
+    private SubAgentControlResult Missing(string agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            return SubAgentControlResult.NotFound;
+        }
+
+        lock (gate)
+        {
+            return finished.Contains(agentId) ? SubAgentControlResult.AlreadyFinished : SubAgentControlResult.NotFound;
         }
     }
 
@@ -95,7 +130,12 @@ public sealed class SubAgentScheduler
         }
 
         AgentInstance? instance = null;
+        SubAgentRun? run = null;
         var holdsGate = false;
+        var usageBefore = TokenUsage.Empty;
+        var completed = false;
+        string? failure = null;
+        var watch = Stopwatch.StartNew();
         try
         {
             if (resumeId is not null)
@@ -136,16 +176,33 @@ public sealed class SubAgentScheduler
                 holdsGate = true;
             }
 
-            sink.Emit(new AgentSubAgentStarted(parentId, instance.Id, instance.Definition.Name));
-            var result = await Runner(instance, ChatMessage.User(task), sink, ct).ConfigureAwait(false);
+            usageBefore = instance.Usage;
+            instance.ResetText();
+            run = Attach(instance, sink, ct);
+
+            sink.Emit(new AgentSubAgentStarted(
+                parentId,
+                instance.Id,
+                instance.Definition.Name,
+                task,
+                instance.Definition.Model.Model,
+                instance.SessionId,
+                DateTimeOffset.UtcNow));
+            var result = await Runner(instance, ChatMessage.User(task), sink, run.Token).ConfigureAwait(false);
+            completed = true;
             return new SubAgentOutcome(instance.Id, result.Text, IsError: false);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (run is not null && run.StopRequested)
+        {
+            return new SubAgentOutcome(instance!.Id, StoppedText(instance, run), IsError: false);
+        }
+        catch (OperationCanceledException)
         {
             throw;
         }
         catch (Exception exception)
         {
+            failure = exception.Message;
             if (instance is not null)
             {
                 sink.Emit(new AgentFailed(instance.Id, exception.Message));
@@ -156,10 +213,103 @@ public sealed class SubAgentScheduler
         }
         finally
         {
+            if (run is not null && instance is not null)
+            {
+                var (status, error) = FinishState(completed, run, failure, ct);
+                run.Finish(status, UsageOf(instance, usageBefore), watch.Elapsed, error);
+                instance.Control = null;
+                Detach(instance.Id, run);
+                run.Dispose();
+            }
+
             if (holdsGate)
             {
                 instance!.Release();
             }
+        }
+    }
+
+    private static (SubAgentStatus Status, string? Error) FinishState(
+        bool completed,
+        SubAgentRun run,
+        string? failure,
+        CancellationToken parentToken)
+    {
+        if (completed)
+        {
+            return (SubAgentStatus.Completed, null);
+        }
+
+        if (run.StopRequested)
+        {
+            return (SubAgentStatus.Stopped, run.StopReason);
+        }
+
+        if (failure is not null)
+        {
+            return (SubAgentStatus.Failed, failure);
+        }
+
+        return parentToken.IsCancellationRequested
+            ? (SubAgentStatus.Stopped, ParentCancelled)
+            : (SubAgentStatus.Failed, "cancelled");
+    }
+
+    private static TokenUsage UsageOf(AgentInstance instance, TokenUsage before)
+    {
+        var total = instance.Usage;
+        return new TokenUsage(
+            total.InputTokens - before.InputTokens,
+            total.OutputTokens - before.OutputTokens,
+            total.CacheReadTokens - before.CacheReadTokens,
+            total.CacheWriteTokens - before.CacheWriteTokens);
+    }
+
+    private static string StoppedText(AgentInstance instance, SubAgentRun run)
+    {
+        var partial = instance.PartialText;
+        var builder = new StringBuilder(partial.Length + 96);
+        builder.Append("Sub-agent '").Append(instance.Id).Append("' was stopped (").Append(run.StopReason).Append("). Partial output:\n");
+        builder.Append(partial.Length == 0 ? "(nothing was produced before it stopped)" : partial);
+        return builder.ToString();
+    }
+
+    private SubAgentRun Attach(AgentInstance instance, IAgentEventSink sink, CancellationToken parentToken)
+    {
+        var run = new SubAgentRun(instance.Id, sink, parentToken);
+        lock (gate)
+        {
+            runs[instance.Id] = run;
+            finished.Remove(instance.Id);
+        }
+
+        instance.Control = run;
+        return run;
+    }
+
+    private void Detach(string id, SubAgentRun run)
+    {
+        lock (gate)
+        {
+            if (runs.TryGetValue(id, out var current) && ReferenceEquals(current, run))
+            {
+                runs.Remove(id);
+                finished.Add(id);
+            }
+        }
+    }
+
+    private bool TryGetRun(string agentId, out SubAgentRun run)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            run = null!;
+            return false;
+        }
+
+        lock (gate)
+        {
+            return runs.TryGetValue(agentId, out run!);
         }
     }
 
@@ -178,7 +328,7 @@ public sealed class SubAgentScheduler
         {
             var next = counters.TryGetValue(prefix, out var current) ? current + 1 : 1;
             counters[prefix] = next;
-            return string.Concat(prefix, "-", next.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return string.Concat(prefix, "-", next.ToString(CultureInfo.InvariantCulture));
         }
     }
 
@@ -190,8 +340,27 @@ public sealed class SubAgentScheduler
         }
 
         var title = task.Length <= TitleLimit ? task : task[..TitleLimit];
-        var session = await store
-            .CreateSessionAsync(context.WorkingDirectory, string.Concat(definition.Name, ": ", title), ct)
+        var full = string.Concat(definition.Name, ": ", title);
+        if (sessions is null)
+        {
+            var created = await store.CreateSessionAsync(context.WorkingDirectory, full, ct).ConfigureAwait(false);
+            return created.Id;
+        }
+
+        var parent = string.IsNullOrWhiteSpace(context.SessionId)
+            ? null
+            : await store.GetSessionAsync(context.SessionId, ct).ConfigureAwait(false);
+        var session = await sessions
+            .CreateAsync(
+                new SessionCreate(context.WorkingDirectory, full)
+                {
+                    ParentSessionId = context.SessionId,
+                    AgentKind = definition.Name,
+                    Task = task,
+                    WorktreePath = parent?.WorktreePath,
+                    ProjectId = parent?.ProjectId,
+                },
+                ct)
             .ConfigureAwait(false);
         return session.Id;
     }

@@ -31,6 +31,9 @@ public sealed record AgentHostOptions
 
     public IArtifactStore? Artifacts { get; init; }
 
+    /// <summary>Registers the <c>todo</c> tool when set; the same store backs the TODO panel.</summary>
+    public ITodoStore? Todos { get; init; }
+
     /// <summary>Overrides the default <see cref="SummaryCompactor"/> (used when a store is configured).</summary>
     public IContextCompactor? Compactor { get; init; }
 
@@ -61,6 +64,7 @@ public sealed class AgentHost
     private readonly SubAgentScheduler scheduler;
     private readonly ToolRegistry toolRegistry;
     private readonly AgentLoop loop;
+    private readonly ISessionStore? store;
 
     public AgentHost(AgentHostOptions options)
     {
@@ -69,6 +73,7 @@ public sealed class AgentHost
         catalog = new AgentCatalog(options.Agents);
         layers = options.Layers;
         composer = options.Composer;
+        store = options.Store;
 
         var tools = new List<ITool>(options.Tools);
         if (options.IncludeRetrievalTools)
@@ -85,8 +90,16 @@ public sealed class AgentHost
             }
         }
 
+        if (options.Todos is { } todos)
+        {
+            tools.Add(new TodoTool(todos));
+        }
+
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
         tools.Add(new SpawnAgentTool(scheduler, catalog.All));
+        tools.Add(new SubAgentSteerTool(scheduler));
+        tools.Add(new SubAgentFollowUpTool(scheduler));
+        tools.Add(new SubAgentStopTool(scheduler));
 
         var compactor = options.Compactor
                         ?? (options.Store is { } summaryStore
@@ -100,11 +113,12 @@ public sealed class AgentHost
             options.Policy,
             options.ApprovalHandler,
             options.Store,
+            SessionCatalogs.From(options.Store),
             options.Artifacts,
             compactor,
             options.TokenCounter,
             this.options,
-            SpawnAgentTool.Name,
+            SubAgentTools.Names,
             options.DynamicContext));
         scheduler.Runner = loop.RunAsync;
     }
@@ -114,6 +128,9 @@ public sealed class AgentHost
     public AgentCatalog Catalog => catalog;
 
     public SubAgentScheduler SubAgents => scheduler;
+
+    /// <summary>Control surface over the live sub-agents of this host; the UI stop button uses the same path as the tools.</summary>
+    public ISubAgentControl SubAgentControl => scheduler;
 
     public ToolRegistry Tools => toolRegistry;
 
@@ -137,6 +154,26 @@ public sealed class AgentHost
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
         return CreateRoot(sessionId, workingDirectory, catalog.Get(kind), id);
+    }
+
+    /// <summary>
+    /// Root agent of a stored session, with its history rebuilt from the store the way the compactor leaves it
+    /// (summary view plus the unsummarized tail), so a conversation continues with its context after a restart.
+    /// </summary>
+    public async Task<AgentInstance> ResumeRootAsync(
+        string sessionId,
+        string workingDirectory,
+        CancellationToken ct,
+        AgentDefinition? definition = null)
+    {
+        var root = CreateRoot(sessionId, workingDirectory, definition);
+        if (store is not { } sessionStore)
+        {
+            return root;
+        }
+
+        root.ReplaceHistory(await SessionHistory.LoadAsync(sessionStore, sessionId, ct).ConfigureAwait(false));
+        return root;
     }
 
     /// <summary>

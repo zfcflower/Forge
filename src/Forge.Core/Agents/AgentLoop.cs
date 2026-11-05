@@ -15,11 +15,12 @@ public sealed record AgentLoopServices(
     IApprovalPolicy Policy,
     IApprovalHandler? ApprovalHandler,
     ISessionStore? Store,
+    ISessionCatalog? Sessions,
     IArtifactStore? Artifacts,
     IContextCompactor Compactor,
     ITokenCounter TokenCounter,
     AgentOptions Options,
-    string SpawnToolName,
+    IReadOnlyList<string> SubAgentToolNames,
     Func<string?>? DynamicContext);
 
 /// <summary>
@@ -27,9 +28,14 @@ public sealed record AgentLoopServices(
 /// the tool calls, write one tool message per turn. Read-only calls of a turn run concurrently; anything
 /// with a side effect runs alone, in call order. The loop also owns the host-wide bound on how many
 /// agents are actively running, holding one permit per agent only while that agent does its own work.
+/// A sub-agent run is steered at its tool-batch boundaries: the calls that have not started are answered
+/// as skipped and the instruction becomes the next user message; pending follow-ups keep a run alive
+/// where it would otherwise finish.
 /// </summary>
 public sealed class AgentLoop(AgentLoopServices services)
 {
+    private const string SkippedResult = "skipped: the agent was redirected";
+
     private readonly SemaphoreSlim approvalGate = new(1, 1);
     private readonly AgentSlotPool slots = new(services.Options.MaxParallelSubAgents);
 
@@ -43,12 +49,18 @@ public sealed class AgentLoop(AgentLoopServices services)
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(sink);
 
-        using var slot = await slots.AcquireAsync(ct).ConfigureAwait(false);
+        using var slot = await AcquireAsync(instance, sink, ct).ConfigureAwait(false);
         using var scope = AgentScope.Enter(sink, instance.Id, slot);
+        var control = instance.Control;
+        if (control is not null && control.Admit() is { Length: > 0 } queued)
+        {
+            input = WithInstructions(input, queued);
+        }
+
         var tools = services.Tools.Select(
             instance.Definition.ToolNames,
             instance.Depth < services.Options.MaxSubAgentDepth,
-            services.SpawnToolName);
+            services.SubAgentToolNames);
         var definitions = tools.Definitions;
         var provider = services.Providers(instance.Definition.Model);
 
@@ -63,12 +75,14 @@ public sealed class AgentLoop(AgentLoopServices services)
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
             var stop = StopReason.Other;
+            instance.BeginText();
 
             await foreach (var chunk in provider.StreamAsync(request, ct).ConfigureAwait(false))
             {
                 switch (chunk)
                 {
                     case TextDelta text:
+                        instance.AppendText(text.Text);
                         sink.Emit(new AgentTextDelta(instance.Id, text.Text));
                         break;
                     case ThinkingDelta thinking:
@@ -88,21 +102,114 @@ public sealed class AgentLoop(AgentLoopServices services)
             }
 
             instance.Usage += usage;
+            instance.CommitText(Text(assistant));
             await PersistAsync(instance, assistant, usage, ct).ConfigureAwait(false);
+            await TouchAsync(instance, ct).ConfigureAwait(false);
 
             var calls = ToolCalls(assistant);
             if (calls.Length == 0)
             {
+                if (await ContinueWithControlAsync(instance, control, sink, ct).ConfigureAwait(false))
+                {
+                    continue;
+                }
+
                 sink.Emit(new AgentTurnCompleted(instance.Id, instance.Usage, stop));
                 return new AgentRunResult(Text(assistant), instance.Usage, stop);
             }
 
-            var results = await ExecuteToolsAsync(instance, tools, calls, sink, ct).ConfigureAwait(false);
-            await PersistAsync(instance, new ChatMessage(MessageRole.Tool, results), null, CancellationToken.None).ConfigureAwait(false);
+            var execution = await ExecuteToolsAsync(instance, tools, calls, control, sink, ct).ConfigureAwait(false);
+            await PersistAsync(instance, new ChatMessage(MessageRole.Tool, execution.Results), null, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (execution.Steering is { } steering)
+            {
+                await PersistAsync(instance, ChatMessage.User(steering), null, ct).ConfigureAwait(false);
+            }
         }
 
         throw new AgentTurnLimitException(
             $"Agent '{instance.Id}' did not finish within {services.Options.MaxTurns} turns.");
+    }
+
+    /// <summary>
+    /// Takes this agent's parallelism slot, reporting <see cref="AgentSubAgentQueued"/> only when the agent has to
+    /// wait for one; a root agent has no lifecycle of its own and never reports.
+    /// </summary>
+    private async ValueTask<AgentSlot> AcquireAsync(AgentInstance instance, IAgentEventSink sink, CancellationToken ct)
+    {
+        if (instance.Control is not { } control)
+        {
+            return await slots.AcquireAsync(ct).ConfigureAwait(false);
+        }
+
+        if (slots.TryAcquire() is { } slot)
+        {
+            return slot;
+        }
+
+        control.ReportQueued();
+        return await slots.AcquireAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The child would otherwise finish. A pending steer is delivered first (nothing was left to skip), then the
+    /// follow-ups the user queued; either one keeps the loop going instead of ending the run.
+    /// </summary>
+    private async ValueTask<bool> ContinueWithControlAsync(
+        AgentInstance instance,
+        SubAgentRun? control,
+        IAgentEventSink sink,
+        CancellationToken ct)
+    {
+        if (control is null)
+        {
+            return false;
+        }
+
+        if (control.TakeSteering() is { } redirected)
+        {
+            sink.Emit(new AgentSubAgentSteered(instance.Id, redirected, 0, DateTimeOffset.UtcNow));
+            await PersistAsync(instance, ChatMessage.User(redirected), null, ct).ConfigureAwait(false);
+            return true;
+        }
+
+        if (control.TakeFollowUps() is { } followUps)
+        {
+            foreach (var followUp in followUps)
+            {
+                await PersistAsync(instance, ChatMessage.User(followUp), null, ct).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static ChatMessage WithInstructions(ChatMessage message, string instructions)
+    {
+        var content = new List<ContentBlock>(message.Content.Count + 1);
+        var text = new StringBuilder(instructions.Length + 32);
+        foreach (var block in message.Content)
+        {
+            if (block is TextBlock value)
+            {
+                text.Append(value.Text);
+            }
+            else
+            {
+                content.Add(block);
+            }
+        }
+
+        if (text.Length > 0)
+        {
+            text.Append("\n\n");
+        }
+
+        text.Append(instructions);
+        content.Add(new TextBlock(text.ToString()));
+        return message with { Content = content };
     }
 
     private ChatRequest BuildRequest(AgentInstance instance, IReadOnlyList<ToolDefinition> definitions)
@@ -164,22 +271,38 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
     }
 
-    private async Task<ContentBlock[]> ExecuteToolsAsync(
+    private async ValueTask<(ContentBlock[] Results, string? Steering)> ExecuteToolsAsync(
         AgentInstance instance,
         ToolRegistry tools,
         ToolCallBlock[] calls,
+        SubAgentRun? control,
         IAgentEventSink sink,
         CancellationToken ct)
     {
         var results = new ContentBlock?[calls.Length];
         var context = new ToolContext(instance.SessionId, instance.WorkingDirectory, instance.Depth);
+        string? steering = null;
         try
         {
             var index = 0;
             while (index < calls.Length)
             {
+                if (control is not null && control.TakeSteering() is { } instruction)
+                {
+                    steering = instruction;
+                    var dropped = calls.Length - index;
+                    for (var skipped = index; skipped < calls.Length; skipped++)
+                    {
+                        results[skipped] = new ToolResultBlock(calls[skipped].Id, SkippedResult, IsError: true);
+                    }
+
+                    sink.Emit(new AgentSubAgentSteered(instance.Id, instruction, dropped, DateTimeOffset.UtcNow));
+                    break;
+                }
+
+                ct.ThrowIfCancellationRequested();
                 var end = index;
-                while (end < calls.Length && IsReadOnly(tools, calls[end].Name))
+                while (end < calls.Length && IsReadOnly(tools, calls[end]))
                 {
                     end++;
                 }
@@ -195,6 +318,12 @@ public sealed class AgentLoop(AgentLoopServices services)
                     index = end;
                 }
             }
+
+            if (steering is null && control is not null && control.TakeSteering() is { } trailing)
+            {
+                steering = trailing;
+                sink.Emit(new AgentSubAgentSteered(instance.Id, trailing, 0, DateTimeOffset.UtcNow));
+            }
         }
         catch (Exception)
         {
@@ -204,7 +333,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             throw;
         }
 
-        return Complete(calls, results, "Cancelled.");
+        return (Complete(calls, results, "Cancelled."), steering);
     }
 
     private async Task RunBatchAsync(
@@ -245,7 +374,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             return new ToolResultBlock(call.Id, $"Unknown tool '{call.Name}'.", IsError: true);
         }
 
-        var request = new ApprovalRequest(call.Name, call.ArgumentsJson, tool.SideEffect, instance.WorkingDirectory);
+        var request = new ApprovalRequest(call.Name, call.ArgumentsJson, ToolRegistry.SideEffectOf(tool, call), instance.WorkingDirectory);
         if (!await IsApprovedAsync(request, ct).ConfigureAwait(false))
         {
             sink.Emit(new AgentApprovalDenied(instance.Id, call));
@@ -330,6 +459,26 @@ public sealed class AgentLoop(AgentLoopServices services)
         instance.Add(message, seq);
     }
 
+    /// <summary>Best-effort activity marker for the session list; a store failure must not fail the turn.</summary>
+    private async ValueTask TouchAsync(AgentInstance instance, CancellationToken ct)
+    {
+        if (services.Sessions is not { } sessions)
+        {
+            return;
+        }
+
+        try
+        {
+            await sessions.TouchAsync(instance.SessionId, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+        }
+    }
+
     private static ContentBlock[] Complete(ToolCallBlock[] calls, ContentBlock?[] results, string fallback)
     {
         var content = new ContentBlock[calls.Length];
@@ -341,8 +490,9 @@ public sealed class AgentLoop(AgentLoopServices services)
         return content;
     }
 
-    private static bool IsReadOnly(ToolRegistry tools, string name) =>
-        tools.TryGet(name, out var tool) && tool.SideEffect == ToolSideEffect.ReadOnly;
+    private static bool IsReadOnly(ToolRegistry tools, ToolCallBlock block) =>
+        tools.TryGet(block.Name, out var tool)
+        && ToolRegistry.SideEffectOf(tool, new ToolCall(block.Id, block.Name, block.ArgumentsJson)) == ToolSideEffect.ReadOnly;
 
     private static ToolCallBlock[] ToolCalls(ChatMessage message)
     {

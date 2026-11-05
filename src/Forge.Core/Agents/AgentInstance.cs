@@ -1,3 +1,4 @@
+using System.Text;
 using Forge.Abstractions;
 
 namespace Forge.Core.Agents;
@@ -12,6 +13,8 @@ internal readonly record struct AgentMessage(ChatMessage Message, long Seq);
 public sealed class AgentInstance
 {
     private readonly List<AgentMessage> history = [];
+    private readonly StringBuilder streaming = new();
+    private string lastText = string.Empty;
     private int running;
 
     internal AgentInstance(
@@ -44,6 +47,12 @@ public sealed class AgentInstance
 
     public TokenUsage Usage { get; internal set; } = TokenUsage.Empty;
 
+    /// <summary>Control state of the run driving this instance right now; null for a root agent or a finished sub-agent.</summary>
+    internal SubAgentRun? Control { get; set; }
+
+    /// <summary>Text produced by this instance so far: the turn in progress when it is streaming, else the last finished turn.</summary>
+    internal string PartialText => streaming.Length > 0 ? streaming.ToString() : lastText;
+
     /// <summary>Snapshot of the persisted context, for diagnostics and retrieval; the loop reads <see cref="Messages"/>.</summary>
     public IReadOnlyList<ChatMessage> History => [.. history.Select(static entry => entry.Message)];
 
@@ -54,6 +63,22 @@ public sealed class AgentInstance
     internal void Release() => Volatile.Write(ref running, 0);
 
     internal void Add(ChatMessage message, long seq) => history.Add(new AgentMessage(message, seq));
+
+    internal void BeginText() => streaming.Clear();
+
+    internal void AppendText(string text) => streaming.Append(text);
+
+    internal void CommitText(string text)
+    {
+        lastText = text;
+        streaming.Clear();
+    }
+
+    internal void ResetText()
+    {
+        lastText = string.Empty;
+        streaming.Clear();
+    }
 
     internal void ReplaceHistory(IEnumerable<AgentMessage> messages)
     {

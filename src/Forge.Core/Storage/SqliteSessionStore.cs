@@ -13,54 +13,23 @@ namespace Forge.Core.Storage;
 /// write operations committed in small batches), so sequence assignment is serialized and a caller
 /// only observes a sequence number after the transaction carrying it has committed. Reads use
 /// short-lived pooled connections against the same WAL database and therefore never block the writer.
+/// The same file is the session catalog: project/worktree bindings, parent links, archive state and
+/// activity are columns of the <c>sessions</c> row, so there is no second place to keep in sync.
 /// </summary>
-public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDisposable
+public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncDisposable, IDisposable
 {
     private const int WriterBatchLimit = 128;
     private const int WriterQueueCapacity = 4096;
     private const int LockRetryCount = 5;
 
-    private static readonly string SchemaSql = """
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            workspace_path TEXT NOT NULL,
-            title TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_sessions_workspace ON sessions (workspace_path, created_at DESC);
-
-        CREATE TABLE IF NOT EXISTS messages (
-            session_id TEXT NOT NULL,
-            seq INTEGER NOT NULL,
-            role TEXT NOT NULL,
-            content_json TEXT NOT NULL,
-            usage_json TEXT,
-            at TEXT NOT NULL,
-            PRIMARY KEY (session_id, seq)
-        ) WITHOUT ROWID;
-
-        CREATE TABLE IF NOT EXISTS summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            layer INTEGER NOT NULL,
-            from_seq INTEGER NOT NULL,
-            to_seq INTEGER NOT NULL,
-            text TEXT NOT NULL,
-            at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_summaries_session ON summaries (session_id, layer, from_seq);
-        """;
-
-    private const string FtsSchemaSql =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(session_id UNINDEXED, seq UNINDEXED, text, tokenize='unicode61 remove_diacritics 2')";
-
-    private const string FallbackSchemaSql =
-        "CREATE TABLE IF NOT EXISTS messages_text (session_id TEXT NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (session_id, seq))";
+    private const string SessionColumns =
+        "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, last_active_at";
 
     private const string FtsInsertSql = "INSERT INTO messages_fts (session_id, seq, text) VALUES ($s, $q, $t)";
     private const string FallbackInsertSql = "INSERT OR REPLACE INTO messages_text (session_id, seq, text) VALUES ($s, $q, $t)";
 
     private readonly string? _dataDirectory;
+    private readonly string _databasePath;
     private readonly string _connectionString;
     private readonly Channel<IWriteOp> _writes;
     private readonly ConcurrentDictionary<string, long> _lastSeq = new(StringComparer.Ordinal);
@@ -76,7 +45,8 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         _dataDirectory = Path.GetFullPath(dataDirectory);
-        _connectionString = StorageDb.ConnectionString(Path.Combine(_dataDirectory, StorageDb.FileName));
+        _databasePath = StorageDb.DatabasePath(_dataDirectory);
+        _connectionString = StorageDb.ConnectionString(_databasePath);
         _writes = CreateChannel();
         _initialization = new Lazy<Task>(InitializeAsync, LazyThreadSafetyMode.ExecutionAndPublication);
     }
@@ -85,31 +55,46 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
     public SqliteSessionStore(SqliteConnectionStringBuilder connectionString)
     {
         ArgumentNullException.ThrowIfNull(connectionString);
-        if (string.IsNullOrEmpty(connectionString.DataSource))
-        {
-            throw new ArgumentException("A data source is required.", nameof(connectionString));
-        }
-
-        if (connectionString.DefaultTimeout <= 0)
-        {
-            connectionString.DefaultTimeout = StorageDb.CommandTimeoutSeconds;
-        }
-
-        _connectionString = connectionString.ToString();
+        ArgumentException.ThrowIfNullOrEmpty(connectionString.DataSource, nameof(connectionString));
+        _databasePath = ResolveDatabasePath(connectionString.DataSource);
+        _connectionString = StorageDb.ConnectionString(connectionString);
         _writes = CreateChannel();
         _initialization = new Lazy<Task>(InitializeAsync, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public string ConnectionString => _connectionString;
 
+    /// <summary>Full path of the database file this store reads and writes.</summary>
+    public string DatabasePath => _databasePath;
+
     /// <summary>False when the bundled SQLite lacks the FTS5 module; search then falls back to <c>LIKE</c>.</summary>
     public bool Fts5Available => Volatile.Read(ref _fts5Available) != 0;
 
-    public async Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct)
+    /// <summary>Same as <see cref="CreateAsync"/> with only the workspace and a title.</summary>
+    public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(workspacePath);
         ArgumentNullException.ThrowIfNull(title);
-        var session = new SessionInfo(Guid.NewGuid().ToString("n"), workspacePath, title, DateTimeOffset.UtcNow);
+        return CreateAsync(new SessionCreate(workspacePath, title), ct);
+    }
+
+    public async Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspacePath);
+        ArgumentNullException.ThrowIfNull(request.Title);
+        var now = DateTimeOffset.UtcNow;
+        var session = new SessionInfo(Guid.NewGuid().ToString("n"), request.WorkspacePath, request.Title, now)
+        {
+            ProjectId = request.ProjectId,
+            WorktreePath = request.WorktreePath,
+            Branch = request.Branch,
+            ParentSessionId = request.ParentSessionId,
+            AgentKind = request.AgentKind,
+            Task = request.Task,
+            Status = SessionStatus.Active,
+            LastActiveAt = now,
+        };
         return await EnqueueAsync(new CreateSessionOp(session, ct), ct).ConfigureAwait(false);
     }
 
@@ -119,19 +104,10 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
         await EnsureInitializedAsync().ConfigureAwait(false);
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, workspace_path, title, created_at FROM sessions WHERE id = $id";
+        command.CommandText = $"SELECT {SessionColumns} FROM sessions WHERE id = $id";
         command.Parameters.AddWithValue("$id", sessionId);
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            return null;
-        }
-
-        return new SessionInfo(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            StorageDb.ParseTimestamp(reader.GetString(3)));
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadSession(reader, sessionId) : null;
     }
 
     public async Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct)
@@ -140,8 +116,8 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = workspacePath is null
-            ? "SELECT id, workspace_path, title, created_at FROM sessions ORDER BY created_at DESC, id"
-            : "SELECT id, workspace_path, title, created_at FROM sessions WHERE workspace_path = $ws ORDER BY created_at DESC, id";
+            ? $"SELECT {SessionColumns} FROM sessions ORDER BY created_at DESC, id"
+            : $"SELECT {SessionColumns} FROM sessions WHERE workspace_path = $ws ORDER BY created_at DESC, id";
         if (workspacePath is not null)
         {
             command.Parameters.AddWithValue("$ws", workspacePath);
@@ -151,14 +127,90 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            sessions.Add(new SessionInfo(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                StorageDb.ParseTimestamp(reader.GetString(3))));
+            sessions.Add(ReadSession(reader, null));
         }
 
         return sessions;
+    }
+
+    /// <summary>Filters by the non-null members of <paramref name="query"/>; newest activity first.</summary>
+    public async Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        await EnsureInitializedAsync().ConfigureAwait(false);
+        await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        var conditions = new List<string>(4);
+        if (query.ProjectId is not null)
+        {
+            conditions.Add("project_id = $project");
+            command.Parameters.AddWithValue("$project", query.ProjectId);
+        }
+
+        if (query.WorktreePath is not null)
+        {
+            conditions.Add("worktree_path = $worktree");
+            command.Parameters.AddWithValue("$worktree", query.WorktreePath);
+        }
+
+        if (query.Status is { } status)
+        {
+            conditions.Add("status = $status");
+            command.Parameters.AddWithValue("$status", StatusName(status));
+        }
+
+        if (query.ParentSessionId is { } parent)
+        {
+            if (parent.Length == 0)
+            {
+                conditions.Add("parent_session_id IS NULL");
+            }
+            else
+            {
+                conditions.Add("parent_session_id = $parent");
+                command.Parameters.AddWithValue("$parent", parent);
+            }
+        }
+
+        command.CommandText = conditions.Count == 0
+            ? $"SELECT {SessionColumns} FROM sessions ORDER BY last_active_ticks DESC, id"
+            : $"SELECT {SessionColumns} FROM sessions WHERE {string.Join(" AND ", conditions)} ORDER BY last_active_ticks DESC, id";
+
+        var sessions = new List<SessionInfo>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            sessions.Add(ReadSession(reader, null));
+        }
+
+        return sessions;
+    }
+
+    public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        return EnqueueAsync(new UpdateSessionOp(
+            "UPDATE sessions SET status = $value WHERE id = $id",
+            StatusName(status),
+            sessionId,
+            ct), ct);
+    }
+
+    public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        ArgumentNullException.ThrowIfNull(title);
+        return EnqueueAsync(new UpdateSessionOp(
+            "UPDATE sessions SET title = $value WHERE id = $id",
+            title,
+            sessionId,
+            ct), ct);
+    }
+
+    public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        return EnqueueAsync(new TouchSessionOp(sessionId, at, ct), ct);
     }
 
     public async Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct)
@@ -290,6 +342,56 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
         SqliteConnection.ClearAllPools();
     }
 
+    internal static string StatusName(SessionStatus status) => status switch
+    {
+        SessionStatus.Active => StorageSchema.StatusActive,
+        SessionStatus.Archived => StorageSchema.StatusArchived,
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown session status."),
+    };
+
+    private static SessionStatus ParseStatus(string value, string databasePath, string row) => value switch
+    {
+        StorageSchema.StatusActive => SessionStatus.Active,
+        StorageSchema.StatusArchived => SessionStatus.Archived,
+        _ => throw StorageDb.Malformed(databasePath, "status", row, $"'{value}' is not one of Active, Archived", null),
+    };
+
+    private static string ResolveDatabasePath(string dataSource) =>
+        dataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase) ||
+        dataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase)
+            ? dataSource
+            : Path.GetFullPath(dataSource);
+
+    private SessionInfo ReadSession(SqliteDataReader reader, string? knownId)
+    {
+        var id = StorageDb.ReadText(reader, 0, "id", _databasePath, knownId ?? "a session whose id cannot be read");
+        var row = $"session {id}";
+        var createdAt = StorageDb.ParseCanonicalTimestamp(
+            StorageDb.ReadText(reader, 3, "created_at", _databasePath, row),
+            "created_at",
+            _databasePath,
+            row);
+        return new SessionInfo(
+            id,
+            StorageDb.ReadText(reader, 1, "workspace_path", _databasePath, row),
+            StorageDb.ReadText(reader, 2, "title", _databasePath, row),
+            createdAt)
+        {
+            ProjectId = StorageDb.ReadOptionalText(reader, 4, "project_id", _databasePath, row),
+            WorktreePath = StorageDb.ReadOptionalText(reader, 5, "worktree_path", _databasePath, row),
+            Branch = StorageDb.ReadOptionalText(reader, 6, "branch", _databasePath, row),
+            ParentSessionId = StorageDb.ReadOptionalText(reader, 7, "parent_session_id", _databasePath, row),
+            AgentKind = StorageDb.ReadOptionalText(reader, 8, "agent_kind", _databasePath, row),
+            Task = StorageDb.ReadOptionalText(reader, 9, "task", _databasePath, row),
+            Status = ParseStatus(StorageDb.ReadText(reader, 10, "status", _databasePath, row), _databasePath, row),
+            LastActiveAt = StorageDb.ParseCanonicalTimestamp(
+                StorageDb.ReadText(reader, 11, "last_active_at", _databasePath, row),
+                "last_active_at",
+                _databasePath,
+                row),
+        };
+    }
+
     private static Channel<IWriteOp> CreateChannel() => Channel.CreateBounded<IWriteOp>(
         new BoundedChannelOptions(WriterQueueCapacity)
         {
@@ -314,35 +416,12 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
         await using (var connection = await StorageDb.OpenAsync(_connectionString, CancellationToken.None).ConfigureAwait(false))
         {
             await StorageDb.ConfigureAsync(connection, CancellationToken.None).ConfigureAwait(false);
-            await CreateSchemaAsync(connection, CancellationToken.None).ConfigureAwait(false);
+            var fts5 = await StorageSchema.EnsureAsync(connection, _databasePath, CancellationToken.None).ConfigureAwait(false);
+            _searchInsertSql = fts5 ? FtsInsertSql : FallbackInsertSql;
+            Volatile.Write(ref _fts5Available, fts5 ? 1 : 0);
         }
 
         _writerLoop = Task.Run(RunWriterAsync, CancellationToken.None);
-    }
-
-    private async Task CreateSchemaAsync(SqliteConnection connection, CancellationToken ct)
-    {
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = SchemaSql;
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-
-        await using var search = connection.CreateCommand();
-        try
-        {
-            search.CommandText = FtsSchemaSql;
-            await search.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            _searchInsertSql = FtsInsertSql;
-            Volatile.Write(ref _fts5Available, 1);
-        }
-        catch (SqliteException)
-        {
-            search.CommandText = FallbackSchemaSql;
-            await search.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            _searchInsertSql = FallbackInsertSql;
-            Volatile.Write(ref _fts5Available, 0);
-        }
     }
 
     private async Task RunWriterAsync()
@@ -613,14 +692,52 @@ public sealed class SqliteSessionStore : ISessionStore, IAsyncDisposable, IDispo
         {
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText =
-                "INSERT INTO sessions (id, workspace_path, title, created_at) VALUES ($id, $ws, $title, $at)";
+            command.CommandText = $"""
+                INSERT INTO sessions ({SessionColumns}, last_active_ticks)
+                VALUES ($id, $ws, $title, $at, $project, $worktree, $branch, $parent, $kind, $task, $status, $active, $ticks)
+                """;
             command.Parameters.AddWithValue("$id", session.Id);
             command.Parameters.AddWithValue("$ws", session.WorkspacePath);
             command.Parameters.AddWithValue("$title", session.Title);
             command.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(session.CreatedAt));
+            command.Parameters.AddWithValue("$project", (object?)session.ProjectId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$worktree", (object?)session.WorktreePath ?? DBNull.Value);
+            command.Parameters.AddWithValue("$branch", (object?)session.Branch ?? DBNull.Value);
+            command.Parameters.AddWithValue("$parent", (object?)session.ParentSessionId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$kind", (object?)session.AgentKind ?? DBNull.Value);
+            command.Parameters.AddWithValue("$task", (object?)session.Task ?? DBNull.Value);
+            command.Parameters.AddWithValue("$status", StatusName(session.Status));
+            command.Parameters.AddWithValue("$active", StorageDb.FormatTimestamp(session.LastActiveAt));
+            command.Parameters.AddWithValue("$ticks", StorageDb.TimestampTicks(session.LastActiveAt));
             await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
             return session;
+        }
+    }
+
+    private sealed class UpdateSessionOp(string sql, string value, string sessionId, CancellationToken ct) : WriteOp<bool>(ct)
+    {
+        protected override async ValueTask<bool> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("$value", value);
+            command.Parameters.AddWithValue("$id", sessionId);
+            return await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) > 0;
+        }
+    }
+
+    private sealed class TouchSessionOp(string sessionId, DateTimeOffset at, CancellationToken ct) : WriteOp<bool>(ct)
+    {
+        protected override async ValueTask<bool> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE sessions SET last_active_at = $at, last_active_ticks = $ticks WHERE id = $id";
+            command.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(at));
+            command.Parameters.AddWithValue("$ticks", StorageDb.TimestampTicks(at));
+            command.Parameters.AddWithValue("$id", sessionId);
+            return await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) > 0;
         }
     }
 

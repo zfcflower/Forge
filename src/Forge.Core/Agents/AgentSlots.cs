@@ -14,6 +14,9 @@ internal sealed class AgentSlotPool(int limit)
         await permits.WaitAsync(ct).ConfigureAwait(false);
         return new AgentSlot(permits);
     }
+
+    /// <summary>Takes a permit without waiting; null when every slot is busy.</summary>
+    public AgentSlot? TryAcquire() => permits.Wait(0) ? new AgentSlot(permits) : null;
 }
 
 /// <summary>

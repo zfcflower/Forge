@@ -60,6 +60,17 @@ public sealed class GitCli
         GitRunOptions options,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        return await RunCoreAsync(workingDirectory, arguments, options, null, ct).ConfigureAwait(false);
+    }
+
+    private async Task<GitCommandResult> RunCoreAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        GitRunOptions options,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(arguments);
         ArgumentNullException.ThrowIfNull(options);
@@ -67,7 +78,7 @@ public sealed class GitCli
         var captureLimit = options.MaxCapturedCharacters ?? MaxCapturedCharacters;
         var timeout = options.Timeout ?? DefaultTimeout;
 
-        using var process = Start(workingDirectory, arguments);
+        using var process = Start(workingDirectory, arguments, environment);
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
 
@@ -426,6 +437,140 @@ public sealed class GitCli
         return files;
     }
 
+    /// <summary>
+    /// Writes the whole working tree (tracked and untracked files, honouring the repository's ignore rules) as a tree
+    /// object and returns its hash. The index git uses is a temporary file seeded with a copy of the real index, so the
+    /// snapshot never touches the user's index, HEAD, branch, refs or stash; the temporary file is always deleted.
+    /// Two snapshots of an unchanged tree produce the same hash.
+    /// </summary>
+    public async Task<string> SnapshotTreeAsync(string workingDirectory, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        var root = await GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false)
+            ?? throw new GitException(
+                $"'{workingDirectory}' is not inside a git repository.",
+                Args("rev-parse", "--show-toplevel"),
+                1,
+                string.Empty);
+
+        var index = await ResolveIndexPathAsync(root, ct).ConfigureAwait(false);
+        var temporaryIndex = Path.Combine(
+            Path.GetTempPath(),
+            "forge-snapshot-" + Guid.NewGuid().ToString("n") + ".index");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["GIT_INDEX_FILE"] = temporaryIndex,
+
+            // Optional locks are refreshes of the real index (and rlimits); a snapshot must not take them.
+            ["GIT_OPTIONAL_LOCKS"] = "0",
+        };
+
+        try
+        {
+            if (index is not null && File.Exists(index))
+            {
+                File.Copy(index, temporaryIndex, overwrite: true);
+            }
+
+            await RunCheckedAsync(root, Args("add", "--all"), environment, ct).ConfigureAwait(false);
+            var output = await RunCheckedAsync(root, Args("write-tree"), environment, ct).ConfigureAwait(false);
+            var tree = output.Trim();
+            if (tree.Length == 0)
+            {
+                throw new GitException("git write-tree returned no tree hash.", Args("write-tree"), 0, string.Empty);
+            }
+
+            return tree;
+        }
+        finally
+        {
+            DeleteQuietly(temporaryIndex);
+            DeleteQuietly(temporaryIndex + ".lock");
+        }
+    }
+
+    /// <summary>The unified diff between two tree hashes, as git prints it.</summary>
+    public async Task<string> GetTreeDiffTextAsync(
+        string workingDirectory,
+        string fromTree,
+        string toTree,
+        CancellationToken ct = default)
+    {
+        var arguments = Args(
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--unified=3",
+            "--find-renames",
+            "--end-of-options",
+            Reference(fromTree, nameof(fromTree)),
+            Reference(toTree, nameof(toTree)));
+        return await RunCheckedAsync(workingDirectory, arguments, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The diff between two tree hashes, parsed into files, hunks and numbered lines.</summary>
+    public async Task<IReadOnlyList<FileDiff>> GetTreeDiffAsync(
+        string workingDirectory,
+        string fromTree,
+        string toTree,
+        CancellationToken ct = default)
+    {
+        var text = await GetTreeDiffTextAsync(workingDirectory, fromTree, toTree, ct).ConfigureAwait(false);
+        return UnifiedDiffParser.Parse(text);
+    }
+
+    /// <summary>
+    /// The name/status list (<c>A</c>/<c>M</c>/<c>D</c>/<c>R</c>/<c>T</c>) between two tree hashes, with the old path of a
+    /// rename in <see cref="GitStatusEntry.OriginalPath"/>. Both sides are trees, so the worktree status is unmodified.
+    /// </summary>
+    public async Task<IReadOnlyList<GitStatusEntry>> GetTreeChangesAsync(
+        string workingDirectory,
+        string fromTree,
+        string toTree,
+        CancellationToken ct = default)
+    {
+        var arguments = Args(
+            "diff",
+            "--name-status",
+            "-z",
+            "--no-ext-diff",
+            "--find-renames",
+            "--end-of-options",
+            Reference(fromTree, nameof(fromTree)),
+            Reference(toTree, nameof(toTree)));
+        var output = await RunCheckedAsync(workingDirectory, arguments, ct).ConfigureAwait(false);
+        return GitStatusParser.ParseNameStatus(output);
+    }
+
+    private async Task<string?> ResolveIndexPathAsync(string workingDirectory, CancellationToken ct)
+    {
+        var result = await RunAsync(
+            workingDirectory,
+            Args("rev-parse", "--path-format=absolute", "--git-path", "index"),
+            ct).ConfigureAwait(false);
+        if (!result.Success)
+        {
+            return null;
+        }
+
+        var path = result.StandardOutput.Trim();
+        return path.Length == 0 ? null : path;
+    }
+
+    private static void DeleteQuietly(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     public async Task<string?> GetMergeBaseAsync(string workingDirectory, string first, string second, CancellationToken ct = default)
     {
         Reference(first, nameof(first));
@@ -648,9 +793,16 @@ public sealed class GitCli
         return arguments;
     }
 
-    private async Task<string> RunCheckedAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken ct)
+    private async Task<string> RunCheckedAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken ct) =>
+        await RunCheckedAsync(workingDirectory, arguments, null, ct).ConfigureAwait(false);
+
+    private async Task<string> RunCheckedAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environment,
+        CancellationToken ct)
     {
-        var result = await RunAsync(workingDirectory, arguments, ct).ConfigureAwait(false);
+        var result = await RunCoreAsync(workingDirectory, arguments, new GitRunOptions(), environment, ct).ConfigureAwait(false);
         if (!result.Success)
         {
             throw Failure(result, arguments);
@@ -704,7 +856,30 @@ public sealed class GitCli
         return source;
     }
 
-    private Process Start(string workingDirectory, IReadOnlyList<string> arguments)
+    /// <summary>
+    /// Repository-location and discovery variables never inherited from the parent process. Each one would make
+    /// git use a repository, index, object store or discovery boundary other than the one the working directory
+    /// names: GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR (repository and worktree location), GIT_INDEX_FILE (index),
+    /// GIT_OBJECT_DIRECTORY and GIT_ALTERNATE_OBJECT_DIRECTORIES (object store), GIT_NAMESPACE (ref namespace),
+    /// GIT_PREFIX (set by git for aliases and hooks, shifts relative paths), GIT_CEILING_DIRECTORIES and
+    /// GIT_DISCOVERY_ACROSS_FILESYSTEM (where upward discovery stops). A caller that needs one passes it
+    /// explicitly through the environment argument, which is applied afterwards.
+    /// </summary>
+    private static readonly string[] InheritedRepositoryVariables =
+    [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    ];
+
+    private Process Start(string workingDirectory, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? environment = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -724,12 +899,25 @@ public sealed class GitCli
             startInfo.ArgumentList.Add(argument);
         }
 
+        foreach (var name in InheritedRepositoryVariables)
+        {
+            startInfo.Environment.Remove(name);
+        }
+
         startInfo.Environment["LC_ALL"] = "C";
         startInfo.Environment["LANG"] = "C";
         startInfo.Environment["LANGUAGE"] = "C";
         startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
         startInfo.Environment["GIT_PAGER"] = "cat";
         startInfo.Environment["TERM"] = "dumb";
+
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+            {
+                startInfo.Environment[pair.Key] = pair.Value;
+            }
+        }
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try

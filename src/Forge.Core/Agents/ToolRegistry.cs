@@ -2,6 +2,12 @@ using Forge.Abstractions;
 
 namespace Forge.Core.Agents;
 
+/// <summary>A tool whose approval side effect depends on the arguments of the call, such as a checklist that reads or writes.</summary>
+public interface IToolSideEffectResolver
+{
+    ToolSideEffect Resolve(ToolCall call);
+}
+
 /// <summary>
 /// The tools the host owns, keyed by name and sorted ordinally so two agents with the same definition
 /// send byte-identical tool definitions and keep hitting the same prompt cache entry.
@@ -30,20 +36,24 @@ public sealed class ToolRegistry : IToolRegistry
 
     public IReadOnlyList<ToolDefinition> Definitions { get; }
 
+    /// <summary>Approval side effect of one call: the tool's own, unless it decides per call.</summary>
+    public static ToolSideEffect SideEffectOf(ITool tool, ToolCall call) =>
+        tool is IToolSideEffectResolver resolver ? resolver.Resolve(call) : tool.SideEffect;
+
     public bool TryGet(string name, out ITool tool) => byName.TryGetValue(name, out tool!);
 
     /// <summary>
-    /// Tools visible to one agent: its definition's allow-list (null means everything) minus the spawn
-    /// tool once the depth limit is reached.
+    /// Tools visible to one agent: its definition's allow-list (null means everything) minus the sub-agent
+    /// tools once the depth limit is reached.
     /// </summary>
-    public ToolRegistry Select(IReadOnlyList<string>? toolNames, bool canSpawn, string spawnToolName)
+    public ToolRegistry Select(IReadOnlyList<string>? toolNames, bool canSpawn, IReadOnlyList<string> subAgentTools)
     {
         var selected = new List<ITool>(Tools.Count);
         if (toolNames is null)
         {
             foreach (var tool in Tools)
             {
-                if (canSpawn || !IsSpawn(tool, spawnToolName))
+                if (canSpawn || !IsSubAgentTool(tool, subAgentTools))
                 {
                     selected.Add(tool);
                 }
@@ -54,21 +64,37 @@ public sealed class ToolRegistry : IToolRegistry
             var allowed = new HashSet<string>(toolNames, StringComparer.Ordinal);
             foreach (var tool in Tools)
             {
-                if (allowed.Contains(tool.Definition.Name) && (canSpawn || !IsSpawn(tool, spawnToolName)))
+                if (allowed.Contains(tool.Definition.Name) && (canSpawn || !IsSubAgentTool(tool, subAgentTools)))
                 {
                     selected.Add(tool);
                 }
             }
 
-            if (canSpawn && !allowed.Contains(spawnToolName) && byName.TryGetValue(spawnToolName, out var spawn))
+            if (canSpawn)
             {
-                selected.Add(spawn);
+                foreach (var name in subAgentTools)
+                {
+                    if (!allowed.Contains(name) && byName.TryGetValue(name, out var tool))
+                    {
+                        selected.Add(tool);
+                    }
+                }
             }
         }
 
         return new ToolRegistry(selected);
     }
 
-    private static bool IsSpawn(ITool tool, string spawnToolName) =>
-        string.Equals(tool.Definition.Name, spawnToolName, StringComparison.Ordinal);
+    private static bool IsSubAgentTool(ITool tool, IReadOnlyList<string> names)
+    {
+        foreach (var name in names)
+        {
+            if (string.Equals(tool.Definition.Name, name, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

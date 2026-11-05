@@ -186,7 +186,7 @@ public sealed class SummaryCompactor : IContextCompactor
         }
 
         var rebuilt = new List<AgentMessage>(recent.Count + 1);
-        var summaryText = RenderView(view);
+        var summaryText = SessionHistory.RenderSummaries(view);
         if (summaryText.Length > 0)
         {
             rebuilt.Add(new AgentMessage(ChatMessage.User(summaryText), 0));
@@ -194,28 +194,6 @@ public sealed class SummaryCompactor : IContextCompactor
 
         rebuilt.AddRange(recent);
         return rebuilt;
-    }
-
-    private static string RenderView(ContextView view)
-    {
-        var builder = new StringBuilder(2048);
-        if (view.SessionSummary is { } session)
-        {
-            AppendSection(builder, $"Session summary (messages #{session.FromSeq}-#{session.ToSeq})", session.Text);
-        }
-
-        foreach (var stage in view.StageSummaries)
-        {
-            AppendSection(builder, $"Earlier conversation (messages #{stage.FromSeq}-#{stage.ToSeq})", stage.Text);
-        }
-
-        if (builder.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        builder.Append("\n\nEarlier messages are still in the session store: use search_history, read_history or read_artifact to retrieve them.");
-        return builder.ToString();
     }
 
     private static void AppendSection(StringBuilder builder, string heading, string text)
