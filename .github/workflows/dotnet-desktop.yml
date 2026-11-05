@@ -144,6 +144,7 @@ jobs:
       # Release 测试：排除依赖 Debug 钩子的 3 个测试（它们会按 HostTestHooks.Require() 明确失败，
       # 而不是静默通过）；ReleaseHookAbsenceTests 在此链里验证生产 Host 程序集不含钩子类型。
       - name: Test
+        shell: bash
         run: |
           dotnet test "${{ env.FORGE_SOLUTION }}" -c Release --no-build \
             --filter "FullyQualifiedName!=Forge.Integration.Tests.EntryLifecycleTests.Execute_paused_before_its_gate_never_runs_a_plugin_that_refresh_removed&FullyQualifiedName!=Forge.Integration.Tests.EntryLifecycleTests.Execute_paused_before_its_gate_never_runs_the_version_a_prebuilt_switch_replaced&FullyQualifiedName!=Forge.Integration.Tests.ProcessOwnershipTests.A_worker_that_cannot_be_contained_is_killed_and_the_start_fails" \
