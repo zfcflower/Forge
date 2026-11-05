@@ -68,6 +68,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         // Features add their own sections in parallel; the shell's two stay at both ends.
         Assert.Equal(SettingsSectionIds.Provider, rendered[0]);
         Assert.Equal(SettingsSectionIds.Paths, rendered[^1]);
+        Assert.Contains(SettingsSectionIds.Extensions, rendered);
     }
 
     [Fact]

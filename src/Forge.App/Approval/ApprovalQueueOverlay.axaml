@@ -1,0 +1,316 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ap="using:Forge.App.Approval"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Approval.ApprovalQueueOverlay"
+             x:DataType="ap:ApprovalQueueViewModel"
+             Width="420"
+             HorizontalAlignment="Right"
+             VerticalAlignment="Bottom"
+             Margin="0,0,16,16"
+             IsVisible="{Binding HasItems}">
+
+  <UserControl.DataTemplates>
+
+    <!-- One waiting tool call: session, tool, side effect, working directory, arguments and the decision buttons. -->
+    <DataTemplate DataType="ap:ToolApprovalCardViewModel" x:DataType="ap:ToolApprovalCardViewModel">
+      <Border Classes="turn-card" Padding="10" Margin="0,0,0,8">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label"
+                     Text="{Binding Title}"
+                     AutomationProperties.AutomationId="approval-card-title" />
+          <TextBlock Classes="caption"
+                     Text="{Binding SessionTitle}"
+                     TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding SessionTitle}" />
+
+          <Grid ColumnDefinitions="70,*" Margin="0,4,0,0">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.Name], Source={x:Static loc:Loc.Instance}}" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding ToolName}" TextWrapping="Wrap" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.SideEffect], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding SideEffectText}" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.WorkingDirectory], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       Text="{Binding WorkingDirectory}"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding WorkingDirectory}" />
+          </Grid>
+
+          <Border Classes="notice" IsVisible="{Binding HasNote}" Margin="0,4,0,0">
+            <TextBlock Classes="caption" Text="{Binding Note}" TextWrapping="Wrap" />
+          </Border>
+
+          <TextBlock Classes="caption"
+                     Margin="0,4,0,0"
+                     IsVisible="{Binding IsArgumentsVisible}"
+                     Text="{Binding [Extensions.Tool.Arguments], Source={x:Static loc:Loc.Instance}}" />
+          <ScrollViewer MaxHeight="220"
+                        IsVisible="{Binding IsArgumentsVisible}"
+                        VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Auto">
+            <SelectableTextBlock Classes="mono"
+                                 Text="{Binding ArgumentsText}"
+                                 TextWrapping="Wrap"
+                                 Foreground="{DynamicResource TextSecondaryBrush}" />
+          </ScrollViewer>
+          <Button Classes="link"
+                  HorizontalAlignment="Left"
+                  IsVisible="{Binding IsArgumentsLong}"
+                  Command="{Binding ToggleArgumentsCommand}"
+                  Content="{Binding ArgumentsToggleText}"
+                  AutomationProperties.AutomationId="approval-arguments-toggle"
+                  AutomationProperties.Name="参数" />
+
+          <WrapPanel Margin="0,6,0,0">
+            <Button Classes="primary"
+                    Margin="0,0,6,6"
+                    Command="{Binding AllowCommand}"
+                    Content="{Binding [Extensions.Tool.Allow], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-allow"
+                    AutomationProperties.Name="允许" />
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding DenyCommand}"
+                    Content="{Binding [Extensions.Tool.Deny], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-deny"
+                    AutomationProperties.Name="拒绝" />
+          </WrapPanel>
+          <WrapPanel IsVisible="{Binding CanRemember}">
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding RememberSessionCommand}"
+                    Content="{Binding [Extensions.Tool.RememberSession], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-remember-session"
+                    AutomationProperties.Name="本会话记住" />
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding RememberProjectCommand}"
+                    IsEnabled="{Binding CanRememberProject}"
+                    ToolTip.Tip="{Binding RememberProjectHint}"
+                    Content="{Binding [Extensions.Tool.RememberProject], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-remember-project"
+                    AutomationProperties.Name="本项目记住" />
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding RememberGlobalCommand}"
+                    Content="{Binding [Extensions.Tool.RememberGlobal], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-remember-global"
+                    AutomationProperties.Name="永久记住" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+
+    <!-- One staged extension: full text of a new draft, per-file diff of an update, permissions, dependencies and hashes. -->
+    <DataTemplate DataType="ap:ExtensionApprovalCardViewModel" x:DataType="ap:ExtensionApprovalCardViewModel">
+      <Border Classes="turn-card" Padding="10" Margin="0,0,0,8">
+        <StackPanel Spacing="3">
+          <TextBlock Classes="label"
+                     Text="{Binding Title}"
+                     AutomationProperties.AutomationId="approval-extension-title" />
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding HasSession}"
+                     Text="{Binding SessionTitle}"
+                     TextTrimming="CharacterEllipsis" />
+
+          <Grid ColumnDefinitions="70,*" Margin="0,4,0,0">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Id], Source={x:Static loc:Loc.Instance}}" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding PluginId}" TextWrapping="Wrap" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Version], Source={x:Static loc:Loc.Instance}}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+              <TextBlock Classes="mono" Text="{Binding Version}" />
+              <TextBlock Classes="caption"
+                         IsVisible="{Binding HasLiveVersion}"
+                         Text="{Binding LiveVersion, StringFormat='← {0}'}" />
+            </StackPanel>
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Kind], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding KindText}" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Permissions], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding PermissionsText}" TextWrapping="Wrap" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Dependencies], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="caption" Text="{Binding DependenciesText}" TextWrapping="Wrap" />
+          </Grid>
+
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.SourceHash], Source={x:Static loc:Loc.Instance}}" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding SourceHash}" TextWrapping="Wrap" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.DependencyHash], Source={x:Static loc:Loc.Instance}}" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding DependencyHash}" TextWrapping="Wrap" />
+          </Grid>
+          <Grid ColumnDefinitions="70,*">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.SdkVersion], Source={x:Static loc:Loc.Instance}}" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding SdkVersion}" TextWrapping="Wrap" />
+          </Grid>
+
+          <Border Classes="divider" Margin="0,6,0,2" />
+          <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Files], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding !IsDiffReady}"
+                     Text="{Binding [Extensions.Extension.BuildingDiff], Source={x:Static loc:Loc.Instance}}" />
+          <ItemsControl ItemsSource="{Binding Files}" IsVisible="{Binding IsDiffReady}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="ap:ExtensionFileViewModel">
+                <StackPanel Spacing="2" Margin="0,2,0,4">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <TextBlock Classes="caption" Text="{Binding Badge}" Margin="0,0,6,0" />
+                    <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasRows}">
+                      <TextBlock Classes="caption" Text="{Binding AddedLines}" Foreground="{DynamicResource SuccessBrush}" />
+                      <TextBlock Classes="caption" Text="{Binding RemovedLines}" Foreground="{DynamicResource DangerBrush}" />
+                    </StackPanel>
+                  </Grid>
+
+                  <!-- A new file: the whole text. -->
+                  <ScrollViewer MaxHeight="180"
+                                IsVisible="{Binding IsNew}"
+                                VerticalScrollBarVisibility="Auto"
+                                HorizontalScrollBarVisibility="Auto">
+                    <SelectableTextBlock Classes="mono"
+                                         Text="{Binding FullText}"
+                                         Foreground="{DynamicResource TextSecondaryBrush}" />
+                  </ScrollViewer>
+
+                  <!-- An updated file: one flat, virtualized diff row list. -->
+                  <ScrollViewer MaxHeight="180"
+                                IsVisible="{Binding HasRows}"
+                                VerticalScrollBarVisibility="Auto"
+                                HorizontalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Rows}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="ap:ExtensionDiffRowViewModel">
+                          <Border Classes="diff-line"
+                                  Classes.add="{Binding IsAdd}"
+                                  Classes.del="{Binding IsRemove}"
+                                  Classes.hunk="{Binding IsHunk}">
+                            <Grid ColumnDefinitions="40,40,Auto,*" Height="17">
+                              <TextBlock Classes="mono"
+                                         Text="{Binding OldNumber}"
+                                         TextAlignment="Right"
+                                         Margin="0,0,4,0"
+                                         Foreground="{DynamicResource TextMutedBrush}" />
+                              <TextBlock Grid.Column="1"
+                                         Classes="mono"
+                                         Text="{Binding NewNumber}"
+                                         TextAlignment="Right"
+                                         Margin="0,0,4,0"
+                                         Foreground="{DynamicResource TextMutedBrush}" />
+                              <TextBlock Grid.Column="2"
+                                         Classes="mono"
+                                         Text="{Binding Prefix}"
+                                         Foreground="{DynamicResource TextMutedBrush}" />
+                              <TextBlock Grid.Column="3"
+                                         Classes="mono"
+                                         Text="{Binding Text}"
+                                         Foreground="{DynamicResource TextPrimaryBrush}" />
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding HasNoFileChanges}"
+                     Text="{Binding [Extensions.Extension.NoFileChanges], Source={x:Static loc:Loc.Instance}}" />
+
+          <StackPanel IsVisible="{Binding HasDiagnostics}" Spacing="2" Margin="0,4,0,0">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Diagnostics], Source={x:Static loc:Loc.Instance}}" />
+            <SelectableTextBlock Classes="mono"
+                                 Text="{Binding DiagnosticsText}"
+                                 TextWrapping="Wrap"
+                                 Foreground="{DynamicResource DangerBrush}" />
+          </StackPanel>
+
+          <TextBlock Classes="caption"
+                     Margin="0,6,0,0"
+                     TextWrapping="Wrap"
+                     Text="{Binding [Extensions.Extension.ApproveNote], Source={x:Static loc:Loc.Instance}}" />
+          <WrapPanel Margin="0,6,0,0">
+            <Button Classes="primary"
+                    Margin="0,0,6,6"
+                    IsEnabled="{Binding CanApprove}"
+                    Command="{Binding ApproveCommand}"
+                    Content="{Binding [Extensions.Extension.Approve], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-extension-approve"
+                    AutomationProperties.Name="批准" />
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding RejectCommand}"
+                    Content="{Binding [Extensions.Extension.Reject], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-extension-reject"
+                    AutomationProperties.Name="拒绝" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+  </UserControl.DataTemplates>
+
+  <Border Background="{DynamicResource SurfaceElevatedBrush}"
+          BorderBrush="{DynamicResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="{StaticResource RadiusMd}"
+          BoxShadow="{StaticResource ShadowMd}">
+    <Grid RowDefinitions="Auto,Auto">
+      <Button Classes="link"
+              Padding="10,6"
+              HorizontalAlignment="Stretch"
+              HorizontalContentAlignment="Stretch"
+              Command="{Binding ToggleCommand}"
+              AutomationProperties.AutomationId="approval-queue-toggle"
+              AutomationProperties.Name="待审批">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+          <TextBlock Classes="h2"
+                     VerticalAlignment="Center"
+                     Text="{Binding [Extensions.Queue.Title], Source={x:Static loc:Loc.Instance}}" />
+          <Border Grid.Column="1"
+                  Margin="6,0,0,0"
+                  Padding="5,0"
+                  MinWidth="18"
+                  CornerRadius="{StaticResource RadiusSm}"
+                  Background="{DynamicResource AccentSubtleBrush}"
+                  VerticalAlignment="Center">
+            <TextBlock Classes="caption"
+                       Text="{Binding CountText}"
+                       HorizontalAlignment="Center"
+                       Foreground="{DynamicResource AccentTextBrush}" />
+          </Border>
+          <TextBlock Grid.Column="3"
+                     Classes="caption"
+                     VerticalAlignment="Center"
+                     Text="{Binding ToggleText}" />
+        </Grid>
+      </Button>
+
+      <ScrollViewer Grid.Row="1"
+                    IsVisible="{Binding IsExpanded}"
+                    MaxHeight="560"
+                    Padding="8,0,8,8"
+                    VerticalScrollBarVisibility="Auto">
+        <ItemsControl ItemsSource="{Binding Items}" />
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</UserControl>

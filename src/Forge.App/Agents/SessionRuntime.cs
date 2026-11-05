@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.App.Approval;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Forge.Core.Providers;
+using Forge.Core.Tools;
 using Forge.HostClient;
 
 namespace Forge.App.Agents;
@@ -15,6 +18,13 @@ internal sealed record AgentRuntimeServices(
     ITodoStore Todos,
     ModelSettings Model)
 {
+    /// <summary>
+    /// The shell's approval wiring (queue, remembered rules and the extension authoring adapter). Null when the runtime was
+    /// assembled without the composition root, as in a unit test: the session then has no approval handler and an ask is a
+    /// denial, exactly as before the queue existed.
+    /// </summary>
+    public ApprovalServices? Approvals { get; set; }
+
     public static string? UserDirectory()
     {
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -34,6 +44,8 @@ internal sealed class SessionRuntime : IDisposable
     private readonly Lock gate = new();
     private AgentHost? host;
     private AgentInstance? root;
+    private SessionApprovalHandler? approvalHandler;
+    private ExtensionHostClient? listenedClient;
     private bool disposed;
 
     public SessionRuntime(AgentRuntimeServices services, SessionInfo session)
@@ -104,21 +116,27 @@ internal sealed class SessionRuntime : IDisposable
         {
             host ??= built;
             root = agent;
+
+            // Subscribed here rather than in Build: a registration that arrives before the host field is set would otherwise
+            // be handed to nothing, and the loop built afterwards already reads the current surface.
+            if (listenedClient is null && services.HostClient is { } client)
+            {
+                listenedClient = client;
+                client.ToolsChanged += OnToolsChanged;
+            }
+
             return (host, agent);
         }
     }
 
     private AgentHost Build()
     {
-        var tools = new List<ITool>();
-        if (services.HostClient is { } client)
-        {
-            tools.AddRange(client.Tools);
-            if (tools.Count > 0)
-            {
-                tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
-            }
-        }
+        var tools = CollectExternalTools();
+        var handler = services.Approvals?.CreateHandler(Session);
+
+        // A retried build (the first resume failed) replaces the handler; the old one must not keep a dead wait alive.
+        approvalHandler?.Dispose();
+        approvalHandler = handler;
 
         var layers = LayerSources.Resolve(BuiltInPrompts.System, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
         return new AgentHost(
@@ -127,35 +145,118 @@ internal sealed class SessionRuntime : IDisposable
                 Providers = services.ProviderFactory,
                 Tools = tools,
                 Layers = layers,
-                Policy = TodoPolicy,
-                ApprovalHandler = null,
+                Policy = SessionPolicy,
+                ApprovalHandler = handler,
                 Store = services.Store,
                 Todos = services.Todos,
                 Options = new AgentOptions { DefaultModel = services.Model },
             });
     }
 
+    /// <summary>
+    /// The tools that come from outside Core: the extension host's plugin tools, the <c>run_code</c> proxy and, once the
+    /// approval wiring exists, the five extension tools. Recomputed on every registration change so a hot reload reaches
+    /// the loop before its next model request.
+    /// </summary>
+    private List<ITool> CollectExternalTools()
+    {
+        var tools = new List<ITool>();
+        if (services.HostClient is not { } client)
+        {
+            return tools;
+        }
+
+        tools.AddRange(client.Tools);
+        if (tools.Count > 0)
+        {
+            tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
+        }
+
+        if (services.Approvals?.Extensions is { } extensions)
+        {
+            tools.AddRange(ExtensionTools.Create(extensions));
+        }
+
+        return tools;
+    }
+
+    /// <summary>
+    /// A plugin was registered or unregistered (or an approved extension went live): hand the new external tool surface to
+    /// the running loop. A host event must never take the app down, so a failure is traced and the next change retries.
+    /// </summary>
+    private void OnToolsChanged()
+    {
+        AgentHost? target;
+        lock (gate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            target = host;
+        }
+
+        if (target is null)
+        {
+            return;
+        }
+
+        try
+        {
+            target.ReplaceExternalTools(CollectExternalTools());
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine("[session] the external tool surface could not be replaced: " + exception.Message);
+        }
+    }
+
     public void Dispose()
     {
+        SessionApprovalHandler? handler;
+        ExtensionHostClient? client;
         lock (gate)
         {
             disposed = true;
             host = null;
             root = null;
+            handler = approvalHandler;
+            approvalHandler = null;
+            client = listenedClient;
+            listenedClient = null;
         }
+
+        if (client is not null)
+        {
+            client.ToolsChanged -= OnToolsChanged;
+        }
+
+        // Releasing the runtime withdraws this session's approval cards; every waiting loop then sees a denial.
+        handler?.Dispose();
     }
 
     /// <summary>
-    /// The session checklist is the app's own state, not a file in the workspace, so the <c>todo</c> tool is allowed
-    /// without an approval dialog; every other write still asks, and without a handler an ask is a denial.
+    /// Tool rules that need no approval card: the session checklist (the app's own state, not a workspace file) and the
+    /// extension tools that only stage a draft or switch a plugin off - their real gate is the plugin approval card the
+    /// authoring service puts in front of the user. <c>extension_delete</c> keeps asking: that card is the deletion
+    /// confirmation. Every other write or execution goes to the session's <see cref="SessionApprovalHandler"/>.
     /// </summary>
-    private static readonly IApprovalPolicy TodoPolicy = new DefaultApprovalPolicy
+    private static readonly IApprovalPolicy SessionPolicy = CreatePolicy();
+
+    private static IApprovalPolicy CreatePolicy()
     {
-        ToolRules = new Dictionary<string, ApprovalMode>(StringComparer.Ordinal)
+        var rules = new Dictionary<string, ApprovalMode>(StringComparer.Ordinal)
         {
             [TodoTool.Name] = ApprovalMode.Allow,
-        },
-    };
+        };
+        foreach (var name in ExtensionToolNames.AllowedWithoutAsking)
+        {
+            rules[name] = ApprovalMode.Allow;
+        }
+
+        return new DefaultApprovalPolicy { ToolRules = rules };
+    }
 
     /// <summary>The immutable tool surface a script may call; a snapshot, so a later registration cannot mutate it.</summary>
     private sealed class SnapshotToolRegistry : IToolRegistry

@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ap="using:Forge.App.Approval"
         xmlns:vm="using:Forge.App.ViewModels"
         xmlns:wb="using:Forge.App.Workbench.Controls"
         xmlns:prefs="using:Forge.App.Preferences"
@@ -101,6 +102,10 @@
 
     <!-- Workbench: project | main | inspector, rendered from the layout model -->
     <wb:WorkbenchHost Grid.Row="1" Layout="{Binding Workbench}" />
+
+    <!-- Approval queue: the non-modal panel in the bottom-right corner. It resolves the shell's approval services from
+         its own constructor, so the root view model does not have to carry it. -->
+    <ap:ApprovalQueueOverlay Grid.Row="1" />
 
     <!-- Status bar -->
     <Border Grid.Row="2"

@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Appearance;
+using Forge.App.Approval;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Services;
@@ -160,6 +161,12 @@ internal sealed class AppComposition : IAsyncDisposable
     /// <summary>Registers the general workspace; awaited before the window shows any session state.</summary>
     public Task Initialization { get; }
 
+    /// <summary>
+    /// The approval queue, the remembered rules and the extension authoring adapter; set by <see cref="Create"/>. The queue
+    /// overlay and the <c>extensions</c> settings section read it from here.
+    /// </summary>
+    public ApprovalServices? Approvals { get; private set; }
+
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
 
     public static AppComposition Create()
@@ -199,6 +206,11 @@ internal sealed class AppComposition : IAsyncDisposable
         {
             host = ExtensionHostSupervisor.Create(layout, paths);
         }
+
+        // 2b. Approvals: the remembered rules, the queue and the host adapter that turns a plugin draft into an approval
+        //     card. Created before the agent runtimes because every session handler and the extension tools come from it,
+        //     and before the window so the queue overlay finds it.
+        var approvals = ApprovalServices.Create(paths, host, hostProblem);
 
         // 3. Workspace.
         WorkspaceServices? workspace = null;
@@ -259,11 +271,19 @@ internal sealed class AppComposition : IAsyncDisposable
             sessions,
             todos,
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty));
+        runtimeServices.Approvals = approvals;
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
         var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences, appearance);
 
-        return new AppComposition(
+        // The extensions settings section: installed extensions, staged drafts and the remembered approval rules.
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Extensions,
+            ExtensionsStrings.SettingsSectionTitle,
+            SettingsSectionIds.ExtensionsOrder,
+            approvals.SettingsSection));
+
+        var composition = new AppComposition(
             paths,
             preferences,
             settings,
@@ -289,6 +309,8 @@ internal sealed class AppComposition : IAsyncDisposable
             worktrees,
             runtimes,
             initialization);
+        composition.Approvals = approvals;
+        return composition;
     }
 
     /// <summary>Re-reads <c>settings.json</c>; the running runtime keeps its provider until the next launch.</summary>
@@ -374,6 +396,14 @@ internal sealed class AppComposition : IAsyncDisposable
         }
 
         runtimes.Dispose();
+
+        // After the runtimes: every session handler is released first, then the remaining cards are withdrawn as denials
+        // and a pending rules write is flushed on the pool.
+        if (Approvals is { } approvals)
+        {
+            await approvals.DisposeAsync().ConfigureAwait(false);
+        }
+
         await turnCheckpoints.DisposeAsync().ConfigureAwait(false);
         await uiState.DisposeAsync().ConfigureAwait(false);
         await todos.DisposeAsync().ConfigureAwait(false);

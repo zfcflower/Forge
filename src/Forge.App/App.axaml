@@ -1,6 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:appearance="using:Forge.App.Appearance"
+             xmlns:ap="using:Forge.App.Approval"
              xmlns:views="using:Forge.App.Views"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
@@ -135,6 +136,11 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
+    </DataTemplate>
+
+    <!-- The extensions section: installed extensions, staged drafts and the remembered approval rules. -->
+    <DataTemplate DataType="ap:ExtensionsSettingsSectionViewModel" x:DataType="ap:ExtensionsSettingsSectionViewModel">
+      <ap:ExtensionsSettingsView />
     </DataTemplate>
 
     <!-- User message: IM-style bubble aligned right. -->

@@ -1,0 +1,163 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ap="using:Forge.App.Approval"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Approval.ExtensionsSettingsView"
+             x:DataType="ap:ExtensionsSettingsSectionViewModel">
+
+  <StackPanel Spacing="6">
+
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding InstalledTitle}"
+                 AutomationProperties.AutomationId="extensions-installed-title" />
+      <Button Grid.Column="1"
+              Classes="ghost"
+              Command="{Binding RefreshCommand}"
+              Content="{Binding RefreshText}"
+              AutomationProperties.AutomationId="extensions-refresh"
+              AutomationProperties.Name="刷新" />
+    </Grid>
+
+    <Border Classes="notice" IsVisible="{Binding HasUnavailableText}">
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding UnavailableText}" />
+    </Border>
+    <Border Classes="notice error" IsVisible="{Binding HasActionProblem}">
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding ActionProblem}" />
+    </Border>
+    <Border Classes="notice error" IsVisible="{Binding HasRulesProblem}">
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding RulesProblemText}" />
+    </Border>
+
+    <!-- Installed extensions: state, tools, enable/disable, delete with a second confirmation. -->
+    <StackPanel Spacing="4" IsVisible="{Binding ShowExtensions}">
+      <ItemsControl ItemsSource="{Binding Installed}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="ap:InstalledExtensionViewModel">
+            <Border Classes="card" Margin="0,0,0,6" Padding="8">
+              <StackPanel Spacing="2">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <SelectableTextBlock Classes="mono" Text="{Binding Id}" />
+                  <TextBlock Grid.Column="1" Classes="caption" Margin="8,0" Text="{Binding Version}" />
+                  <TextBlock Grid.Column="2" Classes="caption" Text="{Binding StatusText}" />
+                </Grid>
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding HasTools}"
+                           TextWrapping="Wrap"
+                           Text="{Binding ToolsText}" />
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding HasError}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource DangerBrush}"
+                           Text="{Binding ErrorText}" />
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Classes="ghost"
+                          Margin="0,0,6,6"
+                          IsVisible="{Binding CanEnable}"
+                          Command="{Binding EnableCommand}"
+                          Content="{Binding [Extensions.Settings.Enable], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-enable" />
+                  <Button Classes="ghost"
+                          Margin="0,0,6,6"
+                          IsVisible="{Binding CanDisable}"
+                          Command="{Binding DisableCommand}"
+                          Content="{Binding [Extensions.Settings.Disable], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-disable" />
+                  <Button Classes="ghost"
+                          Margin="0,0,6,6"
+                          IsVisible="{Binding ShowDelete}"
+                          Command="{Binding DeleteCommand}"
+                          Content="{Binding [Extensions.Settings.Delete], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-delete" />
+                  <Button Classes="primary"
+                          Margin="0,0,6,6"
+                          IsVisible="{Binding ShowConfirmDelete}"
+                          Command="{Binding ConfirmDeleteCommand}"
+                          Content="{Binding [Extensions.Settings.DeleteConfirm], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-delete-confirm" />
+                  <Button Classes="ghost"
+                          Margin="0,0,6,6"
+                          IsVisible="{Binding ShowConfirmDelete}"
+                          Command="{Binding CancelDeleteCommand}"
+                          Content="{Binding [Extensions.Settings.Cancel], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-delete-cancel" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding ShowInstalledEmpty}"
+                 Text="{Binding [Extensions.Settings.NoInstalled], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+
+    <!-- Staged drafts: each one opens the same approval card the agent would have shown. -->
+    <StackPanel Spacing="4" IsVisible="{Binding ShowExtensions}">
+      <TextBlock Classes="label" Text="{Binding PendingTitle}" AutomationProperties.AutomationId="extensions-pending-title" />
+      <ItemsControl ItemsSource="{Binding Pending}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="ap:PendingExtensionViewModel">
+            <Border Classes="card" Margin="0,0,0,6" Padding="8">
+              <StackPanel Spacing="2">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <SelectableTextBlock Classes="mono" Text="{Binding Id}" />
+                  <TextBlock Grid.Column="1" Classes="caption" Margin="8,0" Text="{Binding Version}" />
+                  <Button Grid.Column="2"
+                          Classes="ghost"
+                          Command="{Binding OpenCommand}"
+                          Content="{Binding [Extensions.Settings.OpenCard], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="extensions-open-card" />
+                </Grid>
+                <TextBlock Classes="caption" Text="{Binding KindText}" />
+                <SelectableTextBlock Classes="mono"
+                                     IsVisible="{Binding HasDiagnostics}"
+                                     TextWrapping="Wrap"
+                                     Foreground="{DynamicResource DangerBrush}"
+                                     Text="{Binding DiagnosticsText}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding ShowPendingEmpty}"
+                 Text="{Binding [Extensions.Settings.NoPending], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+
+    <!-- Remembered rules, grouped by scope, each one revocable. -->
+    <StackPanel Spacing="4">
+      <TextBlock Classes="label" Text="{Binding RulesTitle}" AutomationProperties.AutomationId="extensions-rules-title" />
+      <ItemsControl ItemsSource="{Binding RuleGroups}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="ap:RememberedRuleGroupViewModel">
+            <StackPanel Spacing="2" Margin="0,0,0,6">
+              <TextBlock Classes="caption" Text="{Binding Title}" />
+              <ItemsControl ItemsSource="{Binding Rules}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="ap:RememberedRuleViewModel">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <SelectableTextBlock Classes="mono"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           Text="{Binding Text}" />
+                      <Button Grid.Column="1"
+                              Classes="link"
+                              Command="{Binding RevokeCommand}"
+                              Content="{Binding [Extensions.Settings.Revoke], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.AutomationId="extensions-revoke" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding ShowRulesEmpty}"
+                 Text="{Binding [Extensions.Settings.NoRules], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+  </StackPanel>
+</UserControl>
