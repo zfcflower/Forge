@@ -31,6 +31,7 @@ public sealed class ExtensionHost : IAsyncDisposable
 #endif
     private readonly ScriptCodeCompiler scriptCompiler = new();
     private readonly ScriptExecutorSupervisor scriptExecutors;
+    private readonly TerminalManager terminals;
     private readonly HostStopSignal stop = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -51,6 +52,7 @@ public sealed class ExtensionHost : IAsyncDisposable
         approvals = new ApprovalStore(options.DataDirectory);
         catalog = new PluginCatalog(options.PluginsDirectory);
         scriptExecutors = new ScriptExecutorSupervisor(options, scriptCompiler, ForwardToolCallAsync, stop, cleanup);
+        terminals = new TerminalManager(stop, cleanup, SendTerminalNotificationAsync);
 #if DEBUG
         testHook = FileHostTestHook.Activate(options.PipeName);
 #endif
@@ -83,6 +85,7 @@ public sealed class ExtensionHost : IAsyncDisposable
             await using var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = Timeout.InfiniteTimeSpan });
             mainPeer = peer;
             peer.RequestReceived += OnRequestAsync;
+            peer.NotificationReceived += OnNotification;
             peer.ProtocolError += error => Console.Error.WriteLine($"forge-extension-host: dropped an inbound frame: {error.Message}");
             peer.Closed += _ => stopped.TrySetResult();
             try
@@ -231,6 +234,56 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Handles the two inbound terminal notifications. Both are deliberately cheap: input is queued for the terminal's own
+    /// writer task and an acknowledgement only moves the flow-control window, so neither a slow PTY nor a slow child can
+    /// stall the dispatch loop. Failures are ignored rather than answered - a notification has no reply - and an unknown or
+    /// already exited terminal id is a normal race, not an error.
+    /// </summary>
+    private void OnNotification(IpcMessage message)
+    {
+        switch (message.Operation)
+        {
+            case TerminalProtocol.Input:
+                if (TryReadNotification(message, TerminalJsonContext.Default.TerminalInputNotification) is { } input)
+                {
+                    terminals.WriteInput(input);
+                }
+
+                break;
+            case TerminalProtocol.Ack:
+                if (TryReadNotification(message, TerminalJsonContext.Default.TerminalAckNotification) is { } ack)
+                {
+                    terminals.Acknowledge(ack);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>Reads a notification payload; an unreadable one is dropped, because a notification has no reply channel.</summary>
+    private static T? TryReadNotification<T>(
+        IpcMessage message,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+        where T : class
+    {
+        try
+        {
+            return TerminalProtocol.Read(message, typeInfo);
+        }
+        catch (HostOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes one terminal notification on the main-program connection. A host that is stopping sends nothing, and a
+    /// connection that can no longer be trusted reports the frame as unsent so the terminal ends itself.
+    /// </summary>
+    private Task<bool> SendTerminalNotificationAsync(string operation, JsonElement payload, CancellationToken ct) =>
+        mainPeer is { } peer ? SendAsync(peer, operation, payload, ct) : Task.FromResult(false);
+
     private Task<JsonElement> DispatchAsync(IpcMessage message, CancellationToken ct)
     {
         // Everything except the stop request itself is refused once shutdown has begun, instead of racing the teardown
@@ -266,6 +319,17 @@ public sealed class ExtensionHost : IAsyncDisposable
                 // host.stop cannot be answered by a host that is still waiting out a connect or a load window.
                 stop.Begin();
                 return Task.FromResult(HostJson.EmptyObject);
+
+            // Terminal operations only touch the terminal registry; they share no state with the plugin gates above them.
+            case TerminalProtocol.Start:
+                return terminals.Start(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalStartRequest));
+            case TerminalProtocol.Resize:
+                return terminals.Resize(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalResizeRequest));
+            case TerminalProtocol.Foreground:
+                return terminals.Foreground(
+                    TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalForegroundRequest));
+            case TerminalProtocol.Stop:
+                return terminals.StopAsync(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalStopRequest));
             default:
                 throw new HostOperationException("unsupported_operation", $"The extension host does not serve '{message.Operation}'.");
         }
@@ -1533,6 +1597,10 @@ public sealed class ExtensionHost : IAsyncDisposable
 
         // Cancels queued script calls (no executor is started for them) and kills every executor process tree.
         await scriptExecutors.DisposeAsync().ConfigureAwait(false);
+
+        // Kills every terminal's process tree. This sends nothing: the connection ending is what tells the main program
+        // that its terminals are gone, and a terminal that cannot be verified as gone is recorded in the cleanup report.
+        await terminals.DisposeAsync().ConfigureAwait(false);
     }
 
     private async Task DrainWorkersAsync()

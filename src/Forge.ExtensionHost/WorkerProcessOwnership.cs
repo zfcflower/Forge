@@ -12,7 +12,7 @@ namespace Forge.ExtensionHost;
 /// fallback, so a descendant outlives neither a worker that exits on its own nor a host that is killed. All P/Invoke of
 /// the host lives in this class; nothing here is unsafe, and no method is called on a platform it does not serve.
 /// </summary>
-internal sealed class WorkerProcessOwnership : IDisposable
+internal sealed partial class WorkerProcessOwnership : IDisposable
 {
 #if DEBUG
     /// <summary>Set to <c>1</c> to make <see cref="Assign"/> fail; read only by this class, read only by a Debug build, and
