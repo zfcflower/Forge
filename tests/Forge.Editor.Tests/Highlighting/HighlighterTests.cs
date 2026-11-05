@@ -28,6 +28,10 @@ public class HighlighterTests
         "/* one */ int b;",
     ];
 
+    // The seeds of the random edit sequences in Inserting_and_removing_lines_match_a_full_pass_over_random_edits: fixed,
+    // so the test is deterministic, and a list, so a failure names the sequence that reproduces it.
+    private static readonly int[] RandomEditSeeds = [20240611, 7, 424242, 9001, 31337, 8675309];
+
     [Fact]
     public void Csharp_tokens_get_lexical_categories()
     {
@@ -278,61 +282,67 @@ public class HighlighterTests
     [Fact]
     public void Inserting_and_removing_lines_match_a_full_pass_over_random_edits()
     {
-        var random = new Random(20240611);
-        var source = new ListSource(Enumerable.Range(0, 12).Select(_ => Snippets[random.Next(Snippets.Length)]));
-        var tokenizer = new Tokenizer(new GrammarRegistry());
-        var incremental = new IncrementalHighlighter(tokenizer, source, "csharp");
-
-        for (var step = 0; step < 150; step++)
+        // Fixed seeds keep the test deterministic; a list of them covers more edit shapes than one sequence. Each seed
+        // gets its own tokenizer over the shared grammar, and the message names the seed, the step and the line.
+        var registry = new GrammarRegistry();
+        foreach (var seed in RandomEditSeeds)
         {
-            LineChange change;
-            switch (random.Next(4))
+            var random = new Random(seed);
+            var source = new ListSource(Enumerable.Range(0, 12).Select(_ => Snippets[random.Next(Snippets.Length)]));
+            var tokenizer = new Tokenizer(registry);
+            var incremental = new IncrementalHighlighter(tokenizer, source, "csharp");
+
+            for (var step = 0; step < 150; step++)
             {
-                case 0:
+                LineChange change;
+                switch (random.Next(4))
                 {
-                    var line = random.Next(source.LineCount);
-                    source.Replace(line, Snippets[random.Next(Snippets.Length)]);
-                    change = LineChange.Replace(line);
-                    break;
-                }
-                case 1:
-                {
-                    var line = random.Next(source.LineCount + 1);
-                    source.Insert(line, Snippets[random.Next(Snippets.Length)]);
-                    change = LineChange.Insert(line, 1);
-                    break;
-                }
-                case 2:
-                {
-                    if (source.LineCount < 2)
+                    case 0:
                     {
-                        continue;
+                        var line = random.Next(source.LineCount);
+                        source.Replace(line, Snippets[random.Next(Snippets.Length)]);
+                        change = LineChange.Replace(line);
+                        break;
                     }
-
-                    var line = random.Next(source.LineCount);
-                    source.Remove(line);
-                    change = LineChange.Remove(line, 1);
-                    break;
-                }
-                default:
-                {
-                    var line = random.Next(source.LineCount);
-                    var removed = source.LineCount > 2 ? Math.Min(2, source.LineCount - line) : 0;
-                    source.RemoveRange(line, removed);
-                    var inserted = random.Next(0, 4);
-                    for (var i = 0; i < inserted; i++)
+                    case 1:
                     {
-                        source.Insert(line + i, Snippets[random.Next(Snippets.Length)]);
+                        var line = random.Next(source.LineCount + 1);
+                        source.Insert(line, Snippets[random.Next(Snippets.Length)]);
+                        change = LineChange.Insert(line, 1);
+                        break;
                     }
+                    case 2:
+                    {
+                        if (source.LineCount < 2)
+                        {
+                            continue;
+                        }
 
-                    change = new LineChange(line, removed, inserted);
-                    break;
+                        var line = random.Next(source.LineCount);
+                        source.Remove(line);
+                        change = LineChange.Remove(line, 1);
+                        break;
+                    }
+                    default:
+                    {
+                        var line = random.Next(source.LineCount);
+                        var removed = source.LineCount > 2 ? Math.Min(2, source.LineCount - line) : 0;
+                        source.RemoveRange(line, removed);
+                        var inserted = random.Next(0, 4);
+                        for (var i = 0; i < inserted; i++)
+                        {
+                            source.Insert(line + i, Snippets[random.Next(Snippets.Length)]);
+                        }
+
+                        change = new LineChange(line, removed, inserted);
+                        break;
+                    }
                 }
+
+                var updated = incremental.Update(change);
+
+                AssertSameTokens(tokenizer.Highlight(source, "csharp"), updated, $"seed {seed}, step {step}");
             }
-
-            var updated = incremental.Update(change);
-
-            AssertSameTokens(tokenizer.Highlight(source, "csharp"), updated);
         }
     }
 
@@ -413,14 +423,15 @@ public class HighlighterTests
     private static string ScopeOf(HighlightResult result, HighlightToken token) =>
         string.Join(' ', result.Scopes.GetScopes(token.ScopeId).ToArray());
 
-    private static void AssertSameTokens(HighlightResult expected, HighlightResult actual)
+    private static void AssertSameTokens(HighlightResult expected, HighlightResult actual, string? context = null)
     {
+        var where = context is null ? string.Empty : $"{context}: ";
         Assert.Equal(expected.LineCount, actual.LineCount);
         for (var line = 0; line < expected.LineCount; line++)
         {
             var left = expected.GetTokens(line).Span.ToArray().Select(t => (t.Start, t.Length, ScopeOf(expected, t))).ToArray();
             var right = actual.GetTokens(line).Span.ToArray().Select(t => (t.Start, t.Length, ScopeOf(actual, t))).ToArray();
-            Assert.True(left.SequenceEqual(right), $"line {line}: expected {string.Join(" | ", left)} but was {string.Join(" | ", right)}");
+            Assert.True(left.SequenceEqual(right), $"{where}line {line}: expected {string.Join(" | ", left)} but was {string.Join(" | ", right)}");
             Assert.Equal(expected.IsContinuation(line), actual.IsContinuation(line));
         }
     }

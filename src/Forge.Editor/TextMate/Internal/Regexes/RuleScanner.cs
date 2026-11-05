@@ -126,18 +126,31 @@ internal sealed class RuleScanner
             return 0;
         }
 
+        // A region shorter than the text (a capture being retokenized) is searched as its own text, so that $ and
+        // \z see its end; the common case searches the line itself.
+        var searched = length == text.Length ? text : GetRegion(text, length);
+        var regex = _patterns[_lastPattern].Pattern;
+
         Match match;
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            // A region shorter than the text (a capture being retokenized) is searched as its own text, so that $ and
-            // \z see its end; the common case searches the line itself.
-            match = _patterns[_lastPattern].Pattern.Match(length == text.Length ? text : GetRegion(text, length), searchStart);
-        }
-        catch (RegexMatchTimeoutException exception)
-        {
-            _firstError ??= exception.Message;
-            _captureCount = 0;
-            return 0;
+            try
+            {
+                match = regex.Match(searched, searchStart);
+                break;
+            }
+            catch (RegexMatchTimeoutException exception)
+            {
+                // The first search of a pattern pays the interpreter's start-up; see Scan.
+                if (attempt == 0)
+                {
+                    continue;
+                }
+
+                _firstError ??= exception.Message;
+                _captureCount = 0;
+                return 0;
+            }
         }
 
         var count = match.Groups.Count;
@@ -214,22 +227,35 @@ internal sealed class RuleScanner
 
         var regex = compiled.Current;
 
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            var enumerator = regex.EnumerateMatches(text.Slice(0, length), start);
-            if (enumerator.MoveNext())
+            try
             {
+                var enumerator = regex.EnumerateMatches(text.Slice(0, length), start);
+                if (!enumerator.MoveNext())
+                {
+                    return NoMatch;
+                }
+
                 var match = enumerator.Current;
                 matchLength = match.Length;
                 return match.Index;
             }
+            catch (RegexMatchTimeoutException exception)
+            {
+                // A search that ran out of the match budget is run once more: the first search of a pattern pays the
+                // interpreter's start-up, and on a loaded machine that start-up alone can outlast the budget. Without the
+                // retry one slow search would decide a line's tokens, so a later pass over the same text could tokenize
+                // that line differently and an incremental update would stop agreeing with a full pass. A search that
+                // overruns twice keeps the old behaviour: it reports the timeout and counts as no match.
+                if (attempt == 0)
+                {
+                    continue;
+                }
 
-            return NoMatch;
-        }
-        catch (RegexMatchTimeoutException exception)
-        {
-            _firstError ??= exception.Message;
-            return NoMatch;
+                _firstError ??= exception.Message;
+                return NoMatch;
+            }
         }
     }
 
