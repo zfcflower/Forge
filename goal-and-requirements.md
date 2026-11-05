@@ -44,7 +44,7 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 
 **工作区与 Git**
 - 隔离工作区:基于 Git Worktree 的并行开发,每个会话绑定一个工作区。
-- 深度 Git 集成:分支、Worktree、提交、Diff、PR 流程。
+- 深度 Git 集成:分支、Worktree、提交、Diff、远程同步与拉取(不对接代码托管平台)。
 
 **Agent 能力**
 - Specs as ground truth:规格树(spec-graph)浏览与读写,Agent 以其为依据。
