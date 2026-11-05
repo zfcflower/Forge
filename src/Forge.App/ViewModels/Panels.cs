@@ -209,22 +209,49 @@ internal sealed class FilesPanelViewModel : ObservableObject
     private FileIndex? index;
     private FileSystemWatcher? watcher;
     private DispatcherTimer? watcherTimer;
-    private Dictionary<string, LineCount>? countsCache;
-    private string? countsFingerprint;
+    private CountsSnapshot? countsSnapshot;
+    private readonly Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory;
     private bool isLoading;
     private int selectedTab;
     private int refreshGeneration;
 
     public FilesPanelViewModel(GitCli git, Action<string> openFile, Action<string> openFileInNewTab, Action<string> openChanges)
+        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory: null)
+    {
+    }
+
+    internal FilesPanelViewModel(
+        GitCli git,
+        Action<string> openFile,
+        Action<string> openFileInNewTab,
+        Action<string> openChanges,
+        Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory)
     {
         this.git = git;
         this.openFile = openFile;
         this.openFileInNewTab = openFileInNewTab;
         this.openChanges = openChanges;
+        this.lineCountsFactory = lineCountsFactory;
         ChangedCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
         AllTabCommand = new RelayCommand(() => SelectedTab = 0);
         ChangedTabCommand = new RelayCommand(() => SelectedTab = 1);
     }
+
+    /// <summary>Test seam: builds the panel already attached to a context, without starting the watcher or a background refresh.</summary>
+    internal FilesPanelViewModel(
+        GitCli git,
+        Action<string> openFile,
+        Action<string> openFileInNewTab,
+        Action<string> openChanges,
+        Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory,
+        PanelContext context)
+        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory)
+    {
+        Context = context;
+    }
+
+    /// <summary>The last atomically published fingerprint/result pair; exposed for the cache race tests.</summary>
+    internal CountsSnapshot? CountsSnapshotForTests => Volatile.Read(ref countsSnapshot);
 
     /// <summary>The visible rows of the "全部" tree, in display order; the view virtualizes this one list.</summary>
     public RangeObservableCollection<FileNodeViewModel> Rows => tree.Rows;
@@ -280,8 +307,7 @@ internal sealed class FilesPanelViewModel : ObservableObject
             tree.Clear();
             Changes.Clear();
             index = null;
-            countsCache = null;
-            countsFingerprint = null;
+            Volatile.Write(ref countsSnapshot, null);
         }
 
         RestartWatcher();
@@ -450,11 +476,26 @@ internal sealed class FilesPanelViewModel : ObservableObject
         CancellationToken ct)
     {
         var fingerprint = CountsFingerprint(workingDirectory, repositoryRoot, entries);
-        if (countsCache is not null && string.Equals(fingerprint, countsFingerprint, StringComparison.Ordinal))
+        var snapshot = Volatile.Read(ref countsSnapshot);
+        if (snapshot is not null && string.Equals(fingerprint, snapshot.Fingerprint, StringComparison.Ordinal))
         {
-            return countsCache;
+            return snapshot.Counts;
         }
 
+        var counts = lineCountsFactory is not null
+            ? await lineCountsFactory(fingerprint, ct).ConfigureAwait(false)
+            : await ComputeLineCountsAsync(workingDirectory, repositoryRoot, entries, ct).ConfigureAwait(false);
+
+        Volatile.Write(ref countsSnapshot, new CountsSnapshot(fingerprint, counts));
+        return counts;
+    }
+
+    private async Task<Dictionary<string, LineCount>> ComputeLineCountsAsync(
+        string workingDirectory,
+        string repositoryRoot,
+        IReadOnlyList<GitStatusEntry> entries,
+        CancellationToken ct)
+    {
         var counts = new Dictionary<string, LineCount>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -490,8 +531,6 @@ internal sealed class FilesPanelViewModel : ObservableObject
             counts.Clear();
         }
 
-        countsFingerprint = fingerprint;
-        countsCache = counts;
         return counts;
     }
 
@@ -543,6 +582,9 @@ internal sealed class FilesPanelViewModel : ObservableObject
     }
 
     internal readonly record struct LineCount(int Added, int Removed, bool IsBinary);
+
+    /// <summary>An immutable fingerprint/result pair so the two halves of the line-count cache can only be read and written together.</summary>
+    internal sealed record CountsSnapshot(string Fingerprint, Dictionary<string, LineCount> Counts);
 
     private static string Status(GitStatusEntry entry) => entry.Kind switch
     {
