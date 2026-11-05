@@ -44,7 +44,7 @@ parent: forge-architecture
 
 **破坏面。** `ApprovalStore(string, TimeSpan replaceBudget)` → `ApprovalStore(string, ApprovalStoreOptions?)`;`FilePath` → `DatabasePath`,`FileName` 值改为 `approvals.db`(新增 `LegacyFileName`、`MigratedSuffix`);新增 `IDisposable`(调用方必须 `Dispose`/`using`)。`Upsert`/`SetApproved`/`Revoke`/`Disable`/`Enable`/`Get`/`List`/`Count`/`Reload` 的签名与语义不变。
 
-**测试接缝(仅 Debug)。** 让并发与失效路径的测试不依赖机器计时:`ApprovalStoreOptions` 在 `DEBUG` 构建里多两个 `internal` 钩子——`AfterInitialSnapshotRead`(构造期整表读之后、快照与版本赋值之前调用,与版本/行读取顺序无关)与 `SnapshotRead`(每次真实整表读后调用一次:构造、`Reload()`、失效重读)。两者经 `src/Forge.Approval/AssemblyInfo.cs` 的 `InternalsVisibleTo("Forge.Approval.Tests")`(同样只在 `DEBUG`)对测试可见;`Release` 构建里既无属性也无 `InternalsVisibleTo`,不引入环境变量、静态可变全局状态或公共 API。钩子抛异常等同该路径失败:构造期释放连接并上抛,`Reload()`/读路径不换快照。用它们可以“在初始快照加载后立刻外部 Revoke”,并数出真实整表读次数。
+**测试接缝(仅 Debug)。** 让并发与失效路径的测试不依赖机器计时:`ApprovalStoreOptions` 在 `DEBUG` 构建里多两个 `internal` 钩子——`AfterInitialSnapshotRead`(构造期整表读之后、快照与版本赋值之前调用,与版本/行读取顺序无关)与 `SnapshotRead`(每次真实整表读后调用一次:构造、`Reload()`、失效重读)。两者经 `src/Forge.Approval/AssemblyInfo.cs` 的 `InternalsVisibleTo("Forge.Approval.Tests")`(同样只在 `DEBUG`)对测试可见;`Release` 构建里既无属性也无 `InternalsVisibleTo`,不引入环境变量、静态可变全局状态或公共 API。钩子抛异常等同该路径失败:构造期释放连接并上抛,`Reload()`/读路径不换快照。用它们可以“在初始快照加载后立刻外部 Revoke”,并数出真实整表读次数。跨进程压力测试的子进程把 `BusyTimeout` 提到 60 秒:默认 5 秒是产品策略,慢盘或杀毒扫描使一次写锁的持有超过 5 秒是已文档化的合法结果(`SqliteException 5`),不应被压测读成丢更新;真正的死锁仍会在父进程 3 分钟的等待里失败。
 
 ## 未决
 

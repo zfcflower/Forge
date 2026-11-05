@@ -278,7 +278,9 @@ public class McpServerManagerTests
         var options = new McpServerManagerOptions
         {
             RequestTimeout = TimeSpan.FromSeconds(5),
-            InitialReconnectDelay = TimeSpan.FromMilliseconds(100),
+            // The uncapped backoff would be 2 s and then 4 s, so a cap that is not applied cannot be mistaken for
+            // scheduling jitter on a slow runner the way a 100 ms/200 ms pair can.
+            InitialReconnectDelay = TimeSpan.FromSeconds(2),
             MaxReconnectDelay = TimeSpan.FromMilliseconds(100),
             MaxReconnectAttempts = 5,
             TransportFactory = config => new LoopbackTransport(config.Name) { Responder = server.Respond },
@@ -291,7 +293,7 @@ public class McpServerManagerTests
         var stamps = attempts.ToArray();
         Assert.Equal(3, stamps.Length);
         var second = Stopwatch.GetElapsedTime(stamps[1], stamps[2]);
-        Assert.True(second < TimeSpan.FromMilliseconds(180), $"second backoff was {second.TotalMilliseconds}ms; expected the 100ms cap");
+        Assert.True(second < TimeSpan.FromSeconds(1), $"second backoff was {second.TotalMilliseconds:F0}ms; expected the 100ms cap");
     }
 
     [Fact]

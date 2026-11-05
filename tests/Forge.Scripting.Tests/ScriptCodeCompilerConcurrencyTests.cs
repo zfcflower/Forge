@@ -24,6 +24,8 @@ public sealed class ScriptCodeCompilerConcurrencyTests
         Assert.True(results[0].Ok);
     }
 
+    // The tests below inject the internal compile delegate, so they only compile where InternalsVisibleTo exists.
+#if DEBUG
     [Fact]
     public async Task Cancelled_waiter_leaves_other_waiters_unaffected()
     {
@@ -52,7 +54,9 @@ public sealed class ScriptCodeCompilerConcurrencyTests
 
         Assert.True(resultB.Ok);
     }
+#endif
 
+#if DEBUG
     [Fact]
     public async Task All_waiters_cancelled_cancels_shared_compile_and_next_call_recompiles()
     {
@@ -88,7 +92,9 @@ public sealed class ScriptCodeCompilerConcurrencyTests
         Assert.True(next.Ok);
         Assert.Equal(2, Volatile.Read(ref compileCount));
     }
+#endif
 
+#if DEBUG
     [Fact]
     public async Task Cancellation_racing_completion_returns_success_or_clean_cancellation_only()
     {
@@ -146,6 +152,7 @@ public sealed class ScriptCodeCompilerConcurrencyTests
             Assert.True(next.Ok);
         }
     }
+#endif
 
     [Fact]
     public async Task Many_waiters_with_random_cancellation_do_not_deadlock_and_share_one_result()
@@ -210,8 +217,10 @@ public sealed class ScriptCodeCompilerConcurrencyTests
         }
     }
 
+#if DEBUG
     private static ScriptCodeCompiler Compiler(Func<CancellationToken, CompiledScript> compile) =>
         new((_, _, _, ct) => compile(ct));
+#endif
 
     private static ScriptCompilation Success() =>
         new(true, "key", new string('a', 64), [1], null, null);

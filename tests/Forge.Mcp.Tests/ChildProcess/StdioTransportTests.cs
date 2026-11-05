@@ -6,7 +6,9 @@ namespace Forge.Mcp.Tests.ChildProcess;
 
 public class StdioTransportTests
 {
-    private static readonly TimeSpan Generous = TimeSpan.FromSeconds(30);
+    // Cold-starting the child is part of the first MCP request, and a loaded CI runner can take longer than the
+    // request budget to start Windows PowerShell; the budget therefore covers process start as well.
+    private static readonly TimeSpan Generous = TimeSpan.FromSeconds(120);
 
     [Fact]
     public async Task Handshake_list_and_call_work_over_a_real_child_process()
@@ -121,6 +123,11 @@ public class StdioTransportTests
     public async Task Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines()
     {
         var transport = new StdioTransport(PlatformStdioServer.Options());
+        // Warm the child up first: the 3 s budget below is about the cancelled call, not about process start.
+        await transport.StartAsync(CancellationToken.None);
+        Assert.True(
+            await Eventually.Async(() => transport.StderrLines.Contains("fake-ready", StringComparer.Ordinal), Generous),
+            $"the fake stdio server never reported readiness; stderr: {transport.StderrTail}");
         await using var client = new McpClient(transport, Clients.DefaultOptions(TimeSpan.FromSeconds(3)));
         await client.ConnectAsync(CancellationToken.None);
 

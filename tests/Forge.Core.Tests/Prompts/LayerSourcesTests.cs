@@ -99,7 +99,7 @@ public class LayerSourcesTests
 
         Assert.Contains(PromptComposer.GlobalAgentHeading + "\n\nglobal text", prompt.StablePrefix, StringComparison.Ordinal);
         Assert.Contains(PromptComposer.ProjectAgentHeading + "\n\nproject text", prompt.StablePrefix, StringComparison.Ordinal);
-        Assert.EndsWith(BuiltInAgents.Scout.Prompt, prompt.StablePrefix, StringComparison.Ordinal);
+        Assert.EndsWith(PromptSourceText.Lf(BuiltInAgents.Scout.Prompt), prompt.StablePrefix, StringComparison.Ordinal);
         Assert.Equal("dynamic", prompt.DynamicSuffix);
     }
 }

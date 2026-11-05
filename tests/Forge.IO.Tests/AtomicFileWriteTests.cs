@@ -12,6 +12,12 @@ public class AtomicFileWriteTests
     private const int RewriteCount = 150;
     private const int ReaderCount = 4;
 
+    // Readers that re-open the file back to back starve the Windows rename for as long as they keep doing it: the
+    // product documents that a continuously held handle can exhaust the replace budget, so a reader yields between
+    // reads. The test still checks what it is about (readers never observe a missing, partial or mixed file while
+    // rewrites are happening), not the out-of-contract case of readers that never leave the destination alone.
+    private const int ReaderPauseMilliseconds = 1;
+
     private static readonly TimeSpan ShortBudget = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan CancelDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan ReleaseAfter = TimeSpan.FromMilliseconds(300);
@@ -409,7 +415,7 @@ public class AtomicFileWriteTests
                 failures.Add($"{exception.GetType().Name}: {exception.Message}");
             }
         }
-        while (!stop.IsSet);
+        while (!stop.Wait(ReaderPauseMilliseconds));
 
         return completed;
     }

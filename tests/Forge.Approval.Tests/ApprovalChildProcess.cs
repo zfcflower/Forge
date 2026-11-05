@@ -18,6 +18,14 @@ internal static class ApprovalChildProcess
     internal const string ArmedLine = "armed";
     internal const string ReadyLine = "ready";
 
+    // Contention is expected to queue, not to fail. A short budget turns a slow CI disk or an antivirus scan that
+    // holds the WAL for a few seconds into a spurious SQLITE_BUSY, so the stress children wait far longer than the
+    // shipped default; a genuine deadlock still fails instead of hanging (the parent waits three minutes).
+    private static readonly TimeSpan StressBusyTimeout = TimeSpan.FromSeconds(60);
+
+    private static ApprovalStore OpenStressStore(string directory) =>
+        new(directory, new ApprovalStoreOptions { BusyTimeout = StressBusyTimeout });
+
     internal static Process Start(string mode, string directory, string tag = "", int count = 0)
     {
         var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
@@ -76,7 +84,7 @@ internal static class ApprovalChildProcess
 
     private static int BlockRace(string directory, string tag, int count)
     {
-        using var store = new ApprovalStore(directory);
+        using var store = OpenStressStore(directory);
         Console.Out.WriteLine(ReadyLine);
         Console.Out.Flush();
         Console.In.ReadLine();
@@ -85,6 +93,7 @@ internal static class ApprovalChildProcess
         string? first = null;
         for (var i = 0; i < count; i++)
         {
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 if (string.Equals(tag, "approver", StringComparison.Ordinal))
@@ -99,7 +108,7 @@ internal static class ApprovalChildProcess
             catch (SqliteException exception) when (exception.SqliteErrorCode is 5 or 6)
             {
                 busy++;
-                first ??= exception.GetType().Name + " " + exception.SqliteErrorCode + ": " + exception.Message;
+                first ??= exception.GetType().Name + " " + exception.SqliteErrorCode + " after " + Elapsed(started) + ": " + exception.Message;
             }
             catch (Exception exception)
             {
@@ -116,12 +125,13 @@ internal static class ApprovalChildProcess
 
     private static int Stress(string directory, string tag, int count)
     {
-        using var store = new ApprovalStore(directory);
+        using var store = OpenStressStore(directory);
         var busy = 0;
         var fail = 0;
         string? first = null;
         for (var i = 0; i < count; i++)
         {
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 store.SetApproved($"{tag}.plugin.{i}", "1.0.0", $"hash-{i}", "dep", "10.0.100");
@@ -130,7 +140,7 @@ internal static class ApprovalChildProcess
             catch (SqliteException exception) when (exception.SqliteErrorCode is 5 or 6)
             {
                 busy++;
-                first ??= exception.GetType().Name + " " + exception.SqliteErrorCode + ": " + exception.Message;
+                first ??= exception.GetType().Name + " " + exception.SqliteErrorCode + " after " + Elapsed(started) + ": " + exception.Message;
             }
             catch (Exception exception)
             {
@@ -143,6 +153,9 @@ internal static class ApprovalChildProcess
         Console.Out.Flush();
         return busy == 0 && fail == 0 ? 0 : 1;
     }
+
+    private static string Elapsed(long started) =>
+        Stopwatch.GetElapsedTime(started).TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + "s";
 
     private static int Import(string directory)
     {
