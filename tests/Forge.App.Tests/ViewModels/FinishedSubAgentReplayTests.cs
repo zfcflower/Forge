@@ -2,6 +2,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Xunit;
 
@@ -55,7 +56,7 @@ public sealed class FinishedSubAgentReplayTests
     {
         var outcome = await RestoreAsync([]);
 
-        Assert.Contains(Strings.FinishedAgentsNoTranscript, outcome.OpenedNotices);
+        Assert.Contains(SessionStrings.FinishedAgentsNoTranscript.Resolve(), outcome.OpenedNotices);
     }
 
     /// <summary>A store that cannot prove how the child ended must not turn that into "completed".</summary>
@@ -65,7 +66,7 @@ public sealed class FinishedSubAgentReplayTests
         var outcome = await RestoreAsync([Stored(1, ChatMessage.User(UserText))]);
 
         var agent = Assert.Single(outcome.Finished);
-        Assert.Equal(Strings.SubAgentEnded, agent.StatusText);
+        Assert.Equal(SessionStrings.SubAgentEnded, agent.StatusText);
     }
 
     private static List<StoredMessage> StoredConversation() =>

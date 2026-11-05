@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Xml.Linq;
 using Avalonia.Headless;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.App.ViewModels;
 using Forge.Workspace;
@@ -56,7 +57,7 @@ public sealed class MinorRegressionTests
 
         agent.MarkRunning(At);
 
-        Assert.Equal(Strings.SubAgentRunning, agent.StatusText);
+        Assert.Equal(SessionStrings.SubAgentRunning, agent.StatusText);
         Assert.True(agent.IsLive);
     }
 

@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
              xmlns:vm="using:Forge.App.ViewModels"
              x:Class="Forge.App.Views.SubAgentView"
              x:DataType="vm:SubAgentViewModel">
@@ -41,11 +42,12 @@
         <TextBlock Grid.Column="4" Classes="mono" Margin="0,0,12,0" Text="{Binding ElapsedText}" VerticalAlignment="Center" />
         <Button Grid.Column="5"
                 Classes="ghost"
-                Content="停止"
+                Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
                 IsVisible="{Binding IsLive}"
                 Command="{Binding StopCommand}"
-                AutomationProperties.AutomationId="stop-subagent" AutomationProperties.Name="停止子 Agent"
-                ToolTip.Tip="停止这个子 Agent，结果回报给主 Agent" />
+                AutomationProperties.AutomationId="stop-subagent"
+                AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}"
+                ToolTip.Tip="{Binding [subagent.stopTooltip], Source={x:Static loc:Loc.Instance}}" />
       </Grid>
     </Border>
   </Grid>

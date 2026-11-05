@@ -1,41 +1,67 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Text;
 using Forge.Abstractions;
+using Forge.App.Localization;
 
 namespace Forge.App.ViewModels;
 
-internal abstract class TranscriptItemViewModel : ObservableObject;
+internal abstract class TranscriptItemViewModel : ObservableObject
+{
+    /// <summary>
+    /// Re-raises the item's text properties in the current UI language. The owning session calls this after a language
+    /// switch; the texts themselves are derived in the getters, never cached, so this only notifies.
+    /// </summary>
+    public virtual void RefreshText()
+    {
+    }
+}
 
 /// <summary>A user message, rendered as an IM-style bubble aligned right.</summary>
 internal sealed class UserMessageViewModel(string text, DateTimeOffset at) : TranscriptItemViewModel
 {
     public string Text { get; } = text;
 
-    public string Time { get; } = at.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+    public string Time { get; } = TextFormat.Clock(at);
 }
 
 /// <summary>A one-line system note inside a transcript (compaction, denied call, stopped turn).</summary>
-internal sealed class NoticeViewModel(string text, bool isError = false) : TranscriptItemViewModel
+internal sealed class NoticeViewModel(LocText text, bool isError = false) : TranscriptItemViewModel
 {
-    public string Text { get; } = text;
+    /// <summary>The note in the current language, resolved when the note is rendered.</summary>
+    public string Text => text.Resolve();
 
     public bool IsError { get; } = isError;
+
+    public override void RefreshText() => OnPropertyChanged(nameof(Text));
 }
 
 /// <summary>Base of the blocks inside a turn card: reply text, tool rows and notes, in arrival order.</summary>
-internal abstract class TurnBlockViewModel : ObservableObject;
+internal abstract class TurnBlockViewModel : ObservableObject
+{
+    /// <summary>Re-raises the block's text properties in the current UI language; see <see cref="TranscriptItemViewModel.RefreshText"/>.</summary>
+    public virtual void RefreshText()
+    {
+    }
+}
 
 /// <summary>One rendered stretch of a reply; a delta updates only this segment's text.</summary>
-internal sealed class TextSegmentViewModel(string value) : ObservableObject
+internal sealed class TextSegmentViewModel : ObservableObject
 {
-    private string text = value;
+    private string text = string.Empty;
+    private readonly LocText placeholder;
+
+    public TextSegmentViewModel(string value) => text = value;
+
+    /// <summary>A segment that shows a localized placeholder instead of model text - a reply that never arrived.</summary>
+    public TextSegmentViewModel(LocText value) => placeholder = value;
 
     public string Text
     {
-        get => text;
+        get => placeholder.IsEmpty ? text : placeholder.Resolve();
         set => Set(ref text, value);
     }
+
+    internal void RefreshText() => OnPropertyChanged(nameof(Text));
 }
 
 /// <summary>
@@ -102,7 +128,15 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel
         IsStreaming = false;
         if (segments.Count == 0 && open.Length == 0)
         {
-            segments.Add(new TextSegmentViewModel(Strings.NoText));
+            segments.Add(new TextSegmentViewModel(SessionStrings.NoText));
+        }
+    }
+
+    public override void RefreshText()
+    {
+        foreach (var segment in segments)
+        {
+            segment.RefreshText();
         }
     }
 
@@ -122,11 +156,14 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel
 }
 
 /// <summary>A note inside a turn card, such as a redirected or stopped sub-agent.</summary>
-internal sealed class TurnNoticeViewModel(string text, bool isError) : TurnBlockViewModel
+internal sealed class TurnNoticeViewModel(LocText text, bool isError) : TurnBlockViewModel
 {
-    public string Text { get; } = text;
+    /// <summary>The note in the current language, resolved when the note is rendered.</summary>
+    public string Text => text.Resolve();
 
     public bool IsError { get; } = isError;
+
+    public override void RefreshText() => OnPropertyChanged(nameof(Text));
 }
 
 /// <summary>
@@ -137,7 +174,8 @@ internal sealed class ToolRowViewModel(string name, string argumentsJson) : Turn
     private const int SummaryLimit = 160;
 
     private string status = "…";
-    private string? result;
+    private LocText result;
+    private bool hasResult;
     private bool isError;
     private bool isExpanded;
 
@@ -153,19 +191,10 @@ internal sealed class ToolRowViewModel(string name, string argumentsJson) : Turn
         private set => Set(ref status, value);
     }
 
-    public string? Result
-    {
-        get => result;
-        private set
-        {
-            if (Set(ref result, value))
-            {
-                OnPropertyChanged(nameof(HasResult));
-            }
-        }
-    }
+    /// <summary>The tool's answer in the current language; null until it returned something.</summary>
+    public string? Result => hasResult ? result.Resolve() : null;
 
-    public bool HasResult => !string.IsNullOrEmpty(result);
+    public bool HasResult => hasResult;
 
     public bool IsError
     {
@@ -181,11 +210,26 @@ internal sealed class ToolRowViewModel(string name, string argumentsJson) : Turn
 
     public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
 
-    public void Complete(ToolResult toolResult)
+    public void Complete(ToolResult toolResult) => Complete(LocText.Literal(toolResult.Content), toolResult.IsError);
+
+    /// <summary>
+    /// Closes the row with a result that is not the tool's own text - the placeholder of a call that never came back - so a
+    /// language switch still reaches it.
+    /// </summary>
+    public void Complete(LocText content, bool isError)
     {
-        IsError = toolResult.IsError;
-        Status = toolResult.IsError ? "✗" : "✓";
-        Result = toolResult.Content;
+        result = content;
+        hasResult = !string.IsNullOrEmpty(content.Resolve());
+        IsError = isError;
+        Status = isError ? "✗" : "✓";
+        OnPropertyChanged(nameof(Result));
+        OnPropertyChanged(nameof(HasResult));
+    }
+
+    public override void RefreshText()
+    {
+        OnPropertyChanged(nameof(Result));
+        OnPropertyChanged(nameof(HasResult));
     }
 
     internal static string Compact(string text, int limit)
@@ -229,8 +273,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     private readonly Dictionary<string, ToolRowViewModel> toolRows = new(StringComparer.Ordinal);
     private readonly ObservableCollection<TurnBlockViewModel> blocks = [];
     private TurnTextViewModel? openText;
-    private string header;
-    private string? footnote;
+    private LocText footnote;
     private TimeSpan? lastElapsed;
     private bool isExpanded = true;
     private bool isRunning = true;
@@ -244,32 +287,28 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         Round = round;
         this.startedAt = startedAt;
         Blocks = new ReadOnlyObservableCollection<TurnBlockViewModel>(blocks);
-        header = Title();
     }
 
     public int Round { get; }
 
     public ReadOnlyObservableCollection<TurnBlockViewModel> Blocks { get; }
 
-    public string Header
-    {
-        get => header;
-        private set => Set(ref header, value);
-    }
+    /// <summary>
+    /// The card title, derived from the turn's state on every read: a language switch (or a tick, or new usage) only has to
+    /// re-raise it, and the elapsed time re-formats in the current language.
+    /// </summary>
+    public string Header =>
+        SessionStrings.TurnHeader(
+            Round,
+            startedAt,
+            lastElapsed,
+            isRunning,
+            sawUsage ? inputTokens : null,
+            sawUsage ? outputTokens : null);
 
-    public string? Footnote
-    {
-        get => footnote;
-        private set
-        {
-            if (Set(ref footnote, value))
-            {
-                OnPropertyChanged(nameof(HasFootnote));
-            }
-        }
-    }
+    public string? Footnote => footnote.IsEmpty ? null : footnote.Resolve();
 
-    public bool HasFootnote => !string.IsNullOrEmpty(footnote);
+    public bool HasFootnote => !footnote.IsEmpty;
 
     /// <summary>Main-session turns are always expanded; a sub-agent collapses every turn but the newest.</summary>
     public bool IsExpanded
@@ -330,7 +369,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         blocks.Add(late);
     }
 
-    public void AddNotice(string text, bool isError = false)
+    public void AddNotice(LocText text, bool isError = false)
     {
         openText = null;
         blocks.Add(new TurnNoticeViewModel(text, isError));
@@ -342,49 +381,54 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         outputTokens += usage.OutputTokens;
         stop = stopReason;
         sawUsage = true;
-        Header = Title();
+        OnPropertyChanged(nameof(Header));
         OnPropertyChanged(nameof(HasUsage));
     }
 
     /// <summary>Closes the turn; called on success, failure and cancellation alike.</summary>
-    public void Finish(TimeSpan? elapsed, string? error)
+    public void Finish(TimeSpan? elapsed, LocText? error)
     {
         openText?.Complete();
         openText = null;
         lastElapsed = elapsed;
         IsRunning = false;
-        Header = Title(elapsed);
-        Footnote = error;
+        OnPropertyChanged(nameof(Header));
+        footnote = error ?? default;
+        OnPropertyChanged(nameof(Footnote));
+        OnPropertyChanged(nameof(HasFootnote));
         foreach (var row in toolRows.Values)
         {
             if (row.Status == "…")
             {
-                row.Complete(new ToolResult(Strings.NoToolResult, IsError: true));
+                row.Complete(SessionStrings.NoToolResult, isError: true);
             }
         }
 
         toolRows.Clear();
     }
 
-    public void Tick(TimeSpan elapsed)
+    /// <summary>A running card re-reads its header once per tick; a finished one has nothing to update.</summary>
+    public void Tick()
     {
         if (isRunning)
         {
-            Header = Title(elapsed);
+            OnPropertyChanged(nameof(Header));
         }
     }
 
     /// <summary>Elapsed time the card shows, or null when it was replayed from the store and never measured.</summary>
     public TimeSpan? Elapsed => isRunning ? null : lastElapsed;
 
-    private string Title(TimeSpan? elapsed = null) =>
-        Strings.TurnHeader(
-            Round,
-            startedAt,
-            elapsed,
-            isRunning,
-            sawUsage ? inputTokens : null,
-            sawUsage ? outputTokens : null);
+    public override void RefreshText()
+    {
+        OnPropertyChanged(nameof(Header));
+        OnPropertyChanged(nameof(Footnote));
+        OnPropertyChanged(nameof(HasFootnote));
+        foreach (var block in blocks)
+        {
+            block.RefreshText();
+        }
+    }
 }
 
 /// <summary>
@@ -398,7 +442,6 @@ internal sealed class TranscriptViewModel : ObservableObject
     private readonly StringBuilder pending = new();
     private TurnCardViewModel? current;
     private int round;
-    private DateTimeOffset currentStartedAt;
 
     public TranscriptViewModel(bool collapseOlderTurns)
     {
@@ -417,7 +460,7 @@ internal sealed class TranscriptViewModel : ObservableObject
     public void AddUserMessage(string text, DateTimeOffset at) =>
         Add(new UserMessageViewModel(text, at));
 
-    public void AddNotice(string text, bool isError = false) =>
+    public void AddNotice(LocText text, bool isError = false) =>
         Add(new NoticeViewModel(text, isError));
 
     /// <summary>
@@ -438,7 +481,6 @@ internal sealed class TranscriptViewModel : ObservableObject
         }
 
         round++;
-        currentStartedAt = at;
         var card = new TurnCardViewModel(round, at);
         if (CollapseOlderTurns)
         {
@@ -481,7 +523,7 @@ internal sealed class TranscriptViewModel : ObservableObject
     }
 
     /// <summary>Called when the event stream ends, on success, failure or cancellation.</summary>
-    public void EndTurn(TimeSpan? elapsed, string? error)
+    public void EndTurn(TimeSpan? elapsed, LocText? error)
     {
         FlushPending();
         current?.Finish(elapsed, error);
@@ -489,7 +531,16 @@ internal sealed class TranscriptViewModel : ObservableObject
 
     public void Tick()
     {
-        current?.Tick(DateTimeOffset.Now - currentStartedAt);
+        current?.Tick();
+    }
+
+    /// <summary>Re-raises every item's text after a language switch; the items derive their texts from their state.</summary>
+    public void RefreshText()
+    {
+        foreach (var item in items)
+        {
+            item.RefreshText();
+        }
     }
 
     public void Clear()

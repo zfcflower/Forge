@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.Workspace;
 using Xunit;
@@ -70,7 +71,7 @@ public sealed class SessionTurnFailureTests
     }
 
     private static bool IsCheckpointNotice(string notice) =>
-        notice.StartsWith(Strings.TurnCheckpointFailed(string.Empty), StringComparison.Ordinal) &&
+        notice.StartsWith(SessionStrings.CheckpointFailed(string.Empty).Resolve(), StringComparison.Ordinal) &&
         notice.Contains(FailureText, StringComparison.Ordinal);
 
     private enum CheckpointFailure

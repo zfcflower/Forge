@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
              xmlns:vm="using:Forge.App.ViewModels"
              x:Class="Forge.App.Views.SessionView"
              x:DataType="vm:SessionWorkspaceViewModel">
@@ -15,13 +16,15 @@
                   VerticalAlignment="Center"
                   Spacing="6"
                   MaxWidth="440">
-        <TextBlock Classes="h2" Text="开始对话" HorizontalAlignment="Center" />
+        <TextBlock Classes="h2"
+                   Text="{Binding [session.startConversation], Source={x:Static loc:Loc.Instance}}"
+                   HorizontalAlignment="Center" />
         <TextBlock Classes="caption"
                    TextAlignment="Center"
                    Text="{Binding WorkDirDisplay}" />
         <TextBlock Classes="caption"
                    TextAlignment="Center"
-                   Text="输入消息后按 Ctrl+Enter 发送。工具调用与每一轮都会显示为卡片。" />
+                   Text="{Binding [session.chatHint], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
     </Panel>
 
@@ -38,25 +41,25 @@
                  MinHeight="56"
                  MaxHeight="150"
                  VerticalContentAlignment="Top"
-                 PlaceholderText="描述要完成的任务…"
+                 PlaceholderText="{Binding [session.messagePlaceholder], Source={x:Static loc:Loc.Instance}}"
                  AutomationProperties.AutomationId="session-input"
-                 AutomationProperties.Name="消息"
+                 AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}"
                  KeyDown="OnInputKeyDown" />
         <StackPanel Grid.Column="1" Spacing="6" Margin="8,0,0,0" VerticalAlignment="Bottom">
           <Button Classes="primary icon"
                   Command="{Binding SendCommand}"
                   IsEnabled="{Binding CanSendNow}"
                   AutomationProperties.AutomationId="session-send"
-                  AutomationProperties.Name="发送"
-                  ToolTip.Tip="发送 (Ctrl+Enter)">
+                  AutomationProperties.Name="{Binding [session.send], Source={x:Static loc:Loc.Instance}}"
+                  ToolTip.Tip="{Binding [session.sendTooltip], Source={x:Static loc:Loc.Instance}}">
             <PathIcon Data="{StaticResource IconSend}" Width="14" Height="14" />
           </Button>
           <Button Classes="ghost icon"
                   Command="{Binding CancelCommand}"
                   IsVisible="{Binding IsRunning}"
                   AutomationProperties.AutomationId="session-stop-turn"
-                  AutomationProperties.Name="停止本轮"
-                  ToolTip.Tip="停止本轮">
+                  AutomationProperties.Name="{Binding [session.stopTurn], Source={x:Static loc:Loc.Instance}}"
+                  ToolTip.Tip="{Binding [session.stopTurn], Source={x:Static loc:Loc.Instance}}">
             <PathIcon Data="{StaticResource IconStop}" Width="12" Height="12" />
           </Button>
         </StackPanel>

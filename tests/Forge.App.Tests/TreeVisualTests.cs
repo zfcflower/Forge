@@ -8,6 +8,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaPath = Avalonia.Controls.Shapes.Path;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Views;
 using Forge.Workspace;
@@ -301,12 +302,12 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public void Agent_state_classifier_maps_each_status_text()
     {
-        Assert.Equal(AgentState.Running, AgentStateClassifier.Classify(Strings.SubAgentRunning));
-        Assert.Equal(AgentState.Queued, AgentStateClassifier.Classify(Strings.SubAgentQueued));
-        Assert.Equal(AgentState.Completed, AgentStateClassifier.Classify(Strings.SubAgentCompleted));
-        Assert.Equal(AgentState.Failed, AgentStateClassifier.Classify(Strings.SubAgentFailed));
-        Assert.Equal(AgentState.Stopped, AgentStateClassifier.Classify(Strings.SubAgentStopped));
-        Assert.Equal(AgentState.Ended, AgentStateClassifier.Classify(Strings.SubAgentEnded));
+        Assert.Equal(AgentState.Running, AgentStateClassifier.Classify(SessionStrings.SubAgentRunning));
+        Assert.Equal(AgentState.Queued, AgentStateClassifier.Classify(SessionStrings.SubAgentQueued));
+        Assert.Equal(AgentState.Completed, AgentStateClassifier.Classify(SessionStrings.SubAgentCompleted));
+        Assert.Equal(AgentState.Failed, AgentStateClassifier.Classify(SessionStrings.SubAgentFailed));
+        Assert.Equal(AgentState.Stopped, AgentStateClassifier.Classify(SessionStrings.SubAgentStopped));
+        Assert.Equal(AgentState.Ended, AgentStateClassifier.Classify(SessionStrings.SubAgentEnded));
         Assert.Equal(AgentState.Ended, AgentStateClassifier.Classify(string.Empty));
     }
 
@@ -392,9 +393,9 @@ public sealed class TreeVisualTests : IDisposable
     private static ProjectTreeViewModel BuildAgentViewModel()
     {
         var main = AgentRow(TreeNodeKind.MainAgent, "Ran 3 subagents", string.Empty, 0, TreeIcons.MainAgent);
-        var running = AgentRow(TreeNodeKind.SubAgent, "Research pricing", Strings.SubAgentRunning, 1, TreeIcons.Scout);
-        var completed = AgentRow(TreeNodeKind.SubAgent, "Draft proposal", Strings.SubAgentCompleted, 1, TreeIcons.Worker);
-        var failed = AgentRow(TreeNodeKind.SubAgent, "Scrape reviews", Strings.SubAgentFailed, 1, TreeIcons.Reviewer);
+        var running = AgentRow(TreeNodeKind.SubAgent, "Research pricing", SessionStrings.SubAgentRunning, 1, TreeIcons.Scout);
+        var completed = AgentRow(TreeNodeKind.SubAgent, "Draft proposal", SessionStrings.SubAgentCompleted, 1, TreeIcons.Worker);
+        var failed = AgentRow(TreeNodeKind.SubAgent, "Scrape reviews", SessionStrings.SubAgentFailed, 1, TreeIcons.Reviewer);
         main.Children.Add(running);
         main.Children.Add(completed);
         main.Children.Add(failed);

@@ -2,12 +2,12 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Data.Common;
 using System.Diagnostics;
-using System.Globalization;
 using System.Text;
 using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
@@ -15,6 +15,9 @@ namespace Forge.App.ViewModels;
 /// <summary>
 /// One open main session: its transcript, its sub-agent tabs, the turn loop and the turn checkpoints. All agent events
 /// are routed by <see cref="AgentEvent.AgentId"/>, so a child's text never reaches the parent's bubble.
+/// <para>This is the long-lived owner of everything the session shows, so it is also the one subscriber of
+/// <see cref="Loc.LanguageChanged"/>: the cards, tool rows, notices and sub-agent labels re-derive their texts when the
+/// language changes and are told to re-raise them from here, and the subscription ends with <see cref="Dispose"/>.</para>
 /// </summary>
 internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 {
@@ -66,8 +69,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         if (!provider.IsConfigured)
         {
-            Transcript.AddNotice(Strings.ProviderMissing + provider.Status, isError: true);
+            Transcript.AddNotice(SessionStrings.ProviderMissing(provider.Status), isError: true);
         }
+
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     public SessionInfo Info { get; private set; }
@@ -179,7 +184,14 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
         var snapshot = new List<AgentNodeSnapshot>(subAgents.Count + finished.Count + 1)
         {
-            new("root", null, Strings.MainAgentTitle, Strings.MainAgentTitle, IsRunning ? Strings.SubAgentRunning : string.Empty, IsRunning, true),
+            new(
+                "root",
+                null,
+                SessionStrings.MainAgentTitle,
+                SessionStrings.MainAgentTitle,
+                IsRunning ? SessionStrings.SubAgentRunning : string.Empty,
+                IsRunning,
+                true),
         };
         foreach (var agent in subAgents)
         {
@@ -206,11 +218,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private void OnAgentStateChanged() => AgentTreeChanged?.Invoke();
 
     /// <summary>The toggle that collapses the region (and, collapsed, shows how many sub-agents are still running).</summary>
-    public string SubAgentToggleText => Strings.SubAgentsToggle(subAgents.Count, subAgentsCollapsed);
+    public string SubAgentToggleText => SessionStrings.SubAgentsToggle(subAgents.Count, subAgentsCollapsed);
 
-    public string SubAgentToggleName => Strings.SubAgentsToggleName;
+    public string SubAgentToggleName => SessionStrings.SubAgentsToggleName;
 
-    public string SubAgentToggleTooltip => Strings.SubAgentsToggleTooltip;
+    public string SubAgentToggleTooltip => SessionStrings.SubAgentsToggleTooltip;
 
     public void Rename(string title)
     {
@@ -244,7 +256,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
-            Transcript.AddNotice(Strings.ReadFailed + exception.Message, isError: true);
+            Transcript.AddNotice(SessionStrings.ReadFailed(exception.Message), isError: true);
         }
     }
 
@@ -360,7 +372,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     public void StopSubAgent(string agentId)
     {
-        runtime.SubAgentControl?.Stop(agentId, Strings.SubAgentStoppedByUser);
+        runtime.SubAgentControl?.Stop(agentId, SessionStrings.SubAgentStoppedByUser);
     }
 
     /// <summary>
@@ -389,7 +401,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             var messages = await TranscriptReplay.ReadAsync(store, agent.ChildSessionId, CancellationToken.None).ConfigureAwait(true);
             if (messages.Count == 0)
             {
-                agent.Transcript.AddNotice(Strings.FinishedAgentsNoTranscript, isError: true);
+                agent.Transcript.AddNotice(SessionStrings.FinishedAgentsNoTranscript, isError: true);
                 return;
             }
 
@@ -397,7 +409,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
-            agent.Transcript.AddNotice(Strings.SubAgentReplayFailed(exception.Message), isError: true);
+            agent.Transcript.AddNotice(SessionStrings.SubAgentReplayFailed(exception.Message), isError: true);
         }
     }
 
@@ -426,7 +438,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
         turn = new CancellationTokenSource();
         var token = turn.Token;
-        string? error = null;
+        LocText? error = null;
         var turnNo = turnNumber;
 
         // Everything that can fail - the checkpoint read, the checkpoint begin and the turn itself - sits inside this
@@ -446,7 +458,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 }
                 catch (Exception exception) when (IsCheckpointFailure(exception))
                 {
-                    Transcript.AddNotice(Strings.TurnCheckpointFailed(exception.Message), isError: true);
+                    Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
                 }
             }
 
@@ -454,11 +466,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
-            error = Strings.Stopped;
+            error = SessionStrings.Stopped;
         }
         catch (Exception exception) when (IsCheckpointFailure(exception) || exception is ProviderException)
         {
-            error = exception.Message;
+            error = LocText.Literal(exception.Message);
         }
         finally
         {
@@ -474,7 +486,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                     }
                     catch (Exception exception) when (IsCheckpointFailure(exception))
                     {
-                        Transcript.AddNotice(Strings.TurnCheckpointFailed(exception.Message), isError: true);
+                        Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
                     }
                 }
             }
@@ -494,7 +506,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         DbException or UnauthorizedAccessException;
 
     private void OnSendFailed(Exception exception) =>
-        Transcript.AddNotice(Strings.TurnFailed + exception.Message, isError: true);
+        Transcript.AddNotice(SessionStrings.TurnFailed(exception.Message), isError: true);
 
     /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
     private void OnAgentEvent(AgentEvent value)
@@ -607,13 +619,13 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 AddTurnUsage(completed);
                 break;
             case AgentApprovalDenied denied:
-                Card(denied.AgentId)?.AddNotice(Strings.Denied(denied.Call.Name), isError: true);
+                Card(denied.AgentId)?.AddNotice(SessionStrings.Denied(denied.Call.Name), isError: true);
                 break;
             case AgentCompacted compacted:
-                Card(compacted.AgentId)?.AddNotice(Strings.Compacted(compacted.TokensBefore, compacted.TokensAfter));
+                Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));
                 break;
             case AgentFailed failed:
-                Card(failed.AgentId)?.AddNotice(failed.Error, isError: true);
+                Card(failed.AgentId)?.AddNotice(LocText.Literal(failed.Error), isError: true);
                 break;
         }
     }
@@ -733,11 +745,40 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         disposed = true;
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
         coalescer.Dispose();
         Cancel();
         turn?.Dispose();
         turn = null;
         Trace.WriteLine("[session] closed tab " + SessionId);
+    }
+
+    /// <summary>
+    /// The language switched. Every text of this session is derived in a getter, so nothing is cached and nothing has to be
+    /// rebuilt: the session's own labels are re-raised here and each card, tool row, notice and sub-agent tab re-raises
+    /// its own - the cards themselves never subscribe to <see cref="Loc.LanguageChanged"/>, or every one of them would
+    /// hold a reference to the static event after the tab closed.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(SubAgentToggleText));
+        OnPropertyChanged(nameof(SubAgentToggleName));
+        OnPropertyChanged(nameof(SubAgentToggleTooltip));
+        Transcript.RefreshText();
+        foreach (var agent in subAgents)
+        {
+            agent.RefreshText();
+        }
+
+        foreach (var agent in finished)
+        {
+            agent.RefreshText();
+        }
+
+        finishedMenu.RefreshText();
+
+        // The left panel's agent rows copy the sub-agents' status texts, so they have to be rebuilt in the new language.
+        AgentTreeChanged?.Invoke();
     }
 }
 
@@ -750,13 +791,14 @@ internal sealed class SubAgentViewModel : ObservableObject
     private const int TabTaskLimit = 18;
 
     private readonly Action<string>? stopRequested;
+    private readonly string kind;
     private SubAgentStatus status = SubAgentStatus.Queued;
     private DateTimeOffset startedAt;
     private TimeSpan elapsed;
     private TokenUsage usage = TokenUsage.Empty;
     private bool sawUsage;
-    private string? error;
-    private string statusNote = Strings.SubAgentWaitingSlot;
+    private LocText error;
+    private LocText statusNote = SessionStrings.SubAgentWaitingSlot;
     private bool isReadOnly;
     private bool isStopRequested;
     private bool outcomeUnknown;
@@ -775,7 +817,7 @@ internal sealed class SubAgentViewModel : ObservableObject
         AgentId = agentId;
         ChildSessionId = childSessionId;
         ParentAgentId = parentAgentId;
-        Kind = kind;
+        this.kind = kind;
         Task = task;
         Model = model;
         this.stopRequested = stopRequested;
@@ -794,13 +836,14 @@ internal sealed class SubAgentViewModel : ObservableObject
     /// <summary>The agent that spawned this one; null for a child that was spawned by the root agent.</summary>
     public string? ParentAgentId { get; }
 
-    public string Kind { get; }
+    /// <summary>The kind the store recorded; a stored child without one is named after the region, in the current language.</summary>
+    public string Kind => kind.Length == 0 ? SessionStrings.SubAgentsTitle : kind;
 
     public string Task { get; }
 
     public string Model { get; }
 
-    public string ModelText => Model.Length == 0 ? Strings.NoModel : Model;
+    public string ModelText => Model.Length == 0 ? SessionStrings.NoModel : Model;
 
     public string TaskSummary => ToolRowViewModel.Compact(Task, 120);
 
@@ -825,7 +868,7 @@ internal sealed class SubAgentViewModel : ObservableObject
 
     public bool ReadOnlyBadgeVisible => isReadOnly;
 
-    public string ReadOnlyBadgeText => Strings.ReadOnlyBadge;
+    public string ReadOnlyBadgeText => SessionStrings.ReadOnlyBadge;
 
     public SubAgentStatus Status
     {
@@ -843,53 +886,41 @@ internal sealed class SubAgentViewModel : ObservableObject
     }
 
     public string StatusText => outcomeUnknown
-        ? Strings.SubAgentEnded
+        ? SessionStrings.SubAgentEnded
         : status switch
         {
-            SubAgentStatus.Queued => Strings.SubAgentQueued,
-            SubAgentStatus.Running => Strings.SubAgentRunning,
-            SubAgentStatus.Completed => Strings.SubAgentCompleted,
-            SubAgentStatus.Stopped => Strings.SubAgentStopped,
-            _ => Strings.SubAgentFailed,
+            SubAgentStatus.Queued => SessionStrings.SubAgentQueued,
+            SubAgentStatus.Running => SessionStrings.SubAgentRunning,
+            SubAgentStatus.Completed => SessionStrings.SubAgentCompleted,
+            SubAgentStatus.Stopped => SessionStrings.SubAgentStopped,
+            _ => SessionStrings.SubAgentFailed,
         };
 
     public bool IsFinished => outcomeUnknown || status is SubAgentStatus.Completed or SubAgentStatus.Stopped or SubAgentStatus.Failed;
 
     public bool IsLive => !IsFinished;
 
-    public string StatusNote
-    {
-        get => statusNote;
-        private set
-        {
-            if (Set(ref statusNote, value))
-            {
-                OnPropertyChanged(nameof(HasStatusNote));
-            }
-        }
-    }
+    /// <summary>The one-line note beside the status, in the current language; empty when there is nothing to say.</summary>
+    public string StatusNote => statusNote.Resolve();
 
-    public bool HasStatusNote => statusNote.Length > 0;
+    public bool HasStatusNote => !statusNote.IsEmpty;
 
     public TokenUsage Usage => usage;
 
     /// <summary>"模型 · 输入 N · 输出 M"; an unreported side is "—".</summary>
     public string UsageText => ModelText + " · " +
-        Strings.TokenSummary(sawUsage ? usage.InputTokens : null, sawUsage ? usage.OutputTokens : null);
+        SessionStrings.TokenSummary(sawUsage ? usage.InputTokens : null, sawUsage ? usage.OutputTokens : null);
 
     public string ElapsedText =>
-        IsFinished || status == SubAgentStatus.Running ? Strings.FormatElapsed(elapsed) : Strings.None;
+        IsFinished || status == SubAgentStatus.Running ? TextFormat.Elapsed(elapsed) : TextFormat.None;
 
-    public string? Error
-    {
-        get => error;
-        private set => Set(ref error, value);
-    }
+    /// <summary>The run's failure message, untranslated; null when the run did not fail.</summary>
+    public string? Error => error.IsEmpty ? null : error.Resolve();
 
     public void MarkQueued()
     {
         Status = SubAgentStatus.Queued;
-        StatusNote = Strings.SubAgentWaitingSlot;
+        SetStatusNote(SessionStrings.SubAgentWaitingSlot);
     }
 
     /// <summary>Clears the note: the status text itself already shows the running state.</summary>
@@ -897,19 +928,19 @@ internal sealed class SubAgentViewModel : ObservableObject
     {
         startedAt = at;
         Status = SubAgentStatus.Running;
-        StatusNote = string.Empty;
+        SetStatusNote(default);
     }
 
     public void MarkSteered(string instruction, int droppedToolCalls)
     {
-        StatusNote = Strings.SubAgentSteeredNote(droppedToolCalls);
-        Transcript.AddNotice(Strings.SteeredNotice(ToolRowViewModel.Compact(instruction, 160)));
+        SetStatusNote(SessionStrings.SubAgentSteeredNote(droppedToolCalls));
+        Transcript.AddNotice(SessionStrings.SteeredNotice(ToolRowViewModel.Compact(instruction, 160)));
     }
 
     public void MarkFollowUp(string instruction, int pending)
     {
-        StatusNote = Strings.SubAgentFollowUpNote(pending);
-        Transcript.AddNotice(Strings.FollowUpNotice(ToolRowViewModel.Compact(instruction, 160)));
+        SetStatusNote(SessionStrings.SubAgentFollowUpNote(pending));
+        Transcript.AddNotice(SessionStrings.FollowUpNotice(ToolRowViewModel.Compact(instruction, 160)));
     }
 
     public void ApplyUsageIfMissing(TokenUsage value)
@@ -940,12 +971,12 @@ internal sealed class SubAgentViewModel : ObservableObject
         }
 
         elapsed = finalElapsed;
-        Error = finalError;
-        StatusNote = finalError ?? string.Empty;
-        Transcript.EndTurn(finalElapsed, finalError);
+        error = finalError is null ? default : LocText.Literal(finalError);
+        SetStatusNote(error);
+        Transcript.EndTurn(finalElapsed, error);
+        OnPropertyChanged(nameof(Error));
         OnPropertyChanged(nameof(UsageText));
         OnPropertyChanged(nameof(ElapsedText));
-        OnPropertyChanged(nameof(HasStatusNote));
         StopCommand.NotifyCanExecuteChanged();
     }
 
@@ -965,12 +996,22 @@ internal sealed class SubAgentViewModel : ObservableObject
         Transcript.Tick();
     }
 
-    public void Refresh()
+    /// <summary>
+    /// Re-raises every text this tab shows after a language switch. The values are all derived in the getters, so this only
+    /// notifies; the owning session calls it for each of its sub-agents.
+    /// </summary>
+    public void RefreshText()
     {
+        OnPropertyChanged(nameof(Kind));
+        OnPropertyChanged(nameof(TabTitle));
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(StatusNote));
+        OnPropertyChanged(nameof(HasStatusNote));
+        OnPropertyChanged(nameof(ModelText));
         OnPropertyChanged(nameof(UsageText));
         OnPropertyChanged(nameof(ElapsedText));
-        OnPropertyChanged(nameof(TabTitle));
+        OnPropertyChanged(nameof(ReadOnlyBadgeText));
+        Transcript.RefreshText();
     }
 
     /// <summary>
@@ -984,7 +1025,7 @@ internal sealed class SubAgentViewModel : ObservableObject
             sessionId,
             session.Id,
             session.Id,
-            session.AgentKind ?? Strings.SubAgentsTitle,
+            session.AgentKind ?? string.Empty,
             session.Task ?? session.Title,
             string.Empty,
             stopRequested: null,
@@ -1008,7 +1049,7 @@ internal sealed class SubAgentViewModel : ObservableObject
     private void MarkEndedUnknown()
     {
         outcomeUnknown = true;
-        StatusNote = string.Empty;
+        SetStatusNote(default);
         Transcript.EndTurn(null, null);
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(IsFinished));
@@ -1022,9 +1063,22 @@ internal sealed class SubAgentViewModel : ObservableObject
     private void RequestStop()
     {
         isStopRequested = true;
-        StatusNote = Strings.SubAgentStopRequested;
+        SetStatusNote(SessionStrings.SubAgentStopRequested);
         StopCommand.NotifyCanExecuteChanged();
         stopRequested?.Invoke(AgentId);
+    }
+
+    /// <summary>Sets the note; it keeps the key and its arguments, so a later language switch re-renders it.</summary>
+    private void SetStatusNote(LocText value)
+    {
+        if (statusNote.Equals(value))
+        {
+            return;
+        }
+
+        statusNote = value;
+        OnPropertyChanged(nameof(StatusNote));
+        OnPropertyChanged(nameof(HasStatusNote));
     }
 }
 
@@ -1039,9 +1093,17 @@ internal sealed class FinishedSubAgentsViewModel : ObservableObject
 
     public ObservableCollection<SubAgentViewModel> Items { get; } = [];
 
-    public string Title => Strings.FinishedAgentsMenu(Items.Count);
+    /// <summary><c>已结束 (3)</c>: derived on every read so a language switch only has to re-raise it.</summary>
+    public string Title => SessionStrings.FinishedAgentsMenu(Items.Count);
 
-    public string Hint => Strings.FinishedAgentsHint;
+    public string Hint => SessionStrings.FinishedAgentsHint;
+
+    /// <summary>Re-raises the texts after a language switch; the owning session calls this.</summary>
+    public void RefreshText()
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Hint));
+    }
 
     public SubAgentViewModel? Selected
     {
