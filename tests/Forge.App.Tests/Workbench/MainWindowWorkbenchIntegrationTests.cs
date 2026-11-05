@@ -68,7 +68,7 @@ public sealed class MainWindowWorkbenchIntegrationTests
             });
     }
 
-    [Fact(Skip = "BUG: 从文件面板单击打开的文件按进程工作目录解析，预览选项卡显示“文件不存在”（面板传的是相对路径 src/Forge.App/ViewModels/Panels.cs:52，MainWindowViewModel.cs:751 直接交给 FileDocumentViewModel.LoadAsync，后者在 Panels.cs:681 用 Path.GetFullPath 按 CWD 解析）")]
+    [Fact]
     public async Task Single_click_shows_the_clicked_files_content_in_the_preview_tab()
     {
         await RunAsync(
@@ -91,8 +91,8 @@ public sealed class MainWindowWorkbenchIntegrationTests
                 await harness.OpenFromPanelAsync(AlphaFile, newTab: true);
                 await harness.OpenFromPanelAsync(BetaFile, newTab: true);
 
-                Assert.NotNull(harness.ViewModel.Workbench.FindTab(WorkbenchIds.PinnedFileTab(AlphaFile)));
-                Assert.NotNull(harness.ViewModel.Workbench.FindTab(WorkbenchIds.PinnedFileTab(BetaFile)));
+                Assert.NotNull(harness.ViewModel.Workbench.FindTab(WorkbenchIds.PinnedFileTab(Path.Combine(harness.WorkDirectory, AlphaFile))));
+                Assert.NotNull(harness.ViewModel.Workbench.FindTab(WorkbenchIds.PinnedFileTab(Path.Combine(harness.WorkDirectory, BetaFile))));
             });
     }
 
@@ -109,6 +109,20 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
                 Assert.Same(first, again);
                 Assert.Equal(pinnedCount, harness.ViewModel.Workbench.PreviewTabs.Tabs.Count);
+            });
+    }
+
+    [Fact]
+    public async Task Open_in_new_tab_shows_the_clicked_files_content()
+    {
+        await RunAsync(
+            async harness =>
+            {
+                var tab = await harness.OpenFromPanelAsync(AlphaFile, newTab: true);
+
+                var document = (FileDocumentViewModel)tab.Content;
+                Assert.False(document.HasError, document.Error);
+                Assert.NotEmpty(document.Lines);
             });
     }
 
@@ -231,6 +245,25 @@ public sealed class MainWindowWorkbenchIntegrationTests
             });
     }
 
+    [Fact]
+    public async Task Restored_preview_file_shows_its_content()
+    {
+        await RunAsync(
+            scenario: new Scenario
+            {
+                Files = [AlphaFile],
+                ConfigureTabs = (tabs, work) => tabs.PreviewFile = Path.Combine(work, AlphaFile),
+            },
+            harness =>
+            {
+                var tab = Assert.IsType<TabModel>(harness.ViewModel.Workbench.FindTab(WorkbenchIds.PreviewTab));
+                var document = Assert.IsType<FileDocumentViewModel>(tab.Content);
+                Assert.False(document.HasError, document.Error);
+                Assert.NotEmpty(document.Lines);
+                return Task.CompletedTask;
+            });
+    }
+
     // ---------------------------------------------------------------- harness
 
     /// <summary>What a test wants seeded before the view model restores: files, the layout, and the open tabs.</summary>
@@ -306,6 +339,9 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
         public FilesPanelViewModel Files => ViewModel.Files;
 
+        /// <summary>The session working directory the file panel rows are relative to.</summary>
+        public string WorkDirectory => workDirectory;
+
         /// <summary>The session a two-session scenario is not looking at.</summary>
         public string OtherSessionId => SessionIds[^1];
 
@@ -361,7 +397,7 @@ public sealed class MainWindowWorkbenchIntegrationTests
             await Files.RefreshAsync(CancellationToken.None);
 
             var row = Files.Rows.First(row => string.Equals(row.RelativePath, fileName, StringComparison.Ordinal));
-            var id = newTab ? WorkbenchIds.PinnedFileTab(fileName) : WorkbenchIds.PreviewTab;
+            var id = newTab ? WorkbenchIds.PinnedFileTab(Path.Combine(workDirectory, fileName)) : WorkbenchIds.PreviewTab;
             if (newTab)
             {
                 row.OpenInNewTabCommand.Execute(null);

@@ -17,7 +17,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 - 不直接读审批数据库做判断(哈希经 `plugins.status` 取);为状态面用只读连接数 `plugin_approval` 的行数,进程里不持有任何可写审批连接,也不建表、不迁移。计数只在文件不存在(不打开、不创建文件/`-wal`/`-shm`)或没有 `plugin_approval` 表时返回 0;其余错误上抛,状态栏显示"不可用",不把损坏或锁住的库显示成没有插件。
 - UI 线程不碰存储:Microsoft.Data.Sqlite 的 `*Async` 是同步执行的,所以所有存储/SQLite/文件调用(含归档、重命名、`ui_state` 写入、TODO 增删)都经后台助手,不在调度器上 await。
 - 无 P/Invoke;进程归属是 `forge-extension-host` 的职责。App 只启动/重启 Host 子进程并保证退出时杀树等待。
-- 工作台布局自写(`Workbench/`),不用任何停靠框架;原内化的 Dock 已移除(见 `task-workbench-rewrite`)。
+- 工作台布局自写(`Workbench/`),不用任何停靠框架;原内化的 Dock 已移除。
 
 ## 组合根
 
@@ -94,6 +94,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 
 **浮动窗口。** 只允许浮出选项卡(任意组的任意选项卡,含 TODO/评审/规格)和文件 panel;其他 panel 不能浮出。
 - 文件 panel 浮出时,预览组随它进同一个窗口(仍在其左侧),回位时一起回。
+- 文件 panel 给出的是会话相对路径;打开前统一按活动会话工作目录解析成绝对路径,`open-tabs` 里也存绝对路径,恢复时不依赖当时的活动会话。
 - 一个对象一个 `FloatingPanelWindow`,用同一视图模型重新套数据模板(视图内的滚动等临时状态不保留)。
 - 浮出的选项卡仍留在原组的集合里,只标记浮动、不显示,所以点“停靠”或关窗时天然回到原槽位,不用另记“家”;组里活动选项卡永远不是浮动的。
 - 浮动默认尺寸 900×640(文件 panel 320×420)。文件 panel 的浮动窗口标题栏同样带它的工具按钮。最小化期间不写回几何(否则存下 -32000 坐标)。
@@ -108,4 +109,4 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 - 规格树面板仍用旧文字箭头(待与其他树统一)。
 - `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
 - Worker 资源限制受威胁模型决策门控,不在此模块实现。
-- 已知缺陷:`WorkspaceServices` 不释放 `reviews.db` 句柄。
+- `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。

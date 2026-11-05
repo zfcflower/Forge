@@ -750,18 +750,46 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task OpenFileAsync(string path, bool newTab, CancellationToken ct)
     {
-        var id = newTab ? WorkbenchIds.PinnedFileTab(path) : WorkbenchIds.PreviewTab;
+        var resolved = ResolveFilePath(path);
+        if (resolved is null)
+        {
+            return;
+        }
+
+        var id = newTab ? WorkbenchIds.PinnedFileTab(resolved) : WorkbenchIds.PreviewTab;
         if (Workbench.FindTab(id) is { Content: FileDocumentViewModel open } tab)
         {
-            await open.LoadAsync(path, ct).ConfigureAwait(true);
+            await open.LoadAsync(resolved, ct).ConfigureAwait(true);
             tab.Title = open.TabTitle;
             Workbench.ActivateTab(tab);
             return;
         }
 
         var document = FileDocumentViewModel.Create();
-        await document.LoadAsync(path, ct).ConfigureAwait(true);
+        await document.LoadAsync(resolved, ct).ConfigureAwait(true);
         Workbench.OpenTab(Workbench.PreviewTabs, id, TabKind.FilePreview, document, document.TabTitle);
+    }
+
+    /// <summary>
+    /// File-panel rows carry workspace-relative paths, while spec-tree rows and restored snapshots are already absolute.
+    /// A relative path is resolved against the active session's working directory so the document never depends on the
+    /// process working directory. Without an active session there is nothing to resolve against: the open is skipped with
+    /// a status-bar hint instead of throwing.
+    /// </summary>
+    private string? ResolveFilePath(string path)
+    {
+        if (Path.IsPathFullyQualified(path))
+        {
+            return path;
+        }
+
+        if (activeSession is null || activeSession.WorkDir.Length == 0)
+        {
+            Status.SetWorkspaceProblem(Strings.NoSession);
+            return null;
+        }
+
+        return Path.GetFullPath(Path.Combine(activeSession.WorkDir, path));
     }
 
     private void ShowChangesAsync(string? path) => _ = ShowChangesCoreAsync(path);
