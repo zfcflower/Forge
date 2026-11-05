@@ -940,8 +940,8 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
             if (started is { HasExited: true })
             {
                 throw new InvalidOperationException(
-                    $"The Extension Host exited before accepting the connection on pipe '{connection.PipeName}'." +
-                    OutputTail(started), last);
+                    $"The Extension Host exited before accepting the connection on pipe '{connection.PipeName}' " +
+                    $"({started.DescribeState()})." + OutputTail(started), last);
             }
 
             try
@@ -969,7 +969,23 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
 
         return new TimeoutException(
             $"The Extension Host did not accept a connection on pipe '{connection.PipeName}' within " +
-            $"{timeout.TotalMilliseconds:F0} ms.{OutputTail(null)}", last ?? oce);
+            $"{timeout.TotalMilliseconds:F0} ms." + HostState() + OutputTail(null), last ?? oce);
+    }
+
+    /// <summary>Where the self-started host was when the connect budget ran out, so a timeout names a slow start
+    /// (still running) separately from a host that died before it listened (exit code and output follow). A client
+    /// that only connected to an already running host reports nothing.</summary>
+    private string HostState()
+    {
+        HostProcess? started;
+        lock (peerGate)
+        {
+            started = hostProcess;
+        }
+
+        return started is null
+            ? string.Empty
+            : Environment.NewLine + $"The Extension Host process {started.DescribeState()}.";
     }
 
     private PeerBundle CreatePeer(string pipeName)

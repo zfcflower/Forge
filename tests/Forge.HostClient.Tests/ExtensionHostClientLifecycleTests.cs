@@ -239,4 +239,49 @@ public sealed class ExtensionHostClientLifecycleTests
         Assert.NotNull(failure.Detail);
         Assert.Contains("did not accept a connection", failure.Detail);
     }
+
+    [Fact]
+    public async Task Start_timeout_names_a_host_that_is_still_running_instead_of_reporting_a_crash()
+    {
+        await using var host = new FakeHost();
+        var directory = SleeperHost.NewDirectory();
+        var connection = SleeperHost.Connection(host, directory) with { StartTimeout = TimeSpan.FromSeconds(2) };
+        await using var client = new ExtensionHostClient(connection);
+        using var limit = TestLimit.Create();
+        try
+        {
+            var failure = await Assert.ThrowsAsync<TimeoutException>(() => client.StartAsync(limit.Token));
+
+            Assert.Contains("did not accept a connection", failure.Message);
+            Assert.Contains("is still running as process", failure.Message);
+        }
+        finally
+        {
+            SleeperHost.DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public async Task Start_names_a_host_that_exited_before_it_listened_with_its_exit_code()
+    {
+        await using var host = new FakeHost();
+        var (executable, arguments) = OperatingSystem.IsWindows()
+            ? ("cmd.exe", (IReadOnlyList<string>)["/c", "exit 3"])
+            : ("/bin/sh", (IReadOnlyList<string>)["-c", "exit 3"]);
+        var connection = new HostConnection
+        {
+            PipeName = host.PipeName,
+            HostExecutablePath = executable,
+            RuntimePath = string.Empty,
+            HostArguments = arguments,
+            StartTimeout = TimeSpan.FromSeconds(2),
+        };
+        await using var client = new ExtensionHostClient(connection);
+        using var limit = TestLimit.Create();
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync(limit.Token));
+
+        Assert.Contains("exited before accepting the connection", failure.Message);
+        Assert.Contains("exited with code 3", failure.Message);
+    }
 }

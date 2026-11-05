@@ -182,7 +182,7 @@ public sealed class ExtensionHostToolProxyTests
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<IpcTimeoutException>(() => tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), Context, limit.Token).AsTask());
-        var second = await tool.InvokeAsync(new ToolCall("c2", "echo", "{}"), Context, limit.Token);
+        var second = await AnswerAfterTimeoutAsync(tool, limit.Token);
 
         Assert.Equal(new ToolResult("second", false), second);
         Assert.Equal(HostStatus.Running, client.Status);
@@ -253,5 +253,36 @@ public sealed class ExtensionHostToolProxyTests
         await Assert.ThrowsAsync<ArgumentNullException>(() => tool.InvokeAsync(null!, Context, limit.Token).AsTask());
         await Assert.ThrowsAsync<ArgumentNullException>(() => tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), null!, limit.Token).AsTask());
         Assert.Empty(host.Requests("plugin.execute"));
+    }
+
+    /// <summary>
+    /// Calls <paramref name="tool"/> until the host answers. The 300 ms budget this class configures is the budget
+    /// under test, and it caps every follow-up call as well, so one expired budget on a loaded runner says nothing
+    /// about the connection: the round trip is what is awaited, with the test limit as the upper bound. Only
+    /// <see cref="IpcTimeoutException"/> is retried, so a connection the timeout really broke fails the call at once
+    /// (a closed peer is not running any more, and an unanswered request on a closed pipe raises its own exception).
+    /// </summary>
+    private static async Task<ToolResult> AnswerAfterTimeoutAsync(ITool tool, CancellationToken limit)
+    {
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    return await tool.InvokeAsync(
+                        new ToolCall($"after-timeout-{attempt}", "echo", "{}"), Context, limit);
+                }
+                catch (IpcTimeoutException) when (!limit.IsCancellationRequested)
+                {
+                }
+            }
+        }
+        catch (OperationCanceledException exception) when (limit.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"The Extension Host answered no call within {TestLimit.Span.TotalSeconds:0} s after the timed-out one.",
+                exception);
+        }
     }
 }

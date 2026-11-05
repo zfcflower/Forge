@@ -296,13 +296,29 @@ public sealed class EntryLifecycleTests
         {
             try
             {
-                return File.Exists(path) ? await File.ReadAllLinesAsync(path) : [];
+                return File.Exists(path) ? await ReadLinesSharedAsync(path) : [];
             }
             catch (Exception exception) when (attempt < 20 && exception is IOException)
             {
                 await Task.Delay(5);
             }
         }
+    }
+
+    /// <summary>Reads a log a worker may still be appending: the writer opens it with
+    /// <see cref="FileShare.Read"/>, so a reader that does not also share write access is refused with a sharing
+    /// violation on Windows while the append is in flight.</summary>
+    private static async Task<string[]> ReadLinesSharedAsync(string path)
+    {
+        await using var stream = SharedRead.Open(path);
+        using var reader = new StreamReader(stream);
+        var lines = new List<string>();
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            lines.Add(line);
+        }
+
+        return [.. lines];
     }
 
     /// <summary>Worker process id recorded in one line of a plugin's load log.</summary>
@@ -408,7 +424,7 @@ internal sealed class EntryCaptureHook : IDisposable
         {
             foreach (var file in System.IO.Directory.GetFiles(Directory, "*.captured"))
             {
-                if (string.Equals(File.ReadAllText(file), pluginId, StringComparison.Ordinal))
+                if (string.Equals(ReadCaptured(file), pluginId, StringComparison.Ordinal))
                 {
                     return long.Parse(Path.GetFileNameWithoutExtension(file), System.Globalization.CultureInfo.InvariantCulture);
                 }
@@ -422,10 +438,44 @@ internal sealed class EntryCaptureHook : IDisposable
             $"by the test hook in '{Directory}'; check {EnvironmentVariable}.");
     }
 
+    /// <summary>Reads one capture the host is writing concurrently. The writer holds the file with
+    /// <see cref="FileShare.Read"/> until it has flushed, so the read shares write access; the content arrives as
+    /// the writer publishes it, so a capture that is not readable or still empty simply keeps the wait going.</summary>
+    private static string ReadCaptured(string path)
+    {
+        try
+        {
+            return SharedRead.Text(path);
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
+    }
+
     public void Release(long sequence) =>
         File.WriteAllText(
             Path.Combine(Directory, sequence.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".release"),
             "release");
 
     public void Dispose() => Environment.SetEnvironmentVariable(EnvironmentVariable, previous);
+}
+
+/// <summary>
+/// Reads files the Extension Host and its workers write while a test is already reading them. On Windows a read
+/// that does not share write and delete access is refused with a sharing violation while the writer's handle is
+/// open, which is exactly the window these tests race against; sharing both turns the race into a read of whatever
+/// the writer has published so far.
+/// </summary>
+internal static class SharedRead
+{
+    public static FileStream Open(string path) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    public static string Text(string path)
+    {
+        using var stream = Open(path);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 }

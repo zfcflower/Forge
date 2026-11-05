@@ -117,6 +117,22 @@ internal sealed class HostProcess : IAsyncDisposable
         }
     }
 
+    /// <summary>What the host process was doing when a caller gave up on it, for failure messages: a process that
+    /// is still running means the start was slow, one that exited means it died before it could answer.</summary>
+    public string DescribeState()
+    {
+        try
+        {
+            return process.HasExited
+                ? $"exited with code {process.ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                : $"is still running as process {process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            return "is no longer running, and its exit code is unavailable";
+        }
+    }
+
     /// <summary>Ends the process tree: kill when it is still running, then wait for it and its output readers. A host
     /// that acknowledged <c>host.stop</c> first gets <paramref name="grace"/> to run its own shutdown and exit, and its
     /// tree is killed only when it does not.</summary>

@@ -27,7 +27,9 @@ internal sealed class E2eFixture : IAsyncDisposable
 {
     public static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(30);
 
-    private readonly CancellationTokenSource budget = new(TimeSpan.FromSeconds(150));
+    /// <summary>Overall budget of one fixture, a safety net for a test that never finishes rather than a
+    /// performance assertion: it has to leave room for the host start below on a loaded runner.</summary>
+    private readonly CancellationTokenSource budget = new(TimeSpan.FromSeconds(240));
 
     public E2eFixture(
         IReadOnlyList<string>? hostArguments = null,
@@ -49,7 +51,10 @@ internal sealed class E2eFixture : IAsyncDisposable
             HostExecutablePath = hostExecutablePath ?? HostAssemblyPath,
             RuntimePath = "dotnet",
             HostArguments = hostArguments ?? [],
-            StartTimeout = TimeSpan.FromSeconds(60),
+            // Starting a host is bounded by how fast the machine creates a process and pages in a .NET app, not by
+            // this number: a runner that already runs a dozen test assemblies at once can take far longer than a
+            // quiet desktop. It stays a bound, so a host that never listens still fails the test.
+            StartTimeout = TimeSpan.FromSeconds(120),
         };
         var options = new ExtensionHostClientOptions
         {

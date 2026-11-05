@@ -74,6 +74,17 @@ depends-on: [forge-ipc]
   (默认 60 秒、上限 600 秒)作为该次 `code.execute` 的预算,排队与执行都算在同一条 deadline 里。这样合法的 600 秒
   脚本不会被全局默认值截断,其他请求也没有被放宽。预算到期映射为 `IpcTimeoutException`;`run_code` 把它转成
   “脚本已停止”的错误结果,并作废该 run。
+- **超时只结束那一次调用,不动连接。** 预算到期是**调用级**结果,不是连接级故障:客户端只把该请求从 pending
+  移除、给 Host 发一条 `ipc.cancel` 通知,然后抛 `IpcTimeoutException`;peer、连接世代、`Status` 与已登记的
+  工具/贡献快照全部不变,紧接着的下一个请求走同一条连接。只有连接真的关闭(对端 `Closed`、管道 IO 失败)才会把
+  状态改成 `Failed` 并让在途调用拿到 `IpcConnectionClosedException`。所以“超时后连接仍可用”是本模块的契约,
+  不是调用方的期望:同一 `runId` 的迟到应答在 run 结束后一律作废(`EndRun` 已作废 pending 记录),不会被下一
+  个请求误取。
+- **连接超时要说明 Host 自己的状态。** `StartTimeout` 到期时抛出的 `TimeoutException` 先报“没在 N ms 内接受
+  连接”,再给出自启进程当时的状态:仍在运行(带 pid)的是启动慢,已退出(带退出码)的是启动前就死了,
+  两种都不需要再靠猜;随后附上同一进程的标准输出/标准错误尾部(有则附)。只连接外部 Host、自身没启动进程时
+  这两段为空:`HostConnection.HostExecutablePath` 为空就没有可报告的进程。一个连接尝试的时长为
+  `IpcPipeOptions.ConnectTimeout`,因此它决定了客户端发现“自启进程已退出”的最慢延迟。
 - **崩溃保留快照,同实例重连。** Host 崩溃置 `Failed` 但保留最后已知 `Tools` 与贡献快照;主动 `StopAsync` 清空。
   `StartAsync` 在 `Stopped` 与 `Failed` 均合法:从 `Failed` 是重连(新连接,必要时新进程)。重连在建立新连接
   **之前**先拆掉上一条连接:不发 `host.stop`、不清快照,只处置旧 peer/transport,并按
