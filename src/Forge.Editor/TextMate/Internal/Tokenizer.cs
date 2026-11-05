@@ -34,11 +34,16 @@ internal sealed class Tokenizer
     private readonly Dictionary<int, DynamicPatternCache> _dynamicPatterns = [];
     private readonly HashSet<string> _errors = new(StringComparer.Ordinal);
     private readonly CharBuffer _buffer = new();
+    private readonly CharBuffer _lineBuffer = new();
     private readonly List<StateStack> _whileNodes = [];
 
     private Token[] _tokens = new Token[64];
     private int _tokenCount;
     private int _lastTokenEndIndex;
+    private int _lineId;
+
+    // The materialised line plus its synthetic newline, built lazily when a match needs its capture groups.
+    private string? _lineString;
 
     // The scopes of the last token produced: the synthetic newline's scopes once the line is tokenized.
     private AttributedScopeStack? _lastProducedScopes;
@@ -123,7 +128,12 @@ internal sealed class Tokenizer
             isFirstLine = false;
         }
 
-        var lineText = string.Concat(line, "\n");
+        _lineBuffer.Clear();
+        _lineBuffer.Append(line);
+        _lineBuffer.Append('\n');
+        _lineString = null;
+        _lineId++;
+        var lineText = _lineBuffer.AsSpan();
         var lineLength = lineText.Length;
 
         _tokenCount = 0;
@@ -162,7 +172,7 @@ internal sealed class Tokenizer
 
     // _tokenizeString. Returns true when the time budget ran out.
     [MethodImpl(Jit.FullOpts)]
-    private bool TokenizeString(string text, int lineLength, bool isFirstLine, int linePos, ref StateStack stack, bool checkWhileConditions, long deadline)
+    private bool TokenizeString(ReadOnlySpan<char> text, int lineLength, bool isFirstLine, int linePos, ref StateStack stack, bool checkWhileConditions, long deadline)
     {
         // A retokenized capture has no enclosing begin match, so the region start is where \G may match.
         var anchorPosition = checkWhileConditions ? -1 : linePos;
@@ -307,7 +317,7 @@ internal sealed class Tokenizer
     // _checkWhileConditions: from the outermost begin/while rule inward, each while pattern must match at the line
     // start; the first that fails cuts the stack above it.
     [MethodImpl(Jit.FullOpts)]
-    private void CheckWhileConditions(string text, int lineLength, ref bool isFirstLine, ref int linePos, ref StateStack stack, ref int anchorPosition)
+    private void CheckWhileConditions(ReadOnlySpan<char> text, int lineLength, ref bool isFirstLine, ref int linePos, ref StateStack stack, ref int anchorPosition)
     {
         anchorPosition = stack.BeginRuleCapturedEol ? 0 : -1;
 
@@ -369,14 +379,20 @@ internal sealed class Tokenizer
     // from the previous line, as the second of two adjacent line comments does. \G does not count: it matches wherever the
     // first line starts, so a rule that only anchors on it still reopens per line.
     [MethodImpl(Jit.FullOpts)]
-    private static bool StartsAtLineStart(RegexSource begin, string text)
+    private static bool StartsAtLineStart(RegexSource begin, ReadOnlySpan<char> text)
     {
-        var match = begin.GetCompiled(RegexAnchorVariant.A1G0).Current.Match(text);
-        return match.Success && match.Index == 0;
+        var compiled = begin.GetCompiled(RegexAnchorVariant.A1G0);
+        if (!compiled.CanMatch)
+        {
+            return false;
+        }
+
+        var enumerator = compiled.Current.EnumerateMatches(text, 0);
+        return enumerator.MoveNext() && enumerator.Current.Index == 0;
     }
 
     [MethodImpl(Jit.FullOpts)]
-    private bool MatchRuleOrInjections(string text, int lineLength, bool isFirstLine, int linePos, StateStack stack, int anchorPosition, out MatchResult result)
+    private bool MatchRuleOrInjections(ReadOnlySpan<char> text, int lineLength, bool isFirstLine, int linePos, StateStack stack, int anchorPosition, out MatchResult result)
     {
         // Look for a normal grammar rule.
         var rule = _rules[stack.RuleId];
@@ -411,7 +427,7 @@ internal sealed class Tokenizer
     }
 
     [MethodImpl(Jit.FullOpts)]
-    private bool MatchInjections(string text, int lineLength, bool isFirstLine, int linePos, StateStack stack, int anchorPosition, out MatchResult result, out bool priorityMatch)
+    private bool MatchInjections(ReadOnlySpan<char> text, int lineLength, bool isFirstLine, int linePos, StateStack stack, int anchorPosition, out MatchResult result, out bool priorityMatch)
     {
         // The lower the better.
         var bestMatchRating = int.MaxValue;
@@ -492,7 +508,7 @@ internal sealed class Tokenizer
     // CompiledRule.findNextMatchSync over the rule's patterns: the static ones in one scanner, a back-referencing
     // end or while pattern in its own, merged by earliest start with the dynamic one first or last in priority.
     [MethodImpl(Jit.FullOpts)]
-    private bool Search(int ruleId, RulePatterns patterns, string? endRule, bool isWhile, string text, int lineLength, int start, bool allowA, bool allowG, out MatchResult result)
+    private bool Search(int ruleId, RulePatterns patterns, string? endRule, bool isWhile, ReadOnlySpan<char> text, int lineLength, int start, bool allowA, bool allowG, out MatchResult result)
     {
         RuleScanner? winner = null;
         var winnerRuleId = 0;
@@ -502,7 +518,7 @@ internal sealed class Tokenizer
         if (patterns.DynamicSource is { } dynamicSource)
         {
             dynamic = GetDynamicScanner(ruleId, isWhile, dynamicSource, patterns.DynamicRuleId, endRule ?? string.Empty, allowA, allowG);
-            if (patterns.DynamicIndex == 0 && dynamic.FindNextMatch(text, lineLength, start, out winnerRuleId))
+            if (patterns.DynamicIndex == 0 && dynamic.FindNextMatch(text, _lineId, lineLength, start, out winnerRuleId))
             {
                 winner = dynamic;
                 bestStart = dynamic.Captures[0].Index;
@@ -512,7 +528,7 @@ internal sealed class Tokenizer
         if (patterns.Entries.Length > 0 && bestStart != start)
         {
             var scanner = GetScanner(ruleId, isWhile, patterns, patterns.Variant(allowA, allowG));
-            if (scanner.FindNextMatch(text, lineLength, start, out var staticRuleId) && scanner.Captures[0].Index < bestStart)
+            if (scanner.FindNextMatch(text, _lineId, lineLength, start, out var staticRuleId) && scanner.Captures[0].Index < bestStart)
             {
                 winner = scanner;
                 winnerRuleId = staticRuleId;
@@ -521,7 +537,7 @@ internal sealed class Tokenizer
         }
 
         if (dynamic is not null && patterns.DynamicIndex != 0 && bestStart != start
-            && dynamic.FindNextMatch(text, lineLength, start, out var dynamicRuleId) && dynamic.Captures[0].Index < bestStart)
+            && dynamic.FindNextMatch(text, _lineId, lineLength, start, out var dynamicRuleId) && dynamic.Captures[0].Index < bestStart)
         {
             winner = dynamic;
             winnerRuleId = dynamicRuleId;
@@ -533,9 +549,60 @@ internal sealed class Tokenizer
             return false;
         }
 
+        if (NeedsCaptures(ruleId, winnerRuleId))
+        {
+            winner.CollectCaptures(GetLineString(), lineLength, start);
+        }
+
         result = new MatchResult(winnerRuleId, CopyCaptures(winner.Captures), winner.Captures.Length);
         return true;
     }
+
+    // Whether the winning pattern's capture groups are needed: a rule that reads capture groups (captures, capturing
+    // names, back-references) requires the materialised line string. Group 0 alone is recorded by the scanner, so
+    // rules without any captures stay on the span path.
+    [MethodImpl(Jit.FullOpts)]
+    private bool NeedsCaptures(int searchedRuleId, int winnerRuleId)
+    {
+        if (winnerRuleId == Rule.EndRuleId)
+        {
+            return _rules[searchedRuleId] is BeginEndRule be && HasAnyCapture(be.EndCaptures);
+        }
+
+        if (winnerRuleId == Rule.WhileRuleId)
+        {
+            return _rules[searchedRuleId] is BeginWhileRule bw && HasAnyCapture(bw.WhileCaptures);
+        }
+
+        return RuleNeedsOwnCaptures(_rules[winnerRuleId]);
+    }
+
+    [MethodImpl(Jit.FullOpts)]
+    private static bool RuleNeedsOwnCaptures(Rule rule) => rule switch
+    {
+        MatchRule match => match.NameIsCapturing || HasAnyCapture(match.Captures),
+        BeginEndRule beginEnd => beginEnd.NameIsCapturing || beginEnd.ContentNameIsCapturing || beginEnd.EndHasBackReferences || HasAnyCapture(beginEnd.BeginCaptures),
+        BeginWhileRule beginWhile => beginWhile.NameIsCapturing || beginWhile.ContentNameIsCapturing || beginWhile.WhileHasBackReferences || HasAnyCapture(beginWhile.BeginCaptures),
+        _ => true,
+    };
+
+    [MethodImpl(Jit.FullOpts)]
+    private static bool HasAnyCapture(CaptureRule?[] captures)
+    {
+        for (var i = 0; i < captures.Length; i++)
+        {
+            if (captures[i] is not null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // The line plus its synthetic newline as a string, built once per line and only when a match needs its captures.
+    [MethodImpl(Jit.FullOpts)]
+    private string GetLineString() => _lineString ??= _lineBuffer.ToString();
 
     [MethodImpl(Jit.FullOpts)]
     private RuleScanner GetScanner(int ruleId, bool isWhile, RulePatterns patterns, RegexAnchorVariant variant)
@@ -594,7 +661,7 @@ internal sealed class Tokenizer
     // getEndWithResolvedBackReferences / getWhileWithResolvedBackReferences. Resolved texts the rule saw recently are
     // reused, so a repeated heredoc delimiter or fence allocates nothing.
     [MethodImpl(Jit.FullOpts)]
-    private string ResolveBackReferences(int ruleId, bool isWhile, RegexSource source, string text, int captureOffset, int captureCount)
+    private string ResolveBackReferences(int ruleId, bool isWhile, RegexSource source, ReadOnlySpan<char> text, int captureOffset, int captureCount)
     {
         PatternRewriter.ResolveBackReferences(source.Text, text, _captures.AsSpan(captureOffset, captureCount), _buffer);
         return GetDynamicCache(ruleId, isWhile).FindText(_buffer.AsSpan()) ?? _buffer.ToString();
@@ -602,7 +669,7 @@ internal sealed class Tokenizer
 
     // handleCaptures.
     [MethodImpl(Jit.FullOpts)]
-    private void HandleCaptures(string text, bool isFirstLine, ref PendingState stack, CaptureRule?[] captures, int captureOffset, int captureCount)
+    private void HandleCaptures(ReadOnlySpan<char> text, bool isFirstLine, ref PendingState stack, CaptureRule?[] captures, int captureOffset, int captureCount)
     {
         if (captures.Length == 0)
         {
@@ -691,7 +758,7 @@ internal sealed class Tokenizer
     }
 
     [MethodImpl(Jit.FullOpts)]
-    private AttributedScopeStack PushName(AttributedScopeStack scopes, string? name, bool isCapturing, string text, int captureOffset, int captureCount, string grammarScopeName)
+    private AttributedScopeStack PushName(AttributedScopeStack scopes, string? name, bool isCapturing, ReadOnlySpan<char> text, int captureOffset, int captureCount, string grammarScopeName)
     {
         if (name is null)
         {

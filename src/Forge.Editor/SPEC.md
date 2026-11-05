@@ -25,9 +25,9 @@ parent: forge-architecture
 
 **Diff。** 行 Diff 默认比较行终止符(`CRLF` vs `LF` 是变更),`IgnoreLineEndings` 可关闭;评论锚点按内容哈希重定位(精确/移动/模糊/丢失),移动搜索建每 hunk 索引,避免平方级扫描。
 
-**TextMate。** Oniguruma 正则翻译为 .NET 正则(未内化 GregsEx,体积过大),翻译不了的模式报诊断并不匹配;include 规则展开带环检测与深度上限;状态相等性覆盖影响后续分词的全部字段(含 `BeginRuleCapturedEol`),保证增量与全量结果一致;用户语法可来自 `~/.forge/grammars` 与 `<workspace>/.forge/grammars`。字符串高亮源与快照高亮源都把 LF/CRLF/CR 视为换行且行内容不含换行符;快照经 `TextSnapshotHighlightSource` 适配 `IHighlightSource`,整份文本物化为一个字符串后按行返回 `ReadOnlySpan<char>`,读行零分配。
+**TextMate。** Oniguruma 正则翻译为 .NET 正则(未内化 GregsEx,体积过大),翻译不了的模式报诊断并不匹配;include 规则展开带环检测与深度上限;状态相等性覆盖影响后续分词的全部字段(含 `BeginRuleCapturedEol`),保证增量与全量结果一致;用户语法可来自 `~/.forge/grammars` 与 `<workspace>/.forge/grammars`。字符串高亮源与快照高亮源都把 LF/CRLF/CR 视为换行且行内容不含换行符;快照经 `TextSnapshotHighlightSource` 适配 `IHighlightSource`,整份文本物化为一个字符串后按行返回 `ReadOnlySpan<char>`,读行零分配。分词器把行内容加 `\n` 写入按需增长的复用 `char[]` 缓冲,用 `Regex.EnumerateMatches(ReadOnlySpan<char>)` 在 span 上找最早匹配(零分配);仅当命中的规则需要第 1 组及以上的捕获(`captures`/捕获名/反向引用)时才把缓冲物化为字符串交给 `Regex.Match`。
 
 
 ## 未决
 
-- TextMate 分词器内部(`TextMate/Internal/Tokenizer.cs` 的 `Tokenize`)每行仍把行文本和换行符拼接成一个新字符串(`string.Concat`);适配层读行已零分配,端到端仍有每行一次分配。
+- `Regex.Match` 没有能返回捕获组的 span 入口,所以当命中规则需要第 1 组及以上的捕获(`captures`/捕获名/反向引用)时,分词器仍会把复用缓冲里的行文本物化成一个字符串供捕获收集;不需要捕获的规则全程在 span 上匹配,已无每行字符串分配。

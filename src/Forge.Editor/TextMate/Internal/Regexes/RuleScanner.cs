@@ -17,6 +17,7 @@ internal sealed class RuleScanner
     private readonly CompiledRegex[] _patterns;
     private readonly int[] _ruleIds;
     private readonly int[] _nextMatch;
+    private readonly int[] _nextMatchLength;
     private readonly int[] _noMatchFrom;
     private readonly int[] _searches;
     private readonly bool _startSensitive;
@@ -24,9 +25,10 @@ internal sealed class RuleScanner
 
     private OnigCapture[] _captures = new OnigCapture[8];
     private int _captureCount;
-    private string? _cacheText;
+    private int _cacheLine = -1;
     private int _cacheLength = -1;
     private int _cacheStart = int.MaxValue;
+    private int _lastPattern = -1;
 
     // The searched region when it is shorter than the text, kept so consecutive searches reuse one string.
     private string? _region;
@@ -38,6 +40,7 @@ internal sealed class RuleScanner
         _patterns = patterns;
         _ruleIds = ruleIds;
         _nextMatch = new int[patterns.Length];
+        _nextMatchLength = new int[patterns.Length];
         _noMatchFrom = new int[patterns.Length];
         _searches = new int[patterns.Length];
         Array.Fill(_nextMatch, NotScanned);
@@ -58,13 +61,14 @@ internal sealed class RuleScanner
     // The captures of the last successful search, group 0 first. Empty when the last search found nothing.
     public ReadOnlySpan<OnigCapture> Captures => _captures.AsSpan(0, _captureCount);
 
-    // Searches text[..length] from start for the earliest match of any pattern.
+    // Searches text[..length] from start for the earliest match of any pattern, recording only group 0. Capture groups
+    // are collected on demand by CollectCaptures, so patterns that never use them search the line without a string.
     [MethodImpl(Jit.FullOpts)]
-    public bool FindNextMatch(string text, int length, int start, out int ruleId)
+    public bool FindNextMatch(ReadOnlySpan<char> text, int lineId, int length, int start, out int ruleId)
     {
-        if (!ReferenceEquals(text, _cacheText) || _cacheLength != length || start < _cacheStart)
+        if (_cacheLine != lineId || _cacheLength != length || start < _cacheStart)
         {
-            _cacheText = text;
+            _cacheLine = lineId;
             _cacheLength = length;
             _cacheStart = start;
             if (!_startSensitive)
@@ -76,13 +80,15 @@ internal sealed class RuleScanner
         _cacheStart = start;
 
         var bestIndex = int.MaxValue;
+        var bestLength = 0;
         var bestPattern = -1;
         for (var i = 0; i < _patterns.Length; i++)
         {
-            var index = _startSensitive ? Scan(i, text.AsSpan(), length, start) : Lookup(i, text.AsSpan(), length, start);
+            var index = _startSensitive ? Scan(i, text, length, start, out var matchLength) : Lookup(i, text, length, start, out matchLength);
             if (index >= 0 && index < bestIndex)
             {
                 bestIndex = index;
+                bestLength = matchLength;
                 bestPattern = i;
                 if (index == start)
                 {
@@ -94,36 +100,79 @@ internal sealed class RuleScanner
         if (bestPattern < 0)
         {
             _captureCount = 0;
+            _lastPattern = -1;
             ruleId = 0;
             return false;
         }
 
         ruleId = _ruleIds[bestPattern];
+        _lastPattern = bestPattern;
 
-        // The captures come from a second search of the winning pattern, started where the winning search started:
-        // searching from bestIndex instead would move \G to the match and could pick another alternative of the pattern.
-        CollectCaptures(_patterns[bestPattern].Pattern, text, length, start);
+        EnsureCaptures(1);
+        _captures[0] = new OnigCapture(bestIndex, bestLength, participated: true);
+        _captureCount = 1;
         return true;
     }
 
+    // Runs the winning pattern again over the materialised line string, from the search start that produced the last
+    // FindNextMatch result, and records every group. The search starts where the first search started: searching from
+    // the match itself would move \G to the match and could pick another alternative of the pattern.
     [MethodImpl(Jit.FullOpts)]
-    private int Lookup(int pattern, ReadOnlySpan<char> text, int length, int start)
+    public int CollectCaptures(string text, int length, int searchStart)
+    {
+        if (_lastPattern < 0)
+        {
+            _captureCount = 0;
+            return 0;
+        }
+
+        Match match;
+        try
+        {
+            // A region shorter than the text (a capture being retokenized) is searched as its own text, so that $ and
+            // \z see its end; the common case searches the line itself.
+            match = _patterns[_lastPattern].Pattern.Match(length == text.Length ? text : GetRegion(text, length), searchStart);
+        }
+        catch (RegexMatchTimeoutException exception)
+        {
+            _firstError ??= exception.Message;
+            _captureCount = 0;
+            return 0;
+        }
+
+        var count = match.Groups.Count;
+        EnsureCaptures(count);
+        for (var i = 0; i < count; i++)
+        {
+            var group = match.Groups[i];
+            _captures[i] = group.Success ? new OnigCapture(group.Index, group.Length, participated: true) : default;
+        }
+
+        _captureCount = count;
+        return count;
+    }
+
+    [MethodImpl(Jit.FullOpts)]
+    private int Lookup(int pattern, ReadOnlySpan<char> text, int length, int start, out int matchLength)
     {
         var cached = _nextMatch[pattern];
         if (cached >= start)
         {
+            matchLength = _nextMatchLength[pattern];
             return cached;
         }
 
         if (cached == NoMatch && _noMatchFrom[pattern] <= start)
         {
+            matchLength = 0;
             return NoMatch;
         }
 
-        var index = Scan(pattern, text, length, start);
+        var index = Scan(pattern, text, length, start, out matchLength);
         if (index >= 0)
         {
             _nextMatch[pattern] = index;
+            _nextMatchLength[pattern] = matchLength;
         }
         else
         {
@@ -148,8 +197,9 @@ internal sealed class RuleScanner
     }
 
     [MethodImpl(Jit.FullOpts)]
-    private int Scan(int pattern, ReadOnlySpan<char> text, int length, int start)
+    private int Scan(int pattern, ReadOnlySpan<char> text, int length, int start, out int matchLength)
     {
+        matchLength = 0;
         var compiled = _patterns[pattern];
         if (!compiled.CanMatch)
         {
@@ -167,7 +217,14 @@ internal sealed class RuleScanner
         try
         {
             var enumerator = regex.EnumerateMatches(text.Slice(0, length), start);
-            return enumerator.MoveNext() ? enumerator.Current.Index : NoMatch;
+            if (enumerator.MoveNext())
+            {
+                var match = enumerator.Current;
+                matchLength = match.Length;
+                return match.Index;
+            }
+
+            return NoMatch;
         }
         catch (RegexMatchTimeoutException exception)
         {
@@ -177,34 +234,11 @@ internal sealed class RuleScanner
     }
 
     [MethodImpl(Jit.FullOpts)]
-    private void CollectCaptures(Regex regex, string text, int length, int searchStart)
+    private void EnsureCaptures(int count)
     {
-        Match match;
-        try
-        {
-            // A region shorter than the text (a capture being retokenized) is searched as its own text, so that $ and
-            // \z see its end; the common case searches the line itself.
-            match = regex.Match(length == text.Length ? text : GetRegion(text, length), searchStart);
-        }
-        catch (RegexMatchTimeoutException exception)
-        {
-            _firstError ??= exception.Message;
-            _captureCount = 0;
-            return;
-        }
-
-        var count = match.Groups.Count;
         if (_captures.Length < count)
         {
             _captures = new OnigCapture[Math.Max(_captures.Length * 2, count)];
         }
-
-        for (var i = 0; i < count; i++)
-        {
-            var group = match.Groups[i];
-            _captures[i] = group.Success ? new OnigCapture(group.Index, group.Length, participated: true) : default;
-        }
-
-        _captureCount = count;
     }
 }
