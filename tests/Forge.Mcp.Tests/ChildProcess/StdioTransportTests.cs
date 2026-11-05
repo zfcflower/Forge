@@ -59,7 +59,13 @@ public class StdioTransportTests
         await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
         await client.ConnectAsync(CancellationToken.None);
 
-        Assert.True(await Eventually.Async(() => transport.StderrTail.Contains("[stdout] banner line", StringComparison.Ordinal), TimeSpan.FromSeconds(10)));
+        // stdout pollution is copied into the stderr log by the stdout reader, while real stderr lines come from the
+        // stderr reader: two independent tasks, so neither stream's arrival implies the other one was recorded yet.
+        var arrived = await Eventually.Async(
+            () => transport.StderrTail.Contains("[stdout] banner line", StringComparison.Ordinal) &&
+                  transport.StderrTail.Contains("fake-ready", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10));
+        Assert.True(arrived, $"stderr log: {transport.StderrTail}");
         Assert.Contains("fake-ready", transport.StderrTail, StringComparison.Ordinal);
         Assert.Contains("fake-ready", transport.StderrLines);
     }
@@ -241,7 +247,13 @@ public class StdioTransportTests
                                                                      state.LastError is not null &&
                                                                      state.LastError.Contains($"exited with code {PlatformStdioServer.ExitCode}")), TimeSpan.FromSeconds(10)),
             string.Join(" | ", states.Select(state => $"{state.Status}:{state.LastError}")));
-        Assert.True(await Eventually.Async(() => manager.GetState("fake").IsReady, TimeSpan.FromSeconds(60)));
+        // Readiness comes from the handshake on stdout; the restarted child's stderr line is recorded by the other
+        // reader task and can land after it.
+        var ready = await Eventually.Async(
+            () => manager.GetState("fake") is { IsReady: true, StderrTail: { } tail } &&
+                  tail.Contains("fake-ready", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(60));
+        Assert.True(ready, $"restarted server state: {manager.GetState("fake").Status}, stderr: {manager.GetState("fake").StderrTail}");
         var restarted = manager.GetState("fake");
         Assert.Equal(0, restarted.ConsecutiveFailures);
         Assert.Contains("fake-ready", restarted.StderrTail ?? string.Empty, StringComparison.Ordinal);
