@@ -7,8 +7,13 @@ internal sealed class TempDirectory : IDisposable
 {
     public TempDirectory()
     {
-        Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "forge-workspace-tests", Guid.NewGuid().ToString("n"));
-        Directory.CreateDirectory(Path);
+        var requested = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "forge-workspace-tests", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(requested);
+
+        // Resolve the freshly created directory to its real path. On macOS the temp directory is
+        // reported under /var, which is a symlink to /private/var; git reports the resolved path,
+        // so keeping the symlink form here would make every path comparison fail.
+        Path = TestPaths.ResolveRealPath(requested);
     }
 
     public string Path { get; }
@@ -237,7 +242,40 @@ internal static class TestPaths
         string.Equals(Trimmed(left), Trimmed(right), Comparison);
 
     private static string Trimmed(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        Path.TrimEndingDirectorySeparator(ResolveRealPath(path));
+
+    /// <summary>
+    /// Resolves the symlinks of every existing component of <paramref name="path"/> and returns the
+    /// resulting real path. Components that do not exist yet are appended unchanged, so a
+    /// not-yet-created file still yields the directory it would really land in.
+    /// </summary>
+    public static string ResolveRealPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (OperatingSystem.IsWindows())
+        {
+            return full;
+        }
+
+        var root = Path.GetPathRoot(full) ?? string.Empty;
+        var current = root;
+        foreach (var segment in full[root.Length..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            if (!File.Exists(current) && !Directory.Exists(current))
+            {
+                return current;
+            }
+
+            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (info.LinkTarget is not null)
+            {
+                current = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? current;
+            }
+        }
+
+        return Path.TrimEndingDirectorySeparator(current);
+    }
 
     public static bool IsInside(string path, string root)
     {

@@ -481,6 +481,37 @@ public sealed class GitCliTests
     }
 
     [Fact]
+    public async Task Worktree_add_finds_the_worktree_when_the_path_goes_through_a_symlink()
+    {
+        if (!GitProbe.IsAvailable) return;
+        using var repo = new TestRepo();
+        repo.Write("f.txt", "1\n");
+        repo.Commit("first");
+        using var external = new TempDirectory();
+        var real = Path.Combine(external.Path, "real");
+        Directory.CreateDirectory(real);
+        var link = Path.Combine(external.Path, "link");
+        try
+        {
+            Directory.CreateSymbolicLink(link, real);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // Creating a symlink needs a privilege a Windows runner may withhold; the same resolution runs on
+            // macOS for every temp directory, because /var is a link to /private/var.
+            return;
+        }
+
+        var cli = new GitCli();
+        var added = await cli.AddWorktreeAsync(repo.Root, Path.Combine(link, "wt"), "forge/linked");
+
+        Assert.Equal("forge/linked", added.Branch);
+        Assert.Contains(
+            await cli.ListWorktreesAsync(repo.Root),
+            worktree => worktree.Branch == "forge/linked" && TestPaths.Same(worktree.Path, added.Path));
+    }
+
+    [Fact]
     public async Task Run_captures_exit_code_and_both_streams()
     {
         if (!GitProbe.IsAvailable) return;

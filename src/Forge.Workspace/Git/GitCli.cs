@@ -456,7 +456,8 @@ public sealed class GitCli
         var index = await ResolveIndexPathAsync(root, ct).ConfigureAwait(false);
         var temporaryIndex = Path.Combine(
             Path.GetTempPath(),
-            "forge-snapshot-" + Guid.NewGuid().ToString("n") + ".index");
+            "forge-snapshot-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + "-" +
+            Guid.NewGuid().ToString("n") + ".index");
         var environment = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["GIT_INDEX_FILE"] = temporaryIndex,

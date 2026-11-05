@@ -1,3 +1,4 @@
+using System.Globalization;
 using Xunit;
 
 namespace Forge.Workspace.Tests.Git;
@@ -18,8 +19,11 @@ public sealed class GitCliSnapshotTests
     private static string IndexPath(string root) =>
         GitFixture.RunChecked(root, "rev-parse", "--path-format=absolute", "--git-path", "index").Trim();
 
+    // The snapshot names its temp index after the owning process, because `dotnet test` runs the
+    // other test assemblies at the same time and they snapshot into the same temp directory.
     private static HashSet<string> SnapshotTempFiles() =>
-        Directory.GetFiles(Path.GetTempPath(), "forge-snapshot-*").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Directory.GetFiles(Path.GetTempPath(), "forge-snapshot-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + "-*")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     [Fact]
     public async Task Snapshot_leaves_index_bytes_mtime_head_branch_refs_stash_and_status_untouched()

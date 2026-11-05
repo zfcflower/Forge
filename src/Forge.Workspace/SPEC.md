@@ -22,11 +22,13 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 
 **捕获字节级且诚实。** 输出按原始字节流读取(不按行重拼),保留 CRLF 与末尾无换行;超过上限时结构化接口抛 `GitOutputTruncatedException`,不把截断数据当完整结果。统一 Diff 解析器校验 hunk 声明的行数与内容一致,损坏块标记而非猜测。
 
+**路径身份与符号链接。** `WorkspacePaths.Normalize` 只做 `GetFullPath` 加去尾分隔符;`WorkspacePaths.Equals` 先比规范化串(Windows 不区分大小写、其余平台 Ordinal),不同时再解析两侧已存在组件的符号链接后比较。依据是 git 一律回报解析后的真实路径,而调用方可以经符号链接传入路径(macOS 的 `/tmp`、`/var` 都是链接,仓库在 `/var` 下时 git 报 `/private/var`)。因此 `AddWorktreeAsync`/`AttachWorktreeAsync` 在路径拼写不同时仍返回带分支、带 HEAD 的真实 worktree,而不是空分支的占位对象。测试夹具同样先把临时沙箱解析成真实路径,再与 git 输出逐字比较。
+
 **Worktree 安全。** 每会话一个 `forge/<slug>` worktree;非强制删除在有未提交改动、未合入提交、游离 HEAD 独有提交、或无法确定基线分支时拒绝。会话结束后 worktree 保留,由用户手动清理。`WorktreeOptions.Layout` 默认 `NestedByRepository`;App 使用 `SiblingOfRepository`(`<repoParent>/<repoName>.worktrees/<slug>`),兄弟目录不会被误提交,也不混用多个仓库的命名空间。
 
 **Worktree 并发创建。** slug/分支/路径分配是检查后动作:进程内按规范化仓库根(OS 比较器)取引用计数门串行“列分支 → 挑后缀 → `worktree add -b`”,最后一个持有者/等待者释放时移除;跨进程冲突(`already exists`/`cannot lock ref` 或目标路径已存在)重读分支取下一后缀重试,上限 20,耗尽时抛带最后一次 git 失败详情的 `GitException`。从不删除已存在的分支、目录或 worktree。
 
-**按轮次改动。** `SnapshotTreeAsync` 把本 worktree 真实索引复制到临时文件,以 `GIT_INDEX_FILE` + `GIT_OPTIONAL_LOCKS=0` 执行 `add --all` + `write-tree`,`finally` 删除副本:用户索引、HEAD、分支、refs、stash 不变,唯一副作用是未引用对象(gc 回收);同内容同哈希。本仓约 70 ms,一万文件约 80–120 ms。轮次改动 = 相邻两棵树的 diff(`GetTreeDiffAsync`/`GetTreeDiffTextAsync`/`GetTreeChangesAsync`)。
+**按轮次改动。** `SnapshotTreeAsync` 把本 worktree 真实索引复制到 `<系统临时目录>/forge-snapshot-<pid>-<guid>.index`,以 `GIT_INDEX_FILE` + `GIT_OPTIONAL_LOCKS=0` 执行 `add --all` + `write-tree`,`finally` 删除副本:用户索引、HEAD、分支、refs、stash 不变,唯一副作用是未引用对象(gc 回收);同内容同哈希。文件名带进程号,因为 `dotnet test` 会并行跑多个测试程序集并共用同一个系统临时目录,按进程归属才能断言本进程没有残留,而不会把别的进程(例如 App 测试里 `TurnCheckpointService` 的在途快照)算成泄漏。本仓约 70 ms,一万文件约 80–120 ms。轮次改动 = 相邻两棵树的 diff(`GetTreeDiffAsync`/`GetTreeDiffTextAsync`/`GetTreeChangesAsync`)。
 
 **规格写入原子。** `SpecGraph` 更新 frontmatter 时把整份 markdown(UTF-8 无 BOM、沿用文件原有行尾)交给 `AtomicFile.WriteAllBytesAsync`:同目录临时文件 + `fsync` + 改名覆盖,读者不会看到半文件;目标是 `ReadOnly` 文件或目录时立即失败且原文件逐字节不变,临时文件被删除。新建规格仍是 `FileMode.CreateNew` 的独占创建(已存在即拒绝)。
 

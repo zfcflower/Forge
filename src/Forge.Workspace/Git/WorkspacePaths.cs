@@ -13,11 +13,17 @@ internal static class WorkspacePaths
 
     public static string NormalizeCandidate(string path) => Normalize(path);
 
-    public static bool Equals(string left, string right) =>
-        string.Equals(
-            Normalize(left),
-            Normalize(right),
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    /// <summary>
+    /// True when both spellings name the same path. The normalized spellings are compared first; when they differ, the
+    /// links of every existing component are resolved too, because git reports resolved paths while a caller may pass a
+    /// path through a symlink (macOS <c>/tmp</c> and <c>/var</c> are links).
+    /// </summary>
+    public static bool Equals(string left, string right)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(Normalize(left), Normalize(right), comparison)
+            || string.Equals(ResolveRealPath(left), ResolveRealPath(right), comparison);
+    }
 
     public static bool IsUnder(string path, string root)
     {

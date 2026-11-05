@@ -50,9 +50,11 @@ public class ApprovalPolicyTests
     public void Directory_comparison_follows_the_platform_case_sensitivity()
     {
         var policy = new DefaultApprovalPolicy { TrustedDirectories = [Workspace] };
-        var marker = Path.Combine(Workspace, "CaseSensitiveProbe");
-        var flipped = OperatingSystem.IsWindows() ? marker.ToUpperInvariant() : marker.ToLowerInvariant();
-        if (string.Equals(marker, flipped, StringComparison.Ordinal))
+        // Membership is decided by the path prefix, so flip the trusted directory itself (not a
+        // component inside it) to get a path that differs from the trusted root only by case.
+        var workspace = Path.TrimEndingDirectorySeparator(Workspace);
+        var flipped = workspace.ToUpperInvariant();
+        if (string.Equals(workspace, flipped, StringComparison.Ordinal))
         {
             return;
         }

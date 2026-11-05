@@ -6,6 +6,19 @@ namespace Forge.Approval.Tests;
 
 public class ApprovalFailureTests
 {
+    /// <summary>
+    /// Makes the database and every SQLite sidecar writable again. SQLite gives a sidecar the mode of the database
+    /// file, so the sidecars a read-only connection created (-wal/-shm/-journal) are read-only too and the retry
+    /// below would fail with SQLITE_READONLY even after the database itself is writable.
+    /// </summary>
+    private static void RestoreDatabaseWritable(string directory)
+    {
+        foreach (var path in Directory.GetFiles(directory, ApprovalStore.FileName + "*"))
+        {
+            ApprovalStoreTestSupport.SetReadOnly(path, false);
+        }
+    }
+
     [Fact]
     public void Write_to_a_read_only_database_throws_and_leaves_the_snapshot_unchanged()
     {
@@ -30,7 +43,7 @@ public class ApprovalFailureTests
         }
         finally
         {
-            ApprovalStoreTestSupport.SetReadOnly(databasePath, false);
+            RestoreDatabaseWritable(directory.Path);
         }
 
         using var retry = new ApprovalStore(directory.Path);
