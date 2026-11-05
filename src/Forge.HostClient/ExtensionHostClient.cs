@@ -460,22 +460,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         await SendAsync(active, Sdk.ExtensionProtocol.PluginRevoke, payload, RequestBudget, ct).ConfigureAwait(false);
     }
 
-    public Task<Sdk.StagedExtension> StageExtensionAsync(Sdk.ExtensionStageRequest request, CancellationToken ct) =>
-        throw new NotImplementedException();
-
-    public Task<IReadOnlyList<Sdk.StagedExtension>> GetPendingExtensionsAsync(CancellationToken ct) =>
-        throw new NotImplementedException();
-
-    public Task<Sdk.ExtensionCommitResult> CommitExtensionAsync(Sdk.ExtensionCommitRequest request, CancellationToken ct) =>
-        throw new NotImplementedException();
-
-    public Task DiscardExtensionAsync(string pluginId, CancellationToken ct) => throw new NotImplementedException();
-
-    public Task DisablePluginAsync(string pluginId, string version, CancellationToken ct) => throw new NotImplementedException();
-
-    public Task EnablePluginAsync(string pluginId, string version, CancellationToken ct) => throw new NotImplementedException();
-
-    public Task DeletePluginAsync(string pluginId, string version, CancellationToken ct) => throw new NotImplementedException();
+    // The authoring surface (IExtensionAuthoringClient) lives in ExtensionHostClient.Authoring.cs.
 
     public async ValueTask DisposeAsync()
     {

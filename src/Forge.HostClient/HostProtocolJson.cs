@@ -405,7 +405,7 @@ internal static class HostProtocolJson
         var index = 0;
         foreach (var row in list.EnumerateArray())
         {
-            if (!TryReadPluginStatus(row, index, out var status, out problem))
+            if (!TryReadPluginStatus(row, $"plugins[{index}]", out var status, out problem))
             {
                 return false;
             }
@@ -418,14 +418,17 @@ internal static class HostProtocolJson
         return true;
     }
 
-    private static bool TryReadPluginStatus(
-        JsonElement row, int index, out Sdk.PluginStatusInfo status, out string problem)
+    /// <summary>Validates one status row. <paramref name="label"/> names the row for the caller
+    /// (<c>plugins[3]</c> in a registry answer, <c>status</c> inside a commit result) so the same rule set can be
+    /// shared without losing the ability to locate the bad row.</summary>
+    public static bool TryReadPluginStatus(
+        JsonElement row, string label, out Sdk.PluginStatusInfo status, out string problem)
     {
         status = null!;
         problem = string.Empty;
         if (row.ValueKind != JsonValueKind.Object)
         {
-            problem = $"plugins[{index}] is {DescribeJson(row)} instead of a plugin status object.";
+            problem = $"{label} is {DescribeJson(row)} instead of a plugin status object.";
             return false;
         }
 
@@ -436,25 +439,26 @@ internal static class HostProtocolJson
         }
         catch (JsonException ex)
         {
-            problem = $"plugins[{index}] cannot be decoded: {ex.Message}";
+            problem = $"{label} cannot be decoded: {ex.Message}";
             return false;
         }
 
         if (decoded is null)
         {
-            problem = $"plugins[{index}] cannot be decoded as a plugin status.";
+            problem = $"{label} cannot be decoded as a plugin status.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(decoded.PluginId))
         {
-            problem = $"plugins[{index}] has no plugin id.";
+            problem = $"{label} has no plugin id.";
             return false;
         }
 
+        var identity = $"{label} ('{decoded.PluginId}')";
         if (string.IsNullOrWhiteSpace(decoded.Status))
         {
-            problem = $"plugins[{index}] ('{decoded.PluginId}') has no status.";
+            problem = $"{identity} has no status.";
             return false;
         }
 
@@ -462,30 +466,30 @@ internal static class HostProtocolJson
         {
             if (string.IsNullOrWhiteSpace(decoded.Version))
             {
-                problem = $"plugins[{index}] ('{decoded.PluginId}') has no version.";
+                problem = $"{identity} has no version.";
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(decoded.SourceHash))
             {
-                problem = $"plugins[{index}] ('{decoded.PluginId}') has no source hash.";
+                problem = $"{identity} has no source hash.";
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(decoded.DependencyHash))
             {
-                problem = $"plugins[{index}] ('{decoded.PluginId}') has no dependency hash.";
+                problem = $"{identity} has no dependency hash.";
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(decoded.SdkVersion))
             {
-                problem = $"plugins[{index}] ('{decoded.PluginId}') has no SDK version.";
+                problem = $"{identity} has no SDK version.";
                 return false;
             }
         }
 
-        if (!TryReadPermissions(row, decoded, index, out problem))
+        if (!TryReadPermissions(row, decoded.Permissions, identity, out problem))
         {
             return false;
         }
@@ -500,14 +504,16 @@ internal static class HostProtocolJson
         return true;
     }
 
-    private static bool TryReadPermissions(
-        JsonElement row, Sdk.PluginStatusInfo status, int index, out string problem)
+    /// <summary>Checks a permission array against both the raw JSON and the decoded list, for any payload that carries
+    /// <c>permissions</c> (<c>plugins.status</c> rows and staged extensions alike).</summary>
+    public static bool TryReadPermissions(
+        JsonElement row, IReadOnlyList<Sdk.Permission>? permissions, string label, out string problem)
     {
         problem = string.Empty;
         if (!row.TryGetProperty("permissions", out var list) || list.ValueKind != JsonValueKind.Array ||
-            status.Permissions is not { } permissions)
+            permissions is null)
         {
-            problem = $"plugins[{index}] ('{status.PluginId}') has no permission list.";
+            problem = $"{label} has no permission list.";
             return false;
         }
 
@@ -518,15 +524,13 @@ internal static class HostProtocolJson
             if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("kind", out _) ||
                 permission is null || !Enum.IsDefined(permission.Kind))
             {
-                problem =
-                    $"plugins[{index}] ('{status.PluginId}') has an unusable permission at permissions[{position}].";
+                problem = $"{label} has an unusable permission at permissions[{position}].";
                 return false;
             }
 
             if (permission.Scope is { } scope && string.IsNullOrWhiteSpace(scope))
             {
-                problem =
-                    $"plugins[{index}] ('{status.PluginId}') has a blank scope at permissions[{position}] ({permission.Kind}).";
+                problem = $"{label} has a blank scope at permissions[{position}] ({permission.Kind}).";
                 return false;
             }
 
@@ -539,7 +543,7 @@ internal static class HostProtocolJson
     private static bool IsInvalidStatus(string status) =>
         string.Equals(status, "invalid", StringComparison.OrdinalIgnoreCase);
 
-    private static string DescribeJson(JsonElement element) => element.ValueKind switch
+    public static string DescribeJson(JsonElement element) => element.ValueKind switch
     {
         JsonValueKind.Null => "null",
         JsonValueKind.Array => "an array",

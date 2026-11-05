@@ -165,6 +165,19 @@ depends-on: [forge-ipc]
   行照旧作为一行返回(带 `error`),不会变成“没有这一行”,也不会被映射成 `approved` 之类的已知状态。
 - **权限按原始 JSON 与解码结果同时校验。** 缺 `kind` 的权限对象会被绑定成枚举默认值 `ReadFile`,只看解码结果会把它
   当成一条合法权限;所以逐项比对 `permissions` 数组与解码出的列表,长度/形状不符或 `kind` 未定义都判该行不可用。
+  同一条校验也用于暂存草稿的 `permissions`(见下一条),`plugins.status` 与 `extensions.commit` 内嵌的 `status`
+  共用同一份行校验(标签区分 `plugins[i]` 与 `status`):规则只有一处,消息仍带坏行下标与已知身份。
+- **授权的扩展写入同样只读 IPC、逐项校验。** `IExtensionAuthoringClient` 的七个方法先做本地参数校验——空白
+  id/version/哈希、未知 `kind`、`Files`/`Permissions`/`Dependencies` 为 null 或含 null 项都抛 `ArgumentException`
+  且不发 IPC;`extensions.stage`/`extensions.commit` 可能在 Host 侧跑 Roslyn 编译,预算取 `RequestTimeout` 与
+  5 分钟中较大者(客户端未配超时则不设 deadline),其余请求用 `RequestBudget`。应答逐字段校验,不合格先记
+  `Diagnostics` 再抛带 op 名与具体问题的 `InvalidDataException`:`StagedExtension` 的 `pluginId`/`version`/`kind`
+  必须非空白且 `kind` 只能是 `plugin`/`workflow`,`files`/`permissions`/`dependencies`/`diagnostics` 必须是非 null
+  数组且元素非 null、每个文件 `path` 非空白;没有 diagnostics 时三个哈希都必须非空白(带诊断的草稿允许没有哈希,
+  缺失的哈希按 `null`→`string.Empty` 归一);`extensions.pending` 的每一项按同一套规则校验,**任一项坏则整份应答
+  无效**;`extensions.commit` 的 `toolNames` 必须是非 null 数组且元素非空白。Host 的业务错误
+  (`IpcRemoteException`,如 `approval_mismatch`/`extension_blocked`/`unknown_plugin`)与调用方取消原样传播,预算
+  到期映射为 `IpcTimeoutException` 并先记一条诊断。
 - **终端(`ExtensionHostClient.Terminal.cs` 实现 `ITerminalHost`)。** 线协议见 `forge-extension-host`“交互终端”。
   - **启动**:未处于 `Running` 时 `StartAsync` 抛 `InvalidOperationException`。`terminal.start` 请求本身**不绑调用方的 ct**,因为取消会让对端丢掉应答,也就丢掉了 Host 可能已建好的终端的 id。调用方取消后立即得到 `OperationCanceledException`;客户端继续等应答,若终端已建好,就清掉它的早到帧并补发 `terminal.stop`,否则这个终端会占着 Host 的 32 个名额直到断连。
   - **早到帧**:`terminal.output`/`exit` 可能先于 start 应答到达,按 id 缓冲(总量 1 MiB),在登记表锁内回放,所以首批输出不丢、seq 不乱。
