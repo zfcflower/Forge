@@ -66,37 +66,135 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
             writer.WriteEndObject();
         }
 
-        foreach (var message in request.Messages)
+        var messages = request.Messages;
+        for (var i = 0; i < messages.Count; i++)
         {
-            WriteMessage(writer, message);
+            var role = messages[i].Role;
+            if (role != MessageRole.User && role != MessageRole.Assistant)
+            {
+                WriteMessage(writer, messages[i]);
+                continue;
+            }
+
+            var end = i;
+            while (end + 1 < messages.Count && messages[end + 1].Role == role)
+            {
+                end++;
+            }
+
+            WriteMerged(writer, role, messages, i, end);
+            i = end;
         }
     }
 
     private static void WriteMessage(Utf8JsonWriter writer, ChatMessage message)
     {
-        switch (message.Role)
+        if (message.Role == MessageRole.System)
         {
-            case MessageRole.System:
-                WritePlain(writer, "system", ProviderJson.Text(message.Content) ?? string.Empty);
-                break;
-
-            case MessageRole.Assistant:
-                WriteAssistant(writer, message.Content);
-                break;
-
-            case MessageRole.User:
-                WriteToolResults(writer, message.Content);
-                if (ProviderJson.Text(message.Content) is { } userText)
-                {
-                    WritePlain(writer, "user", userText);
-                }
-
-                break;
-
-            default:
-                WriteToolResults(writer, message.Content);
-                break;
+            WritePlain(writer, "system", ProviderJson.Text(message.Content) ?? string.Empty);
+            return;
         }
+
+        WriteToolResults(writer, message.Content);
+    }
+
+    private static void WriteMerged(Utf8JsonWriter writer, MessageRole role, IReadOnlyList<ChatMessage> messages, int start, int end)
+    {
+        if (role == MessageRole.User)
+        {
+            for (var i = start; i <= end; i++)
+            {
+                WriteToolResults(writer, messages[i].Content);
+            }
+
+            var text = MergedText(messages, start, end);
+            if (text is not null)
+            {
+                WritePlain(writer, "user", text);
+            }
+
+            return;
+        }
+
+        var calls = CountToolCalls(messages, start, end);
+        var assistantText = MergedText(messages, start, end);
+        if (assistantText is null && calls == 0)
+        {
+            return;
+        }
+
+        writer.WriteStartObject();
+        writer.WriteString("role", "assistant");
+        if (assistantText is null)
+        {
+            writer.WriteNull("content");
+        }
+        else
+        {
+            writer.WriteString("content", assistantText);
+        }
+
+        if (calls > 0)
+        {
+            writer.WriteStartArray("tool_calls");
+            for (var i = start; i <= end; i++)
+            {
+                foreach (var block in messages[i].Content)
+                {
+                    if (block is ToolCallBlock call)
+                    {
+                        WriteToolCall(writer, call);
+                    }
+                }
+            }
+
+            writer.WriteEndArray();
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static string? MergedText(IReadOnlyList<ChatMessage> messages, int start, int end)
+    {
+        System.Text.StringBuilder? builder = null;
+        for (var i = start; i <= end; i++)
+        {
+            var text = ProviderJson.Text(messages[i].Content);
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            if (builder is null)
+            {
+                builder = new System.Text.StringBuilder();
+            }
+            else
+            {
+                builder.Append("\n\n");
+            }
+
+            builder.Append(text);
+        }
+
+        return builder?.ToString();
+    }
+
+    private static int CountToolCalls(IReadOnlyList<ChatMessage> messages, int start, int end)
+    {
+        var calls = 0;
+        for (var i = start; i <= end; i++)
+        {
+            foreach (var block in messages[i].Content)
+            {
+                if (block is ToolCallBlock)
+                {
+                    calls++;
+                }
+            }
+        }
+
+        return calls;
     }
 
     private static void WritePlain(Utf8JsonWriter writer, string role, string content)
@@ -107,56 +205,15 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         writer.WriteEndObject();
     }
 
-    private static void WriteAssistant(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks)
+    private static void WriteToolCall(Utf8JsonWriter writer, ToolCallBlock call)
     {
-        var text = ProviderJson.Text(blocks);
-        var calls = 0;
-        foreach (var block in blocks)
-        {
-            if (block is ToolCallBlock)
-            {
-                calls++;
-            }
-        }
-
-        if (text is null && calls == 0)
-        {
-            return;
-        }
-
         writer.WriteStartObject();
-        writer.WriteString("role", "assistant");
-        if (text is null)
-        {
-            writer.WriteNull("content");
-        }
-        else
-        {
-            writer.WriteString("content", text);
-        }
-
-        if (calls > 0)
-        {
-            writer.WriteStartArray("tool_calls");
-            foreach (var block in blocks)
-            {
-                if (block is not ToolCallBlock call)
-                {
-                    continue;
-                }
-
-                writer.WriteStartObject();
-                writer.WriteString("id", call.Id);
-                writer.WriteString("type", "function");
-                writer.WriteStartObject("function");
-                writer.WriteString("name", call.Name);
-                writer.WriteString("arguments", call.ArgumentsJson);
-                writer.WriteEndObject();
-                writer.WriteEndObject();
-            }
-            writer.WriteEndArray();
-        }
-
+        writer.WriteString("id", call.Id);
+        writer.WriteString("type", "function");
+        writer.WriteStartObject("function");
+        writer.WriteString("name", call.Name);
+        writer.WriteString("arguments", call.ArgumentsJson);
+        writer.WriteEndObject();
         writer.WriteEndObject();
     }
 

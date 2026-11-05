@@ -44,12 +44,11 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **压缩触发。** 阈值是用户设置的绝对 token 数,而非窗口百分比;压缩目标为阈值的一半。无会话存储时压缩不生效。
 
-**提供方。** OpenAI 兼容与 Anthropic。重试只发生在首个事件之前;`HttpClient` 必须是无限超时,改由每次读取的空闲超时(默认 120 秒)判定停滞。`ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。
+**提供方。** OpenAI 兼容与 Anthropic。重试只发生在首个事件之前;`HttpClient` 必须是无限超时,改由每次读取的空闲超时(默认 120 秒)判定停滞。`ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。OpenAI 兼容适配器在写 wire 消息时合并相邻的同角色 `user`/`assistant` 消息:文本按序拼接、段落间空一行,`tool_calls` 保持顺序;`tool` 角色消息不合并,`system` 保持现状(系统提示词在最前,历史中的 system 消息按原位置逐条写出)。内部历史不变,序列化结果对同一历史字节稳定。
 
 ## 未决
 
 - 事件通道为无界;UI 侧按帧合并尚未实现。
 - `MaxTurns` 计入后续指令续跑;不响应取消的工具要等其返回才真正停止。
 - 内置 Agent 的工具白名单未含 `todo`(加入会改动其可缓存工具集),目前只有根 Agent 可用。
-- OpenAI 兼容适配器不合并相邻同角色消息,对严格的兼容服务可能不被接受。
 - Artifact 转存阈值与三层摘要的保留量使用默认值,未经使用验证。
