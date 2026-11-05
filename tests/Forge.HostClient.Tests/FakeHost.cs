@@ -13,6 +13,8 @@ internal sealed class FakeHost : IAsyncDisposable
         new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<IpcMessage> requests = new();
     private readonly ConcurrentQueue<IpcMessage> notifications = new();
+    private readonly EventLog<IpcMessage> requestLog = new();
+    private readonly EventLog<IpcMessage> notificationLog = new();
     private readonly List<(string Operation, string ArgsJson)> onAccept = [];
     private readonly EventLog<int> accepts = new();
     private readonly CancellationTokenSource lifetime = new();
@@ -33,6 +35,26 @@ internal sealed class FakeHost : IAsyncDisposable
     /// <summary>Client notifications received so far for <paramref name="operation"/>.</summary>
     public IReadOnlyList<IpcMessage> Notifications(string operation) =>
         notifications.Where(message => string.Equals(message.Operation, operation, StringComparison.Ordinal)).ToArray();
+
+    /// <summary>Returns once the host has received <paramref name="count"/> requests for
+    /// <paramref name="operation"/> (client to host); lets a test await input/ack frames without sleeps.</summary>
+    public async Task<IReadOnlyList<IpcMessage>> WaitForRequestsAsync(string operation, int count)
+    {
+        var seen = await requestLog.UntilAsync(
+            events => events.Count(message => string.Equals(message.Operation, operation, StringComparison.Ordinal)) >= count)
+            .ConfigureAwait(false);
+        return seen.Where(message => string.Equals(message.Operation, operation, StringComparison.Ordinal)).ToArray();
+    }
+
+    /// <summary>Returns once the host has received <paramref name="count"/> notifications for
+    /// <paramref name="operation"/> (client to host); lets a test await input/ack frames without sleeps.</summary>
+    public async Task<IReadOnlyList<IpcMessage>> WaitForNotificationsAsync(string operation, int count)
+    {
+        var seen = await notificationLog.UntilAsync(
+            events => events.Count(message => string.Equals(message.Operation, operation, StringComparison.Ordinal)) >= count)
+            .ConfigureAwait(false);
+        return seen.Where(message => string.Equals(message.Operation, operation, StringComparison.Ordinal)).ToArray();
+    }
 
     /// <summary>Replaces the answer to <paramref name="operation"/>. A handler that throws <see cref="FakeHostError"/>
     /// answers with an IPC error envelope; one that never completes simulates a host that does not answer.</summary>
@@ -59,7 +81,11 @@ internal sealed class FakeHost : IAsyncDisposable
         var server = await IpcPipe.CreateServer(PipeName, lifetime.Token).ConfigureAwait(false);
         var created = new IpcPeer(server, new IpcPeerOptions { DefaultTimeout = TestLimit.Span });
         created.RequestReceived += (message, ct) => OnRequestAsync(created, message, ct);
-        created.NotificationReceived += notifications.Enqueue;
+        created.NotificationReceived += message =>
+        {
+            notifications.Enqueue(message);
+            notificationLog.Add(message);
+        };
         await created.StartAsync(CancellationToken.None).ConfigureAwait(false);
         transport = server;
         peer = created;
@@ -121,6 +147,7 @@ internal sealed class FakeHost : IAsyncDisposable
     private async Task OnRequestAsync(IpcPeer active, IpcMessage message, CancellationToken ct)
     {
         requests.Enqueue(message);
+        requestLog.Add(message);
         var handler = handlers.TryGetValue(message.Operation, out var registered) ? registered : DefaultHandler;
         try
         {

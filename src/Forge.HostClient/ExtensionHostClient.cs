@@ -14,7 +14,7 @@ namespace Forge.HostClient;
 /// plugin→main-program tool calls through the caller's resolver and approval path so the client never bypasses
 /// permission checks.
 /// </summary>
-public sealed class ExtensionHostClient : IExtensionContributionClient
+public sealed partial class ExtensionHostClient : IExtensionContributionClient, ITerminalHost
 {
     internal const string RunCodeIdentity = "$run_code";
 
@@ -1023,8 +1023,11 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
 
     /// <summary>Stops the current connection generation from reporting: a close callback of a torn-down
     /// connection must not move the status of the connection that replaced it.</summary>
-    private void RetireActiveGeneration() =>
+    private void RetireActiveGeneration()
+    {
         Volatile.Write(ref activeGeneration, Interlocked.Increment(ref nextGeneration));
+        TerminateTerminals(null);
+    }
 
     private void OnPeerClosed(long generation, Exception? cause)
     {
@@ -1032,6 +1035,8 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
         {
             return;
         }
+
+        TerminateTerminals(cause);
 
         var intentional = Volatile.Read(ref stopping) != 0;
         var next = intentional ? HostStatus.Stopped : HostStatus.Failed;
@@ -1074,6 +1079,14 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
         else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ContributionsUnregister, StringComparison.Ordinal))
         {
             UnregisterContributions(generation, message.Arguments);
+        }
+        else if (string.Equals(message.Operation, TerminalOps.Output, StringComparison.Ordinal))
+        {
+            OnTerminalOutput(generation, message.Arguments);
+        }
+        else if (string.Equals(message.Operation, TerminalOps.Exit, StringComparison.Ordinal))
+        {
+            OnTerminalExit(generation, message.Arguments);
         }
     }
 

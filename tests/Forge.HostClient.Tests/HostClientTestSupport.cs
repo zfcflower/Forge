@@ -216,3 +216,83 @@ internal static class SleeperHost
         }
     }
 }
+
+/// <summary>Wire helpers for the <c>terminal.*</c> family: request construction, host-side frame JSON and
+/// channel draining. All waits are TCS/poll bounded by <see cref="TestLimit"/>; no sleeps.</summary>
+internal static class TerminalFixtures
+{
+    public static TerminalStartRequest Request(
+        string? sessionId = "sess-term",
+        string? workingDirectory = null,
+        int columns = 80,
+        int rows = 24,
+        string? shell = null,
+        IReadOnlyList<string>? args = null,
+        IReadOnlyDictionary<string, string>? environment = null) =>
+        new(
+            sessionId ?? "sess-term",
+            workingDirectory ?? BoundRoots.AbsoluteDir("term"),
+            new TerminalSize(columns, rows),
+            shell,
+            args,
+            environment);
+
+    /// <summary>Answers <c>terminal.start</c> with a fixed id; returns the id for the test to address.</summary>
+    public static string AnswerStart(FakeHost host, string terminalId, long processId = 4242, string? shell = "sh")
+    {
+        host.On(TerminalOps.Start, (_, _) => Task.FromResult(Json.Element(StartResultJson(terminalId, processId, shell))));
+        return terminalId;
+    }
+
+    public static string StartResultJson(string terminalId, long processId = 4242, string? shell = "sh") =>
+        "{\"terminalId\":\"" + terminalId + "\",\"processId\":" + processId + ",\"shell\":\"" + shell + "\"}";
+
+    public static string OutputJson(string terminalId, long seq, byte[] data) =>
+        "{\"terminalId\":\"" + terminalId + "\",\"seq\":" + seq + ",\"data\":\"" + Convert.ToBase64String(data) + "\"}";
+
+    public static string OutputJson(string terminalId, long seq, string text) =>
+        OutputJson(terminalId, seq, System.Text.Encoding.UTF8.GetBytes(text));
+
+    public static string ExitJson(string terminalId, int exitCode) =>
+        "{\"terminalId\":\"" + terminalId + "\",\"exitCode\":" + exitCode + "}";
+
+    /// <summary>Starts one terminal against a connected client; the host must already answer start.</summary>
+    public static async Task<ITerminalSession> StartTerminalAsync(
+        ExtensionHostClient client, TerminalStartRequest request, CancellationToken ct) =>
+        await client.StartAsync(request, ct).ConfigureAwait(false);
+
+    /// <summary>Decodes the base64 <c>data</c> of a captured <c>terminal.input</c>/<c>terminal.output</c> frame.</summary>
+    public static byte[] DecodeData(IpcMessage message) =>
+        Convert.FromBase64String(message.Arguments!.Value.GetProperty("data").GetString()!);
+
+    /// <summary>Reads <see cref="ITerminalSession.Output"/> to normal completion and returns every byte.
+    /// Faults with the session's own error when the stream ends abnormally.</summary>
+    public static async Task<byte[]> DrainAsync(ITerminalSession session)
+    {
+        var collected = new List<byte>();
+        using var limit = TestLimit.Create();
+        var reader = session.Output;
+        while (await reader.WaitToReadAsync(limit.Token).ConfigureAwait(false))
+        {
+            while (reader.TryRead(out var chunk))
+            {
+                collected.AddRange(chunk.ToArray());
+            }
+        }
+
+        await reader.Completion.WaitAsync(limit.Token).ConfigureAwait(false);
+        return collected.ToArray();
+    }
+
+    /// <summary>Sums the <c>bytes</c> of captured <c>terminal.ack</c> notifications.</summary>
+    public static long AckTotal(IReadOnlyList<IpcMessage> acks)
+    {
+        long total = 0;
+        foreach (var ack in acks)
+        {
+            total += ack.Arguments!.Value.GetProperty("bytes").GetInt64();
+        }
+
+        return total;
+    }
+}
