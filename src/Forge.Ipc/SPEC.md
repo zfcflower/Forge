@@ -24,6 +24,8 @@ parent: forge-architecture
 
 **丢弃的帧必须可见。** 传输层(`IIpcTransport.ProtocolError`)与 `IIpcPeer.ProtocolError` 对每个被丢弃的入站帧各上报一次 `IpcProtocolException`:零长度帧、超帧上限、JSON 解码失败;连接保持可用,后续合法帧照常派发。调用方据此区分"对端发来坏帧"与"超时"(`IpcTimeoutException`),不再只看到超时。
 
+**放弃的连接必须真的停下。** `ConnectTimeout` 到期时用链接令牌取消底层连接并处置流,不再只放弃等待:`NamedPipeClientStream.ConnectAsync` 被放任继续重试时,它会在服务端开始监听后抢到唯一的管道实例、随即断开,服务端把"连上却不发请求"当作对端离开而正常退出(exit 0、无输出),此后任何重连都连不上。因此超时的连接尝试必须取消并观察其结束,再处置。
+
 **帧上限与恢复。** 单帧上限 16 MiB;零长度帧与超限帧读侧拒绝并跳帧重同步,超限超过重同步上限(64 MiB)才关闭连接;写侧拒绝不发送。
 
 ## 未决

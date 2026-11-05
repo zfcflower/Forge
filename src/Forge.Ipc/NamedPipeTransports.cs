@@ -147,12 +147,16 @@ internal static class PipeConnect
     public static async Task<Stream> ClientAsync(string name, IpcPipeOptions options, CancellationToken ct)
     {
         var stream = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
+        // 放弃的连接必须真的停下:仅 WaitAsync 超时会让底层 ConnectAsync 继续重试,它随后连上
+        // 服务端再断开,Host 会把这当成主程序离开而退出(exit 0、无输出),后来的连接再也连不上。
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        attempt.CancelAfter(options.ConnectTimeout);
         try
         {
-            await stream.ConnectAsync(ct).WaitAsync(options.ConnectTimeout, ct).ConfigureAwait(false);
+            await stream.ConnectAsync(attempt.Token).ConfigureAwait(false);
             return stream;
         }
-        catch (TimeoutException ex)
+        catch (OperationCanceledException ex) when (attempt.IsCancellationRequested && !ct.IsCancellationRequested)
         {
             await stream.DisposeAsync().ConfigureAwait(false);
             throw new IpcTimeoutException($"connect:{name}", options.ConnectTimeout, ex);
