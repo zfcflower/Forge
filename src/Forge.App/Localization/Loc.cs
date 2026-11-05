@@ -98,7 +98,8 @@ internal sealed class Loc : INotifyPropertyChanged
                     return;
                 }
 
-                throw new InvalidOperationException("文案 key 重复注册且文本不同：" + key);
+                // Developer-facing only (a defect, never a user path): English, like every exception text in this app.
+                throw new InvalidOperationException("Localization key registered twice with different texts: " + key);
             }
 
             Entries.Add(key, new Entry(chinese, english));
@@ -134,43 +135,17 @@ internal sealed class Loc : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// The concrete language behind <see cref="UiLanguage.System"/>. This build runs with invariant globalization, so
-    /// <see cref="CultureInfo.CurrentUICulture"/> is the invariant culture; the POSIX locale variables are the fallback
-    /// that still carries the user's choice there.
+    /// The concrete language behind <see cref="UiLanguage.System"/>, never <see cref="UiLanguage.System"/> itself.
+    /// <see cref="SystemLanguageDetector"/> owns the decision - culture names, the Windows display language, the POSIX
+    /// locale variables - so this build's invariant globalization does not pin the UI to English.
+    /// <see cref="SystemLanguageOverride"/> is the test seam and wins when set.
+    /// <para>Also read by the language settings section, which says under "follow the system" which language that choice
+    /// currently resolves to; that is why the property is not private.</para>
     /// </summary>
-    private static UiLanguage SystemLanguage
-    {
-        get
-        {
-            if (SystemLanguageOverride is { } forced && forced != UiLanguage.System)
-            {
-                return forced;
-            }
-
-            if (IsChinese(CultureInfo.CurrentUICulture.Name) || IsChinese(CultureInfo.InstalledUICulture.Name))
-            {
-                return UiLanguage.Chinese;
-            }
-
-            // A local, not a static field: Loc's instance is created by the static initializer, and a field declared
-            // later in the type would still be null here.
-            ReadOnlySpan<string> localeVariables = ["LC_ALL", "LC_MESSAGES", "LANG"];
-            foreach (var variable in localeVariables)
-            {
-                if (IsChinese(Environment.GetEnvironmentVariable(variable)))
-                {
-                    return UiLanguage.Chinese;
-                }
-            }
-
-            return UiLanguage.English;
-        }
-    }
-
-    private static bool IsChinese(string? culture) =>
-        !string.IsNullOrEmpty(culture) &&
-        culture.StartsWith("zh", StringComparison.OrdinalIgnoreCase) &&
-        (culture.Length == 2 || culture[2] is '-' or '_');
+    internal static UiLanguage SystemLanguage =>
+        SystemLanguageOverride is { } forced && forced != UiLanguage.System
+            ? forced
+            : SystemLanguageDetector.Resolve(SystemLanguageDetector.ReadCurrent());
 
     private static void ReportMissing(string key)
     {
