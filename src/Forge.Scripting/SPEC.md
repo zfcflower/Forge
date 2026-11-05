@@ -34,6 +34,8 @@ Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的�
 
 **按请求重建能力。** 缓存只驻留编译产物与固定编译表面:`ScriptCodeCompiler` 不缓存工具元数据、facade、审批结果或调用上下文。缓存键 = 编译表面指纹(版本 + 导入 + 引用路径 + 三个自有程序集 MVID)+ 源码 + 全部 `CodeExecutionOptions`,因此换选项不会命中上一次的错误文本;失败编译同样入 LRU,重复的错误脚本不再进 Roslyn。工具元数据不进缓存键(脚本按名调用,元数据不进编译),每次运行按本次 `Tools` 重建 `ToolsFacade`,上一请求的工具名在下一请求里即未知。装载出的入口委托按编译产物加锁创建一次并复用;每次运行的 globals/log/facade/令牌各自独立。
 
+**单飞与取消隔离。** 同一缓存键的并发 `CompileAsync` 共享同一次编译(脚本与插件编译器都如此);每个调用者的取消只让它自己立刻抛 `OperationCanceledException`,共享编译只在最后一个等待者取消后才取消,取消的编译不写入缓存,下一次调用重新编译。
+
 **脚本编译产出可装载产物。** 用 `CSharpCompilation` + `Emit(Embedded PDB, deterministic)` 把脚本发成一个 PE 映像,而不是 `CSharpScript` 提交/委托。`ScriptSourceBuilder` 生成唯一入口类型 `ForgeScriptEntry : ScriptGlobals`(私有构造从传入的 globals 初始化 `Tools`/`Log`/`Cancellation`)、`static Task<object?> Run(ScriptGlobals, CancellationToken)` 与 `async Task<object?> RunScriptAsync()`;脚本正文原样落在后者的方法体里,前面加 `#line <脚本行> "script.csx"`,因此诊断行列与栈帧 `script.csx:line N` 都与脚本自己的坐标一致。脚本自带的 `using` 指令被提升到文件头,正文用补偿的 `#line` 保持原有行号。语义等价:顶层语句、顶层 `await`、`return`、末尾表达式(改写为 `return (object?)…`)、返回 `Task` 由运行回路解包。末尾表达式的判定**只看语义模型给出的类型**,不看语法节点名:第一次编译把末尾语句表达式当作语句编出语义模型,`GetTypeInfo(...).Type` 非 `void` 即改写成 `return (object?)(…)` 再编一次,只有真正的 `void`(例如末尾一句 `Log(...)`、`await` 一个非泛型 `Task`)或 **ref-like 类型**(`IsRefLikeType`,例如返回 `Span<T>` 的末尾调用;ref struct 无法装箱进 `object?`,改写会直接 CS0029)才保持语句并让脚本结果为 `null`——旧 CSharpScript 引擎对这两类同样返回 `null`,而它同样返回末尾表达式的值:因此 `await Tools.Call("x");`、`Tools.CallJson("…");`、`new List<int>{1,2};`、`x = 5;` 作为最后一行都返回其值,而不是 `null`。已知差异:脚本里**声明类型**(class/struct)不再允许——旧引擎允许,新形态是方法体。另一处已知差异:末尾非 void 语句表达式被改写为 `return (object?)(…)` 后,该行的诊断**列**会偏移 17 个字符(`return (object?)(` 前缀长度),行号不受 `#line` 影响而保持正确。描述(`AssemblyName`/`SourceHash`/`CacheKey`/`ContractVersion`/`RuntimeVersion`/`EntryPointType`/`EntryPointMethod`/`GlobalsMvid`/`PeSha256`/`PeLength`)随映像一起产出,`SourceHash` 与 `CacheKey` 仍是两个概念(字节完整性 vs 缓存身份)。
 
 **取消与终止。** 运行回路在 `Forge.ScriptRuntime`(`ScriptHarness`):脚本在 `Task.Run` 上执行,预算由 `WaitAsync(runToken)` 收口,同步死循环不会占住 IPC 线程。超时或外部取消先给 1 秒宽限让脚本自行收尾:停下来就是普通错误结果;仍未停下则 `RequiresTermination=true`,文本明确写“未停止、已被放弃、执行器进程必须终止”,不把等待的取消说成已停止。放弃的执行保留线程与令牌源(避免其后续回调撞上已释放对象),由 Host 杀进程回收。编译前取消直接抛 `OperationCanceledException`:不编译脚本、不启动脚本、不触发任何 facade 回调。脚本返回 `Task` 时解包同样受预算约束。
@@ -44,13 +46,12 @@ Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的�
 
 ## 验证约定
 
-并发以门闩验证实际同时进入与上限,运行期取消必须等脚本进入工具门面后再触发;编译可能很慢,不能用短定时器推断脚本已经启动。无公开的缓存命中观测点,测试以同源码更换工具集/选项后的可见行为验证能力隔离,不以耗时猜测缓存命中。失控脚本只在可整体回收的测试子进程执行;模块初始化器中的子进程入口须先在当前线程预热门面调用路径,避免首次类型初始化与执行脚本的工作线程相互等待。
+并发以门闩验证实际同时进入与上限,运行期取消必须等脚本进入工具门面后再触发;编译可能很慢,不能用短定时器推断脚本已经启动。无公开的缓存命中观测点,测试以同源码更换工具集/选项后的可见行为验证能力隔离,不以耗时猜测缓存命中。`CompileAsync` 的单飞/取消并发测试用测试注入的编译委托与门闩停在编译中,不用短定时器。失控脚本只在可整体回收的测试子进程执行;模块初始化器中的子进程入口须先在当前线程预热门面调用路径,避免首次类型初始化与执行脚本的工作线程相互等待。
 
 ## 未决
 
 - 根任务完成不证明脚本全部工作结束:未等待的异步任务可在成功结果之后继续执行。主调用预算与 RequiresTermination 只覆盖被等待的任务,因此进程**不复用**是唯一正确的处置——由 `forge-extension-host` 的一次性执行器负责杀树,而不是由本模块证明“没有残留”。
 
-- `CompileAsync` 单飞时,首个调用者的取消令牌连累并发等待者。
 - 失败的编译保留在缓存;依赖变化时的失效由 ExtensionHost 负责(`Evict`/`Clear`)。
 - 脚本白名单与禁用名单的条目未经实战校准(尤其 `System.Type` 允许成员、`Regex` 回溯型 CPU 炸弹)。
 - 内存与 CPU 无法在进程内限制;失控脚本只能整进程终止,1 秒宽限是常量而非按调用配置。

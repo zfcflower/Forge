@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.Loader;
@@ -66,8 +67,24 @@ public sealed class ScriptCodeCompiler
     private static readonly EmitOptions EmitOptions = new(debugInformationFormat: DebugInformationFormat.Embedded);
 
     private readonly ScriptCompilationCache cache = new();
+    private readonly ConcurrentDictionary<string, CompileFlight<ScriptCompilation>> inFlight = new(StringComparer.Ordinal);
+    private readonly Func<string, CodeExecutionOptions, string, CancellationToken, CompiledScript>? compileOverride;
 
-    /// <summary>Compiles through the cache. A malformed script returns a bounded error instead of throwing.</summary>
+    public ScriptCodeCompiler()
+    {
+    }
+
+    internal ScriptCodeCompiler(Func<string, CodeExecutionOptions, string, CancellationToken, CompiledScript> compile)
+    {
+        ArgumentNullException.ThrowIfNull(compile);
+        compileOverride = compile;
+    }
+
+    /// <summary>
+    /// Compiles through the cache. Concurrent calls for one key share a single compile; each caller's cancellation only
+    /// cancels its own wait, and the shared compile is cancelled only after every waiter has cancelled. A malformed
+    /// script returns a bounded error instead of throwing.
+    /// </summary>
     public async Task<ScriptCompilation> CompileAsync(string code, CodeExecutionOptions options, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(code);
@@ -79,9 +96,76 @@ public sealed class ScriptCodeCompiler
             return cached.Compilation;
         }
 
-        var compiled = await Task.Run(() => Compile(code, options, key, ct), ct).ConfigureAwait(false);
-        cache.Set(key, compiled, options.CompilationCacheCapacity);
-        return compiled.Compilation;
+        ct.ThrowIfCancellationRequested();
+
+        while (true)
+        {
+            if (inFlight.TryGetValue(key, out var flight))
+            {
+                if (flight.TryAttach())
+                {
+                    try
+                    {
+                        return await flight.Task.WaitAsync(ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        flight.Detach();
+                    }
+                }
+
+                // The previous flight is being abandoned; drop it so the next iteration starts a fresh compile.
+                inFlight.TryRemove(KeyValuePair.Create(key, flight));
+                continue;
+            }
+
+            var candidate = new CompileFlight<ScriptCompilation>();
+            if (!inFlight.TryAdd(key, candidate))
+            {
+                continue;
+            }
+
+            _ = RunCompileAsync(this, code, options, key, candidate);
+            try
+            {
+                return await candidate.Task.WaitAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                candidate.Detach();
+            }
+        }
+    }
+
+    private static async Task RunCompileAsync(
+        ScriptCodeCompiler compiler,
+        string code,
+        CodeExecutionOptions options,
+        string key,
+        CompileFlight<ScriptCompilation> flight)
+    {
+        try
+        {
+            var compiled = await Task.Run(
+                () => compiler.compileOverride is { } compile
+                    ? compile(code, options, key, flight.Token)
+                    : Compile(code, options, key, flight.Token),
+                flight.Token).ConfigureAwait(false);
+            compiler.cache.Set(key, compiled, options.CompilationCacheCapacity);
+            flight.Complete(compiled.Compilation);
+        }
+        catch (OperationCanceledException) when (flight.Token.IsCancellationRequested)
+        {
+            flight.Cancel();
+        }
+        catch (Exception exception)
+        {
+            flight.Fail(exception);
+        }
+        finally
+        {
+            compiler.inFlight.TryRemove(KeyValuePair.Create(key, flight));
+        }
     }
 
     /// <summary>Drops every cached image; the next call compiles again.</summary>

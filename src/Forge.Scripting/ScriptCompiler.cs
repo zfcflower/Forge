@@ -83,7 +83,7 @@ public sealed class ScriptCompiler
 
     private readonly ScriptCompilerOptions options;
     private readonly string[] defaultReferencePaths;
-    private readonly ConcurrentDictionary<string, Task<CompilationResult>> inFlight =
+    private readonly ConcurrentDictionary<string, CompileFlight<CompilationResult>> inFlight =
         new(StringComparer.Ordinal);
 
     public ScriptCompiler(ScriptCompilerOptions? options = null)
@@ -119,7 +119,11 @@ public sealed class ScriptCompiler
         return result;
     }
 
-    /// <summary>Compiles through the cache on the thread pool; concurrent calls for one cache key share one compile.</summary>
+    /// <summary>
+    /// Compiles through the cache on the thread pool; concurrent calls for one cache key share one compile. Each
+    /// caller's cancellation only cancels its own wait, and the shared compile is cancelled only after every waiter has
+    /// cancelled.
+    /// </summary>
     public async Task<CompilationResult> CompileAsync(CompilationRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -129,40 +133,70 @@ public sealed class ScriptCompiler
             return cached;
         }
 
+        ct.ThrowIfCancellationRequested();
+
         while (true)
         {
-            if (inFlight.TryGetValue(key, out var shared))
+            if (inFlight.TryGetValue(key, out var flight))
             {
-                return await shared.WaitAsync(ct).ConfigureAwait(false);
+                if (flight.TryAttach())
+                {
+                    try
+                    {
+                        return await flight.Task.WaitAsync(ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        flight.Detach();
+                    }
+                }
+
+                inFlight.TryRemove(KeyValuePair.Create(key, flight));
+                continue;
             }
 
-            var completion = new TaskCompletionSource<CompilationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!inFlight.TryAdd(key, completion.Task))
+            var candidate = new CompileFlight<CompilationResult>();
+            if (!inFlight.TryAdd(key, candidate))
             {
                 continue;
             }
 
+            _ = RunCompileAsync(this, request, key, candidate);
             try
             {
-                var result = await Task.Run(() => CompileDirect(request, ct), ct).ConfigureAwait(false);
-                Cache.Set(key, result);
-                completion.SetResult(result);
-                return result;
-            }
-            catch (OperationCanceledException ex)
-            {
-                completion.SetCanceled(ex.CancellationToken);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                completion.SetException(ex);
-                throw;
+                return await candidate.Task.WaitAsync(ct).ConfigureAwait(false);
             }
             finally
             {
-                inFlight.TryRemove(key, out _);
+                candidate.Detach();
             }
+        }
+    }
+
+    private static async Task RunCompileAsync(
+        ScriptCompiler compiler,
+        CompilationRequest request,
+        string key,
+        CompileFlight<CompilationResult> flight)
+    {
+        try
+        {
+            var result = await Task.Run(() => compiler.CompileDirect(request, flight.Token), flight.Token)
+                .ConfigureAwait(false);
+            compiler.Cache.Set(key, result);
+            flight.Complete(result);
+        }
+        catch (OperationCanceledException) when (flight.Token.IsCancellationRequested)
+        {
+            flight.Cancel();
+        }
+        catch (Exception exception)
+        {
+            flight.Fail(exception);
+        }
+        finally
+        {
+            compiler.inFlight.TryRemove(KeyValuePair.Create(key, flight));
         }
     }
 

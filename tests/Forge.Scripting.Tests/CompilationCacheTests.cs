@@ -163,6 +163,44 @@ public class CompilationCacheTests
     }
 
     [Fact]
+    public async Task CompileAsync_precancelled_caller_does_not_cancel_other_waiters()
+    {
+        var compiler = new ScriptCompiler();
+        var request = Build.Request(PluginSources.Echo);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var cancelled = compiler.CompileAsync(request, cts.Token);
+        var success = await compiler.CompileAsync(request).WaitAsync(TimeSpan.FromSeconds(30));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        Assert.True(success.Success);
+        Assert.Equal(1, compiler.Cache.Count);
+    }
+
+    [Fact]
+    public async Task CompileAsync_all_precancelled_waiters_leave_no_cancelled_cache_entry()
+    {
+        var compiler = new ScriptCompiler();
+        var request = Build.Request(PluginSources.Echo);
+        using var ctsA = new CancellationTokenSource();
+        using var ctsB = new CancellationTokenSource();
+        ctsA.Cancel();
+        ctsB.Cancel();
+
+        var taskA = compiler.CompileAsync(request, ctsA.Token);
+        var taskB = compiler.CompileAsync(request, ctsB.Token);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => taskA);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => taskB);
+        Assert.Equal(0, compiler.Cache.Count);
+
+        var next = await compiler.CompileAsync(request).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(next.Success);
+        Assert.Equal(1, compiler.Cache.Count);
+    }
+
+    [Fact]
     public async Task WarmUpAsync_compiles_uncached_requests_and_keeps_existing_entries()
     {
         var compiler = new ScriptCompiler();
