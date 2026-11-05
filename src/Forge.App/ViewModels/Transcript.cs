@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
-using Avalonia.Threading;
 using Forge.Abstractions;
 
 namespace Forge.App.ViewModels;
@@ -389,15 +388,14 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 }
 
 /// <summary>
-/// The ordered transcript of one agent (the main session or one sub-agent). Streaming text is coalesced into at most one
-/// UI update per dispatcher pass; every other event is posted to the UI thread by the owner.
+/// The ordered transcript of one agent (the main session or one sub-agent). Streaming text is merged on the worker thread
+/// into a pending buffer; the session's frame coalescer drains it on the UI thread.
 /// </summary>
 internal sealed class TranscriptViewModel : ObservableObject
 {
     private readonly ObservableCollection<TranscriptItemViewModel> items = [];
     private readonly Lock pendingGate = new();
     private readonly StringBuilder pending = new();
-    private int flushScheduled;
     private TurnCardViewModel? current;
     private int round;
     private DateTimeOffset currentStartedAt;
@@ -458,22 +456,17 @@ internal sealed class TranscriptViewModel : ObservableObject
         return card;
     }
 
+    /// <summary>Merges a worker-thread delta into the pending buffer; the owner schedules the UI-thread flush.</summary>
     public void QueueDelta(string chunk)
     {
         lock (pendingGate)
         {
             pending.Append(chunk);
         }
-
-        if (Interlocked.Exchange(ref flushScheduled, 1) == 0)
-        {
-            Dispatcher.UIThread.Post(FlushPending, DispatcherPriority.Render);
-        }
     }
 
     public void FlushPending()
     {
-        Interlocked.Exchange(ref flushScheduled, 0);
         string chunk;
         lock (pendingGate)
         {

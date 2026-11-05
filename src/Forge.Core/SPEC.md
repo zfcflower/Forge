@@ -48,7 +48,7 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 ## 未决
 
-- 事件通道为无界;UI 侧按帧合并尚未实现。
+- 事件通道保持无界(决定):`AgentHost.RunAsync` 的 `Channel.CreateUnbounded<AgentEvent>` 不加背压、不丢事件;UI 合并在 App 侧由 `FrameCoalescer` 实现,见 forge-app。
 - `MaxTurns` 计入后续指令续跑;不响应取消的工具要等其返回才真正停止。
 - 内置 Agent 的工具白名单未含 `todo`(加入会改动其可缓存工具集),目前只有根 Agent 可用。
 - Artifact 转存阈值与三层摘要的保留量使用默认值,未经使用验证。

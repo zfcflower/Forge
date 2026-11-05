@@ -31,6 +31,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, TokenUsage> agentUsage = new(StringComparer.Ordinal);
     private readonly ObservableCollection<SubAgentViewModel> finished = [];
     private readonly FinishedSubAgentsViewModel finishedMenu = new();
+    private readonly FrameCoalescer<AgentEvent> coalescer;
 
     /// <summary>Text of a child agent that arrived before its <c>AgentSubAgentStarted</c> reached the dispatcher.</summary>
     private readonly ConcurrentDictionary<string, StringBuilder> earlyDeltas = new(StringComparer.Ordinal);
@@ -57,6 +58,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         this.subAgentOpened = subAgentOpened;
         providerModel = provider.Provider?.Model ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
+        coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
         SubAgents = new ReadOnlyObservableCollection<SubAgentViewModel>(subAgents);
         Finished = new ReadOnlyObservableCollection<SubAgentViewModel>(finished);
         SendCommand = new AsyncRelayCommand(SendAsync, EvaluateCanSend, OnSendFailed);
@@ -494,7 +496,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private void OnSendFailed(Exception exception) =>
         Transcript.AddNotice(Strings.TurnFailed + exception.Message, isError: true);
 
-    /// <summary>Worker-thread event sink; only coalesced text is touched here, everything else is posted.</summary>
+    /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
     private void OnAgentEvent(AgentEvent value)
     {
         switch (value)
@@ -505,7 +507,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             case AgentThinkingDelta:
                 break;
             default:
-                Dispatcher.UIThread.Post(() => HandleOnUi(value));
+                coalescer.Enqueue(value);
                 break;
         }
     }
@@ -519,6 +521,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         if (Target(delta.AgentId) is { } target)
         {
             target.QueueDelta(delta.Text);
+            coalescer.RequestFlush();
             return;
         }
 
@@ -545,6 +548,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             if (buffer.Length > 0)
             {
                 agent.Transcript.QueueDelta(buffer.ToString());
+                agent.Transcript.FlushPending();
             }
         }
     }
@@ -554,14 +558,20 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             ? Transcript
             : subAgentById.TryGetValue(agentId, out var agent) ? agent.Transcript : null;
 
-    private void HandleOnUi(AgentEvent value)
+    /// <summary>Drains the merged text of every transcript; runs once per coalesced flush and before each event.</summary>
+    private void FlushAllPendingText()
     {
-        // Text that is still coalesced belongs above the row this event is about to add.
         Transcript.FlushPending();
         foreach (var agent in subAgents)
         {
             agent.Transcript.FlushPending();
         }
+    }
+
+    private void HandleOnUi(AgentEvent value)
+    {
+        // Text that is still coalesced belongs above the row this event is about to add.
+        FlushAllPendingText();
 
         switch (value)
         {
@@ -586,9 +596,6 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 break;
             case AgentSubAgentFinished subFinished:
                 FinishSubAgent(subFinished);
-                break;
-            case AgentTextDelta delta:
-                RouteDelta(delta);
                 break;
             case AgentToolStarted started:
                 Card(started.AgentId)?.AddTool(started.Call);
@@ -726,6 +733,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         disposed = true;
+        coalescer.Dispose();
         Cancel();
         turn?.Dispose();
         turn = null;
