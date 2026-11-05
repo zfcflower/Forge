@@ -14,6 +14,7 @@ parent: forge-architecture
 
 - 一个传输实例承载一条连接;重连即新传输。传输负责帧边界,`IIpcPeer` 负责请求/响应关联。
 - 消息信封:`v`(协议版本)、`id`(0 = 通知)、`op`、`args`/`result`/`error`。计算属性不序列化。
+- 命名管道在 Linux/macOS 上由 .NET 的 Unix 域套接字实现,套接字文件落在 `<临时目录>/CoreFxPipe_<name>`。完整路径上限 `sockaddr_un.sun_path` 为 108 字节(Linux;含结尾 NUL)与 104 字节(macOS),macOS 的用户临时目录本身就很长(CI 上 `/var/folders/<x>/<32 字符>/T/` 占 51 字节),因此 `ValidatePipeName` 的 108 只是名称上限、**不保证**在 macOS 上能 bind。生成名称的调用方改用 `IpcPipe.MaxNameLength`:由当前平台的套接字路径上限减去 `<临时目录>` + `CoreFxPipe_` + 1(NUL)的 UTF-8 字节数算出(取不到临时目录时保守返回 16),Windows 无路径约束、返回 108。超预算的命名在 macOS 上表现为 BCL 抛出的 `ArgumentOutOfRangeException`,不是 IPC 层的协议错误。
 
 ## 关键决策
 

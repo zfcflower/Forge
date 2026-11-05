@@ -87,7 +87,9 @@ internal static class Peers
 
 internal static class TestPipes
 {
-    public static string NewName() => "forge-ipc-test-" + Guid.NewGuid().ToString("N");
+    /// <summary>Short enough to stay inside macOS's 104-byte domain socket path limit once the BCL prepends
+    /// <c>CoreFxPipe_</c> under a long per-user temporary directory.</summary>
+    public static string NewName() => "fx-" + Guid.NewGuid().ToString("N")[..16];
 }
 
 internal sealed class FrameSink

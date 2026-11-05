@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Text;
 
 namespace Forge.Ipc;
 
@@ -29,16 +30,49 @@ public interface IIpcTransport : IAsyncDisposable
 /// <see cref="NamedPipeServerStream"/> with the same pipe name, so one API covers all three platforms.</summary>
 public static class IpcPipe
 {
+    /// <summary>Name-only upper bound; the path bound on Linux/macOS is <see cref="MaxNameLength"/>.</summary>
+    private const int MaxValidatedNameLength = 108;
+
+    private const string UnixSocketFilePrefix = "CoreFxPipe_";
+
+    private static readonly Lazy<int> MaxNameLengthValue = new(ComputeMaxNameLength, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>The longest pipe name that still fits a Unix domain socket on this platform. The BCL keeps the socket
+    /// file at <c>&lt;temporary directory&gt;/CoreFxPipe_&lt;name&gt;</c> and <c>sockaddr_un.sun_path</c> is 108 bytes on
+    /// Linux but only 104 on macOS, so a name accepted by <see cref="ValidatePipeName"/> can still be unusable there.
+    /// Callers that generate names should stay at or below this value; Windows has no path bound and reports 108.</summary>
+    public static int MaxNameLength => MaxNameLengthValue.Value;
+
     /// <summary>Rejects pipe names that cannot round-trip through a Unix socket path.</summary>
     public static string ValidatePipeName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name.Length > 108)
+        if (name.Length > MaxValidatedNameLength)
             throw new ArgumentException("Pipe name too long (max 108 chars for Unix domain sockets).", nameof(name));
         foreach (var c in name)
             if (c is '/' or '\\' or ':')
                 throw new ArgumentException("Pipe name must not contain path separators or ':'.", nameof(name));
         return name;
+    }
+
+    private static int ComputeMaxNameLength()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return MaxValidatedNameLength;
+        }
+
+        // sockaddr_un.sun_path includes the terminating NUL.
+        var socketPathLimit = OperatingSystem.IsMacOS() ? 104 : 108;
+        try
+        {
+            var spent = Encoding.UTF8.GetByteCount(Path.GetTempPath()) + UnixSocketFilePrefix.Length + 1;
+            return Math.Max(16, socketPathLimit - spent);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return 16;
+        }
     }
 
     /// <summary>Creates a server transport and waits for one client, bounded by <see cref="IpcPipeOptions.ConnectTimeout"/>.</summary>

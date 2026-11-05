@@ -401,9 +401,20 @@ internal sealed class WorkerProcess : IAsyncDisposable
 
     private static string BuildPipeName(string ownerLabel)
     {
+        const string prefix = "forge-worker-";
+        var suffix = "-" + Guid.NewGuid().ToString("N")[..12];
+        // Linux/macOS keep the socket file under the temporary directory and cap the whole path, so the readable plugin
+        // token only gets what the budget leaves after the fixed parts; uniqueness always comes from the GUID. The
+        // budget is in bytes, and a plugin id may contain non-ASCII letters, so the cut is measured in UTF-8 bytes.
+        var budget = Math.Max(0, IpcPipe.MaxNameLength - prefix.Length - suffix.Length);
         var token = PluginIds.PipeToken(ownerLabel);
-        var unique = Guid.NewGuid().ToString("N")[..12];
-        return $"forge-worker-{token}-{unique}";
+        var keep = token.Length;
+        while (keep > 0 && Encoding.UTF8.GetByteCount(token.AsSpan(0, keep)) > budget)
+        {
+            keep--;
+        }
+
+        return prefix + token[..keep] + suffix;
     }
 
     /// <summary>Kills a worker together with everything it started: the job object or process group first, so remnants

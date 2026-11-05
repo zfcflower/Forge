@@ -16,6 +16,7 @@ public sealed class ExtensionHostClientLifecycleTests
         Assert.Empty(client.Tools);
         Assert.Empty(client.ToolsByPlugin);
         Assert.Null(client.HostProcessId);
+        Assert.Null(client.HostExitCode);
     }
 
     [Fact]
@@ -34,6 +35,8 @@ public sealed class ExtensionHostClientLifecycleTests
         Assert.Equal($"Connecting to the Extension Host on pipe '{host.PipeName}'.", seen[0].Detail);
         Assert.Null(seen[1].Detail);
         Assert.Null(client.HostProcessId);
+        // This client only connected to an already-running host, so it has no exit code to report.
+        Assert.Null(client.HostExitCode);
     }
 
     [Fact]
@@ -139,6 +142,7 @@ public sealed class ExtensionHostClientLifecycleTests
         var events = statuses.Snapshot();
         Assert.DoesNotContain(events, e => e.Status == HostStatus.Failed);
         Assert.Equal((HostStatus.Stopped, (string?)null), events[^1]);
+        Assert.Null(client.HostExitCode);
     }
 
     [Fact]

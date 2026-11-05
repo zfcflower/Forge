@@ -170,8 +170,43 @@ public class McpConfigLoaderTests : IDisposable
         Assert.Equal("both", both.Name);
         Assert.Null(both.Command);
         Assert.Equal("http://localhost:9000/mcp", both.Url);
-        Assert.Contains(config.Diagnostics, diagnostic => diagnostic.ServerName == "relative" && diagnostic.Message.Contains("not an absolute URI"));
+        Assert.Contains(config.Diagnostics, diagnostic => diagnostic.ServerName == "relative" && diagnostic.Message.Contains("not an absolute http or https URI"));
         Assert.Contains(config.Diagnostics, diagnostic => diagnostic.ServerName == "both" && diagnostic.Message.Contains("using \"url\""));
+    }
+
+    [Theory]
+    [InlineData("/mcp")]
+    [InlineData("mcp")]
+    [InlineData("file:///tmp/mcp")]
+    [InlineData("ftp://localhost/mcp")]
+    public void A_url_that_is_not_http_or_https_is_rejected_on_every_platform(string url)
+    {
+        // "/mcp" is an absolute file URI on Unix and a relative path on Windows; only http(s) endpoints are usable,
+        // so the rule is scheme-based rather than "looks absolute on this platform".
+        var json = "{\"mcpServers\":{\"t\":{\"url\":\"" + url + "\"}}}";
+
+        var config = McpConfigLoader.Parse(json, "test.json");
+
+        Assert.Empty(config.Servers);
+        var diagnostic = Assert.Single(config.Diagnostics);
+        Assert.Equal("t", diagnostic.ServerName);
+        Assert.Contains("not an absolute http or https URI", diagnostic.Message);
+        Assert.Contains(url, diagnostic.Message);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:9000/mcp")]
+    [InlineData("HTTPS://localhost:9000/mcp")]
+    public void Http_and_https_urls_are_accepted(string url)
+    {
+        var json = "{\"mcpServers\":{\"t\":{\"url\":\"" + url + "\"}}}";
+
+        var config = McpConfigLoader.Parse(json, "test.json");
+
+        var server = Assert.Single(config.Servers);
+        Assert.Equal(url, server.Url);
+        Assert.True(server.IsHttp);
+        Assert.Empty(config.Diagnostics);
     }
 
     [Theory]

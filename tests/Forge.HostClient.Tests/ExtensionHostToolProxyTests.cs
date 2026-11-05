@@ -8,7 +8,8 @@ namespace Forge.HostClient.Tests;
 
 public sealed class ExtensionHostToolProxyTests
 {
-    private static readonly ToolContext Context = new("session-1", "C:/work", 3);
+    private static readonly string WorkingDirectory = BoundRoots.AbsoluteDir("work");
+    private static readonly ToolContext Context = new("session-1", WorkingDirectory, 3);
 
     [Fact]
     public async Task Invoke_sends_plugin_execute_with_parsed_arguments_and_the_call_context()
@@ -28,7 +29,7 @@ public sealed class ExtensionHostToolProxyTests
         Assert.Equal("alpha", args.GetProperty("pluginId").GetString());
         Assert.Equal("echo", args.GetProperty("tool").GetString());
         Assert.Equal("session-1", args.GetProperty("sessionId").GetString());
-        Assert.Equal("C:/work", args.GetProperty("workingDir").GetString());
+        Assert.Equal(WorkingDirectory, args.GetProperty("workingDir").GetString());
         Assert.Equal(3, args.GetProperty("depth").GetInt32());
         var sent = args.GetProperty("args");
         Assert.Equal(JsonValueKind.Object, sent.ValueKind);

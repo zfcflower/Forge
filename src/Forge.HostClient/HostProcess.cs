@@ -21,6 +21,9 @@ internal sealed class HostProcess : IAsyncDisposable
 
     public int ProcessId => process.Id;
 
+    /// <summary>Exit code captured after the process left; null while it is still running or when the code is unavailable.</summary>
+    public int? ExitCode { get; private set; }
+
     public bool HasExited
     {
         get
@@ -156,7 +159,22 @@ internal sealed class HostProcess : IAsyncDisposable
         }
         finally
         {
+            CaptureExitCode();
             await AwaitReadersAsync().ConfigureAwait(false);
+        }
+    }
+
+    private void CaptureExitCode()
+    {
+        try
+        {
+            if (process.HasExited)
+            {
+                ExitCode = process.ExitCode;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
         }
     }
 
@@ -167,6 +185,7 @@ internal sealed class HostProcess : IAsyncDisposable
             return;
         }
 
+        CaptureExitCode();
         await AwaitReadersAsync().ConfigureAwait(false);
         process.Dispose();
     }

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Forge.Plugin.Sdk;
 using Forge.Scripting.Tests.Support;
 using Xunit;
@@ -144,7 +145,17 @@ public class VerifiedNativeLibraryTests
 
         if (OperatingSystem.IsMacOS())
         {
-            return ("/usr/lib/libSystem.B.dylib", "getpid");
+            // System dylibs moved into the dyld shared cache on modern macOS, so there is no file to copy
+            // from /usr/lib. The .NET runtime still ships a real, loadable native shim; its GetPid export
+            // exercises the same path-mode resolution this test verifies.
+            var candidate = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "libSystem.Native.dylib");
+            if (File.Exists(candidate))
+            {
+                return (candidate, "SystemNative_GetPid");
+            }
+
+            throw new InvalidOperationException(
+                $"No file-backed native library was found on macOS; looked for {candidate}.");
         }
 
         foreach (var candidate in LinuxLibraries)

@@ -55,6 +55,7 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
     private IpcPeer? peer;
     private NamedPipeClientTransport? transport;
     private HostProcess? hostProcess;
+    private int? hostExitCode;
     private string? protocolProblem;
     private long nextCallId;
     private long nextGeneration;
@@ -146,6 +147,19 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
             lock (peerGate)
             {
                 return hostProcess?.ProcessId;
+            }
+        }
+    }
+
+    /// <summary>Exit code of the host process this client started, once that process has left; null while it is
+    /// running or when this client connected to an existing host instead of starting one.</summary>
+    public int? HostExitCode
+    {
+        get
+        {
+            lock (peerGate)
+            {
+                return hostExitCode;
             }
         }
     }
@@ -349,6 +363,14 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
                     lock (peerGate)
                     {
                         hostProcess = started;
+                        hostExitCode = null;
+                    }
+                }
+                else
+                {
+                    lock (peerGate)
+                    {
+                        hostExitCode = null;
                     }
                 }
 
@@ -867,6 +889,11 @@ public sealed class ExtensionHostClient : IExtensionContributionClient
             }
             finally
             {
+                lock (peerGate)
+                {
+                    hostExitCode = pendingHost.ExitCode;
+                }
+
                 await pendingHost.DisposeAsync().ConfigureAwait(false);
             }
         }

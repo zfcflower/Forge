@@ -31,6 +31,11 @@ public sealed class StdioTransport : IMcpTransport
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
     private const int MaxPollutionEntryBytes = 4096;
 
+    /// <summary>How long a stdout end-of-stream waits for the child to be observed as exited before it is reported as a
+    /// broken pipe. On Unix the child's pipes close during <c>exit</c>, while the parent only learns the exit code when
+    /// the process is reaped afterwards, so without this window the exit code is lost to a "closed its standard output".</summary>
+    private static readonly TimeSpan ExitNoticeWindow = TimeSpan.FromMilliseconds(500);
+
     private readonly McpStdioOptions options;
     private readonly BoundedLog stderrLog;
     private readonly BoundedLog stdoutPollution;
@@ -335,7 +340,10 @@ public sealed class StdioTransport : IMcpTransport
         }
         finally
         {
-            if (!HasExited(current))
+            // Report a broken stdout only when the child is really still alive: a child that exited closes its pipes
+            // before the parent can observe the exit, and then <see cref="MonitorExitAsync"/> owns the (more useful)
+            // "exited with code N" notice.
+            if (!HasExited(current) && !await WaitForExitAsync(current, ExitNoticeWindow).ConfigureAwait(false))
             {
                 RaiseClosed(
                     current,

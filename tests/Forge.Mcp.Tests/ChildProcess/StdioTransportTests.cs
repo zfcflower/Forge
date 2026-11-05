@@ -11,7 +11,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Handshake_list_and_call_work_over_a_real_child_process()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
 
         await client.ConnectAsync(CancellationToken.None);
@@ -33,7 +33,7 @@ public class StdioTransportTests
         Directory.CreateDirectory(directory);
         try
         {
-            var transport = new StdioTransport(FakeStdioServer.Options(
+            var transport = new StdioTransport(PlatformStdioServer.Options(
                 env: new Dictionary<string, string> { ["FAKE_MCP_VALUE"] = "hello-env" },
                 workingDirectory: directory));
             await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
@@ -53,7 +53,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Stderr_lines_are_captured_and_non_json_stdout_is_routed_to_the_log()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
         await client.ConnectAsync(CancellationToken.None);
 
@@ -65,7 +65,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Process_exit_faults_pending_requests_and_raises_closed_with_the_exit_code()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
         Exception? closedWith = null;
         var closed = new TaskCompletionSource();
@@ -78,9 +78,9 @@ public class StdioTransportTests
 
         var error = await Assert.ThrowsAsync<McpConnectionClosedException>(() => client.CallToolAsync("exit", null, CancellationToken.None));
 
-        Assert.Contains($"exited with code {FakeStdioServer.ExitCode}", error.InnerException?.Message ?? string.Empty);
+        Assert.Contains($"exited with code {PlatformStdioServer.ExitCode}", error.InnerException?.Message ?? string.Empty);
         await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Contains($"exited with code {FakeStdioServer.ExitCode}", closedWith?.Message ?? string.Empty);
+        Assert.Contains($"exited with code {PlatformStdioServer.ExitCode}", closedWith?.Message ?? string.Empty);
         Assert.False(transport.IsConnected);
         Assert.False(client.IsConnected);
     }
@@ -88,7 +88,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Graceful_close_shuts_the_child_down()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
         await client.ConnectAsync(CancellationToken.None);
         var pid = transport.ProcessId;
@@ -105,7 +105,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Graceful_close_raises_closed_once_without_an_error()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var client = new McpClient(transport, Clients.DefaultOptions(Generous));
         var closedCalls = new List<Exception?>();
         client.Closed += error => closedCalls.Add(error);
@@ -120,7 +120,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var client = new McpClient(transport, Clients.DefaultOptions(TimeSpan.FromSeconds(3)));
         await client.ConnectAsync(CancellationToken.None);
 
@@ -160,7 +160,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Sending_before_start_reports_the_process_is_not_running()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
         await using var _ = transport;
 
         var error = await Assert.ThrowsAsync<McpConnectionClosedException>(async () =>
@@ -173,7 +173,7 @@ public class StdioTransportTests
     [Fact]
     public async Task Start_is_idempotent_while_the_process_runs_and_dispose_stops_it()
     {
-        var transport = new StdioTransport(FakeStdioServer.Options());
+        var transport = new StdioTransport(PlatformStdioServer.Options());
 
         await transport.StartAsync(CancellationToken.None);
         var first = transport.ProcessId;
@@ -204,8 +204,8 @@ public class StdioTransportTests
             new McpServerConfig
             {
                 Name = "fake",
-                Command = "powershell.exe",
-                Args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", FakeStdioServer.ScriptPath],
+                Command = PlatformStdioServer.Command,
+                Args = PlatformStdioServer.Args,
             },
         ],
         []);
@@ -232,7 +232,8 @@ public class StdioTransportTests
 
         Assert.True(await Eventually.Async(() => states.Any(state => state.Status == McpServerStatus.Failed &&
                                                                      state.LastError is not null &&
-                                                                     state.LastError.Contains($"exited with code {FakeStdioServer.ExitCode}")), TimeSpan.FromSeconds(10)));
+                                                                     state.LastError.Contains($"exited with code {PlatformStdioServer.ExitCode}")), TimeSpan.FromSeconds(10)),
+            string.Join(" | ", states.Select(state => $"{state.Status}:{state.LastError}")));
         Assert.True(await Eventually.Async(() => manager.GetState("fake").IsReady, TimeSpan.FromSeconds(60)));
         var restarted = manager.GetState("fake");
         Assert.Equal(0, restarted.ConsecutiveFailures);

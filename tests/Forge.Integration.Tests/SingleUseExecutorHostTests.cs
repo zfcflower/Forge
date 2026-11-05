@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Forge.Abstractions;
@@ -288,6 +289,11 @@ internal static class HostProcessTree
             return WindowsChildPids(parentPid);
         }
 
+        if (OperatingSystem.IsMacOS())
+        {
+            return MacChildPids(parentPid);
+        }
+
         return ProcChildPids(parentPid);
     }
 
@@ -364,6 +370,51 @@ internal static class HostProcessTree
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
             {
             }
+        }
+
+        return children;
+    }
+
+    /// <summary>Reads direct children from <c>ps -axo pid=,ppid=</c>; macOS has no <c>/proc</c>, so the
+    /// Linux <see cref="ProcChildPids"/> fallback cannot see the host's worker and executor children there.</summary>
+    private static IReadOnlyList<int> MacChildPids(int parentPid)
+    {
+        var children = new List<int>();
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "/bin/ps",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-axo");
+        startInfo.ArgumentList.Add("pid=,ppid=");
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return children;
+            }
+
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            foreach (var line in output.Split('\n'))
+            {
+                var parts = line.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 &&
+                    int.TryParse(parts[0], out var pid) &&
+                    int.TryParse(parts[1], out var ppid) &&
+                    ppid == parentPid)
+                {
+                    children.Add(pid);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            return children;
         }
 
         return children;

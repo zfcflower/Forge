@@ -93,6 +93,12 @@ depends-on: [forge-ipc]
   `Failed`——谁先把状态移出 `Starting` 谁报。
 - **先等自退,超时才杀。** `StopAsync` 发 `host.stop` 并等应答;应答到手后给 Host `ProcessExitTimeout` 自行跑完关停
   (停 Worker 进程树)并以退出码 0 结束,只有超过该期限才杀进程树。没有应答(超时或连接已断)时立即清理,不再等。
+  自启进程的退出码因此可观测:`ExtensionHostClient.HostExitCode` 在本客户端**自己启动**的 Host 离开后给出该码
+  (0 = 自行退出,被杀的 POSIX 进程为 128+信号),正在跑、或本客户端只是连到外部 Host(`HostExecutablePath` 为空)
+  时为 `null`;每次 `StartAsync` 先重置为 `null`,拆除时若确实处置了自启进程则写入它的退出码(崩溃后仍保留,直到下次启动)。
+  它与 `HostProcessId` 一样只在具体类上,不在 `IExtensionHostClient`。
+  注意 `Process.GetProcessById` 拿到的 `Process` 在 Unix 上读 `ExitCode` 会抛 `InvalidOperationException`(不是本对象
+  启动的),需要退出码的调用方必须用本属性。
 - **非 UI 贡献是世代化的整数快照。** `contributions.register` 携带某插件的完整 `PluginContributionSet`,
   `contributions.unregister` 移除该插件的全部非工具贡献。替换而非追加,所以同一插件不会留下重复或过期条目;
   内容完全相同的新世代登记只更新世代号,不重建代理、不触发 `ContributionsChanged`。视图是原子替换的不可变列表

@@ -33,6 +33,23 @@ public sealed class NamedPipeTransportTests
     }
 
     [Fact]
+    public async Task Max_name_length_is_the_longest_name_a_real_pipe_accepts()
+    {
+        // The budget is derived from the platform's sockaddr_un.sun_path limit minus the temporary directory the BCL
+        // keeps the socket file in, so a name of exactly this length must bind on Linux and on macOS.
+        var name = TestFrames.Padded(IpcPipe.MaxNameLength);
+        Assert.True(IpcPipe.MaxNameLength >= 16, $"Only {IpcPipe.MaxNameLength} characters are left for a pipe name.");
+
+        var serverTask = IpcPipe.CreateServer(name);
+        await using var client = await IpcPipe.CreateClient(name).Bounded();
+        await using var server = await serverTask.Bounded();
+
+        Assert.Equal(name, server.PipeName);
+        Assert.True(client.IsConnected);
+        Assert.True(server.IsConnected);
+    }
+
+    [Fact]
     public void Transport_constructor_validates_the_pipe_name()
     {
         Assert.Throws<ArgumentException>(() => new NamedPipeClientTransport("bad/name"));

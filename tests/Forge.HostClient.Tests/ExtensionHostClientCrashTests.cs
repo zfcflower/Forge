@@ -24,7 +24,7 @@ public sealed class ExtensionHostClientCrashTests
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
-        var pending = tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), new ToolContext("s", "C:/w"), limit.Token).AsTask();
+        var pending = tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), new ToolContext("s", BoundRoots.AbsoluteDir("crash")), limit.Token).AsTask();
         await received.Task.Bounded();
         await host.DropConnectionAsync();
 
@@ -72,7 +72,7 @@ public sealed class ExtensionHostClientCrashTests
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() =>
-            tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), new ToolContext("s", "C:/w"), limit.Token).AsTask());
+            tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), new ToolContext("s", BoundRoots.AbsoluteDir("crash")), limit.Token).AsTask());
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() => client.RefreshPluginsAsync(limit.Token));
 
         Assert.Equal(HostStatus.Failed, client.Status);

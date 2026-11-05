@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Forge.HostClient;
 using Xunit;
 
@@ -46,6 +45,7 @@ public sealed class StopLifecycleTests
         await fx.Client.StartAsync(fx.Ct);
         Assert.Equal(HostStatus.Running, fx.Client.Status);
         Assert.NotEqual(firstHost, fx.Client.HostProcessId);
+        Assert.Null(fx.Client.HostExitCode);
         await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools after restart");
 
         var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"again"}""");
@@ -70,14 +70,12 @@ public sealed class StopLifecycleTests
         await fx.StartAsync();
         await fx.ApproveAsync("alpha");
         await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
-
-        var hostPid = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
-        using var host = Process.GetProcessById(hostPid);
-        var exited = host.WaitForExitAsync(fx.Ct);
+        Assert.Null(fx.Client.HostExitCode);
 
         await fx.Client.StopAsync(fx.Ct);
 
-        await exited;
-        Assert.Equal(0, host.ExitCode);
+        Assert.Equal(HostStatus.Stopped, fx.Client.Status);
+        // Exit code 0 proves the host ran its own shutdown after host.stop instead of being killed by the client.
+        Assert.Equal(0, fx.Client.HostExitCode);
     }
 }

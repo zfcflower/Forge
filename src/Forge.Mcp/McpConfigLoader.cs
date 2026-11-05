@@ -167,9 +167,13 @@ public static class McpConfigLoader
                 return null;
             }
 
-            if (url is not null && !Uri.TryCreate(url, UriKind.Absolute, out _))
+            // A streamable-HTTP server endpoint is always http(s): a bare "/mcp" is an absolute file URI on Unix and
+            // a relative one on Windows, so UriKind.Absolute alone accepts values no transport can use.
+            if (url is not null &&
+                (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
             {
-                diagnostics.Add(new McpConfigDiagnostic(source, name, $"\"url\" is not an absolute URI: {url}"));
+                diagnostics.Add(new McpConfigDiagnostic(source, name, $"\"url\" is not an absolute http or https URI: {url}"));
                 return null;
             }
 
