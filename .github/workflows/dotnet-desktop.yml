@@ -6,15 +6,25 @@
 #   - 主程序 Forge.App 按 architecture.md 第 44 条要求 **Native AOT 发布**，不是 JIT。
 #     Native AOT 不能跨操作系统交叉编译（链接器只能用目标平台的），所以 App 的发布
 #     必须分别在 Windows / Linux / macOS 的 runner 上跑；只有跨架构（linux-x64→arm64）
-#     才需要额外工具链，故矩阵先只收原生组合。
-#   - Forge.ExtensionHost / Forge.PluginWorker 是 **framework-dependent 的普通 JIT 进程**
-#     （architecture.md 第 52 条：要求用户已安装 .NET 运行时，启动时自检并报错），
-#     所以不打 self-contained，也不进 AOT。
-#   - 测试在 ubuntu + windows 上各跑一次：NamedPipe / Unix 域套接字、FileLock、
-#     Microsoft.Data.Sqlite 原生库在这些平台上的行为不同，只测 Linux 会漏掉真实缺陷。
-#   - PR 只验证，不产包；main 的 push、v* 标签、手动触发才打包；v* 标签才建 Release。
-#   - Forge.App 尚未落地时（src/Forge.App 不存在）publish 自动只打包 JIT 侧并给出
-#     warning annotation，等 App 进来后无需再改本文件。
+#     才需要额外工具链，故矩阵先只收原生组合（win-x64 / linux-x64 / osx-arm64）。
+#   - Forge.ExtensionHost / Forge.PluginWorker / Forge.ScriptExecutor 是
+#     **framework-dependent 的普通 JIT 进程**（architecture.md 第 52 条：要求用户已安装
+#     .NET 运行时，启动时自检并报错），所以不打 self-contained，也不进 AOT。
+#   - CI 分两条测试链，三平台都跑：
+#       * Debug：完整集成测试。Host 的测试钩子（IHostTestHook / FileHostTestHook）只在
+#         Debug 构建里编译，依赖钩子的竞态覆盖必须在 Debug 下跑。
+#       * Release：构建 + 其余全部测试 + 生产钩子拒用验证。Release 不编译进测试钩子，
+#         由 tests/Forge.Integration.Tests/ReleaseHookAbsenceTests.cs 断言生产 Host 程序集
+#         不含这两个类型；依赖 Debug 钩子的 3 个测试用 --filter 排除（不在 Release 里
+#         跑 Debug 才有的断言）。
+#   - AOT 验证覆盖 Forge.App 本身：三平台 dotnet publish -p:PublishAot=true。仓库
+#     Directory.Build.props 全局 TreatWarningsAsErrors=true，AOT 步骤再显式带一次，
+#     IL/AOT/trim 警告一律视为失败。PR 也跑 AOT 验证（代价见下），但不产包；main 的
+#     push、v* 标签、手动触发才打包；v* 标签才建 Release。
+#   - tools/Forge.Smoke 是 Native AOT 冒烟代理：起真实 JIT Host / Worker / 一次性
+#     ScriptExecutor 后经 HostClient 做 plugins.status + run_code 往返。Forge.App 存在时
+#     App 与 Smoke 都发布并冒烟；若 App 目录被移除，Smoke 仍保留 AOT↔JIT 验证入口，
+#     绝不静默跳过 AOT 验证。
 #   - SDK 版本由仓库根的 global.json 钉死（10.0.403，rollForward latestPatch），
 #     环境变量 DOTNET_SDK_VERSION 与它保持一致；改版本时两处一起改。
 #   - macOS 产物未签名/未公证（无 Apple Developer 证书），用户首次运行需去隔离属性；
@@ -54,9 +64,57 @@ env:
   FORGE_ARTIFACT_PREFIX: Forge
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
+  test-debug:
+    name: Test Debug (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore "${{ env.FORGE_SOLUTION }}"
+
+      - name: Build
+        run: dotnet build "${{ env.FORGE_SOLUTION }}" -c Debug --no-restore
+
+      # Debug 集成测试：Host 的测试钩子只在 Debug 构建里编译，竞态/归属覆盖必须在这条链跑。
+      - name: Test
+        run: dotnet test "${{ env.FORGE_SOLUTION }}" -c Debug --no-build --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-debug-${{ matrix.os }}
+          path: TestResults/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test-release:
+    name: Test Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -83,25 +141,33 @@ jobs:
       - name: Build
         run: dotnet build "${{ env.FORGE_SOLUTION }}" -c Release --no-restore
 
-      # 16 个测试项目：VSTest 模式（无 global.json 的 SDK 10 默认），xunit v2。
+      # Release 测试：排除依赖 Debug 钩子的 3 个测试（它们会按 HostTestHooks.Require() 明确失败，
+      # 而不是静默通过）；ReleaseHookAbsenceTests 在此链里验证生产 Host 程序集不含钩子类型。
       - name: Test
-        run: dotnet test "${{ env.FORGE_SOLUTION }}" -c Release --no-build --logger trx --results-directory TestResults
+        run: |
+          dotnet test "${{ env.FORGE_SOLUTION }}" -c Release --no-build \
+            --filter "FullyQualifiedName!=Forge.Integration.Tests.EntryLifecycleTests.Execute_paused_before_its_gate_never_runs_a_plugin_that_refresh_removed&FullyQualifiedName!=Forge.Integration.Tests.EntryLifecycleTests.Execute_paused_before_its_gate_never_runs_the_version_a_prebuilt_switch_replaced&FullyQualifiedName!=Forge.Integration.Tests.ProcessOwnershipTests.A_worker_that_cannot_be_contained_is_killed_and_the_start_fails" \
+            --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results-release-${{ matrix.os }}
           path: TestResults/
           if-no-files-found: ignore
           retention-days: 7
 
   publish:
-    name: Publish (${{ matrix.rid }})
-    needs: test
-    # PR 只验证构建和测试，不产出发布包；main 的 push、tag、手动触发才打包
-    if: github.event_name != 'pull_request'
+    name: Publish / AOT verify (${{ matrix.rid }})
+    needs: [ test-debug, test-release ]
+    # PR 也跑 AOT 验证（Forge.App + Forge.Smoke 都发布并冒烟），只是不产包；
+    # main 的 push、tag、手动触发才打包。AOT 是主程序的硬性发布路径，放进 PR 是让
+    # 引入反射/修剪不兼容的改动在合并前就失败，代价是每次 PR 多付三平台 Native AOT 发布时间。
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +206,8 @@ jobs:
             echo "version=0.0.0-ci.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Forge.App 还没落地时不要整个 publish 挂掉：只打包 JIT 侧，并留下 warning。
+      # Forge.App 现在已落地；保留探测只是为了让"App 目录被移除时"仍走 Smoke 代理冒烟，
+      # 而不是把整个 AOT 验证静默跳过。
       - name: Detect main app project
         id: app
         shell: bash
@@ -149,19 +216,21 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Forge.App missing::$FORGE_APP_PROJECT 不存在，本次只发布 ExtensionHost / PluginWorker。"
+            echo "::warning title=Forge.App missing::$FORGE_APP_PROJECT 不存在，本次用 Forge.Smoke 代理验证 AOT↔JIT 往返。"
           fi
 
-      # Native AOT 需要目标平台的 C 工具链；Windows/macOS runner 自带 MSVC / Xcode CLT。
+      # Native AOT 需要目标平台的 C 工具链：Windows/macOS runner 自带 MSVC / Xcode CLT；
+      # Linux 需要 clang 与 zlib1g-dev（ubuntu runner 默认没有，必须显式安装）。Smoke 的
+      # AOT 发布同样需要它们，所以不按 App 是否存在收窄。
       - name: Install Native AOT prerequisites
-        if: runner.os == 'Linux' && steps.app.outputs.present == 'true'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang zlib1g-dev
 
-      # Host 与 Worker 发布到同一目录，保证它们与主程序并排部署。
+      # Host / Worker / Executor 发布到同一目录，保证它们与主程序并排部署。
       # framework-dependent：不包 .NET 运行时，体积小；运行期缺失由 Host 自检并报错。
-      - name: Publish ExtensionHost and PluginWorker (JIT)
+      - name: Publish ExtensionHost, PluginWorker and ScriptExecutor (JIT)
         shell: bash
         env:
           RID: ${{ matrix.rid }}
@@ -190,18 +259,21 @@ jobs:
           if [ "$RUNNER_OS" != "Windows" ]; then
             strip_flag="-p:StripSymbols=true"
           fi
+          # TreatWarningsAsErrors 已在 Directory.Build.props 全局开启，这里再显式带一次：
+          # IL/AOT/trim 警告一旦出现就使 publish 失败。
           dotnet publish "$FORGE_APP_PROJECT" \
             -c Release \
             -r "$RID" \
             -p:PublishAot=true \
             -p:SelfContained=true \
+            -p:TreatWarningsAsErrors=true \
             -p:Version="$VERSION" \
             $strip_flag \
             -o "publish/$RID"
 
-      # Forge.App 尚未落地时，用 Native AOT 的 Forge.Smoke 代理做三平台冒烟：它定位同目录的 JIT Host、
-      # Worker 与一次性 ScriptExecutor，起 Host 后经 HostClient 做 plugins.status + run_code 往返，断言 SMOKE OK。
-      # 这是 architecture.md 第 44 条 AOT↔JIT 往返的验证，不静默跳过。
+      # Forge.Smoke 是 AOT↔JIT 边界的代理冒烟：起真实 JIT Host / Worker / 一次性
+      # ScriptExecutor，经 HostClient 做 plugins.status + run_code 往返，断言 SMOKE OK。
+      # 它随 App 一起发布（App 缺失时它是唯一的 AOT 验证入口）。
       - name: Publish Forge.Smoke (Native AOT)
         shell: bash
         env:
@@ -214,6 +286,7 @@ jobs:
             -r "$RID" \
             -p:PublishAot=true \
             -p:SelfContained=true \
+            -p:TreatWarningsAsErrors=true \
             -p:Version="$VERSION" \
             -o "publish/$RID"
 
@@ -230,6 +303,7 @@ jobs:
           fi
 
       - name: Package
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           RID: ${{ matrix.rid }}
@@ -257,6 +331,7 @@ jobs:
           ls -1 "publish/$RID"
 
       - name: Upload package
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.rid }}
@@ -271,6 +346,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Download packages
         uses: actions/download-artifact@v8
