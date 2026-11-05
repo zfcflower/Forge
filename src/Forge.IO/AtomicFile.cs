@@ -38,6 +38,7 @@ public static class AtomicFile
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize))
             {
                 stream.Write(data);
+                cancellationToken.ThrowIfCancellationRequested();
                 stream.Flush(flushToDisk: true);
             }
         }
@@ -128,6 +129,7 @@ public static class AtomicFile
             await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous))
             {
                 await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 stream.Flush(flushToDisk: true);
             }
         }

@@ -185,11 +185,16 @@ public class AtomicFileWriteTests
     [InlineData(true)]
     public async Task Cancelling_during_the_replace_retry_throws_and_keeps_the_old_bytes(bool useAsync)
     {
+        // The whole write, so the temporary file is created and flushed inside the measured call. Those two steps are
+        // file system calls the BCL cannot cancel and a slow or scanned disk can stall them for seconds, so the bound
+        // is the retry budget: an implementation that ignored the token would keep retrying until the budget ran out
+        // and rethrow the sharing violation instead of the cancellation.
         using var directory = new TestDirectory();
         var path = directory.File("state.json");
         var original = Encode(1);
         File.WriteAllBytes(path, original);
-        var options = new AtomicFileOptions { RetryBudget = TimeSpan.FromSeconds(10) };
+        var budget = TimeSpan.FromSeconds(10);
+        var options = new AtomicFileOptions { RetryBudget = budget };
         using var cancellation = new CancellationTokenSource(CancelDelay);
 
         Exception? exception;
@@ -204,7 +209,7 @@ public class AtomicFileWriteTests
         if (OperatingSystem.IsWindows())
         {
             Assert.IsAssignableFrom<OperationCanceledException>(exception);
-            Assert.True(elapsed < TimeSpan.FromSeconds(5), $"the cancelled write returned after {elapsed.TotalMilliseconds:F0} ms");
+            Assert.True(elapsed < budget, $"the cancelled write returned after {elapsed.TotalMilliseconds:F0} ms, so the budget ended it instead of the token");
             Assert.Equal(original, File.ReadAllBytes(path));
         }
         else
@@ -213,6 +218,47 @@ public class AtomicFileWriteTests
             Assert.Equal(Encode(2), File.ReadAllBytes(path));
         }
 
+        Assert.Empty(directory.TemporaryFiles());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancelling_the_retry_of_a_prepared_file_throws_without_waiting_for_the_budget(bool useAsync)
+    {
+        // Only the retry loop is measured: the temporary file is written and flushed before the timer starts.
+        using var directory = new TestDirectory();
+        var path = directory.File("state.json");
+        var original = Encode(1);
+        File.WriteAllBytes(path, original);
+        var prepared = PreparedTemporary(path, Encode(2));
+        var options = new AtomicFileOptions { RetryBudget = TimeSpan.FromSeconds(10) };
+        using var cancellation = new CancellationTokenSource(CancelDelay);
+
+        Exception? exception;
+        TimeSpan elapsed;
+        using (OpenLikeReader(path))
+        {
+            var start = Stopwatch.GetTimestamp();
+            exception = await Record.ExceptionAsync(() => PublishAsync(useAsync, prepared, path, options, cancellation.Token));
+            elapsed = Stopwatch.GetElapsedTime(start);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.IsAssignableFrom<OperationCanceledException>(exception);
+            Assert.True(
+                elapsed < CancelDelay + CancelLatencyLimit,
+                $"the cancelled retry returned after {elapsed.TotalMilliseconds:F0} ms for a cancellation requested after {CancelDelay.TotalMilliseconds:F0} ms");
+            Assert.Equal(original, File.ReadAllBytes(path));
+        }
+        else
+        {
+            Assert.Null(exception);
+            Assert.Equal(Encode(2), File.ReadAllBytes(path));
+        }
+
+        Assert.False(File.Exists(prepared), "the cancelled publish kept its temporary file");
         Assert.Empty(directory.TemporaryFiles());
     }
 
@@ -274,7 +320,9 @@ public class AtomicFileWriteTests
             elapsed = Stopwatch.GetElapsedTime(start);
 
             Assert.IsType<UnauthorizedAccessException>(exception);
-            Assert.True(elapsed < budget / 10, $"the write gave up after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+            // Half the budget: the write still creates and flushes its temporary file first, and a single stalled file
+            // system call has been measured at 300 ms on a scanned disk, while a retried failure costs the whole budget.
+            Assert.True(elapsed < budget / 2, $"the write gave up after {elapsed.TotalMilliseconds:F0} ms, so it was retried");
             Assert.Equal(original, File.ReadAllBytes(path));
             Assert.Equal(1, Decode(File.ReadAllBytes(path)).Count);
             AssertStillReadOnly(path);
@@ -326,7 +374,8 @@ public class AtomicFileWriteTests
         var elapsed = Stopwatch.GetElapsedTime(start);
 
         Assert.True(exception is IOException or UnauthorizedAccessException, exception?.GetType().FullName);
-        Assert.True(elapsed < budget / 10, $"the failure took {elapsed.TotalMilliseconds:F0} ms, so it was retried");
+        // Half the budget for the same reason as the read-only case above.
+        Assert.True(elapsed < budget / 2, $"the failure took {elapsed.TotalMilliseconds:F0} ms, so it was retried");
         Assert.True(Directory.Exists(path));
         Assert.Empty(directory.TemporaryFiles());
     }
@@ -365,6 +414,32 @@ public class AtomicFileWriteTests
         {
             AtomicFile.WriteAllBytes(path, data, options, token);
         }
+    }
+
+    private static async Task PublishAsync(bool useAsync, string temporary, string path, AtomicFileOptions? options, CancellationToken token)
+    {
+        if (useAsync)
+        {
+            await AtomicFile.ReplaceFileAsync(temporary, path, options, token);
+        }
+        else
+        {
+            AtomicFile.ReplaceFile(temporary, path, options, token);
+        }
+    }
+
+    /// <summary>Writes and flushes a temporary file the way a streaming caller would, so a test can time the publish
+    /// alone.</summary>
+    private static string PreparedTemporary(string path, byte[] data)
+    {
+        var temporary = path + ".prepared.tmp";
+        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096))
+        {
+            stream.Write(data);
+            stream.Flush(flushToDisk: true);
+        }
+
+        return temporary;
     }
 
     private static FileStream OpenLikeReader(string path) =>

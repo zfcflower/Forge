@@ -9,6 +9,9 @@ public class AtomicJsonStoreTests
     private const int StoreInstanceCount = 8;
     private const int UpdatesPerInstance = 100;
     private const int ChildUpdates = 100;
+
+    // The child process needs its runtime, the test assembly and JIT started before it can take the lock.
+    private static readonly TimeSpan ChildStartAllowance = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ShortTimeout = TimeSpan.FromMilliseconds(200);
 
     [Fact]
@@ -102,16 +105,9 @@ public class AtomicJsonStoreTests
     {
         using var directory = new TestDirectory();
         var path = directory.File("settings.json");
+        var budget = UpdateSeriesLimit(directory.Path, StoreInstanceCount * UpdatesPerInstance);
 
-        var tasks = Enumerable.Range(0, StoreInstanceCount).Select(_ => Task.Run(() =>
-        {
-            var store = NewStore(path, TestLimit);
-            for (var update = 0; update < UpdatesPerInstance; update++)
-            {
-                store.Update(Increment);
-            }
-        })).ToArray();
-        await Task.WhenAll(tasks).WaitAsync(TestLimit);
+        await RunUpdatesAsync(path, budget, StoreInstanceCount * UpdatesPerInstance);
 
         Assert.Equal(StoreInstanceCount * UpdatesPerInstance, NewStore(path).Read().Count);
     }
@@ -121,21 +117,17 @@ public class AtomicJsonStoreTests
     {
         using var directory = new TestDirectory();
         var path = directory.File("settings.json");
+        var budget = UpdateSeriesLimit(
+            directory.Path,
+            StoreInstanceCount * UpdatesPerInstance + ChildUpdates,
+            ChildStartAllowance);
         using var child = ChildProcess.Start(ChildProcess.IncrementMode, path, ChildUpdates);
         try
         {
-            var tasks = Enumerable.Range(0, StoreInstanceCount).Select(_ => Task.Run(() =>
-            {
-                var store = NewStore(path, TestLimit);
-                for (var update = 0; update < UpdatesPerInstance; update++)
-                {
-                    store.Update(Increment);
-                }
-            })).ToArray();
-            await Task.WhenAll(tasks).WaitAsync(TestLimit);
+            await RunUpdatesAsync(path, budget, StoreInstanceCount * UpdatesPerInstance);
 
-            var output = await child.StandardOutput.ReadToEndAsync().WaitAsync(TestLimit);
-            await child.WaitForExitAsync().WaitAsync(TestLimit);
+            var output = await child.StandardOutput.ReadToEndAsync().WaitAsync(budget.Limit);
+            await child.WaitForExitAsync().WaitAsync(budget.Limit);
 
             Assert.Equal(0, child.ExitCode);
             Assert.Equal(ChildProcess.DoneLine, output.Trim());
@@ -320,9 +312,56 @@ public class AtomicJsonStoreTests
         Assert.Equal(Path.GetFullPath(relative), store.Path);
     }
 
+    [Theory]
+    [InlineData(1, 800, 0, 30)]       // a fast disk keeps the historical 30 s limit
+    [InlineData(10, 800, 0, 64)]      // 10 ms per update buys 8 x 10 ms x 800 updates
+    [InlineData(40, 900, 10, 120)]    // a slow disk with a child process never pushes the limit past two minutes
+    public void The_update_series_limit_follows_the_measured_cost_but_stays_within_bounds(
+        double perUpdateMs,
+        int updates,
+        double allowanceSeconds,
+        double expectedSeconds)
+    {
+        var limit = SeriesLimit(
+            TimeSpan.FromMilliseconds(perUpdateMs),
+            updates,
+            TimeSpan.FromSeconds(allowanceSeconds));
+
+        Assert.Equal(expectedSeconds, limit.TotalSeconds, precision: 6);
+    }
+
     private static TestState Increment(TestState state)
     {
         state.Count++;
         return state;
+    }
+
+    /// <summary>Runs the eight concurrent update series and fails with the measured per-update cost when they do not
+    /// finish inside <paramref name="budget" />. The workers honour the cancellation token so a failed run stops
+    /// writing instead of hammering the disk from behind the test.</summary>
+    private static async Task RunUpdatesAsync(string path, (TimeSpan PerUpdate, TimeSpan Limit) budget, int updates)
+    {
+        using var stop = new CancellationTokenSource();
+        var tasks = Enumerable.Range(0, StoreInstanceCount).Select(_ => Task.Run(() =>
+        {
+            var store = NewStore(path, TestLimit);
+            for (var update = 0; update < UpdatesPerInstance; update++)
+            {
+                store.Update(Increment, stop.Token);
+            }
+        })).ToArray();
+        var all = Task.WhenAll(tasks);
+
+        try
+        {
+            await all.WaitAsync(budget.Limit);
+        }
+        catch (TimeoutException)
+        {
+            stop.Cancel();
+            await all.ContinueWith(_ => { }, TaskScheduler.Default);
+            Assert.Fail(
+                $"{updates} updates did not finish within {budget.Limit.TotalSeconds:F0} s; one update measured {budget.PerUpdate.TotalMilliseconds:F1} ms on this machine");
+        }
     }
 }
