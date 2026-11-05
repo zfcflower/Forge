@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using Avalonia.Media;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.Workspace;
 using ICommand = System.Windows.Input.ICommand;
@@ -58,6 +59,8 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     private string statusText = string.Empty;
     private AgentState agentState = AgentState.Ended;
     private Geometry icon = TreeIcons.Session;
+    private int historyCount;
+    private bool archived;
 
     public TreeNodeViewModel(TreeNodeKind kind)
     {
@@ -106,15 +109,55 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         OnPropertyChanged(nameof(Guides));
     }
 
+    /// <summary>
+    /// The row label. Project, worktree, session and agent rows show stored data (a name, a title, a task); the general
+    /// and history rows have no data of their own, so their label is resolved in the current language on every read.
+    /// </summary>
     public string Title
     {
-        get => title;
+        get => Kind switch
+        {
+            TreeNodeKind.General => ProjectStrings.GeneralSection,
+            TreeNodeKind.History => ProjectStrings.HistoryTitle(historyCount),
+            _ => title,
+        };
         set => Set(ref title, value);
     }
 
+    /// <summary>Archived sessions of a history row; the row title is formatted from it, so it follows the language too.</summary>
+    public int HistoryCount
+    {
+        get => historyCount;
+        set
+        {
+            if (Set(ref historyCount, value))
+            {
+                OnPropertyChanged(nameof(Title));
+            }
+        }
+    }
+
+    /// <summary>True for an archived session row: its subtitle is the archived label, resolved on read.</summary>
+    public bool IsArchived
+    {
+        get => archived;
+        set
+        {
+            if (archived == value)
+            {
+                return;
+            }
+
+            archived = value;
+            OnPropertyChanged(nameof(Subtitle));
+            OnPropertyChanged(nameof(HasSubtitle));
+        }
+    }
+
+    /// <summary>The grey second line: a path, the last-active stamp, or the archived label of a session row.</summary>
     public string Subtitle
     {
-        get => subtitle;
+        get => archived ? ProjectStrings.ArchivedSubtitle : subtitle;
         set
         {
             if (Set(ref subtitle, value))
@@ -124,7 +167,7 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         }
     }
 
-    public bool HasSubtitle => subtitle.Length > 0;
+    public bool HasSubtitle => archived || subtitle.Length > 0;
 
     public bool IsExpanded
     {
@@ -160,7 +203,18 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         }
     }
 
-    public string RunningText => isRunning ? Strings.RunningLabel() : string.Empty;
+    public string RunningText => isRunning ? ProjectStrings.RunningLabel : string.Empty;
+
+    /// <summary>
+    /// Re-raises the labels this row resolves from the current language. The owning panel calls it on a language switch;
+    /// a row must not subscribe to the language event itself, or every tree row would outlive the tree inside the string table.
+    /// </summary>
+    public void RefreshText()
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Subtitle));
+        OnPropertyChanged(nameof(RunningText));
+    }
 
     /// <summary>The state line of the row: an agent's run state, or empty when the row has none.</summary>
     public string StatusText
@@ -284,6 +338,12 @@ internal sealed record TreeNodePlan(
 
     /// <summary>The run state shown on an agent row, empty when the row has none.</summary>
     public string StatusText { get; init; } = string.Empty;
+
+    /// <summary>Archived sessions of a history row; the row formats its title from it in the current language.</summary>
+    public int HistoryCount { get; init; }
+
+    /// <summary>True for an archived session row, whose subtitle is the archived label instead of the last-active stamp.</summary>
+    public bool IsArchived { get; init; }
 }
 
 /// <summary>One agent of a session as the left panel shows it: the main agent, or a sub-agent and its parent link.</summary>
@@ -301,7 +361,7 @@ internal sealed record AgentNodeSnapshot(
 /// archived history of each worktree. A new session on a project creates an isolated worktree; on a worktree it shares it.
 /// A refresh is planned off the dispatcher and merged into the existing nodes, so expansion and scroll position survive.
 /// </summary>
-internal sealed class ProjectTreeViewModel : ObservableObject
+internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
 {
     private readonly IProjectRegistry projects;
     private readonly ISessionCatalog catalog;
@@ -314,7 +374,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
     private readonly FlatTree<TreeNodeViewModel> tree = new();
     private bool busy;
     private bool refreshPending;
-    private string statusText = string.Empty;
+    private LocText status;
 
     public ProjectTreeViewModel(
         IProjectRegistry projects,
@@ -337,6 +397,10 @@ internal sealed class ProjectTreeViewModel : ObservableObject
         AddProjectCommand = new AsyncRelayCommand(ct => addProject(ct), () => true, OnFailed);
         GeneralSessionCommand = new AsyncRelayCommand(ct => CreateGeneralSessionAsync(ct), () => true, OnFailed);
         RefreshCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
+
+        // The tree is a long-lived owner: it is the one that hears a language switch and pushes the rows to re-render.
+        // Rows stay unsubscribed (RefreshText is called on them), so closing a window does not leave rows in the table.
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     public ObservableCollection<TreeNodeViewModel> Sections { get; } = [];
@@ -364,13 +428,16 @@ internal sealed class ProjectTreeViewModel : ObservableObject
     /// <summary>Called after a session was archived, so the shell can drop its runtime when nothing else uses it.</summary>
     public Action<string>? SessionArchived { get; set; }
 
-    public string StatusText
-    {
-        get => statusText;
-        private set => Set(ref statusText, value);
-    }
+    /// <summary>The status line under the add-project button: stored as a key, so it re-renders when the language changes.</summary>
+    public string StatusText => status.Resolve();
 
-    public bool HasStatusText => statusText.Length > 0;
+    public bool HasStatusText => !status.IsEmpty;
+
+    /// <summary>
+    /// Releases the language subscription. The tree is the owner the rows are refreshed from, so nothing else has to be
+    /// unsubscribed; the call is idempotent.
+    /// </summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 
     /// <summary>Registers the general workspace project and rebuilds the tree.</summary>
     public async Task InitializeAsync(string generalPath, CancellationToken ct)
@@ -384,8 +451,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
-            StatusText = Strings.GeneralWorkspaceFailed(exception.Message);
-            OnPropertyChanged(nameof(HasStatusText));
+            SetStatus(ProjectStrings.GeneralWorkspaceFailed(exception.Message));
         }
 
         await RefreshAsync(ct).ConfigureAwait(true);
@@ -495,14 +561,12 @@ internal sealed class ProjectTreeViewModel : ObservableObject
             Merge(Sections, plans);
             RebuildRows();
             GeneralSection = Sections.FirstOrDefault(static node => node.Kind == TreeNodeKind.General);
-            StatusText = all.Count <= 1 ? Strings.EmptyProjects : string.Empty;
-            OnPropertyChanged(nameof(HasStatusText));
+            SetStatus(all.Count <= 1 ? ProjectStrings.EmptyProjects : default);
             OnPropertyChanged(nameof(SectionCount));
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
-            StatusText = Strings.ProjectTreeFailed(exception.Message);
-            OnPropertyChanged(nameof(HasStatusText));
+            SetStatus(ProjectStrings.TreeFailed(exception.Message));
         }
     }
 
@@ -571,7 +635,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
         return new TreeNodePlan(
             TreeNodeKind.General,
             "general:" + project.Id,
-            Strings.GeneralSection,
+            string.Empty, // the row resolves its label in the current language
             project.RootPath,
             false,
             project,
@@ -646,7 +710,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
         new(
             TreeNodeKind.History,
             "history:" + project.Id + "|" + worktreePath,
-            Strings.HistoryTitle(sessions.Count),
+            string.Empty, // the row formats its label from HistoryCount in the current language
             string.Empty,
             false,
             project,
@@ -654,7 +718,10 @@ internal sealed class ProjectTreeViewModel : ObservableObject
             worktreePath,
             null,
             true,
-            sessions.Select(session => PlanSession(session, running, agents)).ToArray());
+            sessions.Select(session => PlanSession(session, running, agents)).ToArray())
+        {
+            HistoryCount = sessions.Count,
+        };
 
     private static TreeNodePlan PlanSession(
         SessionInfo session,
@@ -664,16 +731,17 @@ internal sealed class ProjectTreeViewModel : ObservableObject
             TreeNodeKind.Session,
             "session:" + session.Id,
             session.Title,
-            session.Status == SessionStatus.Archived
-                ? Strings.ArchivedSubtitle()
-                : session.LastActiveAt.ToLocalTime().ToString("MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            session.Status == SessionStatus.Archived ? string.Empty : TextFormat.ShortStamp(session.LastActiveAt),
             running.Contains(session.Id),
             null,
             session,
             session.WorktreePath ?? session.WorkspacePath,
             session.Branch,
             false,
-            agents.TryGetValue(session.Id, out var snapshot) && snapshot.Count > 0 ? PlanAgents(snapshot) : []);
+            agents.TryGetValue(session.Id, out var snapshot) && snapshot.Count > 0 ? PlanAgents(snapshot) : [])
+        {
+            IsArchived = session.Status == SessionStatus.Archived,
+        };
 
     /// <summary>Nests a session's agents by the parent link into 主 Agent → 子 Agent → 孙 Agent rows.</summary>
     internal static List<TreeNodePlan> PlanAgents(IReadOnlyList<AgentNodeSnapshot> snapshot)
@@ -815,6 +883,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject
     private void Apply(TreeNodeViewModel node, TreeNodePlan plan)
     {
         node.Update(plan.Title, plan.Subtitle, plan.IsRunning);
+        node.HistoryCount = plan.HistoryCount;
+        node.IsArchived = plan.IsArchived;
         node.StatusText = plan.StatusText;
         node.Icon = IconOf(plan);
         switch (plan.Kind)
@@ -885,8 +955,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject
                 {
                     var general = await projects.ListAsync(backgroundToken).ConfigureAwait(false);
                     var project = general.FirstOrDefault(static p => p.Kind == ProjectKind.General)
-                                  ?? throw new InvalidOperationException(Strings.GeneralWorkspaceMissing());
-                    var title = Strings.GeneralSessionTitle();
+                                  ?? throw new InvalidOperationException(ProjectStrings.GeneralWorkspaceMissing);
+                    var title = ProjectStrings.GeneralSessionTitle();
                     var scratch = WorktreeService.CreateScratchFolder(project.RootPath, title);
                     return await catalog.CreateAsync(
                             new SessionCreate(scratch, title) { ProjectId = project.Id },
@@ -903,10 +973,10 @@ internal sealed class ProjectTreeViewModel : ObservableObject
                 {
                     if (!await worktrees.IsRepositoryAsync(project.RootPath, backgroundToken).ConfigureAwait(false))
                     {
-                        throw new InvalidOperationException(Strings.NotAGitRepository());
+                        throw new InvalidOperationException(ProjectStrings.NotAGitRepository);
                     }
 
-                    var title = Strings.WorktreeSessionTitle();
+                    var title = ProjectStrings.WorktreeSessionTitle();
                     var worktree = await worktrees.CreateAsync(project.RootPath, title, backgroundToken).ConfigureAwait(false);
                     return await catalog.CreateAsync(
                             new SessionCreate(worktree.Path, title)
@@ -926,7 +996,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
             token => BackgroundRead.RunAsync(
                 token2 =>
                 {
-                    var title = Strings.WorktreeSessionTitle();
+                    var title = ProjectStrings.WorktreeSessionTitle();
                     return catalog.CreateAsync(
                         new SessionCreate(worktreePath, title)
                         {
@@ -949,8 +1019,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is GitException or InvalidOperationException or IOException or ArgumentException)
         {
-            StatusText = exception.Message;
-            OnPropertyChanged(nameof(HasStatusText));
+            SetStatus(LocText.Literal(exception.Message));
         }
     }
 
@@ -965,7 +1034,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
 
     private async Task RenameSessionAsync(SessionInfo session, CancellationToken ct)
     {
-        var title = await promptText(Strings.RenameSessionTitle(), session.Title).ConfigureAwait(true);
+        var title = await promptText(ProjectStrings.RenameSessionTitle, session.Title).ConfigureAwait(true);
         if (!string.IsNullOrWhiteSpace(title))
         {
             await RenameAsync(session.Id, title.Trim(), ct).ConfigureAwait(true);
@@ -974,7 +1043,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject
 
     private async Task RenameProjectAsync(ProjectInfo project, CancellationToken ct)
     {
-        var name = await promptText(Strings.RenameProjectTitle(), project.Name).ConfigureAwait(true);
+        var name = await promptText(ProjectStrings.RenameProjectTitle, project.Name).ConfigureAwait(true);
         if (!string.IsNullOrWhiteSpace(name))
         {
             var trimmed = name.Trim();
@@ -986,13 +1055,33 @@ internal sealed class ProjectTreeViewModel : ObservableObject
     private Task<IReadOnlyList<SessionInfo>> QueryAllSessionsAsync(CancellationToken ct) =>
         catalog.QueryAsync(new SessionQuery { ParentSessionId = string.Empty }, ct);
 
-    private void OnFailed(Exception exception) =>
-        StatusText = exception.Message;
+    private void OnFailed(Exception exception) => SetStatus(LocText.Literal(exception.Message));
 
-    private void RefreshCommands()
+    /// <summary>A language switch re-renders the stored status line and every row's label; the rows compute their text on read.</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshStatus();
+        foreach (var node in Enumerate(Sections))
+        {
+            node.RefreshText();
+        }
+    }
+
+    private void SetStatus(LocText text)
+    {
+        status = text;
+        RefreshStatus();
+    }
+
+    private void RefreshStatus()
     {
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(HasStatusText));
+    }
+
+    private void RefreshCommands()
+    {
+        RefreshStatus();
         AddProjectCommand.NotifyCanExecuteChanged();
         GeneralSessionCommand.NotifyCanExecuteChanged();
         RefreshCommand.NotifyCanExecuteChanged();

@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.ProjectView"
              x:DataType="vm:ProjectTreeViewModel">
   <UserControl.Resources>
@@ -21,12 +22,12 @@
       <Border Classes="tree-row">
         <Border.ContextMenu>
           <ContextMenu>
-            <MenuItem Header="新建会话" Command="{Binding NewSessionCommand}" />
-            <MenuItem Header="重命名" Command="{Binding RenameCommand}" />
-            <MenuItem Header="归档" Command="{Binding ArchiveCommand}" />
-            <MenuItem Header="在资源管理器中打开" Command="{Binding RevealCommand}" />
+            <MenuItem Header="{Binding [project.newSession], Source={x:Static loc:Loc.Instance}}" Command="{Binding NewSessionCommand}" />
+            <MenuItem Header="{Binding [project.rename], Source={x:Static loc:Loc.Instance}}" Command="{Binding RenameCommand}" />
+            <MenuItem Header="{Binding [project.archive], Source={x:Static loc:Loc.Instance}}" Command="{Binding ArchiveCommand}" />
+            <MenuItem Header="{Binding [project.reveal], Source={x:Static loc:Loc.Instance}}" Command="{Binding RevealCommand}" />
             <Separator />
-            <MenuItem Header="移除项目(仅取消注册)" Command="{Binding RemoveCommand}" />
+            <MenuItem Header="{Binding [project.remove], Source={x:Static loc:Loc.Instance}}" Command="{Binding RemoveCommand}" />
           </ContextMenu>
         </Border.ContextMenu>
         <Grid ColumnDefinitions="Auto,*">
@@ -74,8 +75,9 @@
                         Height="20"
                         Command="{Binding NewSessionCommand}"
                         IsVisible="{Binding HasNewSession}"
-                        ToolTip.Tip="新建会话"
-                        AutomationProperties.AutomationId="project-new-session" AutomationProperties.Name="新建会话">
+                        ToolTip.Tip="{Binding [project.newSessionTooltip], Source={x:Static loc:Loc.Instance}}"
+                        AutomationProperties.AutomationId="project-new-session"
+                        AutomationProperties.Name="{Binding [project.newSessionTooltip], Source={x:Static loc:Loc.Instance}}">
                   <PathIcon Data="{StaticResource IconPlusSmall}" Width="9" Height="9" />
                 </Button>
                 <Button Grid.Column="4"
@@ -84,8 +86,9 @@
                         Height="20"
                         Command="{Binding OpenCommand}"
                         IsVisible="{Binding HasOpen}"
-                        ToolTip.Tip="打开"
-                        AutomationProperties.AutomationId="project-open-session" AutomationProperties.Name="打开会话">
+                        ToolTip.Tip="{Binding [project.open], Source={x:Static loc:Loc.Instance}}"
+                        AutomationProperties.AutomationId="project-open-session"
+                        AutomationProperties.Name="{Binding [project.openSessionName], Source={x:Static loc:Loc.Instance}}">
                   <TextBlock Classes="glyph" Text="›" />
                 </Button>
               </Grid>
@@ -131,15 +134,17 @@
         <Button Grid.Column="1"
                 Classes="ghost icon"
                 Command="{Binding GeneralSessionCommand}"
-                ToolTip.Tip="新建常规对话"
-                AutomationProperties.AutomationId="new-general-session" AutomationProperties.Name="新建常规对话">
+                ToolTip.Tip="{Binding [project.newGeneralSession], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="new-general-session"
+                AutomationProperties.Name="{Binding [project.newGeneralSession], Source={x:Static loc:Loc.Instance}}">
           <PathIcon Data="{StaticResource IconPlus}" Width="10" Height="10" />
         </Button>
         <Button Grid.Column="2"
                 Classes="ghost icon"
                 Command="{Binding RefreshCommand}"
-                ToolTip.Tip="刷新"
-                AutomationProperties.AutomationId="refresh-projects" AutomationProperties.Name="刷新项目">
+                ToolTip.Tip="{Binding [project.refresh], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="refresh-projects"
+                AutomationProperties.Name="{Binding [project.refreshProjectsName], Source={x:Static loc:Loc.Instance}}">
           <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
         </Button>
       </Grid>
@@ -149,9 +154,10 @@
             Classes="primary"
             Margin="8,6"
             HorizontalAlignment="Stretch"
-            Content="+ 添加项目"
+            Content="{Binding [project.addProject], Source={x:Static loc:Loc.Instance}}"
             Command="{Binding AddProjectCommand}"
-            AutomationProperties.AutomationId="add-project" AutomationProperties.Name="添加项目" />
+            AutomationProperties.AutomationId="add-project"
+            AutomationProperties.Name="{Binding [project.addProjectName], Source={x:Static loc:Loc.Instance}}" />
 
     <TextBlock Grid.Row="2"
                Classes="caption"
@@ -167,7 +173,8 @@
              ItemTemplate="{StaticResource TreeNodeTemplate}"
              Padding="6,4"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-             AutomationProperties.AutomationId="project-tree" AutomationProperties.Name="项目树">
+             AutomationProperties.AutomationId="project-tree"
+             AutomationProperties.Name="{Binding [project.treeName], Source={x:Static loc:Loc.Instance}}">
       <ListBox.ItemsPanel>
         <ItemsPanelTemplate>
           <VirtualizingStackPanel />
