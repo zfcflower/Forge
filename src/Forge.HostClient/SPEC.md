@@ -9,18 +9,144 @@ depends-on: [forge-ipc]
 
 # Forge.HostClient
 
-主程序(Native AOT)侧访问 Extension Host 的唯一入口 `IExtensionHostClient`。
+主程序(Native AOT)侧访问 Extension Host 的唯一入口 `IExtensionHostClient`;`ExtensionHostClient` 同时实现
+`IExtensionContributionClient`,提供非 UI 贡献快照、命令/提示词调用和 `run_code` 代理。
 
 ## 边界
 
 - 只依赖 Abstractions、Ipc、Plugin.Sdk;AOT 兼容(源生成 JSON,无反射序列化)。不引用 Roslyn、ExtensionHost。
-- 提供 `ITool` 代理(`ExtensionHostTool`);参数在本地校验,无效参数不发 IPC。
+- 提供 `ITool` 代理(`ExtensionHostTool`)、命令代理(`ExtensionHostCommand`);参数在本地校验,无效参数不发 IPC。
+- 不读审批数据库,也不携带 SQLite 依赖:插件状态与待审批信息一律经 `plugins.status` 查询。
+- 无论 Host 由本进程启动还是外部已在运行,绑定/上下文规则完全一致:谁启动 Host 不影响信任判断。
 
 ## 关键决策
 
-- **回传工具调用 fail-closed。** `host.tool_call` 顺序为 解析 → 审批 → 执行:无 resolver 报未知工具,有 resolver 但无审批通道则拒绝,绝不未经审批执行。
-- **回传上下文取自发起调用。** Host 的 `host.tool_call` 总带 `sessionId`/`workingDir`/`depth`,原样用于审批与 `ToolInvocation`。`workingDir` 必须**完全限定**(`Path.IsPathFullyQualified`,不是 `Path.IsPathRooted`:Windows 上 `C:relative` 与 `\relative` 仍依赖当前盘/目录),否则不进审批、不执行,直接返回错误结果。字段**缺席**(旧 Host)才走兜底 `HostToolWorkingDirectory`/当前目录,且兜底值本身也必须是完全限定路径,否则同样 fail-closed。字段**存在**但为 `null`/空/空白/非完全限定一律 fail-closed —— 显式空白**不**回退,解析层不再把空白折叠成 "没有字段"。这是行为变更:旧实现把空白当缺省并静默落到主程序目录。
-- **崩溃保留快照,同实例重连。** Host 崩溃置 `Failed` 但保留最后已知 `Tools`;主动 `StopAsync` 清空。`StartAsync` 在 `Stopped` 与 `Failed` 均合法:从 `Failed` 是重连(新连接,必要时新进程)。重连在建立新连接**之前**先拆掉上一条连接:不发 `host.stop`、不清工具快照,只处置旧 peer/transport,并按 `TerminateAsync(..., waitForSelfExit: false)` 杀掉并释放旧的自启进程树(否则旧进程只会在 `StopAsync` 时随最新一代一起被漏掉)。每条连接有一个单调递增的世代号,`tools.register`/`tools.unregister` 按收到它的那条连接打标签;成功进入 `Running` 时只丢弃**更早世代**的登记(确有丢弃才触发一次 `ToolsChanged`),因此新 Host 在连接就绪到 `Running` 之间发出的、或与这次切换并发到达的注册不会被误清,而未被新 Host 重新注册的旧条目仍不会残留。世代号同时决定"哪条连接还在说话":拆解前先把当前世代退役(`activeGeneration` 前移),因此旧连接的迟到 `Closed` 回调(以及连接重试期间被丢弃的候选 peer 的关闭)不会改写新连接的状态。崩溃后的自动、有上限的重启策略不属于本模块,由组合根(Forge.App)实现:它观察 `StatusChanged == Failed` 并调用同一实例的 `StartAsync`。
-- **Running 与关闭回调同一把锁。** 连上之后提交 `Running` 必须在关闭回调用的同一把状态锁(`statusGate`)内,并在锁内复核三件事:该连接的世代仍是当前世代、对端尚未关闭、状态仍是 `Starting`。连接若在“连上→Running”这段窗口里关闭,关闭回调写下的 `Failed` 不会被覆盖:客户端保持/变为 `Failed` 并带上关闭原因,本次 `StartAsync` 抛 `IpcConnectionClosedException` 并拆掉这条已死连接,同一实例随后可从 `Failed` 重启。一次启动最多报告一次 `Failed`——谁先把状态移出 `Starting` 谁报。
-- **先等自退,超时才杀。** `StopAsync` 发 `host.stop` 并等应答;应答到手后给 Host `ProcessExitTimeout` 自行跑完关停(停 Worker 进程树)并以退出码 0 结束,只有超过该期限才杀进程树。没有应答(超时或连接已断)时立即清理,不再等。
-- **已知限制:** `IIpcPeer` 仅有每 peer 一个默认超时,`RequestTimeout` 约束包括长插件运行在内的所有往返;无 per-call 超时。
+- **回传调用必须绑定在途调用(fail-closed)。** Host 转来的 `host.tool_call` 必须是 `{runId, pluginId, name, args}`。
+  缺 `runId`、空白 `runId` 或只有旧字段(`sessionId`/`workingDir`/`depth`)的**无绑定旧式调用直接拒绝**,不再执行:
+  这是协议不匹配,不是兼容路径。`runId` 必须命中本连接世代仍在途的私有 pending 记录,且记录的 plugin 身份必须与
+  `pluginId` 相等(`$run_code` 为脚本保留身份),否则在 resolver 与审批之前拒绝。会话、工作目录、深度、插件链
+  **只取 pending 记录**(发起调用时的 `ToolContext` 与可信链),Worker 自报的 `sessionId`/`workingDir`/`depth`
+  一律忽略。未知、已结束、已取消、已超时或重放(运行已结束后再次出现)的 run 一律无效。旧的
+  `HostToolWorkingDirectory` 选项保留源码兼容但不再被读取。
+- **可信调用链走私有 AsyncLocal。** 每次执行(tools/commands/prompts/code)都分配 128 位加密随机 `runId`、
+  绑定当时连接世代、原始 `ToolContext`、完整可信链、自身取消生命周期和每运行回调门。嵌套代理只在本客户端执行
+  某回调期间读取该私有上下文,并以新 `runId`、父链与父深度(深度由主程序推算,不取 Worker 值)发起新执行;
+  用户参数无法注入其中。链中重复插件(环)与超过 8 环的链在本地拒绝;`run_code` 的嵌套规则见下一条;
+  父运行结束时其所有嵌套子请求随生命周期取消。运行结束/连接拆除会作废 pending 记录,迟到的回调找不到可执行目标。
+- **根身份是可信的调用令牌,不是插件名。** `ExtensionRun` 记录 `RootRunId`:顶层 `BeginRun` 生成 `runId` 并令
+  `RootRunId` 等于它;嵌套 `BeginRun` 从 pending 记录里的父运行复制 `RootRunId`,不从 `ToolContext`、Worker 回调
+  或线缆上任何字段读取回填。四类序列化上下文(`plugin.execute`/`code.execute`/`plugin.command`/`plugin.prompt`)
+  统一由 `WireContext` 从 pending 记录构造并携带 `rootRunId`,所以同一插件(或 `$run_code`)的两次**独立**执行
+  得到不同根身份——Host 不能再用首个插件名或 `$run_code` 判定“同根”,同根排队才安全;A→B 的嵌套调用沿用 A 的
+  根身份而各自持有新的 `runId`。
+- **执行根的工作目录必须可信且绝对。** 四类执行入口(插件工具、`run_code`、命令、提示词)在 `BeginRun`、审批与
+  任何 IPC **之前**校验**有效上下文**的工作目录:非空白且完全限定(`Path.IsPathFullyQualified`)。有效上下文由
+  `EffectiveContext` 统一推导为 `origin.ParentContext ?? context`:嵌套调用一律继承可信父运行记录里的会话与目录,
+  调用方传进来的替换路径不能覆盖父上下文;也不把相对路径规范化成进程当前目录,相对就是相对并被拒绝。拒绝时的
+  形状按入口固定:插件工具与 `run_code` 返回 `IsError` 的 `ToolResult`,命令返回错误 `CommandResult`(审批请求也
+  用有效上下文里的目录),提示词返回 `null` 并记诊断;四条路径都不发 IPC、不调用审批、不解析工具。命令入口因此把
+  取 origin 与目录校验排在审批**之前**(旧实现先审批后取 origin)。根登记(`tools.register`/`contributions.register`)
+  与 peer 可用性的既有语义不变。
+- **`run_code` 只在顶层执行。** 主程序自己发起的顶层 `run_code`(无受信父调用的 Agent/UI 调用)正常执行;
+  只要 `origin.Ancestors` 非空,即处于任何受信父调用中(脚本或插件回调),`InvokeCodeAsync` 就在本地拒绝,
+  不再只按祖先名字是否为 `$run_code` 特判。Worker 经 Host 转来的 `host.tool_call` 若 `name == run_code`,
+  一律在 pending 绑定查找、resolver 与审批**之前**拒绝,不看该 run 是否为脚本。用户已批准“插件与脚本都禁止子调用
+  `run_code`”,所以这条规则按“嵌套扩展调用”统一表述,而不是只写脚本。
+- **审批不延长 run 的生命周期。** 审批回调可以忽略取消令牌并仍然返回 `Allow`。因此 `Allow` 之后、真正调用工具
+  之前必须重新检查链接令牌与 `run.IsActive`:父调用在审批挂起期间结束(超时、取消、连接拆除)时该 run 已失效,
+  即使目标工具忽略 `CancellationToken` 也不得启动。已结束回错误结果,仅连接级取消则直接返回取消;两条路径都不
+  调用工具。
+- **run 资源确定性释放。** `ExtensionRun` 持有取消源与每运行门,并用租约计数保护:回调在读取 token、使用门、
+  把子 run 链接到父 token 之前必须 `TryLease()`(run 已结束则失败并拒绝),结束时 `ReleaseLease()`。
+  发起调用方本身持有第一个租约,`EndRun` 在 `End()` 之后归还它。`End()` 先置 ended 再 `Cancel()`,取消返回且
+  最后一个租约归还后才 `Dispose()` 取消源与门;取消进行中不释放,因此不会出现 `Cancel` 与 `Dispose` 并发、
+  在已释放源上 `Register`/`CreateLinkedTokenSource` 这类 ODE 竞争。
+  run 记录在构造时捕获 `CancellationToken`,调用方不再读取 `Lifetime.Token` 属性。每个 run 结束时处置自己的
+  linked source,长期存活的会话/调用者令牌上不残留注册;嵌套子 run 仍链接父 run 的令牌,而父 run 在其回调
+  持有租约期间不会被释放。
+- **失败回执有界、不打断事件循环。** 被拒绝的回调、被丢弃的声明与无法解码的贡献集都写入
+  `Diagnostics`(最近 16 条)并返回错误结果,不会抛出到 IPC 事件循环。`plugins.status` 的失败不在此列:它先记
+  诊断再把异常抛给调用方(见插件状态一条)。每次子调用仍按 main 端结果上限截断
+  (`CodeExecutionOptions.MaxInnerResultChars`),脚本输出按 `MaxResultChars` 截断;每运行的并发门同样由 pending
+  记录携带。
+- **每次调用一个预算,不是每连接一个。** `IIpcPeer` 只有每 peer 一个默认超时,所以本客户端把它设为无限,自己给
+  每个请求挂预算:`RequestTimeout`(默认 120 秒)约束普通往返,`run_code` 用脚本自己的 `timeout_seconds`
+  (默认 60 秒、上限 600 秒)作为该次 `code.execute` 的预算,排队与执行都算在同一条 deadline 里。这样合法的 600 秒
+  脚本不会被全局默认值截断,其他请求也没有被放宽。预算到期映射为 `IpcTimeoutException`;`run_code` 把它转成
+  “脚本已停止”的错误结果,并作废该 run。
+- **崩溃保留快照,同实例重连。** Host 崩溃置 `Failed` 但保留最后已知 `Tools` 与贡献快照;主动 `StopAsync` 清空。
+  `StartAsync` 在 `Stopped` 与 `Failed` 均合法:从 `Failed` 是重连(新连接,必要时新进程)。重连在建立新连接
+  **之前**先拆掉上一条连接:不发 `host.stop`、不清快照,只处置旧 peer/transport,并按
+  `TerminateAsync(..., waitForSelfExit: false)` 杀掉并释放旧的自启进程树(否则旧进程只会在 `StopAsync` 时随最新
+  一代一起被漏掉)。每条连接有一个单调递增的世代号,`tools.register`/`tools.unregister` 与
+  `contributions.register`/`contributions.unregister` 按收到它的那条连接打标签;成功进入 `Running` 时只丢弃
+  **更早世代**的登记(确有丢弃才触发一次 `ToolsChanged`/`ContributionsChanged`),因此新 Host 在连接就绪到
+  `Running` 之间发出的、或与这次切换并发到达的注册不会被误清,而未被新 Host 重新注册的旧条目仍不会残留。
+  世代号同时决定"哪条连接还在说话":拆解前先把当前世代退役(`activeGeneration` 前移)并作废该世代的 pending
+  run,因此旧连接的迟到 `Closed` 回调(以及连接重试期间被丢弃的候选 peer 的关闭)不会改写新连接的状态。崩溃后的
+  自动、有上限的重启策略不属于本模块,由组合根(Forge.App)实现:它观察 `StatusChanged == Failed` 并调用同一实例
+  的 `StartAsync`。
+- **Running 与关闭回调同一把锁。** 连上之后提交 `Running` 必须在关闭回调用的同一把状态锁(`statusGate`)内,并在锁内
+  复核三件事:该连接的世代仍是当前世代、对端尚未关闭、状态仍是 `Starting`。连接若在“连上→Running”这段窗口里关闭,
+  关闭回调写下的 `Failed` 不会被覆盖:客户端保持/变为 `Failed` 并带上关闭原因,本次 `StartAsync` 抛
+  `IpcConnectionClosedException` 并拆掉这条已死连接,同一实例随后可从 `Failed` 重启。一次启动最多报告一次
+  `Failed`——谁先把状态移出 `Starting` 谁报。
+- **先等自退,超时才杀。** `StopAsync` 发 `host.stop` 并等应答;应答到手后给 Host `ProcessExitTimeout` 自行跑完关停
+  (停 Worker 进程树)并以退出码 0 结束,只有超过该期限才杀进程树。没有应答(超时或连接已断)时立即清理,不再等。
+- **非 UI 贡献是世代化的整数快照。** `contributions.register` 携带某插件的完整 `PluginContributionSet`,
+  `contributions.unregister` 移除该插件的全部非工具贡献。替换而非追加,所以同一插件不会留下重复或过期条目;
+  内容完全相同的新世代登记只更新世代号,不重建代理、不触发 `ContributionsChanged`。视图是原子替换的不可变列表
+  (`Commands`/`Workflows`/`Agents`/`PromptContributors`)。名称跨插件按 ordinal plugin id 去重(先到先得,后者被丢弃并
+  记录诊断),避免同名命令/工作流/Agent 指向错误实现。畸形声明(空名、空 body、未定义的 `thinking` 序号、
+  非正 `maxOutputTokens`、空提示词 id)逐条丢弃并诊断;整个贡献集无法解码时该插件的快照不更新,不抛异常。
+  `$run_code` 是保留身份,不能登记工具或贡献。`panels` 只做声明记录,本阶段不注册也不渲染。
+- **Agent 严格转换,工作流保持 Markdown。** `AgentDeclaration` 转成 Abstractions `AgentDefinition`/`ModelSettings`
+  时校验枚举与数值,不把未知值夹到相邻值;工作流按 `WorkflowDefinition` 原样传递(frontmatter + 步骤文本),
+  不做 JSON 执行引擎;提示词贡献只在 `GetPluginPromptAsync` 时异步求值。
+- **命令与提示词代理都走审批和绑定上下文。** 命令代理发 `plugin.command`/`CommandExecutionRequest`,先经 main 的
+  审批路径(以 `ToolSideEffect.Execute` 请求),被拒或没有审批路径时返回错误结果且不发 IPC;提示词代理发
+  `plugin.prompt`/`PromptExecutionRequest`,携带由 `ToolContext` 绑定的上下文。两者都带随机 `runId` 与自身预算,
+  其回调按同一 pending 规则执行。同步阻塞 IPC 不引入。
+- **提示词的软失败只覆盖可解释的失败,且不掩盖调用方取消。** `GetPluginPromptAsync` 在以下情形返回 `null` 并记诊断:
+  未注册/空白标识、客户端未运行、环、工作目录无效、host 业务错误(`IpcRemoteException`)、超时,以及调用中途的
+  连接断开或管道 IO 失败(`IpcConnectionClosedException` 本身是 `IOException`,所以只捕 `IOException` 这一具体类型)。
+  不设兜底 `catch`;调用方自己的 `OperationCanceledException` 原样传播——取消是调用方的决定,不是“插件没有文本”。
+- **run_code 是显式代理。** `CreateRunCodeTool(IToolRegistry, RunCodeProxyOptions?)` 返回 AOT 安全的 `ITool`
+  (不要静默塞进插件工具列表)。描述与 schema 由主程序工具注册表稳定生成(按名称排序,registry 变化才重建),
+  解析 `code`/`timeout_seconds` 并在本地校验:脚本必填、非空、不超过 `MaxScriptChars`;`timeout_seconds` 必须是正的
+  有限数(NaN、∞、非正一律拒绝),默认 60 秒、上限 600 秒。数值先与上限比较夹取、再转 `TimeSpan`,所以 `1e300`
+  这类超大有限预算夹到上限,而不是在校验之前抛 `OverflowException`。加密随机 `runId` 与上下文放进 SDK `CodeExecutionRequest` 的
+  `code.execute`;编译、语义检查与脚本进程一概留在 Host,本模块不含反射或 Roslyn。每个子调用单独审批,
+  并发由每运行门限制,结果在主程序侧截断;超时/结束后该 run 立即作废,迟到回调被拒。
+- **run_code 的可调用面只有一个推导点。** `RunCodeToolSurface.Snapshot` 一次读出每个工具的定义字段(名称/描述/
+  schema/副作用),描述文本、变更指纹与 `code.execute` 的 `tools` 声明全部来自同一份快照,因此三者不会对“哪些工具
+  可调用”或“读到的定义内容”产生分歧。所有 `RunCodeProxyTool` 实例在**读 `Definition` 之前**按类型剔除:代理的
+  描述本身就由 registry 推导,若它已被登记进该 registry(自己的或共享同一 registry 的第二个代理),读它的
+  `Definition` 会无基线递归,导致不可捕获的栈溢出——`catch`/`finally` 都救不回进程,所以排除必须发生在解引用之前,
+  不能靠“读出来再按名字过滤”。剔除代理之后,再按名称排除其它恰好叫 `run_code` 的普通工具。指纹是内容哈希而不是
+  对象身份:内容相同的新对象不重建描述,代理的增删也不重建(它对可调用面没有贡献);只有可调用面真的变化才重建,
+  描述顺序按 ordinal 排序保持稳定。代价是每次读 `Definition` 都分配一份快照列表(条目数=工具数),换来策略单点与
+  自包含安全;工具数在主程序规模下是几十量级。
+- **插件状态只读 IPC,失败不伪装成“没有插件”。** `GetPluginStatusesAsync` 发 `plugins.status`,不回落到本地数据库,
+  也没有“失败→空列表”的成功路径:未运行与调用中途断连会**抛出**(`InvalidOperationException`/
+  `IpcConnectionClosedException`),调用方的取消原样以 `OperationCanceledException` 传播;请求预算到期会被转成
+  `IpcTimeoutException`,先记一条诊断再抛出;应答无法解码时先记诊断,再抛出携带操作名与具体问题的
+  `InvalidDataException`。三者调用方都必须理解为“未知”,而不是“没有插件”。只有真正解码成功、Host 明确报告
+  `{"plugins":[]}` 的应答才返回空列表。
+- **状态逐行校验,任一行无效则整份应答无效。** `plugins` 的每一项都单独校验,不合格的那一行不会像旧实现那样被
+  静默跳过(那会把“Host 报告损坏条目”伪装成“插件更少”):数组项不是 JSON 对象、`pluginId` 缺失或空白、`status`
+  缺失或空白、`permissions` 不是数组/含未定义 `PermissionKind`/scope 空白、以及非 `invalid` 行缺 `version`、
+  `sourceHash`、`dependencyHash` 或 `sdkVersion` 都会拒绝**整个**应答。问题文本带数组下标(`plugins[3]`),已知身份时
+  再带 `'(pluginId)'`,所以调用方与服务日志能定位到坏行。`status` 为 `invalid`(无内容、无可审批项)的行不要求
+  version/哈希/SDK 版本非空,否则“为什么跑不起来”这唯一一行会被反过来判成不可读。`status` 只要求是非空 token、
+  按原值透传:已文档化的 `draft`/`approved`/`disabled`/`uninstalled`/`invalid` 全数接受,Host 以后新增状态也不会让
+  整份注册表变成“未知”。
+- **`invalid` 行缺元数据不等于公开记录带 `null`。** `invalid` 行允许没有 `version`/`sourceHash`/`dependencyHash`/
+  `sdkVersion`(线上仍是可选字段,合法的无内容插件就是这样报的),但 STJ 用构造器绑定缺失的非空 `string` 参数会写进
+  `null`,而 `PluginStatusInfo` 的这四个属性声明为不可空 `string`。所以行校验通过后按 `with` 记录归一:只有 `null` 变
+  `string.Empty`,Host 已给的值(含空串)原样保留,`pluginId`/`status`/`permissions`/`error` 不动。缺元数据的 `invalid`
+  行照旧作为一行返回(带 `error`),不会变成“没有这一行”,也不会被映射成 `approved` 之类的已知状态。
+- **权限按原始 JSON 与解码结果同时校验。** 缺 `kind` 的权限对象会被绑定成枚举默认值 `ReadFile`,只看解码结果会把它
+  当成一条合法权限;所以逐项比对 `permissions` 数组与解码出的列表,长度/形状不符或 `kind` 未定义都判该行不可用。
+- **已知限制:** `IIpcPeer` 仍只有每 peer 一个默认超时,`SendRequestAsync` 没有 per-call 超时重载;本客户端因此把 peer
+  默认超时设为无限、在 `SendAsync` 里为每次调用自建 deadline。若将来 Ipc 增加 per-call 超时,这里应改为直接使用它。

@@ -71,30 +71,3 @@ public static class DiagnosticText
         return TextBounds.Truncate(text.ToString(), maxChars, "diagnostics");
     }
 }
-
-internal static class TextBounds
-{
-    public static string Truncate(string text, int maxChars, string what)
-    {
-        if (maxChars <= 0)
-        {
-            return string.Empty;
-        }
-
-        if (text.Length <= maxChars)
-        {
-            return text;
-        }
-
-        return new StringBuilder(maxChars + 96)
-            .Append(text, 0, maxChars)
-            .Append("\n[... ")
-            .Append(what)
-            .Append(" truncated: kept ")
-            .Append(maxChars.ToString(CultureInfo.InvariantCulture))
-            .Append(" of ")
-            .Append(text.Length.ToString(CultureInfo.InvariantCulture))
-            .Append(" chars]")
-            .ToString();
-    }
-}

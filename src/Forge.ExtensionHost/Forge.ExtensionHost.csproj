@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Forge.Ipc\Forge.Ipc.csproj" />
     <ProjectReference Include="..\Forge.Plugin.Sdk\Forge.Plugin.Sdk.csproj" />
     <ProjectReference Include="..\Forge.Scripting\Forge.Scripting.csproj" />
+    <ProjectReference Include="..\Forge.ScriptRuntime\Forge.ScriptRuntime.csproj" />
     <ProjectReference Include="..\Forge.Workflows\Forge.Workflows.csproj" />
     <ProjectReference Include="..\Forge.Approval\Forge.Approval.csproj" />
   </ItemGroup>

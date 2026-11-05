@@ -9,7 +9,14 @@ public static class ExtensionProtocol
     public const string ToolsRegister = "tools.register";     // {pluginId, tools:[ToolDeclaration]}
     public const string ToolsUnregister = "tools.unregister"; // {pluginId}
 
+    public const string ContributionsRegister = "contributions.register"; // PluginContributionsNotification; replaces the complete snapshot for this plugin
+    public const string ContributionsUnregister = "contributions.unregister"; // {pluginId}; removes every non-tool contribution
+
     // Main program → Host
+    public const string PluginsStatus = "plugins.status"; // {} → PluginStatusResponse; no direct database access by the main program
+    public const string CodeExecute = "code.execute"; // CodeExecutionRequest → CodeExecutionResult
+    public const string PluginCommand = "plugin.command"; // CommandExecutionRequest → CommandOutput
+    public const string PluginPrompt = "plugin.prompt"; // PromptExecutionRequest → PromptOutput
     public const string PluginExecute = "plugin.execute";     // {pluginId, tool, args, sessionId, workingDir, depth} → {content, isError}
     public const string PluginApprove = "plugin.approve";     // {pluginId, version, sourceHash, dependencyHash, sdkVersion} → {}
     public const string PluginRevoke = "plugin.revoke";       // {pluginId, version} → {}
@@ -20,6 +27,8 @@ public static class ExtensionProtocol
     public const string HostToolCall = "host.tool_call";      // {name, args, sessionId, workingDir, depth} → {content, isError}; context is the originating plugin invocation's, never a shared field
 
     // Host → Worker
+    public const string WorkerCommand = "worker.command"; // CommandExecutionRequest → CommandOutput
+    public const string WorkerPrompt = "worker.prompt"; // PromptExecutionRequest → PromptOutput
     public const string WorkerLoad = "worker.load";           // {pluginId, version, assemblyPath, assemblySha256, files:{relativeName: sha256}} → {tools:[ToolDeclaration]}; the worker must load exactly the bytes that match assemblySha256 and reject any file of the plugin directory not listed or not matching
     public const string WorkerExecute = "worker.execute";     // {pluginId, tool, args, sessionId, workingDir, depth, hostPipeName} → {content, isError}
     public const string WorkerUnload = "worker.unload";       // {pluginId} → {}

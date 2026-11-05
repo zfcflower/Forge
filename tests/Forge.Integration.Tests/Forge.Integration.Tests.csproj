@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\Forge.HostClient\Forge.HostClient.csproj" />
     <ProjectReference Include="..\..\src\Forge.ExtensionHost\Forge.ExtensionHost.csproj" />
     <ProjectReference Include="..\..\src\Forge.PluginWorker\Forge.PluginWorker.csproj" />
+    <ProjectReference Include="..\..\src\Forge.ScriptExecutor\Forge.ScriptExecutor.csproj" />
     <ProjectReference Include="..\..\src\Forge.Approval\Forge.Approval.csproj" />
     <ProjectReference Include="..\..\src\Forge.Plugin.Sdk\Forge.Plugin.Sdk.csproj" />
   </ItemGroup>

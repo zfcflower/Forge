@@ -23,6 +23,10 @@ internal sealed record WorkerLoadRequest
     /// <summary>SHA-256 of every file of the plugin directory, keyed by its <c>/</c>-separated relative name.</summary>
     [JsonPropertyName("files")]
     public Dictionary<string, string>? Files { get; init; }
+
+    /// <summary>Permissions the host captured from the manifest before approval. Registration may not ask for more.</summary>
+    [JsonPropertyName("permissions")]
+    public Permission[]? Permissions { get; init; }
 }
 
 internal sealed record WorkerExecuteRequest
@@ -48,6 +52,14 @@ internal sealed record WorkerExecuteRequest
 
     [JsonPropertyName("hostPipeName")]
     public string? HostPipeName { get; init; }
+
+    /// <summary>The context the host bound to this execution; it is the plugin's only source of identity and session.</summary>
+    [JsonPropertyName("context")]
+    public ExtensionCallContext? Context { get; init; }
+
+    /// <summary>Cooperative budget the host supplied; the host still kills the process tree when it runs out.</summary>
+    [JsonPropertyName("timeoutMilliseconds")]
+    public int? TimeoutMilliseconds { get; init; }
 }
 
 internal sealed record WorkerUnloadRequest
@@ -60,6 +72,10 @@ internal sealed record WorkerLoadResult
 {
     [JsonPropertyName("tools")]
     public ToolDeclaration[] Tools { get; init; } = [];
+
+    /// <summary>Everything the plugin registered; tools are repeated here so one snapshot carries all declarations.</summary>
+    [JsonPropertyName("contributions")]
+    public PluginContributionSet Contributions { get; init; } = new();
 }
 
 internal sealed record ToolResultPayload
@@ -71,22 +87,18 @@ internal sealed record ToolResultPayload
     public bool IsError { get; init; }
 }
 
-internal sealed record HostToolCallRequest
+/// <summary>What a plugin tool may send when it calls a main-program tool: the run it belongs to and the call target.
+/// Session, directory and depth are intentionally absent - the host reconstructs them from its active-run table.</summary>
+internal sealed record BoundToolCallRequest
 {
+    [JsonPropertyName("runId")]
+    public string? RunId { get; init; }
+
     [JsonPropertyName("name")]
     public string Name { get; init; } = "";
 
     [JsonPropertyName("args")]
     public JsonElement Arguments { get; init; }
-
-    [JsonPropertyName("sessionId")]
-    public string SessionId { get; init; } = "";
-
-    [JsonPropertyName("workingDir")]
-    public string WorkingDirectory { get; init; } = "";
-
-    [JsonPropertyName("depth")]
-    public int Depth { get; init; }
 }
 
 /// <summary>Wire helpers for the worker operations: one source-generated context and the shared
@@ -143,10 +155,11 @@ internal static class WorkerJson
     }
 }
 
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(WorkerLoadRequest))]
 [JsonSerializable(typeof(WorkerExecuteRequest))]
 [JsonSerializable(typeof(WorkerUnloadRequest))]
 [JsonSerializable(typeof(WorkerLoadResult))]
 [JsonSerializable(typeof(ToolResultPayload))]
-[JsonSerializable(typeof(HostToolCallRequest))]
+[JsonSerializable(typeof(BoundToolCallRequest))]
 internal partial class WorkerJsonContext : JsonSerializerContext;

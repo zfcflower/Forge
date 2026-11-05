@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Forge.Ipc;
 using Forge.Plugin.Sdk;
 
 namespace Forge.ExtensionHost;
@@ -16,6 +17,26 @@ internal static class HostJson
     public static JsonElement EmptyObject => Empty;
 
     public static JsonElement ToElement<T>(T value) => JsonSerializer.SerializeToElement(value, Options);
+
+    /// <summary>Reads the arguments object of an inbound request; a request without one is refused, never defaulted.</summary>
+    public static T Read<T>(IpcMessage message)
+        where T : class
+    {
+        if (message.Arguments is not { ValueKind: JsonValueKind.Object } arguments)
+        {
+            throw new HostOperationException("invalid_request", $"'{message.Operation}' requires an arguments object.");
+        }
+
+        try
+        {
+            return arguments.Deserialize<T>(Options) ??
+                throw new HostOperationException("invalid_request", $"'{message.Operation}' requires an arguments object.");
+        }
+        catch (JsonException exception)
+        {
+            throw new HostOperationException("invalid_request", $"'{message.Operation}' has unreadable arguments: {exception.Message}");
+        }
+    }
 
     private static JsonSerializerOptions CreateOptions()
     {
@@ -42,7 +63,9 @@ internal sealed record PluginExecuteRequest(
     JsonElement? Args,
     string SessionId,
     string WorkingDir,
-    int Depth);
+    int Depth,
+    ExtensionCallContext? Context = null,
+    int? TimeoutMilliseconds = null);
 
 internal sealed record PluginApproveRequest(
     string PluginId,
@@ -60,15 +83,25 @@ internal sealed record ToolsRegisterNotification(string PluginId, IReadOnlyList<
 
 internal sealed record ToolsUnregisterNotification(string PluginId);
 
+/// <summary>One <c>host.tool_call</c> relayed to the main program: the run id and plugin identity come from the host's
+/// active-run table, never from the worker, and the worker-supplied session/directory/depth are not part of it.</summary>
+internal sealed record HostToolCallForward(string RunId, string PluginId, string Name, JsonElement? Args);
+
+// Worker → host.
+internal sealed record WorkerBoundToolCall(string? RunId, string? Name, JsonElement? Args);
+
 // Host ↔ worker.
 internal sealed record WorkerLoadRequest(
     string PluginId,
     string Version,
     string AssemblyPath,
     string AssemblySha256,
-    IReadOnlyDictionary<string, string> Files);
+    IReadOnlyDictionary<string, string> Files,
+    IReadOnlyList<Permission> Permissions);
 
-internal sealed record WorkerLoadResponse(IReadOnlyList<ToolDeclaration> Tools);
+internal sealed record WorkerLoadResponse(
+    IReadOnlyList<ToolDeclaration> Tools,
+    PluginContributionSet? Contributions);
 
 internal sealed record WorkerExecuteRequest(
     string PluginId,
@@ -77,6 +110,8 @@ internal sealed record WorkerExecuteRequest(
     string SessionId,
     string WorkingDir,
     int Depth,
-    string HostPipeName);
+    string HostPipeName,
+    ExtensionCallContext Context,
+    int TimeoutMilliseconds);
 
 internal sealed record ToolCallResult(string Content, bool IsError);

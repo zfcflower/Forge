@@ -5,11 +5,19 @@ using Forge.Plugin.Sdk;
 namespace Forge.PluginWorker;
 
 /// <summary>Relays <see cref="IHostFacade.CallToolAsync"/> to the host over the worker's own pipe as a
-/// <c>host.tool_call</c> request. One instance belongs to exactly one <c>worker.execute</c>: the session, working
-/// directory and depth it reports are that invocation's, so concurrent executions never share mutable context.
-/// The worker performs no permission checks: the main program decides and its answer is returned verbatim.</summary>
-internal sealed class HostCallFacade(IIpcPeer peer, string sessionId, string workingDirectory, int depth) : IHostFacade
+/// <c>host.tool_call</c> request of the form <c>{runId, name, args}</c>. One instance belongs to exactly one execution:
+/// the run id is the one the host bound to that execution, so the host can validate the callback against its active-run
+/// table and stamp the plugin identity itself. The worker performs no permission checks and never reports a session,
+/// working directory or depth: those come from the host's binding, not from the plugin process.</summary>
+internal sealed class HostCallFacade(
+    IIpcPeer peer,
+    string runId,
+    string sessionId,
+    string workingDirectory,
+    int depth) : IHostFacade
 {
+    public string RunId { get; } = runId;
+
     public string SessionId { get; } = sessionId;
 
     public string WorkingDirectory { get; } = workingDirectory;
@@ -21,15 +29,13 @@ internal sealed class HostCallFacade(IIpcPeer peer, string sessionId, string wor
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         var request = WorkerJson.Serialize(
-            new HostToolCallRequest
+            new BoundToolCallRequest
             {
+                RunId = RunId,
                 Name = name,
                 Arguments = WorkerJson.ObjectOrEmpty(arguments),
-                SessionId = SessionId,
-                WorkingDirectory = WorkingDirectory,
-                Depth = Depth,
             },
-            WorkerJsonContext.Default.HostToolCallRequest);
+            WorkerJsonContext.Default.BoundToolCallRequest);
 
         try
         {

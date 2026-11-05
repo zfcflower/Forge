@@ -6,21 +6,77 @@ using Xunit;
 
 namespace Forge.HostClient.Tests;
 
+/// <summary>Relay coverage for run-bound <c>host.tool_call</c> callbacks. Every callback here is issued
+/// from inside an in-flight <c>plugin.execute</c> root and carries that root's <c>runId</c>; unsolicited
+/// traffic (the shape the old tests sent) is refused before it reaches the resolver. The recorded
+/// originating context always wins: forged session/path/depth fields and the legacy options fallback
+/// are ignored.</summary>
 public sealed class HostToolCallRelayTests
 {
     private const string Operation = "host.tool_call";
 
     [Fact]
-    public async Task Without_a_resolver_the_call_is_answered_as_an_unknown_tool()
+    public async Task Unsolicited_call_without_a_runId_is_refused_before_resolution()
+    {
+        var resolved = 0;
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host, resolver: _ =>
+        {
+            Interlocked.Increment(ref resolved);
+            return null;
+        });
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+
+        var response = await host.CallClientAsync(Operation, """{"name":"echo","args":{}}""", limit.Token);
+
+        var (content, isError) = BoundRoots.OutputOf(response);
+        Assert.True(isError);
+        Assert.Contains("not bound to a run id", content);
+        Assert.Equal(0, resolved);
+    }
+
+    [Fact]
+    public async Task Unsolicited_call_with_only_legacy_fields_is_refused_as_unbound()
+    {
+        var resolved = 0;
+        var workingDirectory = BoundRoots.AbsoluteDir("host-dir");
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host, resolver: _ =>
+        {
+            Interlocked.Increment(ref resolved);
+            return null;
+        });
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+
+        var response = await host.CallClientAsync(
+            Operation,
+            $$"""{"name":"echo","args":{"a":1},"workingDir":"{{workingDirectory}}","sessionId":"s-9","depth":2}""",
+            limit.Token);
+
+        var (content, isError) = BoundRoots.OutputOf(response);
+        Assert.True(isError);
+        Assert.Contains("not bound to a run id", content);
+        Assert.Contains("unbound tool calls are refused", content);
+        Assert.Equal(0, resolved);
+    }
+
+    [Fact]
+    public async Task Without_a_resolver_the_bound_call_is_answered_as_an_unknown_tool()
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host);
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("Unknown tool 'echo'.", true), Output(response));
+        Assert.Equal(("Unknown tool 'echo'.", true), BoundRoots.OutputOf(response));
     }
 
     [Fact]
@@ -38,10 +94,14 @@ public sealed class HostToolCallRelayTests
             });
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("missing"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "missing", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("Unknown tool 'missing'.", true), Output(response));
+        Assert.Equal(("Unknown tool 'missing'.", true), BoundRoots.OutputOf(response));
         Assert.Empty(approvals);
     }
 
@@ -53,13 +113,17 @@ public sealed class HostToolCallRelayTests
         await using var client = ClientFactory.Create(host, resolver: name => name == "echo" ? tool : null);
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        var output = Output(response);
-        Assert.True(output.IsError);
-        Assert.Contains("'echo' was not run", output.Content);
-        Assert.Contains("no approval path", output.Content);
+        var (content, isError) = BoundRoots.OutputOf(response);
+        Assert.True(isError);
+        Assert.Contains("'echo' was not run", content);
+        Assert.Contains("no approval path", content);
         Assert.Equal(0, tool.InvocationCount);
     }
 
@@ -74,10 +138,14 @@ public sealed class HostToolCallRelayTests
             approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Deny));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("The main program denied 'echo'.", true), Output(response));
+        Assert.Equal(("The main program denied 'echo'.", true), BoundRoots.OutputOf(response));
         Assert.Equal(0, tool.InvocationCount);
     }
 
@@ -92,12 +160,16 @@ public sealed class HostToolCallRelayTests
             approval: (_, _) => throw new InvalidOperationException("policy store offline"));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
         Assert.Equal(
-            new ToolOutput("'echo' was not run: the approval path failed: policy store offline", true),
-            Output(response));
+            ("'echo' was not run: the approval path failed: policy store offline", true),
+            BoundRoots.OutputOf(response));
         Assert.Equal(0, tool.InvocationCount);
     }
 
@@ -125,47 +197,63 @@ public sealed class HostToolCallRelayTests
             });
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("done", false), Output(response));
+        Assert.Equal(("done", false), BoundRoots.OutputOf(response));
         Assert.Equal(new[] { "resolve:echo", "approve:echo", "invoke" }, order.ToArray());
     }
 
     [Fact]
-    public async Task A_fully_qualified_working_directory_from_the_host_is_approved_and_used_verbatim()
+    public async Task The_recorded_originating_context_wins_and_forged_host_fields_are_ignored()
     {
         var tool = new StubTool("echo", ToolSideEffect.Write, (_, _, _) => ValueTask.FromResult(new ToolResult("42")));
-        var workingDirectory = AbsoluteDirectory("host-dir");
+        var rootDirectory = BoundRoots.AbsoluteDir("root-session");
+        var rootContext = new ToolContext("sess-root", rootDirectory, 2);
+        ApprovalRequest? approved = null;
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(
             host,
             resolver: name => name == "echo" ? tool : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+            approval: (request, _) =>
+            {
+                approved = request;
+                return ValueTask.FromResult(ApprovalDecision.Allow);
+            });
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, rootContext, limit.Token);
 
         var response = await host.CallClientAsync(
             Operation,
-            $$"""{"name":"echo","args":{"a":1},"workingDir":"{{workingDirectory}}","sessionId":"s-9","depth":2}""",
+            BoundRoots.BoundPayload(root.RunId, "alpha", "echo", """{"a":1}""", forgeLegacy: true),
             limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("42", false), Output(response));
+        Assert.Equal(("42", false), BoundRoots.OutputOf(response));
+        Assert.Equal(rootDirectory, approved?.WorkingDirectory);
+        Assert.DoesNotContain("FORGED", approved?.WorkingDirectory ?? string.Empty, StringComparison.Ordinal);
         var invocation = Assert.Single(tool.Invocations);
         Assert.Equal("echo", invocation.Call.Name);
         Assert.Equal("""{"a":1}""", invocation.Call.ArgumentsJson);
         Assert.StartsWith("hostcall-", invocation.Call.Id, StringComparison.Ordinal);
-        Assert.Equal(new ToolContext("s-9", workingDirectory, 2), invocation.Context);
+        Assert.Equal(new ToolContext("sess-root", rootDirectory, 3), invocation.Context);
     }
 
     [Fact]
-    public async Task The_carried_working_directory_session_and_depth_win_over_the_options()
+    public async Task The_legacy_options_fallback_is_never_consulted()
     {
         var tool = new StubTool("echo");
-        var workingDirectory = AbsoluteDirectory("repo/sub");
+        var rootDirectory = BoundRoots.AbsoluteDir("repo-sub");
+        var rootContext = new ToolContext("sess-7", rootDirectory, 4);
         ApprovalRequest? approved = null;
         await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = AbsoluteDirectory("configured") };
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = BoundRoots.AbsoluteDir("configured") };
         await using var client = ClientFactory.Create(
             host,
             resolver: name => name == "echo" ? tool : null,
@@ -177,91 +265,70 @@ public sealed class HostToolCallRelayTests
             options: options);
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, rootContext, limit.Token);
 
         var response = await host.CallClientAsync(
-            Operation,
-            $$"""{"name":"echo","args":{"a":1},"sessionId":"sess-7","workingDir":"{{workingDirectory}}","depth":4}""",
-            limit.Token);
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", """{"a":1}"""), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("ran echo", false), Output(response));
-        Assert.Equal(workingDirectory, approved?.WorkingDirectory);
+        Assert.Equal(("ran echo", false), BoundRoots.OutputOf(response));
+        Assert.Equal(rootDirectory, approved?.WorkingDirectory);
         var invocation = Assert.Single(tool.Invocations);
-        Assert.Equal(new ToolContext("sess-7", workingDirectory, 4), invocation.Context);
-    }
-
-    [Theory]
-    [InlineData("relative/dir")]
-    [InlineData("sub")]
-    [InlineData("C:relative")]
-    [InlineData("\\relative")]
-    public async Task A_working_directory_that_is_not_fully_qualified_fails_closed_before_approval_and_invocation(
-        string workingDirectory)
-    {
-        var tool = new StubTool("echo");
-        var approvals = 0;
-        await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "echo" ? tool : null,
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approvals);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
-        using var limit = TestLimit.Create();
-
-        var response = await host.CallClientAsync(
-            Operation,
-            $$"""{"name":"echo","args":{},"sessionId":"sess-7","workingDir":"{{workingDirectory}}","depth":1}""",
-            limit.Token);
-
-        var output = Output(response);
-        Assert.True(output.IsError);
-        Assert.Contains("not a fully qualified path", output.Content);
-        Assert.Equal(0, approvals);
-        Assert.Equal(0, tool.InvocationCount);
-    }
-
-    [Theory]
-    [InlineData("\"\"")]
-    [InlineData("\"   \"")]
-    [InlineData("null")]
-    public async Task A_present_but_blank_working_directory_fails_closed_instead_of_falling_back(string workingDirJson)
-    {
-        var tool = new StubTool("echo");
-        var approvals = 0;
-        await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = AbsoluteDirectory("configured") };
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "echo" ? tool : null,
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approvals);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            },
-            options: options);
-        await client.StartConnectedAsync(host);
-        using var limit = TestLimit.Create();
-
-        var response = await host.CallClientAsync(
-            Operation,
-            "{\"name\":\"echo\",\"args\":{},\"workingDir\":" + workingDirJson + "}",
-            limit.Token);
-
-        var output = Output(response);
-        Assert.True(output.IsError);
-        Assert.Contains("working directory carried by the host is blank", output.Content);
-        Assert.Equal(0, approvals);
-        Assert.Equal(0, tool.InvocationCount);
+        Assert.Equal(new ToolContext("sess-7", rootDirectory, 5), invocation.Context);
     }
 
     [Fact]
-    public async Task The_approval_request_carries_the_tool_side_effect_arguments_and_working_directory()
+    public async Task A_non_fully_qualified_options_value_is_harmless_because_it_is_never_read()
+    {
+        var tool = new StubTool("echo");
+        var rootDirectory = BoundRoots.AbsoluteDir("repo-sub");
+        await using var host = new FakeHost();
+        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = "relative/dir" };
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow),
+            options: options);
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, new ToolContext("sess-7", rootDirectory), limit.Token);
+
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
+
+        Assert.Equal(("ran echo", false), BoundRoots.OutputOf(response));
+        Assert.Equal(1, tool.InvocationCount);
+    }
+
+    [Fact]
+    public async Task A_bound_call_needs_no_legacy_fields_at_all()
+    {
+        var tool = new StubTool("echo");
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
+
+        var payload = "{\"runId\":\"" + root.RunId + "\",\"pluginId\":\"alpha\",\"name\":\"echo\",\"args\":{}}";
+        var response = await host.CallClientAsync(Operation, payload, limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
+
+        Assert.Equal(("ran echo", false), BoundRoots.OutputOf(response));
+    }
+
+    [Fact]
+    public async Task The_approval_request_carries_the_tool_side_effect_arguments_and_bound_working_directory()
     {
         var tool = new StubTool("writer", ToolSideEffect.Execute);
-        var workingDirectory = AbsoluteDirectory("proj");
+        var rootDirectory = BoundRoots.AbsoluteDir("proj");
         ApprovalRequest? seen = null;
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(
@@ -274,93 +341,17 @@ public sealed class HostToolCallRelayTests
             });
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, new ToolContext("sess-9", rootDirectory), limit.Token);
 
         await host.CallClientAsync(
             Operation,
-            $$"""{"name":"writer","args":{"path":"a.txt"},"workingDir":"{{workingDirectory}}"}""",
+            BoundRoots.BoundPayload(root.RunId, "alpha", "writer", """{"path":"a.txt"}""", forgeLegacy: true),
             limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ApprovalRequest("writer", """{"path":"a.txt"}""", ToolSideEffect.Execute, workingDirectory), seen);
-    }
-
-    [Fact]
-    public async Task An_absent_working_directory_falls_back_to_the_option()
-    {
-        var requests = new ConcurrentQueue<ApprovalRequest>();
-        var tool = new StubTool("echo");
-        var configured = AbsoluteDirectory("configured");
-        await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = configured };
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "echo" ? tool : null,
-            approval: (request, _) =>
-            {
-                requests.Enqueue(request);
-                return ValueTask.FromResult(ApprovalDecision.Deny);
-            },
-            options: options);
-        await client.StartConnectedAsync(host);
-        using var limit = TestLimit.Create();
-
-        await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
-
-        Assert.Equal(new[] { configured }, requests.Select(request => request.WorkingDirectory).ToArray());
-    }
-
-    [Theory]
-    [InlineData("relative/dir")]
-    [InlineData("C:relative")]
-    [InlineData("\\relative")]
-    public async Task An_absent_working_directory_with_a_non_fully_qualified_option_fails_closed(
-        string configured)
-    {
-        var tool = new StubTool("echo");
-        var approvals = 0;
-        await using var host = new FakeHost();
-        var options = new ExtensionHostClientOptions { HostToolWorkingDirectory = configured };
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "echo" ? tool : null,
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approvals);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            },
-            options: options);
-        await client.StartConnectedAsync(host);
-        using var limit = TestLimit.Create();
-
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
-
-        var output = Output(response);
-        Assert.True(output.IsError);
-        Assert.Contains("the fallback working directory", output.Content);
-        Assert.Contains("is not a fully qualified path", output.Content);
-        Assert.Equal(0, approvals);
-        Assert.Equal(0, tool.InvocationCount);
-    }
-
-    [Fact]
-    public async Task Without_a_working_directory_option_the_process_directory_is_used()
-    {
-        ApprovalRequest? seen = null;
-        var tool = new StubTool("echo");
-        await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "echo" ? tool : null,
-            approval: (request, _) =>
-            {
-                seen = request;
-                return ValueTask.FromResult(ApprovalDecision.Deny);
-            });
-        await client.StartConnectedAsync(host);
-        using var limit = TestLimit.Create();
-
-        await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
-
-        Assert.Equal(Environment.CurrentDirectory, seen?.WorkingDirectory);
+        Assert.Equal(
+            new ApprovalRequest("writer", """{"path":"a.txt"}""", ToolSideEffect.Execute, rootDirectory), seen);
     }
 
     [Fact]
@@ -375,10 +366,14 @@ public sealed class HostToolCallRelayTests
             approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("bad input", true), Output(response));
+        Assert.Equal(("bad input", true), BoundRoots.OutputOf(response));
     }
 
     [Fact]
@@ -393,20 +388,27 @@ public sealed class HostToolCallRelayTests
             approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
-        Assert.Equal(new ToolOutput("InvalidOperationException: boom", true), Output(response));
+        Assert.Equal(("InvalidOperationException: boom", true), BoundRoots.OutputOf(response));
     }
 
-    [Theory]
-    [InlineData("""{"args":{}}""")]
-    [InlineData("""{"name":"","args":{}}""")]
-    [InlineData("""{"name":null,"args":{}}""")]
-    [InlineData("""{"name":5}""")]
-    [InlineData("""[1]""")]
-    public async Task A_call_without_a_tool_name_is_rejected_before_resolution(string payload)
+    [Fact]
+    public async Task Bound_calls_without_a_usable_tool_name_are_rejected_before_resolution()
     {
+        var payloads = new[]
+        {
+            """{"args":{}}""",
+            """{"name":"","args":{}}""",
+            """{"name":null,"args":{}}""",
+            """{"name":5,"args":{}}""",
+            """[1]""",
+        };
         var resolved = 0;
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host, resolver: _ =>
@@ -416,10 +418,22 @@ public sealed class HostToolCallRelayTests
         });
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var response = await host.CallClientAsync(Operation, payload, limit.Token);
+        foreach (var template in payloads)
+        {
+            var payload = template.StartsWith('[')
+                ? template
+                : template[..^1] + ",\"runId\":\"" + root.RunId + "\",\"pluginId\":\"alpha\"}";
+            var response = await host.CallClientAsync(Operation, payload, limit.Token);
 
-        Assert.Equal(new ToolOutput("The host.tool_call request has no tool name.", true), Output(response));
+            var (content, isError) = BoundRoots.OutputOf(response);
+            Assert.True(isError);
+            Assert.Contains(template.StartsWith('[') ? "no arguments" : "no tool name", content);
+        }
+
+        root.Hold.Release();
+        await root.RootTask.Bounded();
         Assert.Equal(0, resolved);
     }
 
@@ -434,8 +448,14 @@ public sealed class HostToolCallRelayTests
             approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        await host.CallClientAsync(Operation, """{"name":"echo","args":"{\"a\": 1}"}""", limit.Token);
+        await host.CallClientAsync(
+            Operation,
+            BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "\"{\\\"a\\\": 1}\""),
+            limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
         Assert.Equal("""{"a": 1}""", Assert.Single(tool.Invocations).Call.ArgumentsJson);
     }
@@ -451,10 +471,105 @@ public sealed class HostToolCallRelayTests
             approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        await host.CallClientAsync(Operation, """{"name":"echo"}""", limit.Token);
+        var payload = "{\"runId\":\"" + root.RunId + "\",\"pluginId\":\"alpha\",\"name\":\"echo\"}";
+        await host.CallClientAsync(Operation, payload, limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
 
         Assert.Equal("{}", Assert.Single(tool.Invocations).Call.ArgumentsJson);
+    }
+
+    [Fact]
+    public async Task Non_object_arguments_are_preserved_verbatim()
+    {
+        var seen = new ConcurrentQueue<string>();
+        var tool = new StubTool("echo", ToolSideEffect.ReadOnly, (call, _, _) =>
+        {
+            seen.Enqueue(call.ArgumentsJson);
+            return ValueTask.FromResult(new ToolResult("ok"));
+        });
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
+
+        foreach (var args in new[] { "[1,2]", "7", "true" })
+        {
+            await host.CallClientAsync(
+                Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", args), limit.Token);
+        }
+
+        root.Hold.Release();
+        await root.RootTask.Bounded();
+
+        Assert.Equal(new[] { "[1,2]", "7", "true" }, seen.ToArray());
+    }
+
+    [Fact]
+    public async Task An_invalid_JSON_string_argument_falls_back_to_an_empty_object()
+    {
+        var tool = new StubTool("echo");
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(
+            host,
+            resolver: name => name == "echo" ? tool : null,
+            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
+
+        await host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "\"not json\""), limit.Token);
+        root.Hold.Release();
+        await root.RootTask.Bounded();
+
+        Assert.Equal("{}", Assert.Single(tool.Invocations).Call.ArgumentsJson);
+    }
+
+    [Fact]
+    public async Task Malformed_bound_payloads_are_rejected_before_resolution()
+    {
+        var resolved = 0;
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host, resolver: _ =>
+        {
+            Interlocked.Increment(ref resolved);
+            return null;
+        });
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
+
+        var malformed = new[]
+        {
+            "[1,2]",
+            "\"text\"",
+            "null",
+            "{}",
+            "{\"runId\":null,\"pluginId\":\"alpha\",\"name\":\"echo\"}",
+            "{\"runId\":\"   \",\"pluginId\":\"alpha\",\"name\":\"echo\"}",
+            "{\"runId\":42,\"pluginId\":\"alpha\",\"name\":\"echo\"}",
+            "{\"runId\":true,\"pluginId\":\"alpha\",\"name\":\"echo\"}",
+            "{\"runId\":\"" + root.RunId + "\",\"name\":\"echo\"}",
+            "{\"runId\":\"" + root.RunId + "\",\"pluginId\":\"\",\"name\":\"echo\"}",
+            "{\"runId\":\"" + root.RunId + "\",\"pluginId\":7,\"name\":\"echo\"}",
+        };
+        foreach (var payload in malformed)
+        {
+            var response = await host.CallClientAsync(Operation, payload, limit.Token);
+            Assert.True(BoundRoots.OutputOf(response).IsError);
+        }
+
+        root.Hold.Release();
+        await root.RootTask.Bounded();
+        Assert.Equal(0, resolved);
+        Assert.Equal(HostStatus.Running, client.Status);
     }
 
     [Fact]
@@ -486,12 +601,17 @@ public sealed class HostToolCallRelayTests
         client.StatusChanged += (status, detail) => failures.Add((status, detail));
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
+        var root = await StartRootAsync(host, client, limit.Token);
 
-        var pending = host.CallClientAsync(Operation, ToolCallPayload("echo"), limit.Token);
+        var pending = host.CallClientAsync(
+            Operation, BoundRoots.BoundPayload(root.RunId, "alpha", "echo", "{}"), limit.Token);
         await entered.Task.Bounded();
         await host.DropConnectionAsync();
 
-        await Assert.ThrowsAnyAsync<IOException>(() => pending);
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => pending);
+        Assert.True(
+            error is IOException || error is IpcConnectionClosedException,
+            "Dropping the connection should fault the pending callback, but got " + error.GetType().Name);
         await canceled.Task.Bounded();
         Assert.Equal(0, tool.InvocationCount);
         var statuses = await failures.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
@@ -499,18 +619,22 @@ public sealed class HostToolCallRelayTests
         Assert.Contains(statuses, e => e.Status == HostStatus.Failed && e.Detail is not null);
     }
 
-    private static string AbsoluteDirectory(string name) =>
-        Path.Combine(Path.GetTempPath(), "forge-hc", name).Replace('\\', '/');
+    private sealed record ActiveRoot(string RunId, InFlightRoot Hold, Task<ToolResult> RootTask);
 
-    /// <summary>A call that carries no <c>workingDir</c> at all, as an old host sends it.</summary>
-    private static string ToolCallPayload(string name) =>
-        "{\"name\":\"" + name + "\",\"args\":{}}";
+    private static async Task<ActiveRoot> StartRootAsync(
+        FakeHost host, ExtensionHostClient client, CancellationToken ct) =>
+        await StartRootAsync(
+            host, client, new ToolContext("sess-root", BoundRoots.AbsoluteDir("root")), ct);
 
-    private static ToolOutput Output(IpcMessage response)
+    private static async Task<ActiveRoot> StartRootAsync(
+        FakeHost host, ExtensionHostClient client, ToolContext context, CancellationToken ct)
     {
-        var result = response.Result ?? throw new InvalidOperationException("The relay answered with an error envelope.");
-        return new ToolOutput(result.GetProperty("content").GetString()!, result.GetProperty("isError").GetBoolean());
+        var root = new InFlightRoot();
+        BoundRoots.ParkRoot(host, "plugin.execute", root);
+        var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
+        var rootTask = await BoundRoots.StartPluginRootAsync(proxy, context, root, ct);
+        var runId = BoundRoots.RunIdOf(await root.Arrived.Task.Bounded());
+        Assert.NotEqual(string.Empty, runId);
+        return new ActiveRoot(runId, root, rootTask);
     }
-
-    private sealed record ToolOutput(string Content, bool IsError);
 }

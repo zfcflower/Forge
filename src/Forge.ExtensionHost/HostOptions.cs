@@ -13,11 +13,18 @@ public sealed record HostOptions
 
     public const string WorkerEnvironmentVariable = "FORGE_PLUGIN_WORKER";
 
+    public const string ExecutorExecutableName = "Forge.ScriptExecutor";
+
+    public const string ExecutorEnvironmentVariable = "FORGE_SCRIPT_EXECUTOR";
+
     public static readonly TimeSpan DefaultToolTimeout = TimeSpan.FromSeconds(120);
 
     public static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(30);
 
-    public static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(120);
+    /// <summary>Script workers the host runs scripts on when <c>--script-workers</c> is not given.</summary>
+    public const int DefaultScriptWorkerCount = 4;
+
+    public const int MaxScriptWorkers = 16;
 
     /// <summary>Named pipe the main program connects to.</summary>
     public required string PipeName { get; init; }
@@ -34,17 +41,25 @@ public sealed record HostOptions
     /// <summary>Worker executable or assembly; <c>null</c> when it could not be located.</summary>
     public string? WorkerPath { get; init; }
 
+    /// <summary>Single-use script executor executable or assembly; <c>null</c> when it could not be located.</summary>
+    public string? ExecutorPath { get; init; }
+
+    /// <summary>The executor path <c>--executor</c> or <see cref="ExecutorEnvironmentVariable"/> named, before it was
+    /// resolved. A value here that does not exist is a hard <c>executor_missing</c> failure; it is never a reason to fall
+    /// back to discovery, because that would run an executor nobody named.</summary>
+    public string? RequestedExecutorPath { get; init; }
+
     /// <summary>Upper bound on one <c>worker.execute</c>; exceeding it kills the worker process tree.</summary>
     public TimeSpan ToolTimeout { get; init; } = DefaultToolTimeout;
 
     /// <summary>How long a freshly started worker has to connect to its pipe.</summary>
     public TimeSpan ConnectTimeout { get; init; } = DefaultConnectTimeout;
 
-    /// <summary>Deadline applied to requests the host sends over the main-program pipe.</summary>
-    public TimeSpan RequestTimeout { get; init; } = DefaultRequestTimeout;
-
     /// <summary>In-flight tool executions allowed on one worker before further calls wait.</summary>
     public int MaxConcurrentExecutionsPerWorker { get; init; } = 4;
+
+    /// <summary>Upper bound on the script executions running at the same time; each one owns a fresh executor process.</summary>
+    public int ScriptWorkerCount { get; init; } = DefaultScriptWorkerCount;
 
     public static HostOptions Parse(IReadOnlyList<string> args)
     {
@@ -55,8 +70,10 @@ public sealed record HostOptions
         string? dataArgument = null;
         string? runtime = null;
         string? worker = null;
+        string? executor = null;
         var toolTimeout = DefaultToolTimeout;
         var concurrency = 4;
+        var scriptWorkers = DefaultScriptWorkerCount;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -78,11 +95,17 @@ public sealed record HostOptions
                 case "--worker":
                     worker = RequireValue(args, ref index, name);
                     break;
+                case "--executor":
+                    executor = RequireValue(args, ref index, name);
+                    break;
                 case "--tool-timeout":
                     toolTimeout = ParseSeconds(RequireValue(args, ref index, name));
                     break;
                 case "--concurrency":
                     concurrency = ParseConcurrency(RequireValue(args, ref index, name));
+                    break;
+                case "--script-workers":
+                    scriptWorkers = ParseScriptWorkers(RequireValue(args, ref index, name));
                     break;
                 default:
                     break;
@@ -100,6 +123,9 @@ public sealed record HostOptions
         var pluginsDirectory = string.IsNullOrWhiteSpace(pluginsArgument)
             ? Path.Combine(dataDirectory, "plugins")
             : Path.GetFullPath(pluginsArgument);
+        var requestedExecutor = string.IsNullOrWhiteSpace(executor)
+            ? Environment.GetEnvironmentVariable(ExecutorEnvironmentVariable)
+            : executor;
 
         return new HostOptions
         {
@@ -108,8 +134,11 @@ public sealed record HostOptions
             DataDirectory = dataDirectory,
             RuntimePath = string.IsNullOrWhiteSpace(runtime) ? DefaultRuntimePath() : runtime,
             WorkerPath = FindWorkerExecutable(worker),
+            ExecutorPath = FindExecutorExecutable(requestedExecutor),
+            RequestedExecutorPath = string.IsNullOrWhiteSpace(requestedExecutor) ? null : requestedExecutor,
             ToolTimeout = toolTimeout,
             MaxConcurrentExecutionsPerWorker = concurrency,
+            ScriptWorkerCount = scriptWorkers,
         };
     }
 
@@ -154,16 +183,23 @@ public sealed record HostOptions
             return File.Exists(full) ? full : null;
         }
 
+        return FindSiblingExecutable(WorkerExecutableName);
+    }
+
+    /// <summary>Looks for <paramref name="executableName"/> next to the host, next to its process, then in that project's
+    /// own build output.</summary>
+    private static string? FindSiblingExecutable(string executableName)
+    {
         var roots = new List<string>(3);
         AddRoot(roots, AppContext.BaseDirectory);
         AddRoot(roots, Path.GetDirectoryName(Environment.ProcessPath));
-        AddRoot(roots, SiblingProjectOutput());
+        AddRoot(roots, SiblingProjectOutput(executableName));
 
         foreach (var root in roots)
         {
             foreach (var extension in new[] { ".dll", ".exe" })
             {
-                var candidate = Path.Combine(root, WorkerExecutableName + extension);
+                var candidate = Path.Combine(root, executableName + extension);
                 if (File.Exists(candidate))
                 {
                     return candidate;
@@ -174,11 +210,33 @@ public sealed record HostOptions
         return null;
     }
 
+    /// <summary>Resolves the single-use script executor to launch: an explicit path, then
+    /// <see cref="ExecutorEnvironmentVariable"/>, then <c>Forge.ScriptExecutor.dll</c>/<c>.exe</c> next to the host.</summary>
+    public static string? FindExecutorExecutable(string? explicitPath = null, string? environmentValue = null)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            var full = Path.GetFullPath(explicitPath);
+            return File.Exists(full) ? full : null;
+        }
+
+        var fromEnvironment = string.IsNullOrWhiteSpace(environmentValue)
+            ? Environment.GetEnvironmentVariable(ExecutorEnvironmentVariable)
+            : environmentValue;
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            var full = Path.GetFullPath(fromEnvironment);
+            return File.Exists(full) ? full : null;
+        }
+
+        return FindSiblingExecutable(ExecutorExecutableName);
+    }
+
     /// <summary>The worker's own build output when both projects are built side by side
     /// (<c>&lt;root&gt;/src/Forge.ExtensionHost/bin/&lt;configuration&gt;/&lt;tfm&gt;</c> →
     /// <c>&lt;root&gt;/src/Forge.PluginWorker/bin/&lt;configuration&gt;/&lt;tfm&gt;</c>), so a host run from the repository
     /// finds its worker without an extra flag.</summary>
-    private static string? SiblingProjectOutput()
+    private static string? SiblingProjectOutput(string projectName)
     {
         var target = new DirectoryInfo(AppContext.BaseDirectory);
         if (target.Parent is not { } configuration ||
@@ -188,7 +246,7 @@ public sealed record HostOptions
             return null;
         }
 
-        var sibling = Path.Combine(projectsRoot.FullName, WorkerExecutableName, "bin", configuration.Name, target.Name);
+        var sibling = Path.Combine(projectsRoot.FullName, projectName, "bin", configuration.Name, target.Name);
         return Directory.Exists(sibling) ? sibling : null;
     }
 
@@ -234,6 +292,18 @@ public sealed record HostOptions
         }
 
         return concurrency;
+    }
+
+    private static int ParseScriptWorkers(string value)
+    {
+        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var workers) ||
+            workers < 1 ||
+            workers > MaxScriptWorkers)
+        {
+            throw new FormatException($"'{value}' is not a valid script worker count (1 <= n <= {MaxScriptWorkers}).");
+        }
+
+        return workers;
     }
 
     private static TimeSpan ParseSeconds(string value)

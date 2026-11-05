@@ -12,6 +12,7 @@ internal enum PluginIssueKind
     DirectoryNameInvalid,
     ManifestMissing,
     ManifestInvalid,
+    LegacyPluginPackage,
     IdMismatch,
     DuplicateId,
     SourceMissing,
@@ -94,6 +95,9 @@ internal sealed class PluginEntry(PluginManifest manifest)
     public ApprovalDecision Decision { get; set; } = ApprovalDecision.Block("the plugin has not been evaluated");
 
     public IReadOnlyList<ToolDeclaration> Tools { get; set; } = [];
+
+    /// <summary>The complete non-tool contribution set the loaded worker reported for this plugin.</summary>
+    public PluginContributionSet Contributions { get; set; } = new();
 
     public bool HasContent => Image is not null && SourceHash.Length > 0;
 

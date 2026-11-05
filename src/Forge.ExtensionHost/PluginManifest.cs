@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Forge.Approval;
+using Forge.Plugin.Sdk;
 using Forge.Scripting;
 
 namespace Forge.ExtensionHost;
@@ -17,6 +18,7 @@ internal sealed record PluginManifest(
     string EntryAssembly,
     string? Source,
     IReadOnlyList<Dependency> Dependencies,
+    IReadOnlyList<Permission> Permissions,
     string Directory)
 {
     /// <summary>File name of the compiled image inside a version directory.</summary>
@@ -46,6 +48,9 @@ internal sealed class PluginManifestDocument
     public string? Source { get; set; }
 
     public List<DependencyDocument>? Dependencies { get; set; }
+
+    /// <summary>Permissions the plugin asks the user to grant; shown before approval and folded into the approval hash.</summary>
+    public List<PermissionDocument>? Permissions { get; set; }
 }
 
 internal sealed class DependencyDocument
@@ -53,6 +58,13 @@ internal sealed class DependencyDocument
     public string? Name { get; set; }
 
     public string? Version { get; set; }
+}
+
+internal sealed class PermissionDocument
+{
+    public JsonElement? Kind { get; set; }
+
+    public string? Scope { get; set; }
 }
 
 /// <summary>Reads <c>manifest.json</c>. Every failure is reported through the returned issue kind instead of throwing.</summary>
@@ -124,16 +136,25 @@ internal static class PluginManifestReader
                 foreach (var dependency in declared)
                 {
                     var name = dependency?.Name?.Trim();
-                    var dependencyVersion = dependency?.Version?.Trim();
-                    if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(dependencyVersion))
+                    var dependencyVersion = dependency?.Version?.Trim() ?? string.Empty;
+                    if (string.IsNullOrEmpty(name))
                     {
                         kind = PluginIssueKind.ManifestInvalid;
-                        error = $"'{path}' declares a dependency without a name and version.";
+                        error = $"'{path}' declares a dependency without a name.";
                         return false;
                     }
 
+                    // An empty version means "unpinned" and stays a legitimate value: the dependency hash frames name and
+                    // version separately, so accepting arbitrary text here cannot make two different declarations collide.
                     dependencies.Add(new Dependency(name, dependencyVersion));
                 }
+            }
+
+            if (!TryReadPermissions(path, document.Permissions, out var permissions, out var permissionError))
+            {
+                kind = PluginIssueKind.ManifestInvalid;
+                error = permissionError;
+                return false;
             }
 
             manifest = new PluginManifest(
@@ -142,6 +163,7 @@ internal static class PluginManifestReader
                 entryAssembly,
                 document.Source,
                 dependencies.AsReadOnly(),
+                permissions,
                 Path.GetFullPath(directory));
             kind = default;
             error = string.Empty;
@@ -153,6 +175,75 @@ internal static class PluginManifestReader
             error = $"'{path}' could not be read: {exception.Message}";
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads <c>permissions</c>: each entry is <c>{kind, scope?}</c>, where <c>kind</c> is a defined
+    /// <see cref="PermissionKind"/> name or its integer ordinal. An unknown kind, an empty scope or a duplicate entry is a
+    /// manifest error - the host never guesses a permission the user was not shown. Permissions are metadata only: the
+    /// host captures them before approval and never runs plugin code to discover them.
+    /// </summary>
+    private static bool TryReadPermissions(
+        string path,
+        List<PermissionDocument>? documents,
+        out IReadOnlyList<Permission> permissions,
+        out string error)
+    {
+        permissions = [];
+        error = string.Empty;
+        if (documents is null || documents.Count == 0)
+        {
+            return true;
+        }
+
+        var parsed = new List<Permission>(documents.Count);
+        var seen = new HashSet<(PermissionKind Kind, string Scope)>();
+        foreach (var document in documents)
+        {
+            if (document?.Kind is not { } kindElement)
+            {
+                error = $"'{path}' declares a permission without a kind.";
+                return false;
+            }
+
+            PermissionKind permissionKind;
+            if (kindElement.ValueKind == JsonValueKind.Number &&
+                kindElement.TryGetInt32(out var ordinal) &&
+                ordinal >= 0 &&
+                ordinal <= (int)PermissionKind.Database)
+            {
+                permissionKind = (PermissionKind)ordinal;
+            }
+            else if (kindElement.ValueKind == JsonValueKind.String &&
+                Enum.TryParse<PermissionKind>(kindElement.GetString(), ignoreCase: true, out var named) &&
+                Enum.IsDefined(named))
+            {
+                permissionKind = named;
+            }
+            else
+            {
+                error = $"'{path}' declares permission kind '{kindElement}' which is not one of {string.Join(", ", Enum.GetNames<PermissionKind>())}.";
+                return false;
+            }
+
+            var scope = document.Scope?.Trim();
+            if (scope is { Length: 0 })
+            {
+                error = $"'{path}' declares permission '{permissionKind}' with an empty scope.";
+                return false;
+            }
+
+            if (!seen.Add((permissionKind, scope ?? string.Empty)))
+            {
+                error = $"'{path}' declares permission '{permissionKind}'{(scope is null ? string.Empty : " for '" + scope + "'")} twice.";
+                return false;
+            }
+
+            parsed.Add(new Permission(permissionKind, scope));
+        }
+
+        permissions = parsed.AsReadOnly();
+        return true;
     }
 }
 

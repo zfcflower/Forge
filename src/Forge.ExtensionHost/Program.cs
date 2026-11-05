@@ -11,7 +11,7 @@ public static class Program
 {
     public const string Usage =
         """
-        forge-extension-host --pipe <name> [--plugins <dir>] [--data <dir>] [--dotnet <path>] [--worker <path>] [--tool-timeout <seconds>] [--concurrency <n>]
+        forge-extension-host --pipe <name> [--plugins <dir>] [--data <dir>] [--dotnet <path>] [--worker <path>] [--tool-timeout <seconds>] [--concurrency <n>] [--script-workers <n>]
           --pipe <name>           named pipe the main program connects to (required)
           --plugins <dir>         directory with one sub-directory per plugin (default <data>/plugins)
           --data <dir>            host state directory, holds the approval database approvals.db (default %LOCALAPPDATA%/Forge/extension-host)
@@ -19,6 +19,7 @@ public static class Program
           --worker <path>         Forge.PluginWorker.dll/.exe (default: $FORGE_PLUGIN_WORKER, then next to the host)
           --tool-timeout <s>      per-call deadline before the worker process tree is killed (default 120)
           --concurrency <n>       in-flight calls per worker (default 4)
+          --script-workers <n>    script workers the host schedules, one script each (default 4, 1-16)
         """;
 
     public static async Task<int> Main(string[] args)
@@ -62,10 +63,28 @@ public static class Program
             return 1;
         }
 
-        await using (host)
+        var exitCode = 0;
+        try
         {
-            return await host.RunAsync(cancellation.Token).ConfigureAwait(false);
+            exitCode = await host.RunAsync(cancellation.Token).ConfigureAwait(false);
         }
+        finally
+        {
+            // DisposeAsync reports a shutdown it could not verify by throwing. The exit code stays the observable result:
+            // a host that already returned a failure keeps it, and a host that looked clean but failed to verify its
+            // cleanup exits non-zero instead of pretending the stop was clean.
+            try
+            {
+                await host.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (HostOperationException exception) when (string.Equals(exception.Code, "host_shutdown_failed", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine("forge-extension-host: " + exception.Message);
+                exitCode = 1;
+            }
+        }
+
+        return exitCode;
     }
 
     private static PosixSignalRegistration? RegisterTermination(CancellationTokenSource cancellation)

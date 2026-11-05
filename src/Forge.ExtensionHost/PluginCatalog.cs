@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Forge.Approval;
+using Forge.Plugin.Sdk;
 using Forge.Scripting;
 
 namespace Forge.ExtensionHost;
@@ -17,9 +18,11 @@ internal sealed class PluginCatalog
 {
     private const int MaxSourceBytes = 1024 * 1024;
 
-    /// <summary>Prefix that keeps a file digest from ever colliding with a manifest dependency inside the folded
-    /// dependency hash.</summary>
-    private const string FileDependencyPrefix = "file:";
+    private static readonly IReadOnlyDictionary<string, string> EmptyFiles =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>Manifest file name of the retired 1.x plugin format; only used to explain why a package is not loaded.</summary>
+    private const string LegacyManifestFileName = "plugin.json";
 
     private readonly ScriptCompiler compiler;
 
@@ -110,24 +113,30 @@ internal sealed class PluginCatalog
             ? assemblySha256
             : await SourceHashAsync(entry, ct).ConfigureAwait(false);
         var current = new PluginImage(image.Directory, image.AssemblyFileName, assemblySha256, files);
-        return new PluginContent(current, sourceHash, DependencyFingerprint(entry.Manifest.Dependencies, files));
+        return new PluginContent(
+            current,
+            sourceHash,
+            DependencyFingerprint(entry.Manifest.Dependencies, entry.Manifest.Permissions, files));
     }
 
-    /// <summary>Folds the private-dependency digests together with the manifest dependencies: sorted, prefixed entries
-    /// hashed by <see cref="Hashing.DependencyHash"/>, so replacing any loaded file invalidates the approval.</summary>
+    /// <summary>
+    /// Folds the private-dependency digests, the manifest dependencies and the declared permissions together, so replacing
+    /// any loaded file <em>or changing what the plugin asks to be allowed to do</em> invalidates the approval. Permissions
+    /// therefore never need an SDK version bump to force re-approval.
+    /// <para>
+    /// The encoding is the host's own <see cref="DependencyHashSchema.SchemaMarker"/> schema, not
+    /// <see cref="Hashing.DependencyHash"/>: each tuple carries an explicit category domain and every field is length
+    /// framed, because manifest dependency names and versions are arbitrary text and the old <c>name@version</c> line
+    /// format let a crafted dependency produce the same bytes as an internal permission entry. Changing this hash is meant
+    /// to invalidate every approval written under the previous format (fail closed, no migration): the user re-approves
+    /// what is actually declared now.
+    /// </para>
+    /// </summary>
     internal static string DependencyFingerprint(
         IReadOnlyList<Dependency> dependencies,
-        IReadOnlyDictionary<string, string> files)
-    {
-        var entries = new List<Dependency>(dependencies.Count + files.Count);
-        entries.AddRange(dependencies);
-        foreach (var file in files)
-        {
-            entries.Add(new Dependency(FileDependencyPrefix + file.Key, file.Value));
-        }
-
-        return Hashing.DependencyHash(entries);
-    }
+        IReadOnlyList<Permission> permissions,
+        IReadOnlyDictionary<string, string> files) =>
+        DependencyHashSchema.Compute(dependencies, permissions, files);
 
     /// <summary>The stored image for a compilation version: the store layout, then the literal
     /// <c>bin/&lt;version&gt;/</c> layout, so an image produced elsewhere is still picked up.</summary>
@@ -171,6 +180,17 @@ internal sealed class PluginCatalog
         if (!PluginManifestReader.TryRead(directory, out var manifest, out var kind, out var error))
         {
             issues.Add(new PluginIssue(directoryName, kind, error, directory));
+            if (kind == PluginIssueKind.ManifestMissing && HasLegacyManifest(directory))
+            {
+                // A 1.x package is never adapted or executed: its plugin.json describes an IForgePlugin assembly the
+                // current contract does not load, so the user gets an explicit migration diagnostic instead.
+                issues.Add(new PluginIssue(
+                    directoryName,
+                    PluginIssueKind.LegacyPluginPackage,
+                    $"'{directory}' contains a legacy plugin.json (IForgePlugin package). Forge 2.0 plugins declare manifest.json and implement Forge.Plugin.Sdk.IPlugin; this package is not compatible and was not loaded. Migrate the plugin or remove the directory.",
+                    directory));
+            }
+
             return;
         }
 
@@ -205,7 +225,7 @@ internal sealed class PluginCatalog
     {
         var manifest = entry.Manifest;
         entry.SdkVersion = ScriptCompiler.ContractVersion;
-        entry.DependencyHash = Hashing.DependencyHash(manifest.Dependencies);
+        entry.DependencyHash = DependencyFingerprint(manifest.Dependencies, manifest.Permissions, EmptyFiles);
 
         if (!string.IsNullOrWhiteSpace(manifest.Source))
         {
@@ -358,7 +378,7 @@ internal sealed class PluginCatalog
                 entry.SourceHash = assemblySha256;
             }
 
-            entry.DependencyHash = DependencyFingerprint(entry.Manifest.Dependencies, files);
+            entry.DependencyHash = DependencyFingerprint(entry.Manifest.Dependencies, entry.Manifest.Permissions, files);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -448,6 +468,18 @@ internal sealed class PluginCatalog
 
         text = string.Empty;
         return false;
+    }
+
+    private static bool HasLegacyManifest(string directory)
+    {
+        try
+        {
+            return File.Exists(Path.Combine(directory, LegacyManifestFileName));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Drops a leading byte-order mark so the approval hash and the compiler's own source hash agree.</summary>

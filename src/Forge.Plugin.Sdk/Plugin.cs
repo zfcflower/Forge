@@ -22,6 +22,9 @@ public interface IRegistrationContext
     void AddWorkflow(WorkflowDeclaration workflow);
     void AddPanel(PanelDeclaration panel);
     void RequirePermission(Permission permission);
+    void AddCommand(IPluginCommand command) => throw new NotSupportedException("Executable commands are not supported by this registration context.");
+    void AddAgent(AgentDeclaration agent) => throw new NotSupportedException("Agent declarations are not supported by this registration context.");
+    void AddPromptContributor(IPluginPromptContributor contributor) => throw new NotSupportedException("Prompt contributors are not supported by this registration context.");
 }
 
 [JsonSerializable(typeof(PluginInfo))]

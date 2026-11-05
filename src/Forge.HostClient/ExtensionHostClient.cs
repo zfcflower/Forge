@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
@@ -8,24 +10,48 @@ namespace Forge.HostClient;
 
 /// <summary>
 /// Main-program side of the Extension Host contract. It owns the host process and the IPC connection, keeps
-/// an atomic snapshot of the plugin tools the host registered as <see cref="ITool"/> proxies, and relays
-/// plugin→main-program tool calls through the caller's resolver and approval path so the client never
-/// bypasses permission checks.
+/// atomic snapshots of what the host registered (tool proxies and the non-UI contributions) and relays
+/// plugin→main-program tool calls through the caller's resolver and approval path so the client never bypasses
+/// permission checks.
 /// </summary>
-public sealed class ExtensionHostClient : IExtensionHostClient
+public sealed class ExtensionHostClient : IExtensionContributionClient
 {
+    internal const string RunCodeIdentity = "$run_code";
+
+    private const int MaxCallChain = 8;
+    private const int MaxDiagnostics = 16;
+
+    private const string NestedRunCodeRefusal =
+        "run_code cannot be invoked from inside another extension invocation (a plugin callback or a script); call the underlying tools directly.";
+
+    private const string EndedRunRefusal =
+        "The execution that made this call already ended; the call was refused.";
+
+    private static readonly Sdk.CodeExecutionOptions DefaultExecutionOptions = new();
+
     private readonly HostConnection connection;
     private readonly ExtensionHostClientOptions options;
     private readonly Func<string, ITool?>? toolResolver;
     private readonly Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? approvalPath;
     private readonly SemaphoreSlim lifecycle = new(1, 1);
     private readonly Lock toolsGate = new();
+    private readonly Lock contributionsGate = new();
     private readonly Lock statusGate = new();
     private readonly Lock peerGate = new();
+    private readonly Lock runsGate = new();
+    private readonly Lock diagnosticsGate = new();
+    private readonly AsyncLocal<TrustedCall?> trustedCall = new();
     private readonly Dictionary<string, PluginTools> toolsByPlugin = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PluginContributions> contributionsByPlugin = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ExtensionRun> runs = new(StringComparer.Ordinal);
+    private readonly Queue<string> diagnostics = new();
     private IReadOnlyList<ITool> tools = [];
     private IReadOnlyDictionary<string, IReadOnlyList<ITool>> toolsByPluginView =
         new Dictionary<string, IReadOnlyList<ITool>>(StringComparer.Ordinal);
+    private IReadOnlyList<ICommand> commands = [];
+    private IReadOnlyList<WorkflowDefinition> workflows = [];
+    private IReadOnlyList<AgentDefinition> agents = [];
+    private IReadOnlyList<PluginPromptReference> promptContributors = [];
     private IpcPeer? peer;
     private NamedPipeClientTransport? transport;
     private HostProcess? hostProcess;
@@ -86,6 +112,32 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     /// <summary>The same proxies grouped by plugin id, as last reported by the host.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<ITool>> ToolsByPlugin => Volatile.Read(ref toolsByPluginView);
 
+    /// <summary>Plugin commands as last reported through <c>contributions.register</c>; each proxy runs the command
+    /// in its plugin's worker after the main program's approval path allows it.</summary>
+    public IReadOnlyList<ICommand> Commands => Volatile.Read(ref commands);
+
+    /// <summary>Markdown skill workflows contributed by plugins (metadata only; the agent reads and follows them).</summary>
+    public IReadOnlyList<WorkflowDefinition> Workflows => Volatile.Read(ref workflows);
+
+    /// <summary>Agent definitions contributed by plugins, converted to the main-program contract.</summary>
+    public IReadOnlyList<AgentDefinition> Agents => Volatile.Read(ref agents);
+
+    /// <summary>Dynamic prompt contributors, addressed by plugin id and contributor id.</summary>
+    public IReadOnlyList<PluginPromptReference> PromptContributors => Volatile.Read(ref promptContributors);
+
+    /// <summary>The most recent protocol problems (a refused callback, a malformed registration, a dropped
+    /// declaration), newest last. Malformed host data is dropped here instead of failing the event loop.</summary>
+    public IReadOnlyList<string> Diagnostics
+    {
+        get
+        {
+            lock (diagnosticsGate)
+            {
+                return [.. diagnostics];
+            }
+        }
+    }
+
     /// <summary>Id of the host process this client started; null when it connected to an existing host.</summary>
     public int? HostProcessId
     {
@@ -100,7 +152,165 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
     public event Action? ToolsChanged;
 
+    public event Action? ContributionsChanged;
+
     public event Action<HostStatus, string?>? StatusChanged;
+
+    /// <summary>Creates the AOT-safe <c>run_code</c> proxy. The description and schema are generated from
+    /// <paramref name="tools"/>, the arguments are validated locally, and one <c>code.execute</c> request carries the
+    /// script, its budget and the tool surface; compilation and execution stay in the Extension Host.</summary>
+    public ITool CreateRunCodeTool(IToolRegistry tools, RunCodeProxyOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        var validated = (options ?? new RunCodeProxyOptions()).Validated();
+        return new RunCodeProxyTool(this, tools, validated);
+    }
+
+    /// <summary>Asks the host for the plugin registry state; the main program never reads the approval database.
+    /// An unavailable store is never an empty successful answer: a timeout propagates as
+    /// <see cref="IpcTimeoutException"/> and an undecodable response as <see cref="InvalidDataException"/>, so the caller
+    /// treats both as "unknown" rather than "no plugins".</summary>
+    public async Task<IReadOnlyList<Sdk.PluginStatusInfo>> GetPluginStatusesAsync(CancellationToken ct)
+    {
+        var active = RequireRunning();
+        IpcMessage response;
+        try
+        {
+            response = await SendAsync(
+                    active, Sdk.ExtensionProtocol.PluginsStatus, IpcJsonTypes.EmptyObject, RequestBudget, ct)
+                .ConfigureAwait(false);
+        }
+        catch (IpcTimeoutException ex)
+        {
+            Diagnose($"plugins.status did not answer within its budget: {ex.Message}");
+            throw;
+        }
+
+        if (!HostProtocolJson.TryReadPluginStatuses(response.Result, out var statuses, out var problem))
+        {
+            Diagnose("plugins.status returned unusable data: " + problem);
+            throw new InvalidDataException(
+                $"{Sdk.ExtensionProtocol.PluginsStatus} returned a response that cannot be decoded: {problem}");
+        }
+
+        return statuses;
+    }
+
+    /// <summary>Evaluates one prompt contributor inside its plugin's worker, bound to <paramref name="context"/>.
+    /// Null means the contributor produced no text (or is no longer registered).</summary>
+    public async Task<string?> GetPluginPromptAsync(
+        PluginPromptReference contributor, ToolContext context, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(contributor);
+        ArgumentNullException.ThrowIfNull(context);
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(contributor.PluginId) || string.IsNullOrWhiteSpace(contributor.ContributorId))
+        {
+            Diagnose("A prompt contributor with a blank plugin or contributor id was requested; it was ignored.");
+            return null;
+        }
+
+        if (!IsRegisteredPrompt(contributor))
+        {
+            Diagnose(
+                $"Prompt contributor '{contributor.ContributorId}' of plugin '{contributor.PluginId}' is not registered; it was ignored.");
+            return null;
+        }
+
+        IpcPeer active;
+        try
+        {
+            active = RequireRunning();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IpcConnectionClosedException)
+        {
+            Diagnose($"Prompt contributor '{contributor.ContributorId}' could not be evaluated: {ex.Message}");
+            return null;
+        }
+
+        if (!TryGetCallOrigin(context.AgentDepth, ct, out var origin, out var originProblem))
+        {
+            Diagnose(originProblem);
+            return null;
+        }
+
+        var effectiveContext = EffectiveContext(origin, context);
+        if (!IsFullyQualified(effectiveContext.WorkingDirectory))
+        {
+            Diagnose(
+                $"Prompt contributor '{contributor.ContributorId}' of plugin '{contributor.PluginId}' was not evaluated: {WorkingDirectoryProblem(effectiveContext)}");
+            return null;
+        }
+
+        if (TryFindCycle(origin.Ancestors, contributor.PluginId, out var cycleProblem))
+        {
+            Diagnose(cycleProblem);
+            return null;
+        }
+
+        if (!BeginRun(
+                contributor.PluginId,
+                origin,
+                null,
+                context,
+                isCode: false,
+                DefaultExecutionOptions.MaxConcurrentToolCalls,
+                DefaultExecutionOptions.MaxInnerResultChars,
+                out var run))
+        {
+            Diagnose("The Extension Host connection changed before the prompt could be evaluated.");
+            return null;
+        }
+
+        try
+        {
+            var request = new Sdk.PromptExecutionRequest(
+                contributor.PluginId,
+                contributor.ContributorId,
+                WireContext(run!, origin),
+                WireTimeoutMilliseconds);
+            var payload = HostProtocolJson.SerializePromptExecute(request);
+            IpcMessage response;
+            try
+            {
+                response = await SendAsync(
+                        active, Sdk.ExtensionProtocol.PluginPrompt, payload, RequestBudget, run.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (IpcRemoteException ex)
+            {
+                Diagnose(
+                    $"Prompt contributor '{contributor.ContributorId}' of plugin '{contributor.PluginId}' failed: {ex.Message}");
+                return null;
+            }
+            catch (IpcTimeoutException ex)
+            {
+                Diagnose(
+                    $"Prompt contributor '{contributor.ContributorId}' of plugin '{contributor.PluginId}' did not answer: {ex.Message}");
+                return null;
+            }
+            catch (IOException ex)
+            {
+                // Transport-only failure (IpcConnectionClosedException is an IOException): the caller gets the
+                // documented soft null plus a diagnostic, while its own OperationCanceledException still propagates.
+                Diagnose(
+                    $"Prompt contributor '{contributor.ContributorId}' of plugin '{contributor.PluginId}' could not be evaluated: the connection failed: {ex.Message}");
+                return null;
+            }
+
+            if (!HostProtocolJson.TryReadPromptOutput(response.Result, out var output, out var problem))
+            {
+                Diagnose("plugin.prompt returned unusable data: " + problem);
+                return null;
+            }
+
+            return output.Text;
+        }
+        finally
+        {
+            EndRun(run);
+        }
+    }
 
     public async Task StartAsync(CancellationToken ct)
     {
@@ -128,7 +338,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             {
                 if (recovering)
                 {
-                    await TeardownAsync(sendHostStop: false, clearTools: false).ConfigureAwait(false);
+                    await TeardownAsync(sendHostStop: false, clearSnapshots: false).ConfigureAwait(false);
                 }
 
                 var pipeName = IpcPipe.ValidatePipeName(connection.PipeName);
@@ -164,19 +374,19 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
                 if (recovering)
                 {
-                    DropToolsOfEarlierConnections();
+                    DropSnapshotsOfEarlierConnections();
                 }
             }
             catch (Exception ex) when (ex is OperationCanceledException && ct.IsCancellationRequested)
             {
                 SetStatus(HostStatus.Stopped, "Starting the Extension Host was canceled.");
-                await TeardownAsync(sendHostStop: false, clearTools: false).ConfigureAwait(false);
+                await TeardownAsync(sendHostStop: false, clearSnapshots: false).ConfigureAwait(false);
                 throw;
             }
             catch (Exception ex)
             {
                 ReportStartFailure(DescribeFailure(ex));
-                await TeardownAsync(sendHostStop: false, clearTools: false).ConfigureAwait(false);
+                await TeardownAsync(sendHostStop: false, clearSnapshots: false).ConfigureAwait(false);
                 throw;
             }
         }
@@ -203,7 +413,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     public async Task RefreshPluginsAsync(CancellationToken ct)
     {
         var active = RequireRunning();
-        await active.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcJsonTypes.EmptyObject, ct)
+        await SendAsync(active, Sdk.ExtensionProtocol.PluginsRefresh, IpcJsonTypes.EmptyObject, RequestBudget, ct)
             .ConfigureAwait(false);
     }
 
@@ -215,7 +425,8 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         var active = RequireRunning();
         var payload = HostProtocolJson.SerializeApprove(
             pluginId, version, sourceHash, dependencyHash, sdkVersion);
-        await active.SendRequestAsync(Sdk.ExtensionProtocol.PluginApprove, payload, ct).ConfigureAwait(false);
+        await SendAsync(active, Sdk.ExtensionProtocol.PluginApprove, payload, RequestBudget, ct)
+            .ConfigureAwait(false);
     }
 
     public async Task RevokePluginAsync(string pluginId, string version, CancellationToken ct)
@@ -224,7 +435,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         var active = RequireRunning();
         var payload = HostProtocolJson.SerializeRevoke(pluginId, version);
-        await active.SendRequestAsync(Sdk.ExtensionProtocol.PluginRevoke, payload, ct).ConfigureAwait(false);
+        await SendAsync(active, Sdk.ExtensionProtocol.PluginRevoke, payload, RequestBudget, ct).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -254,10 +465,14 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         }
     }
 
-    /// <summary>Sends one <c>plugin.execute</c> request and maps the reply to a tool result.</summary>
+    /// <summary>Sends one <c>plugin.execute</c> request for an agent- or UI-initiated plugin tool call. A call made
+    /// from inside a bound callback inherits that callback's trusted chain and depth instead of starting a new one.</summary>
     internal async ValueTask<ToolResult> InvokePluginToolAsync(
         string pluginId, string toolName, ToolCall call, ToolContext context, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        ArgumentNullException.ThrowIfNull(call);
+        ArgumentNullException.ThrowIfNull(context);
         var active = RequireRunning();
         if (!HostProtocolJson.TryParseArguments(call.ArgumentsJson, out var arguments))
         {
@@ -265,26 +480,306 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                 $"The arguments of '{toolName}' are not valid JSON: {call.ArgumentsJson}", IsError: true);
         }
 
-        var payload = HostProtocolJson.SerializePluginExecute(
-            pluginId, toolName, arguments, context.SessionId, context.WorkingDirectory, context.AgentDepth);
-        IpcMessage response;
-        try
+        if (!TryGetCallOrigin(context.AgentDepth, ct, out var origin, out var originProblem))
         {
-            response = await active.SendRequestAsync(Sdk.ExtensionProtocol.PluginExecute, payload, ct)
-                .ConfigureAwait(false);
+            Diagnose(originProblem);
+            return new ToolResult($"'{toolName}' of plugin '{pluginId}' was not run: {originProblem}", IsError: true);
         }
-        catch (IpcRemoteException ex)
+
+        var effectiveContext = EffectiveContext(origin, context);
+        if (!IsFullyQualified(effectiveContext.WorkingDirectory))
+        {
+            var problem = WorkingDirectoryProblem(effectiveContext);
+            Diagnose($"'{toolName}' of plugin '{pluginId}' was not run: {problem}");
+            return new ToolResult($"'{toolName}' of plugin '{pluginId}' was not run: {problem}", IsError: true);
+        }
+
+        if (TryFindCycle(origin.Ancestors, pluginId, out var cycleProblem))
+        {
+            Diagnose(cycleProblem);
+            return new ToolResult($"'{toolName}' of plugin '{pluginId}' was not run: {cycleProblem}", IsError: true);
+        }
+
+        if (!BeginRun(
+                pluginId,
+                origin,
+                null,
+                context,
+                isCode: false,
+                DefaultExecutionOptions.MaxConcurrentToolCalls,
+                DefaultExecutionOptions.MaxInnerResultChars,
+                out var run))
         {
             return new ToolResult(
-                $"The Extension Host could not run '{toolName}' of plugin '{pluginId}': {ex.Message}", IsError: true);
+                $"'{toolName}' of plugin '{pluginId}' was not run: the Extension Host connection changed.",
+                IsError: true);
         }
 
-        if (!HostProtocolJson.TryReadToolOutput(response.Result, out var content, out var isError))
+        try
         {
-            return new ToolResult(content, IsError: true);
+            var toolContext = WireContext(run!, origin);
+            var payload = HostProtocolJson.SerializePluginExecute(
+                pluginId,
+                toolName,
+                arguments,
+                run.Context.SessionId,
+                run.Context.WorkingDirectory,
+                run.Depth,
+                toolContext,
+                WireTimeoutMilliseconds);
+            IpcMessage response;
+            try
+            {
+                response = await SendAsync(
+                        active,
+                        Sdk.ExtensionProtocol.PluginExecute,
+                        payload,
+                        RequestBudget,
+                        run.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (IpcRemoteException ex)
+            {
+                return new ToolResult(
+                    $"The Extension Host could not run '{toolName}' of plugin '{pluginId}': {ex.Message}",
+                    IsError: true);
+            }
+
+            if (!HostProtocolJson.TryReadToolOutput(response.Result, out var content, out var isError))
+            {
+                return new ToolResult(content, IsError: true);
+            }
+
+            return new ToolResult(content, IsError: isError);
+        }
+        finally
+        {
+            EndRun(run);
+        }
+    }
+
+    /// <summary>Sends one <c>code.execute</c> request for the <c>run_code</c> proxy: the script, its budget, the
+    /// run-bound context and the tool surface. Compilation, semantic checks and the process lease stay in the host.</summary>
+    internal async ValueTask<ToolResult> InvokeCodeAsync(
+        IToolRegistry registry,
+        Sdk.CodeExecutionOptions execution,
+        string code,
+        IReadOnlyList<Sdk.ToolDeclaration> declarations,
+        TimeSpan timeout,
+        ToolContext context,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(execution);
+        ct.ThrowIfCancellationRequested();
+        var active = RequireRunning();
+
+        if (!TryGetCallOrigin(context.AgentDepth, ct, out var origin, out var originProblem))
+        {
+            Diagnose(originProblem);
+            return new ToolResult($"The script was not run: {originProblem}", IsError: true);
         }
 
-        return new ToolResult(content, IsError: isError);
+        if (origin.Ancestors.Count > 0)
+        {
+            Diagnose(NestedRunCodeRefusal);
+            return new ToolResult(NestedRunCodeRefusal, IsError: true);
+        }
+
+        var effectiveContext = EffectiveContext(origin, context);
+        if (!IsFullyQualified(effectiveContext.WorkingDirectory))
+        {
+            var problem = $"The script was not run: {WorkingDirectoryProblem(effectiveContext)}";
+            Diagnose(problem);
+            return new ToolResult(problem, IsError: true);
+        }
+
+        if (!BeginRun(
+                RunCodeIdentity,
+                origin,
+                registry,
+                context,
+                isCode: true,
+                execution.MaxConcurrentToolCalls,
+                execution.MaxInnerResultChars,
+                out var run))
+        {
+            return new ToolResult("The script was not run: the Extension Host connection changed.", IsError: true);
+        }
+
+        var milliseconds = (int)Math.Clamp(Math.Ceiling(timeout.TotalMilliseconds), 1, int.MaxValue);
+        try
+        {
+            var request = new Sdk.CodeExecutionRequest(
+                code,
+                WireContext(run!, origin),
+                milliseconds,
+                declarations,
+                execution);
+            var payload = HostProtocolJson.SerializeCodeExecute(request);
+            IpcMessage response;
+            try
+            {
+                response = await SendAsync(
+                        active, Sdk.ExtensionProtocol.CodeExecute, payload, timeout, run.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (IpcRemoteException ex)
+            {
+                return new ToolResult($"The Extension Host could not run the script: {ex.Message}", IsError: true);
+            }
+            catch (IpcTimeoutException)
+            {
+                return new ToolResult(
+                    $"The script was stopped after {Seconds(timeout)} s (run_code timeout). Narrow the work, raise timeout_seconds, or split it into several calls.",
+                    IsError: true);
+            }
+
+            if (!HostProtocolJson.TryReadCodeExecutionResult(response.Result, out var result, out var problem))
+            {
+                Diagnose("code.execute returned unusable data: " + problem);
+                return new ToolResult(problem, IsError: true);
+            }
+
+            var content = TextBounds.Truncate(result.Content, execution.MaxResultChars, "result");
+            return new ToolResult(content, result.IsError);
+        }
+        finally
+        {
+            EndRun(run);
+        }
+    }
+
+    /// <summary>Runs one contributed command in its plugin's worker after the main program's approval path allows a
+    /// main-program-confirmed <see cref="ToolSideEffect.Execute"/> call.</summary>
+    internal async ValueTask<CommandResult> InvokeCommandAsync(
+        ExtensionHostCommand command, string arguments, CommandContext context, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(context);
+        ct.ThrowIfCancellationRequested();
+        var name = command.Definition.Name;
+        IpcPeer active;
+        try
+        {
+            active = RequireRunning();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IpcConnectionClosedException)
+        {
+            return new CommandResult(Output: ex.Message, IsError: true);
+        }
+
+        var toolContext = new ToolContext(context.SessionId ?? string.Empty, context.WorkingDirectory);
+        if (!TryGetCallOrigin(toolContext.AgentDepth, ct, out var origin, out var originProblem))
+        {
+            Diagnose(originProblem);
+            return new CommandResult(Output: $"The command '{name}' was not run: {originProblem}", IsError: true);
+        }
+
+        var effectiveContext = EffectiveContext(origin, toolContext);
+        if (!IsFullyQualified(effectiveContext.WorkingDirectory))
+        {
+            var problem = $"The command '{name}' was not run: {WorkingDirectoryProblem(effectiveContext)}";
+            Diagnose(problem);
+            return new CommandResult(Output: problem, IsError: true);
+        }
+
+        var approval = approvalPath;
+        if (approval is null)
+        {
+            return new CommandResult(
+                Output: $"The command '{name}' was not run: the main program has no approval path for plugin commands.",
+                IsError: true);
+        }
+
+        ApprovalDecision decision;
+        try
+        {
+            decision = await approval(
+                    new ApprovalRequest(
+                        name,
+                        HostProtocolJson.SerializeText(arguments),
+                        ToolSideEffect.Execute,
+                        effectiveContext.WorkingDirectory),
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new CommandResult(
+                Output: $"The command '{name}' was not run: the approval path failed: {ex.Message}", IsError: true);
+        }
+
+        if (decision != ApprovalDecision.Allow)
+        {
+            return new CommandResult(Output: $"The main program denied command '{name}'.", IsError: true);
+        }
+
+        if (TryFindCycle(origin.Ancestors, command.PluginId, out var cycleProblem))
+        {
+            Diagnose(cycleProblem);
+            return new CommandResult(Output: $"The command '{name}' was not run: {cycleProblem}", IsError: true);
+        }
+
+        if (!BeginRun(
+                command.PluginId,
+                origin,
+                null,
+                toolContext,
+                isCode: false,
+                DefaultExecutionOptions.MaxConcurrentToolCalls,
+                DefaultExecutionOptions.MaxInnerResultChars,
+                out var run))
+        {
+            return new CommandResult(
+                Output: $"The command '{name}' was not run: the Extension Host connection changed.", IsError: true);
+        }
+
+        try
+        {
+            var request = new Sdk.CommandExecutionRequest(
+                command.PluginId,
+                name,
+                arguments,
+                WireContext(run!, origin),
+                WireTimeoutMilliseconds);
+            var payload = HostProtocolJson.SerializeCommandExecute(request);
+            IpcMessage response;
+            try
+            {
+                response = await SendAsync(
+                        active, Sdk.ExtensionProtocol.PluginCommand, payload, RequestBudget, run.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (IpcRemoteException ex)
+            {
+                return new CommandResult(
+                    Output: $"The Extension Host could not run command '{name}' of plugin '{command.PluginId}': {ex.Message}",
+                    IsError: true);
+            }
+            catch (IpcTimeoutException ex)
+            {
+                return new CommandResult(
+                    Output: $"Command '{name}' of plugin '{command.PluginId}' did not finish: {ex.Message}",
+                    IsError: true);
+            }
+
+            if (!HostProtocolJson.TryReadCommandOutput(response.Result, out var output, out var problem))
+            {
+                Diagnose("plugin.command returned unusable data: " + problem);
+                return new CommandResult(Output: problem, IsError: true);
+            }
+
+            return new CommandResult(output.Output, output.PromptToSend, output.IsError);
+        }
+        finally
+        {
+            EndRun(run);
+        }
     }
 
     private async Task StopCoreAsync()
@@ -292,7 +787,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         Interlocked.Exchange(ref stopping, 1);
         try
         {
-            await TeardownAsync(sendHostStop: true, clearTools: true).ConfigureAwait(false);
+            await TeardownAsync(sendHostStop: true, clearSnapshots: true).ConfigureAwait(false);
             SetStatus(HostStatus.Stopped, null);
         }
         finally
@@ -303,9 +798,10 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
     /// <summary>Drops the peer, transport and host process of the current connection generation. The peers' own
     /// close path faults pending requests with <see cref="IpcConnectionClosedException"/>.</summary>
-    private async Task TeardownAsync(bool sendHostStop, bool clearTools)
+    private async Task TeardownAsync(bool sendHostStop, bool clearSnapshots)
     {
         RetireActiveGeneration();
+        InvalidateRuns();
         IpcPeer? active;
         lock (peerGate)
         {
@@ -375,9 +871,10 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             }
         }
 
-        if (clearTools)
+        if (clearSnapshots)
         {
             ClearTools();
+            ClearContributions();
         }
     }
 
@@ -453,7 +950,9 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         var pipe = new NamedPipeClientTransport(pipeName, options.PipeOptions);
         var created = new IpcPeer(pipe, new IpcPeerOptions
         {
-            DefaultTimeout = options.RequestTimeout ?? Timeout.InfiniteTimeSpan,
+            // Deadlines are per call in this client (see SendAsync): a peer-wide default would cut a 600 s script
+            // short, while leaving unrelated requests at the configured RequestTimeout.
+            DefaultTimeout = Timeout.InfiniteTimeSpan,
         });
         var generation = Interlocked.Increment(ref nextGeneration);
         Volatile.Write(ref activeGeneration, generation);
@@ -510,12 +1009,28 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         {
             UnregisterTools(generation, message.Arguments);
         }
+        else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ContributionsRegister, StringComparison.Ordinal))
+        {
+            RegisterContributions(generation, message.Arguments);
+        }
+        else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ContributionsUnregister, StringComparison.Ordinal))
+        {
+            UnregisterContributions(generation, message.Arguments);
+        }
     }
 
     private void RegisterTools(long generation, JsonElement? payload)
     {
         if (!HostProtocolJson.TryReadToolsRegister(payload, out var pluginId, out var declarations))
         {
+            Diagnose("tools.register carried no usable plugin id or tool list; it was ignored.");
+            return;
+        }
+
+        if (string.Equals(pluginId, RunCodeIdentity, StringComparison.Ordinal))
+        {
+            Diagnose(
+                $"tools.register used the reserved identity '{RunCodeIdentity}'; it was ignored so it cannot shadow run_code.");
             return;
         }
 
@@ -525,10 +1040,29 @@ public sealed class ExtensionHostClient : IExtensionHostClient
             return;
         }
 
-        var proxies = new ExtensionHostTool[declarations.Count];
+        var callable = new List<Sdk.ToolDeclaration>(declarations.Count);
+        foreach (var declaration in declarations)
+        {
+            if (string.Equals(declaration.Name, RunCodeProxyTool.Name, StringComparison.Ordinal))
+            {
+                Diagnose(
+                    $"Plugin '{pluginId}' registered a tool named '{RunCodeProxyTool.Name}'; it was ignored because run_code is a reserved main-program tool.");
+                continue;
+            }
+
+            callable.Add(declaration);
+        }
+
+        if (callable.Count == 0)
+        {
+            SetPluginTools(pluginId, null, generation);
+            return;
+        }
+
+        var proxies = new ExtensionHostTool[callable.Count];
         for (var index = 0; index < proxies.Length; index++)
         {
-            proxies[index] = new ExtensionHostTool(this, pluginId, declarations[index]);
+            proxies[index] = new ExtensionHostTool(this, pluginId, callable[index]);
         }
 
         SetPluginTools(pluginId, proxies, generation);
@@ -538,6 +1072,7 @@ public sealed class ExtensionHostClient : IExtensionHostClient
     {
         if (!HostProtocolJson.TryReadToolsUnregister(payload, out var pluginId))
         {
+            Diagnose("tools.unregister carried no usable plugin id; it was ignored.");
             return;
         }
 
@@ -580,11 +1115,93 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         RaiseToolsChanged();
     }
 
+    private void RegisterContributions(long generation, JsonElement? payload)
+    {
+        if (!HostProtocolJson.TryReadContributionsRegister(
+                payload, out var pluginId, out var contributions, out var problem))
+        {
+            Diagnose("contributions.register ignored: " + problem);
+            return;
+        }
+
+        if (string.Equals(pluginId, RunCodeIdentity, StringComparison.Ordinal))
+        {
+            Diagnose(
+                $"contributions.register used the reserved identity '{RunCodeIdentity}'; it was ignored so it cannot shadow run_code.");
+            return;
+        }
+
+        var validation = new List<string>();
+        var validated = ContributionSnapshots.Validate(pluginId, contributions, validation);
+        foreach (var message in validation)
+        {
+            Diagnose(message);
+        }
+
+        SetPluginContributions(pluginId, validated, generation);
+    }
+
+    private void UnregisterContributions(long generation, JsonElement? payload)
+    {
+        if (!HostProtocolJson.TryReadPluginId(payload, out var pluginId))
+        {
+            Diagnose("contributions.unregister carried no usable plugin id; it was ignored.");
+            return;
+        }
+
+        SetPluginContributions(pluginId, null, generation);
+    }
+
+    private void SetPluginContributions(
+        string pluginId, ValidatedContributions? contributions, long generation)
+    {
+        var changed = false;
+        var messages = new List<string>();
+        lock (contributionsGate)
+        {
+            contributionsByPlugin.TryGetValue(pluginId, out var registered);
+            if (registered is not null && registered.Generation > generation)
+            {
+                return;
+            }
+
+            if (contributions is null || contributions.IsEmpty)
+            {
+                changed = contributionsByPlugin.Remove(pluginId);
+            }
+            else if (registered is null || !ContributionSnapshots.Same(registered.Contributions, contributions))
+            {
+                contributionsByPlugin[pluginId] = new PluginContributions(generation, contributions);
+                changed = true;
+            }
+            else
+            {
+                contributionsByPlugin[pluginId] = registered with { Generation = generation };
+            }
+
+            if (changed)
+            {
+                RebuildContributionSnapshots(messages);
+            }
+        }
+
+        foreach (var message in messages)
+        {
+            Diagnose(message);
+        }
+
+        if (changed)
+        {
+            RaiseContributionsChanged();
+        }
+    }
+
     /// <summary>Drops the entries an earlier connection registered; entries the current connection published - even
-    /// ones that arrived before the Running transition - survive.</summary>
-    private void DropToolsOfEarlierConnections()
+    /// ones that arrived before the Running transition - survive. A crash keeps the last known snapshot.</summary>
+    private void DropSnapshotsOfEarlierConnections()
     {
         var current = Volatile.Read(ref registeredGeneration);
+        var toolsChanged = false;
         lock (toolsGate)
         {
             List<string>? stale = null;
@@ -596,20 +1213,57 @@ public sealed class ExtensionHostClient : IExtensionHostClient
                 }
             }
 
-            if (stale is null)
+            if (stale is not null)
             {
-                return;
-            }
+                foreach (var pluginId in stale)
+                {
+                    toolsByPlugin.Remove(pluginId);
+                }
 
-            foreach (var pluginId in stale)
-            {
-                toolsByPlugin.Remove(pluginId);
+                RebuildToolSnapshots();
+                toolsChanged = true;
             }
-
-            RebuildToolSnapshots();
         }
 
-        RaiseToolsChanged();
+        if (toolsChanged)
+        {
+            RaiseToolsChanged();
+        }
+
+        var contributionsChanged = false;
+        var messages = new List<string>();
+        lock (contributionsGate)
+        {
+            List<string>? stale = null;
+            foreach (var (pluginId, registered) in contributionsByPlugin)
+            {
+                if (registered.Generation < current)
+                {
+                    (stale ??= []).Add(pluginId);
+                }
+            }
+
+            if (stale is not null)
+            {
+                foreach (var pluginId in stale)
+                {
+                    contributionsByPlugin.Remove(pluginId);
+                }
+
+                RebuildContributionSnapshots(messages);
+                contributionsChanged = true;
+            }
+        }
+
+        foreach (var message in messages)
+        {
+            Diagnose(message);
+        }
+
+        if (contributionsChanged)
+        {
+            RaiseContributionsChanged();
+        }
     }
 
     private static bool SameDeclarations(
@@ -652,6 +1306,26 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         RaiseToolsChanged();
     }
 
+    private void ClearContributions()
+    {
+        lock (contributionsGate)
+        {
+            if (contributionsByPlugin.Count == 0 &&
+                commands.Count == 0 &&
+                workflows.Count == 0 &&
+                agents.Count == 0 &&
+                promptContributors.Count == 0)
+            {
+                return;
+            }
+
+            contributionsByPlugin.Clear();
+            RebuildContributionSnapshots([]);
+        }
+
+        RaiseContributionsChanged();
+    }
+
     private void RebuildToolSnapshots()
     {
         if (toolsByPlugin.Count == 0)
@@ -680,33 +1354,126 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         toolsByPluginView = view;
     }
 
+    /// <summary>Rebuilds the four contribution views under <see cref="contributionsGate"/>. Names are unique across
+    /// plugins by ordinal plugin id (the first registration wins), so a lookup by name is unambiguous.</summary>
+    private void RebuildContributionSnapshots(List<string> messages)
+    {
+        if (contributionsByPlugin.Count == 0)
+        {
+            Volatile.Write(ref commands, []);
+            Volatile.Write(ref workflows, []);
+            Volatile.Write(ref agents, []);
+            Volatile.Write(ref promptContributors, []);
+            return;
+        }
+
+        var ordered = new List<KeyValuePair<string, PluginContributions>>(contributionsByPlugin);
+        ordered.Sort(static (left, right) => string.CompareOrdinal(left.Key, right.Key));
+
+        var commandList = new List<ICommand>();
+        var workflowList = new List<WorkflowDefinition>();
+        var agentList = new List<AgentDefinition>();
+        var promptList = new List<PluginPromptReference>();
+        var commandNames = new HashSet<string>(StringComparer.Ordinal);
+        var workflowNames = new HashSet<string>(StringComparer.Ordinal);
+        var agentNames = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (pluginId, snapshot) in ordered)
+        {
+            foreach (var declaration in snapshot.Contributions.Commands)
+            {
+                if (!commandNames.Add(declaration.Name))
+                {
+                    messages.Add(
+                        $"Command '{declaration.Name}' of plugin '{pluginId}' clashes with another contribution; it was ignored.");
+                    continue;
+                }
+
+                commandList.Add(new ExtensionHostCommand(this, pluginId, declaration));
+            }
+
+            foreach (var workflow in snapshot.Contributions.Workflows)
+            {
+                if (!workflowNames.Add(workflow.Name))
+                {
+                    messages.Add(
+                        $"Workflow '{workflow.Name}' of plugin '{pluginId}' clashes with another contribution; it was ignored.");
+                    continue;
+                }
+
+                workflowList.Add(ContributionSnapshots.ToWorkflow(workflow));
+            }
+
+            foreach (var agent in snapshot.Contributions.Agents)
+            {
+                if (!agentNames.Add(agent.Name))
+                {
+                    messages.Add(
+                        $"Agent '{agent.Name}' of plugin '{pluginId}' clashes with another contribution; it was ignored.");
+                    continue;
+                }
+
+                agentList.Add(ContributionSnapshots.ToAgent(agent));
+            }
+
+            foreach (var prompt in snapshot.Contributions.Prompts)
+            {
+                promptList.Add(new PluginPromptReference(pluginId, prompt.Id));
+            }
+        }
+
+        Volatile.Write(ref commands, commandList);
+        Volatile.Write(ref workflows, workflowList);
+        Volatile.Write(ref agents, agentList);
+        Volatile.Write(ref promptContributors, promptList);
+    }
+
     private Task OnRequestAsync(IpcPeer active, IpcMessage message, CancellationToken ct) =>
         string.Equals(message.Operation, Sdk.ExtensionProtocol.HostToolCall, StringComparison.Ordinal)
             ? HandleHostToolCallAsync(active, message, ct)
             : RespondErrorAsync(active, message.Id, "unsupported", $"The main program does not handle '{message.Operation}'.");
 
-    /// <summary>A plugin (via the host) calls a main-program tool: resolve, apply the caller's approval path, run.</summary>
+    /// <summary>A worker, via the host, calls a main-program tool. Only a call that names a live run of this
+    /// connection generation and the plugin identity recorded for it is resolved, approved and executed; the session,
+    /// working directory, depth and plugin chain come from that record, not from the message.</summary>
     private async Task HandleHostToolCallAsync(IpcPeer active, IpcMessage request, CancellationToken ct)
     {
-        if (!HostProtocolJson.TryReadHostToolCall(request.Arguments, out var hostCall))
+        if (!HostProtocolJson.TryReadBoundToolCall(request.Arguments, out var call, out var problem))
         {
-            await RespondToolOutputAsync(active, request.Id, "The host.tool_call request has no tool name.", isError: true)
-                .ConfigureAwait(false);
+            Diagnose("host.tool_call refused: " + problem);
+            await RespondToolOutputAsync(active, request.Id, problem, isError: true).ConfigureAwait(false);
             return;
         }
 
-        if (!TryResolveWorkingDirectory(hostCall, out var directory, out var directoryProblem))
+        if (string.Equals(call.Name, RunCodeProxyTool.Name, StringComparison.Ordinal))
         {
-            await RespondToolOutputAsync(
-                    active, request.Id, $"'{hostCall.Name}' was not run: {directoryProblem}", isError: true)
-                .ConfigureAwait(false);
+            Diagnose("host.tool_call refused: " + NestedRunCodeRefusal);
+            await RespondToolOutputAsync(active, request.Id, NestedRunCodeRefusal, isError: true).ConfigureAwait(false);
             return;
         }
 
-        var tool = toolResolver?.Invoke(hostCall.Name);
+        if (!TryGetActiveRun(call.RunId, out var run, out problem))
+        {
+            Diagnose($"host.tool_call refused: {problem}");
+            await RespondToolOutputAsync(active, request.Id, problem, isError: true).ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.Equals(run.PluginId, call.PluginId, StringComparison.Ordinal))
+        {
+            problem =
+                $"'{call.Name}' was not run: the call claims plugin '{call.PluginId}' but the run belongs to '{run.PluginId}'.";
+            Diagnose("host.tool_call refused: " + problem);
+            await RespondToolOutputAsync(active, request.Id, problem, isError: true).ConfigureAwait(false);
+            return;
+        }
+
+        var tool = run.IsCode
+            ? run.Registry is { } registry && registry.TryGet(call.Name, out var registered) ? registered : null
+            : toolResolver?.Invoke(call.Name);
         if (tool is null)
         {
-            await RespondToolOutputAsync(active, request.Id, $"Unknown tool '{hostCall.Name}'.", isError: true)
+            await RespondToolOutputAsync(active, request.Id, $"Unknown tool '{call.Name}'.", isError: true)
                 .ConfigureAwait(false);
             return;
         }
@@ -716,102 +1483,396 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         {
             await RespondToolOutputAsync(
                     active, request.Id,
-                    $"'{hostCall.Name}' was not run: the main program has no approval path for plugin tool calls.",
+                    $"'{call.Name}' was not run: the main program has no approval path for plugin tool calls.",
                     isError: true)
                 .ConfigureAwait(false);
             return;
         }
 
-        ApprovalDecision decision;
+        if (!run.TryLease())
+        {
+            Diagnose("host.tool_call refused: " + EndedRunRefusal);
+            await RespondToolOutputAsync(active, request.Id, EndedRunRefusal, isError: true).ConfigureAwait(false);
+            return;
+        }
+
         try
         {
-            decision = await approval(
-                    new ApprovalRequest(hostCall.Name, hostCall.ArgumentsJson, tool.SideEffect, directory), ct)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            await RespondToolOutputAsync(
-                    active, request.Id, $"'{hostCall.Name}' was not run: the approval path failed: {ex.Message}",
-                    isError: true)
-                .ConfigureAwait(false);
-            return;
-        }
-
-        if (decision != ApprovalDecision.Allow)
-        {
-            await RespondToolOutputAsync(active, request.Id, $"The main program denied '{hostCall.Name}'.", isError: true)
-                .ConfigureAwait(false);
-            return;
-        }
-
-        var call = new ToolCall($"hostcall-{Interlocked.Increment(ref nextCallId)}", hostCall.Name, hostCall.ArgumentsJson);
-        ToolResult result;
-        try
-        {
-            result = await tool.InvokeAsync(
-                    call, new ToolContext(hostCall.SessionId, directory, hostCall.Depth), ct)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            await RespondToolOutputAsync(active, request.Id, $"{ex.GetType().Name}: {ex.Message}", isError: true)
-                .ConfigureAwait(false);
-            return;
-        }
-
-        await RespondToolOutputAsync(active, request.Id, result.Content ?? string.Empty, result.IsError).ConfigureAwait(false);
-    }
-
-    /// <summary>Picks the directory a relayed call runs in: the fully qualified <c>workingDir</c> the host carried,
-    /// or - only when the request carries none at all (an old host) - the fallback, which must itself be fully
-    /// qualified. Anything else is reported instead of approved and run.</summary>
-    private bool TryResolveWorkingDirectory(HostToolCallRequest call, out string directory, out string problem)
-    {
-        if (call.WorkingDirectoryProvided)
-        {
-            if (IsFullyQualified(call.WorkingDirectory))
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, run.Token);
+            var token = linked.Token;
+            try
             {
-                directory = call.WorkingDirectory;
-                problem = string.Empty;
-                return true;
+                await run.Gate.WaitAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
 
-            directory = string.Empty;
-            problem = string.IsNullOrWhiteSpace(call.WorkingDirectory)
-                ? "the working directory carried by the host is blank."
-                : $"the working directory '{call.WorkingDirectory}' carried by the host is not a fully qualified path.";
+            try
+            {
+                if (!run.IsActive)
+                {
+                    Diagnose("host.tool_call refused: " + EndedRunRefusal);
+                    await RespondToolOutputAsync(active, request.Id, EndedRunRefusal, isError: true)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                ApprovalDecision decision;
+                try
+                {
+                    decision = await approval(
+                            new ApprovalRequest(
+                                call.Name, call.ArgumentsJson, tool.SideEffect, run.Context.WorkingDirectory),
+                            token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    await RespondToolOutputAsync(
+                            active, request.Id, $"'{call.Name}' was not run: the approval path failed: {ex.Message}",
+                            isError: true)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                if (decision != ApprovalDecision.Allow)
+                {
+                    await RespondToolOutputAsync(
+                            active, request.Id, $"The main program denied '{call.Name}'.", isError: true)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                // Approval may ignore cancellation and still answer Allow; only an active run may start a tool.
+                if (!run.IsActive)
+                {
+                    Diagnose("host.tool_call refused: " + EndedRunRefusal);
+                    await RespondToolOutputAsync(active, request.Id, EndedRunRefusal, isError: true)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                var childContext = new ToolContext(
+                    run.Context.SessionId, run.Context.WorkingDirectory, run.Depth + 1);
+                var toolCall = new ToolCall(
+                    $"hostcall-{Interlocked.Increment(ref nextCallId)}", call.Name, call.ArgumentsJson);
+                var previous = trustedCall.Value;
+                trustedCall.Value = new TrustedCall(run.RunId, run.Generation, run.Chain, childContext.AgentDepth);
+                ToolResult result;
+                try
+                {
+                    result = await tool.InvokeAsync(toolCall, childContext, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    await RespondToolOutputAsync(
+                            active, request.Id, $"{ex.GetType().Name}: {ex.Message}", isError: true)
+                        .ConfigureAwait(false);
+                    return;
+                }
+                finally
+                {
+                    trustedCall.Value = previous;
+                }
+
+                var content = TextBounds.Truncate(
+                    result.Content ?? string.Empty, run.MaxInnerResultChars, "tool result");
+                await RespondToolOutputAsync(active, request.Id, content, result.IsError).ConfigureAwait(false);
+            }
+            finally
+            {
+                run.Gate.Release();
+            }
+        }
+        finally
+        {
+            run.ReleaseLease();
+        }
+    }
+
+    /// <summary>Registers a new execution. It is bound to the connection generation it starts on; if the connection
+    /// was replaced in the meantime the run is not created at all.</summary>
+    private bool BeginRun(
+        string pluginId,
+        CallOrigin origin,
+        IToolRegistry? registry,
+        ToolContext context,
+        bool isCode,
+        int maxConcurrency,
+        int maxInnerResultChars,
+        [NotNullWhen(true)] out ExtensionRun? run)
+    {
+        run = null;
+        CancellationTokenSource lifetime;
+        try
+        {
+            lifetime = CancellationTokenSource.CreateLinkedTokenSource(origin.Token);
+        }
+        catch (ObjectDisposedException)
+        {
             return false;
         }
 
-        var fallback = FallbackWorkingDirectory();
-        if (IsFullyQualified(fallback))
+        lock (runsGate)
         {
-            directory = fallback;
-            problem = string.Empty;
+            if (Volatile.Read(ref activeGeneration) != origin.Generation)
+            {
+                lifetime.Dispose();
+                return false;
+            }
+
+            string runId;
+            do
+            {
+                runId = RandomNumberGenerator.GetHexString(32);
+            }
+            while (runs.ContainsKey(runId));
+
+            var chain = new string[origin.Ancestors.Count + 1];
+            for (var index = 0; index < origin.Ancestors.Count; index++)
+            {
+                chain[index] = origin.Ancestors[index];
+            }
+
+            chain[^1] = pluginId;
+            run = new ExtensionRun(
+                runId,
+                origin.RootRunId ?? runId,
+                origin.Generation,
+                pluginId,
+                chain,
+                EffectiveContext(origin, context),
+                origin.Depth,
+                isCode,
+                registry,
+                maxConcurrency,
+                maxInnerResultChars,
+                lifetime);
+            runs.Add(runId, run);
+            return true;
+        }
+    }
+
+    private void EndRun(ExtensionRun? run)
+    {
+        if (run is null)
+        {
+            return;
+        }
+
+        lock (runsGate)
+        {
+            if (runs.TryGetValue(run.RunId, out var stored) && ReferenceEquals(stored, run))
+            {
+                runs.Remove(run.RunId);
+            }
+        }
+
+        try
+        {
+            run.End();
+        }
+        finally
+        {
+            run.ReleaseLease();
+        }
+    }
+
+    /// <summary>Ends every execution of the connection being torn down, so a late callback of an old run finds
+    /// nothing to run instead of reaching the resolver.</summary>
+    private void InvalidateRuns()
+    {
+        ExtensionRun[] stale;
+        lock (runsGate)
+        {
+            if (runs.Count == 0)
+            {
+                return;
+            }
+
+            stale = [.. runs.Values];
+            runs.Clear();
+        }
+
+        foreach (var run in stale)
+        {
+            run.End();
+        }
+    }
+
+    private bool TryGetActiveRun(string runId, [NotNullWhen(true)] out ExtensionRun? run, out string problem)
+    {
+        problem = string.Empty;
+        ExtensionRun? found;
+        lock (runsGate)
+        {
+            runs.TryGetValue(runId, out found);
+        }
+
+        if (found is null)
+        {
+            problem = "The call is not part of an execution that is in flight on this connection; it was refused.";
+            run = null;
+            return false;
+        }
+
+        if (found.Generation != Volatile.Read(ref activeGeneration))
+        {
+            problem = "The call belongs to an execution of an earlier connection; it was refused.";
+            run = null;
+            return false;
+        }
+
+        if (!found.IsActive)
+        {
+            problem = "The execution that made this call already ended; the call was refused.";
+            run = null;
+            return false;
+        }
+
+        run = found;
+        return true;
+    }
+
+    /// <summary>Resolves the trusted context of a new execution: the caller's top-level depth for an agent- or
+    /// UI-initiated call, or the parent callback's chain and depth for a nested one. It is never taken from a message.</summary>
+    private bool TryGetCallOrigin(int topLevelDepth, CancellationToken ct, out CallOrigin origin, out string problem)
+    {
+        origin = default;
+        problem = string.Empty;
+        var generation = Volatile.Read(ref activeGeneration);
+        if (trustedCall.Value is not { } parent)
+        {
+            origin = new CallOrigin([], Math.Max(0, topLevelDepth), generation, ct, null, RootRunId: null);
             return true;
         }
 
-        directory = string.Empty;
-        problem = $"the fallback working directory '{fallback}' is not a fully qualified path.";
+        if (!TryGetActiveRun(parent.RunId, out var parentRun, out problem))
+        {
+            return false;
+        }
+
+        if (parentRun.Generation != parent.Generation)
+        {
+            problem = "The call belongs to an execution of an earlier connection; it was refused.";
+            return false;
+        }
+
+        if (parent.Chain.Count >= MaxCallChain)
+        {
+            problem = $"The plugin call chain already has {parent.Chain.Count} links; the limit is {MaxCallChain}.";
+            return false;
+        }
+
+        origin = new CallOrigin(
+            parent.Chain, parent.ChildDepth, parent.Generation, parentRun.Token, parentRun.Context,
+            parentRun.RootRunId);
+        return true;
+    }
+
+    private static bool TryFindCycle(IReadOnlyList<string> ancestors, string pluginId, out string problem)
+    {
+        foreach (var ancestor in ancestors)
+        {
+            if (string.Equals(ancestor, pluginId, StringComparison.Ordinal))
+            {
+                problem =
+                    $"Plugin '{pluginId}' is already on the call chain; a plugin may not be called recursively.";
+                return true;
+            }
+        }
+
+        problem = string.Empty;
         return false;
     }
+
+    private bool IsRegisteredPrompt(PluginPromptReference contributor)
+    {
+        foreach (var registered in PromptContributors)
+        {
+            if (string.Equals(registered.PluginId, contributor.PluginId, StringComparison.Ordinal) &&
+                string.Equals(registered.ContributorId, contributor.ContributorId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Sends a request with a per-call deadline: the caller's token, this call's budget and the connection
+    /// lifetime.</summary>
+    private static async Task<IpcMessage> SendAsync(
+        IpcPeer active, string operation, JsonElement? args, TimeSpan? budget, CancellationToken ct)
+    {
+        if (budget is not { } timeout)
+        {
+            return await active.SendRequestAsync(operation, args, ct).ConfigureAwait(false);
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(timeout);
+        try
+        {
+            return await active.SendRequestAsync(operation, args, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException oce) when (!ct.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            throw new IpcTimeoutException(operation, timeout, oce);
+        }
+    }
+
+    private TimeSpan? RequestBudget =>
+        options.RequestTimeout is { } timeout && timeout > TimeSpan.Zero ? timeout : null;
+
+    /// <summary>The budget a plugin execution reports to the host; a client configured without a deadline still
+    /// tells the host the documented two-minute default.</summary>
+    private int WireTimeoutMilliseconds => (int)Math.Clamp(
+        (RequestBudget ?? TimeSpan.FromSeconds(120)).TotalMilliseconds, 1, int.MaxValue);
 
     private static bool IsFullyQualified([NotNullWhen(true)] string? path) =>
         !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path);
 
-    private string FallbackWorkingDirectory() =>
-        !string.IsNullOrWhiteSpace(options.HostToolWorkingDirectory)
-            ? options.HostToolWorkingDirectory
-            : Environment.CurrentDirectory;
+    /// <summary>The context an execution actually runs with. A nested call inherits the trusted parent's context, so a
+    /// caller cannot swap in a different working directory; only a top-level call uses the context it was handed.
+    /// Nothing here normalizes the path: a relative path stays relative and is refused by
+    /// <see cref="IsFullyQualified"/> instead of being silently resolved against the process directory.</summary>
+    private static ToolContext EffectiveContext(in CallOrigin origin, ToolContext context) =>
+        origin.ParentContext ?? context;
+
+    /// <summary>The context a request carries on the wire. Every field, the root invocation identity included, is taken
+    /// from the trusted pending record of the run: <see cref="ExtensionRun.RootRunId"/> is this run's own id for a
+    /// top-level execution and the inherited one for a nested call, so it can never be supplied by a worker, a tool
+    /// context or a callback message.</summary>
+    private static Sdk.ExtensionCallContext WireContext(ExtensionRun run, in CallOrigin origin) =>
+        new(run.RunId, run.Context.SessionId, run.Context.WorkingDirectory, run.Depth, origin.Ancestors)
+        {
+            RootRunId = run.RootRunId,
+        };
+
+    /// <summary>Refusal text for an execution whose effective working directory is unusable.</summary>
+    private static string WorkingDirectoryProblem(ToolContext context) =>
+        string.IsNullOrWhiteSpace(context.WorkingDirectory)
+            ? "the working directory is blank; it is not a fully qualified path"
+            : $"the working directory '{context.WorkingDirectory}' is not a fully qualified path";
+
+    private static string Seconds(TimeSpan value) =>
+        value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
 
     private static Task RespondToolOutputAsync(IpcPeer active, long requestId, string content, bool isError) =>
         active.IsClosed ? Task.CompletedTask : RespondAsync(active, requestId, content, isError);
@@ -976,6 +2037,40 @@ public sealed class ExtensionHostClient : IExtensionHostClient
         }
     }
 
+    private void RaiseContributionsChanged()
+    {
+        var handler = ContributionsChanged;
+        if (handler is null)
+        {
+            return;
+        }
+
+        try
+        {
+            handler();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void Diagnose(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        lock (diagnosticsGate)
+        {
+            diagnostics.Enqueue(message);
+            while (diagnostics.Count > MaxDiagnostics)
+            {
+                diagnostics.Dequeue();
+            }
+        }
+    }
+
     private static async Task DisposeQuietlyAsync(IpcPeer active)
     {
         try
@@ -1025,4 +2120,15 @@ public sealed class ExtensionHostClient : IExtensionHostClient
 
     /// <summary>One plugin's tool proxies plus the connection generation that registered them.</summary>
     private readonly record struct PluginTools(long Generation, IReadOnlyList<ExtensionHostTool> Tools);
+
+    /// <summary>Where a new execution starts: the trusted chain, depth and context it inherits, the connection
+    /// generation it is bound to, the parent lifetime a nested call is cancelled with, and the root invocation
+    /// identity it belongs to (<see langword="null"/> for a top-level call, which starts a new root).</summary>
+    private readonly record struct CallOrigin(
+        IReadOnlyList<string> Ancestors,
+        int Depth,
+        long Generation,
+        CancellationToken Token,
+        ToolContext? ParentContext,
+        string? RootRunId);
 }

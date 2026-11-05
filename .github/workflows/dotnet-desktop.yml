@@ -49,6 +49,8 @@ env:
   FORGE_APP_PROJECT: src/Forge.App/Forge.App.csproj              # 主程序（Native AOT）
   FORGE_EXTENSION_HOST_PROJECT: src/Forge.ExtensionHost/Forge.ExtensionHost.csproj   # 常驻 Host（JIT）
   FORGE_PLUGIN_WORKER_PROJECT: src/Forge.PluginWorker/Forge.PluginWorker.csproj       # 插件 Worker（JIT）
+  FORGE_SCRIPT_EXECUTOR_PROJECT: src/Forge.ScriptExecutor/Forge.ScriptExecutor.csproj # 一次性脚本执行器（JIT）
+  FORGE_SMOKE_PROJECT: tools/Forge.Smoke/Forge.Smoke.csproj                           # Native AOT 冒烟代理
   FORGE_ARTIFACT_PREFIX: Forge
 
 jobs:
@@ -58,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest ]
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -166,7 +168,7 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          for proj in "$FORGE_EXTENSION_HOST_PROJECT" "$FORGE_PLUGIN_WORKER_PROJECT"; do
+          for proj in "$FORGE_EXTENSION_HOST_PROJECT" "$FORGE_PLUGIN_WORKER_PROJECT" "$FORGE_SCRIPT_EXECUTOR_PROJECT"; do
             dotnet publish "$proj" \
               -c Release \
               -r "$RID" \
@@ -196,8 +198,36 @@ jobs:
             -p:Version="$VERSION" \
             $strip_flag \
             -o "publish/$RID"
-          # TODO(冒烟): architecture.md 第 44 条要求 CI 做三平台冒烟。等 Forge.App 定下
-          # headless/--version 之类的非交互入口后，在这里跑一次产物并断言退出码。
+
+      # Forge.App 尚未落地时，用 Native AOT 的 Forge.Smoke 代理做三平台冒烟：它定位同目录的 JIT Host、
+      # Worker 与一次性 ScriptExecutor，起 Host 后经 HostClient 做 plugins.status + run_code 往返，断言 SMOKE OK。
+      # 这是 architecture.md 第 44 条 AOT↔JIT 往返的验证，不静默跳过。
+      - name: Publish Forge.Smoke (Native AOT)
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          dotnet publish "$FORGE_SMOKE_PROJECT" \
+            -c Release \
+            -r "$RID" \
+            -p:PublishAot=true \
+            -p:SelfContained=true \
+            -p:Version="$VERSION" \
+            -o "publish/$RID"
+
+      - name: Smoke test (AOT ↔ JIT ↔ Executor)
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          if [[ "$RID" == win-* ]]; then
+            "publish/$RID/Forge.Smoke.exe"
+          else
+            "publish/$RID/Forge.Smoke"
+          fi
 
       - name: Package
         shell: bash

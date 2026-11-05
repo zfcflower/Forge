@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
-  </ItemGroup>
-</Project>

@@ -7,7 +7,8 @@ namespace Forge.PluginWorker;
 /// <summary>Command line of the worker executable: <c>--pipe &lt;name&gt;</c> (required, the Extension
 /// Host's worker pipe) and <c>--max-concurrency &lt;n&gt;</c> (bounded parallel tool execution).
 /// <c>--dotnet &lt;path&gt;</c> is accepted and ignored: the worker launches no child process, and an older host
-/// still passes the runtime it would use for a <c>.dll</c>.</summary>
+/// still passes the runtime it would use for a <c>.dll</c>. The worker is plugin-only: scripts run in a
+/// <c>Forge.ScriptExecutor</c> process, never here.</summary>
 public sealed record WorkerOptions
 {
     public const int DefaultMaxConcurrency = 8;

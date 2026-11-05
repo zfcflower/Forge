@@ -258,4 +258,182 @@ internal static class PluginSources
             public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) => Task.FromResult(new ToolResult("x"));
         }
         """;
+
+    /// <summary>A plugin that contributes every non-UI kind at once: one tool, one executable command (which calls
+    /// the main-program tool <c>probe</c>), one Markdown workflow, one agent, one dynamic prompt contributor (which
+    /// also calls <c>probe</c>), one panel declaration and one permission. <paramref name="markerPath"/> is appended
+    /// from <c>Register</c>, so a test can prove whether registration ran.</summary>
+    public static string Contributed(string id, string markerPath, string version = "1.0.0") =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "{{version}}", "non-UI contributions test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                File.AppendAllText(@"{{markerPath}}", "registered\n");
+                context.AddTool(new CEchoTool());
+                context.AddCommand(new GreetCommand());
+                context.AddWorkflow(new WorkflowDeclaration("guide", "Guides the agent", "---\nname: guide\n---\n\n# Steps\n\n1. Do it.\n"));
+                context.AddAgent(new AgentDeclaration("helper", "Helps the agent", "You are a helper.", new AgentModelSettings("model-x", AgentThinkingEffort.Low, 128)));
+                context.AddPromptContributor(new BriefContributor());
+                context.AddPanel(new PanelDeclaration("side", "Side panel", new UiSchema("text", JsonDocument.Parse("{\"text\":\"hello\"}").RootElement)));
+                context.RequirePermission(new Permission(PermissionKind.ReadFile));
+            }
+        }
+
+        public sealed class CEchoTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("cecho", "Echoes the text argument", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
+            {
+                var text = invocation.Arguments.ValueKind == JsonValueKind.Object &&
+                    invocation.Arguments.TryGetProperty("text", out var value)
+                        ? value.ToString()
+                        : "";
+                return Task.FromResult(new ToolResult("c:" + text));
+            }
+        }
+
+        public sealed class GreetCommand : IPluginCommand
+        {
+            public CommandDeclaration Declaration { get; } = new("greet", "Greets", "<name>");
+
+            public async Task<CommandOutput> ExecuteAsync(CommandInvocation invocation, CancellationToken ct)
+            {
+                var result = await invocation.Host.CallToolAsync("probe", JsonDocument.Parse("{\"from\":\"command\"}").RootElement, ct);
+                return new CommandOutput(Output: "cmd:" + result.Content, IsError: result.IsError);
+            }
+        }
+
+        public sealed class BriefContributor : IPluginPromptContributor
+        {
+            public PromptContributorDeclaration Declaration { get; } = new("brief");
+
+            public async Task<string?> GetTextAsync(PromptInvocation invocation, CancellationToken ct)
+            {
+                var result = await invocation.Host.CallToolAsync("probe", JsonDocument.Parse("{\"from\":\"prompt\"}").RootElement, ct);
+                return "prompt:" + result.Content;
+            }
+        }
+        """;
+
+    /// <summary>A plugin that registers a metadata-only command with no executable body.</summary>
+    public static string PlainCommand(string id) =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "1.0.0", "metadata-only command test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddCommand(new CommandDeclaration("dud", "Does nothing", "<x>"));
+            }
+        }
+        """;
+
+    /// <summary>A plugin that requires a permission kind no manifest can declare.</summary>
+    public static string BadRuntimePermission(string id) =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "1.0.0", "bad permission test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddTool(new EchoTool());
+                context.RequirePermission(new Permission((PermissionKind)99));
+            }
+        }
+
+        public sealed class EchoTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("echo", "Echoes", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult("echo"));
+        }
+        """;
+
+    /// <summary>A plugin whose agent declares an undefined thinking effort.</summary>
+    public static string BadThinking(string id) =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "1.0.0", "bad thinking test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddTool(new EchoTool());
+                context.AddAgent(new AgentDeclaration("helper", "Helps", "You are a helper.", new AgentModelSettings("model-x", (AgentThinkingEffort)99, 128)));
+            }
+        }
+
+        public sealed class EchoTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("echo", "Echoes", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult("echo"));
+        }
+        """;
+
+    /// <summary>A plugin whose workflow has no body.</summary>
+    public static string EmptyBodyWorkflow(string id) =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "1.0.0", "empty workflow test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddTool(new EchoTool());
+                context.AddWorkflow(new WorkflowDeclaration("empty", "Has no body", ""));
+            }
+        }
+
+        public sealed class EchoTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("echo", "Echoes", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult("echo"));
+        }
+        """;
+
+    /// <summary>A plugin whose panel declares an unknown schema kind.</summary>
+    public static string BadPanelKind(string id) =>
+        $$"""
+        public sealed class TestPlugin : IPlugin
+        {
+            public PluginInfo Info => new("{{id}}", "1.0.0", "bad panel test plugin");
+
+            public void Register(IRegistrationContext context)
+            {
+                context.AddTool(new EchoTool());
+                context.AddPanel(new PanelDeclaration("p1", "P", new UiSchema("hologram", JsonDocument.Parse("{}").RootElement)));
+            }
+        }
+
+        public sealed class EchoTool : IPluginTool
+        {
+            public ToolDeclaration Declaration { get; } =
+                new("echo", "Echoes", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+
+            public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
+                Task.FromResult(new ToolResult("echo"));
+        }
+        """;
+
+    /// <summary>Source-free manifest text for a source plugin with the given permissions.</summary>
+    public static string ManifestWithPermissions(string id, string version, params string[] kinds)
+    {
+        var permissions = string.Join(",", kinds.Select(kind => "{\"kind\":\"" + kind + "\"}"));
+        return "{\"id\":\"" + id + "\",\"version\":\"" + version + "\",\"source\":\"Plugin.cs\",\"permissions\":[" + permissions + "]}";
+    }
 }

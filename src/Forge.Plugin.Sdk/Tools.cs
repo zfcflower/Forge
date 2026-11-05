@@ -12,7 +12,12 @@ public sealed record ToolResult(string Content, bool IsError = false);
 
 /// <summary>Execution context handed to a plugin tool; <see cref="Host"/> is the only way to reach
 /// main-program tools (routed over IPC, never in-process).</summary>
-public sealed record ToolInvocation(string SessionId, string WorkingDirectory, JsonElement Arguments, IHostFacade Host);
+public sealed record ToolInvocation(
+    string SessionId,
+    string WorkingDirectory,
+    JsonElement Arguments,
+    IHostFacade Host,
+    ExtensionCallContext? Context = null);
 
 /// <summary>A plugin tool: metadata plus its execution body, run inside the Worker process.</summary>
 public interface IPluginTool

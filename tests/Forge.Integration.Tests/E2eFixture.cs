@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.HostClient;
+using Sdk = Forge.Plugin.Sdk;
 using Xunit;
 
 namespace Forge.Integration.Tests;
@@ -31,7 +32,8 @@ internal sealed class E2eFixture : IAsyncDisposable
     public E2eFixture(
         IReadOnlyList<string>? hostArguments = null,
         Func<string, ITool?>? toolResolver = null,
-        Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? approvalPath = null)
+        Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? approvalPath = null,
+        string? hostExecutablePath = null)
     {
         var token = Guid.NewGuid().ToString("N")[..10];
         Root = Path.Combine(Path.GetTempPath(), "forge-e2e-" + token);
@@ -44,7 +46,7 @@ internal sealed class E2eFixture : IAsyncDisposable
         var connection = new HostConnection
         {
             PipeName = PipeName,
-            HostExecutablePath = HostAssemblyPath,
+            HostExecutablePath = hostExecutablePath ?? HostAssemblyPath,
             RuntimePath = "dotnet",
             HostArguments = hostArguments ?? [],
             StartTimeout = TimeSpan.FromSeconds(60),
@@ -89,6 +91,52 @@ internal sealed class E2eFixture : IAsyncDisposable
         File.WriteAllText(Path.Combine(directory, "manifest.json"), manifest);
         File.WriteAllText(SourcePath(id), source);
         return directory;
+    }
+
+    /// <summary>Writes a plugin with a caller-supplied manifest document (permissions, prebuilt entry, ...).</summary>
+    public string WritePluginWithManifest(string id, string source, string manifestJson)
+    {
+        var directory = PluginDirectory(id);
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "manifest.json"), manifestJson);
+        File.WriteAllText(SourcePath(id), source);
+        return directory;
+    }
+
+    /// <summary>Polls <c>plugins.status</c> until <paramref name="id"/> has a row; never touches the approval database.</summary>
+    public async Task<Sdk.PluginStatusInfo?> WaitForStatusAsync(string id, string what)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        deadline.CancelAfter(WaitLimit);
+        while (true)
+        {
+            var statuses = await Client.GetPluginStatusesAsync(Ct);
+            var found = statuses.FirstOrDefault(
+                status => string.Equals(status.PluginId, id, StringComparison.Ordinal));
+            if (found is not null)
+            {
+                return found;
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token);
+            }
+            catch (OperationCanceledException) when (!Ct.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"Timed out after {WaitLimit.TotalSeconds:0} s waiting for {what}.");
+            }
+        }
+    }
+
+    /// <summary>Approves <paramref name="id"/> with the hashes the host itself reports; never reads the database.</summary>
+    public async Task ApproveViaStatusAsync(string id, string version = "1.0.0")
+    {
+        var status = await WaitForStatusAsync(id, $"a status row for {id} {version}");
+        Assert.NotNull(status);
+        Assert.Equal(version, status!.Version);
+        await Client.ApprovePluginAsync(id, version, status.SourceHash, status.DependencyHash, status.SdkVersion, Ct);
     }
 
     public void EditSource(string id, string source) => File.WriteAllText(SourcePath(id), source);

@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.*" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
-  </ItemGroup>
-</Project>
