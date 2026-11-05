@@ -37,14 +37,119 @@ ThinkRail 的这些能力来自它的工具(工作区、计划步骤提交、计
 - 分支与远程:查看当前分支与上游、超前/落后数;新建、切换、设置上游、删除;fetch、pull、push(含首次 `-u`)。失败要可见、可恢复:鉴权失败、非快进、冲突、远程不存在。
 - 步骤提交、PR 生命周期、CI 监控、评审意见处理,都按上面对标清单的语义实现。
 
-## 待细化(本对话里问用户)
+## 细化结论(2026-11-05,用户已确认)
 
-- pull 策略:只允许 fast-forward / rebase / merge,是否可配置。
-- 步骤提交是否默认开启;没有 TODO 计划的会话是否按“轮次”提交。
-- 截图(#7):Forge 截谁的图?被开发项目的界面需要能启动它;可能先只支持用户手动附图。
-- 等待模式的轮询间隔、上限与通知方式(状态栏、系统通知)。
-- 入口位置:会话标题栏、项目树 worktree 行右键、还是检视区单独一个“PR” panel。
-- 是否预留 GitLab(glab)的抽象层,还是只做 GitHub。
+- pull:fast-forward / rebase / merge 三选一,默认只快进;不能快进时报错并提示改用 rebase/merge 或 `git_sync`。在 `git` 设置分区可改。
+- 步骤提交:默认开启,只对 TODO 条目生效;没有 TODO 的会话不自动提交(不按轮次提交)。设置分区可关。
+- 截图(#7):**自动截图**(做法见 ⑥)。
+- 等待模式:30 秒一次,最长 30 分钟,可取消;结果写进 Git panel 与状态栏,**并发系统通知**。
+- 入口:检视区新增 Git panel;会话标题栏显示分支名;状态栏显示超前/落后数。
+- 平台:只做 GitHub,但**先定义平台接口** `IPrPlatform`,工具与 UI 只依赖接口,`GitHubPlatform`(基于 `GhCli`)是唯一实现。
+- 写操作审批:Agent 发起的 push、创建/修改 PR、回复/resolve 都走现有 `IApprovalHandler`;审批对话框(扩展任务负责)上线前一律拒绝。用户在 Git panel 里点按钮发起的操作不走审批,点击本身就是确认。**待对接**:对话框合入后,在 `SessionRuntime` 接上处理器并端到端验证(已列入本对话 TODO;任务结束时若仍未对接,写进 forge-app SPEC 未决)。
+- 越界清单 1–8 已获同意;两处偏差(工具放 Workspace、流程指引不进 Forge.Workflows)已获同意。
+
+## Design
+
+### 与设计提示的偏差(须确认)
+
+- **git/PR 工具放在 `Forge.Workspace/Git`,不放 `Forge.Core/Tools`。** Core 只依赖 Abstractions,SPEC 明写“不含 Git”;Core 引用 Workspace 会反转依赖方向。Workspace 已有先例:7 个规格工具就在 Workspace 实现 `ITool`。这个目录也在归属路径里。
+- **内置工作流不进 `Forge.Workflows`。** 该项目是 JSON 声明式(L0)引擎,依赖 Plugin.Sdk,主程序不引用它;仓里也还没有 Markdown 技能的加载器。闸门既然由代码强制,流程文字只是给 Agent 的指引,所以以 C# 原始字符串常量放在 `Forge.Workspace/Git/PrWorkflowText.cs`(不需要改 csproj 嵌入资源),由只读工具 `pr_workflow` 按阶段返回(creating / syncing / body / checks / review-comments / screenshots),各工具描述里点名先读它。将来有了 Markdown 技能加载器,再把它迁成技能文件。
+
+### 分层
+
+| 层 | 内容 |
+|---|---|
+| `Forge.Abstractions`(主 Agent 写契约) | `TodoItem` 加 `CommitSubject`/`Summary`/`Verification`/`CommitId`;`ITodoStore` 加带这些字段的更新重载与会话级计划摘要读写;新增 `IStepCommitter`(步骤提交钩子)。 |
+| `Forge.Core`(存储与 `todo` 工具) | `StorageSchema` v1→v2:`todos` 加 4 列、新表 `plan_summaries(session_id PK, text, updated_at)`;`todo` 工具在 update 里接受 `commit_subject`/`summary`/`verification`,新增 `plan_summary` 操作;状态变为 done 时调用 `IStepCommitter`,把提交结果写进工具结果。 |
+| `Forge.Workspace/Git` | `GitCli` 新增方法(分支、上游、ahead/behind、fetch/pull/push、rebase/merge 与冲突状态、ls-remote);`IPrPlatform` 平台接口与平台无关的模型(PR、检查、合并状态、评审线程);`GhCli` 与 `GitHubPlatform`;`GhJsonContext` 源生成;Agent 工具;`PrWorkflowText`;`PrBodyRenderer`;`ScreenshotCapture`。 |
+| `Forge.App` | `Git/` 新目录:`StepCommitter`(实现 `IStepCommitter`)、`GitPanelViewModel`/`GitPanelView`、`PrWatcher`(等待模式)、`SystemNotifier`、`GitSettingsSectionViewModel`;`Localization/Strings.Git.cs`。 |
+
+### 进程与隔离
+
+`GhCli` 与 `GitCli` 同一套:`ArgumentList`、按字节捕获、超时杀进程树、取消即杀。环境:`GH_PROMPT_DISABLED=1`、`GIT_TERMINAL_PROMPT=0`、`GH_NO_UPDATE_NOTIFIER=1`、`GH_PAGER=cat`、`NO_COLOR=1`,并清掉 `GitCli` 已清掉的那组仓库定位变量。网络命令(fetch/pull/push/gh)默认超时 2 分钟,可设置。`GhCli.GetAvailabilityAsync` 返回 `NotInstalled` / `NotAuthenticated` / `Ready`(`gh auth status`,带 host);不是 `Ready` 时 PR 工具返回明确错误,UI 显示“需要安装并登录 gh”,本地 git 功能不受影响。所有 JSON 走 `GhJsonContext`,不用反射。
+
+失败分类(`GitRemoteFailure`):`AuthenticationFailed`、`NonFastForward`、`Conflict`、`RemoteNotFound`、`NoUpstream`、`Network`、`TimedOut`、`Other`;按 git/gh 的退出码与 stderr 关键字判定(`LC_ALL=C` 已保证英文输出),原始 stderr 原样附带。工具与 UI 都按分类给出下一步提示。
+
+### ① 分支与远程
+
+- `GitCli` 新增:`GetBranchStatusAsync`(当前分支、上游、ahead/behind,来自 `status --porcelain=v2 --branch`)、`CreateBranchAsync`、`SwitchBranchAsync`(工作树不干净时拒绝)、`SetUpstreamAsync`、`FetchAsync`、`PullAsync(策略)`、`PushAsync(setUpstream, forceWithLease 期望值)`、`RebaseAsync`/`MergeAsync`/`AbortAsync`/`ContinueAsync`、`GetConflictsAsync`、`LsRemoteAsync`。已有方法签名和语义都不变。
+- 远程写操作执行前现读状态再核对:push 先 `ls-remote` 读远程分支当前 sha,作为 `--force-with-lease=<ref>:<sha>` 的期望值;从不使用缓存的结果。
+- 删除分支沿用 `DeleteBranchAsync`;删除当前分支或某个 worktree 已检出的分支时拒绝。
+- Agent 工具 `git_status`(只读:分支、上游、ahead/behind、改动、冲突)、`git_log`(只读,供判断提交风格)、`git_diff`(只读,`base...HEAD` 加工作树)、`git_branch`(Write)、`git_sync`(fetch 为只读,pull/push/rebase/merge 为 Write;用 `IToolSideEffectResolver` 按参数判定)。
+- 新建会话时分支名可编辑(默认 `forge/<slug>`,按 `git check-ref-format` 校验);会话标题栏显示分支名。
+
+### ② 步骤提交与计划摘要
+
+- 触发:TODO 条目从非 done 变成 done,不论 Agent 还是用户在 TODO panel 里勾选。会话不在 git 仓库里(常规 `scratch/`)、或设置里关掉时跳过。
+- 范围:提交时工作树里**全部**未提交改动(`add -A` + `commit`)。会话 worktree 只属于这个会话,所以这些改动就是本步骤的。没有采用“按轮次检查点切分”:Agent 一个轮次里可能跨两个步骤改文件,按轮次切反而切错。检查点只用来标注:把这一步跨越的轮次范围记在条目上,供 Diff 按步骤查看。没有改动时不产生空提交,结果写“无改动”。
+- 提交说明:优先用 Agent 给的 `commit_subject`,没有时退回条目标题。`todo` 工具描述要求 Agent 先用 `git_log` 读近 20 条提交,判断是否 Conventional Commits 再写。正文写入步骤的 summary;verification 不进提交说明。
+- 提交失败(钩子失败、冲突中、游离 HEAD)不回滚 done 状态:工具结果与 TODO 行都显示失败原因,并提供“重试提交”。
+- 审批:本地提交写的是会话自己的 worktree,而且可撤销,随 `todo` 一起放行,不单独弹审批。
+- 计划摘要:会话级一段文本(Summary / Changes / Testing 三段);`PrBodyRenderer` 把它加上自动生成的 `## Plan`(每步:标题、提交短 sha、summary、verification)渲染成 PR 正文。纯函数,便于测试。
+
+### ③ PR 创建 / 同步 / 改正文
+
+- `pr_create`(Write)按顺序由代码检查五道闸门,任一不过就拒绝并说明原因:
+  1. `git status --porcelain` 为空;
+  2. 现 fetch 后,`origin/<base>` 是 HEAD 的祖先(否则让 Agent 先用 `git_sync` rebase);
+  3+5. **当前 HEAD** 的 `git_diff` 已经被读过:工具按会话记下最近一次被读取的 HEAD sha,HEAD 之后有变化就必须重读。自审与“清理临时产物”都绑定到这次读取,代码能强制的只有这一点,清理是否干净仍靠 Agent 判断(诚实写进工具描述);
+  4. 正文里 `## Testing` 段非空,且不是只有一句“tests pass”这类空话(最小长度加禁用词)。
+  闸门通过后再现读一次状态,然后 `push -u`(带 lease)→ `gh pr create --body-file <临时文件>`,完成后删除临时文件;`--draft` 只在参数明确要求时加。
+- `pr_sync`(Write):fetch,然后按 PR 已有的历史风格 rebase 或 merge(看分支里有没有 merge 提交)。有冲突时停下,返回冲突文件列表交给 Agent 解;Agent 需要读两侧 `git log -p`,工具描述里写明。解决后 `--continue`,push 用 `--force-with-lease`。冲突文件与结果在 Git panel 显示。
+- `pr_edit`(Write):先读当前 title/body,执行前再读一次,有并发修改就把本次修改合并进最新正文;执行后再读一次核对是否生效,不一致就报错。
+- `pr_view`(只读):PR 号、状态、链接、head/base。
+
+### ④ 检查与等待模式
+
+- `pr_checks`(只读):快照模式查一次 `gh pr checks --json` 与 `gh pr view --json mergeStateStatus,isDraft,reviewDecision`,如实报告;空结果报告为“未确定”,不当作没有 CI。
+- `wait: true`:每 30 秒轮询,最长 30 分钟,随轮次取消;`UNKNOWN`、排队中一律继续等;只有观察到 `CLEAN` / `HAS_HOOKS`(后者附注意事项)且全部检查通过才算完成;`BEHIND`/`DIRTY`/`BLOCKED`/`UNSTABLE`/草稿按 checks.md 的语义返回给 Agent,不自己同步或修复。连续多次确认没有任何检查,才报告“仓库没有 CI”。
+- `pr_ci_log`(只读):`gh run view --job <id> --log-failed`,输出过长时转存 Artifact(Core 已有)。
+- App 侧 `PrWatcher`:Git panel 的“等待检查”按钮使用同样的轮询逻辑(两边共用 Workspace 里的 `PrChecksPoller`),只在后台线程运行,结果经快照回到 UI 线程;关闭会话或点取消即停止。
+- 系统通知(`SystemNotifier`):等待结束(成功、失败、超时、被阻塞)时各发一条。App 不允许 P/Invoke,白名单也没有通知库,Avalonia 的 `TrayIcon` 又没有气泡通知 API,所以改为调用平台自带的命令行工具:Windows 用 `powershell` 调 WinRT `ToastNotificationManager`(发送方会显示为 Windows PowerShell,因为未打包的程序没有自己的 AppUserModelID),macOS 用 `osascript -e 'display notification …'`,Linux 用 `notify-send`。参数经 `ArgumentList` 传入并转义,超时 5 秒;工具不存在或执行失败时不报错,只记 Trace,状态栏和 Git panel 照常显示。设置分区里可以关掉。
+
+### ⑤ 评审意见
+
+- 读取:`gh api graphql` 拉取 `reviewThreads`(含 id、isResolved、路径、行号、全部评论,分页取完);同时 `gh pr diff` 读全量 diff。
+- `pr_comments`:`list`(只读)、`reply`(Write,必须带 `verdict` = apply / push_back / clarify)、`resolve`(Write)。由代码强制:verdict 为 apply 的回复必须引用一个**已推送**的提交 sha(用 `ls-remote` 与 `merge-base --is-ancestor` 核对);resolve 只允许对已回复过、且 verdict 为 apply 或 push_back 的线程执行;clarify 不能 resolve。
+- 本地评审意见(#10):`review_comments` 工具对 `ReviewStore` 做 list / resolve(只用它已有的 API,不改 `ReviewStore`)。本地意见和 PR 意见共用同一份“先判断再改”的指引(`pr_workflow` 的 review-comments 阶段)。
+- UI:PR 评审线程显示在 Git panel 的“评审”分组里(见“越界”),附上每条线程的 verdict 与回复。
+
+### ⑥ 截图(自动)
+
+- 采集方式(用户已确认):**由项目提供截图命令**。仓库里的 `.forge/screenshots.json` 声明 `command`(把 PNG 写到 `output` 目录的命令,如 headless/e2e 测试)、`output`、`timeoutSeconds`(默认 300)。没有声明时,Agent 可以写一个一次性采集脚本,然后以参数形式把命令传给 `pr_screenshots`;两者都没有就明确报告“无法自动截图”,不猜启动方式。不做“Forge 启动程序并截取窗口”。
+- 流程(`ScreenshotCapture`,工具 `pr_screenshots` 与 Git panel 按钮共用):以**会话分支上的**配置为准(base 上可能还没有配置),先在会话 worktree 里跑一次得到 after,再在 `origin/<base>` 的临时分离 worktree 里跑一次得到 before;按文件名配对(`<name>.png` → `<name>-before.png`/`<name>-after.png`),只有一侧有的图也保留,并标注另一侧缺失。命令经平台 shell 执行(Windows `cmd /c`,其余 `/bin/sh -c`),超时或取消就杀进程树;任一侧失败时把退出码与输出尾部返回,不附图。临时 worktree 放在系统临时目录,`finally` 里 `worktree remove --force` 并 prune。
+- 审批:截图命令会执行仓库里的任意代码,`pr_screenshots` 的副作用是 **Execute**,推送与改正文部分另算 Write;用户在 Git panel 点按钮时按钮旁边会显示将要执行的命令。
+- 附图:生成孤儿提交(`hash-object -w` → `mktree` → `commit-tree`)→ push 到 `refs/heads/assets/<分支 slug>` → 用 `pr_edit` 的“读-改-核对”流程更新正文里的 `## Screenshots` 段,链接固定到提交 sha。图片不进 PR 的文件树。这一步与采集方式无关,也支持用户手动选择本地 PNG。
+- 临时产物(截图目录、before worktree、一次性采集脚本)在正文更新成功后由代码清理;如果采集脚本被提交过,删除它的提交也要推送。
+
+### 设置分区 `git`
+
+步骤提交开关、pull 策略、网络超时、等待间隔与上限、系统通知开关、`gh` 可执行路径。需要在 `AppPreferences` 里加字段(见“越界”)。
+
+### 越界清单(动手前须你同意)
+
+这些都是“追加注册”或最小改动,不改既有行为:
+
+1. `src/Forge.Abstractions/Workbench.cs`:`TodoItem` 加字段、`ITodoStore` 加方法、新增 `IStepCommitter`。`TodoItem` 是位置记录,新字段放在末尾并给默认值,现有构造调用不受影响。
+2. `src/Forge.Core/Storage/StorageSchema.cs` 与 `SqliteTodoStore.cs`:schema 升到 v2(只加列、加表,沿用版本阶梯的规则)。
+3. `src/Forge.App/Preferences/AppPreferences.cs`:加 git 设置字段(与 terminal 字段同样的写法)。
+4. `src/Forge.App/Agents/SessionRuntime.cs`:注册 git/PR 工具,把 `IStepCommitter` 传给 `AgentHost`,审批规则里 `git_status`/`git_log`/`git_diff`/`pr_view`/`pr_checks`/`pr_ci_log`/`pr_workflow` 按只读处理。还需要 `AgentHostOptions` 加一个 `StepCommitter` 属性(`Forge.Core/Agents/AgentHost.cs`)。
+5. 工作台:在检视区工具组(TODO | 评审 | 规格树)里追加 Git 选项卡(`MainWindowViewModel.cs`/`WorkbenchLayout` 的默认选项卡列表);`MainWindow.axaml` 标题行追加分支名,状态栏追加 ahead/behind。
+6. `src/Forge.App/ViewModels/Panels.cs` 的 `TodoListViewModel`/`TodoEntryViewModel`:显示提交 sha 与失败原因、“重试提交”,并在用户勾选完成时调用 `IStepCommitter`。
+7. 新建会话流程(`ProjectTree.cs`、`WorktreeService.cs`):分支名可编辑。`WorktreeManager` 在 `Forge.Workspace/Worktrees/`,也需要接受调用方给的分支名。
+8. `AppComposition.cs`、`App.axaml`:追加注册(这两处任务 spec 已允许)。
+
+PR 评审线程不改 `ReviewPanelViewModel`,只显示在 Git panel 里,所以评审面板本身不在越界清单中。
+
+### 交付与验证
+
+- 按 ①→⑥ 分批。每批:主 Agent 先定契约与骨架并提交 → 实现 Worker 与测试 Agent 在各自副本里并行 → Review → 主 Agent 跑全量构建与测试、检查越界 → rebase 到最新 main 后提交。①③④⑤ 的 Workspace 部分彼此独立的,可以并行。
+- 测试:`tests/Forge.Workspace.Tests/Git/**` 用本地裸仓库作远程(覆盖 fetch/pull 三种策略/push/lease 冲突/非快进/远程不存在/鉴权失败模拟/冲突与 abort/continue);`GhCli` 用一个假 `gh` 可执行文件(测试里生成的脚本或小程序,通过 `ExecutablePath` 注入)回放 JSON 与错误,不访问真实 GitHub;闸门、轮询(注入 `TimeProvider`)、渲染器都是确定性单测;Core 的 schema 迁移、`todo` 新字段与 done 时的提交钩子在 `Forge.Core.Tests`;App 的视图模型用 headless 测试。另在本机对真实 GitHub 测试仓库手动走一遍创建 → 检查 → 回复,结果写进最后的计划摘要,不进 CI。
+- AOT:Workspace 保持 `IsAotCompatible`,分析器 0 警告;CI 已有的 AOT 发布作为门禁。
+
+### 明确不做
+
+GitLab 的实现(只留接口);合并 PR(`gh pr merge`)——对标清单没有,ThinkRail 也不替用户合并。
 
 ## 设计提示
 
