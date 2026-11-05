@@ -134,6 +134,14 @@ public sealed class AgentHost
 
     public ToolRegistry Tools => toolRegistry;
 
+    /// <summary>
+    /// Replaces the externally supplied tools (the <see cref="AgentHostOptions.Tools"/> part; built-in tools such as
+    /// retrieval, <c>todo</c> and the sub-agent tools stay). Thread-safe. Running loops pick the new set up before their next
+    /// model request, so a tool approved mid-turn is callable in the same turn; the changed definitions break the prompt
+    /// cache once. Same-named external tools never shadow a built-in tool.
+    /// </summary>
+    public void ReplaceExternalTools(IEnumerable<ITool> tools) => throw new NotImplementedException();
+
     /// <summary>Root agent of a session: no depth limit in practice, every tool its definition allows.</summary>
     public AgentInstance CreateRoot(string sessionId, string workingDirectory, AgentDefinition? definition = null, string id = "root")
     {

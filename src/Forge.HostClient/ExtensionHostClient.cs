@@ -14,7 +14,7 @@ namespace Forge.HostClient;
 /// plugin→main-program tool calls through the caller's resolver and approval path so the client never bypasses
 /// permission checks.
 /// </summary>
-public sealed partial class ExtensionHostClient : IExtensionContributionClient, ITerminalHost
+public sealed partial class ExtensionHostClient : IExtensionContributionClient, ITerminalHost, IExtensionAuthoringClient
 {
     internal const string RunCodeIdentity = "$run_code";
 
@@ -459,6 +459,23 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         var payload = HostProtocolJson.SerializeRevoke(pluginId, version);
         await SendAsync(active, Sdk.ExtensionProtocol.PluginRevoke, payload, RequestBudget, ct).ConfigureAwait(false);
     }
+
+    public Task<Sdk.StagedExtension> StageExtensionAsync(Sdk.ExtensionStageRequest request, CancellationToken ct) =>
+        throw new NotImplementedException();
+
+    public Task<IReadOnlyList<Sdk.StagedExtension>> GetPendingExtensionsAsync(CancellationToken ct) =>
+        throw new NotImplementedException();
+
+    public Task<Sdk.ExtensionCommitResult> CommitExtensionAsync(Sdk.ExtensionCommitRequest request, CancellationToken ct) =>
+        throw new NotImplementedException();
+
+    public Task DiscardExtensionAsync(string pluginId, CancellationToken ct) => throw new NotImplementedException();
+
+    public Task DisablePluginAsync(string pluginId, string version, CancellationToken ct) => throw new NotImplementedException();
+
+    public Task EnablePluginAsync(string pluginId, string version, CancellationToken ct) => throw new NotImplementedException();
+
+    public Task DeletePluginAsync(string pluginId, string version, CancellationToken ct) => throw new NotImplementedException();
 
     public async ValueTask DisposeAsync()
     {

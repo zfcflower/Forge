@@ -23,6 +23,16 @@ public static class ExtensionProtocol
     public const string PluginsRefresh = "plugins.refresh";   // {} → {}
     public const string HostStop = "host.stop";               // {} → {}
 
+    // Main program → Host: agent-authored extensions (ExtensionAuthoring.cs). Staged content lives in <plugins>/.pending/<id>/,
+    // is never loaded, and only becomes live through extensions.commit with the hashes the user approved.
+    public const string ExtensionsStage = "extensions.stage";     // ExtensionStageRequest → StagedExtension
+    public const string ExtensionsPending = "extensions.pending"; // {} → StagedExtensionList
+    public const string ExtensionsCommit = "extensions.commit";   // ExtensionCommitRequest → ExtensionCommitResult; approval_mismatch when the staged bytes differ
+    public const string ExtensionsDiscard = "extensions.discard"; // ExtensionIdRequest → {}
+    public const string PluginDisable = "plugin.disable";         // PluginVersionRequest → {}; unregisters tools and stops the worker
+    public const string PluginEnable = "plugin.enable";           // PluginVersionRequest → {}; runs again only if the approved hashes still match
+    public const string PluginDelete = "plugin.delete";           // PluginVersionRequest → {}; marks the version uninstalled (blocked for good) and removes the directory
+
     // Worker/plugin → Host → main program (request: a plugin calls a main-program tool)
     public const string HostToolCall = "host.tool_call";      // {name, args, sessionId, workingDir, depth} → {content, isError}; context is the originating plugin invocation's, never a shared field
 

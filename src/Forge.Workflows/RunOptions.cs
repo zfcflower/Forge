@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Forge.Workflows;
 
 /// <summary>Per-run knobs. All values are optional; the defaults are the ones documented in <c>README.md</c>.</summary>
@@ -23,4 +25,11 @@ public sealed record RunOptions
     /// A host tool that ignores its token cannot be stopped from here.
     /// </summary>
     public TimeSpan CancellationDrainTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Arguments of the call that started this run, readable from any step through the <c>$input</c> binding root
+    /// (<c>{"$ref": "$input"}</c> or <c>{"$ref": "$input.path.to.field"}</c>). Null means the run has no input; a binding to
+    /// <c>$input</c> then fails that step like any other unresolved binding. The element must stay valid for the whole run.
+    /// </summary>
+    public JsonElement? Input { get; init; }
 }
