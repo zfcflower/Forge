@@ -34,6 +34,10 @@ internal sealed partial class WorkerProcessOwnership
     /// <summary>How long the host waits for a killed tree to disappear before it reports the tree as unverified.</summary>
     internal static readonly TimeSpan PtyExitWindow = TimeSpan.FromSeconds(5);
 
+    /// <summary>How long one terminal session sweep may keep looking for survivors before it reports them as
+    /// unverified. SIGKILL is immediate, so this only covers a process that is mid-exit.</summary>
+    private static readonly TimeSpan PtySessionSweepWindow = TimeSpan.FromSeconds(2);
+
     /// <summary><c>PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE</c>: the pseudo console a new process is attached to.</summary>
     private const int ProcThreadAttributePseudoConsole = 0x0002_0016;
 
@@ -791,6 +795,127 @@ internal sealed partial class WorkerProcessOwnership
             }
         }
 
+        /// <summary>
+        /// Kills every process that is still in <paramref name="sessionId"/>'s session, and returns the first problem
+        /// that left a survivor behind - <c>null</c> once the session is empty.
+        /// <para>
+        /// The shell's process group is not the whole tree. An interactive shell with job control puts each job into a
+        /// process group of its own (that is exactly what makes <c>tcgetpgrp</c> answer the foreground question), and
+        /// those groups stay in the shell's session. A session id is a pid and the shell holds it for as long as this
+        /// runs - alive before it is reaped, a zombie afterwards - so no unrelated process can carry it: every member
+        /// found here was started by this terminal.
+        /// </para>
+        /// <para>
+        /// Linux answers membership from <c>/proc</c>. macOS has no <c>/proc</c>, so only the shell's own group is
+        /// signalled there and a job-control child can outlive the shell - one more reason macOS remains unverified.
+        /// </para>
+        /// </summary>
+        private static string? SweepSession(int sessionId)
+        {
+            string? problem = null;
+            if (kill(-sessionId, SignalKill) != 0)
+            {
+                var groupError = Marshal.GetLastPInvokeError();
+                if (groupError is not (NoSuchProcess or 0))
+                {
+                    problem = $"kill(-{sessionId}, SIGKILL) failed with error {groupError} while the terminal was being swept";
+                }
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                return problem;
+            }
+
+            var deadline = Environment.TickCount64 + (long)PtySessionSweepWindow.TotalMilliseconds;
+            while (true)
+            {
+                var survivors = SessionMembers(sessionId);
+                if (survivors.Count == 0)
+                {
+                    return problem;
+                }
+
+                foreach (var member in survivors)
+                {
+                    if (kill(member, SignalKill) != 0)
+                    {
+                        var memberError = Marshal.GetLastPInvokeError();
+                        if (memberError is not (NoSuchProcess or 0))
+                        {
+                            problem ??=
+                                $"kill({member}, SIGKILL) failed with error {memberError} while the terminal's session was being swept";
+                        }
+                    }
+                }
+
+                if (Environment.TickCount64 >= deadline)
+                {
+                    return problem
+                        ?? $"{survivors.Count} process(es) of the terminal's session {sessionId} were still alive "
+                        + $"{PtySessionSweepWindow.TotalSeconds:0.###} s after they were killed";
+                }
+
+                Thread.Sleep(1);
+            }
+        }
+
+        /// <summary>
+        /// The live processes whose session is <paramref name="sessionId"/>, from <c>/proc</c>. Zombies are left out:
+        /// they are already dead and only wait for a parent to collect them, so counting them would never terminate.
+        /// </summary>
+        private static List<int> SessionMembers(int sessionId)
+        {
+            var members = new List<int>();
+            string[] entries;
+            try
+            {
+                entries = Directory.GetDirectories("/proc");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return members;
+            }
+
+            foreach (var entry in entries)
+            {
+                if (!int.TryParse(Path.GetFileName(entry), out var process) || process == sessionId)
+                {
+                    continue;
+                }
+
+                string stat;
+                try
+                {
+                    stat = File.ReadAllText(Path.Combine(entry, "stat"));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                var close = stat.LastIndexOf(')');
+                if (close < 0)
+                {
+                    continue;
+                }
+
+                // Fields after "comm)": state, ppid, pgrp, session, tty_nr, ...
+                var fields = stat[(close + 2)..].Split(' ');
+                if (fields.Length < 4
+                    || fields[0] is ['Z', ..] or ['X', ..]
+                    || !int.TryParse(fields[3], out var session)
+                    || session != sessionId)
+                {
+                    continue;
+                }
+
+                members.Add(process);
+            }
+
+            return members;
+        }
+
         private bool TryReap(int childProcessId, IntPtr information, out int exitCode)
         {
             exitCode = -1;
@@ -819,20 +944,12 @@ internal sealed partial class WorkerProcessOwnership
                 return false;
             }
 
-            // The child is a zombie: its pid is reserved, so the group it led can only contain processes it started. Sweep
-            // them before the waitpid below makes the group id reusable. A group this class already emptied answers ESRCH,
-            // which is not a problem.
-            var sweepError = 0;
-            if (kill(-childProcessId, SignalKill) != 0)
-            {
-                sweepError = Marshal.GetLastPInvokeError();
-            }
-
-            Volatile.Write(
-                ref reapProblem,
-                sweepError is 0 or NoSuchProcess
-                    ? null
-                    : $"kill(-{childProcessId}, SIGKILL) failed with error {sweepError} while the terminal was being reaped");
+            // The child is a zombie: its pid is reserved, so the session it led can only contain processes it started.
+            // Sweep all of them before the waitpid below makes those ids reusable. The session, not the process group,
+            // is the unit that has to die: an interactive shell with job control gives every job a process group of its
+            // own, so `kill(-pgid)` alone leaves editors, builds and agent CLIs running - and holding the only slave
+            // descriptors, which keeps the master from ever reporting end of file.
+            Volatile.Write(ref reapProblem, SweepSession(childProcessId));
             Volatile.Write(ref groupClosed, 1);
             exitCode = ExitCodeOf(information);
 
@@ -900,13 +1017,10 @@ internal sealed partial class WorkerProcessOwnership
                 return Volatile.Read(ref reapProblem);
             }
 
-            if (kill(-processId, SignalKill) == 0)
-            {
-                return null;
-            }
-
-            var error = Marshal.GetLastPInvokeError();
-            return error == NoSuchProcess ? null : $"kill(-{processId}, SIGKILL) failed with error {error}";
+            // The shell is still alive (or at least not reaped), so its session id is reserved and the sweep can only
+            // find this terminal's processes. It kills the shell's own group first and then every job-control group the
+            // shell created, which `kill(-pgid)` cannot reach.
+            return SweepSession(processId);
         }
 
         internal override void CloseConsole()
