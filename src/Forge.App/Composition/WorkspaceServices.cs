@@ -44,8 +44,11 @@ internal sealed class WorkspaceServices : IDisposable
     }
 
     /// <summary>
-    /// Nothing at this layer owns an OS handle: Git runs one child process per call and waits for it, the spec graph
-    /// holds an in-memory index and the review store opens a pooled connection per call.
+    /// Nothing here can be disposed directly: Git runs one child process per call and waits for it, the spec graph holds
+    /// an in-memory index, and <see cref="ReviewStore"/> implements neither <see cref="IDisposable"/> nor
+    /// <see cref="IAsyncDisposable"/>. Its pooled SQLite connections are released by the process-wide pool clear the
+    /// forge.db stores perform during their own teardown (<see cref="AppComposition.DisposeAsync"/>), so the empty
+    /// method is the complete teardown at this layer.
     /// </summary>
     public void Dispose()
     {
