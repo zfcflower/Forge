@@ -1,26 +1,47 @@
 using System.Collections.ObjectModel;
 using Forge.App.Composition;
+using Forge.App.Localization;
+using Forge.App.Preferences;
 
 namespace Forge.App.ViewModels;
 
 /// <summary>
 /// The settings surface. It is deliberately read-only: it shows where the settings file lives, what was read from it and
 /// what the extension host reported, and it can reload. Nothing here edits a secret or invents a working model call.
+/// <para>The page body is a list of sections (<see cref="SettingsSections"/>): this class contributes the two the shell
+/// owns today (<c>provider</c> and <c>paths</c>), and the page renders every section through the app-level DataTemplate
+/// for its view model, so a feature adds its settings without editing the page. Section headings and the page's own
+/// labels are <see cref="Loc"/> keys and refresh on <see cref="Loc.LanguageChanged"/>.</para>
 /// </summary>
 internal sealed class SettingsViewModel : ObservableObject
 {
     private readonly AppComposition composition;
+    private readonly ProviderSettingsSectionViewModel provider;
+    private readonly PathsSettingsSectionViewModel paths;
     private bool isOpen;
-    private string providerDetail = string.Empty;
 
     public SettingsViewModel(AppComposition composition)
     {
         this.composition = composition;
-        Paths = new ObservableCollection<SettingLine>();
+
+        provider = new ProviderSettingsSectionViewModel();
+        paths = new PathsSettingsSectionViewModel();
+
+        // The registry belongs to the composition root (that is where features append their sections); this view model
+        // contributes the two the shell owns today, unless a test or a feature already put them there.
+        Sections = composition.Settings;
+        if (!Sections.Items.Any(static section => string.Equals(section.Id, SettingsSectionIds.Provider, StringComparison.Ordinal)))
+        {
+            Sections.Add(new SettingsSection(SettingsSectionIds.Provider, CoreStrings.SettingsSectionProvider, SettingsSectionIds.ProviderOrder, provider));
+            Sections.Add(new SettingsSection(SettingsSectionIds.Paths, CoreStrings.SettingsSectionPaths, SettingsSectionIds.PathsOrder, paths));
+        }
+
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         Rebuild();
     }
 
-    public ObservableCollection<SettingLine> Paths { get; }
+    /// <summary>The page body, ordered by each section's <see cref="SettingsSection.Order"/>.</summary>
+    public SettingsSections Sections { get; }
 
     public bool IsOpen
     {
@@ -28,46 +49,94 @@ internal sealed class SettingsViewModel : ObservableObject
         set => Set(ref isOpen, value);
     }
 
-    public string ProviderDetail
-    {
-        get => providerDetail;
-        private set => Set(ref providerDetail, value);
-    }
+    public string Title => Loc.Instance[CoreStrings.SettingsTitle];
+
+    public string ReloadText => Loc.Instance[CoreStrings.SettingsReload];
+
+    public string CloseText => Loc.Instance[CoreStrings.SettingsClose];
 
     public void Rebuild()
     {
-        Paths.Clear();
-        Paths.Add(new SettingLine("settings.json", composition.Paths.SettingsPath));
-        Paths.Add(new SettingLine("数据目录", composition.Paths.UserDataDirectory));
-        Paths.Add(new SettingLine("工作区", composition.WorkspaceDirectory));
-        Paths.Add(new SettingLine("扩展宿主数据", composition.Paths.HostDataDirectory));
-        Paths.Add(new SettingLine("插件", composition.Paths.PluginsDirectory));
+        paths.Paths.Clear();
+        paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathFile], composition.Paths.SettingsPath));
+        paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathData], composition.Paths.UserDataDirectory));
+        paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathWorkspace], composition.WorkspaceDirectory));
+        paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathGeneralWorkspace], composition.Paths.GeneralWorkspaceDirectory));
+        paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathHostData], composition.Paths.HostDataDirectory));
+        paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathPlugins], composition.Paths.PluginsDirectory));
 
-        var provider = composition.Provider;
-        ProviderDetail = provider.Provider is { } snapshot
+        var providerSettings = composition.Provider;
+        provider.Detail = providerSettings.Provider is { } snapshot
             ? Strings.ProviderDetail(snapshot.Summary, snapshot.HasApiKey, snapshot.KeyFromEnvironment)
-            : provider.Status;
+            : providerSettings.Status;
+
+        if (composition.PreferencesProblem is { Length: > 0 } preferencesProblem)
+        {
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathPreferences], preferencesProblem));
+        }
 
         if (composition.HostProblem is { Length: > 0 } hostProblem)
         {
-            Paths.Add(new SettingLine("扩展宿主", hostProblem));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathHost], hostProblem));
         }
 
         if (composition.ApprovalsDatabasePath is { Length: > 0 } approvalsDatabase)
         {
-            Paths.Add(new SettingLine("审批数据库", approvalsDatabase));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathApprovals], approvalsDatabase));
         }
 
         if (composition.Mcp is { } mcp)
         {
-            Paths.Add(new SettingLine("MCP 服务器", Strings.McpDetail(mcp.ConfiguredServers, mcp.ConfigDiagnostics)));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathMcp], Strings.McpDetail(mcp.ConfiguredServers, mcp.ConfigDiagnostics)));
         }
 
         if (composition.Editor is { } editor)
         {
-            Paths.Add(new SettingLine("编辑器", Strings.EditorDetail(editor.LanguageCount, editor.GrammarCount, editor.Problem)));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathEditor], Strings.EditorDetail(editor.LanguageCount, editor.GrammarCount, editor.Problem)));
         }
     }
+
+    /// <summary>
+    /// Text that caches a language-dependent value has to re-read it: the headings through <see cref="SettingsSection.Title"/>,
+    /// the provider section's hint, and the path rows' labels (rebuilt by <see cref="Rebuild"/>).
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(ReloadText));
+        OnPropertyChanged(nameof(CloseText));
+
+        foreach (var section in Sections.Items)
+        {
+            section.RaiseTitle();
+        }
+
+        provider.RefreshText();
+        Rebuild();
+    }
+}
+
+/// <summary>The <c>provider</c> section: which model provider the app uses, or the sentence that says why there is none.</summary>
+internal sealed class ProviderSettingsSectionViewModel : ObservableObject
+{
+    private string detail = string.Empty;
+
+    public string Detail
+    {
+        get => detail;
+        set => Set(ref detail, value);
+    }
+
+    public string Hint => Loc.Instance[CoreStrings.SettingsProviderHint];
+
+    /// <summary>Re-reads the strings that come from <see cref="Loc"/> after a language switch.</summary>
+    internal void RefreshText() => OnPropertyChanged(nameof(Hint));
+}
+
+/// <summary>The <c>paths</c> section: the data root, the workspace and the services the shell found.</summary>
+internal sealed class PathsSettingsSectionViewModel : ObservableObject
+{
+    public ObservableCollection<SettingLine> Paths { get; } = [];
 }
 
 /// <summary>One label/value row of the settings panel.</summary>

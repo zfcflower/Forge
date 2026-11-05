@@ -25,6 +25,13 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 
 ## 关键决策
 
+**偏好、文案与设置分区。** 三件共用的底座,界面语言、字体、终端、Git/PR、扩展与审批五个功能都从这里取,不再各写一份。
+
+- **偏好。** `Preferences/AppPreferences.cs`:`AppPreferences` 的 setter 就是校验器(空字体族回退默认值,字号夹到 9–28),改完立刻生效;`PreferencesStore` 读写 `settings.json` 的 `preferences` 段。写回先把整份文件读成 `JsonNode`,只替换 `preferences` 节点,再用 `Forge.IO.AtomicFile` 原子替换,因此 `provider` 段(仍由 `ProviderSettings` 读)和任何未知字段原样保留。读写都在线程池(`LoadAsync`/`SaveAsync` 内部 `Task.Run`),UI 线程不碰文件;`LoadAsync` 只读不写,也不发通知(加载发生在窗口绑定之前,语言由组合根自己推给 `Loc`)。只有用户改了偏好才写:每次修改重启 500 ms 防抖窗口,窗口结束在线程池写一次;`DisposeAsync` 强制把待写的改动落盘(组合根拆除时调用)。文件损坏或 `preferences` 段无效时用默认值并填 `LoadProblem`,绝不因加载覆盖文件;第一次写入前先把损坏的原文件复制成 `settings.json.bak`,且只备份一次。源生成 JSON 走新增的 `PreferencesJsonContext`。
+- **文案。** `Localization/Loc.cs` 是实时文案表:`Register(key, 中文, English)` 一名一键;`Language` 的 setter 把 `System` 解析成具体语言(永不为 `System`),切换时依次发出 `PropertyChanged("Item[]")`、`PropertyChanged("Item")` 与 `LanguageChanged`——Avalonia 编译索引器绑定(`{Binding [Key], Source={x:Static loc:Loc.Instance}}`,AOT 安全)只认 `Item`,只发 `Item[]` 会让所有绑定文本停在旧语言。缺失 key 返回 `[key]` 且每个 key 只 Trace 一次;同 key 两次注册文本不同直接抛异常(文本相同则幂等)。每个功能一张表:新建 `Localization/Strings.<功能>.cs`,类名 `<功能>Strings`,键名带功能前缀,在 `[ModuleInitializer]` 里调用 `Loc.Register(...)` 注册——没有共享清单文件,并行功能不会互相冲突,`Loc.EnsureRegistered()`(组合根启动时调用)因此只保住“所有表已注册”这个顺序点。`ViewModels/Strings.cs` 本次不迁移,由界面语言任务负责。通知按订阅者逐个 try/catch:某个订阅者(例如测试宿主里已关闭窗口的控件)抛错不能中断整批刷新。当前构建开着 `InvariantGlobalization`,`CurrentUICulture` 恒为不变文化,“跟随系统”在 Windows 上会落到英文,只有 `LANG`/`LC_ALL` 兜底;是否为它放弃不变全球化由界面语言任务决定。
+- **设置分区。** `Preferences/SettingsSection.cs` 的 `SettingsSections` 是分区注册表:`Add` 按 `Order` 升序插入(同序保持加入顺序),id 重复抛异常;分区标题是 `Loc` key,`SettingsSection.Title` 在 `Loc.LanguageChanged` 时由设置视图模型重新抬一次。注册表由组合根创建并暴露成 `AppComposition.Settings`:功能在 `AppComposition.Create()` 里 `Settings.Add(new SettingsSection(id, 标题 key, order, 该功能的设置视图模型))`,再在 `App.axaml` 加一个按该视图模型类型的 `DataTemplate`,不碰设置页本身。设置页只渲染 `Settings.Sections.Items`:一个分区 = 一个标题 + 装分区视图模型的 `ContentControl`。现有“提供方”“路径与服务”已改成 `provider`、`paths` 两个分区(顺序来自 `SettingsSectionIds`),内容与行为不变。设置页自身的文案(面板标题、两个分区标题、路径行标签、两个按钮)注册在 `Localization/Strings.Core.cs`,语言切换时随 `LanguageChanged` 刷新。
+- **在 headless 测试里切换语言**时,同一进程里已关闭但尚未回收的窗口仍持有 `Loc`/视图模型绑定,会跨线程抛错;切换语言的那个测试应独占一个会话,并让旧窗口先被回收。
+
 **工作台布局。** 三个区域按角色命名,不按位置:项目区、主区、检视区。默认顺序 项目 | 主 | 检视,可以拖拽互换,内容跟着角色走。
 - 项目区:顶部常规对话区,其下 项目 → worktree → 会话;归档会话收进各 worktree 的“历史 (n)”。
 - 主区:主选项卡组(只放会话标签)+ 底部组(子 Agent 选项卡组,命令行以后也放这里)。

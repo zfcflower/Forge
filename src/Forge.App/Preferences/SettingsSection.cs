@@ -1,3 +1,6 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+
 namespace Forge.App.Preferences;
 
 /// <summary>
@@ -6,15 +9,51 @@ namespace Forge.App.Preferences;
 /// not edit the settings page itself. Sections are shown in ascending <see cref="Order"/>; the title is a
 /// <see cref="Localization.Loc"/> key.
 /// </summary>
-internal sealed record SettingsSection(string Id, string TitleKey, int Order, object ViewModel);
+internal sealed record SettingsSection(string Id, string TitleKey, int Order, object ViewModel) : INotifyPropertyChanged
+{
+    private static readonly PropertyChangedEventArgs TitleChanged = new(nameof(Title));
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>The heading in the current UI language; <see cref="RaiseTitle"/> re-reads it after a language switch.</summary>
+    public string Title => Localization.Loc.Instance[TitleKey];
+
+    /// <summary>Called by the settings view model when <see cref="Localization.Loc.LanguageChanged"/> fires.</summary>
+    internal void RaiseTitle() => PropertyChanged?.Invoke(this, TitleChanged);
+}
 
 /// <summary>Registry of settings sections, owned by the settings view model; UI thread only.</summary>
 internal sealed class SettingsSections
 {
-    public System.Collections.ObjectModel.ReadOnlyObservableCollection<SettingsSection> Items => throw new NotImplementedException();
+    private readonly ObservableCollection<SettingsSection> items = [];
+    private readonly ReadOnlyObservableCollection<SettingsSection> itemsView;
+
+    public SettingsSections() => itemsView = new ReadOnlyObservableCollection<SettingsSection>(items);
+
+    public ReadOnlyObservableCollection<SettingsSection> Items => itemsView;
 
     /// <summary>Adds a section, keeping <see cref="Items"/> sorted by order; a duplicate id throws.</summary>
-    public void Add(SettingsSection section) => throw new NotImplementedException();
+    public void Add(SettingsSection section)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+
+        foreach (var existing in items)
+        {
+            if (string.Equals(existing.Id, section.Id, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("设置分区 id 重复：" + section.Id);
+            }
+        }
+
+        // Equal orders keep insertion order: the new section goes after every section that does not sort after it.
+        var index = 0;
+        while (index < items.Count && items[index].Order <= section.Order)
+        {
+            index++;
+        }
+
+        items.Insert(index, section);
+    }
 }
 
 /// <summary>Well-known section ids and orders, so features agree on placement without coordinating.</summary>

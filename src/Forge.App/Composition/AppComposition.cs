@@ -1,5 +1,9 @@
-﻿using Forge.Abstractions;
+﻿using System.ComponentModel;
+using Avalonia.Threading;
+using Forge.Abstractions;
 using Forge.App.Agents;
+using Forge.App.Localization;
+using Forge.App.Preferences;
 using Forge.App.Services;
 using Forge.Approval;
 using Forge.Core.Providers;
@@ -27,10 +31,14 @@ internal sealed class AppComposition : IAsyncDisposable
     private readonly SqliteUiStateStore uiState;
     private readonly SqliteTurnCheckpointStore turnCheckpoints;
     private readonly AgentRuntimeManager runtimes;
+    private readonly PreferencesStore preferences;
+    private readonly SettingsSections settings;
     private bool disposed;
 
     private AppComposition(
         AppPaths paths,
+        PreferencesStore preferences,
+        SettingsSections settings,
         HttpClient httpClient,
         string approvalsDatabasePath,
         ExtensionHostSupervisor? host,
@@ -54,6 +62,8 @@ internal sealed class AppComposition : IAsyncDisposable
         Task initialization)
     {
         Paths = paths;
+        this.preferences = preferences;
+        this.settings = settings;
         this.httpClient = httpClient;
         ApprovalsDatabasePath = approvalsDatabasePath;
         this.host = host;
@@ -76,9 +86,22 @@ internal sealed class AppComposition : IAsyncDisposable
         Worktrees = worktrees;
         this.runtimes = runtimes;
         Initialization = initialization;
+        preferences.Current.PropertyChanged += OnPreferencesChanged;
     }
 
     public AppPaths Paths { get; }
+
+    /// <summary>The live user preferences; every setter applies immediately and the store persists after a short debounce.</summary>
+    public AppPreferences Preferences => preferences.Current;
+
+    /// <summary>Why the last read of the <c>preferences</c> section fell back to defaults, or null.</summary>
+    public string? PreferencesProblem => preferences.LoadProblem;
+
+    /// <summary>
+    /// The settings-page sections. A feature appends its own here in <see cref="Create"/> (id and order come from
+    /// <see cref="SettingsSectionIds"/>) plus one app-level DataTemplate, and never edits the settings page.
+    /// </summary>
+    public SettingsSections Settings => settings;
 
     public ProviderSettings Provider { get; private set; }
 
@@ -135,7 +158,16 @@ internal sealed class AppComposition : IAsyncDisposable
 
     public static AppComposition Create()
     {
+        // 0. Preferences own the `preferences` section of the same settings.json the provider reads. Constructed
+        //    before everything else so the debounced write is the last thing flushed on shutdown. The settings registry
+        //    is created here too: a feature adds its section below, once the service it edits exists. The live string
+        //    table is touched first of all: every table registers from its own [ModuleInitializer], and this is the
+        //    explicit order point before any view model asks for a text.
+        Loc.EnsureRegistered();
+
         var paths = AppPaths.Create();
+        var preferences = new PreferencesStore(paths.SettingsPath);
+        var settings = new SettingsSections();
 
         // 1. The approval database is owned by the extension host; the shell only reads its record count.
         var approvalsDatabasePath = Path.Combine(paths.HostDataDirectory, ApprovalStore.FileName);
@@ -214,10 +246,12 @@ internal sealed class AppComposition : IAsyncDisposable
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty));
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
-        var initialization = InitializeWorkbenchAsync(projects, worktrees, paths);
+        var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences);
 
         return new AppComposition(
             paths,
+            preferences,
+            settings,
             httpClient,
             approvalsDatabasePath,
             host,
@@ -244,15 +278,49 @@ internal sealed class AppComposition : IAsyncDisposable
     /// <summary>Re-reads <c>settings.json</c>; the running runtime keeps its provider until the next launch.</summary>
     public ProviderSettings ReloadProvider() => Provider = ProviderSettings.Load(Paths.SettingsPath);
 
+    /// <summary>
+    /// Startup work the window waits for: the preferences are read on the pool and then applied here, and the general
+    /// workspace is registered. The first await has no <c>ConfigureAwait(false)</c> on purpose - the caller is the UI
+    /// thread, and the language is pushed into <see cref="Loc"/> (which notifies bound text) before anything is bound.
+    /// </summary>
     private static async Task InitializeWorkbenchAsync(
         SqliteProjectRegistry projects,
         WorktreeService worktrees,
-        AppPaths paths)
+        AppPaths paths,
+        PreferencesStore preferences)
     {
+        await preferences.LoadAsync(CancellationToken.None).ConfigureAwait(true);
+        ApplyLanguage(preferences.Current.Language);
+
         var general = await worktrees.EnsureGeneralWorkspaceAsync(paths.GeneralWorkspaceDirectory, CancellationToken.None)
             .ConfigureAwait(false);
         await projects.AddAsync(general, WorktreeService.GeneralFolderName, ProjectKind.General, CancellationToken.None)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// <see cref="Loc"/> raises <c>Item[]</c> and <see cref="Loc.LanguageChanged"/> to whatever is bound, so the language
+    /// is only ever set on the UI thread. The pool thread of a host without a dispatcher loop posts and never runs it,
+    /// which is the one case where nothing is bound anyway.
+    /// </summary>
+    private static void ApplyLanguage(UiLanguage language)
+    {
+        var dispatcher = Dispatcher.UIThread;
+        if (dispatcher.CheckAccess())
+        {
+            Loc.Instance.Language = language;
+            return;
+        }
+
+        dispatcher.Post(() => Loc.Instance.Language = language);
+    }
+
+    private void OnPreferencesChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.Equals(e.PropertyName, nameof(AppPreferences.Language), StringComparison.Ordinal))
+        {
+            ApplyLanguage(preferences.Current.Language);
+        }
     }
 
     private static Func<ModelSettings, IChatProvider> BuildProviderFactory(ProviderSettings settings, HttpClient httpClient)
@@ -303,6 +371,9 @@ internal sealed class AppComposition : IAsyncDisposable
         }
 
         httpClient.Dispose();
+
+        preferences.Current.PropertyChanged -= OnPreferencesChanged;
+        await preferences.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>

@@ -46,6 +46,31 @@
       <views:SpecTreeToolView />
     </DataTemplate>
 
+    <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
+    <DataTemplate DataType="vm:ProviderSettingsSectionViewModel" x:DataType="vm:ProviderSettingsSectionViewModel">
+      <StackPanel Spacing="6">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Detail}" />
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:PathsSettingsSectionViewModel" x:DataType="vm:PathsSettingsSectionViewModel">
+      <ItemsControl ItemsSource="{Binding Paths}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:SettingLine">
+            <Grid ColumnDefinitions="150,*" Margin="0,3">
+              <TextBlock Classes="label" Text="{Binding Label}" VerticalAlignment="Top" />
+              <TextBlock Grid.Column="1"
+                         Classes="caption"
+                         Text="{Binding Value}"
+                         TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding Value}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </DataTemplate>
+
     <!-- User message: IM-style bubble aligned right. -->
     <DataTemplate DataType="vm:UserMessageViewModel" x:DataType="vm:UserMessageViewModel">
       <StackPanel Margin="0,10,0,4" HorizontalAlignment="Right" Spacing="2">

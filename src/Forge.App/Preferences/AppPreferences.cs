@@ -1,4 +1,11 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Forge.App.ViewModels;
+using Forge.IO;
 
 namespace Forge.App.Preferences;
 
@@ -24,21 +31,133 @@ internal sealed class AppPreferences : ObservableObject
     public const double DefaultUiFontSize = 13;
     public const double DefaultCodeFontSize = 13;
 
-    public string UiFontFamily { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    private string uiFontFamily = DefaultUiFontFamily;
+    private double uiFontSize = DefaultUiFontSize;
+    private string codeFontFamily = DefaultCodeFontFamily;
+    private double codeFontSize = DefaultCodeFontSize;
+    private UiLanguage language = UiLanguage.System;
+    private string terminalShell = string.Empty;
+    private string terminalArguments = string.Empty;
 
-    public double UiFontSize { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
-    public string CodeFontFamily { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public double UiFontSize { get => uiFontSize; set => Set(ref uiFontSize, Size(value, DefaultUiFontSize)); }
 
-    public double CodeFontSize { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public string CodeFontFamily { get => codeFontFamily; set => Set(ref codeFontFamily, Family(value, DefaultCodeFontFamily)); }
 
-    public UiLanguage Language { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public double CodeFontSize { get => codeFontSize; set => Set(ref codeFontSize, Size(value, DefaultCodeFontSize)); }
+
+    public UiLanguage Language { get => language; set => Set(ref language, value); }
 
     /// <summary>Shell executable for new terminals; empty means the platform default (pwsh/powershell on Windows, $SHELL or /bin/sh elsewhere).</summary>
-    public string TerminalShell { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public string TerminalShell { get => terminalShell; set => Set(ref terminalShell, (value ?? string.Empty).Trim()); }
 
     /// <summary>Arguments for <see cref="TerminalShell"/>, space separated with double quotes for grouping.</summary>
-    public string TerminalArguments { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public string TerminalArguments { get => terminalArguments; set => Set(ref terminalArguments, value ?? string.Empty); }
+
+    /// <summary>
+    /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
+    /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
+    /// Values go through the same validation as the setters.
+    /// </summary>
+    internal void ApplyLoaded(PreferencesSection section, UiLanguage loadedLanguage)
+    {
+        uiFontFamily = Family(section.UiFontFamily, DefaultUiFontFamily);
+        uiFontSize = Size(section.UiFontSize, DefaultUiFontSize);
+        codeFontFamily = Family(section.CodeFontFamily, DefaultCodeFontFamily);
+        codeFontSize = Size(section.CodeFontSize, DefaultCodeFontSize);
+        language = loadedLanguage;
+        terminalShell = (section.TerminalShell ?? string.Empty).Trim();
+        terminalArguments = section.TerminalArguments ?? string.Empty;
+    }
+
+    /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
+    internal PreferencesSection ToSection() =>
+        new()
+        {
+            UiFontFamily = uiFontFamily,
+            UiFontSize = uiFontSize,
+            CodeFontFamily = codeFontFamily,
+            CodeFontSize = codeFontSize,
+            Language = LanguageToken(language),
+            TerminalShell = terminalShell,
+            TerminalArguments = terminalArguments,
+        };
+
+    /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
+    internal static bool TryParseLanguage(string? text, out UiLanguage parsed)
+    {
+        parsed = UiLanguage.System;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        switch (text.Trim().ToLowerInvariant())
+        {
+            case "system":
+                return true;
+            case "chinese" or "zh" or "zh-cn" or "zh-hans":
+                parsed = UiLanguage.Chinese;
+                return true;
+            case "english" or "en" or "en-us":
+                parsed = UiLanguage.English;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static string LanguageToken(UiLanguage language) => language switch
+    {
+        UiLanguage.Chinese => "chinese",
+        UiLanguage.English => "english",
+        _ => "system",
+    };
+
+    private static string Family(string? value, string fallback)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? fallback : trimmed;
+    }
+
+    private static double Size(double? value, double fallback) =>
+        value is { } size && !double.IsNaN(size) ? Math.Clamp(size, MinFontSize, MaxFontSize) : fallback;
+}
+
+/// <summary>
+/// The <c>preferences</c> section of <c>settings.json</c>: every property optional, so a hand-written or older file still
+/// loads and a value that is absent keeps its default. The language is stored as a token, not as a number.
+/// </summary>
+internal sealed class PreferencesSection
+{
+    [JsonPropertyName("uiFontFamily")]
+    public string? UiFontFamily { get; set; }
+
+    [JsonPropertyName("uiFontSize")]
+    public double? UiFontSize { get; set; }
+
+    [JsonPropertyName("codeFontFamily")]
+    public string? CodeFontFamily { get; set; }
+
+    [JsonPropertyName("codeFontSize")]
+    public double? CodeFontSize { get; set; }
+
+    [JsonPropertyName("language")]
+    public string? Language { get; set; }
+
+    [JsonPropertyName("terminalShell")]
+    public string? TerminalShell { get; set; }
+
+    [JsonPropertyName("terminalArguments")]
+    public string? TerminalArguments { get; set; }
+}
+
+/// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(PreferencesSection))]
+internal sealed partial class PreferencesJsonContext : JsonSerializerContext
+{
 }
 
 /// <summary>
@@ -48,17 +167,325 @@ internal sealed class AppPreferences : ObservableObject
 /// </summary>
 internal sealed class PreferencesStore : IAsyncDisposable
 {
-    public PreferencesStore(string settingsPath) => throw new NotImplementedException();
+    /// <summary>How long a burst of edits waits before it becomes one file write.</summary>
+    private const int DebounceMilliseconds = 500;
 
-    public AppPreferences Current => throw new NotImplementedException();
+    private const string SectionName = "preferences";
+    private const string BackupSuffix = ".bak";
+
+    /// <summary>Whole-document output: other sections keep their values, only their whitespace is normalized.</summary>
+    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
+    private readonly string settingsPath;
+    private readonly Lock gate = new();
+    private readonly AppPreferences current = new();
+    private CancellationTokenSource? debounce;
+    private byte[]? originalBytes;
+    private string? loadProblem;
+    private bool protectOriginal;
+    private bool dirty;
+    private bool disposed;
+    private int version;
+    private int saveCount;
+
+    public PreferencesStore(string settingsPath)
+    {
+        this.settingsPath = Path.GetFullPath(settingsPath);
+        BackupPath = this.settingsPath + BackupSuffix;
+        current.PropertyChanged += OnCurrentChanged;
+    }
+
+    public AppPreferences Current => current;
 
     /// <summary>Null when the last load succeeded or the file did not exist.</summary>
-    public string? LoadProblem => throw new NotImplementedException();
+    public string? LoadProblem
+    {
+        get
+        {
+            lock (gate)
+            {
+                return loadProblem;
+            }
+        }
+    }
 
-    public Task LoadAsync(CancellationToken ct) => throw new NotImplementedException();
+    /// <summary>Where an unreadable <c>settings.json</c> is preserved before the first write replaces it.</summary>
+    internal string BackupPath { get; }
+
+    /// <summary>Completed file writes; the debounce test pins that a burst of edits still lands as one write.</summary>
+    internal int SaveCount
+    {
+        get
+        {
+            lock (gate)
+            {
+                return saveCount;
+            }
+        }
+    }
+
+    public async Task LoadAsync(CancellationToken ct)
+    {
+        var outcome = await Task.Run(() => Read(ct), ct).ConfigureAwait(false);
+
+        lock (gate)
+        {
+            loadProblem = outcome.Problem;
+            protectOriginal = outcome.Problem is not null;
+            originalBytes = outcome.Protect ? outcome.Raw : null;
+            dirty = false;
+        }
+
+        current.ApplyLoaded(outcome.Section ?? new PreferencesSection(), outcome.Language ?? UiLanguage.System);
+    }
 
     /// <summary>Writes immediately (atomic replace via Forge.IO); normally called by the debounce, and once on dispose.</summary>
-    public Task SaveAsync(CancellationToken ct) => throw new NotImplementedException();
+    public async Task SaveAsync(CancellationToken ct)
+    {
+        CancellationTokenSource? pending;
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            pending = debounce;
+            debounce = null;
+        }
 
-    public ValueTask DisposeAsync() => throw new NotImplementedException();
+        Cancel(pending);
+        await Task.Run(() => SaveCore(ct), ct).ConfigureAwait(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        CancellationTokenSource? pending;
+        bool flush;
+        lock (gate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            pending = debounce;
+            debounce = null;
+            flush = dirty;
+        }
+
+        Cancel(pending);
+
+        if (!flush)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => SaveCore(CancellationToken.None), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsFileFailure(exception))
+        {
+            Trace.WriteLine("[preferences] the final save failed: " + exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Any preference change is a user edit: the load path writes the fields without notifying, so a notification can only
+    /// come from a setter. Each edit restarts the 500 ms window; the write itself runs on the thread pool.
+    /// </summary>
+    private void OnCurrentChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        CancellationTokenSource cts;
+        CancellationTokenSource? previous;
+        lock (gate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            version++;
+            dirty = true;
+            previous = debounce;
+            cts = new CancellationTokenSource();
+            debounce = cts;
+        }
+
+        Cancel(previous);
+        _ = DebounceAsync(cts.Token);
+    }
+
+    private async Task DebounceAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(DebounceMilliseconds, ct).ConfigureAwait(false);
+            SaveCore(ct);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (IsFileFailure(exception))
+        {
+            Trace.WriteLine("[preferences] save failed: " + exception.Message);
+        }
+    }
+
+    /// <summary>The one write path: keep every other section, back up an unreadable file once, then replace atomically.</summary>
+    private void SaveCore(CancellationToken ct)
+    {
+        var section = current.ToSection();
+        int snapshot;
+        bool shouldBackUp;
+        byte[]? retained;
+        lock (gate)
+        {
+            snapshot = version;
+            shouldBackUp = protectOriginal;
+            retained = originalBytes;
+        }
+
+        var existing = ReadExistingBytes(ct);
+        var document = existing is { Length: > 0 } ? TryParseDocument(existing) : null;
+
+        // A file that turned invalid after the load is still the user's content: back it up before it is replaced.
+        var unreadable = existing is { Length: > 0 } && document is null;
+        if (shouldBackUp || unreadable)
+        {
+            var source = existing is { Length: > 0 } ? existing : retained;
+            if (source is { Length: > 0 })
+            {
+                AtomicFile.WriteAllBytes(BackupPath, source, null, ct);
+            }
+        }
+
+        document ??= new JsonObject();
+        document[SectionName] = JsonSerializer.SerializeToNode(section, PreferencesJsonContext.Default.PreferencesSection);
+
+        AtomicFile.WriteAllBytes(settingsPath, Encoding.UTF8.GetBytes(document.ToJsonString(WriteOptions) + "\n"), null, ct);
+
+        lock (gate)
+        {
+            if (snapshot == version)
+            {
+                dirty = false;
+            }
+
+            protectOriginal = false;
+            originalBytes = null;
+            saveCount++;
+        }
+    }
+
+    private LoadOutcome Read(CancellationToken ct)
+    {
+        byte[]? bytes;
+        try
+        {
+            bytes = AtomicFile.ReadAllBytesShared(settingsPath, null, ct);
+        }
+        catch (Exception exception) when (IsFileFailure(exception))
+        {
+            return new LoadOutcome(null, null, "读取 settings.json 失败：" + exception.Message, null, false);
+        }
+
+        if (bytes is null || bytes.Length == 0)
+        {
+            return new LoadOutcome(null, null, null, null, false);
+        }
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(bytes);
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
+        {
+            return new LoadOutcome(null, null, "settings.json 不是有效的 JSON：" + exception.Message, bytes, true);
+        }
+
+        if (parsed is not JsonObject document)
+        {
+            return new LoadOutcome(null, null, "settings.json 的顶层不是 JSON 对象。", bytes, true);
+        }
+
+        if (document[SectionName] is not { } node)
+        {
+            return new LoadOutcome(null, null, null, null, false);
+        }
+
+        if (node is not JsonObject)
+        {
+            return new LoadOutcome(null, null, "settings.json 的 preferences 段不是 JSON 对象。", bytes, true);
+        }
+
+        PreferencesSection? section;
+        try
+        {
+            section = node.Deserialize(PreferencesJsonContext.Default.PreferencesSection);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or NotSupportedException)
+        {
+            return new LoadOutcome(null, null, "settings.json 的 preferences 段无效：" + exception.Message, bytes, true);
+        }
+
+        if (section is null)
+        {
+            return new LoadOutcome(null, null, null, null, false);
+        }
+
+        if (!AppPreferences.TryParseLanguage(section.Language, out var language))
+        {
+            return new LoadOutcome(section, UiLanguage.System, "settings.json 的 preferences.language 无法识别：" + section.Language, bytes, true);
+        }
+
+        return new LoadOutcome(section, language, null, null, false);
+    }
+
+    /// <summary>Re-reads the whole file so the write is a merge, not an overwrite; null when it is missing.</summary>
+    private byte[]? ReadExistingBytes(CancellationToken ct)
+    {
+        try
+        {
+            return AtomicFile.ReadAllBytesShared(settingsPath, null, ct);
+        }
+        catch (Exception exception) when (IsFileFailure(exception))
+        {
+            Trace.WriteLine("[preferences] the existing settings.json could not be read: " + exception.Message);
+            return null;
+        }
+    }
+
+    private static JsonObject? TryParseDocument(byte[] bytes)
+    {
+        try
+        {
+            return JsonNode.Parse(bytes) as JsonObject;
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static void Cancel(CancellationTokenSource? cancellation)
+    {
+        if (cancellation is null)
+        {
+            return;
+        }
+
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    private static bool IsFileFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException or NotSupportedException;
+
+    /// <summary>What one read of <c>settings.json</c> produced: values, the resolved language, and whether the file must survive.</summary>
+    private readonly record struct LoadOutcome(
+        PreferencesSection? Section,
+        UiLanguage? Language,
+        string? Problem,
+        byte[]? Raw,
+        bool Protect);
 }

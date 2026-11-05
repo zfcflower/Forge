@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Forge.App.ViewModels"
         xmlns:wb="using:Forge.App.Workbench.Controls"
+        xmlns:prefs="using:Forge.App.Preferences"
         x:Class="Forge.App.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Forge"
@@ -139,7 +140,8 @@
       </Grid>
     </Border>
 
-    <!-- Provider notice + settings overlay -->
+    <!-- Settings overlay: the body is the registered section list (provider, paths and whatever a feature adds), and
+         each section's view model is rendered by the app-level data template for its type. -->
     <Border Grid.RowSpan="3"
             Background="{DynamicResource SurfaceBackgroundBrush}"
             Opacity="0.92"
@@ -153,7 +155,10 @@
               BoxShadow="{StaticResource ShadowMd}">
         <Grid RowDefinitions="Auto,*,Auto">
           <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="h2" Text="设置" VerticalAlignment="Center" />
+            <TextBlock Classes="h2"
+                       VerticalAlignment="Center"
+                       Text="{Binding Settings.Title}"
+                       AutomationProperties.AutomationId="settings-title" />
             <Button Grid.Column="1"
                     Classes="ghost icon"
                     Command="{Binding ToggleSettingsCommand}"
@@ -163,37 +168,28 @@
           </Grid>
 
           <ScrollViewer Grid.Row="1" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="10">
-              <TextBlock Classes="section-title" Text="模型提供方" />
-              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Settings.ProviderDetail}" />
-              <TextBlock Classes="caption"
-                         TextWrapping="Wrap"
-                         Text="提供方来自 settings.json，启动时与点击重新加载时读取；密钥可来自该文件指定的环境变量。" />
-              <Border Classes="divider" Margin="0,4" />
-              <TextBlock Classes="section-title" Text="常规工作区" />
-              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GeneralWorkspaceText}" />
-              <Border Classes="divider" Margin="0,4" />
-              <TextBlock Classes="section-title" Text="路径与服务" />
-              <ItemsControl ItemsSource="{Binding Settings.Paths}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:SettingLine">
-                    <Grid ColumnDefinitions="150,*" Margin="0,3">
-                      <TextBlock Classes="label" Text="{Binding Label}" VerticalAlignment="Top" />
-                      <TextBlock Grid.Column="1"
-                                 Classes="caption"
-                                 Text="{Binding Value}"
-                                 TextTrimming="CharacterEllipsis"
-                                 ToolTip.Tip="{Binding Value}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
+            <ItemsControl ItemsSource="{Binding Settings.Sections.Items}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="prefs:SettingsSection">
+                  <StackPanel Spacing="8" Margin="0,0,0,10">
+                    <TextBlock Classes="section-title"
+                               Text="{Binding Title}"
+                               AutomationProperties.AutomationId="{Binding Id}" />
+                    <ContentControl Content="{Binding ViewModel}" />
+                    <Border Classes="divider" Margin="0,2,0,0" />
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
           </ScrollViewer>
 
           <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,16,0,0">
-            <Button Classes="primary" Content="重新加载设置" Command="{Binding ReloadSettingsCommand}" />
-            <Button Classes="ghost" Content="关闭" Command="{Binding ToggleSettingsCommand}" />
+            <Button Classes="primary"
+                    Command="{Binding ReloadSettingsCommand}"
+                    Content="{Binding Settings.ReloadText}" />
+            <Button Classes="ghost"
+                    Command="{Binding ToggleSettingsCommand}"
+                    Content="{Binding Settings.CloseText}" />
           </StackPanel>
         </Grid>
       </Border>
