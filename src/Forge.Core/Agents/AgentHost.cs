@@ -62,7 +62,7 @@ public sealed class AgentHost
     private readonly PromptLayers layers;
     private readonly IPromptComposer composer;
     private readonly SubAgentScheduler scheduler;
-    private readonly ToolRegistry toolRegistry;
+    private readonly ToolSurface toolSurface;
     private readonly AgentLoop loop;
     private readonly ISessionStore? store;
 
@@ -75,41 +75,42 @@ public sealed class AgentHost
         composer = options.Composer;
         store = options.Store;
 
-        var tools = new List<ITool>(options.Tools);
+        var builtIns = new List<ITool>();
         if (options.IncludeRetrievalTools)
         {
             if (options.Store is { } store)
             {
-                tools.Add(new SearchHistoryTool(store));
-                tools.Add(new ReadHistoryTool(store));
+                builtIns.Add(new SearchHistoryTool(store));
+                builtIns.Add(new ReadHistoryTool(store));
             }
 
             if (options.Artifacts is { } artifacts)
             {
-                tools.Add(new ReadArtifactTool(artifacts));
+                builtIns.Add(new ReadArtifactTool(artifacts));
             }
         }
 
         if (options.Todos is { } todos)
         {
-            tools.Add(new TodoTool(todos));
+            builtIns.Add(new TodoTool(todos));
         }
 
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
-        tools.Add(new SpawnAgentTool(scheduler, catalog.All));
-        tools.Add(new SubAgentSteerTool(scheduler));
-        tools.Add(new SubAgentFollowUpTool(scheduler));
-        tools.Add(new SubAgentStopTool(scheduler));
+        builtIns.Add(new SpawnAgentTool(scheduler, catalog.All));
+        builtIns.Add(new SubAgentSteerTool(scheduler));
+        builtIns.Add(new SubAgentFollowUpTool(scheduler));
+        builtIns.Add(new SubAgentStopTool(scheduler));
 
         var compactor = options.Compactor
                         ?? (options.Store is { } summaryStore
                             ? new SummaryCompactor(summaryStore, options.Providers, options.TokenCounter, this.options.CompactionTargetRatio)
                             : NoopCompactor.Instance);
 
-        toolRegistry = new ToolRegistry(tools);
+        toolSurface = new ToolSurface(builtIns);
+        toolSurface.ReplaceExternal(options.Tools);
         loop = new AgentLoop(new AgentLoopServices(
             options.Providers,
-            toolRegistry,
+            toolSurface,
             options.Policy,
             options.ApprovalHandler,
             options.Store,
@@ -132,7 +133,7 @@ public sealed class AgentHost
     /// <summary>Control surface over the live sub-agents of this host; the UI stop button uses the same path as the tools.</summary>
     public ISubAgentControl SubAgentControl => scheduler;
 
-    public ToolRegistry Tools => toolRegistry;
+    public ToolRegistry Tools => toolSurface.Tools;
 
     /// <summary>
     /// Replaces the externally supplied tools (the <see cref="AgentHostOptions.Tools"/> part; built-in tools such as
@@ -140,7 +141,7 @@ public sealed class AgentHost
     /// model request, so a tool approved mid-turn is callable in the same turn; the changed definitions break the prompt
     /// cache once. Same-named external tools never shadow a built-in tool.
     /// </summary>
-    public void ReplaceExternalTools(IEnumerable<ITool> tools) => throw new NotImplementedException();
+    public void ReplaceExternalTools(IEnumerable<ITool> tools) => toolSurface.ReplaceExternal(tools);
 
     /// <summary>Root agent of a session: no depth limit in practice, every tool its definition allows.</summary>
     public AgentInstance CreateRoot(string sessionId, string workingDirectory, AgentDefinition? definition = null, string id = "root")

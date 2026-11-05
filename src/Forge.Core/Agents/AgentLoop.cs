@@ -11,7 +11,7 @@ public sealed class AgentTurnLimitException(string message) : Exception(message)
 /// <summary>Everything the loop needs; assembled once by <see cref="AgentHost"/> and shared by all agents.</summary>
 public sealed record AgentLoopServices(
     Func<ModelSettings, IChatProvider> Providers,
-    ToolRegistry Tools,
+    ToolSurface Tools,
     IApprovalPolicy Policy,
     IApprovalHandler? ApprovalHandler,
     ISessionStore? Store,
@@ -57,11 +57,11 @@ public sealed class AgentLoop(AgentLoopServices services)
             input = WithInstructions(input, queued);
         }
 
-        var tools = services.Tools.Select(
+        var tools = new ToolSelection(
+            services.Tools,
             instance.Definition.ToolNames,
             instance.Depth < services.Options.MaxSubAgentDepth,
             services.SubAgentToolNames);
-        var definitions = tools.Definitions;
         var provider = services.Providers(instance.Definition.Model);
 
         await PersistAsync(instance, input, null, ct).ConfigureAwait(false);
@@ -71,7 +71,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             ct.ThrowIfCancellationRequested();
             await CompactIfNeededAsync(instance, sink, ct).ConfigureAwait(false);
 
-            var request = BuildRequest(instance, definitions);
+            var request = BuildRequest(instance, tools.Current().Definitions);
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
             var stop = StopReason.Other;
@@ -273,7 +273,7 @@ public sealed class AgentLoop(AgentLoopServices services)
 
     private async ValueTask<(ContentBlock[] Results, string? Steering)> ExecuteToolsAsync(
         AgentInstance instance,
-        ToolRegistry tools,
+        ToolSelection tools,
         ToolCallBlock[] calls,
         SubAgentRun? control,
         IAgentEventSink sink,
@@ -301,8 +301,9 @@ public sealed class AgentLoop(AgentLoopServices services)
                 }
 
                 ct.ThrowIfCancellationRequested();
+                var current = tools.Current();
                 var end = index;
-                while (end < calls.Length && IsReadOnly(tools, calls[end]))
+                while (end < calls.Length && IsReadOnly(current, calls[end]))
                 {
                     end++;
                 }
@@ -338,7 +339,7 @@ public sealed class AgentLoop(AgentLoopServices services)
 
     private async Task RunBatchAsync(
         AgentInstance instance,
-        ToolRegistry tools,
+        ToolSelection tools,
         ToolCallBlock[] calls,
         ContentBlock?[] results,
         int from,
@@ -362,14 +363,14 @@ public sealed class AgentLoop(AgentLoopServices services)
 
     private async Task<ContentBlock> RunOneAsync(
         AgentInstance instance,
-        ToolRegistry tools,
+        ToolSelection tools,
         ToolCallBlock block,
         ToolContext context,
         IAgentEventSink sink,
         CancellationToken ct)
     {
         var call = new ToolCall(block.Id, block.Name, block.ArgumentsJson);
-        if (!tools.TryGet(call.Name, out var tool))
+        if (!tools.Current().TryGet(call.Name, out var tool))
         {
             return new ToolResultBlock(call.Id, $"Unknown tool '{call.Name}'.", IsError: true);
         }
@@ -493,6 +494,39 @@ public sealed class AgentLoop(AgentLoopServices services)
     private static bool IsReadOnly(ToolRegistry tools, ToolCallBlock block) =>
         tools.TryGet(block.Name, out var tool)
         && ToolRegistry.SideEffectOf(tool, new ToolCall(block.Id, block.Name, block.ArgumentsJson)) == ToolSideEffect.ReadOnly;
+
+    /// <summary>
+    /// One run's view of the host's live tool surface. The registry is selected once and reused while the published
+    /// version stays the same, so a steady run allocates nothing per request and keeps sending the identical definition
+    /// list (and the identical prompt cache entry); a version change, which only a tool replacement causes, re-selects with
+    /// the same allow-list and depth rules. Refreshing is lock-free: two racing callers may each select a registry, and
+    /// both publish an equivalent snapshot.
+    /// </summary>
+    private sealed class ToolSelection(
+        ToolSurface surface,
+        IReadOnlyList<string>? toolNames,
+        bool canSpawn,
+        IReadOnlyList<string> subAgentTools)
+    {
+        private Selected? selected;
+
+        /// <summary>The registry to use right now: the cached one unless the host published a new tool set.</summary>
+        public ToolRegistry Current()
+        {
+            var published = surface.Current;
+            var cached = Volatile.Read(ref selected);
+            if (cached is not null && cached.Version == published.Version)
+            {
+                return cached.Registry;
+            }
+
+            var registry = published.Tools.Select(toolNames, canSpawn, subAgentTools);
+            Volatile.Write(ref selected, new Selected(published.Version, registry));
+            return registry;
+        }
+
+        private sealed record Selected(int Version, ToolRegistry Registry);
+    }
 
     private static ToolCallBlock[] ToolCalls(ChatMessage message)
     {

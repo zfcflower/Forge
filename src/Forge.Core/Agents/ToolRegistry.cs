@@ -98,3 +98,83 @@ public sealed class ToolRegistry : IToolRegistry
         return false;
     }
 }
+
+/// <summary>
+/// An immutable pair of a published tool registry and the version it was published under; agents read both together so
+/// they can never mix a new version with an old registry.
+/// </summary>
+internal sealed record ToolSet(int Version, ToolRegistry Tools);
+
+/// <summary>
+/// The live tool set of one host: the built-in tools, which never change, plus the externally supplied tools, which
+/// <see cref="AgentHost.ReplaceExternalTools"/> swaps at any time. Readers take one immutable snapshot, so no lock is needed
+/// on the hot path; <see cref="Version"/> changes exactly when <see cref="Tools"/> is replaced, which lets each run reuse
+/// its selected registry (and its byte-identical definitions) until the set really changed. Built-in tools always win: an
+/// external tool with the name of a built-in tool is dropped, never registered next to it.
+/// </summary>
+public sealed class ToolSurface
+{
+    private readonly ToolRegistry builtIns;
+    private readonly HashSet<string> builtInNames;
+    private readonly Lock publishGate = new();
+    private ToolSet current;
+
+    public ToolSurface(IEnumerable<ITool> builtIns)
+    {
+        ArgumentNullException.ThrowIfNull(builtIns);
+        builtInNames = new HashSet<string>(StringComparer.Ordinal);
+        var list = new List<ITool>();
+        foreach (var tool in builtIns)
+        {
+            ArgumentNullException.ThrowIfNull(tool);
+            if (builtInNames.Add(tool.Definition.Name))
+            {
+                list.Add(tool);
+            }
+        }
+
+        this.builtIns = new ToolRegistry(list);
+        current = new ToolSet(0, this.builtIns);
+    }
+
+    /// <summary>Current tool set: the built-ins plus the external tools, sorted by name and deduplicated.</summary>
+    public ToolRegistry Tools => Volatile.Read(ref current).Tools;
+
+    /// <summary>Version of the current tool set, starting at 0; compare it to detect that <see cref="Tools"/> was replaced.</summary>
+    public int Version => Volatile.Read(ref current).Version;
+
+    internal ToolSet Current => Volatile.Read(ref current);
+
+    /// <summary>
+    /// Publishes a new external tool set; safe to call from any thread. Built-ins stay and shadow an external tool of the
+    /// same name. A replacement always publishes a new version, so the next model request re-selects even when the names
+    /// happen to be unchanged.
+    /// </summary>
+    public void ReplaceExternal(IEnumerable<ITool> tools)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        var external = new List<ITool>();
+        foreach (var tool in tools)
+        {
+            ArgumentNullException.ThrowIfNull(tool);
+            if (!builtInNames.Contains(tool.Definition.Name))
+            {
+                external.Add(tool);
+            }
+        }
+
+        var builtInTools = builtIns.Tools;
+        var merged = new ITool[builtInTools.Count + external.Count];
+        for (var index = 0; index < builtInTools.Count; index++)
+        {
+            merged[index] = builtInTools[index];
+        }
+
+        external.CopyTo(merged, builtInTools.Count);
+        var registry = new ToolRegistry(merged);
+        lock (publishGate)
+        {
+            Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), registry));
+        }
+    }
+}

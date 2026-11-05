@@ -91,5 +91,20 @@ public static class ExtensionToolNames
 /// <summary>Factory for the five extension tools. They are for the root agent only: no built-in agent lists them.</summary>
 public static class ExtensionTools
 {
-    public static IReadOnlyList<ITool> Create(IExtensionAuthoring authoring) => throw new NotImplementedException();
+    /// <summary>
+    /// Builds the five tools over one <paramref name="authoring"/> implementation. They are created once per host and
+    /// registered as external tools; nothing here can approve an extension without the user.
+    /// </summary>
+    public static IReadOnlyList<ITool> Create(IExtensionAuthoring authoring)
+    {
+        ArgumentNullException.ThrowIfNull(authoring);
+        return
+        [
+            new ExtensionListTool(authoring),
+            new ExtensionSubmitTool(authoring, isUpdate: false),
+            new ExtensionSubmitTool(authoring, isUpdate: true),
+            new ExtensionDisableTool(authoring),
+            new ExtensionDeleteTool(authoring),
+        ];
+    }
 }
