@@ -115,6 +115,12 @@ internal sealed class Loc : INotifyPropertyChanged
         CoreStrings.Register();
     }
 
+    /// <summary>
+    /// Test seam: when set, <see cref="UiLanguage.System"/> resolves to this language instead of the machine's, so test
+    /// assertions on texts do not depend on the OS display language of the machine they run on. Never set by the product.
+    /// </summary>
+    internal static UiLanguage? SystemLanguageOverride { get; set; }
+
     /// <summary>All registered keys; for the completeness test.</summary>
     public static IReadOnlyCollection<string> Keys
     {
@@ -136,6 +142,11 @@ internal sealed class Loc : INotifyPropertyChanged
     {
         get
         {
+            if (SystemLanguageOverride is { } forced && forced != UiLanguage.System)
+            {
+                return forced;
+            }
+
             if (IsChinese(CultureInfo.CurrentUICulture.Name) || IsChinese(CultureInfo.InstalledUICulture.Name))
             {
                 return UiLanguage.Chinese;
