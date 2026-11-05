@@ -1,0 +1,84 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.SessionView"
+             x:DataType="vm:SessionWorkspaceViewModel">
+  <Grid RowDefinitions="*,Auto" Background="{DynamicResource SurfaceBackgroundBrush}">
+    <Panel Grid.Row="0">
+      <ListBox x:Name="Transcript"
+               ItemsSource="{Binding Transcript.Items}"
+               Padding="16,10,16,4"
+               SelectionMode="Single"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+      <StackPanel IsVisible="{Binding Transcript.IsEmpty}"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Spacing="6"
+                  MaxWidth="440">
+        <TextBlock Classes="h2" Text="开始对话" HorizontalAlignment="Center" />
+        <TextBlock Classes="caption"
+                   TextAlignment="Center"
+                   Text="{Binding WorkDirDisplay}" />
+        <TextBlock Classes="caption"
+                   TextAlignment="Center"
+                   Text="输入消息后按 Ctrl+Enter 发送。工具调用与每一轮都会显示为卡片。" />
+      </StackPanel>
+    </Panel>
+
+    <Border Grid.Row="1"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,1,0,0"
+            Padding="12,8">
+      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
+        <TextBox x:Name="Input"
+                 Text="{Binding Draft, Mode=TwoWay}"
+                 AcceptsReturn="True"
+                 TextWrapping="Wrap"
+                 MinHeight="56"
+                 MaxHeight="150"
+                 VerticalContentAlignment="Top"
+                 PlaceholderText="描述要完成的任务…"
+                 AutomationProperties.AutomationId="session-input"
+                 AutomationProperties.Name="消息"
+                 KeyDown="OnInputKeyDown" />
+        <StackPanel Grid.Column="1" Spacing="6" Margin="8,0,0,0" VerticalAlignment="Bottom">
+          <Button Classes="primary icon"
+                  Command="{Binding SendCommand}"
+                  IsEnabled="{Binding CanSendNow}"
+                  AutomationProperties.AutomationId="session-send"
+                  AutomationProperties.Name="发送"
+                  ToolTip.Tip="发送 (Ctrl+Enter)">
+            <PathIcon Data="{StaticResource IconSend}" Width="14" Height="14" />
+          </Button>
+          <Button Classes="ghost icon"
+                  Command="{Binding CancelCommand}"
+                  IsVisible="{Binding IsRunning}"
+                  AutomationProperties.AutomationId="session-stop-turn"
+                  AutomationProperties.Name="停止本轮"
+                  ToolTip.Tip="停止本轮">
+            <PathIcon Data="{StaticResource IconStop}" Width="12" Height="12" />
+          </Button>
+        </StackPanel>
+        <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,6,0,0">
+          <Ellipse Classes="status-dot"
+                   Classes.running="{Binding IsRunning}"
+                   Margin="0,0,6,0" />
+          <TextBlock Grid.Column="1"
+                     Classes="caption"
+                     Text="{Binding WorkDirDisplay}"
+                     ToolTip.Tip="{Binding WorkDirDisplay}" />
+          <TextBlock Grid.Column="2" Classes="caption" Margin="0,0,10,0" Text="{Binding BranchText}" />
+          <Button Grid.Column="3"
+                  Classes="tab"
+                  Content="{Binding SubAgentToggleText}"
+                  IsVisible="{Binding HasSubAgentActivity}"
+                  Command="{Binding ToggleSubAgentsCommand}"
+                  AutomationProperties.AutomationId="toggle-subagents"
+                  AutomationProperties.Name="{Binding SubAgentToggleName}"
+                  ToolTip.Tip="{Binding SubAgentToggleTooltip}" />
+        </Grid>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

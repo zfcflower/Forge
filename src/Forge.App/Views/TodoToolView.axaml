@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.TodoToolView"
+             x:DataType="vm:TodoListViewModel">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
+    <TextBlock Classes="caption" Text="{Binding Summary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,8,0,6">
+      <TextBox Text="{Binding NewTitle, Mode=TwoWay}"
+               PlaceholderText="添加任务…"
+               AutomationProperties.AutomationId="new-task" AutomationProperties.Name="新任务"
+               KeyDown="OnNewTaskKeyDown" />
+      <Button Grid.Column="1"
+              Classes="ghost icon"
+              Margin="6,0,0,0"
+              Command="{Binding AddCommand}"
+              AutomationProperties.AutomationId="add-task" AutomationProperties.Name="添加任务">
+        <PathIcon Data="{StaticResource IconPlus}" Width="11" Height="11" />
+      </Button>
+    </Grid>
+
+    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+      <ItemsControl ItemsSource="{Binding Items}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:TodoEntryViewModel">
+            <Border Classes="tree-row">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                <CheckBox IsChecked="{Binding IsDone, Mode=TwoWay}" VerticalAlignment="Center" AutomationProperties.AutomationId="todo-done" AutomationProperties.Name="完成" />
+                <TextBlock Grid.Column="1"
+                           Margin="6,0"
+                           VerticalAlignment="Center"
+                           Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <Button Grid.Column="2" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveUpCommand}" ToolTip.Tip="上移">
+                  <PathIcon Data="{StaticResource IconChevronUp}" Width="9" Height="9" />
+                </Button>
+                <Button Grid.Column="3" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveDownCommand}" ToolTip.Tip="下移">
+                  <PathIcon Data="{StaticResource IconChevronDown}" Width="9" Height="9" />
+                </Button>
+                <Button Grid.Column="4" Classes="ghost icon" Width="20" Height="20" Command="{Binding RemoveCommand}" ToolTip.Tip="删除">
+                  <PathIcon Data="{StaticResource IconTrash}" Width="9" Height="9" />
+                </Button>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <Button Grid.Row="3"
+            Classes="ghost"
+            Margin="0,6,0,0"
+            HorizontalAlignment="Left"
+            Content="清除已完成"
+            Command="{Binding ClearDoneCommand}" />
+  </Grid>
+</UserControl>

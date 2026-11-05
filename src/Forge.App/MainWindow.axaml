@@ -1,0 +1,202 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:wb="using:Forge.App.Workbench.Controls"
+        x:Class="Forge.App.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Forge"
+        Width="1440"
+        Height="900"
+        MinWidth="900"
+        MinHeight="560"
+        WindowDecorations="BorderOnly"
+        Background="{DynamicResource SurfaceBackgroundBrush}">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- Window top: the window background itself, so there is no separate title-bar fill. The caption buttons are drawn
+         here because the client area extends into the title bar; the settings button sits to their left. -->
+    <Border x:Name="TitleBar"
+            Grid.Row="0"
+            Height="40"
+            PointerPressed="OnTitleBarPointerPressed"
+            Background="{DynamicResource SurfaceBackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0,8,0">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="Forge"
+                     Classes="h2"
+                     VerticalAlignment="Center"
+                     Foreground="{DynamicResource AccentTextBrush}" />
+          <TextBlock Classes="caption"
+                     VerticalAlignment="Center"
+                     MaxWidth="320"
+                     Text="{Binding ActiveSessionTitle}" />
+        </StackPanel>
+
+        <TextBox x:Name="SearchBox"
+                 Grid.Column="1"
+                 Width="380"
+                 Height="26"
+                 MinHeight="26"
+                 Padding="10,3"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center"
+                 VerticalContentAlignment="Center"
+                 CornerRadius="6"
+                 FontSize="{StaticResource FontSizeSm}"
+                 Background="{DynamicResource SearchBoxBackgroundBrush}"
+                 BorderBrush="{DynamicResource SearchBoxBorderBrush}"
+                 BorderThickness="1"
+                 PlaceholderText="搜索（即将可用）"
+                 AutomationProperties.AutomationId="shell-search"
+                 AutomationProperties.Name="搜索" />
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Classes="ghost icon"
+                  Width="30"
+                  Height="26"
+                  Command="{Binding ToggleSettingsCommand}"
+                  AutomationProperties.AutomationId="open-settings" AutomationProperties.Name="设置"
+                  ToolTip.Tip="设置">
+            <PathIcon Data="{StaticResource IconGear}" Width="13" Height="13" />
+          </Button>
+          <Button x:Name="MinimizeButton"
+                  Classes="ghost icon"
+                  Width="34"
+                  Height="26"
+                  Click="OnMinimizeClick"
+                  AutomationProperties.AutomationId="window-minimize" AutomationProperties.Name="最小化"
+                  ToolTip.Tip="最小化">
+            <PathIcon Data="{StaticResource IconMinimize}" Width="11" Height="11" />
+          </Button>
+          <Button x:Name="MaximizeButton"
+                  Classes="ghost icon"
+                  Width="34"
+                  Height="26"
+                  Click="OnMaximizeClick"
+                  ToolTip.Tip="最大化"
+                  AutomationProperties.AutomationId="window-maximize" AutomationProperties.Name="最大化">
+            <PathIcon x:Name="MaximizeIcon" Data="{StaticResource IconMaximize}" Width="11" Height="11" />
+          </Button>
+          <Button x:Name="CloseButton"
+                  Classes="ghost icon"
+                  Width="34"
+                  Height="26"
+                  Click="OnCloseClick"
+                  AutomationProperties.AutomationId="window-close" AutomationProperties.Name="关闭窗口"
+                  ToolTip.Tip="关闭">
+            <PathIcon Data="{StaticResource IconClose}" Width="11" Height="11" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Workbench: project | main | inspector, rendered from the layout model -->
+    <wb:WorkbenchHost Grid.Row="1" Layout="{Binding Workbench}" />
+
+    <!-- Status bar -->
+    <Border Grid.Row="2"
+            MinHeight="26"
+            Padding="14,0"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Ellipse Classes="status-dot"
+                   Classes.running="{Binding Status.IsHostRunning}"
+                   Classes.starting="{Binding Status.IsHostStarting}"
+                   Classes.failed="{Binding Status.IsHostFailed}" />
+          <TextBlock Classes="caption" Text="{Binding Status.HostText}" VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBlock Grid.Column="1" Classes="caption" Margin="14,0,0,0" Text="{Binding Status.PluginsText}" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="2" Classes="caption" Margin="14,0,0,0" Text="{Binding Status.McpText}" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="3" Classes="caption" Margin="14,0,0,0" Text="{Binding Status.ApprovalsText}" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="4"
+                   Classes="caption"
+                   Margin="14,0,0,0"
+                   MaxWidth="260"
+                   Text="{Binding Status.ProviderText}"
+                   TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="5"
+                   Classes="caption"
+                   Margin="14,0,0,0"
+                   Text="{Binding GeneralWorkspaceText}"
+                   ToolTip.Tip="{Binding GeneralWorkspaceText}"
+                   MaxWidth="280"
+                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="6"
+                   Classes="caption"
+                   HorizontalAlignment="Right"
+                   VerticalAlignment="Center"
+                   IsVisible="{Binding Status.HasHostDetail}"
+                   Text="{Binding Status.HostDetail}"
+                   TextTrimming="CharacterEllipsis"
+                   MaxWidth="420" />
+      </Grid>
+    </Border>
+
+    <!-- Provider notice + settings overlay -->
+    <Border Grid.RowSpan="3"
+            Background="{DynamicResource SurfaceBackgroundBrush}"
+            Opacity="0.92"
+            IsVisible="{Binding Settings.IsOpen}">
+      <Border Classes="card"
+              Width="660"
+              MaxHeight="560"
+              Padding="20"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              BoxShadow="{StaticResource ShadowMd}">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="h2" Text="设置" VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    Classes="ghost icon"
+                    Command="{Binding ToggleSettingsCommand}"
+                    AutomationProperties.AutomationId="close-settings" AutomationProperties.Name="关闭设置">
+              <PathIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            </Button>
+          </Grid>
+
+          <ScrollViewer Grid.Row="1" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="section-title" Text="模型提供方" />
+              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Settings.ProviderDetail}" />
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="提供方来自 settings.json，启动时与点击重新加载时读取；密钥可来自该文件指定的环境变量。" />
+              <Border Classes="divider" Margin="0,4" />
+              <TextBlock Classes="section-title" Text="常规工作区" />
+              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GeneralWorkspaceText}" />
+              <Border Classes="divider" Margin="0,4" />
+              <TextBlock Classes="section-title" Text="路径与服务" />
+              <ItemsControl ItemsSource="{Binding Settings.Paths}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:SettingLine">
+                    <Grid ColumnDefinitions="150,*" Margin="0,3">
+                      <TextBlock Classes="label" Text="{Binding Label}" VerticalAlignment="Top" />
+                      <TextBlock Grid.Column="1"
+                                 Classes="caption"
+                                 Text="{Binding Value}"
+                                 TextTrimming="CharacterEllipsis"
+                                 ToolTip.Tip="{Binding Value}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
+
+          <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,16,0,0">
+            <Button Classes="primary" Content="重新加载设置" Command="{Binding ReloadSettingsCommand}" />
+            <Button Classes="ghost" Content="关闭" Command="{Binding ToggleSettingsCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Border>
+  </Grid>
+</Window>

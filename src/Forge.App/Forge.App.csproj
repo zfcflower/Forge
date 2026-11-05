@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Forge.App.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
+    <ProjectReference Include="..\Forge.Approval\Forge.Approval.csproj" />
+    <ProjectReference Include="..\Forge.Core\Forge.Core.csproj" />
+    <ProjectReference Include="..\Forge.Workspace\Forge.Workspace.csproj" />
+    <ProjectReference Include="..\Forge.Mcp\Forge.Mcp.csproj" />
+    <ProjectReference Include="..\Forge.Editor\Forge.Editor.csproj" />
+    <ProjectReference Include="..\Forge.HostClient\Forge.HostClient.csproj" />
+  </ItemGroup>
+</Project>

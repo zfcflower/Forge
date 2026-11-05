@@ -1,0 +1,189 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="using:System">
+
+  <!-- Layer 1: primitives. Grey/white body; eye-care green only as accent. -->
+  <Color x:Key="LightBackground">#F5F6F5</Color>
+  <Color x:Key="LightPanel">#FFFFFF</Color>
+  <Color x:Key="LightBorder">#E3E6E3</Color>
+  <Color x:Key="LightText">#2B2F2C</Color>
+  <Color x:Key="LightAccent">#3A8F5C</Color>
+
+  <Color x:Key="DarkBackground">#1E2120</Color>
+  <Color x:Key="DarkPanel">#262A28</Color>
+  <Color x:Key="DarkBorder">#343936</Color>
+  <Color x:Key="DarkText">#DDE3DF</Color>
+  <Color x:Key="DarkAccent">#5FBF86</Color>
+
+  <sys:Double x:Key="FontSizeXs">11</sys:Double>
+  <sys:Double x:Key="FontSizeSm">12</sys:Double>
+  <sys:Double x:Key="FontSizeBase">13</sys:Double>
+  <sys:Double x:Key="FontSizeMd">15</sys:Double>
+  <sys:Double x:Key="FontSizeLg">18</sys:Double>
+  <sys:Double x:Key="FontSizeXl">22</sys:Double>
+
+  <sys:Double x:Key="Space1">4</sys:Double>
+  <sys:Double x:Key="Space2">8</sys:Double>
+  <sys:Double x:Key="Space3">12</sys:Double>
+  <sys:Double x:Key="Space4">16</sys:Double>
+  <sys:Double x:Key="Space5">20</sys:Double>
+  <sys:Double x:Key="Space6">24</sys:Double>
+
+  <Thickness x:Key="PaddingPage">16</Thickness>
+  <Thickness x:Key="PaddingCard">12</Thickness>
+  <Thickness x:Key="PaddingControl">12,6</Thickness>
+
+  <CornerRadius x:Key="RadiusSm">4</CornerRadius>
+  <CornerRadius x:Key="RadiusMd">8</CornerRadius>
+  <CornerRadius x:Key="RadiusLg">12</CornerRadius>
+
+  <BoxShadows x:Key="ShadowSm">0 1 2 0 #20000000</BoxShadows>
+  <BoxShadows x:Key="ShadowMd">0 8 24 -8 #33000000</BoxShadows>
+
+  <!-- Layer 2: semantic tokens, one dictionary per theme variant. -->
+  <ResourceDictionary.ThemeDictionaries>
+
+    <ResourceDictionary x:Key="Light">
+      <!-- Fluent system colours, so built-in controls follow the same palette. -->
+      <Color x:Key="SystemAccentColor">#3A8F5C</Color>
+      <Color x:Key="SystemAccentColorLight1">#4A9E6B</Color>
+      <Color x:Key="SystemAccentColorLight2">#63B283</Color>
+      <Color x:Key="SystemAccentColorLight3">#8AC9A3</Color>
+      <Color x:Key="SystemAccentColorDark1">#2F7A4D</Color>
+      <Color x:Key="SystemAccentColorDark2">#25653E</Color>
+      <Color x:Key="SystemAccentColorDark3">#1B4F30</Color>
+      <Color x:Key="SystemBaseHighColor">#2B2F2C</Color>
+      <Color x:Key="SystemBaseMediumHighColor">#3F4541</Color>
+      <Color x:Key="SystemBaseMediumColor">#5C625E</Color>
+      <Color x:Key="SystemBaseMediumLowColor">#8A918C</Color>
+      <Color x:Key="SystemBaseLowColor">#C7CDC8</Color>
+      <Color x:Key="SystemChromeMediumColor">#FFFFFF</Color>
+      <Color x:Key="SystemChromeMediumLowColor">#F5F6F5</Color>
+      <Color x:Key="SystemChromeLowColor">#EFF1EF</Color>
+      <Color x:Key="SystemChromeHighColor">#E3E6E3</Color>
+      <Color x:Key="SystemAltHighColor">#FFFFFF</Color>
+      <Color x:Key="SystemAltMediumHighColor">#F8F9F8</Color>
+      <Color x:Key="RegionColor">#F5F6F5</Color>
+      <Color x:Key="SystemListLowColor">#F0F2F0</Color>
+
+      <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource LightBackground}" />
+      <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource LightPanel}" />
+      <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource LightPanel}" />
+      <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F0F2F0" />
+      <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#F8F9F8" />
+
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource LightText}" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#3F4541" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#5C625E" />
+      <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
+
+      <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource LightBorder}" />
+      <SolidColorBrush x:Key="BorderStrongBrush" Color="#C7CDC8" />
+
+      <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource LightAccent}" />
+      <SolidColorBrush x:Key="AccentTextBrush" Color="#2F7449" />
+      <SolidColorBrush x:Key="AccentSubtleBrush" Color="#E4F1E9" />
+      <SolidColorBrush x:Key="PrimaryButtonBackgroundBrush" Color="#2F7449" />
+      <SolidColorBrush x:Key="DangerBrush" Color="#B3261E" />
+      <SolidColorBrush x:Key="SuccessBrush" Color="#2F7449" />
+      <SolidColorBrush x:Key="WarningBrush" Color="#8A5A00" />
+
+      <SolidColorBrush x:Key="UserBubbleBrush" Color="#E4F1E9" />
+      <SolidColorBrush x:Key="AssistantBubbleBrush" Color="{StaticResource LightPanel}" />
+      <SolidColorBrush x:Key="ToolBubbleBrush" Color="#F0F2F0" />
+      <SolidColorBrush x:Key="ToolCardBrush" Color="#F8F9F8" />
+      <SolidColorBrush x:Key="ErrorBubbleBrush" Color="#FBEAE9" />
+      <SolidColorBrush x:Key="DiffAddBrush" Color="#E6F4EA" />
+      <SolidColorBrush x:Key="DiffRemoveBrush" Color="#FBEAE9" />
+      <SolidColorBrush x:Key="DiffHunkBrush" Color="#EDF1EE" />
+      <SolidColorBrush x:Key="RunningBrush" Color="#2F7449" />
+
+      <!-- Search box: one step lighter than the window background, with a border one step darker. -->
+      <SolidColorBrush x:Key="SearchBoxBackgroundBrush" Color="#FAFBFA" />
+      <SolidColorBrush x:Key="SearchBoxBorderBrush" Color="#E3E6E3" />
+
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Dark">
+      <Color x:Key="SystemAccentColor">#5FBF86</Color>
+      <Color x:Key="SystemAccentColorLight1">#79CC9A</Color>
+      <Color x:Key="SystemAccentColorLight2">#95D9AF</Color>
+      <Color x:Key="SystemAccentColorLight3">#B7E6C8</Color>
+      <Color x:Key="SystemAccentColorDark1">#4CA872</Color>
+      <Color x:Key="SystemAccentColorDark2">#3D8C5E</Color>
+      <Color x:Key="SystemAccentColorDark3">#2E6E49</Color>
+      <Color x:Key="SystemBaseHighColor">#DDE3DF</Color>
+      <Color x:Key="SystemBaseMediumHighColor">#C3CAC5</Color>
+      <Color x:Key="SystemBaseMediumColor">#9AA39E</Color>
+      <Color x:Key="SystemBaseMediumLowColor">#6E7671</Color>
+      <Color x:Key="SystemBaseLowColor">#3F4442</Color>
+      <Color x:Key="SystemChromeMediumColor">#262A28</Color>
+      <Color x:Key="SystemChromeMediumLowColor">#222523</Color>
+      <Color x:Key="SystemChromeLowColor">#1E2120</Color>
+      <Color x:Key="SystemChromeHighColor">#343936</Color>
+      <Color x:Key="SystemAltHighColor">#262A28</Color>
+      <Color x:Key="SystemAltMediumHighColor">#2B302D</Color>
+      <Color x:Key="RegionColor">#1E2120</Color>
+      <Color x:Key="SystemListLowColor">#2B302D</Color>
+
+      <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource DarkBackground}" />
+      <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource DarkPanel}" />
+      <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource DarkPanel}" />
+      <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2B302D" />
+      <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#222523" />
+
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource DarkText}" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#C3CAC5" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#9AA39E" />
+      <SolidColorBrush x:Key="TextOnAccentBrush" Color="#12211A" />
+
+      <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource DarkBorder}" />
+      <SolidColorBrush x:Key="BorderStrongBrush" Color="#4A504D" />
+
+      <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource DarkAccent}" />
+      <SolidColorBrush x:Key="AccentTextBrush" Color="#79CC9A" />
+      <SolidColorBrush x:Key="AccentSubtleBrush" Color="#223A2C" />
+      <SolidColorBrush x:Key="PrimaryButtonBackgroundBrush" Color="#5FBF86" />
+      <SolidColorBrush x:Key="DangerBrush" Color="#F2857C" />
+      <SolidColorBrush x:Key="SuccessBrush" Color="#79CC9A" />
+      <SolidColorBrush x:Key="WarningBrush" Color="#E0B15A" />
+
+      <SolidColorBrush x:Key="UserBubbleBrush" Color="#223A2C" />
+      <SolidColorBrush x:Key="AssistantBubbleBrush" Color="{StaticResource DarkPanel}" />
+      <SolidColorBrush x:Key="ToolBubbleBrush" Color="#2B302D" />
+      <SolidColorBrush x:Key="ToolCardBrush" Color="#222523" />
+      <SolidColorBrush x:Key="ErrorBubbleBrush" Color="#3A2323" />
+      <SolidColorBrush x:Key="DiffAddBrush" Color="#1F3128" />
+      <SolidColorBrush x:Key="DiffRemoveBrush" Color="#3A2323" />
+      <SolidColorBrush x:Key="DiffHunkBrush" Color="#2A2F2C" />
+      <SolidColorBrush x:Key="RunningBrush" Color="#79CC9A" />
+
+      <SolidColorBrush x:Key="SearchBoxBackgroundBrush" Color="#262A28" />
+      <SolidColorBrush x:Key="SearchBoxBorderBrush" Color="#151817" />
+
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+
+  <FontFamily x:Key="FontMono">Consolas, Cascadia Mono, monospace</FontFamily>
+
+  <!-- Icon geometry (single family: simple filled paths). -->
+  <StreamGeometry x:Key="IconPlus">M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z</StreamGeometry>
+  <StreamGeometry x:Key="IconClose">M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z</StreamGeometry>
+  <StreamGeometry x:Key="IconPlusSmall">M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z</StreamGeometry>
+  <StreamGeometry x:Key="IconSend">M3 20.5 21 12 3 3.5 3 10l12 2-12 2z</StreamGeometry>
+  <StreamGeometry x:Key="IconGear">M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4a8.9 8.9 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a9 9 0 0 0-2-1.2L16 2h-4l-.4 2.6a9 9 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A8.9 8.9 0 0 0 3 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a9 9 0 0 0 2 1.2L8 22h4l.4-2.6a9 9 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z</StreamGeometry>
+  <StreamGeometry x:Key="IconStop">M6 6h12v12H6z</StreamGeometry>
+  <StreamGeometry x:Key="IconRefresh">M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z</StreamGeometry>
+  <StreamGeometry x:Key="IconChevronDown">M7 10l5 5 5-5z</StreamGeometry>
+  <StreamGeometry x:Key="IconMinimize">M4 11h16v2H4z</StreamGeometry>
+  <!-- A window with an arrow leaving it: "move to a window of its own". -->
+  <StreamGeometry x:Key="IconWindowExternal">F1 M2 4h9v2H4v14h14v-7h2v9H2z M13 2h9v9h-2V5.4l-8.3 8.3-1.4-1.4L18.6 4H13z</StreamGeometry>
+  <StreamGeometry x:Key="IconMaximize">F0 M4 4h16v16H4z M6 6h12v12H6z</StreamGeometry>
+  <!-- Two overlapping windows: the maximize button turns into "restore" while the window is maximized. -->
+  <StreamGeometry x:Key="IconRestore">F0 M7 3h14v14h-4V7H7z M3 7h14v14H3z M5 9h10v10H5z</StreamGeometry>
+  <StreamGeometry x:Key="TreeChevronGeometry">M9 4.5 17 12 9 19.5 9 16 12.5 12 9 8Z</StreamGeometry>
+  <StreamGeometry x:Key="IconChevronUp">M7 14l5-5 5 5z</StreamGeometry>
+  <StreamGeometry x:Key="IconTrash">M9 3v1H4v2h1v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6h1V4h-5V3H9zM6 6h12v13H6V6z</StreamGeometry>
+
+</ResourceDictionary>

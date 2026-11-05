@@ -1,0 +1,111 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.ChangesView"
+             x:DataType="vm:ChangesViewModel">
+
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="vm:DiffFileRowViewModel" x:DataType="vm:DiffFileRowViewModel">
+      <Border Background="{DynamicResource SurfaceMutedBrush}"
+              BorderBrush="{DynamicResource BorderBrush}"
+              BorderThickness="0,1,0,1"
+              Padding="8,4">
+        <Grid ColumnDefinitions="Auto,*">
+          <Border Background="{DynamicResource AccentSubtleBrush}"
+                  CornerRadius="{StaticResource RadiusSm}"
+                  Padding="4,0"
+                  MinWidth="20">
+            <TextBlock Classes="label"
+                       Text="{Binding Badge}"
+                       HorizontalAlignment="Center"
+                       Foreground="{DynamicResource AccentTextBrush}" />
+          </Border>
+          <TextBlock Grid.Column="1" Classes="mono" Margin="6,0,0,0" Text="{Binding Header}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:DiffLineRowViewModel" x:DataType="vm:DiffLineRowViewModel">
+      <Border Classes="diff-line" Classes.add="{Binding IsAdd}" Classes.del="{Binding IsRemove}" Classes.hunk="{Binding IsHunk}">
+        <Grid ColumnDefinitions="46,46,Auto,*" Height="17">
+          <TextBlock Classes="mono"
+                     Text="{Binding OldNumber}"
+                     TextAlignment="Right"
+                     Margin="0,0,6,0"
+                     Foreground="{DynamicResource TextMutedBrush}" />
+          <TextBlock Grid.Column="1"
+                     Classes="mono"
+                     Text="{Binding NewNumber}"
+                     TextAlignment="Right"
+                     Margin="0,0,6,0"
+                     Foreground="{DynamicResource TextMutedBrush}" />
+          <TextBlock Grid.Column="2" Classes="mono" Text="{Binding Prefix}" Foreground="{DynamicResource TextMutedBrush}" />
+          <TextBlock Grid.Column="3" Classes="mono" Text="{Binding Text}" Foreground="{DynamicResource TextPrimaryBrush}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.DataTemplates>
+
+  <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+        <Button Classes="tab"
+                Classes.selected="{Binding IsByTurn}"
+                Content="按轮次"
+                Command="{Binding ByTurnCommand}"
+                AutomationProperties.AutomationId="changes-by-turn" AutomationProperties.Name="按轮次" />
+        <Button Grid.Column="1"
+                Classes="tab"
+                Classes.selected="{Binding IsUncommitted}"
+                Content="未提交改动"
+                Command="{Binding UncommittedCommand}"
+                AutomationProperties.AutomationId="changes-uncommitted" AutomationProperties.Name="未提交改动" />
+        <ComboBox Grid.Column="2"
+                  Margin="10,0"
+                  MinWidth="180"
+                  HorizontalAlignment="Left"
+                  IsVisible="{Binding IsByTurn}"
+                  ItemsSource="{Binding Turns}"
+                  SelectedItem="{Binding SelectedTurn, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="changes-turn" AutomationProperties.Name="轮次">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:TurnChoiceViewModel">
+              <TextBlock Classes="caption" Text="{Binding Label}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <TextBlock Grid.Column="3"
+                   Classes="caption"
+                   Margin="0,0,10,0"
+                   VerticalAlignment="Center"
+                   Text="{Binding Summary}" />
+        <Button Grid.Column="4"
+                Classes="ghost icon"
+                Command="{Binding RefreshCommand}"
+                ToolTip.Tip="刷新"
+                AutomationProperties.AutomationId="refresh-changes" AutomationProperties.Name="刷新改动">
+          <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <TextBlock Grid.Row="1"
+               Classes="caption"
+               Margin="12,6"
+               IsVisible="{Binding HasMessage}"
+               Text="{Binding Message}" />
+
+    <ListBox x:Name="RowList"
+             Grid.Row="2"
+             ItemsSource="{Binding Rows}"
+             Padding="0,0,0,8"
+             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+             AutomationProperties.AutomationId="changes-rows" AutomationProperties.Name="改动内容">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
+  </Grid>
+</UserControl>

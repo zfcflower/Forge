@@ -1,0 +1,71 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.FinishedSubAgentsHeaderView"
+             x:DataType="vm:FinishedSubAgentsViewModel">
+  <UserControl.Styles>
+    <!-- A flat title-bar button: 20 px tall so it fits the 28 px bar beside the 20x20 icon buttons. -->
+    <Style Selector="Button.finished-menu">
+      <Setter Property="Height" Value="20" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.finished-menu:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Button.finished-menu:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Button x:Name="MenuButton"
+          Classes="finished-menu"
+          VerticalAlignment="Center"
+          IsEnabled="{Binding HasItems}"
+          AutomationProperties.AutomationId="finished-subagents-menu"
+          AutomationProperties.Name="{Binding Title}"
+          ToolTip.Tip="{Binding Hint}">
+    <Button.Content>
+      <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+        <TextBlock Classes="label" Text="{Binding Title}" VerticalAlignment="Center" />
+        <PathIcon Data="{DynamicResource IconChevronDown}"
+                  Width="8"
+                  Height="8"
+                  VerticalAlignment="Center" />
+      </StackPanel>
+    </Button.Content>
+    <Button.Flyout>
+      <Flyout Placement="BottomEdgeAlignedRight">
+        <ListBox x:Name="FinishedPicker"
+                 MinWidth="260"
+                 MaxHeight="320"
+                 SelectionMode="Single"
+                 ItemsSource="{Binding Items}"
+                 SelectedItem="{Binding Selected, Mode=TwoWay}"
+                 AutomationProperties.AutomationId="finished-subagents-list"
+                 AutomationProperties.Name="{Binding Title}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:SubAgentViewModel">
+              <Grid ColumnDefinitions="Auto,*,Auto" MinWidth="240">
+                <TextBlock Classes="glyph" Text="○" />
+                <TextBlock Grid.Column="1"
+                           Margin="6,0"
+                           Text="{Binding TaskSummary}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" Classes="caption" Text="{Binding StatusText}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

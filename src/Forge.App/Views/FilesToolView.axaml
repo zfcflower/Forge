@@ -1,0 +1,143 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.FilesToolView"
+             x:DataType="vm:FilesPanelViewModel">
+  <UserControl.Resources>
+    <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
+      <Border Width="12" VerticalAlignment="Stretch">
+        <Border Width="1"
+                HorizontalAlignment="Center"
+                Background="{DynamicResource BorderBrush}" />
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate x:Key="FileNodeTemplate" x:DataType="vm:FileNodeViewModel">
+      <Border Classes="tree-row">
+        <Border.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="在新标签页打开" Command="{Binding OpenInNewTabCommand}" />
+          </ContextMenu>
+        </Border.ContextMenu>
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*">
+          <ItemsControl Grid.Column="0"
+                        VerticalAlignment="Stretch"
+                        ItemsSource="{Binding Guides}"
+                        ItemTemplate="{StaticResource IndentGuideTemplate}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+          <Button Grid.Column="1"
+                  Classes="ghost icon"
+                  Width="14"
+                  Height="18"
+                  Padding="0"
+                  Command="{Binding ToggleCommand}"
+                  IsVisible="{Binding IsDirectory}"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center">
+            <Path Data="{StaticResource TreeChevronGeometry}"
+                  Classes="tree-chevron"
+                  Classes.expanded="{Binding ChevronRotated}"
+                  Width="7"
+                  Height="7"
+                  Stretch="Uniform" />
+          </Button>
+          <Path Grid.Column="2"
+                Classes="tree-icon"
+                Data="{Binding Icon}"
+                Margin="2,0,5,0" />
+          <Button Grid.Column="3"
+                  Classes="link"
+                  Padding="0"
+                  HorizontalAlignment="Left"
+                  HorizontalContentAlignment="Left"
+                  VerticalAlignment="Center"
+                  Command="{Binding ToggleCommand}"
+                  AutomationProperties.AutomationId="file-row" AutomationProperties.Name="{Binding Name}">
+            <TextBlock Classes="mono"
+                       Text="{Binding Name}"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+          </Button>
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}">
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+        <Button Classes="tab"
+                Classes.selected="{Binding IsAllTab}"
+                Content="全部"
+                Command="{Binding AllTabCommand}"
+                AutomationProperties.AutomationId="files-all" AutomationProperties.Name="全部文件" />
+        <Button Grid.Column="1"
+                Classes="tab"
+                Classes.selected="{Binding IsChangedTab}"
+                Content="已改动"
+                Command="{Binding ChangedTabCommand}"
+                AutomationProperties.AutomationId="files-changed" AutomationProperties.Name="已改动文件" />
+        <TextBlock Grid.Column="2"
+                   Classes="caption"
+                   Margin="10,0"
+                   VerticalAlignment="Center"
+                   Text="{Binding Summary}" />
+        <Button Grid.Column="3"
+                Classes="ghost icon"
+                Command="{Binding ChangedCommand}"
+                ToolTip.Tip="刷新"
+                AutomationProperties.AutomationId="refresh-files" AutomationProperties.Name="刷新文件">
+          <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <ListBox x:Name="TreeList"
+             Grid.Row="1"
+             IsVisible="{Binding IsAllTab}"
+             ItemsSource="{Binding Rows}"
+             ItemTemplate="{StaticResource FileNodeTemplate}"
+             Padding="4,2"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             AutomationProperties.AutomationId="files-tree" AutomationProperties.Name="全部文件树">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
+
+    <ListBox x:Name="ChangedList"
+             Grid.Row="1"
+             IsVisible="{Binding IsChangedTab}"
+             ItemsSource="{Binding Changes}"
+             SelectionChanged="OnChangedSelection"
+             Padding="2,2"
+             AutomationProperties.AutomationId="changed-files" AutomationProperties.Name="已改动文件列表">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ChangedFileViewModel">
+          <Grid ColumnDefinitions="*,Auto" Margin="4,2">
+            <TextBlock Classes="mono"
+                       VerticalAlignment="Center"
+                       Text="{Binding Path}"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding Description}" />
+            <TextBlock Grid.Column="1"
+                       Classes="mono"
+                       Margin="10,0,0,0"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Right"
+                       Text="{Binding Meta}"
+                       Foreground="{DynamicResource AccentTextBrush}"
+                       AutomationProperties.AutomationId="changed-meta" AutomationProperties.Name="{Binding Meta}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </Grid>
+</UserControl>

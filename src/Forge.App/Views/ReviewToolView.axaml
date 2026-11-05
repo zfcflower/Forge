@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.ReviewToolView"
+             x:DataType="vm:ReviewPanelViewModel">
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
+    <TextBlock Classes="caption" Text="{Binding Summary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+
+    <ListBox x:Name="CommentList"
+             Grid.Row="1"
+             Margin="0,6,0,0"
+             ItemsSource="{Binding Items}"
+             SelectionChanged="OnSelectionChanged">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ReviewEntryViewModel">
+          <StackPanel Margin="2,3" Spacing="2">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="mono" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Line}" />
+            </Grid>
+            <TextBlock Classes="caption" Text="{Binding Body}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBlock Classes="caption" Text="{Binding Status}" />
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </Grid>
+</UserControl>

@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.SubAgentView"
+             x:DataType="vm:SubAgentViewModel">
+  <Grid RowDefinitions="*,Auto" Background="{DynamicResource SurfaceBackgroundBrush}">
+    <ListBox x:Name="Transcript"
+             Grid.Row="0"
+             ItemsSource="{Binding Transcript.Items}"
+             Padding="12,8"
+             SelectionMode="Single"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+
+    <Border Grid.Row="1"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,1,0,0"
+            Padding="10,5">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Ellipse Classes="status-dot" Classes.running="{Binding IsLive}" />
+          <TextBlock Classes="label" Text="{Binding StatusText}" VerticalAlignment="Center" />
+          <TextBlock Classes="caption" Text="{Binding StatusNote}" VerticalAlignment="Center" IsVisible="{Binding HasStatusNote}" />
+          <Border IsVisible="{Binding ReadOnlyBadgeVisible}"
+                  Background="{DynamicResource AccentSubtleBrush}"
+                  CornerRadius="{StaticResource RadiusSm}"
+                  Padding="5,0"
+                  VerticalAlignment="Center">
+            <TextBlock Classes="label" Text="{Binding ReadOnlyBadgeText}" Foreground="{DynamicResource AccentTextBrush}" />
+          </Border>
+        </StackPanel>
+        <TextBlock Grid.Column="1"
+                   Classes="caption"
+                   Margin="12,0,0,0"
+                   MaxWidth="280"
+                   VerticalAlignment="Center"
+                   Text="{Binding TaskSummary}"
+                   TextTrimming="CharacterEllipsis"
+                   ToolTip.Tip="{Binding Task}" />
+        <TextBlock Grid.Column="3" Classes="caption" Margin="0,0,12,0" Text="{Binding UsageText}" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="4" Classes="mono" Margin="0,0,12,0" Text="{Binding ElapsedText}" VerticalAlignment="Center" />
+        <Button Grid.Column="5"
+                Classes="ghost"
+                Content="停止"
+                IsVisible="{Binding IsLive}"
+                Command="{Binding StopCommand}"
+                AutomationProperties.AutomationId="stop-subagent" AutomationProperties.Name="停止子 Agent"
+                ToolTip.Tip="停止这个子 Agent，结果回报给主 Agent" />
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

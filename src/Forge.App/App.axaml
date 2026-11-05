@@ -1,0 +1,153 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://Forge.App/Resources/Tokens.axaml" />
+        <ResourceInclude Source="avares://Forge.App/Resources/Workbench.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.DataTemplates>
+    <!-- Workbench content: a panel body or a tab carries its view model directly. -->
+    <DataTemplate DataType="vm:SessionWorkspaceViewModel" x:DataType="vm:SessionWorkspaceViewModel">
+      <views:SessionView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:FileDocumentViewModel" x:DataType="vm:FileDocumentViewModel">
+      <views:FileDocumentView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ChangesViewModel" x:DataType="vm:ChangesViewModel">
+      <views:ChangesView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:SubAgentViewModel" x:DataType="vm:SubAgentViewModel">
+      <views:SubAgentView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:FinishedSubAgentsViewModel" x:DataType="vm:FinishedSubAgentsViewModel">
+      <views:FinishedSubAgentsHeaderView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ProjectTreeViewModel" x:DataType="vm:ProjectTreeViewModel">
+      <views:ProjectView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:FilesPanelViewModel" x:DataType="vm:FilesPanelViewModel">
+      <views:FilesToolView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:TodoListViewModel" x:DataType="vm:TodoListViewModel">
+      <views:TodoToolView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ReviewPanelViewModel" x:DataType="vm:ReviewPanelViewModel">
+      <views:ReviewToolView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
+      <views:SpecTreeToolView />
+    </DataTemplate>
+
+    <!-- User message: IM-style bubble aligned right. -->
+    <DataTemplate DataType="vm:UserMessageViewModel" x:DataType="vm:UserMessageViewModel">
+      <StackPanel Margin="0,10,0,4" HorizontalAlignment="Right" Spacing="2">
+        <Border Classes="user-bubble">
+          <SelectableTextBlock Text="{Binding Text}"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+        </Border>
+        <TextBlock Classes="caption" Text="{Binding Time}" HorizontalAlignment="Right" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:NoticeViewModel" x:DataType="vm:NoticeViewModel">
+      <Border Classes="notice" Classes.error="{Binding IsError}" Margin="0,4">
+        <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
+      </Border>
+    </DataTemplate>
+
+    <!-- One agent turn: header line plus the tree of reply text and tool rows. -->
+    <DataTemplate DataType="vm:TurnCardViewModel" x:DataType="vm:TurnCardViewModel">
+      <Border Classes="turn-card" Margin="0,6">
+        <StackPanel Spacing="0">
+          <Border Classes="turn-header">
+            <Button Classes="link"
+                    Command="{Binding ToggleCommand}"
+                    HorizontalAlignment="Left"
+                    HorizontalContentAlignment="Left"
+                    AutomationProperties.AutomationId="turn-toggle" AutomationProperties.Name="折叠本轮">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
+                <TextBlock Classes="caption" Text="{Binding Header}" />
+              </StackPanel>
+            </Button>
+          </Border>
+          <Border Classes="turn-body" IsVisible="{Binding IsExpanded}">
+            <ItemsControl ItemsSource="{Binding Blocks}" />
+          </Border>
+          <TextBlock Classes="caption"
+                     Margin="4,4,0,0"
+                     IsVisible="{Binding HasFootnote}"
+                     Text="{Binding Footnote}" />
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:TurnTextViewModel" x:DataType="vm:TurnTextViewModel">
+      <ItemsControl ItemsSource="{Binding Segments}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:TextSegmentViewModel">
+            <SelectableTextBlock Text="{Binding Text}"
+                                 TextWrapping="Wrap"
+                                 Margin="0,2"
+                                 Foreground="{DynamicResource TextPrimaryBrush}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:TurnNoticeViewModel" x:DataType="vm:TurnNoticeViewModel">
+      <Border Classes="notice" Classes.error="{Binding IsError}">
+        <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:ToolRowViewModel" x:DataType="vm:ToolRowViewModel">
+      <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}">
+        <StackPanel Spacing="2">
+          <Button Classes="link"
+                  Command="{Binding ToggleCommand}"
+                  HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Left">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+              <TextBlock Classes="glyph" Text="▸" />
+              <TextBlock Grid.Column="1" Classes="mono" Margin="6,0,0,0" Text="{Binding Name}" />
+              <TextBlock Grid.Column="2"
+                         Classes="caption"
+                         Margin="8,0"
+                         Text="{Binding ArgumentSummary}" />
+              <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
+            </Grid>
+          </Button>
+          <StackPanel IsVisible="{Binding IsExpanded}" Spacing="4" Margin="14,2,0,2">
+            <TextBlock Classes="label" Text="参数" />
+            <SelectableTextBlock Classes="mono"
+                                 Text="{Binding Arguments}"
+                                 TextWrapping="Wrap"
+                                 Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBlock Classes="label" Text="结果" IsVisible="{Binding HasResult}" />
+            <SelectableTextBlock Classes="mono"
+                                 Text="{Binding Result}"
+                                 TextWrapping="Wrap"
+                                 MaxHeight="240"
+                                 Foreground="{DynamicResource TextSecondaryBrush}"
+                                 IsVisible="{Binding HasResult}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+  </Application.DataTemplates>
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Forge.App/Resources/Controls.axaml" />
+  </Application.Styles>
+</Application>

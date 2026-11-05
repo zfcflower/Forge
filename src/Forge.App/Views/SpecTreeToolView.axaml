@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.SpecTreeToolView"
+             x:DataType="vm:SpecTreeViewModel">
+  <UserControl.Resources>
+    <DataTemplate x:Key="SpecNodeTemplate" x:DataType="vm:SpecNodeViewModel">
+      <Border Classes="tree-row" Margin="{Binding Indent}">
+        <Grid ColumnDefinitions="Auto,*">
+          <Button Classes="ghost icon"
+                  Width="14"
+                  Height="16"
+                  Command="{Binding ToggleCommand}"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center">
+            <TextBlock Classes="glyph" Text="{Binding Glyph}" />
+          </Button>
+          <Button Grid.Column="1"
+                  Classes="link"
+                  HorizontalAlignment="Left"
+                  HorizontalContentAlignment="Left"
+                  Command="{Binding OpenCommand}"
+                  Content="{Binding Display}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="caption" Text="{Binding Summary}" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Classes="ghost icon" Command="{Binding RefreshCommand}" ToolTip.Tip="刷新" AutomationProperties.AutomationId="refresh-specs" AutomationProperties.Name="刷新规格树">
+        <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+      </Button>
+    </Grid>
+
+    <ListBox x:Name="TreeList"
+             Grid.Row="1"
+             Margin="0,6,0,0"
+             ItemsSource="{Binding Rows}"
+             ItemTemplate="{StaticResource SpecNodeTemplate}"
+             Padding="0"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             AutomationProperties.AutomationId="spec-tree" AutomationProperties.Name="规格树">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
+  </Grid>
+</UserControl>

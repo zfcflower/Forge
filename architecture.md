@@ -27,10 +27,9 @@ depends-on: [forge-goal]
 | `Forge.ExtensionHost`(新增,JIT) | 常驻进程:插件发现与注册、生命周期、Roslyn 编译与缓存、声明式工作流执行、Worker 管理、版本与依赖管理 |
 | `Forge.PluginWorker`(新增,JIT) | 独立进程:加载并执行动态 C# 插件与 run_code 脚本;可被整体终止 |
 | `Forge.HostClient`(新增,AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Plugin.Sdk |
-| `Forge.CodeMode` / `Forge.Plugins` | 现有进程内实现(Roslyn 脚本、ALC 宿主)迁入 `ExtensionHost`/`PluginWorker`;迁移前不得被 `App` 引用(迁移方案见 Stage 2) |
 | `Forge.App` | Avalonia 桌面 UI 与组合根(含 `ExtensionHostClient`);唯一知道所有主程序项目的层 |
 
-主程序侧(Native AOT):`Abstractions`、`Ipc` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn、`Plugins`、`CodeMode`;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
+主程序侧(Native AOT):`Abstractions`、`Ipc` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
 
 ## 关键决策
 
@@ -61,7 +60,9 @@ depends-on: [forge-goal]
 
 **SubAgent 与缓存。** 相同目的的 SubAgent 共享稳定的提示词前缀以命中提示词缓存;动态内容(时间、工作区状态等)作为请求末尾的一条临时 user 消息,不进历史与存储。内置 Scout、Worker、Plan、Reviewer,每种可单独设置模型与思考强度;同类型实例可按 id 续跑。嵌套深度上限 3,同时活跃的 Agent 数按整棵树计数(默认 4),父 Agent 等待子 Agent 结果时交还名额;均由 `forge-core` 强制。
 
-**codemode。** 模型输出一段 C# 脚本,脚本可并行(`Task.WhenAll`)调用已注册工具,只把最终结果一次返回模型。脚本的 Roslyn 编译与执行在 `ExtensionHost`/`PluginWorker` 中,不在 Native AOT 主程序里;主程序只持有 `run_code` 代理工具。子进程不直接执行工具,只通过 IPC 向主程序发起调用,审批、并发上限与结果截断全在主程序。取代此前的 T1/T2/T3 分层;`dotnet run` 文件式应用(T3)只作为可选能力,不是前提。现有进程内实现与白名单语义检查的迁移见 `forge-codemode`(待更新)。
+**codemode。** 模型输出一段 C# 脚本,脚本可并行(`Task.WhenAll`)调用已注册工具,只把最终结果一次返回模型。已确认的执行架构是**常驻编译服务缓存编译产物 + 一次性 JIT 执行器**:编译服务不执行脚本,每次调用取得从未执行过脚本的执行器,成功、失败、取消或超时都终止并等待其归属进程树退出后才完成调用。不得复用已执行过脚本的进程,也不以静态状态/线程/句柄污染检测决定是否复用。主程序仍保持 Native AOT,只持有 `run_code` 代理工具;工具调用经 IPC 回到主程序审批、限流和截断。产物只经内存管道交付并从已验证字节装载;执行器部署依赖闭包不得含 Roslyn。可选的预启动执行器池只能提供 Take,不能 Return 已用执行器;是否采用须由分段实测决定,不是当前实现前提。一次性进程提供状态与生命周期隔离,不提供文件/网络权限沙箱。正式路径已切换为“Host 常驻编译服务 + 每次调用一个一次性执行器”:执行过的进程不复用,调用返回前先杀并等待整棵进程树,因此不再有跨调用残留;work78 分段测量(暖调用约 134–137 ms)与实现自测数据见 `forge-extension-host`。取代此前的 T1/T2/T3 分层;`dotnet run` 文件式应用(T3)只作为可选能力,不是前提。
+
+**原生进程归属边界。** P/Invoke 只允许位于 JIT Host 的一个内部类,负责平台分支、原生句柄与进程树归属;Native AOT 主程序、执行器和插件 Worker 不含 P/Invoke。这一点已经满足:唯一的原生类是 `Forge.ExtensionHost.WorkerProcessOwnership`,Worker 原先自管的 `setpgid` 已随 `WorkerProcessGroup` 一起删除,执行器与主程序本来就没有。Windows 每执行器一个独立 Job Object,启用 KILL_ON_JOB_CLOSE,以 Job 终止为主清理机制。Linux/macOS 的进程组改由 Host 侧 `posix_spawn` + `POSIX_SPAWN_SETPGROUP(0)` 建立:组在 spawn 系统调用内原子创建,子进程执行第一条指令前就已是自成一组的组长,因此事后 `setpgid` 那个(实测必然 `EACCES` 的)窗口不存在,`kill(-pgid)` 恒有效,执行器也自动获得自己的组。宿主另有强制的收割循环(BCL 不收割非自己启动的子进程,僵尸会让 `HasExited` 永远为假),顺序为 `waitid(WNOWAIT)` 观察退出 → `kill(-pgid)` 趁 pid 未被释放时扫组 → `waitpid` 释放 pid,以免收割放大 pid 复用窗口。Linux 已在 WSL2 上验证(见 `forge-extension-host`);macOS 的 `pipe`+`fcntl`(无 `pipe2`)、`WNOWAIT` 常量与 `siginfo` 偏移分支**完全未验证**,须由 CI 的 macOS runner 确认,不得据此声称 macOS 已支持。进程组**不是**硬边界:后代自己 `setsid`/`setpgid` 即可脱离,POSIX 也没有 KILL_ON_JOB_CLOSE 的等价物——Host 被强杀时 Worker 只靠管道断开自行退出,其残留后代不被清理,因此不得宣称与 Windows Job 等价。操作系统权限沙箱及 CPU/内存/活动进程限制须另行确认威胁模型,不因进程隔离而视为已实现。
 
 **评审。** 评审意见属于工作区,按行/块锚定到 Diff;支持草稿批量发送和单条发送。评审方式可配置为 Reviewer SubAgent 一次评审或人工逐行评审。
 
@@ -71,7 +72,7 @@ depends-on: [forge-goal]
 
 agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用源码并改命名空间内化;署名按许可证要求保留,不要求则不保留(见 `forge-goal`)。
 
-**NuGet 引用规则:** 仅针对 Forge 主程序的开发。默认仅限 BCL、官方基础包与特别指定的包。已确认白名单:Avalonia(UI)及官方同仓包——`Avalonia.Controls.DataGrid`、`Avalonia.Controls.TreeDataGrid`、`Avalonia.Controls.WebView`、`Avalonia.Headless`(含 `.XUnit`,后者连带要求 xunit v3)、`Avalonia.Skia`(含随其传递引入的 SkiaSharp)、`Avalonia.Themes.*`、`Avalonia.Fonts.*`,均不内化;`AvaloniaUI.DiagnosticsSupport` 属 Avalonia Plus 商业工具链,不在白名单内;三方主题/图标/图表库(FluentAvalonia、SukiUI、Semi.Avalonia、Irihi.Ursa、Material.Avalonia、Citrus.Avalonia、ShadUI、LiveCharts、Projektanker.Icons.*、Lucide.Avalonia、Svg.Skia 等)未批准,引入前逐项确认。Microsoft.Data.Sqlite(会话存储,含原生二进制),均不内化;Roslyn 仅用于 `ExtensionHost`/`PluginWorker`,不进入主程序;测试项目另用 xunit(仅测试,不随产品发布;未确认是否纳入);neuecc 的库(https://github.com/neuecc,如 MessagePack-CSharp、MemoryPack、ZLinq)按需选用。其他三方包默认内化源码;若某包体量大或不值得内化,开发中由 Agent 提示用户,经同意后再加入白名单。
+**NuGet 引用规则:** 仅针对 Forge 主程序的开发。默认仅限 BCL、官方基础包与特别指定的包。已确认白名单:Avalonia(UI)及官方同仓包——`Avalonia.Controls.DataGrid`、`Avalonia.Controls.TreeDataGrid`、`Avalonia.Controls.WebView`、`Avalonia.Headless`(含 `.XUnit`,后者连带要求 xunit v3)、`Avalonia.Skia`(含随其传递引入的 SkiaSharp)、`Avalonia.Themes.*`、`Avalonia.Fonts.*`,均不内化;`AvaloniaUI.DiagnosticsSupport` 属 Avalonia Plus 商业工具链,不在白名单内;三方主题/图标/图表库(FluentAvalonia、SukiUI、Semi.Avalonia、Irihi.Ursa、Material.Avalonia、Citrus.Avalonia、ShadUI、LiveCharts、Projektanker.Icons.*、Lucide.Avalonia、Svg.Skia 等)未批准,引入前逐项确认。Microsoft.Data.Sqlite(会话存储,含原生二进制),均不内化;Roslyn 仅用于 `ExtensionHost`/`PluginWorker`,不进入主程序;测试项目另用 xunit(仅测试,不随产品发布;未确认是否纳入);neuecc 的库(https://github.com/neuecc,如 MessagePack-CSharp、MemoryPack、ZLinq)按需选用。其他三方包默认内化源码;若某包体量大或不值得内化,开发中由 Agent 提示用户,经同意后再加入白名单。停靠布局不用三方库:曾内化的 Dock(约 5 万行)已由 `Forge.App` 自写的固定拓扑工作台取代并移除(见 `forge-app`)。
 
 **插件的 NuGet 依赖不受上述白名单限制,由使用者控制(已确认)。** 默认只用 BCL 与 Plugin SDK;新增依赖须经用户审批并计入 DependencyHash;支持离线 NuGet 缓存;编译缓存键包含 SDK、Contracts、依赖与编译配置版本。
 

@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.FileDocumentView"
+             x:DataType="vm:FileDocumentViewModel">
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}">
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="mono" Text="{Binding PathDisplay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1"
+                   Classes="caption"
+                   IsVisible="{Binding IsLoading}"
+                   Text="读取中…"
+                   VerticalAlignment="Center" />
+      </Grid>
+    </Border>
+
+    <ListBox Grid.Row="1"
+             ItemsSource="{Binding LineItems}"
+             Padding="0,2"
+             ScrollViewer.HorizontalScrollBarVisibility="Auto">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:FileLineViewModel">
+          <Grid ColumnDefinitions="52,*" Height="17">
+            <TextBlock Classes="mono"
+                       Text="{Binding Number}"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       TextAlignment="Right"
+                       Margin="0,0,8,0" />
+            <TextBlock Grid.Column="1"
+                       Classes="mono"
+                       Text="{Binding Text}"
+                       Foreground="{DynamicResource TextPrimaryBrush}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <TextBlock Grid.Row="1"
+               Margin="12"
+               Classes="caption"
+               TextWrapping="Wrap"
+               IsVisible="{Binding HasError}"
+               Text="{Binding Error}"
+               Foreground="{DynamicResource DangerBrush}" />
+  </Grid>
+</UserControl>

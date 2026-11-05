@@ -1,0 +1,145 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.ProjectView"
+             x:DataType="vm:ProjectTreeViewModel">
+  <UserControl.Resources>
+    <!-- One indent step: 12 px wide, with a 1 px guide line unless the row is an agent row. -->
+    <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
+      <Border Width="12" VerticalAlignment="Stretch">
+        <Border Width="1"
+                HorizontalAlignment="Center"
+                IsVisible="{Binding DrawLine}"
+                Background="{DynamicResource BorderBrush}" />
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate x:Key="TreeNodeTemplate" x:DataType="vm:TreeNodeViewModel">
+      <Border Classes="tree-row">
+        <Border.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="新建会话" Command="{Binding NewSessionCommand}" />
+            <MenuItem Header="重命名" Command="{Binding RenameCommand}" />
+            <MenuItem Header="归档" Command="{Binding ArchiveCommand}" />
+            <MenuItem Header="在资源管理器中打开" Command="{Binding RevealCommand}" />
+            <Separator />
+            <MenuItem Header="移除项目(仅取消注册)" Command="{Binding RemoveCommand}" />
+          </ContextMenu>
+        </Border.ContextMenu>
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+          <ItemsControl Grid.Column="0"
+                        VerticalAlignment="Stretch"
+                        ItemsSource="{Binding Guides}"
+                        ItemTemplate="{StaticResource IndentGuideTemplate}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+          <Button Grid.Column="1"
+                  Classes="ghost icon"
+                  Width="14"
+                  Height="18"
+                  Padding="0"
+                  Command="{Binding ToggleCommand}"
+                  IsVisible="{Binding HasToggle}"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center">
+            <Path Data="{StaticResource TreeChevronGeometry}"
+                  Classes="tree-chevron"
+                  Classes.expanded="{Binding ChevronRotated}"
+                  Width="8"
+                  Height="8"
+                  Stretch="Uniform"
+                  VerticalAlignment="Center" />
+          </Button>
+          <Path Grid.Column="2"
+                Classes="tree-icon"
+                Data="{Binding Icon}"
+                Margin="2,0,5,0" />
+          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock x:Name="TitleBlock"
+                       Text="{Binding Title}"
+                       FontSize="{StaticResource FontSizeBase}"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+            <Ellipse Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+            <TextBlock Classes="caption" Text="{Binding StatusText}" VerticalAlignment="Center" IsVisible="{Binding HasStatusText}" />
+          </StackPanel>
+          <Button Grid.Column="4"
+                  Classes="ghost icon"
+                  Width="20"
+                  Height="20"
+                  Command="{Binding NewSessionCommand}"
+                  IsVisible="{Binding HasNewSession}"
+                  ToolTip.Tip="新建会话"
+                  AutomationProperties.AutomationId="project-new-session" AutomationProperties.Name="新建会话">
+            <PathIcon Data="{StaticResource IconPlusSmall}" Width="9" Height="9" />
+          </Button>
+          <Button Grid.Column="5"
+                  Classes="ghost icon"
+                  Width="20"
+                  Height="20"
+                  Command="{Binding OpenCommand}"
+                  IsVisible="{Binding HasOpen}"
+                  ToolTip.Tip="打开"
+                  AutomationProperties.AutomationId="project-open-session" AutomationProperties.Name="打开会话">
+            <TextBlock Classes="glyph" Text="›" />
+          </Button>
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid RowDefinitions="Auto,Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <Button Grid.Column="1"
+                Classes="ghost icon"
+                Command="{Binding GeneralSessionCommand}"
+                ToolTip.Tip="新建常规对话"
+                AutomationProperties.AutomationId="new-general-session" AutomationProperties.Name="新建常规对话">
+          <PathIcon Data="{StaticResource IconPlus}" Width="10" Height="10" />
+        </Button>
+        <Button Grid.Column="2"
+                Classes="ghost icon"
+                Command="{Binding RefreshCommand}"
+                ToolTip.Tip="刷新"
+                AutomationProperties.AutomationId="refresh-projects" AutomationProperties.Name="刷新项目">
+          <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <Button Grid.Row="1"
+            Classes="primary"
+            Margin="8,6"
+            HorizontalAlignment="Stretch"
+            Content="+ 添加项目"
+            Command="{Binding AddProjectCommand}"
+            AutomationProperties.AutomationId="add-project" AutomationProperties.Name="添加项目" />
+
+    <TextBlock Grid.Row="2"
+               Classes="caption"
+               Margin="6,4"
+               TextWrapping="Wrap"
+               IsVisible="{Binding HasStatusText}"
+               Text="{Binding StatusText}" />
+
+    <!-- One flat, virtualized row list: expanding or collapsing a row splices only its subtree. -->
+    <ListBox x:Name="TreeList"
+             Grid.Row="3"
+             ItemsSource="{Binding Rows}"
+             ItemTemplate="{StaticResource TreeNodeTemplate}"
+             Padding="6,4"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             AutomationProperties.AutomationId="project-tree" AutomationProperties.Name="项目树">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
+  </Grid>
+</UserControl>
