@@ -31,6 +31,12 @@ public interface ITerminalSession : IAsyncDisposable
     ValueTask WriteAsync(ReadOnlyMemory<byte> input, CancellationToken ct);
 
     ValueTask ResizeAsync(TerminalSize size, CancellationToken ct);
+
+    /// <summary>
+    /// True while the shell has a foreground child (an editor, an agent CLI, a build): closing the terminal would end
+    /// work the user started. False for an idle shell, after exit, and when the host no longer knows the terminal.
+    /// </summary>
+    ValueTask<bool> HasForegroundProcessAsync(CancellationToken ct);
 }
 
 /// <summary>
