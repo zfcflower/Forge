@@ -19,6 +19,32 @@ internal enum TreeNodeKind
     SubAgent,
 }
 
+/// <summary>The state of an agent row, classified from its stored status text.</summary>
+internal enum AgentState
+{
+    /// <summary>Finished but the stored messages do not say how, or the row has no agent status.</summary>
+    Ended,
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
+internal static class AgentStateClassifier
+{
+    /// <summary>Maps the localized status text of an agent row to its state; anything unknown is neutral "ended".</summary>
+    public static AgentState Classify(string statusText) => statusText switch
+    {
+        Strings.SubAgentQueued => AgentState.Queued,
+        Strings.SubAgentRunning => AgentState.Running,
+        Strings.SubAgentCompleted => AgentState.Completed,
+        Strings.SubAgentFailed => AgentState.Failed,
+        Strings.SubAgentStopped => AgentState.Stopped,
+        _ => AgentState.Ended,
+    };
+}
+
 /// <summary>
 /// One row of the left project tree. A single node type keeps the view to one template: projects hold worktrees,
 /// worktrees hold sessions plus a collapsible history group, and the general section holds sessions only.
@@ -30,6 +56,7 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     private string title = string.Empty;
     private string subtitle = string.Empty;
     private string statusText = string.Empty;
+    private AgentState agentState = AgentState.Ended;
     private Geometry icon = TreeIcons.Session;
 
     public TreeNodeViewModel(TreeNodeKind kind)
@@ -143,12 +170,52 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         {
             if (Set(ref statusText, value))
             {
+                if (IsAgent)
+                {
+                    AgentState = AgentStateClassifier.Classify(statusText);
+                }
+
                 OnPropertyChanged(nameof(HasStatusText));
             }
         }
     }
 
     public bool HasStatusText => statusText.Length > 0;
+
+    /// <summary>The classified state of an agent row, derived from <see cref="StatusText"/>; neutral for other rows.</summary>
+    public AgentState AgentState
+    {
+        get => agentState;
+        private set
+        {
+            if (agentState == value)
+            {
+                return;
+            }
+
+            agentState = value;
+            OnPropertyChanged(nameof(AgentState));
+            OnPropertyChanged(nameof(IsAgentRunning));
+            OnPropertyChanged(nameof(IsAgentQueued));
+            OnPropertyChanged(nameof(IsAgentCompleted));
+            OnPropertyChanged(nameof(IsAgentFailed));
+            OnPropertyChanged(nameof(IsAgentStopped));
+            OnPropertyChanged(nameof(IsAgentRunningAnimated));
+        }
+    }
+
+    public bool IsAgentRunning => agentState == AgentState.Running;
+
+    public bool IsAgentQueued => agentState == AgentState.Queued;
+
+    public bool IsAgentCompleted => agentState == AgentState.Completed;
+
+    public bool IsAgentFailed => agentState == AgentState.Failed;
+
+    public bool IsAgentStopped => agentState == AgentState.Stopped;
+
+    /// <summary>True when the running agent's breathing animation may play (the reduced-motion gate is off).</summary>
+    public bool IsAgentRunningAnimated => IsAgentRunning && !TreeMotion.ReducedMotion;
 
     public string SessionId { get; init; } = string.Empty;
 

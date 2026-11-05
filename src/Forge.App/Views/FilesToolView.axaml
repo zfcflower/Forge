@@ -5,9 +5,10 @@
              x:DataType="vm:FilesPanelViewModel">
   <UserControl.Resources>
     <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
-      <Border Width="12" VerticalAlignment="Stretch">
+      <Border Width="16" VerticalAlignment="Stretch">
         <Border Width="1"
                 HorizontalAlignment="Center"
+                IsVisible="{Binding DrawLine}"
                 Background="{DynamicResource BorderBrush}" />
       </Border>
     </DataTemplate>
@@ -19,7 +20,7 @@
             <MenuItem Header="在新标签页打开" Command="{Binding OpenInNewTabCommand}" />
           </ContextMenu>
         </Border.ContextMenu>
-        <Grid ColumnDefinitions="Auto,Auto,Auto,*">
+        <Grid ColumnDefinitions="Auto,*">
           <ItemsControl Grid.Column="0"
                         VerticalAlignment="Stretch"
                         ItemsSource="{Binding Guides}"
@@ -30,39 +31,34 @@
               </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
           </ItemsControl>
-          <Button Grid.Column="1"
-                  Classes="ghost icon"
-                  Width="14"
-                  Height="18"
-                  Padding="0"
-                  Command="{Binding ToggleCommand}"
-                  IsVisible="{Binding IsDirectory}"
-                  HorizontalContentAlignment="Center"
-                  VerticalContentAlignment="Center">
-            <Path Data="{StaticResource TreeChevronGeometry}"
-                  Classes="tree-chevron"
-                  Classes.expanded="{Binding ChevronRotated}"
-                  Width="7"
-                  Height="7"
-                  Stretch="Uniform" />
-          </Button>
-          <Path Grid.Column="2"
-                Classes="tree-icon"
-                Data="{Binding Icon}"
-                Margin="2,0,5,0" />
-          <Button Grid.Column="3"
-                  Classes="link"
-                  Padding="0"
-                  HorizontalAlignment="Left"
-                  HorizontalContentAlignment="Left"
-                  VerticalAlignment="Center"
-                  Command="{Binding ToggleCommand}"
-                  AutomationProperties.AutomationId="file-row" AutomationProperties.Name="{Binding Name}">
-            <TextBlock Classes="mono"
-                       Text="{Binding Name}"
-                       VerticalAlignment="Center"
-                       TextTrimming="CharacterEllipsis" />
-          </Button>
+          <Border Grid.Column="1" Classes="tree-row-content">
+            <Button Classes="tree-row-hit"
+                    Command="{Binding ToggleCommand}"
+                    AutomationProperties.AutomationId="file-row"
+                    AutomationProperties.Name="{Binding Name}">
+              <Grid ColumnDefinitions="Auto,Auto,*">
+                <Border Grid.Column="0" Width="16">
+                  <Path Data="{StaticResource TreeChevronGeometry}"
+                        Classes="tree-chevron"
+                        Classes.expanded="{Binding ChevronRotated}"
+                        IsVisible="{Binding IsDirectory}"
+                        Width="8"
+                        Height="8"
+                        HorizontalAlignment="Center"
+                        Stretch="Uniform" />
+                </Border>
+                <Path Grid.Column="1"
+                      Classes="tree-icon"
+                      Data="{Binding Icon}"
+                      Margin="0,0,6,0" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Name}"
+                           TextWrapping="NoWrap"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+              </Grid>
+            </Button>
+          </Border>
         </Grid>
       </Border>
     </DataTemplate>

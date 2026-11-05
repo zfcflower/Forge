@@ -29,7 +29,9 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
     private readonly Action<string> open;
     private readonly Action<string> openInNewTab;
     private readonly Action<FileNodeViewModel> expansionChanged;
+    private readonly FileNodeViewModel? parent;
     private readonly List<FileNodeViewModel> children = [];
+    private int guideMask;
     private bool isExpanded;
 
     public FileNodeViewModel(
@@ -38,6 +40,7 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
         Action<string> open,
         Action<string> openInNewTab,
         int depth,
+        FileNodeViewModel? parent,
         Action<FileNodeViewModel> expansionChanged)
     {
         Name = entry.Name;
@@ -48,6 +51,8 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
         this.open = open;
         this.openInNewTab = openInNewTab;
         this.expansionChanged = expansionChanged;
+        this.parent = parent;
+        guideMask = GuideMaskOf(parent);
         ToggleCommand = new RelayCommand(Toggle);
         OpenCommand = new RelayCommand(() => this.open(RelativePath));
         OpenInNewTabCommand = new RelayCommand(() => this.openInNewTab(RelativePath));
@@ -61,11 +66,13 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
 
     public int Depth { get; }
 
-    /// <summary>One 12 px step per level, each carrying a 1 px guide line.</summary>
-    public IReadOnlyList<IndentMark> Guides => IndentMarks.For(Depth);
+    /// <summary>The guide lines of this row: one step per expanded ancestor folder, aligned to that ancestor's chevron.</summary>
+    public IReadOnlyList<IndentMark> Guides => IndentMarks.ForMask(guideMask);
 
-    /// <summary>The file or folder icon drawn before the name.</summary>
-    public Geometry Icon => IsDirectory ? TreeIcons.Folder : TreeIcons.File;
+    /// <summary>The file or folder icon drawn before the name; an expanded folder shows the open shape.</summary>
+    public Geometry Icon => IsDirectory
+        ? (isExpanded ? TreeIcons.FolderOpen : TreeIcons.Folder)
+        : TreeIcons.File;
 
     public IReadOnlyList<FileNodeViewModel> Children => children;
 
@@ -89,9 +96,15 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
             }
 
             OnPropertyChanged(nameof(ChevronRotated));
+            OnPropertyChanged(nameof(Icon));
             if (value)
             {
                 LoadChildren();
+            }
+
+            foreach (var child in children)
+            {
+                child.RefreshGuideMask();
             }
 
             expansionChanged(this);
@@ -118,7 +131,30 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
 
         foreach (var entry in index.List(RelativePath))
         {
-            children.Add(new FileNodeViewModel(entry, index, open, openInNewTab, Depth + 1, expansionChanged));
+            children.Add(new FileNodeViewModel(entry, index, open, openInNewTab, Depth + 1, this, expansionChanged));
+        }
+    }
+
+    /// <summary>The levels whose expanded ancestor folder draws a guide line above this row.</summary>
+    private static int GuideMaskOf(FileNodeViewModel? parent) =>
+        parent is null
+            ? 0
+            : parent.guideMask | (parent.isExpanded && parent.Depth < 31 ? 1 << parent.Depth : 0);
+
+    /// <summary>Recomputes this node's guide mask after an ancestor expanded or collapsed, then its subtree.</summary>
+    private void RefreshGuideMask()
+    {
+        var next = GuideMaskOf(parent);
+        if (next == guideMask)
+        {
+            return;
+        }
+
+        guideMask = next;
+        OnPropertyChanged(nameof(Guides));
+        foreach (var child in children)
+        {
+            child.RefreshGuideMask();
         }
     }
 }
@@ -312,7 +348,7 @@ internal sealed class FilesPanelViewModel : ObservableObject
         var roots = new List<FileNodeViewModel>();
         foreach (var entry in built.List(string.Empty))
         {
-            var node = new FileNodeViewModel(entry, built, openFile, openFileInNewTab, 0, OnExpansionChanged);
+            var node = new FileNodeViewModel(entry, built, openFile, openFileInNewTab, 0, null, OnExpansionChanged);
             Expand(node, expanded);
             roots.Add(node);
         }

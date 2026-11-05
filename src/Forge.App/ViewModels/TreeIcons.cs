@@ -1,78 +1,178 @@
+using System.Collections.Generic;
+using System.Numerics;
 using Avalonia.Media;
 
 namespace Forge.App.ViewModels;
 
 /// <summary>
-/// The tree icons, as geometry so the shell ships no icon package and no font dependency. Icons are filled paths on a
-/// 24×24 box and are scaled by the view.
+/// The tree icons, as geometry so the shell ships no icon package and no font dependency. Icons are stroked outlines on
+/// a 24×24 box and are scaled by the view; the view paints them with <c>Stroke</c> (no fill). Geometries are thread-affine
+/// Avalonia objects, so they are cached per thread: each UI thread (and each headless test session) gets its own set.
 /// </summary>
 internal static class TreeIcons
 {
-    public static Geometry Chevron { get; } = Parse("M9 4.5 17 12 9 19.5 9 16 12.5 12 9 8Z");
+    [ThreadStatic]
+    private static TreeIconSet? set;
 
-    public static Geometry Folder { get; } = Parse("M2 6h6.6l2.2 3.2H22V19H2Z");
+    private static TreeIconSet Set => set ??= new TreeIconSet();
 
-    public static Geometry File { get; } = Parse(
-        "M6 2h7.5L20 8.5V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm7 1.6V9h5.4Z");
+    public static Geometry Chevron => Set.Chevron;
 
-    public static Geometry General { get; } = Parse("M12 3 21 12 12 21 3 12Z");
+    /// <summary>Closed folder: a tabbed rectangle outline.</summary>
+    public static Geometry Folder => Set.Folder;
 
-    public static Geometry Project { get; } = Parse("M3 4h18v4H3Zm0 6h18v10H3Zm3 3v4h5v-4Z");
+    /// <summary>Open folder: the front flap is folded forward.</summary>
+    public static Geometry FolderOpen => Set.FolderOpen;
 
-    public static Geometry Worktree { get; } = Parse("M6 3a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Zm12 0a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z"
-        + "M6 8v6.5a3.5 3.5 0 0 0 3.5 3.5H12v2.5l4.5-4L12 12.5V15H9.5A1.5 1.5 0 0 1 8 13.5V8Z");
+    /// <summary>File: a sheet outline with its top-right corner folded.</summary>
+    public static Geometry File => Set.File;
 
-    public static Geometry History { get; } = Parse("M12 3a9 9 0 1 0 8.4 12h-2.2A7 7 0 1 1 12 5c1.9 0 3.5.7 4.8 2H13v2h7V2h-2v2.6A8.9 8.9 0 0 0 12 3Z"
-        + "M11 7v6.4l5 2.6 1-1.7-4-2.1V7Z");
+    public static Geometry General => Set.General;
 
-    public static Geometry Session { get; } = Parse("M4 4h16v11H8l-4 4Zm3 3v2h10V7Zm0 3.5v2h7v-2Z");
+    public static Geometry Project => Set.Project;
 
-    public static Geometry MainAgent { get; } = Parse("M12 2 14.6 9.4 22 12 14.6 14.6 12 22 9.4 14.6 2 12 9.4 9.4Z");
+    public static Geometry Worktree => Set.Worktree;
 
-    public static Geometry Agent { get; } = Parse("M12 4 20 12 12 20 4 12Z", "M12 8.5 15.5 12 12 15.5 8.5 12Z");
+    public static Geometry History => Set.History;
 
-    public static Geometry Scout { get; } = Parse(
-        "M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Zm0 2.6a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8Z"
-        + "M15.6 16.9 21 22.3 22.3 21 16.9 15.6Z");
+    public static Geometry Session => Set.Session;
 
-    public static Geometry Worker { get; } = Parse("M3 17.6 13.6 7l3.4 3.4L6.4 21Z M15 5.6 18.4 2.2 21.8 5.6 18.4 9Z");
+    public static Geometry MainAgent => Set.MainAgent;
 
-    public static Geometry Planner { get; } = Parse("M4 4h16v3.2H4Zm0 6.4h11V13.6H4Zm0 6.4h16V20H4Z");
+    public static Geometry Agent => Set.Agent;
 
-    public static Geometry Reviewer { get; } = Parse("M9.4 20 2.6 13.2 5.4 10.4 9.4 14.4 18.6 5.2 21.4 8Z");
+    public static Geometry Scout => Set.Scout;
+
+    public static Geometry Worker => Set.Worker;
+
+    public static Geometry Planner => Set.Planner;
+
+    public static Geometry Reviewer => Set.Reviewer;
 
     public static Geometry IconOf(string? agentKind) => agentKind switch
     {
-        null or "" => Agent,
-        "Scout" => Scout,
-        "Worker" => Worker,
-        "Plan" => Planner,
-        "Reviewer" => Reviewer,
-        _ => Agent,
+        null or "" => Set.Agent,
+        "Scout" => Set.Scout,
+        "Worker" => Set.Worker,
+        "Plan" => Set.Planner,
+        "Reviewer" => Set.Reviewer,
+        _ => Set.Agent,
     };
 
-    private static Geometry Parse(string path) => Geometry.Parse(path);
+    private sealed class TreeIconSet
+    {
+        public Geometry Chevron { get; } = Parse("M9 4.5 17 12 9 19.5 9 16 12.5 12 9 8Z");
 
-    private static Geometry Parse(string outer, string hole) =>
-        new CombinedGeometry(GeometryCombineMode.Exclude, Geometry.Parse(outer), Geometry.Parse(hole));
+        public Geometry Folder { get; } = Parse(
+            "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z");
+
+        public Geometry FolderOpen { get; } = Parse(
+            "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2");
+
+        public Geometry File { get; } = Parse(
+            "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z M14 2v4a2 2 0 0 0 2 2h4");
+
+        public Geometry General { get; } = Parse("M12 3 21 12 12 21 3 12Z");
+
+        public Geometry Project { get; } = Parse("M3 5h18v14H3Z M6 9.5h8v6H6Z");
+
+        public Geometry Worktree { get; } = Parse("M6 3a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Zm12 0a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z"
+            + "M6 8v6.5a3.5 3.5 0 0 0 3.5 3.5H12v2.5l4.5-4L12 12.5V15H9.5A1.5 1.5 0 0 1 8 13.5V8Z");
+
+        public Geometry History { get; } = Parse("M12 3a9 9 0 1 0 8.4 12h-2.2A7 7 0 1 1 12 5c1.9 0 3.5.7 4.8 2H13v2h7V2h-2v2.6A8.9 8.9 0 0 0 12 3Z"
+            + "M11 7v6.4l5 2.6 1-1.7-4-2.1V7Z");
+
+        public Geometry Session { get; } = Parse("M4 4h16v11H8l-4 4Z");
+
+        public Geometry MainAgent { get; } = Parse("M12 2 14.6 9.4 22 12 14.6 14.6 12 22 9.4 14.6 2 12 9.4 9.4Z");
+
+        public Geometry Agent { get; } = Parse("M12 4 20 12 12 20 4 12Z M12 8.5 15.5 12 12 15.5 8.5 12Z");
+
+        public Geometry Scout { get; } = Parse(
+            "M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Zm0 2.6a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8Z"
+            + "M15.6 16.9 21 22.3 22.3 21 16.9 15.6Z");
+
+        public Geometry Worker { get; } = Parse("M3 17.6 13.6 7l3.4 3.4L6.4 21Z M15 5.6 18.4 2.2 21.8 5.6 18.4 9Z");
+
+        public Geometry Planner { get; } = Parse("M4 5h16 M4 12h11 M4 19h16");
+
+        public Geometry Reviewer { get; } = Parse("M4 12.5 9.5 18 20 6.5");
+
+        private static Geometry Parse(string path) => StreamGeometry.Parse(path);
+    }
 }
 
-/// <summary>One 12 px indent step of a tree row; <see cref="DrawLine"/> is the 1 px guide line of a tree, not of an agent list.</summary>
+/// <summary>Global motion gate for tree animations. Avalonia 12 exposes no OS reduced-motion preference and this module
+/// forbids P/Invoke, so the shell can set this once it reads the preference another way.</summary>
+internal static class TreeMotion
+{
+    /// <summary>True when looping tree animations (the running agent's breathing) must not play.</summary>
+    public static bool ReducedMotion { get; set; }
+}
+
+/// <summary>One indent step of a tree row; <see cref="DrawLine"/> is the 1 px guide line of a tree, not of an agent list.</summary>
 internal sealed record IndentMark(int Level, bool DrawLine);
 
-/// <summary>Shared per-depth indent lists, so a row only references one array instead of allocating its own.</summary>
+/// <summary>Shared indent lists, so a row references one cached array instead of allocating its own per render.</summary>
 internal static class IndentMarks
 {
+    /// <summary>One indent step in the view, and the width of the chevron slot it lines up with.</summary>
+    public const int Step = 16;
+
     private const int MaxDepth = 32;
 
     private static readonly IReadOnlyList<IndentMark>[] Lines = Build(drawLine: true);
     private static readonly IReadOnlyList<IndentMark>[] Spacers = Build(drawLine: false);
+    private static readonly Dictionary<int, IReadOnlyList<IndentMark>> Masks = [];
 
-    /// <summary>Indent steps joined by a vertical guide line, for the project and file trees.</summary>
+    /// <summary>Indent steps joined by a vertical guide line, for a fully-expanded chain.</summary>
     public static IReadOnlyList<IndentMark> For(int depth) => At(Lines, depth);
 
     /// <summary>Indent steps without a guide line, for the agent tree.</summary>
     public static IReadOnlyList<IndentMark> Spacer(int depth) => At(Spacers, depth);
+
+    /// <summary>
+    /// Marks for a row whose expanded ancestors occupy the levels in <paramref name="mask"/> (bit L = level L). The result
+    /// is cached so template bindings never allocate a new collection.
+    /// </summary>
+    public static IReadOnlyList<IndentMark> ForMask(int mask)
+    {
+        if (mask == 0)
+        {
+            return [];
+        }
+
+        if (!Masks.TryGetValue(mask, out var marks))
+        {
+            marks = BuildMask(mask);
+            Masks[mask] = marks;
+        }
+
+        return marks;
+    }
+
+    private static IReadOnlyList<IndentMark> BuildMask(int mask)
+    {
+        var count = BitOperations.PopCount((uint)mask);
+
+        // A fully-expanded chain is the common case: reuse the shared per-depth array.
+        if (count < MaxDepth && mask == (1 << count) - 1)
+        {
+            return At(Lines, count);
+        }
+
+        var marks = new IndentMark[count];
+        var index = 0;
+        for (var level = 0; level < MaxDepth && index < count; level++)
+        {
+            if ((mask & (1 << level)) != 0)
+            {
+                marks[index++] = new IndentMark(level, true);
+            }
+        }
+
+        return marks;
+    }
 
     private static IReadOnlyList<IndentMark> At(IReadOnlyList<IndentMark>[] cache, int depth) =>
         depth <= 0 ? [] : cache[depth < MaxDepth ? depth : MaxDepth - 1];

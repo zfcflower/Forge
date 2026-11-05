@@ -182,7 +182,7 @@
   <StreamGeometry x:Key="IconMaximize">F0 M4 4h16v16H4z M6 6h12v12H6z</StreamGeometry>
   <!-- Two overlapping windows: the maximize button turns into "restore" while the window is maximized. -->
   <StreamGeometry x:Key="IconRestore">F0 M7 3h14v14h-4V7H7z M3 7h14v14H3z M5 9h10v10H5z</StreamGeometry>
-  <StreamGeometry x:Key="TreeChevronGeometry">M9 4.5 17 12 9 19.5 9 16 12.5 12 9 8Z</StreamGeometry>
+  <StreamGeometry x:Key="TreeChevronGeometry">M9 5 15 12 9 19</StreamGeometry>
   <StreamGeometry x:Key="IconChevronUp">M7 14l5-5 5 5z</StreamGeometry>
   <StreamGeometry x:Key="IconTrash">M9 3v1H4v2h1v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6h1V4h-5V3H9zM6 6h12v13H6V6z</StreamGeometry>
 
