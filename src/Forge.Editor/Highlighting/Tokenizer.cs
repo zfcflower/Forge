@@ -1,5 +1,6 @@
 // Governed by THIRD_PARTY_NOTICES.md.
 
+using Forge.Editor.Text;
 using Forge.Editor.TextMate;
 using Forge.Editor.TextMate.Internal;
 
@@ -110,6 +111,13 @@ public sealed class Tokenizer
 
     public HighlightResult HighlightText(string text, string language, CancellationToken cancellationToken = default)
         => Highlight(new StringHighlightSource(text), language, cancellationToken);
+
+    // Highlights a document snapshot through its span-based line source instead of materialising every line as a string.
+    public HighlightResult Highlight(TextSnapshot snapshot, string language, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return Highlight(new TextSnapshotHighlightSource(snapshot), language, cancellationToken);
+    }
 
     internal HighlightResult Update(IHighlightSource source, HighlightResult previous, LineChange change, CancellationToken cancellationToken)
     {
