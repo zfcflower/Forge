@@ -31,7 +31,9 @@ public sealed class TerminalShutdownTests
         }
         else
         {
-            var (secondId, secondPid, _) = await host.StartTerminalAsync("/bin/sh", ["+m"], ct: ct);
+            // Default interactive shell: job control is on, so the background sleep owns a process
+            // group of its own inside the shell's session; host.stop must sweep the session to take it.
+            var (secondId, secondPid, _) = await host.StartTerminalAsync("/bin/sh", ct: ct);
             await host.SendInputAsync(secondId, "sleep 60 & echo $! > '" + Path.Combine(host.Root, "shutdown-child.pid") + "'\r", ct);
             grandchildPid = await WaitForMarkerPidAsync(host, "shutdown-child.pid", ct);
             Assert.True(E2eFixture.IsRunning(secondPid), $"the second shell (pid {secondPid}) is not running.");
