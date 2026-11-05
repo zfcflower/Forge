@@ -1,11 +1,20 @@
 using System.Security.Cryptography;
+using System.Text;
 using Forge.Approval;
 using Forge.Plugin.Sdk;
 using Forge.Scripting;
+using Forge.Workflows;
 
 namespace Forge.ExtensionHost;
 
 internal sealed record PluginScanResult(IReadOnlyList<PluginEntry> Plugins, IReadOnlyList<PluginIssue> Issues);
+
+/// <summary>
+/// The result of preparing one package directory that is not the scan root: a staged draft, or the directory that is about
+/// to become live. <see cref="Entry"/> carries the hashes and issues it could derive; it is null only when the manifest
+/// itself could not be read, in which case <see cref="Issues"/> explains why.
+/// </summary>
+internal sealed record PreparedPackage(PluginEntry? Entry, IReadOnlyList<PluginIssue> Issues);
 
 /// <summary>
 /// Scans <c>&lt;plugins&gt;/&lt;id&gt;/</c> for <c>manifest.json</c>, resolves each plugin's content and records every
@@ -34,6 +43,13 @@ internal sealed class PluginCatalog
     }
 
     public string PluginsDirectory { get; }
+
+    /// <summary>
+    /// Contract a workflow package is approved against. It is deliberately not the C# <c>ScriptCompiler.ContractVersion</c>:
+    /// a change to the workflow format invalidates workflow approvals without touching compiled plugins, and the two kinds
+    /// never share an approval anyway.
+    /// </summary>
+    public const string WorkflowContractSdkVersion = "forge.workflows/1";
 
     public async Task<PluginScanResult> DiscoverAsync(CancellationToken ct = default)
     {
@@ -67,6 +83,14 @@ internal sealed class PluginCatalog
         foreach (var directory in directories)
         {
             ct.ThrowIfCancellationRequested();
+
+            // A leading dot marks a host-owned area inside the plugins root: .pending (staged drafts) and .trash
+            // (directories being replaced). Nothing there is ever discovered, loaded or reported as an issue.
+            if (IsHostOwnedDirectory(directory))
+            {
+                continue;
+            }
+
             try
             {
                 await DiscoverOneAsync(directory, seen, plugins, issues, ct).ConfigureAwait(false);
@@ -92,10 +116,30 @@ internal sealed class PluginCatalog
     /// Reads the plugin's content from disk now and returns it with the hashes the approval has to cover. Every file of
     /// the loadable directory is read and hashed afresh, so an artifact is never trusted because of the directory it
     /// sits in, and the returned image is the exact set of bytes the caller then hands to the worker.
+    /// <para>
+    /// A workflow package has no image: its source hash covers the normalized workflow document and its dependency hash
+    /// folds the manifest declarations together with that document's digest, so editing the document invalidates the
+    /// approval exactly like editing plugin source does.
+    /// </para>
     /// </summary>
     public static async Task<PluginContent> SnapshotAsync(PluginEntry entry, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        if (entry.IsWorkflow)
+        {
+            var document = await ReadWorkflowAsync(entry.Manifest, ct).ConfigureAwait(false);
+            return new PluginContent(
+                null,
+                Hashing.SourceHash(document.Text),
+                DependencyFingerprint(
+                    entry.Manifest.Dependencies,
+                    entry.Manifest.Permissions,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        [entry.Manifest.WorkflowFile] = Sha256(document.Bytes),
+                    }));
+        }
+
         if (entry.Image is not { } image)
         {
             throw new InvalidOperationException($"Plugin '{entry.Id}' has no loadable image.");
@@ -137,6 +181,38 @@ internal sealed class PluginCatalog
         IReadOnlyList<Permission> permissions,
         IReadOnlyDictionary<string, string> files) =>
         DependencyHashSchema.Compute(dependencies, permissions, files);
+
+    /// <summary>
+    /// Prepares one package directory that is not part of the scan root: a staged draft, or the directory that is about to
+    /// become the live one. It runs exactly the discovery/preparation path a refresh would run - manifest parse, compile,
+    /// image hashing, dependency fingerprint, workflow parsing - but never touches the approval store and never starts a
+    /// worker, so its result is only what the user is about to decide on.
+    /// </summary>
+    public async Task<PreparedPackage> PreparePackageAsync(string directory, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        var full = Path.GetFullPath(directory);
+        var directoryName = Path.GetFileName(full);
+        if (!PluginManifestReader.TryRead(full, out var manifest, out var kind, out var error))
+        {
+            return new PreparedPackage(null, [new PluginIssue(directoryName, kind, error, full)]);
+        }
+
+        if (!string.Equals(manifest.Id, directoryName, StringComparison.Ordinal))
+        {
+            return new PreparedPackage(
+                null,
+                [new PluginIssue(
+                    manifest.Id,
+                    PluginIssueKind.IdMismatch,
+                    $"Plugin id '{manifest.Id}' does not match its directory name '{directoryName}'.",
+                    full)]);
+        }
+
+        var entry = new PluginEntry(manifest);
+        await PrepareAsync(entry, ct).ConfigureAwait(false);
+        return new PreparedPackage(entry, entry.Issues.Count == 0 ? [] : [.. entry.Issues]);
+    }
 
     /// <summary>The stored image for a compilation version: the store layout, then the literal
     /// <c>bin/&lt;version&gt;/</c> layout, so an image produced elsewhere is still picked up.</summary>
@@ -220,12 +296,19 @@ internal sealed class PluginCatalog
     }
 
     /// <summary>Resolves the content behind one manifest: source text plus hash, or a prebuilt image, and then binds the
-    /// bytes it is loaded from into <see cref="PluginEntry.Image"/> and the dependency hash.</summary>
+    /// bytes it is loaded from into <see cref="PluginEntry.Image"/> and the dependency hash. A workflow package has no
+    /// assembly; its document is parsed and its digest folded into the dependency hash instead.</summary>
     private async Task PrepareAsync(PluginEntry entry, CancellationToken ct)
     {
         var manifest = entry.Manifest;
-        entry.SdkVersion = ScriptCompiler.ContractVersion;
+        entry.SdkVersion = manifest.IsWorkflow ? WorkflowContractSdkVersion : ScriptCompiler.ContractVersion;
         entry.DependencyHash = DependencyFingerprint(manifest.Dependencies, manifest.Permissions, EmptyFiles);
+
+        if (manifest.IsWorkflow)
+        {
+            await PrepareWorkflowAsync(entry, ct).ConfigureAwait(false);
+            return;
+        }
 
         if (!string.IsNullOrWhiteSpace(manifest.Source))
         {
@@ -317,6 +400,89 @@ internal sealed class PluginCatalog
                 manifest.Directory));
         }
     }
+
+    /// <summary>
+    /// Resolves a workflow package: the document is read as bytes, the source hash covers its normalized text (the same
+    /// normalization plugin source gets) and the dependency hash folds its digest into the <c>file</c> domain, so editing
+    /// the document invalidates the approval. Parse and validation errors are issues, exactly like a compile error.
+    /// </summary>
+    private static async Task PrepareWorkflowAsync(PluginEntry entry, CancellationToken ct)
+    {
+        var manifest = entry.Manifest;
+        WorkflowDocument document;
+        try
+        {
+            document = await ReadWorkflowAsync(manifest, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            entry.Issues.Add(new PluginIssue(
+                manifest.Id,
+                PluginIssueKind.SourceMissing,
+                $"Workflow document '{manifest.WorkflowFile}' could not be read from '{manifest.Directory}': {exception.Message}",
+                manifest.Directory));
+            return;
+        }
+
+        entry.SourceHash = Hashing.SourceHash(document.Text);
+        entry.DependencyHash = DependencyFingerprint(
+            manifest.Dependencies,
+            manifest.Permissions,
+            new Dictionary<string, string>(StringComparer.Ordinal) { [manifest.WorkflowFile] = Sha256(document.Bytes) });
+
+        WorkflowDefinition definition;
+        try
+        {
+            definition = WorkflowJson.Parse(document.Text);
+        }
+        catch (WorkflowFormatException exception)
+        {
+            entry.Issues.Add(new PluginIssue(
+                manifest.Id,
+                PluginIssueKind.WorkflowInvalid,
+                $"Workflow '{manifest.WorkflowFile}' of '{manifest.Id}' is not a valid workflow: {exception.Message}",
+                manifest.Directory));
+            return;
+        }
+
+        var diagnostics = WorkflowValidator.Validate(definition);
+        if (diagnostics.Count > 0)
+        {
+            var errors = new List<string>(diagnostics.Count);
+            foreach (var diagnostic in diagnostics)
+            {
+                errors.Add(diagnostic.ToString());
+            }
+
+            entry.Issues.Add(new PluginIssue(
+                manifest.Id,
+                PluginIssueKind.WorkflowInvalid,
+                $"Workflow '{manifest.WorkflowFile}' of '{manifest.Id}' is invalid: {string.Join("; ", errors)}",
+                manifest.Directory));
+            return;
+        }
+
+        entry.Workflow = definition;
+    }
+
+    /// <summary>Reads a workflow document once: the bytes are hashed and the text is hashed after BOM stripping, so both
+    /// hashes describe the same read.</summary>
+    private static async Task<WorkflowDocument> ReadWorkflowAsync(PluginManifest manifest, CancellationToken ct)
+    {
+        var path = Path.Combine(manifest.Directory, manifest.WorkflowFile);
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"workflow document '{path}' does not exist", path);
+        }
+
+        var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+        return new WorkflowDocument(StripBom(Encoding.UTF8.GetString(bytes)), bytes);
+    }
+
+    private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    /// <summary>One workflow document as it was read: normalized text for the source hash, raw bytes for the file digest.</summary>
+    private sealed record WorkflowDocument(string Text, byte[] Bytes);
 
     private static void ResolvePrebuilt(PluginEntry entry)
     {
@@ -484,4 +650,10 @@ internal sealed class PluginCatalog
 
     /// <summary>Drops a leading byte-order mark so the approval hash and the compiler's own source hash agree.</summary>
     internal static string StripBom(string text) => text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
+
+    /// <summary>True for a directory name the host reserves for itself (<c>.pending</c>, <c>.trash</c>) inside the plugins
+    /// root. Those are never discovered, loaded or reported: a staging area the host writes itself must not appear as a
+    /// broken plugin.</summary>
+    private static bool IsHostOwnedDirectory(string directory) =>
+        Path.GetFileName(directory) is { Length: > 0 } name && name[0] == '.';
 }

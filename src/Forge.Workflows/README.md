@@ -35,21 +35,29 @@ L0 声明式工作流引擎（`Forge.Workflows`）。一个工作流是一份 JS
 绑定写作单键对象 `{"$ref": "<path>"}`；`args` 里除 `$ref`/`$literal` 外的单键 `$` 对象都是错误（校验诊断）。
 多键对象一律按字面量处理，嵌套层里继续识别指令。
 
-路径文法：
+路径有两个根：
+
+- `steps`：前面步骤的输出，写作 `$.steps.<id>.<field>...`，省略 `$` 时写作 `steps.<id>.<field>...`。
+- `$input`：本次运行的入参（`RunOptions.Input`），写作 `$input`、`$input.a.b` 或 `$input.items[0].name`。
 
 ```
-path     := ('$.')? head segment* '?'?
-head     := steps
-segment  := '.' name | '[' 整数 ']' | '[' 引号字符串 ']'
+path      := (stepsPath | inputPath) '?'?
+stepsPath := ('$.')? 'steps' '.' stepId '.' field segment*
+inputPath := '$input' segment*
+segment   := '.' name | '[' 整数 ']' | '[' 引号字符串 ']'
 ```
 
-- 根固定为 `steps`；第二段是产出步骤的 `id`（普通名或 `['...']` 引号形式）。
-- 第三段必须是字段之一：`content`（原始文本）、`isError`（布尔，工具是否报错）、`status`
+- 步骤根的第二段是产出步骤的 `id`（普通名或 `['...']` 引号形式），第三段必须是字段之一：
+  `content`（原始文本）、`isError`（布尔，工具是否报错）、`status`
   （`succeeded`/`failed`/`cancelled`/`skipped`/`notRun`）、`error`（失败说明；成功步骤上没有该字段）、
   `json`（`content` 解析后的 JSON）。
 - 其后是对象属性与数组下标；名字含 `.`、`[`、`]`、空白或引号时用 `['...']`，引号内 `\\`、`\'`、`\"` 转义。
+- `$input` 根必须带 `$`：裸写 `input.x` 会被当作步骤名，而 `$input` 不可能是步骤 id，所以步骤绑定与入参绑定不会混淆。
+- `$input` 单独使用（`{"$ref": "$input"}`）得到整个入参；带路径时按同一套段语法逐层取值。
+- `$input` 不是步骤：校验器不要求它出现在 `after` 里，也不会报 `UnknownBindingStep`/`BindingOnNonDependency`。
 - 末尾 `?` 表示可选：解析失败时**在对象里省略该属性、在数组里写 `null`**；不带 `?` 的绑定解析失败会让该步骤
-  直接失败（不调用工具），错误文本点名步骤与路径。不会静默注入 null。
+  直接失败（不调用工具），错误文本点名步骤与路径。不会静默注入 null。`RunOptions.Input` 为 null 时所有不带 `?`
+  的 `$input` 绑定都按解析失败处理。
 
 示例（`$ref` 值）：
 
@@ -61,6 +69,21 @@ segment  := '.' name | '[' 整数 ']' | '[' 引号字符串 ']'
 | `$.steps.fetch.json.optional.x?`       | 缺失时省略属性（数组元素为 `null`）       |
 | `$.steps.fetch.status`                 | 该步骤状态字符串                          |
 | `$.steps.fetch.json`                   | 整段 JSON，可整体作为 `args`              |
+| `$input`                               | 整个运行入参（`RunOptions.Input`）        |
+| `$input.branch`                        | 入参对象的 `branch` 属性                  |
+| `$input.items[0].name`                 | 入参数组的第 1 个元素的 `name`            |
+
+`$input` 的入参由宿主在运行前决定（`RunOptions.Input`），工作流插件用它把工具调用参数传进各步骤：
+
+```jsonc
+{
+  "name": "greet",
+  "steps": [
+    { "id": "fetch", "tool": "read_file", "args": { "path": { "$ref": "$input.path" } } },
+    { "id": "echo", "tool": "echo", "args": { "text": { "$ref": "$.steps.fetch.content" }, "label": { "$ref": "$input.label?" } } }
+  ]
+}
+```
 
 解析失败的错误文本形如
 `step 'use': binding '$.steps.fetch.json.items[5]' could not be resolved: index 5 is out of range at '$.steps.fetch.json.items[5]' (length 2)`。

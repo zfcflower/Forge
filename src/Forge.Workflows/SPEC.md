@@ -22,6 +22,10 @@ tags: [workflow, declarative, l0]
   `src/Forge.Workflows/README.md`。
 - 格式与路径子集属于契约：`after` 省略 = 依赖紧邻上一歩，`after: []` = 无依赖；绑定只能指向自己的传递依赖；
   指令只有 `$ref` 与 `$literal`，路径字段只有 `content`/`isError`/`status`/`error`/`json`。
+- 绑定有两个根：`steps`（前面步骤的输出）与 `$input`（本次运行的 `RunOptions.Input`）。`$input` 不是步骤：
+  校验器不要求它进 `after`，不产生 `UnknownBindingStep`/`BindingOnNonDependency`；`Input` 为 null 或路径不存在时
+  该步按绑定解析失败处理（`Failed`，不调工具），带 `?` 时按可选语义省略。工作流插件（L0）就是靠这个根把工具
+  调用参数传进各步骤。
 
 ## 关键决策
 
@@ -43,6 +47,10 @@ tags: [workflow, declarative, l0]
 
 **校验不抛异常。** `WorkflowValidator.Validate` 返回确定顺序的诊断列表；环检测用 Kahn 剥点定位环上节点，再按最小下标
 各报一次并给出路径。`BindingOnNonDependency` 刻意收紧为“只能绑定传递依赖”，避免与并行步骤抢数据。
+
+**`$input` 绑定根。** 写法 `{"$ref": "$input"}`（整个入参）或 `{"$ref": "$input.a.b"}` / `$input[0]`，段语法与步骤
+根相同（含 `?` 可选后缀）。`$` 前缀是必需的：裸写 `input.x` 会被当作步骤名。解析在 `RunState` 内直接面对
+`RunOptions.Input`，不经过步骤结果表；入参为 null 时错误文本明确“run 没有 $input”，不会注入 null 或空对象。
 
 ## 未决
 

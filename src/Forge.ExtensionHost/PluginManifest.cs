@@ -10,7 +10,9 @@ namespace Forge.ExtensionHost;
 /// <c>&lt;plugins&gt;/&lt;id&gt;/manifest.json</c>: the only metadata the host reads from a plugin package.
 /// <see cref="EntryAssembly"/> is a file name inside the plugin's output directory, <see cref="Source"/> is either a
 /// path relative to the plugin directory or inline C# source, and <see cref="Dependencies"/> feeds
-/// <see cref="Hashing.DependencyHash"/>.
+/// <see cref="Hashing.DependencyHash"/>. <see cref="Kind"/> is <c>plugin</c> (the default: C# compiled into an assembly)
+/// or <c>workflow</c> (a declarative document <see cref="WorkflowFile"/> the host runs itself through
+/// <c>Forge.Workflows</c> and exposes with <see cref="Tool"/>).
 /// </summary>
 internal sealed record PluginManifest(
     string Id,
@@ -19,8 +21,14 @@ internal sealed record PluginManifest(
     string? Source,
     IReadOnlyList<Dependency> Dependencies,
     IReadOnlyList<Permission> Permissions,
-    string Directory)
+    string Directory,
+    string Kind = ExtensionKinds.Plugin,
+    string WorkflowFile = PluginManifestReader.DefaultWorkflowFileName,
+    ExtensionToolSpec? Tool = null)
 {
+    /// <summary>True when the package is a declarative workflow rather than C# compiled by the host.</summary>
+    public bool IsWorkflow => string.Equals(Kind, ExtensionKinds.Workflow, StringComparison.Ordinal);
+
     /// <summary>File name of the compiled image inside a version directory.</summary>
     public string OutputFileName
     {
@@ -43,6 +51,15 @@ internal sealed class PluginManifestDocument
 
     public string? Version { get; set; }
 
+    /// <summary><c>plugin</c> (default) or <c>workflow</c>.</summary>
+    public string? Kind { get; set; }
+
+    /// <summary>Workflow document file name, relative to the package directory; only meaningful for kind <c>workflow</c>.</summary>
+    public string? Workflow { get; set; }
+
+    /// <summary>The single tool a workflow package exposes.</summary>
+    public PluginToolDocument? Tool { get; set; }
+
     public string? EntryAssembly { get; set; }
 
     public string? Source { get; set; }
@@ -51,6 +68,17 @@ internal sealed class PluginManifestDocument
 
     /// <summary>Permissions the plugin asks the user to grant; shown before approval and folded into the approval hash.</summary>
     public List<PermissionDocument>? Permissions { get; set; }
+}
+
+/// <summary>The tool a workflow package exposes: its name, description and JSON-schema input.</summary>
+internal sealed class PluginToolDocument
+{
+    public string? Name { get; set; }
+
+    public string? Description { get; set; }
+
+    /// <summary>Schema as a JSON object, or its text (both are accepted; the host stores and reports it as text).</summary>
+    public JsonElement? InputSchema { get; set; }
 }
 
 internal sealed class DependencyDocument
@@ -73,6 +101,9 @@ internal static class PluginManifestReader
     public const string FileName = "manifest.json";
 
     public const int MaxManifestBytes = 64 * 1024;
+
+    /// <summary>Workflow document file name a workflow package uses when its manifest does not name one.</summary>
+    public const string DefaultWorkflowFileName = "workflow.json";
 
     private static readonly JsonDocumentOptions DocumentOptions = new()
     {
@@ -130,6 +161,13 @@ internal static class PluginManifestReader
                 return false;
             }
 
+            if (!TryReadKind(path, document, out var packageKind, out var workflowFile, out var tool, out var kindError))
+            {
+                kind = PluginIssueKind.ManifestInvalid;
+                error = kindError;
+                return false;
+            }
+
             var dependencies = new List<Dependency>(document.Dependencies?.Count ?? 0);
             if (document.Dependencies is { } declared)
             {
@@ -164,7 +202,10 @@ internal static class PluginManifestReader
                 document.Source,
                 dependencies.AsReadOnly(),
                 permissions,
-                Path.GetFullPath(directory));
+                Path.GetFullPath(directory),
+                packageKind,
+                workflowFile,
+                tool);
             kind = default;
             error = string.Empty;
             return true;
@@ -173,6 +214,135 @@ internal static class PluginManifestReader
         {
             kind = PluginIssueKind.ManifestInvalid;
             error = $"'{path}' could not be read: {exception.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the package kind. A missing <c>kind</c> is a <c>plugin</c>, so every package written before workflows existed
+    /// keeps loading unchanged. A workflow package must name its document (a single safe file name, default
+    /// <c>workflow.json</c>) and declare one usable tool: the host publishes that tool and binds the call's arguments as
+    /// <c>$input</c>, so a nameless tool or a schema that is not a JSON object is a manifest error rather than a guess.
+    /// </summary>
+    private static bool TryReadKind(
+        string path,
+        PluginManifestDocument document,
+        out string kind,
+        out string workflowFile,
+        out ExtensionToolSpec? tool,
+        out string error)
+    {
+        workflowFile = DefaultWorkflowFileName;
+        tool = null;
+        error = string.Empty;
+
+        var declared = document.Kind?.Trim();
+        if (string.IsNullOrEmpty(declared))
+        {
+            kind = ExtensionKinds.Plugin;
+            if (document.Workflow is not null || document.Tool is not null)
+            {
+                error = $"'{path}' declares a workflow or a tool but no kind; a workflow package must declare kind 'workflow'.";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (string.Equals(declared, ExtensionKinds.Plugin, StringComparison.OrdinalIgnoreCase))
+        {
+            kind = ExtensionKinds.Plugin;
+            if (document.Workflow is not null || document.Tool is not null)
+            {
+                error = $"'{path}' declares kind 'plugin' but also a workflow or a tool; a workflow package must declare kind 'workflow'.";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (!string.Equals(declared, ExtensionKinds.Workflow, StringComparison.OrdinalIgnoreCase))
+        {
+            kind = ExtensionKinds.Plugin;
+            error = $"'{path}' declares kind '{declared}'; the host implements '{ExtensionKinds.Plugin}' and '{ExtensionKinds.Workflow}'.";
+            return false;
+        }
+
+        kind = ExtensionKinds.Workflow;
+        var declaredFile = document.Workflow?.Trim();
+        if (!string.IsNullOrEmpty(declaredFile))
+        {
+            if (!PluginIds.IsSafeSegment(declaredFile))
+            {
+                error = $"'{path}' declares workflow '{declaredFile}'; it must be a single file name with no path separators.";
+                return false;
+            }
+
+            workflowFile = declaredFile;
+        }
+
+        if (document.Tool is not { } toolDocument)
+        {
+            error = $"'{path}' is a workflow package but declares no tool.";
+            return false;
+        }
+
+        var name = toolDocument.Name?.Trim();
+        if (string.IsNullOrEmpty(name) || !PluginIds.IsSafeToolName(name))
+        {
+            error = $"'{path}' declares workflow tool name '{toolDocument.Name}', which is not a usable tool name.";
+            return false;
+        }
+
+        if (!TryReadInputSchema(toolDocument.InputSchema, out var schema))
+        {
+            error = $"'{path}' declares tool '{name}' with an input schema that is not a JSON object.";
+            return false;
+        }
+
+        tool = new ExtensionToolSpec(name, toolDocument.Description ?? string.Empty, schema);
+        return true;
+    }
+
+    /// <summary>Accepts the schema either as an embedded JSON object or as the text of one; stores it as text.</summary>
+    private static bool TryReadInputSchema(JsonElement? element, out string schema)
+    {
+        schema = string.Empty;
+        if (element is not { } value)
+        {
+            return false;
+        }
+
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            schema = value.GetRawText();
+            return true;
+        }
+
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var text = value.GetString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            schema = text;
+            return true;
+        }
+        catch (JsonException)
+        {
             return false;
         }
     }
@@ -282,6 +452,13 @@ internal static class PluginIds
             return false;
         }
 
+        // A leading dot names a host-owned area of the plugins root (.pending, .trash), which discovery skips by design:
+        // an id or version with that shape could be installed and then never seen, so it is refused at the source.
+        if (value[0] == '.')
+        {
+            return false;
+        }
+
         if (value.Contains("..", StringComparison.Ordinal) || value.AsSpan().IndexOfAny(InvalidSegmentChars) >= 0)
         {
             return false;
@@ -305,6 +482,13 @@ internal static class PluginIds
         var name = Sanitize(id, int.MaxValue);
         return name is "." or ".." ? "plugin" : name;
     }
+
+    /// <summary>
+    /// True for a tool name the host is willing to publish. Tool names travel to the main program as identifiers, so they
+    /// follow the same character rules as a path segment and are bounded in length.
+    /// </summary>
+    public static bool IsSafeToolName(string? value) =>
+        value is { Length: > 0 and <= MaxSegmentLength } && IsSafeSegment(value);
 
     /// <summary>Short, separator-free token used inside a per-worker pipe name.</summary>
     public static string PipeToken(string id)

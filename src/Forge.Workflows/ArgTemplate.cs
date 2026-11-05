@@ -131,7 +131,8 @@ internal sealed class RefArg : ArgTemplate
 
     public BindingPath Path { get; }
 
-    /// <summary>Index of the producing step, or -1 when the path names a step that does not exist.</summary>
+    /// <summary>Index of the producing step, or -1 when the path names a step that does not exist. Unused for an
+    /// <c>$input</c> path, which has no producing step.</summary>
     public int ProducerIndex { get; }
 
     public int ConsumerIndex { get; }
@@ -142,6 +143,23 @@ internal sealed class RefArg : ArgTemplate
 
     public override WriteOutcome Write(Utf8JsonWriter writer, string? propertyName, ResolutionContext context)
     {
+        if (Path.Root == BindingRoot.Input)
+        {
+            if (!context.State.TryResolveInput(Path, out var input, out var inputError))
+            {
+                if (Path.Optional)
+                {
+                    return WriteOutcome.Skipped;
+                }
+
+                context.Fail($"step '{ConsumerId}': binding '{Path.Text}' could not be resolved: {inputError}");
+                return WriteOutcome.Failed;
+            }
+
+            WriteValue(writer, propertyName, input);
+            return WriteOutcome.Written;
+        }
+
         if (ProducerIndex < 0)
         {
             if (Path.Optional)
@@ -164,6 +182,12 @@ internal sealed class RefArg : ArgTemplate
             return WriteOutcome.Failed;
         }
 
+        WriteValue(writer, propertyName, value);
+        return WriteOutcome.Written;
+    }
+
+    private static void WriteValue(Utf8JsonWriter writer, string? propertyName, ResolvedValue value)
+    {
         if (propertyName is not null)
         {
             writer.WritePropertyName(propertyName);
@@ -184,8 +208,6 @@ internal sealed class RefArg : ArgTemplate
                 writer.WriteNullValue();
                 break;
         }
-
-        return WriteOutcome.Written;
     }
 }
 
@@ -302,9 +324,16 @@ internal static class ArgCompiler
             return new LiteralArg(original);
         }
 
-        var producerIndex = indexById.TryGetValue(path!.StepId, out var index) ? index : -1;
+        var producerIndex = path!.Root == BindingRoot.Input
+            ? -1
+            : indexById.TryGetValue(path.StepId, out var index) ? index : -1;
         var reference = new RefArg(path, producerIndex, consumerIndex, consumerId);
-        bindings.Add(reference);
+        if (path.Root == BindingRoot.Step)
+        {
+            // Only step bindings take part in the dependency check: $input is not a step, so it needs no edge in after.
+            bindings.Add(reference);
+        }
+
         return reference;
     }
 

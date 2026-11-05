@@ -1,5 +1,6 @@
 using Forge.Approval;
 using Forge.Plugin.Sdk;
+using Forge.Workflows;
 
 namespace Forge.ExtensionHost;
 
@@ -20,6 +21,7 @@ internal enum PluginIssueKind
     EntryAssemblyMissing,
     LoadFailed,
     InvalidPackage,
+    WorkflowInvalid,
 }
 
 /// <summary>A non-fatal plugin problem.</summary>
@@ -42,8 +44,9 @@ internal sealed record PluginImage(
     public string AssemblyPath => Path.Combine(Directory, AssemblyFileName);
 }
 
-/// <summary>What the approval is evaluated against: the image on disk now and the two hashes derived from it.</summary>
-internal sealed record PluginContent(PluginImage Image, string SourceHash, string DependencyHash);
+/// <summary>What the approval is evaluated against: the image on disk now (null for a workflow package, which loads no
+/// assembly) and the two hashes derived from it.</summary>
+internal sealed record PluginContent(PluginImage? Image, string SourceHash, string DependencyHash);
 
 /// <summary>One approval evaluation plus the content it was evaluated against, so a caller can dispatch exactly the
 /// bytes it checked.</summary>
@@ -67,6 +70,27 @@ internal sealed class PluginEntry(PluginManifest manifest)
     public string Version => Manifest.Version;
 
     public string Directory => Manifest.Directory;
+
+    /// <summary>True when this package is a declarative workflow the host runs itself, not C# compiled into an assembly.</summary>
+    public bool IsWorkflow => Manifest.IsWorkflow;
+
+    /// <summary>The parsed workflow of a workflow package; null when it is a plugin or the document failed to parse.</summary>
+    public WorkflowDefinition? Workflow { get; set; }
+
+    /// <summary>
+    /// The one tool a workflow package publishes. A workflow has no assembly and no worker, so this declaration is all the
+    /// main program ever sees; a plugin gets its declarations from <c>worker.load</c> instead.
+    /// </summary>
+    public IReadOnlyList<ToolDeclaration> WorkflowTools => Manifest.Tool is { } tool
+        ? [new ToolDeclaration(tool.Name, tool.Description, tool.InputSchemaJson, ToolSideEffect.Execute)]
+        : [];
+
+    /// <summary>The contribution set a workflow package publishes: the tool plus the declared permissions, nothing else.</summary>
+    public PluginContributionSet WorkflowContributions => new()
+    {
+        Tools = WorkflowTools,
+        Permissions = [.. Manifest.Permissions],
+    };
 
     public List<PluginIssue> Issues { get; } = [];
 
@@ -99,7 +123,7 @@ internal sealed class PluginEntry(PluginManifest manifest)
     /// <summary>The complete non-tool contribution set the loaded worker reported for this plugin.</summary>
     public PluginContributionSet Contributions { get; set; } = new();
 
-    public bool HasContent => Image is not null && SourceHash.Length > 0;
+    public bool HasContent => SourceHash.Length > 0 && (Image is not null || (IsWorkflow && Workflow is not null));
 
     public bool IsRunnable => HasContent && Decision.IsAllowed;
 }

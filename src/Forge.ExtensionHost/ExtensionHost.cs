@@ -11,15 +11,20 @@ namespace Forge.ExtensionHost;
 /// <see cref="ApprovalEngine"/>, starts one worker process per plugin, publishes <c>tools.register</c> and routes
 /// execution and plugin-to-main-program tool calls.
 /// </summary>
-public sealed class ExtensionHost : IAsyncDisposable
+public sealed partial class ExtensionHost : IAsyncDisposable
 {
     private readonly HostOptions options;
     private readonly ApprovalStore approvals;
     private readonly PluginCatalog catalog;
+    private readonly ExtensionStagingArea staging;
     private readonly Dictionary<string, PluginEntry> plugins = new(StringComparer.Ordinal);
     private readonly Dictionary<string, WorkerSlot> workers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PluginState> states = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Publication> publications = new(StringComparer.Ordinal);
+
+    /// <summary>Runs of workflow plugins in flight. A workflow has no worker session, but its steps still call the main
+    /// program through <c>host.tool_call</c>, so they travel under the same active-run binding a worker callback uses.</summary>
+    private readonly ActiveRunTable workflowRuns = new();
     private readonly List<Task> retiring = [];
     private readonly List<PluginIssue> issues = [];
     private readonly Lock sync = new();
@@ -51,6 +56,7 @@ public sealed class ExtensionHost : IAsyncDisposable
         Directory.CreateDirectory(options.DataDirectory);
         approvals = new ApprovalStore(options.DataDirectory);
         catalog = new PluginCatalog(options.PluginsDirectory);
+        staging = new ExtensionStagingArea(options.PluginsDirectory);
         scriptExecutors = new ScriptExecutorSupervisor(options, scriptCompiler, ForwardToolCallAsync, stop, cleanup);
         terminals = new TerminalManager(stop, cleanup, SendTerminalNotificationAsync);
 #if DEBUG
@@ -330,6 +336,20 @@ public sealed class ExtensionHost : IAsyncDisposable
                     TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalForegroundRequest));
             case TerminalProtocol.Stop:
                 return terminals.StopAsync(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalStopRequest));
+            case ExtensionProtocol.ExtensionsStage:
+                return StageExtensionAsync(HostJson.Read<ExtensionStageRequest>(message), ct);
+            case ExtensionProtocol.ExtensionsPending:
+                return PendingExtensionsAsync(ct);
+            case ExtensionProtocol.ExtensionsCommit:
+                return CommitExtensionAsync(HostJson.Read<ExtensionCommitRequest>(message), ct);
+            case ExtensionProtocol.ExtensionsDiscard:
+                return DiscardExtensionAsync(HostJson.Read<ExtensionIdRequest>(message), ct);
+            case ExtensionProtocol.PluginDisable:
+                return DisablePluginAsync(HostJson.Read<PluginVersionRequest>(message), ct);
+            case ExtensionProtocol.PluginEnable:
+                return EnablePluginAsync(HostJson.Read<PluginVersionRequest>(message), ct);
+            case ExtensionProtocol.PluginDelete:
+                return DeletePluginAsync(HostJson.Read<PluginVersionRequest>(message), ct);
             default:
                 throw new HostOperationException("unsupported_operation", $"The extension host does not serve '{message.Operation}'.");
         }
@@ -354,34 +374,46 @@ public sealed class ExtensionHost : IAsyncDisposable
             throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
         var state = StateOf(captured.Id);
         await EnterCallAsync(captured, state, context, nested, budget, ct, "the tool call").ConfigureAwait(false);
-        WorkerSlot slot;
+        WorkerSlot? slot = null;
+        WorkflowCall? workflow = null;
         PluginState.Lease lease;
         try
         {
             var entry = Current(captured);
             var evaluation = await EvaluateAsync(entry, budget.Token).ConfigureAwait(false);
             RequireAllowed(entry, evaluation.Decision);
-            if (evaluation.Image is not { } image)
+            if (entry.IsWorkflow)
             {
-                throw new HostOperationException("plugin_not_loadable", $"Plugin '{entry.Id}' {entry.Version} has no loadable assembly.");
+                // A workflow has no assembly and no worker: the host binds the call and runs the definition itself. The
+                // approval recheck, the run registration and the execution lease happen inside the gate exactly as for a
+                // worker-backed plugin, so a revoke or a disable still serializes with the moment the call decides to run.
+                workflow = await BindWorkflowCallAsync(entry, request, context, evaluation, nested, budget, ct).ConfigureAwait(false);
+                lease = workflow.Lease;
             }
-
-            slot = GetWorker(entry);
-            var loadout = await slot.EnsureLoadedAsync(entry.Version, image, entry.Manifest.Permissions, budget.Token).ConfigureAwait(false);
-            entry.Tools = loadout.Tools;
-            entry.Contributions = loadout.Contributions;
-
-            var rechecked = ApprovalEngine.Evaluate(Candidate(entry, evaluation), approvals);
-            entry.Decision = rechecked;
-            RequireAllowed(entry, rechecked);
-
-            await PublishAsync(entry.Id, loadout, budget.Token).ConfigureAwait(false);
-            if (!Contains(loadout.Tools, request.Tool))
+            else
             {
-                throw new HostOperationException("unknown_tool", $"Plugin '{entry.Id}' does not declare a tool named '{request.Tool}'.");
-            }
+                if (evaluation.Image is not { } image)
+                {
+                    throw new HostOperationException("plugin_not_loadable", $"Plugin '{entry.Id}' {entry.Version} has no loadable assembly.");
+                }
 
-            lease = state.BeginExecution(entry.Id, CallBinding.RootOf(context), nested);
+                slot = GetWorker(entry);
+                var loadout = await slot.EnsureLoadedAsync(entry.Version, image, entry.Manifest.Permissions, budget.Token).ConfigureAwait(false);
+                entry.Tools = loadout.Tools;
+                entry.Contributions = loadout.Contributions;
+
+                var rechecked = ApprovalEngine.Evaluate(Candidate(entry, evaluation), approvals);
+                entry.Decision = rechecked;
+                RequireAllowed(entry, rechecked);
+
+                await PublishAsync(entry.Id, loadout, budget.Token).ConfigureAwait(false);
+                if (!Contains(loadout.Tools, request.Tool))
+                {
+                    throw new HostOperationException("unknown_tool", $"Plugin '{entry.Id}' does not declare a tool named '{request.Tool}'.");
+                }
+
+                lease = state.BeginExecution(entry.Id, CallBinding.RootOf(context), nested);
+            }
         }
         catch (OperationCanceledException) when (BudgetEndedBeforeDispatch(budget, ct))
         {
@@ -392,9 +424,18 @@ public sealed class ExtensionHost : IAsyncDisposable
             state.Exit();
         }
 
+        if (workflow is not null)
+        {
+            using (workflow)
+            {
+                var result = await RunWorkflowAsync(workflow, request, budget, ct).ConfigureAwait(false);
+                return HostJson.ToElement(new PluginExecuteResponse(result.Content, result.IsError));
+            }
+        }
+
         using (lease)
         {
-            var result = await slot.ExecuteAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
+            var result = await slot!.ExecuteAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
             return HostJson.ToElement(new PluginExecuteResponse(result.Content, result.IsError));
         }
     }
@@ -569,47 +610,57 @@ public sealed class ExtensionHost : IAsyncDisposable
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
-            var record = approvals.Get(entry.Id, entry.Version);
-            var decision = ApprovalEngine.Evaluate(
-                new PluginRecord
-                {
-                    PluginId = entry.Id,
-                    Version = entry.Version,
-                    SourceHash = entry.SourceHash,
-                    DependencyHash = entry.DependencyHash,
-                    SdkVersion = entry.SdkVersion,
-                },
-                record);
-            var status = entry.HasContent
-                ? (record?.Status ?? PluginStatus.Draft).ToString().ToLowerInvariant()
-                : "invalid";
-            // Discovery/load failures are the errors; a stale approval (content no longer matching the record) is
-            // reported as an error too. A plain draft is not an error - its status already says it is not approved.
-            //
-            // A manifest that changed on disk since discovery is reported as invalidated/needs-refresh even while the
-            // persisted record still says "approved": that approval describes the discovery snapshot, and the next run or
-            // approval would fail closed. Detecting it only reads manifest.json (the same cheap check the approval gate
-            // uses) - it never loads or executes plugin code and never invents current content hashes. The record is left
-            // untouched, so a refresh can re-derive the hashes and the user re-approves explicitly; status never grants.
-            var error = FirstIssueMessage(entry) ??
-                (ManifestChangedOnDisk(entry)
-                    ? $"the manifest of {entry.Id} {entry.Version} changed on disk since discovery; refresh before "
-                      + "approving or running it (the hashes reported here are the discovery snapshot, not the disk)"
-                    : record is not null && record.Status != PluginStatus.Draft && !decision.IsAllowed
-                        ? decision.Reason
-                        : null);
-            statuses.Add(new PluginStatusInfo(
-                entry.Id,
-                entry.Version,
-                status,
-                entry.SourceHash,
-                entry.DependencyHash,
-                entry.SdkVersion,
-                [.. entry.Manifest.Permissions],
-                error));
+            statuses.Add(BuildStatus(entry));
         }
 
         return Task.FromResult(HostJson.ToElement(new PluginStatusResponse(statuses)));
+    }
+
+    /// <summary>
+    /// Describes one discovered plugin for the main program: the discovery snapshot hashes, the approval record's status
+    /// and the errors that would stop it from running. It never loads or runs plugin code, so a draft's permissions and
+    /// diagnostics can be shown before the user approves anything.
+    /// </summary>
+    private PluginStatusInfo BuildStatus(PluginEntry entry)
+    {
+        var record = approvals.Get(entry.Id, entry.Version);
+        var decision = ApprovalEngine.Evaluate(
+            new PluginRecord
+            {
+                PluginId = entry.Id,
+                Version = entry.Version,
+                SourceHash = entry.SourceHash,
+                DependencyHash = entry.DependencyHash,
+                SdkVersion = entry.SdkVersion,
+            },
+            record);
+        var status = entry.HasContent
+            ? (record?.Status ?? PluginStatus.Draft).ToString().ToLowerInvariant()
+            : "invalid";
+        // Discovery/load failures are the errors; a stale approval (content no longer matching the record) is reported as
+        // an error too. A plain draft is not an error - its status already says it is not approved.
+        //
+        // A manifest that changed on disk since discovery is reported as invalidated/needs-refresh even while the persisted
+        // record still says "approved": that approval describes the discovery snapshot, and the next run or approval would
+        // fail closed. Detecting it only reads manifest.json (the same cheap check the approval gate uses) - it never loads
+        // or executes plugin code and never invents current content hashes. The record is left untouched, so a refresh can
+        // re-derive the hashes and the user re-approves explicitly; status never grants.
+        var error = FirstIssueMessage(entry) ??
+            (ManifestChangedOnDisk(entry)
+                ? $"the manifest of {entry.Id} {entry.Version} changed on disk since discovery; refresh before "
+                  + "approving or running it (the hashes reported here are the discovery snapshot, not the disk)"
+                : record is not null && record.Status != PluginStatus.Draft && !decision.IsAllowed
+                    ? decision.Reason
+                    : null);
+        return new PluginStatusInfo(
+            entry.Id,
+            entry.Version,
+            status,
+            entry.SourceHash,
+            entry.DependencyHash,
+            entry.SdkVersion,
+            [.. entry.Manifest.Permissions],
+            error);
     }
 
     private static string? FirstIssueMessage(PluginEntry entry) =>
@@ -717,30 +768,7 @@ public sealed class ExtensionHost : IAsyncDisposable
             var sourceHash = string.IsNullOrWhiteSpace(request.SourceHash) ? entry.SourceHash : request.SourceHash;
             var dependencyHash = string.IsNullOrWhiteSpace(request.DependencyHash) ? entry.DependencyHash : request.DependencyHash;
             var sdkVersion = string.IsNullOrWhiteSpace(request.SdkVersion) ? entry.SdkVersion : request.SdkVersion;
-            if (await RefusalReasonAsync(entry, sourceHash, dependencyHash, sdkVersion, ct).ConfigureAwait(false) is { } refusal)
-            {
-                WithdrawUnusableApproval(entry.Id, version);
-                throw new HostOperationException(
-                    "approval_mismatch",
-                    $"The approval does not cover the current content of '{entry.Id}': {refusal}.");
-            }
-
-            approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
-            await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
-
-            if (!entry.Decision.IsAllowed)
-            {
-                // The record was written from the hashes the caller sent, but the content re-read under the gate no
-                // longer matches (for example the plugin directory changed between SetApproved and ApplyCoreAsync). It
-                // must not stay Approved: a record that cannot cover what a run would load is exactly the
-                // "looks approved, refuses to run" state this path exists to prevent. The withdrawal is hash-conditional
-                // under the plugin gate, so a record a different writer legitimately re-approved in the meantime (newer
-                // hashes or a non-Approved status) is left alone.
-                WithdrawApprovalWrittenBy(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
-                throw new HostOperationException(
-                    "approval_mismatch",
-                    $"The approval does not cover the current content of '{entry.Id}': {entry.Decision.Reason}.");
-            }
+            await ApproveCoreAsync(entry, version, sourceHash, dependencyHash, sdkVersion, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -748,6 +776,54 @@ public sealed class ExtensionHost : IAsyncDisposable
         }
 
         return HostJson.EmptyObject;
+    }
+
+    /// <summary>
+    /// Records and applies one approval. The caller already holds the plugin's gate (and, for a commit, the refresh gate),
+    /// so this only performs the ordered steps: re-hash the disk content and compare it with the approved hashes, write the
+    /// record, apply it (load/re-publish or unregister), and withdraw the record again if applying shows the content no
+    /// longer matches it. A mismatch refuses before anything is persisted, and a refusal never lifts a Disabled or
+    /// Uninstalled block.
+    /// </summary>
+    private async Task ApproveCoreAsync(
+        PluginEntry entry,
+        string version,
+        string sourceHash,
+        string dependencyHash,
+        string sdkVersion,
+        CancellationToken ct)
+    {
+        if (!entry.HasContent)
+        {
+            throw new HostOperationException(
+                "plugin_not_loadable",
+                $"Plugin '{entry.Id}' {entry.Version} has no compiled content to approve.");
+        }
+
+        if (await RefusalReasonAsync(entry, sourceHash, dependencyHash, sdkVersion, ct).ConfigureAwait(false) is { } refusal)
+        {
+            WithdrawUnusableApproval(entry.Id, version);
+            throw new HostOperationException(
+                "approval_mismatch",
+                $"The approval does not cover the current content of '{entry.Id}': {refusal}.");
+        }
+
+        approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
+        await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+
+        if (!entry.Decision.IsAllowed)
+        {
+            // The record was written from the hashes the caller sent, but the content re-read under the gate no longer
+            // matches (for example the plugin directory changed between SetApproved and ApplyCoreAsync). It must not stay
+            // Approved: a record that cannot cover what a run would load is exactly the "looks approved, refuses to run"
+            // state this path exists to prevent. The withdrawal is hash-conditional under the plugin gate, so a record a
+            // different writer legitimately re-approved in the meantime (newer hashes or a non-Approved status) is left
+            // alone.
+            WithdrawApprovalWrittenBy(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
+            throw new HostOperationException(
+                "approval_mismatch",
+                $"The approval does not cover the current content of '{entry.Id}': {entry.Decision.Reason}.");
+        }
     }
 
     /// <summary>
@@ -825,7 +901,24 @@ public sealed class ExtensionHost : IAsyncDisposable
 
         return !SamePermissions(entry.Manifest.Permissions, onDisk.Permissions) ||
             !SameDependencies(entry.Manifest.Dependencies, onDisk.Dependencies) ||
-            !string.Equals(entry.Manifest.EntryAssembly, onDisk.EntryAssembly, StringComparison.Ordinal);
+            !string.Equals(entry.Manifest.EntryAssembly, onDisk.EntryAssembly, StringComparison.Ordinal) ||
+            !string.Equals(entry.Manifest.Kind, onDisk.Kind, StringComparison.Ordinal) ||
+            !string.Equals(entry.Manifest.WorkflowFile, onDisk.WorkflowFile, StringComparison.Ordinal) ||
+            !SameTool(entry.Manifest.Tool, onDisk.Tool);
+    }
+
+    /// <summary>Compares the tool a workflow package publishes; the schema text is compared verbatim, because that is what
+    /// the main program received and what the approval covers.</summary>
+    private static bool SameTool(ExtensionToolSpec? stored, ExtensionToolSpec? current)
+    {
+        if (stored is null || current is null)
+        {
+            return stored is null && current is null;
+        }
+
+        return string.Equals(stored.Name, current.Name, StringComparison.Ordinal) &&
+            string.Equals(stored.Description, current.Description, StringComparison.Ordinal) &&
+            string.Equals(stored.InputSchemaJson, current.InputSchemaJson, StringComparison.Ordinal);
     }
 
     private static bool SamePermissions(IReadOnlyList<Permission> stored, IReadOnlyList<Permission> current)
@@ -1110,7 +1203,21 @@ public sealed class ExtensionHost : IAsyncDisposable
     private async Task ApplyCoreAsync(PluginEntry entry, CancellationToken ct)
     {
         var evaluation = await EvaluateAsync(entry, ct).ConfigureAwait(false);
-        if (!evaluation.Decision.IsAllowed || evaluation.Image is not { } image)
+        if (!evaluation.Decision.IsAllowed || !entry.HasContent)
+        {
+            await UnregisterAllAsync(entry.Id, ct).ConfigureAwait(false);
+            await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+            return;
+        }
+
+        if (entry.IsWorkflow)
+        {
+            // Nothing to start and nothing to load: a workflow publishes its one tool and its declared permissions.
+            await PublishWorkflowAsync(entry, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (evaluation.Image is not { } image)
         {
             await UnregisterAllAsync(entry.Id, ct).ConfigureAwait(false);
             await StopWorkerAsync(entry.Id).ConfigureAwait(false);

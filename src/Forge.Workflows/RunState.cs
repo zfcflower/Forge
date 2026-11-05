@@ -52,8 +52,9 @@ internal sealed class RunState : IDisposable
     private readonly string[] _stepIds;
     private readonly StepOutcome?[] _outcomes;
     private readonly JsonSlot?[] _json;
+    private readonly JsonElement? _input;
 
-    public RunState(WorkflowPlan plan)
+    public RunState(WorkflowPlan plan, JsonElement? input = null)
     {
         _stepIds = new string[plan.Steps.Length];
         for (var i = 0; i < plan.Steps.Length; i++)
@@ -63,11 +64,29 @@ internal sealed class RunState : IDisposable
 
         _outcomes = new StepOutcome?[_stepIds.Length];
         _json = new JsonSlot?[_stepIds.Length];
+        _input = input;
     }
 
     public void Publish(int index, StepOutcome outcome) => Volatile.Write(ref _outcomes[index], outcome);
 
     public StepOutcome? Read(int index) => Volatile.Read(ref _outcomes[index]);
+
+    /// <summary>
+    /// Resolves an <c>$input</c> path against the arguments of the call that started this run. A run without input (or an
+    /// input that is <see cref="JsonValueKind.Undefined"/>) fails every such binding: the engine never invents a value,
+    /// so a step that needs the input fails instead of calling its tool with something the caller did not supply.
+    /// </summary>
+    public bool TryResolveInput(BindingPath path, out ResolvedValue value, out string? error)
+    {
+        if (_input is not { } input || input.ValueKind == JsonValueKind.Undefined)
+        {
+            value = ResolvedValue.None;
+            error = "the run has no $input; RunOptions.Input was not supplied";
+            return false;
+        }
+
+        return TryNavigate(input, path, out value, out error);
+    }
 
     public bool TryResolve(BindingPath path, int producerIndex, out ResolvedValue value, out string? error)
     {

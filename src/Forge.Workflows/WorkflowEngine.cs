@@ -122,7 +122,7 @@ public sealed class WorkflowEngine
         private readonly IHostFacade _host = host;
         private readonly RunOptions _options = options;
         private readonly TimeProvider _clock = options.TimeProvider;
-        private readonly RunState _state = new(plan);
+        private readonly RunState _state = new(plan, options.Input);
         private readonly DateTimeOffset[] _startedAt = new DateTimeOffset[plan.Steps.Length];
         private readonly long[] _startedTimestamp = new long[plan.Steps.Length];
         private readonly DateTimeOffset[] _completedAt = new DateTimeOffset[plan.Steps.Length];
