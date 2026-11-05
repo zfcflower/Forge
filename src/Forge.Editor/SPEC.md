@@ -27,3 +27,7 @@ parent: forge-architecture
 
 **TextMate。** Oniguruma 正则翻译为 .NET 正则(未内化 GregsEx,体积过大),翻译不了的模式报诊断并不匹配;include 规则展开带环检测与深度上限;状态相等性覆盖影响后续分词的全部字段(含 `BeginRuleCapturedEol`),保证增量与全量结果一致;用户语法可来自 `~/.forge/grammars` 与 `<workspace>/.forge/grammars`。字符串高亮源与快照高亮源都把 LF/CRLF/CR 视为换行且行内容不含换行符;快照经 `TextSnapshotHighlightSource` 适配 `IHighlightSource`,整份文本物化为一个字符串后按行返回 `ReadOnlySpan<char>`,读行零分配。
 
+
+## 未决
+
+- TextMate 分词器内部(`TextMate/Internal/Tokenizer.cs` 的 `Tokenize`)每行仍把行文本和换行符拼接成一个新字符串(`string.Concat`);适配层读行已零分配,端到端仍有每行一次分配。
