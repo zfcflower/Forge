@@ -65,7 +65,10 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Equal(
             shell.ViewModel.Settings.Sections.Items.Select(static section => section.Id),
             rendered);
-        Assert.Equal([SettingsSectionIds.Provider, SettingsSectionIds.Paths], rendered);
+        // The language section ships with the shell today; a feature that adds one later appends it here too.
+        Assert.Equal(
+            [SettingsSectionIds.Provider, SettingsSectionIds.Language, SettingsSectionIds.Paths],
+            rendered);
     }
 
     [Fact]
@@ -316,8 +319,9 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             }
         }
 
+        // The sections the shell ships today, including the language one this task added.
         private static readonly string[] KnownSectionIds =
-            [SettingsSectionIds.Provider, SettingsSectionIds.Paths];
+            [SettingsSectionIds.Provider, SettingsSectionIds.Language, SettingsSectionIds.Paths];
 
         private static TextBlock? Heading(Window window, string id) =>
             window.GetVisualDescendants()

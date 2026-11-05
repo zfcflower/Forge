@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="using:Forge.App.Views"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -54,6 +55,22 @@
       </StackPanel>
     </DataTemplate>
 
+    <DataTemplate DataType="loc:LanguageSettingsViewModel" x:DataType="loc:LanguageSettingsViewModel">
+      <StackPanel Spacing="6">
+        <RadioButton GroupName="ui-language"
+                     Content="{Binding SystemText}"
+                     IsChecked="{Binding IsSystem, Mode=TwoWay}" />
+        <TextBlock Classes="caption" Margin="24,0,0,0" TextWrapping="Wrap" Text="{Binding SystemResolvedText}" />
+        <RadioButton GroupName="ui-language"
+                     Content="{Binding ChineseText}"
+                     IsChecked="{Binding IsChinese, Mode=TwoWay}" />
+        <RadioButton GroupName="ui-language"
+                     Content="{Binding EnglishText}"
+                     IsChecked="{Binding IsEnglish, Mode=TwoWay}" />
+        <TextBlock Classes="caption" Margin="0,6,0,0" TextWrapping="Wrap" Text="{Binding Hint}" />
+      </StackPanel>
+    </DataTemplate>
+
     <DataTemplate DataType="vm:PathsSettingsSectionViewModel" x:DataType="vm:PathsSettingsSectionViewModel">
       <ItemsControl ItemsSource="{Binding Paths}">
         <ItemsControl.ItemTemplate>
@@ -98,7 +115,8 @@
                     Command="{Binding ToggleCommand}"
                     HorizontalAlignment="Left"
                     HorizontalContentAlignment="Left"
-                    AutomationProperties.AutomationId="turn-toggle" AutomationProperties.Name="折叠本轮">
+                    AutomationProperties.AutomationId="turn-toggle"
+                    AutomationProperties.Name="{Binding [turn.collapse], Source={x:Static loc:Loc.Instance}}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
                 <TextBlock Classes="caption" Text="{Binding Header}" />
@@ -153,12 +171,14 @@
             </Grid>
           </Button>
           <StackPanel IsVisible="{Binding IsExpanded}" Spacing="4" Margin="14,2,0,2">
-            <TextBlock Classes="label" Text="参数" />
+            <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
             <SelectableTextBlock Classes="mono"
                                  Text="{Binding Arguments}"
                                  TextWrapping="Wrap"
                                  Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBlock Classes="label" Text="结果" IsVisible="{Binding HasResult}" />
+            <TextBlock Classes="label"
+                       Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
+                       IsVisible="{Binding HasResult}" />
             <SelectableTextBlock Classes="mono"
                                  Text="{Binding Result}"
                                  TextWrapping="Wrap"

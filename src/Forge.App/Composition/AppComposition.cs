@@ -169,6 +169,14 @@ internal sealed class AppComposition : IAsyncDisposable
         var preferences = new PreferencesStore(paths.SettingsPath);
         var settings = new SettingsSections();
 
+        // The language section edits AppPreferences.Language only: OnPreferencesChanged pushes the value into Loc and
+        // PreferencesStore persists it, so it needs nothing but the preferences.
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Language,
+            LanguageStrings.SectionTitle,
+            SettingsSectionIds.LanguageOrder,
+            new LanguageSettingsViewModel(preferences.Current)));
+
         // 1. The approval database is owned by the extension host; the shell only reads its record count.
         var approvalsDatabasePath = Path.Combine(paths.HostDataDirectory, ApprovalStore.FileName);
 
