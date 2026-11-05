@@ -148,6 +148,110 @@ public sealed class TreeVisualTests : IDisposable
     }
 
     [Fact]
+    public async Task Child_chevron_left_aligns_with_parent_icon_left()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var root = NewRoot();
+        Write(root, "a/b/c.txt");
+
+        var edges = await session.Dispatch(
+            async () =>
+            {
+                var panel = NewFilesPanel();
+                panel.Attach(new PanelContext("s1", root, null));
+                await panel.RefreshAsync(CancellationToken.None);
+
+                panel.Rows.Single(static row => row.RelativePath == "a").IsExpanded = true;
+
+                var view = new FilesToolView { DataContext = panel };
+                var window = new Window { Width = 420, Height = 320, Content = view };
+                window.Show();
+                Settle(window);
+
+                var tree = FilesTree(view);
+                var parent = ItemWithTitle(tree, "a")!;
+                var child = ItemWithTitle(tree, "b")!;
+
+                return (ParentIconLeft: AbsoluteLeft(IconOf(parent), window),
+                    ChildChevronLeft: AbsoluteLeft(ChevronOf(child), window));
+            },
+            CancellationToken.None);
+
+        Assert.Equal(edges.ParentIconLeft, edges.ChildChevronLeft, 0.5);
+    }
+
+    [Fact]
+    public async Task Spec_tree_uses_file_tree_guides_and_icons()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var root = NewRoot();
+        WriteSpec(root, "specs/00-root.md", "root", null, "Root", "draft");
+        WriteSpec(root, "specs/01-app.md", "app", "root", "App", "draft");
+        WriteSpec(root, "specs/02-views.md", "views", "app", "Views", "active");
+        WriteSpec(root, "specs/02-viewmodels.md", "viewmodels", "app", "ViewModels", "active");
+
+        var result = await session.Dispatch(
+            async () =>
+            {
+                var panel = NewSpecPanel(root);
+                panel.Attach(new PanelContext("s1", root, root));
+                await panel.RefreshAsync(CancellationToken.None);
+
+                var rootRow = panel.Rows.Single(static row => row.Id == "root");
+                var appRow = panel.Rows.Single(static row => row.Id == "app");
+                var viewsRow = panel.Rows.Single(static row => row.Id == "views");
+
+                var model = (RootLevels: Levels(rootRow),
+                    AppLevels: Levels(appRow),
+                    ViewsLevels: Levels(viewsRow),
+                    RootOpenFolder: ReferenceEquals(TreeIcons.FolderOpen, rootRow.Icon),
+                    AppOpenFolder: ReferenceEquals(TreeIcons.FolderOpen, appRow.Icon),
+                    ViewsFile: ReferenceEquals(TreeIcons.File, viewsRow.Icon));
+
+                rootRow.IsExpanded = false;
+                var afterCollapse = (AppLevels: Levels(appRow), ViewsLevels: Levels(viewsRow));
+                rootRow.IsExpanded = true;
+
+                var view = new SpecTreeToolView { DataContext = panel };
+                var window = new Window { Width = 420, Height = 240, Content = view };
+                window.Show();
+                Settle(window);
+
+                var tree = SpecTree(view);
+                var rootItem = ItemWithTitle(tree, "Root")!;
+                var appItem = ItemWithTitle(tree, "App")!;
+                var viewsItem = ItemWithTitle(tree, "Views")!;
+
+                return (Model: model,
+                    AfterCollapse: afterCollapse,
+                    RootGuides: GuideLines(rootItem).Count(),
+                    AppGuides: GuideLines(appItem).Count(),
+                    ViewsGuides: GuideLines(viewsItem).Count(),
+                    RootIcon: ReferenceEquals(TreeIcons.FolderOpen, IconOf(rootItem).Data),
+                    AppIcon: ReferenceEquals(TreeIcons.FolderOpen, IconOf(appItem).Data),
+                    ViewsIcon: ReferenceEquals(TreeIcons.File, IconOf(viewsItem).Data));
+            },
+            CancellationToken.None);
+
+        Assert.Empty(result.Model.RootLevels);
+        Assert.Equal([0], result.Model.AppLevels);
+        Assert.Equal([0, 1], result.Model.ViewsLevels);
+        Assert.True(result.Model.RootOpenFolder);
+        Assert.True(result.Model.AppOpenFolder);
+        Assert.True(result.Model.ViewsFile);
+
+        Assert.Empty(result.AfterCollapse.AppLevels);
+        Assert.Equal([1], result.AfterCollapse.ViewsLevels);
+
+        Assert.Equal(0, result.RootGuides);
+        Assert.Equal(1, result.AppGuides);
+        Assert.Equal(2, result.ViewsGuides);
+        Assert.True(result.RootIcon);
+        Assert.True(result.AppIcon);
+        Assert.True(result.ViewsIcon);
+    }
+
+    [Fact]
     public async Task Agent_rows_put_chevron_after_title_and_colour_and_animate_by_state()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
@@ -225,6 +329,14 @@ public sealed class TreeVisualTests : IDisposable
         Write(filesRoot, "Archive/old.md");
         Write(filesRoot, "README.md");
 
+        var specRoot = NewRoot();
+        WriteSpec(specRoot, "specs/00-root.md", "root", null, "Root", "draft");
+        WriteSpec(specRoot, "specs/01-app.md", "app", "root", "App", "draft");
+        WriteSpec(specRoot, "specs/01-core.md", "core", "root", "Core", "draft");
+        WriteSpec(specRoot, "specs/01-workspace.md", "workspace", "root", "Workspace", "draft");
+        WriteSpec(specRoot, "specs/02-views.md", "views", "app", "Views", "active");
+        WriteSpec(specRoot, "specs/02-viewmodels.md", "viewmodels", "app", "ViewModels", "active");
+
         await using var session = HeadlessUnitTestSession.StartNew(typeof(TreeScreenshotAppBuilder));
         await session.Dispatch(
             async () =>
@@ -246,6 +358,19 @@ public sealed class TreeVisualTests : IDisposable
                     frame?.Save(System.IO.Path.Combine(output, "files-tree.png"), PngBitmapEncoderOptions.Default);
                 }
 
+                var specs = NewSpecPanel(specRoot);
+                specs.Attach(new PanelContext("s1", specRoot, specRoot));
+                await specs.RefreshAsync(CancellationToken.None);
+
+                var specView = new SpecTreeToolView { DataContext = specs };
+                var specWindow = new Window { Width = 360, Height = 260, Content = specView };
+                specWindow.Show();
+                Settle(specWindow);
+                using (var frame = specWindow.CaptureRenderedFrame())
+                {
+                    frame?.Save(System.IO.Path.Combine(output, "spec-tree.png"), PngBitmapEncoderOptions.Default);
+                }
+
                 var agents = new ProjectView { DataContext = BuildAgentViewModel() };
                 var agentsWindow = new Window { Width = 360, Height = 240, Content = agents };
                 agentsWindow.Show();
@@ -261,6 +386,8 @@ public sealed class TreeVisualTests : IDisposable
     }
 
     private static FilesPanelViewModel NewFilesPanel() => new(new GitCli(), _ => { }, _ => { }, _ => { });
+
+    private static SpecTreeViewModel NewSpecPanel(string root) => new(_ => new SpecGraph(root), _ => { });
 
     private static ProjectTreeViewModel BuildAgentViewModel()
     {
@@ -298,11 +425,16 @@ public sealed class TreeVisualTests : IDisposable
 
     private static int[] Levels(FileNodeViewModel node) => node.Guides.Select(static mark => mark.Level).ToArray();
 
+    private static int[] Levels(SpecNodeViewModel node) => node.Guides.Select(static mark => mark.Level).ToArray();
+
     private static ListBox FilesTree(Visual root) => root.GetVisualDescendants().OfType<ListBox>()
         .First(static list => AutomationProperties.GetAutomationId(list) == "files-tree");
 
     private static ListBox ProjectTree(Visual root) => root.GetVisualDescendants().OfType<ListBox>()
         .First(static list => AutomationProperties.GetAutomationId(list) == "project-tree");
+
+    private static ListBox SpecTree(Visual root) => root.GetVisualDescendants().OfType<ListBox>()
+        .First(static list => AutomationProperties.GetAutomationId(list) == "spec-tree");
 
     private static IEnumerable<T> Visible<T>(Visual root) where T : Visual =>
         root.GetVisualDescendants().OfType<T>().Where(static visual => visual.IsEffectivelyVisible);
@@ -316,6 +448,15 @@ public sealed class TreeVisualTests : IDisposable
 
     private static AvaloniaPath IconOf(Visual item) =>
         Visible<AvaloniaPath>(item).First(static path => path.Classes.Contains("tree-icon"));
+
+    private static AvaloniaPath ChevronOf(Visual item) =>
+        Visible<AvaloniaPath>(item).First(static path => path.Classes.Contains("tree-chevron"));
+
+    private static IEnumerable<Border> GuideLines(Visual item) =>
+        Visible<Border>(item).Where(static border => border.Width == 1);
+
+    private static double AbsoluteLeft(Visual visual, Visual root) =>
+        visual.TranslatePoint(new Point(0, 0), root)?.X ?? double.NaN;
 
     private static Color ColourOf(AvaloniaPath path) => ((SolidColorBrush)path.Stroke!).Color;
 
@@ -349,6 +490,16 @@ public sealed class TreeVisualTests : IDisposable
         var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         File.WriteAllText(full, "x");
+    }
+
+    private static void WriteSpec(string root, string relativePath, string id, string? parent, string title, string status)
+    {
+        var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        var parentLine = parent is null ? string.Empty : "parent: " + parent + "\n";
+        File.WriteAllText(full,
+            "---\nid: " + id + "\ntype: module-design\nstatus: " + status + "\ntitle: " + title + "\n" +
+            parentLine + "---\n\n# " + title + "\n");
     }
 }
 

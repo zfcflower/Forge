@@ -4,23 +4,66 @@
              x:Class="Forge.App.Views.SpecTreeToolView"
              x:DataType="vm:SpecTreeViewModel">
   <UserControl.Resources>
+    <!-- One indent step, sized by the mark; the guide line is centred in the chevron slot so it lines up under
+         the ancestor's chevron. -->
+    <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
+      <Border Width="{Binding Step}" VerticalAlignment="Stretch">
+        <Grid ColumnDefinitions="8,*" VerticalAlignment="Stretch">
+          <Border Width="1"
+                  HorizontalAlignment="Center"
+                  IsVisible="{Binding DrawLine}"
+                  Background="{DynamicResource BorderBrush}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
     <DataTemplate x:Key="SpecNodeTemplate" x:DataType="vm:SpecNodeViewModel">
-      <Border Classes="tree-row" Margin="{Binding Indent}">
+      <Border Classes="tree-row">
         <Grid ColumnDefinitions="Auto,*">
-          <Button Classes="ghost icon"
-                  Width="14"
-                  Height="16"
-                  Command="{Binding ToggleCommand}"
-                  HorizontalContentAlignment="Center"
-                  VerticalContentAlignment="Center">
-            <TextBlock Classes="glyph" Text="{Binding Glyph}" />
-          </Button>
-          <Button Grid.Column="1"
-                  Classes="link"
-                  HorizontalAlignment="Left"
-                  HorizontalContentAlignment="Left"
-                  Command="{Binding OpenCommand}"
-                  Content="{Binding Display}" />
+          <ItemsControl Grid.Column="0"
+                        VerticalAlignment="Stretch"
+                        ItemsSource="{Binding Guides}"
+                        ItemTemplate="{StaticResource IndentGuideTemplate}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+          <Border Grid.Column="1" Classes="tree-row-content">
+            <Grid ColumnDefinitions="Auto,Auto,*">
+              <Border Grid.Column="0" Width="8">
+                <Button Classes="tree-chevron-button"
+                        Command="{Binding ToggleCommand}"
+                        IsVisible="{Binding HasToggle}">
+                  <Path Data="{StaticResource TreeChevronGeometry}"
+                        Classes="tree-chevron"
+                        Classes.expanded="{Binding ChevronRotated}"
+                        Width="8"
+                        Height="8"
+                        HorizontalAlignment="Center"
+                        Stretch="Uniform" />
+                </Button>
+              </Border>
+              <Path Grid.Column="1"
+                    Classes="tree-icon"
+                    Data="{Binding Icon}"
+                    Margin="14,0,6,0" />
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button Classes="link"
+                        HorizontalAlignment="Left"
+                        HorizontalContentAlignment="Left"
+                        Command="{Binding OpenCommand}"
+                        Content="{Binding Title}"
+                        AutomationProperties.AutomationId="spec-row"
+                        AutomationProperties.Name="{Binding Title}" />
+                <TextBlock Classes="caption"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding HasStatus}"
+                           Text="{Binding Status}" />
+              </StackPanel>
+            </Grid>
+          </Border>
         </Grid>
       </Border>
     </DataTemplate>

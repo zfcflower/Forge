@@ -110,19 +110,29 @@ internal static class TreeMotion
     public static bool ReducedMotion { get; set; }
 }
 
-/// <summary>One indent step of a tree row; <see cref="DrawLine"/> is the 1 px guide line of a tree, not of an agent list.</summary>
-internal sealed record IndentMark(int Level, bool DrawLine);
+/// <summary>One indent step of a tree row; <see cref="DrawLine"/> is the 1 px guide line of a tree, not of an agent list,
+/// and <see cref="Step"/> is the cell width the view gives this mark.</summary>
+internal sealed record IndentMark(int Level, bool DrawLine, int Step);
 
 /// <summary>Shared indent lists, so a row references one cached array instead of allocating its own per render.</summary>
 internal static class IndentMarks
 {
-    /// <summary>One indent step in the view, and the width of the chevron slot it lines up with.</summary>
-    public const int Step = 16;
+    /// <summary>Width of the chevron column; the chevron box fills it, so a child chevron lines up under its parent's icon.</summary>
+    public const int ChevronSlot = 8;
+
+    /// <summary>Gap between the chevron column and the icon, so a child icon lines up near its parent's text.</summary>
+    public const int IconGap = 14;
+
+    /// <summary>One indent step for folder/file rows: the chevron slot plus the chevron-to-icon gap.</summary>
+    public const int Step = ChevronSlot + IconGap;
+
+    /// <summary>One indent step for agent rows, which keep the previous 16 px rhythm and draw no guide lines.</summary>
+    public const int SpacerStep = 16;
 
     private const int MaxDepth = 32;
 
-    private static readonly IReadOnlyList<IndentMark>[] Lines = Build(drawLine: true);
-    private static readonly IReadOnlyList<IndentMark>[] Spacers = Build(drawLine: false);
+    private static readonly IReadOnlyList<IndentMark>[] Lines = Build(drawLine: true, Step);
+    private static readonly IReadOnlyList<IndentMark>[] Spacers = Build(drawLine: false, SpacerStep);
     private static readonly Dictionary<int, IReadOnlyList<IndentMark>> Masks = [];
 
     /// <summary>Indent steps joined by a vertical guide line, for a fully-expanded chain.</summary>
@@ -167,7 +177,7 @@ internal static class IndentMarks
         {
             if ((mask & (1 << level)) != 0)
             {
-                marks[index++] = new IndentMark(level, true);
+                marks[index++] = new IndentMark(level, true, Step);
             }
         }
 
@@ -177,7 +187,7 @@ internal static class IndentMarks
     private static IReadOnlyList<IndentMark> At(IReadOnlyList<IndentMark>[] cache, int depth) =>
         depth <= 0 ? [] : cache[depth < MaxDepth ? depth : MaxDepth - 1];
 
-    private static IReadOnlyList<IndentMark>[] Build(bool drawLine)
+    private static IReadOnlyList<IndentMark>[] Build(bool drawLine, int step)
     {
         var cache = new IReadOnlyList<IndentMark>[MaxDepth];
         cache[0] = [];
@@ -186,7 +196,7 @@ internal static class IndentMarks
             var marks = new IndentMark[depth];
             for (var level = 0; level < depth; level++)
             {
-                marks[level] = new IndentMark(level, drawLine);
+                marks[level] = new IndentMark(level, drawLine, step);
             }
 
             cache[depth] = marks;

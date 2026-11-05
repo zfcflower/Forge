@@ -4,13 +4,16 @@
              x:Class="Forge.App.Views.ProjectView"
              x:DataType="vm:ProjectTreeViewModel">
   <UserControl.Resources>
-    <!-- One indent step: 16 px wide, with a 1 px guide line unless the row is an agent row. -->
+    <!-- One indent step, sized by the mark (folder rows and agent rows use different steps); the guide line is
+         centred in the chevron slot so it lines up under the ancestor's chevron. -->
     <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
-      <Border Width="16" VerticalAlignment="Stretch">
-        <Border Width="1"
-                HorizontalAlignment="Center"
-                IsVisible="{Binding DrawLine}"
-                Background="{DynamicResource BorderBrush}" />
+      <Border Width="{Binding Step}" VerticalAlignment="Stretch">
+        <Grid ColumnDefinitions="8,*" VerticalAlignment="Stretch">
+          <Border Width="1"
+                  HorizontalAlignment="Center"
+                  IsVisible="{Binding DrawLine}"
+                  Background="{DynamicResource BorderBrush}" />
+        </Grid>
       </Border>
     </DataTemplate>
 
@@ -41,7 +44,7 @@
             <Grid>
               <!-- Project / worktree / session rows: the chevron leads, then icon, title and trailing tools. -->
               <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" IsVisible="{Binding !IsAgent}">
-                <Border Grid.Column="0" Width="16">
+                <Border Grid.Column="0" Width="8">
                   <Button Classes="tree-chevron-button"
                           Command="{Binding ToggleCommand}"
                           IsVisible="{Binding HasToggle}">
@@ -57,7 +60,7 @@
                 <Path Grid.Column="1"
                       Classes="tree-icon"
                       Data="{Binding Icon}"
-                      Margin="0,0,6,0" />
+                      Margin="14,0,6,0" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Title}"
                              TextWrapping="NoWrap"

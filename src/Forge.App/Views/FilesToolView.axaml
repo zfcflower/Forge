@@ -4,12 +4,16 @@
              x:Class="Forge.App.Views.FilesToolView"
              x:DataType="vm:FilesPanelViewModel">
   <UserControl.Resources>
+    <!-- One indent step, sized by the mark; the guide line is centred in the chevron slot so it lines up under
+         the ancestor's chevron. -->
     <DataTemplate x:Key="IndentGuideTemplate" x:DataType="vm:IndentMark">
-      <Border Width="16" VerticalAlignment="Stretch">
-        <Border Width="1"
-                HorizontalAlignment="Center"
-                IsVisible="{Binding DrawLine}"
-                Background="{DynamicResource BorderBrush}" />
+      <Border Width="{Binding Step}" VerticalAlignment="Stretch">
+        <Grid ColumnDefinitions="8,*" VerticalAlignment="Stretch">
+          <Border Width="1"
+                  HorizontalAlignment="Center"
+                  IsVisible="{Binding DrawLine}"
+                  Background="{DynamicResource BorderBrush}" />
+        </Grid>
       </Border>
     </DataTemplate>
 
@@ -37,7 +41,7 @@
                     AutomationProperties.AutomationId="file-row"
                     AutomationProperties.Name="{Binding Name}">
               <Grid ColumnDefinitions="Auto,Auto,*">
-                <Border Grid.Column="0" Width="16">
+                <Border Grid.Column="0" Width="8">
                   <Path Data="{StaticResource TreeChevronGeometry}"
                         Classes="tree-chevron"
                         Classes.expanded="{Binding ChevronRotated}"
@@ -50,7 +54,7 @@
                 <Path Grid.Column="1"
                       Classes="tree-icon"
                       Data="{Binding Icon}"
-                      Margin="0,0,6,0" />
+                      Margin="14,0,6,0" />
                 <TextBlock Grid.Column="2"
                            Text="{Binding Name}"
                            TextWrapping="NoWrap"

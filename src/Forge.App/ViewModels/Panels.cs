@@ -1529,6 +1529,8 @@ internal sealed class SpecNodeViewModel : ObservableObject, IFlatTreeNode<SpecNo
 {
     private readonly Action<SpecNodeViewModel> expansionChanged;
     private readonly List<SpecNodeViewModel> children = [];
+    private SpecNodeViewModel? parent;
+    private int guideMask;
     private bool isExpanded;
 
     public SpecNodeViewModel(int depth, bool isExpanded, Action<SpecNodeViewModel> expansionChanged)
@@ -1536,6 +1538,8 @@ internal sealed class SpecNodeViewModel : ObservableObject, IFlatTreeNode<SpecNo
         Depth = depth;
         this.isExpanded = isExpanded;
         this.expansionChanged = expansionChanged;
+        ToggleCommand = new RelayCommand(() => IsExpanded = !IsExpanded);
+        OpenCommand = new RelayCommand(Open);
     }
 
     public required string Title { get; init; }
@@ -1548,17 +1552,26 @@ internal sealed class SpecNodeViewModel : ObservableObject, IFlatTreeNode<SpecNo
 
     public int Depth { get; private set; }
 
-    public Thickness Indent => new(Depth * 12, 0, 0, 0);
+    /// <summary>The guide lines of this row: one step per expanded ancestor, aligned to that ancestor's chevron.</summary>
+    public IReadOnlyList<IndentMark> Guides => IndentMarks.ForMask(guideMask);
+
+    /// <summary>Documents use the file shape; a node with children uses the closed/open folder shape.</summary>
+    public Geometry Icon => children.Count > 0
+        ? (isExpanded ? TreeIcons.FolderOpen : TreeIcons.Folder)
+        : TreeIcons.File;
 
     public IReadOnlyList<SpecNodeViewModel> Children => children;
 
-    public string Glyph => children.Count > 0 ? (isExpanded ? "▾" : "▸") : "·";
+    public bool HasToggle => children.Count > 0;
 
-    public string Display => Status.Length > 0 ? Title + "  " + Status : Title;
+    public bool HasStatus => Status.Length > 0;
 
-    public RelayCommand? ToggleCommand => children.Count > 0 ? new RelayCommand(() => IsExpanded = !IsExpanded) : null;
+    public RelayCommand ToggleCommand { get; }
 
-    public RelayCommand OpenCommand => new(Open);
+    public RelayCommand OpenCommand { get; }
+
+    /// <summary>Chevron points right when collapsed, down when expanded.</summary>
+    public bool ChevronRotated => isExpanded;
 
     public bool IsExpanded
     {
@@ -1570,16 +1583,55 @@ internal sealed class SpecNodeViewModel : ObservableObject, IFlatTreeNode<SpecNo
                 return;
             }
 
-            OnPropertyChanged(nameof(Glyph));
+            OnPropertyChanged(nameof(ChevronRotated));
+            OnPropertyChanged(nameof(Icon));
+            foreach (var child in children)
+            {
+                child.RefreshGuideMask();
+            }
+
             expansionChanged(this);
         }
     }
 
     public Action<string>? OpenFile { get; init; }
 
-    public void Add(SpecNodeViewModel child) => children.Add(child);
+    public void Add(SpecNodeViewModel child)
+    {
+        children.Add(child);
+        child.parent = this;
+    }
 
-    public void SetDepth(int depth) => Depth = depth;
+    /// <summary>Sets the row's depth during the top-down build; the guide mask is derived from the parent, which is
+    /// already assigned because the build walks parents first.</summary>
+    public void SetDepth(int depth)
+    {
+        Depth = depth;
+        guideMask = GuideMaskOf(parent);
+        OnPropertyChanged(nameof(Guides));
+    }
+
+    private static int GuideMaskOf(SpecNodeViewModel? parent) =>
+        parent is null
+            ? 0
+            : parent.guideMask | (parent.isExpanded && parent.Depth < 31 ? 1 << parent.Depth : 0);
+
+    /// <summary>Recomputes this node's guide mask after an ancestor expanded or collapsed, then its subtree.</summary>
+    private void RefreshGuideMask()
+    {
+        var next = GuideMaskOf(parent);
+        if (next == guideMask)
+        {
+            return;
+        }
+
+        guideMask = next;
+        OnPropertyChanged(nameof(Guides));
+        foreach (var child in children)
+        {
+            child.RefreshGuideMask();
+        }
+    }
 
     private void Open() => OpenFile?.Invoke(FullPath);
 }
