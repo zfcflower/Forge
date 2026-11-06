@@ -34,6 +34,13 @@ internal sealed record AgentRuntimeServices(
     public IStepCommitter? StepCommitter { get; set; }
 
     /// <summary>
+    /// The pull request tools (<c>pr_*</c>, <c>review_comments</c>, <c>review_comment_resolve</c>), registered after the git
+    /// tools. Stateless across sessions like <see cref="Git"/>; empty in a unit test. Read-only ones pass through
+    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask.
+    /// </summary>
+    public IReadOnlyList<ITool> PullRequestTools { get; set; } = [];
+
+    /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
     /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
     /// </summary>
@@ -261,7 +268,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             if (tools.Count > 0)
             {
                 // Scripts only see extension-host tools: a call from inside run_code never goes through the per-call
-                // approval presentation, so the git write tools (git_branch, git_sync) must stay out of its registry.
+                // approval presentation, so the git and PR write tools must stay out of its registry.
                 tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
             }
 
@@ -276,6 +283,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             tools.AddRange(git.All);
         }
 
+        tools.AddRange(services.PullRequestTools);
         return tools;
     }
 
@@ -354,7 +362,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// authoring service puts in front of the user. <c>extension_delete</c> keeps asking: that card is the deletion
     /// confirmation. Every other write or execution goes to the session's <see cref="SessionApprovalHandler"/>.
     /// <para>The git tools are deliberately absent: the read-only ones pass through
-    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones (git_branch, git_sync) always ask.</para>
+    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones (git_branch, git_sync, pr_create, pr_sync, pr_edit, pr_comment_reply, pr_comment_resolve, review_comment_resolve) always ask.</para>
     /// </summary>
     private static readonly IApprovalPolicy SessionPolicy = CreatePolicy();
 

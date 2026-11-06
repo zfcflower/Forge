@@ -287,7 +287,19 @@ internal sealed class AppComposition : IAsyncDisposable
 
         // 8. The per-session agent runtimes. The git tools are built once for the whole app: they are stateless, take the
         //    session's worktree from each call's ToolContext, and read the live git preferences on every call.
-        var gitTools = new GitTools(git, GitToolPreferences.ToolSettings(preferences.Current), new GitReviewLedger());
+        //    The review ledger is shared: git_diff records the reviewed HEAD that pr_create's self-review gate checks.
+        var gitToolSettings = GitToolPreferences.ToolSettings(preferences.Current);
+        var reviewLedger = new GitReviewLedger();
+        var gitTools = new GitTools(git, gitToolSettings, reviewLedger);
+        var gh = new GhCli(git: git) { NetworkTimeout = gitToolSettings.NetworkTimeout };
+        var prPlatform = new GitHubPlatform(gh);
+        var prChecksPoller = new PrChecksPoller(prPlatform, TimeProvider.System);
+        IReadOnlyList<ITool> pullRequestTools =
+        [
+            .. new PrTools(git, prPlatform, gitToolSettings, reviewLedger, todos).All,
+            .. new PrCheckTools(prPlatform, prChecksPoller, static () => new PrChecksPollerOptions()).All,
+            .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, PrCommentUser.FromGh(gh)).All,
+        ];
         var runtimeServices = new AgentRuntimeServices(
             BuildProviderFactory(provider, httpClient),
             host?.Client,
@@ -297,6 +309,7 @@ internal sealed class AppComposition : IAsyncDisposable
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty),
             Git: gitTools);
         runtimeServices.Approvals = approvals;
+        runtimeServices.PullRequestTools = pullRequestTools;
         var stepCommitter = new StepCommitter(
             git,
             todos,
