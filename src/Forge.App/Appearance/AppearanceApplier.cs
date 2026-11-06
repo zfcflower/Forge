@@ -28,6 +28,8 @@ internal sealed class AppearanceApplier : IDisposable
     private readonly PropertyChangedEventHandler preferenceChanged;
     private ResourceDictionary tokens = new();
     private Applied? applied;
+    private string? rejectedUi;
+    private string? rejectedCode;
     private bool disposed;
 
     /// <summary>Subscribes to <paramref name="preferences"/> and applies the current values immediately.</summary>
@@ -54,8 +56,8 @@ internal sealed class AppearanceApplier : IDisposable
             return;
         }
 
-        var ui = Resolve(preferences.UiFontFamily, applied?.Ui, "interface");
-        var code = Resolve(preferences.CodeFontFamily, applied?.Code, "code");
+        var ui = Resolve(preferences.UiFontFamily, applied?.Ui, "interface", AppPreferences.DefaultUiFontFamily, ref rejectedUi);
+        var code = Resolve(preferences.CodeFontFamily, applied?.Code, "code", AppPreferences.DefaultCodeFontFamily, ref rejectedCode);
         var sizes = FontScale.Compute(preferences.UiFontSize);
         var codeSize = preferences.CodeFontSize;
 
@@ -119,7 +121,7 @@ internal sealed class AppearanceApplier : IDisposable
     /// can never blank out the interface; the problem goes to <c>Trace</c>. The same text is never parsed twice, which is
     /// what lets the caller compare effective values by text.
     /// </summary>
-    private static ResolvedFamily Resolve(string text, ResolvedFamily? previous, string which)
+    private static ResolvedFamily Resolve(string text, ResolvedFamily? previous, string which, string defaultText, ref string? rejected)
     {
         if (previous is { } last && last.Text.Equals(text, StringComparison.Ordinal))
         {
@@ -131,18 +133,30 @@ internal sealed class AppearanceApplier : IDisposable
             var family = FontFamily.Parse(text);
             if (HasFamilyName(family))
             {
+                rejected = null;
                 return new ResolvedFamily(text, family);
             }
 
-            Trace.WriteLine($"[appearance] the {which} font family \"{text}\" has no usable family name; keeping the previous family.");
+            Reject(text, which, "has no usable family name", ref rejected);
         }
         catch (Exception exception) when (exception is FormatException or ArgumentException or NotSupportedException)
         {
-            Trace.WriteLine(
-                $"[appearance] the {which} font family \"{text}\" does not parse; keeping the previous family: {exception.Message}");
+            Reject(text, which, "does not parse (" + exception.Message + ")", ref rejected);
         }
 
-        return previous ?? new ResolvedFamily(text, FontFamily.Default);
+        return previous ?? new ResolvedFamily(defaultText, FontFamily.Parse(defaultText));
+    }
+
+    /// <summary>Traces a rejected text once; the same text arriving again (every Apply re-reads it) stays silent.</summary>
+    private static void Reject(string text, string which, string reason, ref string? rejected)
+    {
+        if (string.Equals(rejected, text, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        rejected = text;
+        Trace.WriteLine($"[appearance] the {which} font family \"{text}\" {reason}; keeping the previous family.");
     }
 
     /// <summary>A chain of only empty segments ("," or " ") parses to a family with no name that nothing can render.</summary>

@@ -90,9 +90,8 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
     /// <summary>
     /// Hands the list over on the constructing thread: bound controls may only be told from their own thread, and the
     /// continuation after the background enumeration is only back on that thread when it has a synchronization context.
-    /// A host without a dispatcher loop (a unit test) posts into a queue nothing pumps, so the same list is assigned
-    /// straight away as well - nothing is bound there, the second assignment of the very same instance changes nothing,
-    /// and <see cref="FamiliesLoaded"/> must complete either way.
+    /// A thread without a dispatcher (a unit test) assigns straight away; with a dispatcher the list is only posted and
+    /// <see cref="FamiliesLoaded"/> completes from the posted action.
     /// </summary>
     private void PublishFamilies(IReadOnlyList<string> families)
     {
@@ -102,8 +101,26 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        // Off the constructing thread: only the posted action may touch the groups.
         dispatcher.Post(() => AssignFamilies(families));
-        AssignFamilies(families);
+    }
+
+    /// <summary>
+    /// Re-reads both groups' family text, size and preview from the preferences. The preferences finish loading after this
+    /// view model is built and the load raises no PropertyChanged, so without this the editors would keep the defaults and
+    /// a later commit would write that stale text over the saved value. UI thread only.
+    /// </summary>
+    internal void SyncAll()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        Ui.SyncFamily();
+        Ui.SyncSize();
+        Code.SyncFamily();
+        Code.SyncSize();
     }
 
     private void AssignFamilies(IReadOnlyList<string> families)
@@ -236,13 +253,15 @@ internal sealed class FontGroupViewModel : ObservableObject
                 return;
             }
 
+            // The spec's step is 1 (integer sizes); typed fractions round half away from zero.
+            var rounded = (double)Math.Round(requested, MidpointRounding.AwayFromZero);
             if (kind == FontGroupKind.Ui)
             {
-                preferences.UiFontSize = (double)requested;
+                preferences.UiFontSize = rounded;
             }
             else
             {
-                preferences.CodeFontSize = (double)requested;
+                preferences.CodeFontSize = rounded;
             }
 
             SyncSize();

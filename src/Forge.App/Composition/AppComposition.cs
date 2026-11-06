@@ -407,6 +407,22 @@ internal sealed class AppComposition : IAsyncDisposable
     /// Last-resort teardown from <see cref="AppDomain.ProcessExit"/>, where nothing can be awaited. Bounded, and only the
     /// child process matters: an orphaned extension host would outlive the window.
     /// </summary>
+    public void Abort()
+    {
+        if (host is null)
+        {
+            return;
+        }
+
+        try
+        {
+            host.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(15));
+        }
+        catch (Exception exception) when (exception is AggregateException or ObjectDisposedException)
+        {
+        }
+    }
+
     /// <summary>
     /// The font feature's two pieces: the settings section (always) and the applier that writes the font tokens into the
     /// application resources (only when an <see cref="Application"/> exists and this is its thread - a composition built
@@ -417,6 +433,7 @@ internal sealed class AppComposition : IAsyncDisposable
         private readonly AppearanceSettingsViewModel section;
         private readonly AppearanceApplier? applier;
         private readonly Dispatcher? dispatcher;
+        private bool disposed;
 
         private AppearanceFeature(AppearanceSettingsViewModel section, AppearanceApplier? applier, Dispatcher? dispatcher)
         {
@@ -439,43 +456,44 @@ internal sealed class AppComposition : IAsyncDisposable
             return new AppearanceFeature(section, applier: null, dispatcher: null);
         }
 
-        /// <summary>The load raises no PropertyChanged, so the loaded fonts are pushed once, on the applier's thread.</summary>
+        /// <summary>
+        /// The load raises no PropertyChanged, so the loaded values are pushed once on the UI thread: the applier re-reads the
+        /// fonts and the section re-syncs its editors (they were built from the defaults, before the load).
+        /// </summary>
         public void ApplyLoaded()
         {
-            if (applier is null || dispatcher is null)
+            if (dispatcher is null)
             {
+                // No UI thread (a unit-test composition): nothing is bound, so the editors are synced right here.
+                SyncAndApply();
                 return;
             }
 
             if (dispatcher.CheckAccess())
             {
-                applier.Apply();
+                SyncAndApply();
                 return;
             }
 
-            dispatcher.Post(applier.Apply);
+            dispatcher.Post(SyncAndApply);
+        }
+
+        private void SyncAndApply()
+        {
+            if (Volatile.Read(ref disposed))
+            {
+                return;
+            }
+
+            section.SyncAll();
+            applier?.Apply();
         }
 
         public void Dispose()
         {
+            Volatile.Write(ref disposed, true);
             applier?.Dispose();
             section.Dispose();
-        }
-    }
-
-    public void Abort()
-    {
-        if (host is null)
-        {
-            return;
-        }
-
-        try
-        {
-            host.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(15));
-        }
-        catch (Exception exception) when (exception is AggregateException or ObjectDisposedException)
-        {
         }
     }
 }
