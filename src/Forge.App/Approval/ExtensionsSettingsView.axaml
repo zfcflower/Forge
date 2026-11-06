@@ -17,7 +17,7 @@
               Command="{Binding RefreshCommand}"
               Content="{Binding RefreshText}"
               AutomationProperties.AutomationId="extensions-refresh"
-              AutomationProperties.Name="刷新" />
+              AutomationProperties.Name="{Binding [Extensions.Settings.Refresh], Source={x:Static loc:Loc.Instance}}" />
     </Grid>
 
     <Border Classes="notice" IsVisible="{Binding HasUnavailableText}">

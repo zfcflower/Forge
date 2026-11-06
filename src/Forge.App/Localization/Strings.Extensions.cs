@@ -113,6 +113,14 @@ internal static class ExtensionsStrings
     public const string SettingsLoadProblem = "Extensions.Settings.LoadProblem";
     public const string SettingsActionFailed = "Extensions.Settings.ActionFailed";
 
+    public const string RulesUnreadable = "Extensions.Rules.Unreadable";
+    public const string RulesReadFailed = "Extensions.Rules.ReadFailed";
+    public const string RulesInvalid = "Extensions.Rules.Invalid";
+    public const string RulesEmpty = "Extensions.Rules.Empty";
+    public const string RulesVersion = "Extensions.Rules.Version";
+    public const string RulesNoList = "Extensions.Rules.NoList";
+    public const string RulesWriteFailed = "Extensions.Rules.WriteFailed";
+
     public const string StatusDraft = "Extensions.Status.Draft";
     public const string StatusApproved = "Extensions.Status.Approved";
     public const string StatusDisabled = "Extensions.Status.Disabled";
@@ -222,6 +230,14 @@ internal static class ExtensionsStrings
         Loc.Register(SettingsRuleLine, "{0} · {1}", "{0} · {1}");
         Loc.Register(SettingsLoadProblem, "审批规则文件有问题，已按没有记住处理：{0}", "The approval rules file has a problem and was treated as empty: {0}");
         Loc.Register(SettingsActionFailed, "操作失败：{0}", "The action failed: {0}");
+
+        Loc.Register(RulesUnreadable, "approval-rules.json 无法读取：{0}", "approval-rules.json could not be read: {0}");
+        Loc.Register(RulesReadFailed, "读取 approval-rules.json 失败：{0}", "Reading approval-rules.json failed: {0}");
+        Loc.Register(RulesInvalid, "approval-rules.json 不是有效的审批规则文件：{0}", "approval-rules.json is not a valid approval rules file: {0}");
+        Loc.Register(RulesEmpty, "approval-rules.json 为空。", "approval-rules.json is empty.");
+        Loc.Register(RulesVersion, "approval-rules.json 的版本 {0} 无法识别。", "approval-rules.json has an unrecognized version: {0}.");
+        Loc.Register(RulesNoList, "approval-rules.json 缺少规则列表。", "approval-rules.json has no rule list.");
+        Loc.Register(RulesWriteFailed, "写入 approval-rules.json 失败：{0}", "Writing approval-rules.json failed: {0}");
 
         Loc.Register(StatusDraft, "草稿", "Draft");
         Loc.Register(StatusApproved, "已批准", "Approved");

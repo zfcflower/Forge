@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.HostClient;
 
 namespace Forge.App.Approval;
@@ -33,18 +34,19 @@ internal interface IExtensionHostState
 internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
 {
     private readonly ExtensionHostSupervisor? host;
+    private readonly LocText hostProblem;
     private readonly Lock gate = new();
     private bool disposed;
     private int restoring;
 
-    private ApprovalServices(AppPaths paths, ExtensionHostSupervisor? host, string? hostProblem)
+    private ApprovalServices(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem)
     {
         ArgumentNullException.ThrowIfNull(paths);
         Rules = new ApprovalRules(Path.Combine(paths.UserDataDirectory, ApprovalRules.FileName));
         Queue = new ApprovalQueue();
         Sessions = new ApprovalSessionDirectory();
         this.host = host;
-        HostProblem = hostProblem;
+        this.hostProblem = hostProblem;
 
         if (host is not null)
         {
@@ -99,16 +101,16 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
 
     public bool HasHost => host is not null;
 
-    public string? HostProblem { get; }
+    public string? HostProblem => hostProblem.IsEmpty ? null : hostProblem.Resolve();
 
     public HostStatus Status => host?.Status ?? HostStatus.Stopped;
 
-    public string? StatusDetail => host?.StatusDetail;
+    public string? StatusDetail => host?.StatusDetail?.Resolve();
 
     /// <summary>Raised on the host's thread when the connection status changed.</summary>
     public event Action? Changed;
 
-    public static ApprovalServices Create(AppPaths paths, ExtensionHostSupervisor? host, string? hostProblem) =>
+    public static ApprovalServices Create(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem) =>
         new(paths, host, hostProblem);
 
     /// <summary>Registers the session title and returns the handler the session's host injects.</summary>
@@ -204,7 +206,7 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         await Rules.DisposeAsync().ConfigureAwait(false);
     }
 
-    private void OnHostStatusChanged(HostStatus status, string? detail)
+    private void OnHostStatusChanged(HostStatus status, LocText? detail)
     {
         RaiseChanged();
         if (status == HostStatus.Running)

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.Core.Tools;
 using Forge.IO;
 
@@ -69,8 +70,8 @@ internal sealed class ApprovalRules : IAsyncDisposable
     private readonly List<ApprovalRule> rules = [];
     private CancellationTokenSource? debounce;
     private Task? loadTask;
-    private string? loadProblem;
-    private string? saveProblem;
+    private LocText loadProblem;
+    private LocText saveProblem;
     private byte[]? originalBytes;
     private bool protectOriginal;
     private bool dirty;
@@ -99,7 +100,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         {
             lock (gate)
             {
-                return loadProblem;
+                return loadProblem.IsEmpty ? null : loadProblem.Resolve();
             }
         }
     }
@@ -111,7 +112,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         {
             lock (gate)
             {
-                return saveProblem;
+                return saveProblem.IsEmpty ? null : saveProblem.Resolve();
             }
         }
     }
@@ -407,13 +408,13 @@ internal sealed class ApprovalRules : IAsyncDisposable
         {
             // A read that throws must never leave the shared load task faulted: every later approval awaits it. The file
             // is treated as unreadable (no rules, the original protected) and the failure is reported as the load problem.
-            outcome = new LoadOutcome([], "approval-rules.json 无法读取：" + exception.Message, null, false);
+            outcome = new LoadOutcome([], new LocText(ExtensionsStrings.RulesUnreadable, exception.Message), null, false);
         }
 
         lock (gate)
         {
             loadProblem = outcome.Problem;
-            protectOriginal = outcome.Problem is not null;
+            protectOriginal = !outcome.Problem.IsEmpty;
             originalBytes = outcome.Protect ? outcome.Raw : null;
             loaded = true;
 
@@ -449,12 +450,12 @@ internal sealed class ApprovalRules : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            return new LoadOutcome([], "读取 approval-rules.json 失败：" + exception.Message, null, false);
+            return new LoadOutcome([], new LocText(ExtensionsStrings.RulesReadFailed, exception.Message), null, false);
         }
 
         if (bytes is null || bytes.Length == 0)
         {
-            return new LoadOutcome([], null, null, false);
+            return new LoadOutcome([], default, null, false);
         }
 
         ApprovalRulesDocument? document;
@@ -464,23 +465,23 @@ internal sealed class ApprovalRules : IAsyncDisposable
         }
         catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
         {
-            return new LoadOutcome([], "approval-rules.json 不是有效的审批规则文件：" + exception.Message, bytes, true);
+            return new LoadOutcome([], new LocText(ExtensionsStrings.RulesInvalid, exception.Message), bytes, true);
         }
 
         if (document is null)
         {
-            return new LoadOutcome([], "approval-rules.json 为空。", bytes, true);
+            return new LoadOutcome([], new LocText(ExtensionsStrings.RulesEmpty), bytes, true);
         }
 
         if (document.Version != DocumentVersion)
         {
             return new LoadOutcome(
-                [], $"approval-rules.json 的版本 {document.Version} 无法识别。", bytes, true);
+                [], new LocText(ExtensionsStrings.RulesVersion, document.Version), bytes, true);
         }
 
         if (document.Rules is null)
         {
-            return new LoadOutcome([], "approval-rules.json 缺少规则列表。", bytes, true);
+            return new LoadOutcome([], new LocText(ExtensionsStrings.RulesNoList), bytes, true);
         }
 
         var loaded = new List<ApprovalRule>(document.Rules.Count);
@@ -494,7 +495,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
             loaded.Add(rule);
         }
 
-        return new LoadOutcome(loaded, null, null, false);
+        return new LoadOutcome(loaded, default, null, false);
     }
 
     /// <summary>Only a complete project or global allow is a rule; anything else is skipped, so a broken entry never grants.</summary>
@@ -576,7 +577,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         {
             lock (gate)
             {
-                saveProblem = "写入 approval-rules.json 失败：" + exception.Message;
+                saveProblem = new LocText(ExtensionsStrings.RulesWriteFailed, exception.Message);
             }
 
             Trace.WriteLine("[approval-rules] save failed: " + exception.Message);
@@ -654,7 +655,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
 
             protectOriginal = false;
             originalBytes = null;
-            saveProblem = null;
+            saveProblem = default;
         }
     }
 
@@ -730,7 +731,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException
             or InvalidOperationException or NotSupportedException;
 
-    private readonly record struct LoadOutcome(IReadOnlyList<ApprovalRule> Rules, string? Problem, byte[]? Raw, bool Protect);
+    private readonly record struct LoadOutcome(IReadOnlyList<ApprovalRule> Rules, LocText Problem, byte[]? Raw, bool Protect);
 }
 
 /// <summary>On-disk shape of <c>approval-rules.json</c>.</summary>

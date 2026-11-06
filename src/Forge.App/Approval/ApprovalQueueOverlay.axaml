@@ -64,7 +64,7 @@
                   Command="{Binding ToggleArgumentsCommand}"
                   Content="{Binding ArgumentsToggleText}"
                   AutomationProperties.AutomationId="approval-arguments-toggle"
-                  AutomationProperties.Name="参数" />
+                  AutomationProperties.Name="{Binding [Extensions.Tool.Arguments], Source={x:Static loc:Loc.Instance}}" />
 
           <WrapPanel Margin="0,6,0,0">
             <Button Classes="primary"
@@ -72,13 +72,13 @@
                     Command="{Binding AllowCommand}"
                     Content="{Binding [Extensions.Tool.Allow], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-allow"
-                    AutomationProperties.Name="允许" />
+                    AutomationProperties.Name="{Binding [Extensions.Tool.Allow], Source={x:Static loc:Loc.Instance}}" />
             <Button Classes="ghost"
                     Margin="0,0,6,6"
                     Command="{Binding DenyCommand}"
                     Content="{Binding [Extensions.Tool.Deny], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-deny"
-                    AutomationProperties.Name="拒绝" />
+                    AutomationProperties.Name="{Binding [Extensions.Tool.Deny], Source={x:Static loc:Loc.Instance}}" />
           </WrapPanel>
           <WrapPanel IsVisible="{Binding CanRemember}">
             <Button Classes="ghost"
@@ -86,7 +86,7 @@
                     Command="{Binding RememberSessionCommand}"
                     Content="{Binding [Extensions.Tool.RememberSession], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-remember-session"
-                    AutomationProperties.Name="本会话记住" />
+                    AutomationProperties.Name="{Binding [Extensions.Tool.RememberSession], Source={x:Static loc:Loc.Instance}}" />
             <Button Classes="ghost"
                     Margin="0,0,6,6"
                     Command="{Binding RememberProjectCommand}"
@@ -94,13 +94,13 @@
                     ToolTip.Tip="{Binding RememberProjectHint}"
                     Content="{Binding [Extensions.Tool.RememberProject], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-remember-project"
-                    AutomationProperties.Name="本项目记住" />
+                    AutomationProperties.Name="{Binding [Extensions.Tool.RememberProject], Source={x:Static loc:Loc.Instance}}" />
             <Button Classes="ghost"
                     Margin="0,0,6,6"
                     Command="{Binding RememberGlobalCommand}"
                     Content="{Binding [Extensions.Tool.RememberGlobal], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-remember-global"
-                    AutomationProperties.Name="永久记住" />
+                    AutomationProperties.Name="{Binding [Extensions.Tool.RememberGlobal], Source={x:Static loc:Loc.Instance}}" />
           </WrapPanel>
         </StackPanel>
       </Border>
@@ -263,13 +263,13 @@
                     Command="{Binding ApproveCommand}"
                     Content="{Binding [Extensions.Extension.Approve], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-extension-approve"
-                    AutomationProperties.Name="批准" />
+                    AutomationProperties.Name="{Binding [Extensions.Extension.Approve], Source={x:Static loc:Loc.Instance}}" />
             <Button Classes="ghost"
                     Margin="0,0,6,6"
                     Command="{Binding RejectCommand}"
                     Content="{Binding [Extensions.Extension.Reject], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-extension-reject"
-                    AutomationProperties.Name="拒绝" />
+                    AutomationProperties.Name="{Binding [Extensions.Extension.Reject], Source={x:Static loc:Loc.Instance}}" />
           </WrapPanel>
         </StackPanel>
       </Border>
@@ -288,7 +288,7 @@
               HorizontalContentAlignment="Stretch"
               Command="{Binding ToggleCommand}"
               AutomationProperties.AutomationId="approval-queue-toggle"
-              AutomationProperties.Name="待审批">
+              AutomationProperties.Name="{Binding [Extensions.Queue.Title], Source={x:Static loc:Loc.Instance}}">
         <Grid ColumnDefinitions="Auto,Auto,*,Auto">
           <TextBlock Classes="h2"
                      VerticalAlignment="Center"

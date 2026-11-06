@@ -20,7 +20,7 @@ public sealed class StringTableTests
     {
         "shell", "window", "workbench", "status", "provider", "diag", "dialog",
         "project", "session", "turn", "subagent", "files", "changes", "todo",
-        "review", "spec", "language", "settings", "format", "terminal", "appearance",
+        "review", "spec", "language", "settings", "format", "terminal", "appearance", "Extensions",
     };
 
     private static readonly Regex Cjk = new("[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]", RegexOptions.Compiled);

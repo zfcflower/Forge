@@ -131,7 +131,7 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
         var visible = await session.Dispatch(
             async () =>
             {
-                var services = ApprovalServices.Create(AppPaths.Create(), host: null, hostProblem: null);
+                var services = ApprovalServices.Create(AppPaths.Create(), host: null, hostProblem: default);
                 try
                 {
                     var overlay = new ApprovalQueueOverlay();
@@ -162,7 +162,7 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
         var found = await session.Dispatch(
             async () =>
             {
-                var services = ApprovalServices.Create(AppPaths.Create(), host: null, hostProblem: null);
+                var services = ApprovalServices.Create(AppPaths.Create(), host: null, hostProblem: default);
                 try
                 {
                     var overlay = new ApprovalQueueOverlay();
@@ -345,7 +345,7 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
             var texts = await session.Dispatch(
                 async () =>
                 {
-                    var services = ApprovalServices.Create(AppPaths.Create(), host: null, hostProblem: null);
+                    var services = ApprovalServices.Create(AppPaths.Create(), host: null, hostProblem: default);
                     try
                     {
                     var dispatcher = services.Queue.Dispatcher;
