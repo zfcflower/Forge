@@ -137,7 +137,8 @@ internal sealed class PluginCatalog
                     new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         [entry.Manifest.WorkflowFile] = Sha256(document.Bytes),
-                    }));
+                    },
+                    entry.Manifest.Tool));
         }
 
         if (entry.Image is not { } image)
@@ -179,8 +180,9 @@ internal sealed class PluginCatalog
     internal static string DependencyFingerprint(
         IReadOnlyList<Dependency> dependencies,
         IReadOnlyList<Permission> permissions,
-        IReadOnlyDictionary<string, string> files) =>
-        DependencyHashSchema.Compute(dependencies, permissions, files);
+        IReadOnlyDictionary<string, string> files,
+        ExtensionToolSpec? tool = null) =>
+        DependencyHashSchema.Compute(dependencies, permissions, files, tool);
 
     /// <summary>
     /// Prepares one package directory that is not part of the scan root: a staged draft, or the directory that is about to
@@ -302,7 +304,7 @@ internal sealed class PluginCatalog
     {
         var manifest = entry.Manifest;
         entry.SdkVersion = manifest.IsWorkflow ? WorkflowContractSdkVersion : ScriptCompiler.ContractVersion;
-        entry.DependencyHash = DependencyFingerprint(manifest.Dependencies, manifest.Permissions, EmptyFiles);
+        entry.DependencyHash = DependencyFingerprint(manifest.Dependencies, manifest.Permissions, EmptyFiles, manifest.Tool);
 
         if (manifest.IsWorkflow)
         {
@@ -428,7 +430,8 @@ internal sealed class PluginCatalog
         entry.DependencyHash = DependencyFingerprint(
             manifest.Dependencies,
             manifest.Permissions,
-            new Dictionary<string, string>(StringComparer.Ordinal) { [manifest.WorkflowFile] = Sha256(document.Bytes) });
+            new Dictionary<string, string>(StringComparer.Ordinal) { [manifest.WorkflowFile] = Sha256(document.Bytes) },
+            manifest.Tool);
 
         WorkflowDefinition definition;
         try

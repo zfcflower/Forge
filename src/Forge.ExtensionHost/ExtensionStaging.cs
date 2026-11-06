@@ -143,6 +143,119 @@ internal static class ExtensionStaging
             manifest);
     }
 
+    /// <summary>Directory the compiler writes a plugin draft's image into; it is not an author file.</summary>
+    private const string CompilerOutputDirectory = "bin";
+
+    /// <summary>
+    /// Re-asserts the layout of a directory under <c>.pending</c>, which is plain disk anyone could have written to: only
+    /// whitelisted author files, a manifest byte-identical to the one the host would generate from the fields it declares
+    /// (so no entryAssembly and no inconsistent kind/source), no stray directories, and no compiler output except
+    /// <c>bin/</c> of a plugin draft (its bytes are covered by the dependency hash). Returns the first problem, or null.
+    /// </summary>
+    internal static string? VerifyLayout(string directory, string expectedId)
+    {
+        var root = Path.GetFullPath(directory);
+        try
+        {
+            if (!PluginManifestReader.TryRead(root, out var manifest, out _, out var error))
+            {
+                return $"the manifest cannot be read: {error}";
+            }
+
+            if (!string.Equals(manifest.Id, expectedId, StringComparison.Ordinal))
+            {
+                return $"the manifest declares id '{manifest.Id}', not '{expectedId}'.";
+            }
+
+            var allowBin = !manifest.IsWorkflow;
+            var files = new Dictionary<string, string>(StringComparer.Ordinal);
+            var directoriesWithFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+                if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return $"'{relative}' is a link.";
+                }
+
+                if (relative.StartsWith(CompilerOutputDirectory + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!allowBin)
+                    {
+                        return $"'{relative}': a workflow draft has no compiler output.";
+                    }
+
+                    continue;
+                }
+
+                if (string.Equals(relative, ManifestFileName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                files[relative] = File.ReadAllText(file);
+                for (var slash = relative.LastIndexOf('/'); slash > 0; slash = relative.LastIndexOf('/', slash - 1))
+                {
+                    directoriesWithFiles.Add(relative[..slash]);
+                }
+            }
+
+            foreach (var subdirectory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(root, subdirectory).Replace('\\', '/');
+                if (relative.Equals(CompilerOutputDirectory, StringComparison.OrdinalIgnoreCase) ||
+                    relative.StartsWith(CompilerOutputDirectory + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!allowBin)
+                    {
+                        return $"'{relative}': a workflow draft has no compiler output.";
+                    }
+
+                    continue;
+                }
+
+                if (!directoriesWithFiles.Contains(relative))
+                {
+                    return $"'{relative}' is a directory that holds no author file.";
+                }
+            }
+
+            var dependencies = new List<ExtensionDependency>(manifest.Dependencies.Count);
+            foreach (var dependency in manifest.Dependencies)
+            {
+                dependencies.Add(new ExtensionDependency(dependency.Name, dependency.Version));
+            }
+
+            StagedDraft rebuilt;
+            try
+            {
+                rebuilt = Validate(new ExtensionStageRequest(
+                    manifest.Id,
+                    manifest.Version,
+                    manifest.Kind,
+                    files,
+                    [.. manifest.Permissions],
+                    dependencies,
+                    manifest.Tool));
+            }
+            catch (HostOperationException exception)
+            {
+                return exception.Message;
+            }
+
+            if (!File.ReadAllBytes(Path.Combine(root, ManifestFileName)).AsSpan().SequenceEqual(rebuilt.ManifestJson))
+            {
+                return "manifest.json differs from the manifest the host generates for these files; the host owns that file.";
+            }
+
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"the draft could not be read: {exception.Message}";
+        }
+    }
+
     private static string NormalizeKind(string? kind)
     {
         var declared = kind?.Trim();

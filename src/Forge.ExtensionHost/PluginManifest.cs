@@ -464,6 +464,12 @@ internal static class PluginIds
             return false;
         }
 
+        // Windows silently drops a trailing '.' or ' ' from a file name, so "x." and "x" would name the same file.
+        if (value[^1] is '.' or ' ' || IsReservedDeviceName(value))
+        {
+            return false;
+        }
+
         foreach (var character in value)
         {
             if (character < ' ')
@@ -473,6 +479,27 @@ internal static class PluginIds
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// True for a Windows reserved device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9), case-insensitive, with or without an
+    /// extension: <c>nul.txt</c> opens the device, not a file. Refused on every platform so a package is portable.
+    /// </summary>
+    internal static bool IsReservedDeviceName(string value)
+    {
+        var dot = value.IndexOf('.', StringComparison.Ordinal);
+        var stem = (dot < 0 ? value : value[..dot]).TrimEnd(' ');
+        if (stem.Length == 3)
+        {
+            return stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return stem.Length == 4
+            && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+            && stem[3] is >= '1' and <= '9';
     }
 
     /// <summary>A deterministic assembly name for a plugin id, keeping the id readable when it is already valid.</summary>

@@ -35,6 +35,13 @@ public sealed partial class ExtensionHost
             draft.Tool,
             prepared,
             DateTimeOffset.UtcNow);
+        if (draft.Tool is { } declared && FindToolCollision(draft.PluginId, [declared.Name]) is { } collision)
+        {
+            // A diagnostic blocks the commit and shows on the card; C# plugins declare their tools only after the worker
+            // loaded them, so theirs is refused at commit instead.
+            staged = staged with { Diagnostics = [.. staged.Diagnostics, collision] };
+        }
+
         return HostJson.ToElement(staged);
     }
 
@@ -75,6 +82,23 @@ public sealed partial class ExtensionHost
             {
                 Console.Error.WriteLine(
                     $"forge-extension-host: '{directory}' is not a usable staged draft and was ignored: {JoinIssues(prepared.Issues)}");
+                continue;
+            }
+
+            // A draft the host did not write in its own layout (planted file, extra directory, edited manifest) is reported
+            // with diagnostics only: no hashes, no files, so it can never be approved from the card.
+            if (ExtensionStaging.VerifyLayout(directory, pluginId) is { } layoutError)
+            {
+                items.Add(BuildStagedExtension(
+                    pluginId,
+                    entry.Version,
+                    entry.Manifest.Kind,
+                    [],
+                    entry.Manifest.Permissions,
+                    entry.Manifest.Dependencies,
+                    entry.Manifest.Tool,
+                    new PreparedPackage(null, [new PluginIssue(pluginId, PluginIssueKind.InvalidPackage, layoutError, directory)]),
+                    new DateTimeOffset(Directory.GetLastWriteTimeUtc(directory))));
                 continue;
             }
 
@@ -176,6 +200,14 @@ public sealed partial class ExtensionHost
                 $"There is no staged draft for '{pluginId}'; stage it before committing.");
         }
 
+        // The layout is re-asserted here because .pending is plain disk: whatever sits in it now is what would go live.
+        if (ExtensionStaging.VerifyLayout(pending, pluginId) is { } layoutError)
+        {
+            throw new HostOperationException(
+                "invalid_extension",
+                $"The staged draft of '{pluginId}' cannot be committed: {layoutError}");
+        }
+
         // (a) The staged bytes decide, not the card: recompute all three hashes and refuse a mismatch before touching
         // anything, so a draft edited after the user looked at it can never ride an old approval.
         var staged = await catalog.PreparePackageAsync(pending, ct).ConfigureAwait(false);
@@ -198,6 +230,13 @@ public sealed partial class ExtensionHost
         }
 
         RequireNotBlocked(pluginId, candidate.Version);
+
+        // A workflow's tool is known from its manifest, so a clash with another plugin is refused before anything moves.
+        if (candidate.Manifest.Tool is { } workflowTool &&
+            FindToolCollision(pluginId, [workflowTool.Name]) is { } workflowCollision)
+        {
+            throw new HostOperationException("invalid_extension", workflowCollision);
+        }
 
         PluginEntry? previous;
         lock (sync)
@@ -250,6 +289,13 @@ public sealed partial class ExtensionHost
             // compare with what the user approved, SetApproved, apply, publish.
             await ApproveCoreAsync(entry, entry.Version, request.SourceHash, request.DependencyHash, request.SdkVersion, ct)
                 .ConfigureAwait(false);
+
+            // A C# plugin's tool names exist only once its worker loaded, i.e. after the approval step. A clash with another
+            // plugin is refused here by rolling the whole commit back, so the extension never keeps shadowing the other tool.
+            if (FindToolCollision(pluginId, [.. entry.Tools.Select(static tool => tool.Name)]) is { } pluginCollision)
+            {
+                throw new HostOperationException("invalid_extension", pluginCollision);
+            }
         }
         catch
         {
@@ -593,6 +639,44 @@ public sealed partial class ExtensionHost
             LiveManifestVersion(pluginId),
             tool,
             stagedAt);
+    }
+
+    /// <summary>
+    /// The error message when another plugin (a different id) already publishes one of <paramref name="names"/>; null when
+    /// there is no clash. Without this check the last registration would silently shadow the other tool.
+    /// </summary>
+    private string? FindToolCollision(string pluginId, IReadOnlyList<string> names)
+    {
+        if (names.Count == 0)
+        {
+            return null;
+        }
+
+        lock (sync)
+        {
+            foreach (var other in plugins.Values)
+            {
+                if (string.Equals(other.Id, pluginId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var owned = other.Tools.Count > 0 ? other.Tools : other.IsRunnable ? other.WorkflowTools : [];
+                foreach (var tool in owned)
+                {
+                    foreach (var name in names)
+                    {
+                        if (string.Equals(tool.Name, name, StringComparison.Ordinal))
+                        {
+                            return $"the tool name '{name}' is already provided by the extension '{other.Id}'; "
+                                + "choose a different tool name.";
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string DefaultSdkVersion(string kind) =>

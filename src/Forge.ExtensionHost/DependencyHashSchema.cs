@@ -44,13 +44,17 @@ internal static class DependencyHashSchema
     /// <summary>Domain of one declared permission: kind name plus scope.</summary>
     private const string PermissionDomain = "perm";
 
+    /// <summary>Domain of the tool a workflow extension exposes: name, description and input schema, each its own entry.</summary>
+    private const string ToolDomain = "tool";
+
     private readonly record struct Entry(string Domain, string Key, string Value);
 
     /// <summary>Hashes the three tuple categories into one lowercase-hex fingerprint.</summary>
     public static string Compute(
         IReadOnlyList<Dependency> dependencies,
         IReadOnlyList<Permission> permissions,
-        IReadOnlyDictionary<string, string> files)
+        IReadOnlyDictionary<string, string> files,
+        ExtensionToolSpec? tool = null)
     {
         ArgumentNullException.ThrowIfNull(dependencies);
         ArgumentNullException.ThrowIfNull(permissions);
@@ -74,6 +78,14 @@ internal static class DependencyHashSchema
             var permission = permissions[index] ??
                 throw new ArgumentNullException(nameof(permissions), "A declared permission may not be null.");
             entries.Add(new Entry(PermissionDomain, permission.Kind.ToString(), NormalizeScope(permission.Scope)));
+        }
+
+        if (tool is not null)
+        {
+            // The tool spec of a workflow goes straight into the model's tool list, so what the user approved has to cover it.
+            entries.Add(new Entry(ToolDomain, "name", tool.Name));
+            entries.Add(new Entry(ToolDomain, "description", tool.Description ?? string.Empty));
+            entries.Add(new Entry(ToolDomain, "inputSchema", tool.InputSchemaJson ?? string.Empty));
         }
 
         entries.Sort(CompareEntries);
