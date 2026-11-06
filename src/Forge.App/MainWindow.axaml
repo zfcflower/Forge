@@ -52,7 +52,7 @@
                  VerticalAlignment="Center"
                  VerticalContentAlignment="Center"
                  CornerRadius="6"
-                 FontSize="{StaticResource FontSizeSm}"
+                 FontSize="{DynamicResource FontSizeSm}"
                  Background="{DynamicResource SearchBoxBackgroundBrush}"
                  BorderBrush="{DynamicResource SearchBoxBorderBrush}"
                  BorderThickness="1"

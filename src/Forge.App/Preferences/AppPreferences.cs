@@ -27,7 +27,11 @@ internal sealed class AppPreferences : ObservableObject
 {
     public const double MinFontSize = 9;
     public const double MaxFontSize = 28;
-    public const string DefaultUiFontFamily = "Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif";
+    /// <summary>
+    /// <c>fonts:Inter#Inter</c> is the embedded Inter registered by <c>WithInterFont()</c>; a bare <c>Inter</c> only
+    /// matches an installed system font and would silently fall through to the next family.
+    /// </summary>
+    public const string DefaultUiFontFamily = "fonts:Inter#Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif";
     public const string DefaultCodeFontFamily = "Consolas, Cascadia Mono, Menlo, monospace";
     public const double DefaultUiFontSize = 13;
     public const double DefaultCodeFontSize = 13;

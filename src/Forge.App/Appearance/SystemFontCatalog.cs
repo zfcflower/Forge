@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Avalonia.Media;
+
 namespace Forge.App.Appearance;
 
 /// <summary>
@@ -7,11 +10,58 @@ namespace Forge.App.Appearance;
 /// </summary>
 internal sealed class SystemFontCatalog
 {
+    private readonly Func<IEnumerable<string>> source;
+    private readonly Lock gate = new();
+    private Task<IReadOnlyList<string>>? families;
+
     /// <param name="source">Enumerates family names; called at most once, on a pool thread.</param>
-    public SystemFontCatalog(Func<IEnumerable<string>> source) => throw new NotImplementedException();
+    public SystemFontCatalog(Func<IEnumerable<string>> source) =>
+        this.source = source ?? throw new ArgumentNullException(nameof(source));
 
     /// <summary>The catalog over <c>FontManager.Current.SystemFonts</c>.</summary>
-    public static SystemFontCatalog CreateDefault() => throw new NotImplementedException();
+    public static SystemFontCatalog CreateDefault() => new(EnumerateSystemFamilies);
 
-    public Task<IReadOnlyList<string>> GetFamiliesAsync() => throw new NotImplementedException();
+    public Task<IReadOnlyList<string>> GetFamiliesAsync()
+    {
+        lock (gate)
+        {
+            // Started inside the lock so two callers cannot race into two enumerations.
+            return families ??= Task.Run(Load);
+        }
+    }
+
+    private IReadOnlyList<string> Load()
+    {
+        try
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in source())
+            {
+                var trimmed = name?.Trim();
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    names.Add(trimmed);
+                }
+            }
+
+            var sorted = new List<string>(names);
+            sorted.Sort(StringComparer.OrdinalIgnoreCase);
+            return sorted;
+        }
+        catch (Exception exception)
+        {
+            // A font backend problem must not take the settings page down; an empty list only means the user types.
+            Trace.WriteLine("[appearance] the system font families could not be enumerated: " + exception.Message);
+            return [];
+        }
+    }
+
+    /// <summary>Touches <see cref="FontManager"/> only when enumerated, never when the catalog is created.</summary>
+    private static IEnumerable<string> EnumerateSystemFamilies()
+    {
+        foreach (var family in FontManager.Current.SystemFonts)
+        {
+            yield return family.Name;
+        }
+    }
 }

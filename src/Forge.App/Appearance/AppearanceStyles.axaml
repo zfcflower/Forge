@@ -1,0 +1,12 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- The interface font, set once per window. FontFamily and FontSize are inherited properties, so the whole tree under
+       the window follows; TextBlocks and the built-in controls override them through their own tokens
+       (FontSizeXs..Xl, FontSizeCode) and the Fluent keys the applier also writes. -->
+  <Style Selector=":is(Window)">
+    <Setter Property="FontFamily" Value="{DynamicResource FontUi}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+  </Style>
+
+</Styles>

@@ -21,6 +21,8 @@
   <sys:Double x:Key="FontSizeMd">15</sys:Double>
   <sys:Double x:Key="FontSizeLg">18</sys:Double>
   <sys:Double x:Key="FontSizeXl">22</sys:Double>
+  <!-- Code text: the code font size itself, not a step of the UI scale. -->
+  <sys:Double x:Key="FontSizeCode">13</sys:Double>
 
   <sys:Double x:Key="Space1">4</sys:Double>
   <sys:Double x:Key="Space2">8</sys:Double>
@@ -165,7 +167,13 @@
 
   </ResourceDictionary.ThemeDictionaries>
 
-  <FontFamily x:Key="FontMono">Consolas, Cascadia Mono, monospace</FontFamily>
+  <!-- Fonts. These static values are the defaults (the designer and a test without an applier use them);
+       AppearanceApplier replaces them at runtime with the values from the preferences.
+       The interface font spells the embedded Inter as "fonts:Inter#Inter": the package registers its collection as
+       fonts:Inter (WithInterFont), and a keyless "Inter" only searches the OS-installed fonts, so it silently falls
+       through to Segoe UI even though Inter ships with the app. -->
+  <FontFamily x:Key="FontUi">fonts:Inter#Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif</FontFamily>
+  <FontFamily x:Key="FontMono">Consolas, Cascadia Mono, Menlo, monospace</FontFamily>
 
   <!-- Icon geometry (single family: simple filled paths). -->
   <StreamGeometry x:Key="IconPlus">M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z</StreamGeometry>

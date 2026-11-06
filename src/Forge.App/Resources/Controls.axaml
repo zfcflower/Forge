@@ -3,25 +3,25 @@
 
   <!-- Text ramp. -->
   <Style Selector="TextBlock">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 
   <Style Selector="TextBlock.h2">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeMd}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
   <Style Selector="TextBlock.caption">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
   <Style Selector="TextBlock.label">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
@@ -31,21 +31,22 @@
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
-  <Style Selector="TextBlock.mono">
-    <Setter Property="FontFamily" Value="{StaticResource FontMono}" />
-    <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+  <!-- :is() so SelectableTextBlock (tool arguments/results) gets the code font too; a type selector skips subclasses. -->
+  <Style Selector=":is(TextBlock).mono">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeCode}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>
 
   <Style Selector="TextBlock.section-title">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeXs}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>
 
   <Style Selector="TextBlock.glyph">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="VerticalAlignment" Value="Center" />
@@ -57,7 +58,7 @@
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="Padding" Value="{StaticResource PaddingControl}" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
-    <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="Background" Value="Transparent" />
@@ -72,7 +73,7 @@
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="Padding" Value="{StaticResource PaddingControl}" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
-    <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="Background" Value="Transparent" />
@@ -116,7 +117,7 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="2" />
     <Setter Property="MinHeight" Value="18" />
-    <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
   </Style>
 
@@ -131,7 +132,7 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="MinHeight" Value="24" />
     <Setter Property="Padding" Value="8,2" />
-    <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
@@ -173,7 +174,7 @@
 
   <!-- Text input. -->
   <Style Selector="TextBox">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
   </Style>
@@ -426,13 +427,13 @@
   </Style>
 
   <Style Selector="ComboBox">
-    <Setter Property="FontSize" Value="{StaticResource FontSizeSm}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
     <Setter Property="MinHeight" Value="26" />
   </Style>
 
   <Style Selector="CheckBox">
     <Setter Property="MinHeight" Value="20" />
-    <Setter Property="FontSize" Value="{StaticResource FontSizeBase}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
   </Style>
 
 </Styles>

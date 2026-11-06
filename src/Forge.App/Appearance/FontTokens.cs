@@ -41,5 +41,18 @@ internal static class FontScale
     /// number with <see cref="MidpointRounding.AwayFromZero"/>. At <see cref="ReferenceSize"/> the result equals
     /// <see cref="Default"/>. Input is assumed already clamped by <c>AppPreferences</c>.
     /// </summary>
-    public static FontSizeTokens Compute(double uiSize) => throw new NotImplementedException();
+    public static FontSizeTokens Compute(double uiSize)
+    {
+        var scale = uiSize / ReferenceSize;
+        return new FontSizeTokens(
+            Round(Default.Xs * scale),
+            Round(Default.Sm * scale),
+            Round(Default.Base * scale),
+            Round(Default.Md * scale),
+            Round(Default.Lg * scale),
+            Round(Default.Xl * scale));
+    }
+
+    /// <summary>Token values are whole device-independent pixels; halves go away from zero so 9 and 28 stay symmetric.</summary>
+    private static double Round(double value) => Math.Round(value, MidpointRounding.AwayFromZero);
 }
