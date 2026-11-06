@@ -21,6 +21,8 @@ internal static class ExtensionsStrings
     public const string ToolTitle = "Extensions.Tool.Title";
     public const string ToolDeleteTitle = "Extensions.Tool.DeleteTitle";
     public const string ToolDeleteNote = "Extensions.Tool.DeleteNote";
+    public const string ToolCommandTitle = "Extensions.Tool.CommandTitle";
+    public const string ToolCommandNote = "Extensions.Tool.CommandNote";
     public const string ToolSession = "Extensions.Tool.Session";
     public const string ToolName = "Extensions.Tool.Name";
     public const string ToolSideEffect = "Extensions.Tool.SideEffect";
@@ -133,6 +135,8 @@ internal static class ExtensionsStrings
         Loc.Register(ToolTitle, "工具调用审批", "Tool call approval");
         Loc.Register(ToolDeleteTitle, "确认删除扩展", "Confirm extension deletion");
         Loc.Register(ToolDeleteNote, "删除扩展无法记住；每次删除都会单独确认。", "Deleting an extension cannot be remembered; every deletion asks again.");
+        Loc.Register(ToolCommandTitle, "插件命令审批", "Plugin command approval");
+        Loc.Register(ToolCommandNote, "插件命令每次都会单独确认，无法记住。", "A plugin command is confirmed on every call and cannot be remembered.");
         Loc.Register(ToolSession, "会话", "Session");
         Loc.Register(ToolName, "工具", "Tool");
         Loc.Register(ToolSideEffect, "副作用", "Side effect");

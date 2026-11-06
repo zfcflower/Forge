@@ -55,6 +55,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private ExtensionHostClient? listenedClient;
     private bool disposed;
 
+    // Sub-agent sessions aliased to this runtime in the router, by child agent id. Guarded by gate.
+    private readonly Dictionary<string, string> childSessions = new(StringComparer.Ordinal);
+
     public SessionRuntime(AgentRuntimeServices services, SessionInfo session)
     {
         this.services = services;
@@ -96,11 +99,57 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 {
                     await foreach (var value in agentHost.RunAsync(agent, userText, ct).ConfigureAwait(false))
                     {
+                        TrackSubAgent(value);
                         sink(value);
                     }
                 },
                 CancellationToken.None)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A sub-agent's tool context carries its own child session id, but it shares this runtime's host, tool set and approval
+    /// handler, so its plugin and workflow <c>host.tool_call</c> requests belong to this (root) session. The child id is
+    /// aliased to this scope while the child runs: from <see cref="AgentSubAgentStarted"/> (any depth) to
+    /// <see cref="AgentSubAgentFinished"/> or disposal. Cheap: one short lock and a dictionary write.
+    /// </summary>
+    internal void TrackSubAgent(AgentEvent value)
+    {
+        var router = services.ToolRouter;
+        if (router is null)
+        {
+            return;
+        }
+
+        switch (value)
+        {
+            case AgentSubAgentStarted started when !string.IsNullOrWhiteSpace(started.ChildSessionId):
+                lock (gate)
+                {
+                    if (disposed)
+                    {
+                        return;
+                    }
+
+                    childSessions[started.ChildId] = started.ChildSessionId;
+                    router.Register(started.ChildSessionId, this);
+                }
+
+                break;
+            case AgentSubAgentFinished finished:
+                string? sessionId;
+                lock (gate)
+                {
+                    if (!childSessions.Remove(finished.AgentId, out sessionId))
+                    {
+                        return;
+                    }
+
+                    router.Unregister(sessionId, this);
+                }
+
+                break;
+        }
     }
 
     private async Task<(AgentHost Host, AgentInstance Agent)> ResolveAsync()
@@ -253,9 +302,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         SessionApprovalHandler? handler;
         ExtensionHostClient? client;
+        string[] aliases;
         lock (gate)
         {
             disposed = true;
+            aliases = [.. childSessions.Values];
+            childSessions.Clear();
             builtHost = null;
             host = null;
             root = null;
@@ -266,6 +318,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         services.ToolRouter?.Unregister(SessionId, this);
+        foreach (var alias in aliases)
+        {
+            services.ToolRouter?.Unregister(alias, this);
+        }
+
         if (client is not null)
         {
             client.ToolsChanged -= OnToolsChanged;

@@ -734,7 +734,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         {
             decision = await approval(
                     new ApprovalRequest(
-                        name,
+                        PluginCommandApprovalName(command.PluginId, name),
                         HostProtocolJson.SerializeText(arguments),
                         ToolSideEffect.Execute,
                         effectiveContext.WorkingDirectory),
@@ -1513,6 +1513,17 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         Volatile.Write(ref agents, agentList);
         Volatile.Write(ref promptContributors, promptList);
     }
+
+    /// <summary>Prefix of the <see cref="ApprovalRequest.ToolName"/> of a plugin command approval.</summary>
+    public const string PluginCommandApprovalPrefix = "plugin-command:";
+
+    /// <summary>
+    /// The approval name of a plugin command. A model-facing tool name is limited to letters, digits, '_' and '-', so the
+    /// ':' in this name guarantees it never equals a tool name: a policy rule or a remembered "always allow" of a built-in
+    /// tool (<c>todo</c>, <c>bash</c>) can never answer a plugin command.
+    /// </summary>
+    public static string PluginCommandApprovalName(string pluginId, string commandName) =>
+        PluginCommandApprovalPrefix + pluginId + ":" + commandName;
 
     /// <summary>The approval path for one session: the router's when one is configured, the plain delegate otherwise.</summary>
     private Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? ApprovalPathFor(string sessionId)

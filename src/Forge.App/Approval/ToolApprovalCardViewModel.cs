@@ -21,8 +21,8 @@ internal sealed record ToolApprovalCardRequest(
 /// <summary>
 /// One tool call waiting for the user: session, tool name, side effect, working directory and the arguments as indented
 /// JSON (formatted on a pool thread, collapsed when long). The buttons allow once, deny, or allow and remember the
-/// decision for this session / this project / always; <c>extension_delete</c> has no "remember" buttons because that card
-/// is the deletion confirmation.
+/// decision for this session / this project / always; <c>extension_delete</c> and plugin commands have no "remember" buttons
+/// (the first is the deletion confirmation, the second is decided per call).
 /// </summary>
 internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
 {
@@ -69,13 +69,19 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
     public string SideEffectText => ApprovalText.SideEffect(request.SideEffect);
 
     /// <summary>True for the extension deletion confirmation, which replaces the generic tool-call heading.</summary>
-    public bool IsDelete => !ApprovalRules.IsRememberable(request.ToolName);
+    public bool IsDelete => string.Equals(request.ToolName, ExtensionToolNames.Delete, StringComparison.Ordinal);
 
-    public string Title => Loc.Instance[IsDelete ? ExtensionsStrings.ToolDeleteTitle : ExtensionsStrings.ToolTitle];
+    /// <summary>True for a plugin command approval (<c>plugin-command:&lt;plugin&gt;:&lt;command&gt;</c>), which cannot be remembered.</summary>
+    public bool IsPluginCommand => ApprovalRules.IsPluginCommand(request.ToolName);
 
-    public string Note => IsDelete ? Loc.Instance[ExtensionsStrings.ToolDeleteNote] : string.Empty;
+    public string Title => Loc.Instance[
+        IsDelete ? ExtensionsStrings.ToolDeleteTitle : IsPluginCommand ? ExtensionsStrings.ToolCommandTitle : ExtensionsStrings.ToolTitle];
 
-    public bool HasNote => IsDelete;
+    public string Note => IsDelete
+        ? Loc.Instance[ExtensionsStrings.ToolDeleteNote]
+        : IsPluginCommand ? Loc.Instance[ExtensionsStrings.ToolCommandNote] : string.Empty;
+
+    public bool HasNote => IsDelete || IsPluginCommand;
 
     /// <summary>The indented JSON, empty until the background formatting finished.</summary>
     public string ArgumentsText => argumentsText;

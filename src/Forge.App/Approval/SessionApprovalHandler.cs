@@ -46,8 +46,9 @@ internal sealed class ApprovalSessionDirectory
 /// tool runs: a remembered rule answers immediately, anything else becomes a card in the <see cref="ApprovalQueue"/> and
 /// the loop waits for the user. Cancelling the waiting call withdraws the card (a late click then cannot revive it) and
 /// reports cancellation; releasing the session withdraws every card of that session as a denial.
-/// <para>Requests are serialized per session by Core's approval gate, so one session shows at most one tool card; cards of
-/// different sessions sit side by side in the queue.</para>
+/// <para>Several requests of one session can be open at once: Core's approval gate serializes the agent loop's own calls, but
+/// plugin and workflow <c>host.tool_call</c> steps reach this handler through <see cref="SessionToolCallRouter"/> without it.
+/// Each request owns its card and its own wait, so decisions and cancellations never touch another request's card.</para>
 /// </summary>
 internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
 {

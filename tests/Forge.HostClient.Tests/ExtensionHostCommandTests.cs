@@ -32,7 +32,7 @@ public sealed class ExtensionHostCommandTests
 
         Assert.Equal(new CommandResult("hello", "next", false), result);
         Assert.Equal(
-            new ApprovalRequest("hi", "\"some args\"", ToolSideEffect.Execute, directory), seen);
+            new ApprovalRequest("plugin-command:alpha:hi", "\"some args\"", ToolSideEffect.Execute, directory), seen);
         var sent = Assert.Single(host.Requests("plugin.command")).Arguments!.Value;
         Assert.Equal("alpha", sent.GetProperty("pluginId").GetString());
         Assert.Equal("hi", sent.GetProperty("command").GetString());
@@ -46,6 +46,31 @@ public sealed class ExtensionHostCommandTests
         Assert.Equal(
             ["pluginId", "command", "arguments", "context", "timeoutMilliseconds"],
             sent.EnumerateObject().Select(property => property.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task A_command_named_like_a_builtin_tool_is_approved_under_a_namespaced_name()
+    {
+        ApprovalRequest? seen = null;
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(
+            host,
+            approval: (request, _) =>
+            {
+                seen = request;
+                return ValueTask.FromResult(ApprovalDecision.Deny);
+            });
+        await client.StartConnectedAsync(host);
+        using var limit = TestLimit.Create();
+        var command = await RegisterCommandAsync(host, client, "alpha", "todo");
+
+        await command.ExecuteAsync("x", new CommandContext("sess-cmd", BoundRoots.AbsoluteDir("cmds2")), limit.Token);
+
+        Assert.NotNull(seen);
+        Assert.Equal("plugin-command:alpha:todo", seen.ToolName);
+        Assert.NotEqual("todo", seen.ToolName);
+        Assert.Contains(':', seen.ToolName);
+        Assert.StartsWith(ExtensionHostClient.PluginCommandApprovalPrefix, seen.ToolName, StringComparison.Ordinal);
     }
 
     [Fact]

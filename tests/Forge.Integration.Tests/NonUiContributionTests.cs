@@ -144,7 +144,7 @@ public sealed class NonUiContributionTests
         Assert.Equal(fx.Root, observed.WorkingDirectory);
 
         Assert.Equal(2, approvals.Count);
-        Assert.Contains(approvals, a => a.ToolName == "greet" && a.SideEffect == ToolSideEffect.Execute);
+        Assert.Contains(approvals, a => a.ToolName == ExtensionHostClient.PluginCommandApprovalName("gamma", "greet") && a.SideEffect == ToolSideEffect.Execute);
         Assert.Contains(approvals, a => a.ToolName == "probe");
     }
 

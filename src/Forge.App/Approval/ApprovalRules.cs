@@ -376,9 +376,16 @@ internal sealed class ApprovalRules : IAsyncDisposable
         }
     }
 
-    /// <summary><c>extension_delete</c> is a deletion confirmation, never a remembered decision.</summary>
+    /// <summary>
+    /// <c>extension_delete</c> is a deletion confirmation and a plugin command approval is a per-call plugin decision; neither
+    /// is ever a remembered decision.
+    /// </summary>
     public static bool IsRememberable(string toolName) =>
-        !string.Equals(toolName, ExtensionToolNames.Delete, StringComparison.Ordinal);
+        !string.Equals(toolName, ExtensionToolNames.Delete, StringComparison.Ordinal) && !IsPluginCommand(toolName);
+
+    /// <summary>True for the namespaced approval name of a plugin command (it can never equal a tool name).</summary>
+    public static bool IsPluginCommand(string toolName) =>
+        toolName.StartsWith(Forge.HostClient.ExtensionHostClient.PluginCommandApprovalPrefix, StringComparison.Ordinal);
 
     /// <summary>The scope a "remember" button of a tool card records.</summary>
     public static ApprovalRuleKey KeyFor(string toolName, ToolSideEffect sideEffect, ApprovalScope scope, string sessionId, string? projectId) =>
