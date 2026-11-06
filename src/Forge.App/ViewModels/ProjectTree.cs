@@ -1071,30 +1071,13 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Best-effort cleanup of a worktree whose session row could not be written. The removal is never forced: a worktree
-    /// that holds anything (it was created a moment ago, so only a concurrent edit could) is left alone. The branch that
-    /// <c>git worktree add</c> created stays behind, since the removal API of <see cref="WorktreeManager"/> keeps it and
-    /// this view model has no branch-delete call; a leftover <c>forge/…</c> branch is visible and deletable in the Git
-    /// panel. Failures are traced, never thrown: the caller is already reporting the original error.
+    /// Best-effort cleanup of a worktree whose session row could not be written: <see cref="WorktreeService.TryRemoveCreatedAsync"/>
+    /// removes the worktree without force and then the branch it created without force. A worktree or branch that holds
+    /// anything stays (a leftover <c>forge/…</c> branch is visible and deletable in the Git panel). Failures are traced,
+    /// never thrown: the caller is already reporting the original error.
     /// </summary>
-    private async Task TryRemoveOrphanedWorktreeAsync(WorktreeSession worktree)
-    {
-        try
-        {
-            await worktrees.Manager
-                .RemoveAsync(
-                    worktree.RepositoryRoot,
-                    worktree.Path,
-                    force: false,
-                    baseBranch: worktree.BaseCommit,
-                    ct: CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            Trace.WriteLine($"[worktree] could not remove the unused worktree '{worktree.Path}': {exception.Message}");
-        }
-    }
+    private Task TryRemoveOrphanedWorktreeAsync(WorktreeSession worktree) =>
+        worktrees.TryRemoveCreatedAsync(worktree, CancellationToken.None);
 
     /// <summary>
     /// The branch name a new worktree session is prompted with: the worktree branch prefix plus a timestamped slug. The

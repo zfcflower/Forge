@@ -90,7 +90,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             path => OpenFile(path, newTab: false),
             path => OpenFile(path, newTab: true),
             path => ShowChangesAsync(path));
-        Todos = new TodoListViewModel(composition.Todos);
+        Todos = new TodoListViewModel(composition.Todos, composition.TodoStepCommitter);
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
         Changes = new ChangesViewModel(composition.Git, composition.TurnCheckpoints);

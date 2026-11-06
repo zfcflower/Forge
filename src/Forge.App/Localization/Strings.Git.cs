@@ -22,6 +22,8 @@ internal static class GitStrings
     public const string SettingsPullStrategyMerge = "git.settings.pullStrategy.merge";
     public const string SettingsNetworkTimeout = "git.settings.networkTimeout";
     public const string SettingsNetworkTimeoutHint = "git.settings.networkTimeoutHint";
+    public const string SettingsStepCommits = "git.settings.stepCommits";
+    public const string SettingsStepCommitsHint = "git.settings.stepCommitsHint";
 
     // ---------------------------------------------------------------- labels of the panel
 
@@ -105,6 +107,14 @@ internal static class GitStrings
     /// <summary>Format: <c>{0}</c> is the branch name, <c>{1}</c> the reason.</summary>
     public const string WorktreeBranchUnavailable = "git.worktree.branchUnavailable";
 
+    // ---------------------------------------------------------------- step commits shown on the TODO rows
+
+    /// <summary>The marker on a done TODO row whose step commit failed; the reason is the row's tooltip and second line.</summary>
+    public const string TodoCommitFailed = "git.todo.commitFailed";
+
+    /// <summary>The retry button of a failed step commit (visible text, tooltip and accessible name).</summary>
+    public const string TodoCommitRetry = "git.todo.commitRetry";
+
     // ---------------------------------------------------------------- recovery hints, one per failure kind
 
     public const string HintAuthentication = "git.hint.authentication";
@@ -136,6 +146,11 @@ internal static class GitStrings
             SettingsNetworkTimeoutHint,
             "fetch、pull 与 push 的最长等待时间，10–600 秒；改动对下一次操作生效。",
             "Longest wait for fetch, pull and push, 10–600 seconds; a change applies to the next operation.");
+        Loc.Register(SettingsStepCommits, "步骤提交", "Step commits");
+        Loc.Register(
+            SettingsStepCommitsHint,
+            "TODO 条目标记为完成时，把工作树里所有未提交的改动提交到会话分支；提交说明取自条目的提交标题与摘要。关闭后不再自动提交。",
+            "When a TODO item is marked done, commit every uncommitted change in the worktree to the session branch; the message comes from the item's commit subject and summary. Turn off to stop committing automatically.");
 
         Loc.Register(LabelBranch, "分支", "Branch");
         Loc.Register(LabelUpstream, "上游", "Upstream");
@@ -192,6 +207,9 @@ internal static class GitStrings
             WorktreeBranchUnavailable,
             "无法创建分支 {0}：{1}",
             "The branch {0} could not be created: {1}");
+
+        Loc.Register(TodoCommitFailed, "提交失败", "Commit failed");
+        Loc.Register(TodoCommitRetry, "重试提交", "Retry commit");
 
         Loc.Register(
             HintAuthentication,

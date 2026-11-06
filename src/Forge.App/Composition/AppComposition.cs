@@ -177,6 +177,12 @@ internal sealed class AppComposition : IAsyncDisposable
     /// </summary>
     public ApprovalServices? Approvals { get; private set; }
 
+    /// <summary>
+    /// Commits a finished TODO step into the session's worktree. The agent's <c>todo</c> tool reaches it through the
+    /// runtime services; the TODO panel calls it when the user ticks an item or retries a failed commit.
+    /// </summary>
+    public IStepCommitter TodoStepCommitter { get; private set; } = null!;
+
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
 
     public static AppComposition Create()
@@ -291,6 +297,12 @@ internal sealed class AppComposition : IAsyncDisposable
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty),
             Git: gitTools);
         runtimeServices.Approvals = approvals;
+        var stepCommitter = new StepCommitter(
+            git,
+            todos,
+            StepCommitter.WorktreeOf(sessions),
+            () => preferences.Current.GitStepCommits);
+        runtimeServices.StepCommitter = stepCommitter;
         runtimeServices.ToolRouter = toolRouter;
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
@@ -331,6 +343,7 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             initialization);
         composition.Approvals = approvals;
+        composition.TodoStepCommitter = stepCommitter;
         return composition;
     }
 

@@ -11,7 +11,8 @@ namespace Forge.App.Git;
 /// their rows here (step commits, gh path, wait interval and limit, system notifications).
 /// <para>Preferences contract (fields in <see cref="AppPreferences"/>, JSON in the <c>preferences</c> section):
 /// <c>gitPullStrategy</c> = <c>"ff-only"</c> (default) | <c>"rebase"</c> | <c>"merge"</c>, unknown tokens fall back to the
-/// default; <c>gitNetworkTimeoutSeconds</c> = integer clamped to [10, 600], default 120.</para>
+/// default; <c>gitNetworkTimeoutSeconds</c> = integer clamped to [10, 600], default 120; <c>gitStepCommits</c> = boolean,
+/// default <c>true</c> (a TODO item marked done commits that step; missing means the default).</para>
 /// </summary>
 internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposable
 {
@@ -74,6 +75,17 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         set
         {
             preferences.GitNetworkTimeoutSeconds = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Whether marking a TODO item done commits that step's changes to the session branch.</summary>
+    public bool StepCommits
+    {
+        get => preferences.GitStepCommits;
+        set
+        {
+            preferences.GitStepCommits = value;
             OnPropertyChanged();
         }
     }

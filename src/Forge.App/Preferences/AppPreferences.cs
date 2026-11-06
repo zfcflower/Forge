@@ -51,6 +51,7 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinGitNetworkTimeoutSeconds = 10;
     public const int MaxGitNetworkTimeoutSeconds = 600;
     public const int DefaultGitNetworkTimeoutSeconds = 120;
+    public const bool DefaultGitStepCommits = true;
 
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
@@ -62,6 +63,7 @@ internal sealed class AppPreferences : ObservableObject
     private int terminalScrollbackLines = DefaultScrollbackLines;
     private string gitPullStrategy = DefaultGitPullStrategy;
     private int gitNetworkTimeoutSeconds = DefaultGitNetworkTimeoutSeconds;
+    private bool gitStepCommits = DefaultGitStepCommits;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -101,6 +103,12 @@ internal sealed class AppPreferences : ObservableObject
     }
 
     /// <summary>
+    /// Whether finishing a TODO item commits that step's changes to the session branch (default on). Read at the start of
+    /// every step commit, so a change applies to the next item that is marked done.
+    /// </summary>
+    public bool GitStepCommits { get => gitStepCommits; set => Set(ref gitStepCommits, value); }
+
+    /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
     /// Values go through the same validation as the setters.
@@ -121,6 +129,7 @@ internal sealed class AppPreferences : ObservableObject
         gitNetworkTimeoutSeconds = section.GitNetworkTimeoutSeconds is { } seconds
             ? Math.Clamp(seconds, MinGitNetworkTimeoutSeconds, MaxGitNetworkTimeoutSeconds)
             : DefaultGitNetworkTimeoutSeconds;
+        gitStepCommits = section.GitStepCommits ?? DefaultGitStepCommits;
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -137,6 +146,7 @@ internal sealed class AppPreferences : ObservableObject
             TerminalScrollbackLines = terminalScrollbackLines,
             GitPullStrategy = gitPullStrategy,
             GitNetworkTimeoutSeconds = gitNetworkTimeoutSeconds,
+            GitStepCommits = gitStepCommits,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -223,6 +233,9 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("gitNetworkTimeoutSeconds")]
     public int? GitNetworkTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("gitStepCommits")]
+    public bool? GitStepCommits { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>

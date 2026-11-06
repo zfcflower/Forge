@@ -1408,8 +1408,16 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
 
 // ---------------------------------------------------------------- todo
 
+/// <summary>
+/// One TODO row. Besides the title and the done box it shows the outcome of the step commit: the short commit id once the
+/// step was committed, or the failure reason with a "Retry commit" button. The commit fields come from the stored item and
+/// are never edited here; only a user action in this row (ticking the box, retrying) asks the panel to commit.
+/// </summary>
 internal sealed class TodoEntryViewModel : ObservableObject
 {
+    /// <summary>Length of the commit id shown on the row.</summary>
+    internal const int ShortCommitLength = 7;
+
     private readonly TodoListViewModel owner;
     private bool isDone;
     private string title;
@@ -1422,7 +1430,30 @@ internal sealed class TodoEntryViewModel : ObservableObject
         isDone = item.Status == TodoStatus.Done;
         Note = item.Note;
         Order = item.Order;
+        CommitId = string.IsNullOrEmpty(item.CommitId) ? null : item.CommitId;
+        CommitError = string.IsNullOrWhiteSpace(item.CommitError) ? null : item.CommitError;
+        RetryCommitCommand = new AsyncRelayCommand(
+            ct => owner.RetryCommitAsync(Id, ct),
+            () => HasCommitError,
+            owner.ReportFailure);
     }
+
+    /// <summary>The full commit id of the step, or null when the step has no commit.</summary>
+    public string? CommitId { get; }
+
+    /// <summary>The first <see cref="ShortCommitLength"/> characters of <see cref="CommitId"/>; empty when there is none.</summary>
+    public string CommitShort => CommitId is null ? string.Empty : CommitId[..Math.Min(ShortCommitLength, CommitId.Length)];
+
+    public bool HasCommitId => CommitId is not null;
+
+    /// <summary>Why the step commit failed (git's message, English), or null.</summary>
+    public string? CommitError { get; }
+
+    /// <summary>A failed commit only matters while the item is done: unticking it hides the marker and the retry button.</summary>
+    public bool HasCommitError => isDone && CommitError is not null;
+
+    /// <summary>Commits the step again (the failure was a hook, a rebase in progress, a detached HEAD, ...).</summary>
+    public AsyncRelayCommand RetryCommitCommand { get; }
 
     public string Id { get; }
 
@@ -1449,7 +1480,12 @@ internal sealed class TodoEntryViewModel : ObservableObject
         {
             if (Set(ref isDone, value))
             {
-                owner.Update(Id, null, value ? TodoStatus.Done : TodoStatus.Pending);
+                OnPropertyChanged(nameof(HasCommitError));
+                RetryCommitCommand.NotifyCanExecuteChanged();
+
+                // Only the not-done to done edge made in this row commits a step. Rows rebuilt from the store (the agent's
+                // update arrives that way) set the field directly and never come through here.
+                owner.Update(Id, null, value ? TodoStatus.Done : TodoStatus.Pending, commitStep: value);
             }
         }
     }
@@ -1468,14 +1504,21 @@ internal sealed class TodoEntryViewModel : ObservableObject
 internal sealed class TodoListViewModel : ObservableObject, IDisposable
 {
     private readonly ITodoStore store;
+    private readonly IStepCommitter? committer;
     private string sessionId = string.Empty;
     private string newTitle = string.Empty;
     private LocText summary = new(InspectorStrings.TodoNoSession);
     private int generation;
 
-    public TodoListViewModel(ITodoStore store)
+    /// <param name="store">The checklist the panel edits and refreshes from.</param>
+    /// <param name="committer">
+    /// Commits a step when the user ticks an item done or retries a failed commit; null (a unit test) means the panel only
+    /// edits the checklist. The agent's own updates commit inside Core, never through here.
+    /// </param>
+    public TodoListViewModel(ITodoStore store, IStepCommitter? committer = null)
     {
         this.store = store;
+        this.committer = committer;
         AddCommand = new AsyncRelayCommand(
             ct => AddAsync(ct),
             () => sessionId.Length > 0 && !string.IsNullOrWhiteSpace(newTitle),
@@ -1573,21 +1616,63 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
         }
     }
 
-    internal void Update(string id, string? title, TodoStatus? status)
+    /// <summary>
+    /// Writes a title or status change on the thread pool. With <paramref name="commitStep"/> (the user just ticked the item
+    /// done) the step is committed after the status write, with the item exactly as the store returned it, still off the UI
+    /// thread. The commit result reaches the row through the store's <c>Changed</c> refresh, like every other edit.
+    /// </summary>
+    internal void Update(string id, string? title, TodoStatus? status, bool commitStep = false)
     {
         _ = Task.Run(
             async () =>
             {
                 try
                 {
-                    await store.UpdateAsync(id, title, status, null, CancellationToken.None).ConfigureAwait(false);
+                    var updated = await store.UpdateAsync(id, title, status, null, CancellationToken.None).ConfigureAwait(false);
+                    if (commitStep && committer is not null && updated is { Status: TodoStatus.Done })
+                    {
+                        await committer.CommitStepAsync(updated, CancellationToken.None).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
                 {
                     await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
                 }
+                catch (Exception exception) when (commitStep && exception is not OperationCanceledException)
+                {
+                    // The committer reports its expected failures as results; anything thrown is a bug or a dead store.
+                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
+                }
             });
     }
+
+    /// <summary>
+    /// The "Retry commit" button: reads the item again (the agent may have changed its summary or committed meanwhile),
+    /// and commits it if it is still done. Runs on the thread pool; the awaiting command stays disabled until it ends.
+    /// </summary>
+    internal Task RetryCommitAsync(string id, CancellationToken ct)
+    {
+        var owningSession = sessionId;
+        if (committer is null || owningSession.Length == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        return BackgroundRead.RunAsync(
+            async token =>
+            {
+                var items = await store.ListAsync(owningSession, token).ConfigureAwait(false);
+                var item = items.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.Ordinal));
+                if (item is { Status: TodoStatus.Done })
+                {
+                    await committer.CommitStepAsync(item, token).ConfigureAwait(false);
+                }
+            },
+            ct);
+    }
+
+    /// <summary>Shows an unexpected failure of a row command in the panel summary line.</summary>
+    internal void ReportFailure(Exception exception) => SetSummary(LocText.Literal(exception.Message));
 
     internal void Remove(string id) =>
         _ = Task.Run(

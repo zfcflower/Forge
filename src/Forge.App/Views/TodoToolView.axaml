@@ -28,7 +28,7 @@
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:TodoEntryViewModel">
             <Border Classes="tree-row">
-              <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto">
                 <CheckBox IsChecked="{Binding IsDone, Mode=TwoWay}"
                           VerticalAlignment="Center"
                           AutomationProperties.AutomationId="todo-done"
@@ -38,18 +38,59 @@
                            VerticalAlignment="Center"
                            Text="{Binding Title}"
                            TextTrimming="CharacterEllipsis" />
-                <Button Grid.Column="2" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveUpCommand}"
+
+                <!-- The step commit: the short id once committed (full id on hover); a failure shows below with a retry. -->
+                <TextBlock Grid.Column="2"
+                           Classes="caption mono"
+                           Margin="0,0,6,0"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding HasCommitId}"
+                           Text="{Binding CommitShort}"
+                           ToolTip.Tip="{Binding CommitId}"
+                           AutomationProperties.AutomationId="todo-commit-id" />
+                <Button Grid.Column="3"
+                        Classes="ghost"
+                        MinHeight="22"
+                        Padding="6,0"
+                        Margin="0,0,4,0"
+                        FontSize="{DynamicResource FontSizeXs}"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding HasCommitError}"
+                        Command="{Binding RetryCommitCommand}"
+                        Content="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}"
+                        AutomationProperties.AutomationId="todo-retry-commit"
+                        AutomationProperties.Name="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}" />
+                <Button Grid.Column="4" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveUpCommand}"
                         ToolTip.Tip="{Binding [todo.moveUp], Source={x:Static loc:Loc.Instance}}">
                   <PathIcon Data="{StaticResource IconChevronUp}" Width="9" Height="9" />
                 </Button>
-                <Button Grid.Column="3" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveDownCommand}"
+                <Button Grid.Column="5" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveDownCommand}"
                         ToolTip.Tip="{Binding [todo.moveDown], Source={x:Static loc:Loc.Instance}}">
                   <PathIcon Data="{StaticResource IconChevronDown}" Width="9" Height="9" />
                 </Button>
-                <Button Grid.Column="4" Classes="ghost icon" Width="20" Height="20" Command="{Binding RemoveCommand}"
+                <Button Grid.Column="6" Classes="ghost icon" Width="20" Height="20" Command="{Binding RemoveCommand}"
                         ToolTip.Tip="{Binding [todo.delete], Source={x:Static loc:Loc.Instance}}">
                   <PathIcon Data="{StaticResource IconTrash}" Width="9" Height="9" />
                 </Button>
+
+                <Grid Grid.Row="1"
+                      Grid.Column="1"
+                      Grid.ColumnSpan="6"
+                      ColumnDefinitions="Auto,*"
+                      Margin="6,0,0,4"
+                      IsVisible="{Binding HasCommitError}"
+                      ToolTip.Tip="{Binding CommitError}">
+                  <TextBlock Classes="caption"
+                             Margin="0,0,6,0"
+                             Foreground="{DynamicResource DangerBrush}"
+                             Text="{Binding [git.todo.commitFailed], Source={x:Static loc:Loc.Instance}}" />
+                  <TextBlock Grid.Column="1"
+                             Classes="caption"
+                             TextWrapping="Wrap"
+                             MaxLines="2"
+                             Text="{Binding CommitError}"
+                             AutomationProperties.AutomationId="todo-commit-error" />
+                </Grid>
               </Grid>
             </Border>
           </DataTemplate>

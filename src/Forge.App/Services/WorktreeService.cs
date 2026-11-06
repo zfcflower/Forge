@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Forge.App.Localization;
 using Forge.Workspace;
 
@@ -41,6 +42,39 @@ internal sealed class WorktreeService
         string.IsNullOrWhiteSpace(branchName)
             ? worktrees.CreateAsync(repositoryRoot, title, ct)
             : worktrees.CreateAsync(repositoryRoot, title, branchName, ct);
+
+    /// <summary>
+    /// Best-effort cleanup of a worktree this app created a moment ago for a session whose row could not be written: the
+    /// worktree is removed first, then the branch that <c>git worktree add</c> created for it. Neither step is forced - a
+    /// worktree that holds anything (only a concurrent edit could have put it there) stays, and with it its branch, which
+    /// is checked out there; a branch that git does not consider merged (<c>branch -d</c>, never <c>-D</c>) stays too.
+    /// Failures are traced and never thrown, because the caller is already reporting the original error; only an
+    /// out-of-memory condition escapes.
+    /// </summary>
+    public async Task TryRemoveCreatedAsync(WorktreeSession worktree, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(worktree);
+        try
+        {
+            await worktrees
+                .RemoveAsync(worktree.RepositoryRoot, worktree.Path, force: false, baseBranch: worktree.BaseCommit, ct: ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine($"[worktree] could not remove the unused worktree '{worktree.Path}': {exception.Message}");
+            return;
+        }
+
+        try
+        {
+            await git.DeleteBranchAsync(worktree.RepositoryRoot, worktree.Branch, force: false, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine($"[worktree] could not delete the branch '{worktree.Branch}' of the removed worktree '{worktree.Path}': {exception.Message}");
+        }
+    }
 
     /// <summary>Worktree path this app would use for <paramref name="slug"/>; shown in the project tree.</summary>
     public string ResolveWorktreePath(string repositoryRoot, string slug) =>

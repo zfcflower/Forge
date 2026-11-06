@@ -28,6 +28,12 @@ internal sealed record AgentRuntimeServices(
     public ApprovalServices? Approvals { get; set; }
 
     /// <summary>
+    /// Commits a TODO step when the agent marks it done (handed to <c>AgentHostOptions.StepCommitter</c>). Null when the
+    /// runtime was assembled without the composition root, as in a unit test: marking an item done then commits nothing.
+    /// </summary>
+    public IStepCommitter? StepCommitter { get; set; }
+
+    /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
     /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
     /// </summary>
@@ -206,6 +212,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 ApprovalHandler = handler,
                 Store = services.Store,
                 Todos = services.Todos,
+                StepCommitter = services.StepCommitter,
                 Options = new AgentOptions { DefaultModel = services.Model },
             });
 
