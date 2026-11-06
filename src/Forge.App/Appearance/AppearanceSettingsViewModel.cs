@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows.Input;
+using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Forge.App.Localization;
@@ -22,8 +23,9 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
     private readonly TaskCompletionSource familiesLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// The dispatcher of the thread that constructed this view model, or null on a thread that has none (a plain unit
-    /// test). Deliberately not <c>Dispatcher.UIThread</c>: reading that property off the UI thread creates a UI dispatcher
+    /// The dispatcher of the running application's UI thread when this view model was built on it, otherwise null (a plain
+    /// unit test or pool thread, whose own dispatcher may be stale and unpumped, so a post to it would never run).
+    /// Deliberately not <c>Dispatcher.UIThread</c>: reading that property off the UI thread creates a UI dispatcher
     /// on the calling thread, which then hijacks the platform the next headless session sets up.
     /// </summary>
     private readonly Dispatcher? dispatcher;
@@ -36,7 +38,7 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
         ArgumentNullException.ThrowIfNull(catalog);
 
         this.preferences = preferences;
-        dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
+        dispatcher = Application.Current is { } app && app.CheckAccess() ? app.Dispatcher : null;
         Ui = new FontGroupViewModel(preferences, FontGroupKind.Ui);
         Code = new FontGroupViewModel(preferences, FontGroupKind.Code);
 
