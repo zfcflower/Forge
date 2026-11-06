@@ -82,7 +82,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 
 UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
-**降级。** 提供方未配置 / Host 未找到降级为明确的 UI 状态,绝不抛异常或伪造模型调用。审批:只读自动放行,`todo` 工具显式放行(写会话清单而非工作区);其余写/执行为 Ask,暂无审批对话框即等于拒绝,轮次卡显示“已拒绝”。
+**降级。** 提供方未配置 / Host 未找到降级为明确的 UI 状态,绝不抛异常或伪造模型调用。审批:只读自动放行,`todo` 工具显式放行(写会话清单而非工作区);其余写/执行为 Ask,经审批队列由用户当场决定(见“审批队列与 Agent 扩展”),拒绝时轮次卡显示“已拒绝”。
 
 **树一律扁平虚拟化。** 项目树、文件树、规格树、Diff 都是扁平 `RangeObservableCollection` 行列表 + 虚拟化 `ListBox`;展开/折叠只对子树做区间插入/删除,展开状态跨刷新保留(按路径/id 记住);文件树与规格树刷新仍是整表 `ReplaceAll`,滚动位置会回到顶部(未改为按路径 diff 的区间更新);行模型负责缩进档数与引导线,视图不递归。后台计划只吃 UI 线程上快照好的不可变数据(会话运行集合、Agent 层级都归调度器所有)。
 
@@ -141,13 +141,13 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - **设置分区未注册**(用户决定):注册会和 `SettingsPanelTests` 对分区列表的硬性断言冲突。`TerminalSettingsViewModel` 及其模板已写好,但没有接线;shell、参数和回滚行数目前只能经偏好文件修改。
 - **已知遗留**:浮出的终端标签仍会写进 `LayoutSnapshot.Floating`(恢复时被丢弃,无副作用);关闭被否决时,浮出的标签不会提到最前。延后项:缩放重排行、缓冲区内搜索、OSC 133、重启后恢复、已退出终端的“重新启动”、图片协议、双向文本、macOS 实机验证。
 
-## 未决
-
-- 预览组与评审面板只读;逐行审阅的行评论交互未做;编辑器内核(LSP/TextMate/补全/行评论)、审批对话框、声明式插件面板渲染未做。
-- 搜索框暂无行为(占位)。
-- `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
-- Worker 资源限制受威胁模型决策门控,不在此模块实现。
-- `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。
+**审批队列与 Agent 扩展(`Approval/`)。**
+- `ApprovalQueue` 归 UI 线程,条目是工具调用卡或插件审批卡;主窗口右下角非模态叠加层(约 420 px、可折叠,每张卡标注来源会话),不阻塞其它会话;有待审批项时会话标签与状态栏显示计数。
+- `SessionApprovalHandler : IApprovalHandler` 每个主会话一个(注入 `AgentHost.ApprovalHandler`):先查记住规则,命中即 `Allow`;否则入队等待;`ct` 取消或会话释放时撤卡。
+- 记住规则 `ApprovalRules`:键 = 工具名 + 副作用 + 作用域(会话/项目/全局),只记“允许”。会话级只在内存;项目级与永久写 `<数据根>/approval-rules.json`(源生成 JSON、`AtomicFile`、后台线程、写入串行且快照在写锁内取),不放进 `AppPreferences`。项目 id 取自 `ISessionCatalog`,常规会话归 General。文件损坏一律当作无规则并备份 `.bak`。`extension_delete`、插件审批卡、插件命令永不可记住;插件新版本获批时清除其新旧工具名下的全部记住项。
+- 策略:`extension_list/create/update/disable` 为 `Allow`(只写暂存区,真正的闸门是插件卡),`extension_delete` 走 `Ask`(即删除确认)。
+- `ExtensionAuthoringService` 实现 Core 的 `IExtensionAuthoring`:暂存 → 有诊断则直接把诊断返给 Agent(不入队)→ 插件卡入队 → 批准时把卡上展示的哈希原样传给 `extensions.commit`、拒绝则 `extensions.discard`。插件卡新建显示全文、更新显示与线上版本的逐文件 Diff,另示权限、依赖、三种哈希与诊断;只有“批准/拒绝”。重启后 `extensions.pending` 的项以“重启前提交”卡出现,不阻塞任何 Agent。`SessionRuntime` 订阅 `ToolsChanged` 并调用 `AgentHost.ReplaceExternalTools` 热加载。
+- 设置分区 `extensions`(`SettingsSectionIds.Extensions`):已安装扩展(启用/禁用/删除,删除二次确认;enable 只在这里提供)、待审批项、按作用域分组的记住规则(逐条撤销)。文案在 `Localization/Strings.Extensions.cs`(中英)。
 - 插件/工作流的 `host.tool_call` 经 `SessionToolCallRouter`(`Approval/`)按 run 注册会话路由:工具取自该会话 `AgentHost.Tools`(内置+外部),策略用与 agent loop 相同的 `SessionPolicy`,Ask 走该会话的 `SessionApprovalHandler`(记住的规则与卡片会话均正确),未知/已释放会话拒绝;五个 `extension_*` 工具对插件永不可解析、永不放行(它们的策略是"免问",真正的门是插件卡)。`SessionRuntime` 在构建 host 时注册、释放时注销;`ExtensionHostSupervisor.Create` 接收路由器。
 - 子 Agent 的 `host.tool_call`/`run_code` 内部调用:其 `ToolContext.SessionId` 是子会话 id,但子 Agent 与根共用 AgentHost。`SessionRuntime.RunTurnAsync` 消费事件时,`AgentSubAgentStarted`(任意深度)把 `ChildSessionId` 登记为根 scope 的别名,`AgentSubAgentFinished` 或运行时释放时注销(释放时清掉全部别名,释放后不再登记)。子调用按根的工具集解析(变更仍须审批卡;`extension_*` 仍不可达),卡片显示根会话(与 Core 一致)。别名登记发生在事件被消费时,先于子 Agent 的首次模型往返,实际不会落后于其首个工具调用。
 - 插件命令审批的 `ToolName` 是 `plugin-command:<pluginId>:<name>`(`ExtensionHostClient.PluginCommandApprovalName`):模型侧工具名只含字母数字、`_`、`-`,不含 `:`,因此永远不会与内置/外部工具名相等,策略 Allow 规则与"始终允许"都碰不到它。插件命令卡不可记住(`ApprovalRules.IsRememberable` 为 false,无记住按钮,`Allow` 也拒绝入库),每次调用单独确认;卡片标题"插件命令审批"。
@@ -155,3 +155,11 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - 插件卡无用户决定的撤回(会话释放、关闭、取消、卡片 Dispose)产出独立的 `Withdrawn`(≠ Deny):不 Discard 暂存稿,稿件留待 `extensions.pending` 重启后作为"重启前提交"卡出现;给 agent 的文本如实说"已撤回、草稿保留待定、不是拒绝"。工具卡的撤回仍是 Deny。
 - 提交时先(加载规则后)清除旧/新工具名的已记住规则,再提交,提交后按实际注册名再清一次;提交失败时规则保持已清除。`approval-rules.json` 的 `rules: null`/缺失视为损坏文件(无规则 + `.bak`),加载任务永不 Faulted,`RequestAsync` 对加载异常降级为"询问"。
 - 工作流扩展卡显示声明的工具(名称/描述/输入 schema)。
+
+## 未决
+
+- 预览组与评审面板只读;逐行审阅的行评论交互未做;编辑器内核(LSP/TextMate/补全/行评论)、声明式插件面板渲染未做。
+- 搜索框暂无行为(占位)。
+- `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
+- Worker 资源限制受威胁模型决策门控,不在此模块实现。
+- `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。
