@@ -257,20 +257,20 @@ internal sealed class StepCommitHarness : IAsyncDisposable
             () => Enabled);
     }
 
-    private Task<string?> ResolveAsync(string sessionId, CancellationToken ct)
+    private Task<WorktreeResolution> ResolveAsync(string sessionId, CancellationToken ct)
     {
         Interlocked.Increment(ref resolveCalls);
         if (ResolveFailure is { } failure)
         {
-            return Task.FromException<string?>(failure);
+            return Task.FromException<WorktreeResolution>(failure);
         }
 
         if (WorktreeBySession.TryGetValue(sessionId, out var mapped))
         {
-            return Task.FromResult<string?>(mapped);
+            return Task.FromResult(WorktreeResolution.Own(mapped));
         }
 
-        return Task.FromResult<string?>(Resolved ?? Repo.Path);
+        return Task.FromResult(WorktreeResolution.Own(Resolved ?? Repo.Path));
     }
 
     public StepCommitRepo Repo { get; }

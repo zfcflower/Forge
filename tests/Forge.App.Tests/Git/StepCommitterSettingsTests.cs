@@ -229,7 +229,7 @@ public sealed class StepCommitterSettingsTests : IDisposable
         var wired = new StepCommitter(
             StepCommitRepo.Cli,
             harness.Store,
-            (_, _) => Task.FromResult<string?>(harness.Repo.Path),
+            (_, _) => Task.FromResult(WorktreeResolution.Own(harness.Repo.Path)),
             () => preferences.GitStepCommits);
         var first = await harness.AddDoneAsync("first");
         var second = await harness.AddDoneAsync("second");

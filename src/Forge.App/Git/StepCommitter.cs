@@ -10,8 +10,9 @@ namespace Forge.App.Git;
 /// the contract: the <c>todo</c> tool (through <c>AgentHostOptions.StepCommitter</c>, when the agent marks an item done)
 /// and the TODO panel (when the user ticks an item or presses "Retry commit").
 /// <para>Outcome rules, in order. <see cref="StepCommitOutcome.Skipped"/>: the <c>gitStepCommits</c> preference is off,
-/// the session has no worktree of its own (general <c>scratch/</c> sessions, which live inside the shared general
-/// repository and must never be committed into), the worktree directory is gone, or it is not a git repository.
+/// the session is a sub-agent (it shares its parent's worktree, so the parent's own steps own those changes), the session
+/// has no worktree of its own (general <c>scratch/</c> sessions, which live inside the shared general repository and must
+/// never be committed into), the worktree directory is gone, or it is not a git repository.
 /// <see cref="StepCommitOutcome.NoChanges"/>: <c>git status</c> (untracked files included) is empty, so no empty commit is
 /// made. <see cref="StepCommitOutcome.Failed"/>: a merge, rebase, cherry-pick or revert is in progress, HEAD is detached,
 /// or git refused the commit (a hook failed, no identity, ...); the reason is the tail of git's stderr. Otherwise
@@ -22,11 +23,18 @@ namespace Forge.App.Git;
 /// <c>(id, sha, null)</c> on a commit, <c>(id, null, reason)</c> on a failure. <c>NoChanges</c> and <c>Skipped</c> only
 /// clear an earlier failure (<c>(id, null, null)</c>), and only when the stored item still carries one, so a recorded
 /// commit id is never wiped. A store that cannot persist is traced and does not change the returned result.</para>
+/// <para>Failures: when git refuses or the commit otherwise fails, the index is reset to HEAD (a mixed <c>git reset</c>,
+/// working tree files untouched), so the rejected changes show up as unstaged again and neither the next retry nor the
+/// status display inherits a half-staged index; a reset that fails is traced only.</para>
+/// <para>Late cancellation: the HEAD of the worktree is read before the commit, and a cancellation that kills git after
+/// the commit object and ref were written (a slow <c>post-commit</c> hook) re-reads HEAD; when it moved, the new sha is
+/// persisted and reported as <see cref="StepCommitOutcome.Committed"/>, so a commit that exists is never lost. A
+/// cancellation before any commit could exist is rethrown.</para>
 /// <para>Concurrency: commits to the same worktree are serialized by a per-path gate held from the status read to the
 /// persisted result, so the agent and the user ticking two items at once cannot interleave <c>add</c> and <c>commit</c>
 /// (the second one then sees <c>NoChanges</c>). Expected failures are results, never exceptions; only cancellation
-/// throws. Every git call is asynchronous and runs on whatever thread the caller is on, so callers off the UI thread
-/// keep the UI free.</para>
+/// throws, except the late cancellation above that is recovered into a result. Every git call is asynchronous and runs on
+/// whatever thread the caller is on, so callers off the UI thread keep the UI free.</para>
 /// </summary>
 internal sealed class StepCommitter : IStepCommitter
 {
@@ -36,22 +44,25 @@ internal sealed class StepCommitter : IStepCommitter
     /// <summary>Subject used when an item has neither a commit subject nor a title.</summary>
     internal const string FallbackSubject = "Complete step";
 
+    /// <summary>Skipped text of a sub-agent session, which never commits into the worktree it inherits from its parent.</summary>
+    internal const string SubAgentSkipMessage = "The session is a sub-agent and shares its parent's worktree, so nothing is committed here.";
+
     private const int ShortCommitLength = 7;
 
     private readonly GitCli git;
     private readonly ITodoStore store;
-    private readonly Func<string, CancellationToken, Task<string?>> resolveWorktree;
+    private readonly Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree;
     private readonly Func<bool> isEnabled;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> gates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="git">The git wrapper every command goes through.</param>
     /// <param name="store">Where the outcome is recorded.</param>
-    /// <param name="resolveWorktree">Session id to the session's own worktree path; null or empty means the session has none.</param>
+    /// <param name="resolveWorktree">Session id to the worktree the session may commit into; see <see cref="WorktreeResolution"/>.</param>
     /// <param name="isEnabled">Reads the <c>gitStepCommits</c> preference at the start of every commit.</param>
     public StepCommitter(
         GitCli git,
         ITodoStore store,
-        Func<string, CancellationToken, Task<string?>> resolveWorktree,
+        Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree,
         Func<bool> isEnabled)
     {
         ArgumentNullException.ThrowIfNull(git);
@@ -65,16 +76,24 @@ internal sealed class StepCommitter : IStepCommitter
     }
 
     /// <summary>
-    /// The resolver the composition root uses: the session's <see cref="SessionInfo.WorktreePath"/>. A sub-agent session
-    /// inherits its parent's worktree path, a general session has none.
+    /// The resolver the composition root uses: the session's <see cref="SessionInfo.WorktreePath"/>. A general session has
+    /// none; a sub-agent session inherits its parent's path but is reported as a sub-agent, because committing there would
+    /// sweep the parent's work into the child's step.
     /// </summary>
-    public static Func<string, CancellationToken, Task<string?>> WorktreeOf(ISessionStore sessions)
+    public static Func<string, CancellationToken, Task<WorktreeResolution>> WorktreeOf(ISessionStore sessions)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         return async (sessionId, ct) =>
         {
             var session = await sessions.GetSessionAsync(sessionId, ct).ConfigureAwait(false);
-            return session?.WorktreePath;
+            if (session is null)
+            {
+                return WorktreeResolution.None;
+            }
+
+            return string.IsNullOrEmpty(session.ParentSessionId)
+                ? WorktreeResolution.Own(session.WorktreePath)
+                : WorktreeResolution.SubAgent(session.WorktreePath);
         };
     }
 
@@ -88,11 +107,11 @@ internal sealed class StepCommitter : IStepCommitter
             return await NothingToCommitAsync(item, StepCommitOutcome.Skipped, "Step commits are switched off.", ct).ConfigureAwait(false);
         }
 
-        string? directory;
+        WorktreeResolution worktree;
         try
         {
-            directory = string.IsNullOrWhiteSpace(item.SessionId)
-                ? null
+            worktree = string.IsNullOrWhiteSpace(item.SessionId)
+                ? WorktreeResolution.None
                 : await resolveWorktree(item.SessionId, ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (IsExpected(exception))
@@ -100,6 +119,12 @@ internal sealed class StepCommitter : IStepCommitter
             return await FailAsync(item, "Could not look up the session's worktree: " + exception.Message).ConfigureAwait(false);
         }
 
+        if (worktree.IsSubAgent)
+        {
+            return await NothingToCommitAsync(item, StepCommitOutcome.Skipped, SubAgentSkipMessage, ct).ConfigureAwait(false);
+        }
+
+        var directory = worktree.Path;
         if (string.IsNullOrWhiteSpace(directory))
         {
             return await NothingToCommitAsync(
@@ -174,6 +199,9 @@ internal sealed class StepCommitter : IStepCommitter
 
     private async Task<StepCommitResult> CommitLockedAsync(TodoItem item, string directory, CancellationToken ct)
     {
+        // Only a commit attempt can leave staged content behind (git add -A runs inside CommitAsync); a failure earlier in
+        // the rule chain must not unstage changes the user had staged before the step.
+        var commitAttempted = false;
         try
         {
             if (!await git.IsRepositoryAsync(directory, ct).ConfigureAwait(false))
@@ -207,20 +235,94 @@ internal sealed class StepCommitter : IStepCommitter
                 return await FailAsync(item, "HEAD is detached; check out a branch for the step to land on, then retry the commit.").ConfigureAwait(false);
             }
 
-            var commit = await git.CommitAsync(directory, [], BuildMessage(item), ct).ConfigureAwait(false);
+            // Remember where HEAD was: a cancellation that kills git after the commit object and the ref were written (a
+            // slow post-commit hook) is recognized by the new HEAD, so the commit that exists is not lost.
+            var previousHead = branch.HeadCommit ?? await git.RevParseAsync(directory, "HEAD", ct).ConfigureAwait(false);
+            commitAttempted = true;
+            GitCommit commit;
+            try
+            {
+                commit = await git.CommitAsync(directory, [], BuildMessage(item), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!string.IsNullOrWhiteSpace(previousHead))
+            {
+                var head = await ReadHeadAsync(directory).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(head) || string.Equals(head, previousHead, StringComparison.Ordinal))
+                {
+                    // No commit of this step landed (for example the cancellation hit git add), so the cancellation stands.
+                    throw;
+                }
+
+                // The commit exists from here on: record it even though the caller's turn is cancelled.
+                await PersistAsync(item.Id, head, null, CancellationToken.None).ConfigureAwait(false);
+                return new StepCommitResult(StepCommitOutcome.Committed, head, CommittedMessage(item, head, null));
+            }
 
             // The commit exists from here on: record it even if the caller's turn is cancelled a moment later.
             await PersistAsync(item.Id, commit.Id, null, CancellationToken.None).ConfigureAwait(false);
-            var shortId = commit.Id.Length > ShortCommitLength ? commit.Id[..ShortCommitLength] : commit.Id;
-            return new StepCommitResult(StepCommitOutcome.Committed, commit.Id, $"Committed {shortId}: {FirstLine(commit.Subject) ?? FirstLine(item.Title) ?? FallbackSubject}");
+            return new StepCommitResult(StepCommitOutcome.Committed, commit.Id, CommittedMessage(item, commit.Id, FirstLine(commit.Subject)));
         }
         catch (GitException exception)
         {
+            if (commitAttempted)
+            {
+                await UnstageAsync(directory).ConfigureAwait(false);
+            }
+
             return await FailAsync(item, "git commit failed: " + FailureText(exception)).ConfigureAwait(false);
         }
         catch (Exception exception) when (IsExpected(exception))
         {
+            if (commitAttempted)
+            {
+                await UnstageAsync(directory).ConfigureAwait(false);
+            }
+
             return await FailAsync(item, "The step could not be committed: " + exception.Message).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The result text of a commit: short sha and the subject (the item title when git's subject was not read).</summary>
+    private static string CommittedMessage(TodoItem item, string commitId, string? subject)
+    {
+        var shortId = commitId.Length > ShortCommitLength ? commitId[..ShortCommitLength] : commitId;
+        return $"Committed {shortId}: {subject ?? FirstLine(item.Title) ?? FallbackSubject}";
+    }
+
+    /// <summary>
+    /// HEAD after a cancelled commit, read without the cancelled token; null when it cannot be read (the caller then
+    /// treats the cancellation as having landed before the commit).
+    /// </summary>
+    private async Task<string?> ReadHeadAsync(string directory)
+    {
+        try
+        {
+            return await git.RevParseAsync(directory, "HEAD", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsExpected(exception))
+        {
+            Trace.WriteLine($"[step-commit] could not re-read HEAD in '{directory}' after a cancelled commit: {exception.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Puts the index back to HEAD after a failed commit (a mixed <c>git reset</c>: working tree files stay as they are),
+    /// so the rejected changes are unstaged again. Best effort: a failure is only traced.
+    /// </summary>
+    private async Task UnstageAsync(string directory)
+    {
+        try
+        {
+            var result = await git.RunAsync(directory, ["reset", "-q"], CancellationToken.None).ConfigureAwait(false);
+            if (!result.Success)
+            {
+                Trace.WriteLine($"[step-commit] could not unstage '{directory}' (git reset -q exited {result.ExitCode}): {result.StandardError.Trim()}");
+            }
+        }
+        catch (Exception exception) when (IsExpected(exception))
+        {
+            Trace.WriteLine($"[step-commit] could not unstage '{directory}' after a failed commit: {exception.Message}");
         }
     }
 
@@ -304,4 +406,21 @@ internal sealed class StepCommitter : IStepCommitter
     /// <summary>Everything except cancellation and process-fatal errors is an expected failure of the environment.</summary>
     private static bool IsExpected(Exception exception) =>
         exception is not (OperationCanceledException or OutOfMemoryException);
+}
+
+/// <summary>
+/// What the worktree resolver found for a session. <see cref="Path"/> is the session's own worktree (null or blank when it
+/// has none); <see cref="IsSubAgent"/> marks a sub-agent session, which inherits its parent's worktree and never commits
+/// there - the parent's own steps own those changes.
+/// </summary>
+internal readonly record struct WorktreeResolution(string? Path, bool IsSubAgent)
+{
+    /// <summary>No worktree of its own (a general <c>scratch/</c> session or an unknown session).</summary>
+    public static WorktreeResolution None => default;
+
+    /// <summary>A session with its own worktree (or none when <paramref name="path"/> is null or blank).</summary>
+    public static WorktreeResolution Own(string? path) => new(path, false);
+
+    /// <summary>A sub-agent session and the parent's worktree path it carries.</summary>
+    public static WorktreeResolution SubAgent(string? inheritedPath) => new(inheritedPath, true);
 }

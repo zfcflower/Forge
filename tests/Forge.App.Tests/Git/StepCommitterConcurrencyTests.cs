@@ -132,7 +132,7 @@ public sealed class StepCommitterConcurrencyTests
         Assert.Null(stored.CommitError);
     }
 
-    [Fact(Skip = "defect: GitCli.CommitAsync keeps the commit id after a late cancel only when git had already exited (keepCompletedResult); a cancel that arrives while a slow post-commit hook still runs kills git, GitCli throws OperationCanceledException, and StepCommitter never persists the sha although HEAD already holds the commit, so the step shows no commit id (the next tick finds nothing to commit)")]
+    [Fact]
     public async Task A_cancel_that_arrives_while_a_post_commit_hook_runs_still_records_the_commit_that_exists()
     {
         await using var harness = await StepCommitHarness.CreateAsync();
@@ -254,7 +254,7 @@ public sealed class StepCommitterConcurrencyTests
 
     // ------------------------------------------------------------ failure text of a very chatty hook
 
-    [Fact(Skip = "defect: GitCli keeps only the first 64 KiB of stderr, so the 'tail of git's stderr' that StepCommitter shows is the tail of that prefix; a hook that prints more than 64 KiB loses the verdict it printed last")]
+    [Fact]
     public async Task A_hook_that_prints_more_than_the_stderr_capture_still_shows_its_last_line()
     {
         await using var harness = await StepCommitHarness.CreateAsync();

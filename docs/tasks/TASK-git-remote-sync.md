@@ -82,10 +82,11 @@ ThinkRail 的这些能力来自它的工具(工作区、计划步骤提交、计
 
 ### ② 步骤提交与计划摘要
 
-- 触发:TODO 条目从非 done 变成 done,不论 Agent 还是用户在 TODO panel 里勾选。会话不在 git 仓库里(常规 `scratch/`)、或设置里关掉时跳过。
+- 触发:TODO 条目从非 done 变成 done,不论 Agent 还是用户在 TODO panel 里勾选。会话不在 git 仓库里(常规 `scratch/`)、或设置里关掉时跳过。子会话(`ParentSessionId` 非空)一律跳过:它继承父会话的 worktree,子步骤提交会把父会话的改动一起卷进去。
 - 范围:提交时工作树里**全部**未提交改动(`add -A` + `commit`)。会话 worktree 只属于这个会话,所以这些改动就是本步骤的。没有采用“按轮次检查点切分”:Agent 一个轮次里可能跨两个步骤改文件,按轮次切反而切错。检查点只用来标注:把这一步跨越的轮次范围记在条目上,供 Diff 按步骤查看。没有改动时不产生空提交,结果写“无改动”。
 - 提交说明:优先用 Agent 给的 `commit_subject`,没有时退回条目标题。`todo` 工具描述要求 Agent 先用 `git_log` 读近 20 条提交,判断是否 Conventional Commits 再写。正文写入步骤的 summary;verification 不进提交说明。
-- 提交失败(钩子失败、冲突中、游离 HEAD)不回滚 done 状态:工具结果与 TODO 行都显示失败原因,并提供“重试提交”。
+- 提交失败(钩子失败、冲突中、游离 HEAD)不回滚 done 状态:工具结果与 TODO 行都显示失败原因,并提供“重试提交”。提交尝试失败后把 index 复位到 HEAD(mixed `git reset`,不动工作区文件),被拒绝的改动回到未暂存,重试不继承半暂存状态。
+- 晚取消:提交对象与 ref 已存在、只差慢 `post-commit` 钩子时被取消(git 被杀),按 HEAD 是否前进判断;前进了就把新 sha 记到该步骤上并报告已提交,取消发生在 `git add` 阶段则照常抛取消。
 - 审批:本地提交写的是会话自己的 worktree,而且可撤销,随 `todo` 一起放行,不单独弹审批。
 - 计划摘要:会话级一段文本(Summary / Changes / Testing 三段);`PrBodyRenderer` 把它加上自动生成的 `## Plan`(每步:标题、提交短 sha、summary、verification)渲染成 PR 正文。纯函数,便于测试。
 

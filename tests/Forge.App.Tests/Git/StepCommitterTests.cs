@@ -448,6 +448,32 @@ public sealed class StepCommitterTests
     }
 
     [Fact]
+    public async Task A_failed_commit_unstages_what_it_staged_so_the_retry_starts_from_the_same_changes()
+    {
+        await using var harness = await StepCommitHarness.CreateAsync();
+        harness.Repo.InstallHook("pre-commit", "echo 'hook rejected: lint failed' >&2\nexit 1\n");
+        harness.Repo.WriteFile("seed.txt", "seed changed\n");
+        harness.Repo.WriteFile("change.txt", "change\n");
+        var item = await harness.AddDoneAsync();
+        var head = await harness.Repo.HeadAsync();
+        using var cts = Bound();
+
+        var result = await harness.Committer.CommitStepAsync(item, cts.Token);
+
+        Assert.Equal(StepCommitOutcome.Failed, result.Outcome);
+        Assert.Contains("hook rejected: lint failed", result.Message, StringComparison.Ordinal);
+        Assert.Equal(head, await harness.Repo.HeadAsync());
+        // The index is back at HEAD: nothing is staged, and the same changes are still in the working tree, unstaged.
+        Assert.Equal(string.Empty, await harness.Repo.GitAsync("diff", "--cached", "--name-only"));
+        // StatusAsync trims the leading space of the first line, so the unstaged file comes first without it.
+        Assert.Equal("M seed.txt\n?? change.txt", await harness.Repo.StatusAsync());
+        Assert.Equal("seed changed\n", await File.ReadAllTextAsync(harness.Repo.FullPath("seed.txt")));
+        var stored = await harness.StoredAsync(item.Id);
+        Assert.Equal(result.Message, stored.CommitError);
+        Assert.Null(stored.CommitId);
+    }
+
+    [Fact]
     public async Task A_hook_failure_keeps_only_the_tail_of_a_long_output_bounded()
     {
         await using var harness = await StepCommitHarness.CreateAsync();
@@ -725,7 +751,7 @@ public sealed class StepCommitterTests
         var git = StepCommitRepo.Cli;
         using var directory = new TempData();
         var store = new Forge.Core.Storage.SqliteTodoStore(directory.Path);
-        Func<string, CancellationToken, Task<string?>> resolver = static (_, _) => Task.FromResult<string?>(null);
+        Func<string, CancellationToken, Task<WorktreeResolution>> resolver = static (_, _) => Task.FromResult(WorktreeResolution.None);
 
         Assert.Throws<ArgumentNullException>(() => new StepCommitter(null!, store, resolver, static () => true));
         Assert.Throws<ArgumentNullException>(() => new StepCommitter(git, null!, resolver, static () => true));
@@ -744,17 +770,57 @@ public sealed class StepCommitterTests
     }
 
     [Fact]
-    public async Task WorktreeOf_returns_the_session_worktree_path_or_null()
+    public async Task WorktreeOf_reports_the_session_worktree_and_marks_sub_agent_sessions()
     {
         var sessions = new WorktreeSessionStore(
             new SessionInfo("with-worktree", "C:/repo", "title", DateTimeOffset.UnixEpoch) { WorktreePath = "C:/repo.worktrees/x" },
+            new SessionInfo("sub-agent", "C:/repo.worktrees/x", "title", DateTimeOffset.UnixEpoch)
+            {
+                WorktreePath = "C:/repo.worktrees/x",
+                ParentSessionId = "with-worktree",
+                AgentKind = "Explore",
+            },
             new SessionInfo("general", "C:/General/scratch/1", "title", DateTimeOffset.UnixEpoch));
         var resolve = StepCommitter.WorktreeOf(sessions);
 
-        Assert.Equal("C:/repo.worktrees/x", await resolve("with-worktree", CancellationToken.None));
-        Assert.Null(await resolve("general", CancellationToken.None));
-        Assert.Null(await resolve("unknown-session", CancellationToken.None));
+        Assert.Equal(WorktreeResolution.Own("C:/repo.worktrees/x"), await resolve("with-worktree", CancellationToken.None));
+        Assert.Equal(WorktreeResolution.SubAgent("C:/repo.worktrees/x"), await resolve("sub-agent", CancellationToken.None));
+        Assert.Equal(WorktreeResolution.None, await resolve("general", CancellationToken.None));
+        Assert.Equal(WorktreeResolution.None, await resolve("unknown-session", CancellationToken.None));
         Assert.Throws<ArgumentNullException>(() => StepCommitter.WorktreeOf(null!));
+    }
+
+    [Fact]
+    public async Task A_sub_agent_session_shares_its_parents_worktree_and_is_skipped()
+    {
+        await using var harness = await StepCommitHarness.CreateAsync();
+        // The session row of a sub-agent carries the parent's worktree path, exactly as the session store copies it.
+        var subAgent = new SessionInfo(StepCommitHarness.SessionId, harness.Repo.Path, "explore", DateTimeOffset.UnixEpoch)
+        {
+            WorktreePath = harness.Repo.Path,
+            ParentSessionId = "parent-1",
+            AgentKind = "Explore",
+        };
+        var committer = new StepCommitter(
+            StepCommitRepo.Cli,
+            harness.Store,
+            StepCommitter.WorktreeOf(new WorktreeSessionStore(subAgent)),
+            static () => true);
+        harness.Repo.WriteFile("change.txt", "change\n");
+        var item = await harness.AddDoneAsync();
+        var head = await harness.Repo.HeadAsync();
+        using var cts = Bound();
+
+        var result = await committer.CommitStepAsync(item, cts.Token);
+
+        Assert.Equal(StepCommitOutcome.Skipped, result.Outcome);
+        Assert.Null(result.CommitId);
+        Assert.Equal(StepCommitter.SubAgentSkipMessage, result.Message);
+        Assert.Equal(head, await harness.Repo.HeadAsync());
+        Assert.Equal("?? change.txt", await harness.Repo.StatusAsync());
+        var stored = await harness.StoredAsync(item.Id);
+        Assert.Null(stored.CommitId);
+        Assert.Null(stored.CommitError);
     }
 
     [Fact]
