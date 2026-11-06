@@ -165,5 +165,12 @@ depends-on: [forge-ipc]
   行照旧作为一行返回(带 `error`),不会变成“没有这一行”,也不会被映射成 `approved` 之类的已知状态。
 - **权限按原始 JSON 与解码结果同时校验。** 缺 `kind` 的权限对象会被绑定成枚举默认值 `ReadFile`,只看解码结果会把它
   当成一条合法权限;所以逐项比对 `permissions` 数组与解码出的列表,长度/形状不符或 `kind` 未定义都判该行不可用。
+- **终端(`ExtensionHostClient.Terminal.cs` 实现 `ITerminalHost`)。** 线协议见 `forge-extension-host`“交互终端”。
+  - **启动**:未处于 `Running` 时 `StartAsync` 抛 `InvalidOperationException`。`terminal.start` 请求本身**不绑调用方的 ct**,因为取消会让对端丢掉应答,也就丢掉了 Host 可能已建好的终端的 id。调用方取消后立即得到 `OperationCanceledException`;客户端继续等应答,若终端已建好,就清掉它的早到帧并补发 `terminal.stop`,否则这个终端会占着 Host 的 32 个名额直到断连。
+  - **早到帧**:`terminal.output`/`exit` 可能先于 start 应答到达,按 id 缓冲(总量 1 MiB),在登记表锁内回放,所以首批输出不丢、seq 不乱。
+  - **输出与确认**:`Output` 是自写的 `ChannelReader`,`TryRead` 时累加已读字节,攒够 64 KiB 或队列读空就发一次 `terminal.ack`,消费即确认。队列只受 Host 的窗口约束,因此天然有界。客户端校验 `seq` 连续。
+  - **输入**:`WriteAsync` 把输入切成 ≤ 64 KiB 的 `terminal.input` 通知并串行发送。
+  - **退出与断连**:退出后,写入和缩放一律忽略,`HasForegroundProcessAsync` 返回 false。该查询会把业务错误与超时也当成 false(关闭确认宁可不拦)。连接断开(Host 崩溃、重连换代)时,`Output` 以 `IpcConnectionClosedException` 完成,`Exited` 也以它失败。
+  - **释放**:`DisposeAsync` 发 `terminal.stop`,限时 5 秒;超时或失败时写一条带 terminalId 的诊断,本地照常收尾(`Exited` 为 -1),属于尽力而为:Host 侧这个终端要等断连才会被清理。
 - **已知限制:** `IIpcPeer` 仍只有每 peer 一个默认超时,`SendRequestAsync` 没有 per-call 超时重载;本客户端因此把 peer
   默认超时设为无限、在 `SendAsync` 里为每次调用自建 deadline。若将来 Ipc 增加 per-call 超时,这里应改为直接使用它。
