@@ -65,6 +65,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
     private readonly string filePath;
     private readonly int debounceMilliseconds;
     private readonly Lock gate = new();
+    private readonly Lock writeGate = new();
     private readonly List<ApprovalRule> rules = [];
     private CancellationTokenSource? debounce;
     private Task? loadTask;
@@ -514,7 +515,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
             return;
         }
 
-        CancellationTokenSource cts;
+        CancellationToken token;
         CancellationTokenSource? previous;
         lock (gate)
         {
@@ -524,12 +525,14 @@ internal sealed class ApprovalRules : IAsyncDisposable
             }
 
             previous = debounce;
-            cts = new CancellationTokenSource();
+            var cts = new CancellationTokenSource();
+            // Read the token while the lock still keeps a concurrent schedule from cancelling and disposing this source.
+            token = cts.Token;
             debounce = cts;
         }
 
         Cancel(previous);
-        _ = WriteAfterDelayAsync(cts.Token);
+        _ = WriteAfterDelayAsync(token);
     }
 
     private async Task WriteAfterDelayAsync(CancellationToken ct)
@@ -559,6 +562,16 @@ internal sealed class ApprovalRules : IAsyncDisposable
 
     /// <summary>The one write path: back up an unreadable file once, then replace it atomically with a fresh document.</summary>
     private void WriteCore(CancellationToken ct)
+    {
+        // Writers run one at a time and take their snapshot only after getting in, so the file written last always
+        // reflects the newest state instead of an older snapshot overtaking a newer one.
+        lock (writeGate)
+        {
+            WriteLocked(ct);
+        }
+    }
+
+    private void WriteLocked(CancellationToken ct)
     {
         int snapshot;
         bool shouldBackUp;
