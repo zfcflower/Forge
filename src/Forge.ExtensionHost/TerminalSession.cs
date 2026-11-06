@@ -25,8 +25,10 @@ internal interface ITerminalNotifier
 /// <item>Each terminal may have at most <see cref="WindowBytes"/> decoded bytes sent but not acknowledged. At the limit the
 /// reader simply stops reading the PTY, so the child's writes block exactly like they would on a real terminal. An
 /// acknowledgement continues the reader.</item>
-/// <item>No byte is ever dropped while the terminal is open. The only discarded output is what is still unsent when the
-/// terminal is closing - the tree is already dead and the reader is only draining so the console can close.</item>
+/// <item>No byte is ever dropped while the terminal is open, and none when the shell exits on its own: its tail is
+/// delivered under the same window before <c>terminal.exit</c>, bounded by <see cref="NaturalDrainWindow"/>. The only
+/// discarded output is what is still unsent when the terminal is stopped, the host is closing or the connection broke -
+/// the reader then only drains so the console can close.</item>
 /// <item>One read is one frame: the buffer is 64 KiB and nothing merges or splits it, so the byte order the reader saw is
 /// the byte order the sequence numbers describe.</item>
 /// <item>Input is queued per terminal and written by one task in order; the notification handler never blocks the IPC
@@ -48,6 +50,11 @@ internal sealed class TerminalSession
 
     /// <summary>How long the reader gets to reach end of file once the tree is dead and the console is closing.</summary>
     private static readonly TimeSpan DrainWindow = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a shell that exited on its own gets to have its remaining output delivered, under the normal
+    /// acknowledgement window, before the rest is dropped and recorded. An explicit stop, a closing host or a broken
+    /// connection skips this and drops at once.</summary>
+    private static readonly TimeSpan NaturalDrainWindow = TimeSpan.FromSeconds(30);
 
     /// <summary>How many input chunks one terminal may queue before a further chunk is refused instead of growing the
     /// queue without bound. The refusal drops that chunk (a keystroke flood of over 1024 unread chunks), never part of one.</summary>
@@ -75,7 +82,11 @@ internal sealed class TerminalSession
     private readonly Lock gate = new();
     private long unacknowledged;
     private long sequence;
+    /// <summary>Set once the terminal is closing for a reason other than the shell exiting by itself: unsent output is
+    /// discarded from here on. A shell's natural exit does not set it - its tail is still delivered.</summary>
     private volatile bool draining;
+    private readonly TaskCompletionSource discardRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private bool naturalExit;
     private Task? completion;
 
     internal TerminalSession(
@@ -150,7 +161,24 @@ internal sealed class TerminalSession
 
     /// <summary>Stops the terminal and waits until it is over, including the <c>terminal.exit</c> notification. Idempotent:
     /// every caller awaits the same single-flight shutdown.</summary>
-    internal Task StopAsync() => Completion;
+    internal Task StopAsync()
+    {
+        Discard();
+        return Completion;
+    }
+
+    /// <summary>Switches the output from "deliver under flow control" to "read and drop". Idempotent; also upgrades a
+    /// natural-exit drain that is already running, waking a reader parked on a full window.</summary>
+    private void Discard()
+    {
+        lock (flow)
+        {
+            draining = true;
+            Monitor.PulseAll(flow);
+        }
+
+        discardRequested.TrySetResult();
+    }
 
     private async Task WatchAsync()
     {
@@ -165,7 +193,20 @@ internal sealed class TerminalSession
             // A terminal whose exit code cannot be observed is still over; the shutdown path records what it cannot verify.
         }
 
-        await Completion.ConfigureAwait(false);
+        // Only the first trigger decides the mode: a stop that already started the shutdown keeps the drop semantics.
+        Task run;
+        lock (gate)
+        {
+            if (completion is null)
+            {
+                naturalExit = !draining;
+                completion = Task.Run(RunAsync);
+            }
+
+            run = completion;
+        }
+
+        await run.ConfigureAwait(false);
     }
 
     private void ReadLoop()
@@ -219,6 +260,7 @@ internal sealed class TerminalSession
                 {
                     // The frame could not be written, so no acknowledgement for it can ever arrive: keeping the terminal
                     // alive would only fill the window and leak the process tree.
+                    Discard();
                     _ = Completion;
                     break;
                 }
@@ -282,11 +324,19 @@ internal sealed class TerminalSession
         try
         {
             int exitCode;
-            lock (flow)
+            bool natural;
+            lock (gate)
             {
-                draining = true;
-                Monitor.PulseAll(flow);
+                natural = naturalExit;
             }
+
+            if (!natural)
+            {
+                Discard();
+            }
+
+            using var overall = new CancellationTokenSource();
+            var overallDeadline = natural ? Task.Delay(NaturalDrainWindow, overall.Token) : null;
 
             input.Writer.TryComplete();
 
@@ -298,18 +348,10 @@ internal sealed class TerminalSession
 
             // Now - and not before - the console may be released: closing it while a client is still attached is what the
             // ConPTY documentation warns about, and on POSIX there is nothing to release.
-            await Task.Run(process.CloseConsole).ConfigureAwait(false);
-
-            try
-            {
-                await readerFinished.Task.WaitAsync(DrainWindow).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                cleanup.Record(
-                    $"the output of terminal '{Id}' (pid {ProcessId}) did not reach end of file within "
-                    + $"{DrainWindow.TotalSeconds:0} s after its process tree was killed; the remaining output was dropped");
-            }
+            var closing = Task.Run(process.CloseConsole);
+            await AwaitDrainAsync(closing, overallDeadline, null).ConfigureAwait(false);
+            await AwaitDrainAsync(readerFinished.Task, overallDeadline, "reach end of file").ConfigureAwait(false);
+            overall.Cancel();
 
             using (var deadline = new CancellationTokenSource(SendWindow))
             {
@@ -350,6 +392,52 @@ internal sealed class TerminalSession
 
             await AwaitInputWriterAsync().ConfigureAwait(false);
             finished?.Invoke(this);
+        }
+    }
+
+    /// <summary>
+    /// Waits for one shutdown step. After a natural exit the reader is still delivering the shell's tail under flow
+    /// control, so the step may take as long as the app needs to acknowledge - up to the overall deadline, or until a stop
+    /// turns the drain into a drop. Past either, the rest of the output is dropped, recorded, and the step gets
+    /// <see cref="DrainWindow"/> more to finish (the reader then discards at full speed).
+    /// </summary>
+    private async Task AwaitDrainAsync(Task step, Task? overallDeadline, string? what)
+    {
+        if (overallDeadline is not null && !draining)
+        {
+            var first = await Task.WhenAny(step, discardRequested.Task, overallDeadline).ConfigureAwait(false);
+            if (first == step)
+            {
+                await step.ConfigureAwait(false);
+                return;
+            }
+
+            if (first == overallDeadline)
+            {
+                cleanup.Record(
+                    $"the output of terminal '{Id}' (pid {ProcessId}) was not fully acknowledged within "
+                    + $"{NaturalDrainWindow.TotalSeconds:0} s after its shell exited; the remaining output was dropped");
+            }
+
+            Discard();
+        }
+
+        if (what is null)
+        {
+            // Releasing the console is never abandoned: it is called again by Dispose, which must not race it.
+            await step.ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            await step.WaitAsync(DrainWindow).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            cleanup.Record(
+                $"terminal '{Id}' (pid {ProcessId}) did not {what} within {DrainWindow.TotalSeconds:0} s after its "
+                + "process tree was killed; the remaining output was dropped");
         }
     }
 

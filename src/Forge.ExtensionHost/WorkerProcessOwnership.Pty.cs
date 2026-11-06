@@ -70,6 +70,12 @@ internal sealed partial class WorkerProcessOwnership
     /// its value differs between Linux and Darwin.</summary>
     private const int OpenReadWrite = 2;
 
+    /// <summary><c>O_CLOEXEC</c>: the master must not survive an <c>exec</c> in any other child the host spawns later (a
+    /// worker, another terminal's shell), or that child keeps this terminal alive and could read its output. Passed at open
+    /// time, which is atomic; <c>fcntl(F_SETFD)</c> afterwards would leave a window and is variadic, which P/Invoke cannot
+    /// call correctly on Apple arm64. Linux value 0x80000; Darwin 0x1000000 (CI-to-validate: never executed on macOS).</summary>
+    private static readonly int MasterCloseOnExec = OperatingSystem.IsMacOS() ? 0x0100_0000 : 0x0008_0000;
+
     /// <summary><c>TIOCSWINSZ</c> / <c>TIOCGWINSZ</c>'s argument type: rows and columns first, pixels after.</summary>
     private const int SetTerminalWindowSize = 0x5414;
 
@@ -592,7 +598,7 @@ internal sealed partial class WorkerProcessOwnership
             int columns,
             int rows)
         {
-            var masterDescriptor = posix_openpt(OpenReadWrite);
+            var masterDescriptor = posix_openpt(OpenReadWrite | MasterCloseOnExec);
             if (masterDescriptor < 0)
             {
                 throw PtyStartFailed("posix_openpt", Marshal.GetLastPInvokeError());

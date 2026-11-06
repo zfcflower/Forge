@@ -6,12 +6,7 @@ namespace Forge.Integration.Tests.Terminal;
 /// <summary>Flow control over a real host. While the app keeps acknowledging, megabytes arrive with no
 /// loss and no reorder; while it does not, delivery stops at the 1 MiB unacknowledged window and never
 /// grows past it.
-/// <para>
-/// Known platform limit (Windows ConPTY): once the window has filled, the console may stop delivering
-/// the remainder of a burst even after the app acknowledges, so the resume half of the second test only
-/// asserts completion on POSIX. On Windows it records what arrived and still proves the terminal stays
-/// usable — it must not fail there.
-/// </para></summary>
+/// </summary>
 public sealed class TerminalFlowControlTests
 {
     private const int FloodLines = 20000;
@@ -113,14 +108,13 @@ public sealed class TerminalFlowControlTests
 
         if (OperatingSystem.IsWindows())
         {
-            var resumed = await PollForTextAsync(host, terminalId, doneMarker, TimeSpan.FromSeconds(30), ct);
-            output.WriteLine(resumed
-                ? $"the Windows console resumed after ack and delivered {doneMarker}."
-                : $"the Windows console did not deliver {doneMarker} within 30 s of ack (known ConPTY limit); the terminal itself must still stop cleanly.");
-            if (resumed)
-            {
-                TerminalAsserts.FloodIsLosslessInOrder(host.TextOf(terminalId), FillLines, doneMarker);
-            }
+            // Hard assertion: after the window filled, acknowledging must let the rest of the burst through on ConPTY exactly
+            // as on POSIX. An earlier version of this test treated "did not resume within 30 s" as a ConPTY limit; experiments
+            // (repeated runs, both the real pwsh and the Store alias first on PATH) never reproduced a stall (the slowest
+            // run took ~30 s end to end), so the old 30 s poll was most likely just too short for a loaded machine.
+            await host.WaitForTextAsync(terminalId, doneMarker, TimeSpan.FromSeconds(120), ct);
+            TerminalAsserts.SequenceIsContinuous(host.FramesOf(terminalId), terminalId);
+            TerminalAsserts.FloodIsLosslessInOrder(host.TextOf(terminalId), FillLines, doneMarker);
         }
         else
         {
@@ -152,22 +146,5 @@ public sealed class TerminalFlowControlTests
 
         throw new TimeoutException(
             $"Timed out after {limit.TotalSeconds:0} s waiting for delivery to freeze at the window; last count was {host.ByteCountOf(terminalId)}.");
-    }
-
-    private static async Task<bool> PollForTextAsync(
-        RawTerminalHost host, string terminalId, string needle, TimeSpan limit, CancellationToken ct)
-    {
-        var start = DateTime.UtcNow;
-        while (DateTime.UtcNow - start < limit)
-        {
-            if (host.TextOf(terminalId).Contains(needle, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(200), ct).ConfigureAwait(false);
-        }
-
-        return false;
     }
 }
