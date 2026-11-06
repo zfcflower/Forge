@@ -57,6 +57,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     private FinishedSubAgentsViewModel? watchedFinishedMenu;
     private IDialogService? dialogs;
     private bool disposed;
+    private bool closing;
 
     public MainWindowViewModel(AppComposition composition)
     {
@@ -407,7 +408,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ScheduleLayoutSave()
     {
-        if (disposed)
+        // Teardown ends the terminals, and every terminal tab that closes raises TabClosed: after closing began, a save
+        // would only be scheduled for a window that is already gone.
+        if (disposed || closing)
         {
             return;
         }
@@ -1069,6 +1072,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        closing = true;
         clock.Stop();
         layoutSaveTimer.Stop();
 

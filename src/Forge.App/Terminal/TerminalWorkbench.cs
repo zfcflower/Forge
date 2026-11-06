@@ -19,6 +19,12 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
     /// <summary>How long the shell waits for the host to stop every terminal on shutdown.</summary>
     private static readonly TimeSpan ShutdownBudget = TimeSpan.FromSeconds(4);
 
+    /// <summary>
+    /// How long the close hook waits for the host's foreground-process probe. A probe that runs out of time is treated
+    /// like a busy terminal: the banner asks the user instead of ending a program nobody could see.
+    /// </summary>
+    private static readonly TimeSpan ForegroundProbeBudget = TimeSpan.FromSeconds(2);
+
     private readonly WorkbenchLayout layout;
     private readonly AppPreferences preferences;
     private readonly ITerminalHost? host;
@@ -227,13 +233,22 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
         }
 
         var busy = false;
-        try
+        using (var timeout = new CancellationTokenSource(ForegroundProbeBudget))
         {
-            busy = await terminal.HasForegroundProcessAsync(CancellationToken.None);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            Trace.WriteLine("[terminal] foreground probe failed: " + exception.Message);
+            try
+            {
+                busy = await terminal.HasForegroundProcessAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // No answer in time: the safe side is "a program may be running", which shows the banner.
+                Trace.WriteLine("[terminal] the foreground probe timed out; asking the user before closing");
+                busy = true;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                Trace.WriteLine("[terminal] foreground probe failed: " + exception.Message);
+            }
         }
 
         if (!busy)

@@ -37,6 +37,9 @@ internal sealed class TerminalControl : Control
     /// <summary>Rows scrolled per wheel notch when the wheel goes to the scrollback.</summary>
     private const int WheelScrollLines = 3;
 
+    /// <summary>The highest rune the ASCII-only range covers; above it a rune may come from a fallback font.</summary>
+    private const int AsciiLimit = 0x7E;
+
     private static readonly bool IsMacOs = OperatingSystem.IsMacOS();
 
     private static readonly Color LightForeground = Color.Parse("#2B2F2C");
@@ -75,11 +78,15 @@ internal sealed class TerminalControl : Control
     private bool attached;
 
     private int scrollOffset;
+    private long anchoredPushed;
+    private long anchoredDropped;
     private (int Line, int Column) selectionStart;
     private (int Line, int Column) selectionEnd;
     private bool hasSelection;
     private bool selecting;
     private bool forwardedPress;
+    private bool hasMotionCell;
+    private (int Column, int Row) motionCell;
 
     private int pendingColumns = TerminalViewModel.InitialColumns;
     private int pendingRows = TerminalViewModel.InitialRows;
@@ -171,6 +178,8 @@ internal sealed class TerminalControl : Control
         selectionEnd = default;
         hasSelection = false;
         scrollOffset = 0;
+        hasMotionCell = false;
+        ResetScrollAnchor();
 
         // The new view model's emulator may still have another size, so the grid is pushed once even when the view itself
         // did not change size.
@@ -379,6 +388,10 @@ internal sealed class TerminalControl : Control
         lock (viewModel.Gate)
         {
             var emulator = viewModel.Emulator;
+
+            // Output may have arrived since the last frame: anchor the viewport and the selection before reading rows.
+            SyncScrollAnchor(emulator);
+
             var columns = emulator.Columns;
             var rows = emulator.Rows;
             var total = emulator.TotalLines;
@@ -444,7 +457,7 @@ internal sealed class TerminalControl : Control
         DrawSelection(context, absolute, row, columns);
 
         var paint = linePaints[row];
-        if (paint is null || !ReferenceEquals(paint.Line, line) || paint.Version != line.Version)
+        if (paint is null || !ReferenceEquals(paint.Line, line) || paint.Version != line.Version || paint.Reverse != reverse)
         {
             paint = BuildLinePaint(line, palette, reverse);
             linePaints[row] = paint;
@@ -512,10 +525,15 @@ internal sealed class TerminalControl : Control
         }
     }
 
-    /// <summary>Rebuilds the cached text runs of one row: contiguous cells with the same resolved paint become one run.</summary>
+    /// <summary>
+    /// Rebuilds the cached text runs of one row: contiguous ASCII cells with the same resolved paint become one run. A
+    /// wide character, a non-ASCII rune or a cell carrying combining marks is always its own run, because the fallback
+    /// font may draw it at a width that is not an exact multiple of the cell width: a merged run would then drift within
+    /// the run, while a standalone run is placed at <c>StartColumn * cellWidth</c> and stays on its grid.
+    /// </summary>
     private LinePaint BuildLinePaint(TerminalLine line, TerminalPalette palette, bool reverse)
     {
-        var paint = new LinePaint(line, line.Version, new List<LineRun>(8));
+        var paint = new LinePaint(line, line.Version, reverse, new List<LineRun>(8));
         var text = new StringBuilder();
         var startColumn = -1;
         var runColor = themeForeground;
@@ -557,6 +575,24 @@ internal sealed class TerminalControl : Control
             var color = ForegroundOf(cell, palette, reverse);
             var flags = cell.Flags & (CellFlags.Bold | CellFlags.Italic | CellFlags.Underline |
                                       CellFlags.DoubleUnderline | CellFlags.Strikethrough | CellFlags.Dim);
+
+            if (cell.Rune > AsciiLimit || CellWidth.Of(cell.Rune) == 2 || combining is not null)
+            {
+                // Its own run, positioned on the grid: a wide or fallback glyph cannot share a run with its neighbours.
+                Flush();
+                startColumn = column;
+                runColor = color;
+                runFlags = flags;
+                text.Append(char.ConvertFromUtf32(cell.Rune));
+                if (combining is not null)
+                {
+                    text.Append(combining);
+                }
+
+                Flush();
+                continue;
+            }
+
             if (startColumn >= 0 && (color != runColor || flags != runFlags))
             {
                 Flush();
@@ -569,11 +605,7 @@ internal sealed class TerminalControl : Control
                 runFlags = flags;
             }
 
-            text.Append(char.ConvertFromUtf32(cell.Rune));
-            if (combining is not null)
-            {
-                text.Append(combining);
-            }
+            text.Append((char)cell.Rune);
         }
 
         Flush();
@@ -667,6 +699,77 @@ internal sealed class TerminalControl : Control
         {
             linePaints[i] = null;
         }
+    }
+
+    // ---------------------------------------------------------------- viewport anchor
+
+    /// <summary>
+    /// Keeps the scrolled-back viewport and the selection on the text they point at while output keeps arriving.
+    /// <see cref="TerminalEmulator.ScrollbackPushed"/> moves the viewport towards the bottom (the scrollback grew by one
+    /// line), so an offset above zero is raised by the push delta to stay on the same text; at the bottom the view follows
+    /// the output. <see cref="TerminalEmulator.ScrollbackDropped"/> shifts every absolute line index down, so the selection
+    /// is moved by the same amount and dropped once it would fall off the oldest line. Call with
+    /// <see cref="TerminalViewModel.Gate"/> held.
+    /// </summary>
+    private void SyncScrollAnchor(TerminalEmulator emulator)
+    {
+        var pushed = emulator.ScrollbackPushed;
+        var dropped = emulator.ScrollbackDropped;
+        var pushedDelta = pushed - anchoredPushed;
+        var droppedDelta = dropped - anchoredDropped;
+        anchoredPushed = pushed;
+        anchoredDropped = dropped;
+
+        if (pushedDelta > 0 && scrollOffset > 0)
+        {
+            scrollOffset = (int)Math.Min(scrollOffset + pushedDelta, emulator.ScrollbackCount);
+        }
+
+        if (droppedDelta > 0)
+        {
+            ShiftSelection(droppedDelta);
+        }
+    }
+
+    /// <summary>Adopts the emulator's counters as the baseline, so a freshly bound terminal has nothing to compensate.</summary>
+    private void ResetScrollAnchor()
+    {
+        if (Source is { } viewModel)
+        {
+            lock (viewModel.Gate)
+            {
+                anchoredPushed = viewModel.Emulator.ScrollbackPushed;
+                anchoredDropped = viewModel.Emulator.ScrollbackDropped;
+            }
+
+            return;
+        }
+
+        anchoredPushed = 0;
+        anchoredDropped = 0;
+    }
+
+    /// <summary>Moves the selection up by the lines the scrollback dropped; a selection that falls off the oldest line is gone.</summary>
+    private void ShiftSelection(long dropped)
+    {
+        if (!hasSelection)
+        {
+            return;
+        }
+
+        var start = selectionStart.Line - dropped;
+        var end = selectionEnd.Line - dropped;
+        if (start < 0 || end < 0)
+        {
+            selectionStart = default;
+            selectionEnd = default;
+            hasSelection = false;
+            selecting = false;
+            return;
+        }
+
+        selectionStart = ((int)start, selectionStart.Column);
+        selectionEnd = ((int)end, selectionEnd.Column);
     }
 
     // ---------------------------------------------------------------- keyboard and text input
@@ -932,6 +1035,7 @@ internal sealed class TerminalControl : Control
         }
 
         Focus();
+        hasMotionCell = false;
         var point = e.GetPosition(this);
         var properties = e.GetCurrentPoint(this).Properties;
         if (properties.IsRightButtonPressed)
@@ -1018,6 +1122,11 @@ internal sealed class TerminalControl : Control
 
         if (!selecting)
         {
+            if (ReportAnyMotion(viewModel, e))
+            {
+                e.Handled = true;
+            }
+
             return;
         }
 
@@ -1069,6 +1178,46 @@ internal sealed class TerminalControl : Control
         base.OnPointerCaptureLost(e);
         selecting = false;
         forwardedPress = false;
+        hasMotionCell = false;
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+
+        // Re-entering the cell the pointer left is a move the program has not seen yet.
+        hasMotionCell = false;
+    }
+
+    /// <summary>
+    /// DECSET 1003 reports every pointer movement, including one with no button held. A move inside the cell already
+    /// reported is not sent again, so a slow drag does not flood the program with identical positions; Shift keeps the
+    /// pointer local, as it does for presses.
+    /// </summary>
+    private bool ReportAnyMotion(TerminalViewModel viewModel, PointerEventArgs e)
+    {
+        MouseTracking tracking;
+        lock (viewModel.Gate)
+        {
+            SyncScrollAnchor(viewModel.Emulator);
+            tracking = viewModel.Emulator.MouseMode;
+        }
+
+        if (tracking != MouseTracking.AnyEvent || (e.KeyModifiers & KeyModifiers.Shift) != 0)
+        {
+            hasMotionCell = false;
+            return false;
+        }
+
+        var cell = CellAt(viewModel, e.GetPosition(this));
+        if (hasMotionCell && motionCell == (cell.Column, cell.Row))
+        {
+            return false;
+        }
+
+        motionCell = (cell.Column, cell.Row);
+        hasMotionCell = true;
+        return SendMouse(viewModel, MouseEventKind.Move, VtMouseButton.None, e.GetPosition(this), e.KeyModifiers);
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -1088,6 +1237,8 @@ internal sealed class TerminalControl : Control
         int scrollback;
         lock (viewModel.Gate)
         {
+            // Output received since the last frame moves the viewport: compensate before adding the wheel's own notches.
+            SyncScrollAnchor(viewModel.Emulator);
             tracking = viewModel.Emulator.MouseMode;
             sgr = viewModel.Emulator.MouseSgr;
             modes = viewModel.Emulator.Modes;
@@ -1195,6 +1346,8 @@ internal sealed class TerminalControl : Control
         int total;
         lock (viewModel.Gate)
         {
+            // The row under the pointer only matches what is on screen once pending output has been compensated.
+            SyncScrollAnchor(viewModel.Emulator);
             scrollback = viewModel.Emulator.ScrollbackCount;
             columns = viewModel.Emulator.Columns;
             total = viewModel.Emulator.TotalLines;
@@ -1305,6 +1458,8 @@ internal sealed class TerminalControl : Control
         string text;
         lock (viewModel.Gate)
         {
+            // The cached selection is anchored to the text, so copy what a repaint would highlight.
+            SyncScrollAnchor(viewModel.Emulator);
             var (from, to) = SelectionOrder();
             text = TerminalText.GetText(viewModel.Emulator, from, to);
         }
@@ -1354,6 +1509,12 @@ internal sealed class TerminalControl : Control
 
         // A pasted newline is Enter, not a literal line feed: without this a multi-line paste into a shell does nothing.
         text = text.Replace("\r\n", "\r").Replace('\n', '\r');
+
+        // Escape and C1 control characters are dropped from a paste in both modes: a clipboard holding "ESC [ 201 ~" would
+        // otherwise end the bracketed region early and the rest of the text would run as typed commands (xterm, VTE and
+        // kitty strip ESC for the same reason).
+        text = StripEscapes(text);
+
         bool bracketed;
         lock (viewModel.Gate)
         {
@@ -1365,6 +1526,37 @@ internal sealed class TerminalControl : Control
         scrollOffset = 0;
         InvalidateVisual();
     }
+
+    /// <summary>Drops ESC and the C1 controls (U+0080–U+009F); everything else, newlines and tabs included, is pasted as is.</summary>
+    private static string StripEscapes(string text)
+    {
+        var dropped = 0;
+        foreach (var character in text)
+        {
+            if (IsEscape(character))
+            {
+                dropped++;
+            }
+        }
+
+        if (dropped == 0)
+        {
+            return text;
+        }
+
+        var builder = new StringBuilder(text.Length - dropped);
+        foreach (var character in text)
+        {
+            if (!IsEscape(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsEscape(char character) => character == '\u001b' || character is >= '\u0080' and <= '\u009f';
 
     /// <summary>Clears the screen and the scrollback locally, through the parser, so the emulator stays the single truth.</summary>
     private void ClearScreen()
@@ -1387,11 +1579,14 @@ internal sealed class TerminalControl : Control
 
     // ---------------------------------------------------------------- cached paint data
 
-    private sealed class LinePaint(TerminalLine line, long version, List<LineRun> runs)
+    private sealed class LinePaint(TerminalLine line, long version, bool reverse, List<LineRun> runs)
     {
         public TerminalLine Line { get; } = line;
 
         public long Version { get; } = version;
+
+        /// <summary>DECSCNM swaps the whole screen at paint time, so a reverse-video flip invalidates every cached row.</summary>
+        public bool Reverse { get; } = reverse;
 
         public List<LineRun> Runs { get; } = runs;
     }

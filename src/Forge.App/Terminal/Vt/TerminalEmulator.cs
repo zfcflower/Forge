@@ -51,6 +51,8 @@ internal sealed partial class TerminalEmulator
     private bool[] tabStops;
     private string title = string.Empty;
     private long version;
+    private long scrollbackPushed;
+    private long scrollbackDropped;
 
     public TerminalEmulator(int columns, int rows, int scrollbackLimit, ITerminalEmulatorHost host)
     {
@@ -91,10 +93,27 @@ internal sealed partial class TerminalEmulator
                 return;
             }
 
+            int kept = scrollback.Count;
             scrollback.SetLimit(limit);
+            scrollbackDropped += kept - scrollback.Count;
             version++;
         }
     }
+
+    /// <summary>
+    /// Monotonic count of lines pushed into the scrollback. A push does not move the text a line index already points
+    /// at, but it does move the viewport relative to a fixed distance from the bottom, so a viewer that is scrolled
+    /// back adds the push delta to that distance to stay on the same text.
+    /// </summary>
+    public long ScrollbackPushed => scrollbackPushed;
+
+    /// <summary>
+    /// Monotonic count of lines discarded from the oldest end of the scrollback: evicted by a full ring, trimmed by a
+    /// smaller <see cref="ScrollbackLimit"/>, or dropped by <see cref="ClearScrollback"/>. After a discard of
+    /// <c>d</c> lines the text a line index addressed is at <c>index - d</c>, which is how a viewer keeps a selection on
+    /// the text it was dragged over.
+    /// </summary>
+    public long ScrollbackDropped => scrollbackDropped;
 
     public TerminalCursor Cursor => new(screen.CursorRow, screen.CursorColumn, cursorVisible, cursorShape, cursorBlinking);
 
@@ -207,6 +226,7 @@ internal sealed partial class TerminalEmulator
             return;
         }
 
+        scrollbackDropped += scrollback.Count;
         scrollback.Clear();
         version++;
     }
@@ -459,15 +479,23 @@ internal sealed partial class TerminalEmulator
     {
         if (toScrollback)
         {
-            TerminalLine? victim = scrollback.Push(line);
-            if (victim is not null)
-            {
-                spare = victim;
-            }
+            PushScrollback(line);
         }
         else
         {
             spare = line;
+        }
+    }
+
+    /// <summary>Appends to the scrollback and counts the push and, when the ring is full, the evicted oldest line.</summary>
+    private void PushScrollback(TerminalLine line)
+    {
+        TerminalLine? victim = scrollback.Push(line);
+        scrollbackPushed++;
+        if (victim is not null)
+        {
+            scrollbackDropped++;
+            spare = victim;
         }
     }
 
@@ -636,12 +664,8 @@ internal sealed partial class TerminalEmulator
             TerminalLine[] primaryLines = primary.Lines;
             for (int i = 0; i < drop; i++)
             {
-                TerminalLine? victim = scrollback.Push(primaryLines[i]);
+                PushScrollback(primaryLines[i]);
                 primaryLines[i] = null!;
-                if (victim is not null)
-                {
-                    spare = victim;
-                }
             }
 
             var keptPrimary = new TerminalLine[newRows];
@@ -799,6 +823,7 @@ internal sealed partial class TerminalEmulator
         screen = primary;
         hyperlinks.Clear();
         hyperlinkIds.Clear();
+        scrollbackDropped += scrollback.Count;
         scrollback.Clear();
         ClearScreen(primary);
         ClearScreen(alternate);

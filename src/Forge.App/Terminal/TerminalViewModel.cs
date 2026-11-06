@@ -282,6 +282,12 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
         {
             return await active.HasForegroundProcessAsync(ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // A probe that ran out of its budget says nothing about the process tree; the caller decides what a timeout
+            // means (closing a terminal treats it as "a program may still be running").
+            throw;
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             Trace.WriteLine("[terminal] foreground probe failed: " + exception.Message);
@@ -364,6 +370,7 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
     {
         var ct = lifetime.Token;
         ITerminalSession? started = null;
+        var handedOff = false;
         try
         {
             if (host is null)
@@ -379,13 +386,28 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
             }
 
             started = await host.StartAsync(request, ct).ConfigureAwait(false);
-            int columns;
-            int rows;
+            int columns = 0;
+            int rows = 0;
+            bool released;
             lock (gate)
             {
-                session = started;
-                columns = emulator.Columns;
-                rows = emulator.Rows;
+                // DisposeAsync may have run while the host was still starting: taking the session under the same lock
+                // that DisposeAsync nulls it under closes the window where nobody would ever stop it.
+                released = Volatile.Read(ref disposed) != 0;
+                if (!released)
+                {
+                    session = started;
+                    handedOff = true;
+                    columns = emulator.Columns;
+                    rows = emulator.Rows;
+                }
+            }
+
+            if (released)
+            {
+                await DisposeSessionAsync(started).ConfigureAwait(false);
+                started = null;
+                return;
             }
 
             PostStatus(TerminalStatus.Running);
@@ -438,6 +460,28 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             Fail(null, Describe(exception));
+        }
+        finally
+        {
+            // Every path that never handed the session over (a cancelled start, a failure between StartAsync and the
+            // assignment) stops it here; a handed-off session belongs to DisposeAsync.
+            if (!handedOff && started is not null)
+            {
+                await DisposeSessionAsync(started).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Stops a session nobody else owns, swallowing the failure: the terminal is already gone.</summary>
+    private static async ValueTask DisposeSessionAsync(ITerminalSession session)
+    {
+        try
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine("[terminal] stopping the terminal failed: " + exception.Message);
         }
     }
 
@@ -642,14 +686,7 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
 
         if (active is not null)
         {
-            try
-            {
-                await active.DisposeAsync().ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                Trace.WriteLine("[terminal] stopping the terminal failed: " + exception.Message);
-            }
+            await DisposeSessionAsync(active).ConfigureAwait(false);
         }
 
         if (pump is { } task)
