@@ -145,6 +145,25 @@ internal static class GitStrings
     /// <summary>Format: <c>{0}</c> is the reason the platform gave.</summary>
     public const string PullRequestReadFailed = "git.pr.readFailed";
 
+    // ---------------------------------------------------------------- screenshots of the change
+
+    public const string LabelScreenshots = "git.label.screenshots";
+
+    /// <summary>The button that captures the before/after images and puts them into the pull request description.</summary>
+    public const string ButtonScreenshots = "git.button.screenshots";
+
+    /// <summary>Format: <c>{0}</c> is the command the project declared in <c>.forge/screenshots.json</c>.</summary>
+    public const string ScreenshotCommand = "git.screenshot.command";
+
+    /// <summary>Shown instead of the command when this branch declares none, so nothing can be captured.</summary>
+    public const string ScreenshotNoCommand = "git.screenshot.noCommand";
+
+    /// <summary>Format: <c>{0}</c> is why <c>.forge/screenshots.json</c> cannot be used.</summary>
+    public const string ScreenshotConfigProblem = "git.screenshot.configProblem";
+
+    public const string ErrorScreenshotNoPullRequest = "git.error.screenshot.noPullRequest";
+    public const string ErrorScreenshotNoCommand = "git.error.screenshot.noCommand";
+
     // ---------------------------------------------------------------- waiting for the checks
 
     public const string WatchWaiting = "git.watch.waiting";
@@ -346,6 +365,23 @@ internal static class GitStrings
         Loc.Register(PullRequestLoading, "正在读取拉取请求…", "Reading the pull request…");
         Loc.Register(PullRequestGhNotReady, "需要安装并登录 gh", "Install and sign in to gh");
         Loc.Register(PullRequestReadFailed, "读取拉取请求失败：{0}", "Could not read the pull request: {0}");
+
+        Loc.Register(LabelScreenshots, "截图", "Screenshots");
+        Loc.Register(ButtonScreenshots, "截图", "Take screenshots");
+        Loc.Register(ScreenshotCommand, "将执行：{0}", "Will run: {0}");
+        Loc.Register(
+            ScreenshotNoCommand,
+            "本分支没有声明 .forge/screenshots.json，无法自动截图。",
+            "This branch declares no .forge/screenshots.json, so nothing can be captured automatically.");
+        Loc.Register(ScreenshotConfigProblem, ".forge/screenshots.json 不可用：{0}", ".forge/screenshots.json cannot be used: {0}");
+        Loc.Register(
+            ErrorScreenshotNoPullRequest,
+            "当前分支还没有拉取请求：截图要写进拉取请求的正文。",
+            "This branch has no pull request yet; the screenshots belong in the pull request description.");
+        Loc.Register(
+            ErrorScreenshotNoCommand,
+            "没有可执行的截图命令：先在本分支写 .forge/screenshots.json。",
+            "There is no screenshot command to run: declare .forge/screenshots.json on this branch first.");
 
         Loc.Register(WatchWaiting, "正在等待检查…", "Waiting for checks…");
         Loc.Register(WatchProgress, "通过 {0} · 失败 {1} · 进行中 {2}", "{0} passed · {1} failed · {2} pending");

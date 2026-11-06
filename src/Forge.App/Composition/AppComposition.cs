@@ -307,6 +307,7 @@ internal sealed class AppComposition : IAsyncDisposable
         IReadOnlyList<ITool> pullRequestTools =
         [
             .. new PrTools(git, prPlatform, gitToolSettings, reviewLedger, todos).All,
+            .. new ScreenshotTools(git, prPlatform, gitToolSettings).All,
             .. new PrCheckTools(prPlatform, prChecksPoller, checksOptions).All,
             .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
         ];
@@ -314,7 +315,11 @@ internal sealed class AppComposition : IAsyncDisposable
             prPlatform,
             prChecksPoller,
             checksOptions,
-            new SystemNotifier(() => preferences.Current.GitNotifications));
+            new SystemNotifier(() => preferences.Current.GitNotifications))
+        {
+            // The Git panel's screenshot button runs the same step as pr_screenshots, with the same settings.
+            GitSettings = gitToolSettings,
+        };
         var runtimeServices = new AgentRuntimeServices(
             BuildProviderFactory(provider, httpClient),
             host?.Client,

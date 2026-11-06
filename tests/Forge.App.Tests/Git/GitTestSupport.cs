@@ -399,3 +399,152 @@ internal static class GitPanelTesting
         nameof(GitPanelViewModel.HasHint),
     ];
 }
+
+/// <summary>
+/// An in-memory pull request platform for the screenshot suites: it answers the availability check and the pull request
+/// read from what a test sets, records every edit, and throws for everything the screenshot step never calls.
+/// </summary>
+internal sealed class ScreenshotFakePlatform : IPrPlatform
+{
+    private readonly List<(int Number, string? Title, string? Body)> edits = [];
+
+    public string Name => "FakeHub";
+
+    public PullRequestInfo? Current { get; set; }
+
+    public PrPlatformAvailability Availability { get; set; } = new(PrPlatformState.Ready, "logged in");
+
+    /// <summary>Every accepted edit, in order.</summary>
+    public IReadOnlyList<(int Number, string? Title, string? Body)> Edits => edits;
+
+    /// <summary>When true, an accepted edit is not applied (the platform "lost" it).</summary>
+    public bool DropEdits { get; set; }
+
+    public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+        Task.FromResult(Availability);
+
+    public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
+        Task.FromResult(Current is { } current
+            ? PrResult<PullRequestInfo>.Ok(current)
+            : PrResult<PullRequestInfo>.Fail(
+                GitRemoteFailureKind.Other,
+                "no pull requests found",
+                reason: PrFailureReason.PullRequestNotFound));
+
+    public Task<PrResult<PrReference>> CreatePullRequestAsync(
+        string workingDirectory,
+        string title,
+        string body,
+        string baseBranch,
+        string headBranch,
+        bool draft = false,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<PrResult<PrReference>> EditPullRequestAsync(
+        string workingDirectory,
+        int number,
+        string? title = null,
+        string? body = null,
+        CancellationToken ct = default)
+    {
+        lock (edits)
+        {
+            edits.Add((number, title, body));
+        }
+
+        if (!DropEdits && Current is { } current)
+        {
+            Current = current with { Title = title ?? current.Title, Body = body ?? current.Body };
+        }
+
+        return Task.FromResult(PrResult<PrReference>.Ok(new PrReference(number, Current?.Url ?? string.Empty)));
+    }
+
+    public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+        Task.FromResult(PrResult<IReadOnlyList<PrReviewThread>>.Ok([]));
+
+    public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>
+/// A repository that takes its screenshots the way the feature expects: a committed <c>.forge/screenshots.json</c>, a
+/// capture script that copies <c>page.png</c> into <c>FORGE_SCREENSHOT_DIR</c>, and an <c>origin</c> that looks like a
+/// GitHub repository to the link builder while every fetch and push still lands in the local bare repository (through
+/// <c>url.&lt;path&gt;.insteadOf</c>). Shared by the panel and approval suites.
+/// </summary>
+internal static class ScreenshotTestRig
+{
+    public const string PublicAddress = "https://github.com/acme/forge.git";
+
+    public const string WindowsCommand = "call .\\capture.cmd";
+    public const string UnixCommand = "sh capture.sh";
+
+    private const string CaptureCmd =
+        "@echo off\r\n" +
+        "copy /Y page.png \"%FORGE_SCREENSHOT_DIR%\\home.png\" >nul || exit /b 1\r\n" +
+        "exit /b 0\r\n";
+
+    private const string CaptureSh =
+        "#!/bin/sh\n" +
+        "cp page.png \"$FORGE_SCREENSHOT_DIR/home.png\" || exit 1\n" +
+        "exit 0\n";
+
+    /// <summary>The declaration's command on this platform.</summary>
+    public static string Command => OperatingSystem.IsWindows() ? WindowsCommand : UnixCommand;
+
+    public static byte[] Png() => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+
+    /// <summary>The pull request the fake platform answers with; base and head are the branch the clone is on.</summary>
+    public static PullRequestInfo PullRequest(string branch = "main") =>
+        new(
+            5,
+            "https://example.test/acme/forge/pull/5",
+            PrState.Open,
+            "Add the screen",
+            "## Summary\nIt renders.\n\n## Testing\nRan the UI suite.\n",
+            branch,
+            branch,
+            "0123456789abcdef0123456789abcdef01234567",
+            false,
+            PrMergeStateStatus.Clean,
+            PrReviewDecision.None);
+
+    /// <summary>Commits the page, the capture script and the declaration on the checked-out branch and pushes it.</summary>
+    public static void DeclareScreenshots(GitTestSandbox sandbox, string work, string? command = null)
+    {
+        File.WriteAllBytes(Path.Combine(work, "page.png"), Png());
+        File.WriteAllText(Path.Combine(work, "capture.cmd"), CaptureCmd, new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(work, "capture.sh"), CaptureSh, new UTF8Encoding(false));
+        Directory.CreateDirectory(Path.Combine(work, ".forge"));
+        var json = "{\"command\": \"" + (command ?? Command).Replace("\\", "\\\\", StringComparison.Ordinal) + "\", \"output\": \"shots\"}";
+        File.WriteAllText(Path.Combine(work, ".forge", "screenshots.json"), json, new UTF8Encoding(false));
+        GitTestShell.RunChecked(work, "add", "-A");
+        GitTestShell.RunChecked(work, "commit", "-q", "-m", "declare screenshots");
+        GitTestShell.RunChecked(work, "push", "-q", "origin", "HEAD");
+    }
+
+    /// <summary>Makes <c>origin</c> a GitHub address for the link builder while pushes still land in the bare repository.</summary>
+    public static void PointOriginAtGitHub(GitTestSandbox sandbox, string work)
+    {
+        var local = sandbox.Origin.Replace('\\', '/');
+        GitTestShell.RunChecked(work, "config", "--local", "remote.origin.url", PublicAddress);
+        GitTestShell.RunChecked(work, "config", "--local", "url." + local + ".insteadOf", PublicAddress);
+    }
+}

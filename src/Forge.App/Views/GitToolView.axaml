@@ -132,6 +132,30 @@
                     AutomationProperties.AutomationId="git-wait-cancel"
                     AutomationProperties.Name="{Binding [git.button.cancelWait], Source={x:Static loc:Loc.Instance}}" />
           </StackPanel>
+          <!-- Screenshots of the change: the button shows the command the project declared before it runs it. -->
+          <StackPanel Spacing="4" IsVisible="{Binding ShowScreenshots}">
+            <TextBlock Classes="label" Text="{Binding [git.label.screenshots], Source={x:Static loc:Loc.Instance}}" />
+            <Grid ColumnDefinitions="Auto,*">
+              <Button Classes="ghost"
+                      Content="{Binding [git.button.screenshots], Source={x:Static loc:Loc.Instance}}"
+                      Command="{Binding ScreenshotsCommand}"
+                      AutomationProperties.AutomationId="git-screenshots"
+                      AutomationProperties.Name="{Binding [git.button.screenshots], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="1"
+                         Classes="mono"
+                         Margin="8,0,0,0"
+                         VerticalAlignment="Center"
+                         Text="{Binding ScreenshotCommandText}"
+                         TextWrapping="Wrap"
+                         AutomationProperties.AutomationId="git-screenshot-command" />
+            </Grid>
+            <TextBlock Classes="caption"
+                       IsVisible="{Binding HasScreenshotProblem}"
+                       Text="{Binding ScreenshotProblemText}"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       AutomationProperties.AutomationId="git-screenshot-problem" />
+          </StackPanel>
           <StackPanel Spacing="2" IsVisible="{Binding HasWatchProgress}">
             <TextBlock Classes="label" Text="{Binding [git.label.checks], Source={x:Static loc:Loc.Instance}}" />
             <TextBlock Classes="caption"

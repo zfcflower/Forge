@@ -23,6 +23,15 @@ internal sealed record GitPrServices(
 {
     /// <summary>The dispatcher seam with its default filled in.</summary>
     public Action<Action> PostToUi => Post ?? UiThreadDispatcher.Instance.Post;
+
+    /// <summary>
+    /// Live git settings for the screenshot step (its network timeout), read at the start of every run; the defaults of
+    /// <see cref="GitToolSettings"/> when the app did not pass the tool settings.
+    /// </summary>
+    public GitToolSettings GitSettings { get; init; } = new();
+
+    /// <summary>Knobs of the capture (timeout, temporary directory); the defaults are right for the app.</summary>
+    public ScreenshotCaptureOptions ScreenshotOptions { get; init; } = new();
 }
 
 /// <summary>

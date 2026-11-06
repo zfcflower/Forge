@@ -529,6 +529,7 @@ internal sealed partial class GitPanelViewModel
         OnPropertyChanged(nameof(ReviewNoticeText));
         OnPropertyChanged(nameof(HasReviewNotice));
         OnPropertyChanged(nameof(HasReviewThreads));
+        RaiseScreenshotTexts();
     }
 
     private static int CountUnresolved(IReadOnlyList<PrReviewThread> threads)

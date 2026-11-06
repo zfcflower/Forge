@@ -114,6 +114,7 @@ internal sealed partial class GitPanelViewModel : ObservableObject, IDisposable
         ContinueOperationCommand = new RelayCommand(() => Launch(ContinueOperationAsync), CanOperate);
         WaitForChecksCommand = new RelayCommand(StartWatch, CanWaitForChecks);
         CancelWaitCommand = new RelayCommand(CancelWait, CanCancelWait);
+        ScreenshotsCommand = new RelayCommand(() => Launch(RunScreenshotsAsync), CanTakeScreenshots);
         commands =
         [
             RefreshCommand,
@@ -128,6 +129,7 @@ internal sealed partial class GitPanelViewModel : ObservableObject, IDisposable
             ContinueOperationCommand,
             WaitForChecksCommand,
             CancelWaitCommand,
+            ScreenshotsCommand,
         ];
 
         // The panel has to re-read its title and every formatted text on a language switch, the same way the settings
@@ -464,7 +466,7 @@ internal sealed partial class GitPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Reads branch, remotes, local branches and the in-progress operation; runs on a pool thread.</summary>
+    /// <summary>Reads branch, remotes, local branches, the in-progress operation and the screenshot declaration; runs on a pool thread.</summary>
     private async Task<GitSnapshot> ReadSnapshotAsync(string workingDirectory, CancellationToken ct)
     {
         if (!await git.IsRepositoryAsync(workingDirectory, ct).ConfigureAwait(false))
@@ -476,7 +478,8 @@ internal sealed partial class GitPanelViewModel : ObservableObject, IDisposable
         var remotes = await git.GetRemotesAsync(workingDirectory, ct).ConfigureAwait(false);
         var branches = await git.GetBranchesAsync(workingDirectory, ct: ct).ConfigureAwait(false);
         var conflicts = await git.GetConflictStateAsync(workingDirectory, ct).ConfigureAwait(false);
-        return new GitSnapshot(status, remotes, branches, conflicts);
+        var (screenshot, screenshotProblem) = ReadScreenshotConfig(workingDirectory);
+        return new GitSnapshot(status, remotes, branches, conflicts, screenshot, screenshotProblem);
     }
 
     /// <summary>
@@ -1027,14 +1030,18 @@ internal sealed partial class GitPanelViewModel : ObservableObject, IDisposable
         GitBranchStatus? Status,
         IReadOnlyList<GitRemote> Remotes,
         IReadOnlyList<GitBranch> Branches,
-        GitConflictState Conflicts)
+        GitConflictState Conflicts,
+        ScreenshotConfig? Screenshot,
+        string? ScreenshotProblem)
     {
         /// <summary>No repository, no branch: everything the panel shows is empty.</summary>
         public static GitSnapshot Empty { get; } = new(
             null,
             Array.Empty<GitRemote>(),
             Array.Empty<GitBranch>(),
-            new GitConflictState(GitOperationKind.None, Array.Empty<string>()));
+            new GitConflictState(GitOperationKind.None, Array.Empty<string>()),
+            null,
+            null);
 
         public bool HasRepository => Status is not null;
     }

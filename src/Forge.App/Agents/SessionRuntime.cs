@@ -34,9 +34,11 @@ internal sealed record AgentRuntimeServices(
     public IStepCommitter? StepCommitter { get; set; }
 
     /// <summary>
-    /// The pull request tools (<c>pr_*</c>, <c>review_comments</c>, <c>review_comment_resolve</c>), registered after the git
-    /// tools. Stateless across sessions like <see cref="Git"/>; empty in a unit test. Read-only ones pass through
-    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask.
+    /// The pull request tools (<c>pr_*</c>, <c>pr_screenshots</c>, <c>review_comments</c>, <c>review_comment_resolve</c>),
+    /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty in a unit test. Read-only ones
+    /// pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask, and
+    /// <c>pr_screenshots</c> – which runs a command from the repository and then pushes and edits the description – asks with
+    /// its <see cref="ToolSideEffect.Execute"/>.
     /// </summary>
     public IReadOnlyList<ITool> PullRequestTools { get; set; } = [];
 
@@ -362,7 +364,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// authoring service puts in front of the user. <c>extension_delete</c> keeps asking: that card is the deletion
     /// confirmation. Every other write or execution goes to the session's <see cref="SessionApprovalHandler"/>.
     /// <para>The git tools are deliberately absent: the read-only ones pass through
-    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones (git_branch, git_sync, pr_create, pr_sync, pr_edit, pr_comment_reply, pr_comment_resolve, review_comment_resolve) always ask.</para>
+    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones (git_branch, git_sync, pr_create, pr_sync, pr_edit, pr_comment_reply, pr_comment_resolve, review_comment_resolve) always ask, and so does
+    /// <c>pr_screenshots</c>: its side effect is <see cref="ToolSideEffect.Execute"/>, because it runs a command the repository
+    /// declares, and the push and description edit that follow are the write half of the same card.</para>
     /// </summary>
     private static readonly IApprovalPolicy SessionPolicy = CreatePolicy();
 
