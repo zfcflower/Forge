@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.FileDocumentView"
              x:DataType="vm:FileDocumentViewModel">
   <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}">
@@ -10,7 +11,7 @@
         <TextBlock Grid.Column="1"
                    Classes="caption"
                    IsVisible="{Binding IsLoading}"
-                   Text="读取中…"
+                   Text="{Binding [files.loading], Source={x:Static loc:Loc.Instance}}"
                    VerticalAlignment="Center" />
       </Grid>
     </Border>

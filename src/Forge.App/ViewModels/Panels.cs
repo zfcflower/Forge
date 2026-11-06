@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.Workspace;
 
@@ -163,18 +164,49 @@ internal sealed class FileNodeViewModel : ObservableObject, IFlatTreeNode<FileNo
 /// One row of <c>已改动</c>: the path, and at the far right the diff line counts followed by the status letter. A file
 /// whose counts could not be read (no HEAD yet, an unreadable diff) shows the status letter alone, and so does a binary
 /// file: a patch of a binary change has no line counts, so "+0 -0" would be a lie.
+/// <para>The status description is kept as a <see cref="LocText"/> and resolved when the tooltip is read, so the row shows
+/// the current language whenever the panel re-raises it. A row never subscribes to <see cref="Loc.LanguageChanged"/>: one
+/// strong reference per row would keep the whole panel alive.</para>
 /// </summary>
-internal sealed record ChangedFileViewModel(
-    string Path,
-    string Status,
-    int? Insertions,
-    int? Deletions,
-    bool IsBinary,
-    string Description)
+internal sealed class ChangedFileViewModel : ObservableObject
 {
+    private readonly LocText description;
+
+    public ChangedFileViewModel(
+        string path,
+        string status,
+        int? insertions,
+        int? deletions,
+        bool isBinary,
+        LocText description)
+    {
+        Path = path;
+        Status = status;
+        Insertions = insertions;
+        Deletions = deletions;
+        IsBinary = isBinary;
+        this.description = description;
+    }
+
+    public string Path { get; }
+
+    public string Status { get; }
+
+    public int? Insertions { get; }
+
+    public int? Deletions { get; }
+
+    public bool IsBinary { get; }
+
+    /// <summary>Staged, staged and unstaged, or the working tree: the tooltip of the row.</summary>
+    public string Description => description.Resolve();
+
     public string Meta => ChangeBadge.Format(Status, Insertions, Deletions, IsBinary);
 
     public string Display => Path + "  " + Meta;
+
+    /// <summary>Re-reads the description after a language switch; the owning panel calls this, the row never listens itself.</summary>
+    internal void RefreshText() => OnPropertyChanged(nameof(Description));
 }
 
 /// <summary>The line-count half of a <c>已改动</c> row: counts are shown only when the diff reported them.</summary>
@@ -188,17 +220,17 @@ internal static class ChangeBadge
             return statusLetter;
         }
 
-        return "+" + added.ToString(CultureInfo.InvariantCulture) + " -" + removed.ToString(CultureInfo.InvariantCulture) +
-               " " + statusLetter;
+        return "+" + TextFormat.Id(added) + " -" + TextFormat.Id(removed) + " " + statusLetter;
     }
 }
 
 /// <summary>
 /// The right-top "文件" tool: a lazy tree of everything (<c>全部</c>) and the git status list with M/A/D/?? badges
 /// (<c>已改动</c>). Both refresh on turn end and on a debounced file-system watcher; the tree is rebuilt off the dispatcher
-/// and re-applied as one virtualized row list, keeping every expanded folder and the row order.
+/// and re-applied as one virtualized row list, keeping every expanded folder and the row order. The panel's own texts are
+/// resolved from <see cref="Loc"/> on every read and re-raised when the language changes.
 /// </summary>
-internal sealed class FilesPanelViewModel : ObservableObject
+internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
 {
     private readonly GitCli git;
     private readonly Action<string> openFile;
@@ -211,6 +243,7 @@ internal sealed class FilesPanelViewModel : ObservableObject
     private DispatcherTimer? watcherTimer;
     private CountsSnapshot? countsSnapshot;
     private readonly Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory;
+    private LocText error;
     private bool isLoading;
     private int selectedTab;
     private int refreshGeneration;
@@ -235,6 +268,7 @@ internal sealed class FilesPanelViewModel : ObservableObject
         ChangedCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
         AllTabCommand = new RelayCommand(() => SelectedTab = 0);
         ChangedTabCommand = new RelayCommand(() => SelectedTab = 1);
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     /// <summary>Test seam: builds the panel already attached to a context, without starting the watcher or a background refresh.</summary>
@@ -290,10 +324,11 @@ internal sealed class FilesPanelViewModel : ObservableObject
     }
 
     public string Summary => Context.HasSession
-        ? Strings.FileSummary(Changes.Count, index?.FileCount ?? 0)
-        : Strings.NoSession;
+        ? InspectorStrings.FileSummary(Changes.Count, index?.FileCount ?? 0)
+        : Loc.Instance[InspectorStrings.FilesNoSession];
 
-    public string? Error { get; private set; }
+    /// <summary>Why the last refresh failed, in the language of the moment it is read; null when it did not fail.</summary>
+    public string? Error => error.IsEmpty ? null : error.Resolve();
 
     public void Attach(PanelContext context)
     {
@@ -348,12 +383,12 @@ internal sealed class FilesPanelViewModel : ObservableObject
                 Changes.Add(change);
             }
 
-            Error = null;
+            error = default;
             OnPropertyChanged(nameof(Summary));
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or GitException or UnauthorizedAccessException)
         {
-            Error = exception.Message;
+            error = LocText.Literal(exception.Message);
         }
         finally
         {
@@ -606,8 +641,8 @@ internal sealed class FilesPanelViewModel : ObservableObject
         },
     };
 
-    private static string Describe(GitStatusEntry entry) =>
-        entry.IsStaged && entry.IsUnstaged ? Strings.StagedAndUnstaged() : entry.IsStaged ? Strings.Staged() : Strings.WorkingTree();
+    private static LocText Describe(GitStatusEntry entry) =>
+        InspectorStrings.ChangeDescription(entry.IsStaged, entry.IsUnstaged);
 
     private void RestartWatcher()
     {
@@ -640,7 +675,7 @@ internal sealed class FilesPanelViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException)
         {
-            Error = Strings.WatchUnavailable(exception.Message);
+            error = InspectorStrings.WatchUnavailable(exception.Message);
         }
     }
 
@@ -664,27 +699,51 @@ internal sealed class FilesPanelViewModel : ObservableObject
         _ = RefreshAsync(CancellationToken.None);
     }
 
-    private void OnFailed(Exception exception) => Error = exception.Message;
+    private void OnFailed(Exception exception) => error = LocText.Literal(exception.Message);
+
+    /// <summary>
+    /// Re-reads the panel's own texts and hands the refresh down to every changed-file row: a row never subscribes to
+    /// <see cref="Loc.LanguageChanged"/> itself, one strong reference per row would keep the whole panel alive.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(Error));
+        foreach (var change in Changes)
+        {
+            change.RefreshText();
+        }
+    }
+
+    /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 }
 
 // ---------------------------------------------------------------- file document
 
 internal sealed record FileLineViewModel(int Number, string Text);
 
-/// <summary>Read-only file view: one entry per line with its number, virtualized in the view.</summary>
+/// <summary>
+/// Read-only file view: one entry per line with its number, virtualized in the view. The file's content and path are data
+/// and are never translated; only the tab title's leading mark and the placeholder before a file is loaded come from the
+/// string table, and both are read when the property is read.
+/// </summary>
 internal sealed class FileDocumentViewModel : ObservableObject
 {
     private const int MaxLines = 20000;
 
     private string path = string.Empty;
-    private string tabTitle = Strings.FileTabTitle(Strings.FilesName);
+    private string? fileName;
+    private LocText error;
     private bool isLoading;
-    private string? error;
 
     private FileDocumentViewModel()
     {
         LineItems = new ReadOnlyObservableCollection<FileLineViewModel>(Lines);
-        LoadCommand = new AsyncRelayCommand(ct => LoadAsync(path, ct), () => path.Length > 0, exception => Error = exception.Message);
+        LoadCommand = new AsyncRelayCommand(
+            ct => LoadAsync(path, ct),
+            () => path.Length > 0,
+            exception => SetError(LocText.Literal(exception.Message)));
     }
 
     public ObservableCollection<FileLineViewModel> Lines { get; } = [];
@@ -707,11 +766,8 @@ internal sealed class FileDocumentViewModel : ObservableObject
 
     public string PathDisplay => path;
 
-    public string TabTitle
-    {
-        get => tabTitle;
-        private set => Set(ref tabTitle, value);
-    }
+    /// <summary>The mark followed by the file name, or the generic word until a file is loaded.</summary>
+    public string TabTitle => InspectorStrings.FileTabTitle(fileName ?? Loc.Instance[InspectorStrings.FilesName]);
 
     public bool IsLoading
     {
@@ -719,19 +775,10 @@ internal sealed class FileDocumentViewModel : ObservableObject
         private set => Set(ref isLoading, value);
     }
 
-    public string? Error
-    {
-        get => error;
-        private set
-        {
-            if (Set(ref error, value))
-            {
-                OnPropertyChanged(nameof(HasError));
-            }
-        }
-    }
+    /// <summary>The read problem (missing file, too large, truncated, an OS error), in the language of the moment it is read.</summary>
+    public string? Error => error.IsEmpty ? null : error.Resolve();
 
-    public bool HasError => !string.IsNullOrEmpty(error);
+    public bool HasError => !error.IsEmpty;
 
     public static FileDocumentViewModel Create() => new();
 
@@ -739,14 +786,15 @@ internal sealed class FileDocumentViewModel : ObservableObject
     public void Reload(FileDocumentViewModel other)
     {
         Path = other.Path;
-        TabTitle = other.TabTitle;
+        fileName = other.fileName;
+        OnPropertyChanged(nameof(TabTitle));
         Lines.Clear();
         foreach (var line in other.Lines)
         {
             Lines.Add(line);
         }
 
-        Error = other.Error;
+        SetError(other.error);
     }
 
     public async Task LoadAsync(string filePath, CancellationToken ct)
@@ -757,9 +805,10 @@ internal sealed class FileDocumentViewModel : ObservableObject
         }
 
         Path = System.IO.Path.GetFullPath(filePath);
-        TabTitle = Strings.FileTabTitle(System.IO.Path.GetFileName(Path));
+        fileName = System.IO.Path.GetFileName(Path);
+        OnPropertyChanged(nameof(TabTitle));
         Lines.Clear();
-        Error = null;
+        SetError(default);
         IsLoading = true;
         try
         {
@@ -774,7 +823,9 @@ internal sealed class FileDocumentViewModel : ObservableObject
                         var info = new FileInfo(filePath);
                         if (info.Length > 8 * 1024 * 1024)
                         {
-                            return new[] { Strings.FileTooLarge(info.Length) };
+                            // Shown as the document's only line, so it is resolved here, on the pool thread; Loc reads
+                            // are thread-safe.
+                            return new[] { InspectorStrings.FileTooLarge(info.Length).Resolve() };
                         }
 
                         var read = await File.ReadAllLinesAsync(filePath, ct).ConfigureAwait(false);
@@ -785,7 +836,7 @@ internal sealed class FileDocumentViewModel : ObservableObject
 
             if (lines is null)
             {
-                Error = Strings.FileMissing(filePath);
+                SetError(InspectorStrings.FileMissing(filePath));
                 return;
             }
 
@@ -796,17 +847,24 @@ internal sealed class FileDocumentViewModel : ObservableObject
 
             if (lines.Length == MaxLines)
             {
-                Error = Strings.LinesTruncated(MaxLines);
+                SetError(InspectorStrings.LinesTruncated(MaxLines));
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            Error = exception.Message;
+            SetError(LocText.Literal(exception.Message));
         }
         finally
         {
             IsLoading = false;
         }
+    }
+
+    private void SetError(LocText value)
+    {
+        error = value;
+        OnPropertyChanged(nameof(Error));
+        OnPropertyChanged(nameof(HasError));
     }
 }
 
@@ -818,8 +876,33 @@ internal enum ChangeScope
     Uncommitted,
 }
 
-internal sealed record DiffLineViewModel(string Prefix, string Text, string Kind, string OldNumber, string NewNumber)
+/// <summary>
+/// One line of a file diff. A real line's text is content and stays a literal; the placeholder that stands in for a change
+/// with no text is a <see cref="Loc"/> key, so it is resolved when it is shown.
+/// </summary>
+internal sealed class DiffLineViewModel
 {
+    private readonly LocText text;
+
+    public DiffLineViewModel(string prefix, LocText text, string kind, string oldNumber, string newNumber)
+    {
+        Prefix = prefix;
+        this.text = text;
+        Kind = kind;
+        OldNumber = oldNumber;
+        NewNumber = newNumber;
+    }
+
+    public string Prefix { get; }
+
+    public string Text => text.Resolve();
+
+    public string Kind { get; }
+
+    public string OldNumber { get; }
+
+    public string NewNumber { get; }
+
     public bool IsAdd => Kind == "add";
 
     public bool IsRemove => Kind == "del";
@@ -828,9 +911,14 @@ internal sealed record DiffLineViewModel(string Prefix, string Text, string Kind
 }
 
 /// <summary>One row of the changes document: a file header or one diff line, in the order they are stacked.</summary>
-internal abstract class DiffRowViewModel(FileDiffViewModel file)
+internal abstract class DiffRowViewModel(FileDiffViewModel file) : ObservableObject
 {
     public FileDiffViewModel File { get; } = file;
+
+    /// <summary>Re-reads the row's language-dependent text after a language switch; the panel calls this for every row.</summary>
+    public virtual void RefreshText()
+    {
+    }
 }
 
 internal sealed class DiffFileRowViewModel(FileDiffViewModel file) : DiffRowViewModel(file)
@@ -840,6 +928,8 @@ internal sealed class DiffFileRowViewModel(FileDiffViewModel file) : DiffRowView
     public string Badge => File.Badge;
 
     public bool IsHeader => true;
+
+    public override void RefreshText() => OnPropertyChanged(nameof(Header));
 }
 
 internal sealed class DiffLineRowViewModel(FileDiffViewModel file, DiffLineViewModel line) : DiffRowViewModel(file)
@@ -861,16 +951,20 @@ internal sealed class DiffLineRowViewModel(FileDiffViewModel file, DiffLineViewM
     public bool IsHunk => Line.IsHunk;
 
     public bool IsHeader => false;
+
+    public override void RefreshText() => OnPropertyChanged(nameof(Text));
 }
 
 internal sealed class FileDiffViewModel
 {
+    private readonly int added;
+    private readonly int removed;
+
     public FileDiffViewModel(FileDiff diff, string prefix = "")
     {
         Path = Strip(diff, prefix);
-        var added = diff.AddedLineCount;
-        var removed = diff.RemovedLineCount;
-        Header = Strings.FileDiffHeader(Path, added, removed);
+        added = diff.AddedLineCount;
+        removed = diff.RemovedLineCount;
         Badge = diff.Status switch
         {
             FileDiffStatus.Added => "A",
@@ -882,7 +976,7 @@ internal sealed class FileDiffViewModel
         var lines = new List<DiffLineViewModel>();
         foreach (var hunk in diff.Hunks)
         {
-            lines.Add(new DiffLineViewModel(string.Empty, hunk.Header, "hunk", string.Empty, string.Empty));
+            lines.Add(new DiffLineViewModel(string.Empty, LocText.Literal(hunk.Header), "hunk", string.Empty, string.Empty));
             foreach (var line in hunk.Lines)
             {
                 var kind = line.Kind switch
@@ -899,16 +993,16 @@ internal sealed class FileDiffViewModel
                 };
                 lines.Add(new DiffLineViewModel(
                     mark,
-                    line.Text.Replace("\t", "    ", StringComparison.Ordinal),
+                    LocText.Literal(line.Text.Replace("\t", "    ", StringComparison.Ordinal)),
                     kind,
-                    line.OldLineNumber > 0 ? line.OldLineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty,
-                    line.NewLineNumber > 0 ? line.NewLineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty));
+                    line.OldLineNumber > 0 ? TextFormat.Id(line.OldLineNumber) : string.Empty,
+                    line.NewLineNumber > 0 ? TextFormat.Id(line.NewLineNumber) : string.Empty));
             }
         }
 
         if (lines.Count == 0)
         {
-            lines.Add(new DiffLineViewModel(" ", Strings.NoTextualChange, "ctx", string.Empty, string.Empty));
+            lines.Add(new DiffLineViewModel(" ", new LocText(InspectorStrings.ChangesNoTextualChange), "ctx", string.Empty, string.Empty));
         }
 
         Lines = lines;
@@ -916,7 +1010,7 @@ internal sealed class FileDiffViewModel
 
     public string Path { get; }
 
-    public string Header { get; }
+    public string Header => InspectorStrings.FileDiffHeader(Path, added, removed);
 
     public string Badge { get; }
 
@@ -930,7 +1024,30 @@ internal sealed class FileDiffViewModel
     }
 }
 
-internal sealed record TurnChoiceViewModel(int Turn, string Label, string TreeBefore, string? TreeAfter);
+internal sealed class TurnChoiceViewModel : ObservableObject
+{
+    private readonly LocText label;
+
+    public TurnChoiceViewModel(int turn, LocText label, string treeBefore, string? treeAfter)
+    {
+        Turn = turn;
+        this.label = label;
+        TreeBefore = treeBefore;
+        TreeAfter = treeAfter;
+    }
+
+    public int Turn { get; }
+
+    /// <summary>The turn number and its start time, in the language of the moment the entry is read.</summary>
+    public string Label => label.Resolve();
+
+    public string TreeBefore { get; }
+
+    public string? TreeAfter { get; }
+
+    /// <summary>Re-reads the label after a language switch; the panel calls this for every entry.</summary>
+    internal void RefreshText() => OnPropertyChanged(nameof(Label));
+}
 
 /// <summary>
 /// The fixed "改动" document. Scope "按轮次" diffs the two trees the workspace layer recorded around one main-session turn
@@ -938,7 +1055,7 @@ internal sealed record TurnChoiceViewModel(int Turn, string Label, string TreeBe
 /// against HEAD including untracked files. All files are stacked into one flat row list that the view virtualizes;
 /// selecting one scrolls the view to it.
 /// </summary>
-internal sealed class ChangesViewModel : ObservableObject
+internal sealed class ChangesViewModel : ObservableObject, IDisposable
 {
     private readonly GitCli git;
     private readonly ITurnCheckpointStore checkpoints;
@@ -948,16 +1065,20 @@ internal sealed class ChangesViewModel : ObservableObject
     private TurnChoiceViewModel? selectedTurn;
     private FileDiffViewModel? selectedFile;
     private bool isLoading;
-    private string? message;
+    private LocText message;
     private int generation;
 
     public ChangesViewModel(GitCli git, ITurnCheckpointStore checkpoints)
     {
         this.git = git;
         this.checkpoints = checkpoints;
-        RefreshCommand = new AsyncRelayCommand(ct => LoadAsync(ct), () => true, exception => Message = exception.Message);
+        RefreshCommand = new AsyncRelayCommand(
+            ct => LoadAsync(ct),
+            () => true,
+            exception => SetMessage(LocText.Literal(exception.Message)));
         ByTurnCommand = new RelayCommand(() => ScopeIndex = 0);
         UncommittedCommand = new RelayCommand(() => ScopeIndex = 1);
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     public ObservableCollection<TurnChoiceViewModel> Turns { get; } = [];
@@ -1026,23 +1147,14 @@ internal sealed class ChangesViewModel : ObservableObject
         private set => Set(ref isLoading, value);
     }
 
-    public string? Message
-    {
-        get => message;
-        private set
-        {
-            if (Set(ref message, value))
-            {
-                OnPropertyChanged(nameof(HasMessage));
-            }
-        }
-    }
+    /// <summary>"没有改动。" or why the last load failed, in the language of the moment it is read.</summary>
+    public string Message => message.Resolve();
 
-    public bool HasMessage => !string.IsNullOrEmpty(message);
+    public bool HasMessage => !message.IsEmpty;
 
     public string Summary => context.HasSession
-        ? Strings.ChangesSummary(files.Count, IsByTurn)
-        : Strings.NoSession;
+        ? InspectorStrings.ChangesSummary(files.Count, IsByTurn)
+        : Loc.Instance[InspectorStrings.ChangesNoSession];
 
     public event Action<FileDiffViewModel>? FocusRequested;
 
@@ -1119,13 +1231,13 @@ internal sealed class ChangesViewModel : ObservableObject
             files.AddRange(built.Files);
             Rows.ReplaceAll(built.Rows);
 
-            Message = files.Count == 0 ? Strings.NoChanges : null;
+            SetMessage(files.Count == 0 ? new LocText(InspectorStrings.ChangesNoChanges) : default);
             SelectedFile = files.FirstOrDefault();
             OnPropertyChanged(nameof(Summary));
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or GitException or UnauthorizedAccessException)
         {
-            Message = exception.Message;
+            SetMessage(LocText.Literal(exception.Message));
         }
         finally
         {
@@ -1151,7 +1263,7 @@ internal sealed class ChangesViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {
-            Message = exception.Message;
+            SetMessage(LocText.Literal(exception.Message));
             return;
         }
 
@@ -1174,7 +1286,7 @@ internal sealed class ChangesViewModel : ObservableObject
 
             Turns.Insert(index, new TurnChoiceViewModel(
                 checkpoint.Turn,
-                Strings.ChangeTurnLabel(checkpoint.Turn, checkpoint.StartedAt),
+                InspectorStrings.ChangeTurnLabel(checkpoint.Turn, checkpoint.StartedAt),
                 checkpoint.TreeBefore,
                 checkpoint.TreeAfter));
         }
@@ -1185,6 +1297,35 @@ internal sealed class ChangesViewModel : ObservableObject
             OnPropertyChanged(nameof(SelectedTurn));
         }
     }
+
+    private void SetMessage(LocText value)
+    {
+        message = value;
+        OnPropertyChanged(nameof(Message));
+        OnPropertyChanged(nameof(HasMessage));
+    }
+
+    /// <summary>
+    /// Re-reads the document's own texts and hands the refresh down to the turn entries and diff rows: a row never
+    /// subscribes to <see cref="Loc.LanguageChanged"/> itself, one strong reference per row would keep the document alive.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(Message));
+        foreach (var turn in Turns)
+        {
+            turn.RefreshText();
+        }
+
+        foreach (var row in Rows)
+        {
+            row.RefreshText();
+        }
+    }
+
+    /// <summary>Drops the language subscription; a document that is gone must not be refreshed by the next language switch.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 
     /// <summary>The diff is read, mapped to view models and flattened on a pool thread; the caller applies it once.</summary>
     private async Task<(List<FileDiffViewModel> Files, List<DiffRowViewModel> Rows)> BuildRowsAsync(
@@ -1305,22 +1446,35 @@ internal sealed class TodoEntryViewModel : ObservableObject
     public RelayCommand MoveDownCommand => new(() => owner.Move(Id, Order + 1));
 }
 
-/// <summary>The TODO panel of the active session; the agent's <c>todo</c> tool writes the same rows.</summary>
-internal sealed class TodoListViewModel : ObservableObject
+/// <summary>
+/// The TODO panel of the active session; the agent's <c>todo</c> tool writes the same rows. The summary is kept as a
+/// <see cref="LocText"/> and resolved when it is read, so a language switch only has to re-raise it.
+/// </summary>
+internal sealed class TodoListViewModel : ObservableObject, IDisposable
 {
     private readonly ITodoStore store;
     private string sessionId = string.Empty;
     private string newTitle = string.Empty;
-    private string summary = Strings.NoSession;
+    private LocText summary = new(InspectorStrings.TodoNoSession);
     private int generation;
 
     public TodoListViewModel(ITodoStore store)
     {
         this.store = store;
-        AddCommand = new AsyncRelayCommand(ct => AddAsync(ct), () => sessionId.Length > 0 && !string.IsNullOrWhiteSpace(newTitle), exception => summary = exception.Message);
-        RefreshCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => sessionId.Length > 0, exception => summary = exception.Message);
-        ClearDoneCommand = new AsyncRelayCommand(ct => ClearDoneAsync(ct), () => Items.Any(static item => item.IsDone), exception => summary = exception.Message);
+        AddCommand = new AsyncRelayCommand(
+            ct => AddAsync(ct),
+            () => sessionId.Length > 0 && !string.IsNullOrWhiteSpace(newTitle),
+            exception => SetSummary(LocText.Literal(exception.Message)));
+        RefreshCommand = new AsyncRelayCommand(
+            ct => RefreshAsync(ct),
+            () => sessionId.Length > 0,
+            exception => SetSummary(LocText.Literal(exception.Message)));
+        ClearDoneCommand = new AsyncRelayCommand(
+            ct => ClearDoneAsync(ct),
+            () => Items.Any(static item => item.IsDone),
+            exception => SetSummary(LocText.Literal(exception.Message)));
         store.Changed += OnStoreChanged;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     public ObservableCollection<TodoEntryViewModel> Items { get; } = [];
@@ -1345,11 +1499,8 @@ internal sealed class TodoListViewModel : ObservableObject
         }
     }
 
-    public string Summary
-    {
-        get => summary;
-        private set => Set(ref summary, value);
-    }
+    /// <summary>"3/8 完成" for the attached session, or why there is nothing to show, in the language of the moment it is read.</summary>
+    public string Summary => summary.Resolve();
 
     public bool IsEmpty => Items.Count == 0;
 
@@ -1373,7 +1524,7 @@ internal sealed class TodoListViewModel : ObservableObject
     {
         if (sessionId.Length == 0)
         {
-            Summary = Strings.NoSession;
+            SetSummary(new LocText(InspectorStrings.TodoNoSession));
             Items.Clear();
             OnPropertyChanged(nameof(IsEmpty));
             return;
@@ -1395,15 +1546,15 @@ internal sealed class TodoListViewModel : ObservableObject
                 Items.Add(new TodoEntryViewModel(this, item));
             }
 
-            Summary = Items.Count == 0
-                ? Strings.TodoEmpty()
-                : Strings.TodoSummary(Items.Count(static item => item.IsDone), Items.Count);
+            SetSummary(Items.Count == 0
+                ? new LocText(InspectorStrings.TodoEmpty)
+                : InspectorStrings.TodoSummary(Items.Count(static item => item.IsDone), Items.Count));
             OnPropertyChanged(nameof(IsEmpty));
             ClearDoneCommand.NotifyCanExecuteChanged();
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {
-            Summary = exception.Message;
+            SetSummary(LocText.Literal(exception.Message));
         }
     }
 
@@ -1418,7 +1569,7 @@ internal sealed class TodoListViewModel : ObservableObject
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => Summary = exception.Message);
+                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
                 }
             });
     }
@@ -1433,7 +1584,7 @@ internal sealed class TodoListViewModel : ObservableObject
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => Summary = exception.Message);
+                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
                 }
             });
 
@@ -1447,7 +1598,7 @@ internal sealed class TodoListViewModel : ObservableObject
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => Summary = exception.Message);
+                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
                 }
             });
 
@@ -1486,36 +1637,88 @@ internal sealed class TodoListViewModel : ObservableObject
             Dispatcher.UIThread.Post(() => _ = RefreshAsync(CancellationToken.None));
         }
     }
+
+    private void SetSummary(LocText value)
+    {
+        summary = value;
+        OnPropertyChanged(nameof(Summary));
+    }
+
+    /// <summary>The summary is a <see cref="LocText"/>; a language switch only has to re-read it.</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(Summary));
+
+    /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 }
 
 // ---------------------------------------------------------------- review
 
-internal sealed record ReviewEntryViewModel(string Path, string Line, string Body, string Status);
+/// <summary>
+/// One review comment row. The line label and the status are formatted when they are read, so the row follows the language
+/// without subscribing to <see cref="Loc.LanguageChanged"/> itself; the body is the reviewer's own text and is never
+/// translated.
+/// </summary>
+internal sealed class ReviewEntryViewModel : ObservableObject
+{
+    private readonly int lineStart;
+    private readonly int lineEnd;
+    private readonly bool resolved;
+    private readonly bool sent;
 
-/// <summary>Review comments of the active worktree, read-only for now; click opens the file in the changes document.</summary>
-internal sealed class ReviewPanelViewModel : ObservableObject
+    public ReviewEntryViewModel(string path, int lineStart, int lineEnd, string body, bool resolved, bool sent)
+    {
+        Path = path;
+        this.lineStart = lineStart;
+        this.lineEnd = lineEnd;
+        Body = body;
+        this.resolved = resolved;
+        this.sent = sent;
+    }
+
+    public string Path { get; }
+
+    public string Line => InspectorStrings.ReviewLine(lineStart, lineEnd);
+
+    public string Body { get; }
+
+    public string Status => InspectorStrings.ReviewStatus(resolved, sent);
+
+    /// <summary>Re-reads the two localized texts after a language switch; the panel calls this for every row.</summary>
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(Line));
+        OnPropertyChanged(nameof(Status));
+    }
+}
+
+/// <summary>
+/// Review comments of the active worktree, read-only for now; click opens the file in the changes document. The summary is
+/// kept as a <see cref="LocText"/>; the rows are refreshed through the panel, never through the static event.
+/// </summary>
+internal sealed class ReviewPanelViewModel : ObservableObject, IDisposable
 {
     private readonly ReviewStore store;
     private readonly Action<string> openChange;
     private PanelContext context = PanelContext.Empty;
-    private string summary = Strings.NoSession;
+    private LocText summary = new(InspectorStrings.ReviewNoSession);
 
     public ReviewPanelViewModel(ReviewStore store, Action<string> openChange)
     {
         this.store = store;
         this.openChange = openChange;
-        RefreshCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, exception => Summary = exception.Message);
+        RefreshCommand = new AsyncRelayCommand(
+            ct => RefreshAsync(ct),
+            () => true,
+            exception => SetSummary(LocText.Literal(exception.Message)));
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     public ObservableCollection<ReviewEntryViewModel> Items { get; } = [];
 
     public AsyncRelayCommand RefreshCommand { get; }
 
-    public string Summary
-    {
-        get => summary;
-        private set => Set(ref summary, value);
-    }
+    /// <summary>"3 条意见" / "3 comments", or why there is nothing to show, in the language of the moment it is read.</summary>
+    public string Summary => summary.Resolve();
 
     public void Attach(PanelContext panelContext)
     {
@@ -1534,7 +1737,7 @@ internal sealed class ReviewPanelViewModel : ObservableObject
         if (!context.HasSession)
         {
             Items.Clear();
-            Summary = Strings.NoSession;
+            SetSummary(new LocText(InspectorStrings.ReviewNoSession));
             return;
         }
 
@@ -1550,18 +1753,42 @@ internal sealed class ReviewPanelViewModel : ObservableObject
             {
                 Items.Add(new ReviewEntryViewModel(
                     comment.FilePath,
-                    Strings.ReviewLine(comment.NewLineStart, comment.NewLineEnd),
+                    comment.NewLineStart,
+                    comment.NewLineEnd,
                     comment.Body,
-                    Strings.ReviewStatus(comment.IsResolved, comment.Status == ReviewCommentStatus.Sent)));
+                    comment.IsResolved,
+                    comment.Status == ReviewCommentStatus.Sent));
             }
 
-            Summary = Strings.ReviewSummary(Items.Count);
+            SetSummary(InspectorStrings.ReviewSummary(Items.Count));
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException)
         {
-            Summary = exception.Message;
+            SetSummary(LocText.Literal(exception.Message));
         }
     }
+
+    private void SetSummary(LocText value)
+    {
+        summary = value;
+        OnPropertyChanged(nameof(Summary));
+    }
+
+    /// <summary>
+    /// Re-reads the summary and hands the refresh down to every comment row: a row never subscribes to
+    /// <see cref="Loc.LanguageChanged"/> itself, one strong reference per row would keep the panel alive.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(Summary));
+        foreach (var item in Items)
+        {
+            item.RefreshText();
+        }
+    }
+
+    /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 }
 
 // ---------------------------------------------------------------- spec tree
@@ -1680,22 +1907,28 @@ internal sealed class SpecNodeViewModel : ObservableObject, IFlatTreeNode<SpecNo
 
 /// <summary>
 /// The spec tree of the active project root, following the declared parent hierarchy. The graph is read and the row list
-/// is built on a pool thread; the panel keeps a virtualized row list and remembers which nodes the user collapsed.
+/// is built on a pool thread; the panel keeps a virtualized row list and remembers which nodes the user collapsed. The
+/// rows show the graph's own titles and status words, so only the summary is language-dependent and it is kept as a
+/// <see cref="LocText"/>.
 /// </summary>
-internal sealed class SpecTreeViewModel : ObservableObject
+internal sealed class SpecTreeViewModel : ObservableObject, IDisposable
 {
     private readonly Func<string, SpecGraph> graphFactory;
     private readonly Action<string> openFile;
     private readonly FlatTree<SpecNodeViewModel> tree = new();
     private readonly HashSet<string> collapsedIds = new(StringComparer.Ordinal);
     private PanelContext context = PanelContext.Empty;
-    private string summary = Strings.NoProject;
+    private LocText summary = new(InspectorStrings.SpecNoProject);
 
     public SpecTreeViewModel(Func<string, SpecGraph> graphFactory, Action<string> openFile)
     {
         this.graphFactory = graphFactory;
         this.openFile = openFile;
-        RefreshCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => Context.ProjectRoot is not null, exception => Summary = exception.Message);
+        RefreshCommand = new AsyncRelayCommand(
+            ct => RefreshAsync(ct),
+            () => Context.ProjectRoot is not null,
+            exception => SetSummary(LocText.Literal(exception.Message)));
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     /// <summary>The visible rows of the tree, in display order; the view virtualizes this one list.</summary>
@@ -1705,11 +1938,8 @@ internal sealed class SpecTreeViewModel : ObservableObject
 
     public PanelContext Context => context;
 
-    public string Summary
-    {
-        get => summary;
-        private set => Set(ref summary, value);
-    }
+    /// <summary>"12 份规格" / "12 specs", or why there is no tree, in the language of the moment it is read.</summary>
+    public string Summary => summary.Resolve();
 
     public void Attach(PanelContext panelContext)
     {
@@ -1729,8 +1959,7 @@ internal sealed class SpecTreeViewModel : ObservableObject
         if (context.ProjectRoot is not { } root || !Directory.Exists(root))
         {
             tree.Clear();
-            summary = Strings.NoProject;
-            OnPropertyChanged(nameof(Summary));
+            SetSummary(new LocText(InspectorStrings.SpecNoProject));
             return;
         }
 
@@ -1739,13 +1968,25 @@ internal sealed class SpecTreeViewModel : ObservableObject
         {
             var built = await Task.Run(() => BuildAsync(root, collapsed, ct), ct).ConfigureAwait(true);
             tree.Replace(built.Rows);
-            Summary = Strings.SpecCount(built.Count);
+            SetSummary(InspectorStrings.SpecCount(built.Count));
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException or UnauthorizedAccessException)
         {
-            Summary = exception.Message;
+            SetSummary(LocText.Literal(exception.Message));
         }
     }
+
+    private void SetSummary(LocText value)
+    {
+        summary = value;
+        OnPropertyChanged(nameof(Summary));
+    }
+
+    /// <summary>The rows carry the graph's own titles; only the summary is resolved from the string table.</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(Summary));
+
+    /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 
     /// <summary>Reads the graph, maps it to node view models and flattens the visible rows, all on one pool thread.</summary>
     private async Task<(List<SpecNodeViewModel> Rows, int Count)> BuildAsync(

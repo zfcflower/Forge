@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.SpecTreeToolView"
              x:DataType="vm:SpecTreeViewModel">
   <UserControl.Resources>
@@ -72,7 +73,12 @@
   <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
     <Grid ColumnDefinitions="*,Auto">
       <TextBlock Classes="caption" Text="{Binding Summary}" VerticalAlignment="Center" />
-      <Button Grid.Column="1" Classes="ghost icon" Command="{Binding RefreshCommand}" ToolTip.Tip="刷新" AutomationProperties.AutomationId="refresh-specs" AutomationProperties.Name="刷新规格树">
+      <Button Grid.Column="1"
+              Classes="ghost icon"
+              Command="{Binding RefreshCommand}"
+              ToolTip.Tip="{Binding [spec.refresh], Source={x:Static loc:Loc.Instance}}"
+              AutomationProperties.AutomationId="refresh-specs"
+              AutomationProperties.Name="{Binding [spec.refresh.name], Source={x:Static loc:Loc.Instance}}">
         <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
       </Button>
     </Grid>
@@ -84,7 +90,8 @@
              ItemTemplate="{StaticResource SpecNodeTemplate}"
              Padding="0"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-             AutomationProperties.AutomationId="spec-tree" AutomationProperties.Name="规格树">
+             AutomationProperties.AutomationId="spec-tree"
+             AutomationProperties.Name="{Binding [spec.tree.name], Source={x:Static loc:Loc.Instance}}">
       <ListBox.ItemsPanel>
         <ItemsPanelTemplate>
           <VirtualizingStackPanel />

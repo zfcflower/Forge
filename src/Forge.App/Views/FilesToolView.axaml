@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.FilesToolView"
              x:DataType="vm:FilesPanelViewModel">
   <UserControl.Resources>
@@ -21,7 +22,8 @@
       <Border Classes="tree-row">
         <Border.ContextMenu>
           <ContextMenu>
-            <MenuItem Header="在新标签页打开" Command="{Binding OpenInNewTabCommand}" />
+            <MenuItem Header="{Binding [files.openInNewTab], Source={x:Static loc:Loc.Instance}}"
+                      Command="{Binding OpenInNewTabCommand}" />
           </ContextMenu>
         </Border.ContextMenu>
         <Grid ColumnDefinitions="Auto,*">
@@ -73,15 +75,17 @@
       <Grid ColumnDefinitions="Auto,Auto,*,Auto">
         <Button Classes="tab"
                 Classes.selected="{Binding IsAllTab}"
-                Content="全部"
+                Content="{Binding [files.all], Source={x:Static loc:Loc.Instance}}"
                 Command="{Binding AllTabCommand}"
-                AutomationProperties.AutomationId="files-all" AutomationProperties.Name="全部文件" />
+                AutomationProperties.AutomationId="files-all"
+                AutomationProperties.Name="{Binding [files.all.name], Source={x:Static loc:Loc.Instance}}" />
         <Button Grid.Column="1"
                 Classes="tab"
                 Classes.selected="{Binding IsChangedTab}"
-                Content="已改动"
+                Content="{Binding [files.changed], Source={x:Static loc:Loc.Instance}}"
                 Command="{Binding ChangedTabCommand}"
-                AutomationProperties.AutomationId="files-changed" AutomationProperties.Name="已改动文件" />
+                AutomationProperties.AutomationId="files-changed"
+                AutomationProperties.Name="{Binding [files.changed.name], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Grid.Column="2"
                    Classes="caption"
                    Margin="10,0"
@@ -90,8 +94,9 @@
         <Button Grid.Column="3"
                 Classes="ghost icon"
                 Command="{Binding ChangedCommand}"
-                ToolTip.Tip="刷新"
-                AutomationProperties.AutomationId="refresh-files" AutomationProperties.Name="刷新文件">
+                ToolTip.Tip="{Binding [files.refresh], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="refresh-files"
+                AutomationProperties.Name="{Binding [files.refresh.name], Source={x:Static loc:Loc.Instance}}">
           <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
         </Button>
       </Grid>
@@ -104,7 +109,8 @@
              ItemTemplate="{StaticResource FileNodeTemplate}"
              Padding="4,2"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-             AutomationProperties.AutomationId="files-tree" AutomationProperties.Name="全部文件树">
+             AutomationProperties.AutomationId="files-tree"
+             AutomationProperties.Name="{Binding [files.tree.name], Source={x:Static loc:Loc.Instance}}">
       <ListBox.ItemsPanel>
         <ItemsPanelTemplate>
           <VirtualizingStackPanel />
@@ -118,7 +124,8 @@
              ItemsSource="{Binding Changes}"
              SelectionChanged="OnChangedSelection"
              Padding="2,2"
-             AutomationProperties.AutomationId="changed-files" AutomationProperties.Name="已改动文件列表">
+             AutomationProperties.AutomationId="changed-files"
+             AutomationProperties.Name="{Binding [files.changedList.name], Source={x:Static loc:Loc.Instance}}">
       <ListBox.ItemTemplate>
         <DataTemplate x:DataType="vm:ChangedFileViewModel">
           <Grid ColumnDefinitions="*,Auto" Margin="4,2">

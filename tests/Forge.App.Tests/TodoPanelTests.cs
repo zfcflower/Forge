@@ -1,6 +1,7 @@
 using Avalonia.Headless;
 using Avalonia.Threading;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Xunit;
 
@@ -110,7 +111,7 @@ public sealed class TodoPanelTests
         var panel = await session.Dispatch(() => new TodoListViewModel(store), CancellationToken.None);
         await RefreshAfterAttachAsync(session, panel, "s1");
         var summary = await session.Dispatch(() => panel.Summary, CancellationToken.None);
-        Assert.Equal(Strings.TodoEmpty(), summary);
+        Assert.Equal(Loc.Instance[InspectorStrings.TodoEmpty], summary);
 
         // Add through the panel reaches the store and shows up after a refresh.
         await session.Dispatch(
@@ -153,7 +154,7 @@ public sealed class TodoPanelTests
             },
             CancellationToken.None);
         summary = await session.Dispatch(() => panel.Summary, CancellationToken.None);
-        Assert.Equal(Strings.TodoSummary(1, 1), summary);
+        Assert.Equal(InspectorStrings.TodoSummary(1, 1).Resolve(), summary);
 
         // Removing the entry deletes the row.
         await session.Dispatch(
