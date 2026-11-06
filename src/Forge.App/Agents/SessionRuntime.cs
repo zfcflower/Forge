@@ -6,6 +6,7 @@ using Forge.Core.Prompts;
 using Forge.Core.Providers;
 using Forge.Core.Tools;
 using Forge.HostClient;
+using Forge.Workspace;
 
 namespace Forge.App.Agents;
 
@@ -16,7 +17,8 @@ internal sealed record AgentRuntimeServices(
     ISessionStore Store,
     ISessionCatalog Catalog,
     ITodoStore Todos,
-    ModelSettings Model)
+    ModelSettings Model,
+    GitTools? Git = null)
 {
     /// <summary>
     /// The shell's approval wiring (queue, remembered rules and the extension authoring adapter). Null when the runtime was
@@ -187,7 +189,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
     private AgentHost Build()
     {
-        var tools = CollectExternalTools();
         var handler = services.Approvals?.CreateHandler(Session);
 
         // A retried build (the first resume failed) replaces the handler; the old one must not keep a dead wait alive.
@@ -199,7 +200,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             new AgentHostOptions
             {
                 Providers = services.ProviderFactory,
-                Tools = tools,
+                Tools = BuildTools(),
                 Layers = layers,
                 Policy = SessionPolicy,
                 ApprovalHandler = handler,
@@ -241,26 +242,31 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
     /// <summary>
     /// The tools that come from outside Core: the extension host's plugin tools, the <c>run_code</c> proxy and, once the
-    /// approval wiring exists, the five extension tools. Recomputed on every registration change so a hot reload reaches
+    /// approval wiring exists, the five extension tools, then the git tools. Recomputed on every registration change so a hot reload reaches
     /// the loop before its next model request.
     /// </summary>
     private List<ITool> CollectExternalTools()
     {
         var tools = new List<ITool>();
-        if (services.HostClient is not { } client)
+        if (services.HostClient is { } client)
         {
-            return tools;
+            tools.AddRange(client.Tools);
+            if (tools.Count > 0)
+            {
+                // Scripts only see extension-host tools: a call from inside run_code never goes through the per-call
+                // approval presentation, so the git write tools (git_branch, git_sync) must stay out of its registry.
+                tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
+            }
+
+            if (services.Approvals?.Extensions is { } extensions)
+            {
+                tools.AddRange(ExtensionTools.Create(extensions));
+            }
         }
 
-        tools.AddRange(client.Tools);
-        if (tools.Count > 0)
+        if (services.Git is { } git)
         {
-            tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
-        }
-
-        if (services.Approvals?.Extensions is { } extensions)
-        {
-            tools.AddRange(ExtensionTools.Create(extensions));
+            tools.AddRange(git.All);
         }
 
         return tools;
@@ -297,6 +303,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             Trace.WriteLine("[session] the external tool surface could not be replaced: " + exception.Message);
         }
     }
+
+    /// <summary>The tool surface one session runs with (see <see cref="CollectExternalTools"/>); tests read it directly.</summary>
+    internal IReadOnlyList<ITool> BuildTools() => CollectExternalTools();
 
     public void Dispose()
     {
@@ -337,6 +346,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// extension tools that only stage a draft or switch a plugin off - their real gate is the plugin approval card the
     /// authoring service puts in front of the user. <c>extension_delete</c> keeps asking: that card is the deletion
     /// confirmation. Every other write or execution goes to the session's <see cref="SessionApprovalHandler"/>.
+    /// <para>The git tools are deliberately absent: the read-only ones pass through
+    /// <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones (git_branch, git_sync) always ask.</para>
     /// </summary>
     private static readonly IApprovalPolicy SessionPolicy = CreatePolicy();
 

@@ -5,6 +5,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Appearance;
 using Forge.App.Approval;
+using Forge.App.Git;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Services;
@@ -64,6 +65,7 @@ internal sealed class AppComposition : IAsyncDisposable
         TurnCheckpointService checkpoints,
         WorktreeService worktrees,
         AgentRuntimeManager runtimes,
+        GitSettingsSectionViewModel gitSettings,
         Task initialization)
     {
         Paths = paths;
@@ -91,6 +93,8 @@ internal sealed class AppComposition : IAsyncDisposable
         Checkpoints = checkpoints;
         Worktrees = worktrees;
         this.runtimes = runtimes;
+        GitSettings = gitSettings;
+        GitPanelSettings = GitPreferences.PanelSettings(preferences.Current);
         Initialization = initialization;
         preferences.Current.PropertyChanged += OnPreferencesChanged;
     }
@@ -139,6 +143,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public IApprovalCounter ApprovalsCounter { get; }
 
     public GitCli Git { get; }
+
+    /// <summary>The <c>git</c> settings section's view model; it edits <see cref="Preferences"/> live.</summary>
+    public GitSettingsSectionViewModel GitSettings { get; }
+
+    /// <summary>What the inspector's Git tab reads on every operation (pull strategy and network timeout).</summary>
+    public GitPanelSettings GitPanelSettings { get; }
 
     public ISessionStore Sessions => sessions;
 
@@ -190,6 +200,11 @@ internal sealed class AppComposition : IAsyncDisposable
             LanguageStrings.SectionTitle,
             SettingsSectionIds.LanguageOrder,
             new LanguageSettingsViewModel(preferences.Current)));
+
+        // 0b. Git: the settings section edits the live preferences, so it exists as soon as they do; the section is
+        //     registered here (id and order from SettingsSectionIds) like every other feature's.
+        var gitSettings = new GitSettingsSectionViewModel(preferences.Current);
+        settings.Add(new SettingsSection(SettingsSectionIds.Git, GitStrings.SettingsSectionTitle, SettingsSectionIds.GitOrder, gitSettings));
 
         // 1. The approval database is owned by the extension host; the shell only reads its record count.
         var approvalsDatabasePath = Path.Combine(paths.HostDataDirectory, ApprovalStore.FileName);
@@ -264,14 +279,17 @@ internal sealed class AppComposition : IAsyncDisposable
         var checkpoints = new TurnCheckpointService(git, turnCheckpoints);
         var worktrees = new WorktreeService(git);
 
-        // 8. The per-session agent runtimes.
+        // 8. The per-session agent runtimes. The git tools are built once for the whole app: they are stateless, take the
+        //    session's worktree from each call's ToolContext, and read the live git preferences on every call.
+        var gitTools = new GitTools(git, GitToolPreferences.ToolSettings(preferences.Current), new GitReviewLedger());
         var runtimeServices = new AgentRuntimeServices(
             BuildProviderFactory(provider, httpClient),
             host?.Client,
             sessions,
             sessions,
             todos,
-            provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty));
+            provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty),
+            Git: gitTools);
         runtimeServices.Approvals = approvals;
         runtimeServices.ToolRouter = toolRouter;
         var runtimes = new AgentRuntimeManager(runtimeServices);
@@ -310,6 +328,7 @@ internal sealed class AppComposition : IAsyncDisposable
             checkpoints,
             worktrees,
             runtimes,
+            gitSettings,
             initialization);
         composition.Approvals = approvals;
         return composition;

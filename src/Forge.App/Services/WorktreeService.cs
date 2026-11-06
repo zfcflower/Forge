@@ -32,6 +32,16 @@ internal sealed class WorktreeService
     public Task<WorktreeSession> CreateAsync(string repositoryRoot, string title, CancellationToken ct) =>
         worktrees.CreateAsync(repositoryRoot, title, ct);
 
+    /// <summary>
+    /// Creates a worktree on the caller's branch name; the branch starts at HEAD and the name is used as typed, so an
+    /// invalid name throws <see cref="ArgumentException"/> and an existing branch throws <see cref="GitException"/>. A blank
+    /// name falls back to the title overload.
+    /// </summary>
+    public Task<WorktreeSession> CreateAsync(string repositoryRoot, string title, string? branchName, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(branchName)
+            ? worktrees.CreateAsync(repositoryRoot, title, ct)
+            : worktrees.CreateAsync(repositoryRoot, title, branchName, ct);
+
     /// <summary>Worktree path this app would use for <paramref name="slug"/>; shown in the project tree.</summary>
     public string ResolveWorktreePath(string repositoryRoot, string slug) =>
         worktrees.ResolveWorktreePath(repositoryRoot, slug);

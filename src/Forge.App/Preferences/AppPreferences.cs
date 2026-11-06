@@ -43,6 +43,14 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxScrollbackLines = 100000;
 
     public const int DefaultScrollbackLines = 10000;
+    /// <summary>The pull-strategy tokens of the <c>preferences</c> section; an unknown token falls back to <see cref="GitPullStrategyFastForwardOnly"/>.</summary>
+    public const string GitPullStrategyFastForwardOnly = "ff-only";
+    public const string GitPullStrategyRebase = "rebase";
+    public const string GitPullStrategyMerge = "merge";
+    public const string DefaultGitPullStrategy = GitPullStrategyFastForwardOnly;
+    public const int MinGitNetworkTimeoutSeconds = 10;
+    public const int MaxGitNetworkTimeoutSeconds = 600;
+    public const int DefaultGitNetworkTimeoutSeconds = 120;
 
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
@@ -52,6 +60,8 @@ internal sealed class AppPreferences : ObservableObject
     private string terminalShell = string.Empty;
     private string terminalArguments = string.Empty;
     private int terminalScrollbackLines = DefaultScrollbackLines;
+    private string gitPullStrategy = DefaultGitPullStrategy;
+    private int gitNetworkTimeoutSeconds = DefaultGitNetworkTimeoutSeconds;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -77,6 +87,20 @@ internal sealed class AppPreferences : ObservableObject
     }
 
     /// <summary>
+    /// How <see cref="Forge.Workspace.GitPullStrategy"/> integrates the upstream: <see cref="GitPullStrategyFastForwardOnly"/>
+    /// (default), <see cref="GitPullStrategyRebase"/> or <see cref="GitPullStrategyMerge"/>. The token is stored as is, so a
+    /// file written by a newer build still opens; an unknown token means the default.
+    /// </summary>
+    public string GitPullStrategy { get => gitPullStrategy; set => Set(ref gitPullStrategy, PullStrategy(value)); }
+
+    /// <summary>Bounded wait for fetch, pull and push, in seconds; clamped to [<see cref="MinGitNetworkTimeoutSeconds"/>, <see cref="MaxGitNetworkTimeoutSeconds"/>].</summary>
+    public int GitNetworkTimeoutSeconds
+    {
+        get => gitNetworkTimeoutSeconds;
+        set => Set(ref gitNetworkTimeoutSeconds, Math.Clamp(value, MinGitNetworkTimeoutSeconds, MaxGitNetworkTimeoutSeconds));
+    }
+
+    /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
     /// Values go through the same validation as the setters.
@@ -93,6 +117,10 @@ internal sealed class AppPreferences : ObservableObject
         terminalScrollbackLines = section.TerminalScrollbackLines is { } scrollback
             ? Math.Clamp(scrollback, MinScrollbackLines, MaxScrollbackLines)
             : DefaultScrollbackLines;
+        gitPullStrategy = PullStrategy(section.GitPullStrategy);
+        gitNetworkTimeoutSeconds = section.GitNetworkTimeoutSeconds is { } seconds
+            ? Math.Clamp(seconds, MinGitNetworkTimeoutSeconds, MaxGitNetworkTimeoutSeconds)
+            : DefaultGitNetworkTimeoutSeconds;
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -107,6 +135,8 @@ internal sealed class AppPreferences : ObservableObject
             TerminalShell = terminalShell,
             TerminalArguments = terminalArguments,
             TerminalScrollbackLines = terminalScrollbackLines,
+            GitPullStrategy = gitPullStrategy,
+            GitNetworkTimeoutSeconds = gitNetworkTimeoutSeconds,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -148,6 +178,15 @@ internal sealed class AppPreferences : ObservableObject
 
     private static double Size(double? value, double fallback) =>
         value is { } size && !double.IsNaN(size) ? Math.Clamp(size, MinFontSize, MaxFontSize) : fallback;
+
+    /// <summary>Reads a <c>gitPullStrategy</c> token; a missing or unknown value is the default, never an error.</summary>
+    private static string PullStrategy(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            GitPullStrategyRebase => GitPullStrategyRebase,
+            GitPullStrategyMerge => GitPullStrategyMerge,
+            _ => DefaultGitPullStrategy,
+        };
 }
 
 /// <summary>
@@ -179,6 +218,11 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("terminalScrollbackLines")]
     public int? TerminalScrollbackLines { get; set; }
+    [JsonPropertyName("gitPullStrategy")]
+    public string? GitPullStrategy { get; set; }
+
+    [JsonPropertyName("gitNetworkTimeoutSeconds")]
+    public int? GitNetworkTimeoutSeconds { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>

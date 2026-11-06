@@ -8,6 +8,7 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Terminal;
+using Forge.App.Git;
 using Forge.App.Workbench;
 using Forge.HostClient;
 using Forge.Workspace;
@@ -93,11 +94,24 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
         Changes = new ChangesViewModel(composition.Git, composition.TurnCheckpoints);
+        GitPanel = new GitPanelViewModel(composition.Git, composition.GitPanelSettings, ConfirmGitActionAsync);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         NewTerminalCommand = new RelayCommand(OpenTerminal);
         Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs);
         terminals = new TerminalWorkbench(Workbench, composition.Preferences, composition.Host?.Client);
         newTerminalButton = CreateNewTerminalButton();
+
+        // Appended after the three default tool tabs, so the existing order (TODO | Review | Specs) does not move; the
+        // group's active tab is the one the layout constructor set, so opening the Git tab does not steal the view.
+        Workbench.OpenTab(
+            Workbench.InspectorTools,
+            WorkbenchIds.GitTab,
+            TabKind.Git,
+            GitPanel,
+            GitPanel.Title,
+            activate: false,
+            closable: false);
+        GitPanel.PropertyChanged += OnGitPanelPropertyChanged;
         openChangesTool = new PanelToolButton(
             OpenChangesToolId,
             ShellStrings.OpenChangesTooltip,
@@ -156,6 +170,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ChangesViewModel Changes { get; }
 
+    /// <summary>The inspector's Git tab for the active session; its branch also feeds the title and status bars.</summary>
+    public GitPanelViewModel GitPanel { get; }
+
     public WorkbenchLayout Workbench { get; }
 
     public AsyncRelayCommand AddProjectCommand { get; }
@@ -198,6 +215,11 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     public bool HasActiveSession => activeSession is not null;
 
     public string ActiveSessionTitle => activeSession?.Title ?? ShellStrings.NoOpenSession;
+
+    /// <summary>The active session's branch as the Git tab last read it; empty outside a repository.</summary>
+    public string ActiveBranchText => activeSession is null ? string.Empty : GitPanel.BranchText;
+
+    public bool HasActiveBranch => ActiveBranchText.Length > 0;
 
     public void AttachDialogs(IDialogService dialogService) => dialogs = dialogService;
 
@@ -538,6 +560,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             ReleaseClosedSession(session);
         }
 
+        GitPanel.NotifyTurnCompleted(session.SessionId);
         _ = RefreshAfterTurnAsync(session);
     }
 
@@ -779,6 +802,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             Reviews.Attach(PanelContext.Empty);
             Specs.Attach(PanelContext.Empty);
             Changes.Attach(PanelContext.Empty);
+            GitPanel.Attach(PanelContext.Empty);
             SyncFinishedMenu(null);
             PruneSubAgentTabs(null, []);
             return;
@@ -793,8 +817,40 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Reviews.Attach(context);
         Specs.Attach(context);
         Changes.Attach(context);
+        GitPanel.Attach(context);
         SyncSubAgentRegion();
     }
+
+    /// <summary>
+    /// The Git tab carries the branch of the title bar and the ahead/behind of the status bar; both also follow a branch
+    /// switch made in the tab itself, which the session record does not know about.
+    /// </summary>
+    private void OnGitPanelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(GitPanelViewModel.BranchText):
+                OnPropertyChanged(nameof(ActiveBranchText));
+                OnPropertyChanged(nameof(HasActiveBranch));
+                break;
+            case nameof(GitPanelViewModel.AheadBehindText):
+                Status.SetAheadBehind(GitPanel.AheadBehindText);
+                break;
+            case nameof(GitPanelViewModel.Title):
+                if (Workbench.FindTab(WorkbenchIds.GitTab) is { } tab)
+                {
+                    tab.Title = GitPanel.Title;
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>The Git tab's confirmations go through the same dialog as every other shell question.</summary>
+    private Task<bool> ConfirmGitActionAsync(string title, string message) =>
+        dialogs is null
+            ? Task.FromResult(false)
+            : dialogs.ConfirmAsync(title, message, Loc.Instance[GitStrings.ConfirmButton], ShellStrings.Cancel);
 
     private void OpenFile(string path, bool newTab) => _ = OpenFileAsync(path, newTab, CancellationToken.None);
 
@@ -1110,6 +1166,8 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Workbench.ActiveTabChanged -= OnActiveTabChanged;
         Workbench.LayoutChanged -= OnLayoutChanged;
         Workbench.PropertyChanged -= OnWorkbenchPropertyChanged;
+        GitPanel.PropertyChanged -= OnGitPanelPropertyChanged;
+        GitPanel.Dispose();
 
         // The long-lived owners subscribe to the string table themselves; they drop it with the window.
         Loc.Instance.LanguageChanged -= OnLanguageChanged;

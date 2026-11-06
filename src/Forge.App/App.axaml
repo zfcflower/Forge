@@ -6,6 +6,7 @@
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
              xmlns:term="using:Forge.App.Terminal"
+             xmlns:git="using:Forge.App.Git"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -48,6 +49,9 @@
     </DataTemplate>
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
+    </DataTemplate>
+    <DataTemplate DataType="git:GitPanelViewModel" x:DataType="git:GitPanelViewModel">
+      <views:GitToolView />
     </DataTemplate>
 
     <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
@@ -141,6 +145,48 @@
     <!-- The extensions section: installed extensions, staged drafts and the remembered approval rules. -->
     <DataTemplate DataType="ap:ExtensionsSettingsSectionViewModel" x:DataType="ap:ExtensionsSettingsSectionViewModel">
       <ap:ExtensionsSettingsView />
+    </DataTemplate>
+
+    <!-- The git section: pull strategy and network timeout, edited live on the preferences they belong to. -->
+    <DataTemplate DataType="git:GitSettingsSectionViewModel" x:DataType="git:GitSettingsSectionViewModel">
+      <StackPanel Spacing="6">
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.pullStrategy], Source={x:Static loc:Loc.Instance}}" />
+          <ComboBox Grid.Column="1"
+                    MinWidth="170"
+                    HorizontalAlignment="Left"
+                    ItemsSource="{Binding PullStrategies}"
+                    SelectedItem="{Binding SelectedPullStrategy, Mode=TwoWay}"
+                    AutomationProperties.AutomationId="git-pull-strategy"
+                    AutomationProperties.Name="{Binding [git.settings.pullStrategy], Source={x:Static loc:Loc.Instance}}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="git:GitPullStrategyOption">
+                <TextBlock Classes="caption" Text="{Binding Label}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.networkTimeout], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="10"
+                         Maximum="600"
+                         Increment="10"
+                         FormatString="0"
+                         Value="{Binding NetworkTimeoutSeconds, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-network-timeout"
+                         AutomationProperties.Name="{Binding [git.settings.networkTimeout], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [git.settings.networkTimeoutHint], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
     </DataTemplate>
 
     <!-- User message: IM-style bubble aligned right. -->

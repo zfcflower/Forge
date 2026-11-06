@@ -1,0 +1,182 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:git="using:Forge.App.Git"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Views.GitToolView"
+             x:DataType="git:GitPanelViewModel">
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}">
+
+    <!-- Remote operations: the panel never fetches on its own, so every network call is one of these buttons. -->
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+        <Button Classes="ghost"
+                Margin="0,0,4,0"
+                Content="{Binding [git.button.fetch], Source={x:Static loc:Loc.Instance}}"
+                Command="{Binding FetchCommand}"
+                AutomationProperties.AutomationId="git-fetch"
+                AutomationProperties.Name="{Binding [git.button.fetch], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="1"
+                Classes="ghost"
+                Margin="0,0,4,0"
+                Content="{Binding [git.button.pull], Source={x:Static loc:Loc.Instance}}"
+                Command="{Binding PullCommand}"
+                AutomationProperties.AutomationId="git-pull"
+                AutomationProperties.Name="{Binding [git.button.pull], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="2"
+                Classes="ghost"
+                Content="{Binding [git.button.push], Source={x:Static loc:Loc.Instance}}"
+                Command="{Binding PushCommand}"
+                AutomationProperties.AutomationId="git-push"
+                AutomationProperties.Name="{Binding [git.button.push], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Grid.Column="4"
+                   Classes="caption"
+                   Margin="0,0,8,0"
+                   VerticalAlignment="Center"
+                   IsVisible="{Binding IsBusy}"
+                   Text="{Binding [git.state.busy], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="5"
+                Classes="ghost icon"
+                Command="{Binding RefreshCommand}"
+                ToolTip.Tip="{Binding [git.button.refresh], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="git-refresh"
+                AutomationProperties.Name="{Binding [git.button.refresh], Source={x:Static loc:Loc.Instance}}">
+          <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="8,6" Spacing="8">
+
+        <TextBlock Classes="caption"
+                   IsVisible="{Binding !HasRepository}"
+                   TextWrapping="Wrap"
+                   Text="{Binding [git.state.noRepository], Source={x:Static loc:Loc.Instance}}" />
+
+        <!-- Branch, upstream and divergence as of the last fetch. -->
+        <StackPanel Spacing="3" IsVisible="{Binding HasRepository}">
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Classes="label" Text="{Binding [git.label.branch], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1"
+                       Classes="mono"
+                       Text="{Binding BranchText}"
+                       AutomationProperties.AutomationId="git-branch"
+                       AutomationProperties.Name="{Binding BranchText}"
+                       TextTrimming="CharacterEllipsis" />
+          </Grid>
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Classes="label" Text="{Binding [git.label.upstream], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       Text="{Binding UpstreamText}"
+                       AutomationProperties.AutomationId="git-upstream"
+                       TextTrimming="CharacterEllipsis" />
+          </Grid>
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Classes="label" Text="{Binding [git.label.aheadBehind], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       Text="{Binding AheadBehindText}"
+                       AutomationProperties.AutomationId="git-ahead-behind" />
+          </Grid>
+        </StackPanel>
+
+        <!-- The in-progress rebase/merge and the files it stopped on. -->
+        <Border Classes="notice" IsVisible="{Binding HasOperation}">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="caption"
+                       Text="{Binding OperationText}"
+                       AutomationProperties.AutomationId="git-operation" />
+            <TextBlock Classes="label" Text="{Binding [git.label.conflicts], Source={x:Static loc:Loc.Instance}}" />
+            <ItemsControl ItemsSource="{Binding ConflictedFiles}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <TextBlock Classes="mono" Text="{Binding}" TextTrimming="CharacterEllipsis" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Button Classes="ghost"
+                      Content="{Binding [git.button.continue], Source={x:Static loc:Loc.Instance}}"
+                      Command="{Binding ContinueOperationCommand}"
+                      AutomationProperties.AutomationId="git-continue" />
+              <Button Classes="ghost"
+                      Content="{Binding [git.button.abort], Source={x:Static loc:Loc.Instance}}"
+                      Command="{Binding AbortOperationCommand}"
+                      AutomationProperties.AutomationId="git-abort" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <!-- Remotes: read-only, the panel only needs to know whether a push has somewhere to go. -->
+        <StackPanel Spacing="3" IsVisible="{Binding HasRepository}">
+          <TextBlock Classes="label" Text="{Binding [git.label.remotes], Source={x:Static loc:Loc.Instance}}" />
+          <ItemsControl ItemsSource="{Binding Remotes}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock Classes="caption" Text="{Binding}" TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <!-- Branch picker plus the create/switch/set-upstream/delete actions. -->
+        <StackPanel Spacing="4" IsVisible="{Binding HasRepository}">
+          <TextBlock Classes="label" Text="{Binding [git.label.branches], Source={x:Static loc:Loc.Instance}}" />
+          <ComboBox HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding Branches}"
+                    SelectedItem="{Binding SelectedBranch, Mode=TwoWay}"
+                    IsEnabled="{Binding !IsBusy}"
+                    AutomationProperties.AutomationId="git-branch-picker"
+                    AutomationProperties.Name="{Binding [git.label.branches], Source={x:Static loc:Loc.Instance}}" />
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Button Classes="ghost"
+                    Content="{Binding [git.button.createBranch], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding CreateBranchCommand}"
+                    AutomationProperties.AutomationId="git-branch-create" />
+            <Button Classes="ghost"
+                    Content="{Binding [git.button.switchBranch], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding SwitchBranchCommand}"
+                    AutomationProperties.AutomationId="git-branch-switch" />
+            <Button Classes="ghost"
+                    Content="{Binding [git.button.setUpstream], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding SetUpstreamCommand}"
+                    AutomationProperties.AutomationId="git-upstream-set" />
+            <Button Classes="ghost"
+                    Content="{Binding [git.button.deleteBranch], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding DeleteBranchCommand}"
+                    AutomationProperties.AutomationId="git-branch-delete" />
+          </StackPanel>
+          <TextBox Text="{Binding NewBranchName, Mode=TwoWay}"
+                   IsEnabled="{Binding !IsBusy}"
+                   PlaceholderText="{Binding [git.label.newBranch], Source={x:Static loc:Loc.Instance}}"
+                   AutomationProperties.AutomationId="git-new-branch"
+                   AutomationProperties.Name="{Binding [git.label.newBranch], Source={x:Static loc:Loc.Instance}}" />
+        </StackPanel>
+
+        <!-- Outcome of the last operation: git's own message, its stderr, and the recovery hint for the failure kind. -->
+        <Border Classes="notice" Classes.error="{Binding LastResultIsError}" IsVisible="{Binding HasResult}">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="{Binding [git.label.result], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption"
+                       Text="{Binding LastResultText}"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="git-result" />
+            <SelectableTextBlock Classes="mono"
+                                 Text="{Binding LastResultDetail}"
+                                 IsVisible="{Binding HasLastResultDetail}"
+                                 TextWrapping="Wrap"
+                                 MaxHeight="160"
+                                 Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBlock Classes="caption"
+                       Text="{Binding HintText}"
+                       IsVisible="{Binding HasHint}"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       AutomationProperties.AutomationId="git-hint" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

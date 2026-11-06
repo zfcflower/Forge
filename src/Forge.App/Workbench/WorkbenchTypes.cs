@@ -28,6 +28,7 @@ internal enum TabKind
 
     /// <summary>An interactive terminal of the active session; it lives in the bottom group and is never persisted.</summary>
     Terminal,
+    Git,
 }
 
 /// <summary>Position, size and state of a floating window in screen pixels (DIPs).</summary>
@@ -52,6 +53,7 @@ internal static class WorkbenchIds
     public const string TodoTab = "todo";
     public const string ReviewTab = "review";
     public const string SpecsTab = "specs";
+    public const string GitTab = "git";
     public const string ChangesTab = "changes";
 
     /// <summary>The reusable preview tab: a plain click on a file replaces its content.</summary>

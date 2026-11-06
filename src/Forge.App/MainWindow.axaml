@@ -41,6 +41,15 @@
                      VerticalAlignment="Center"
                      MaxWidth="320"
                      Text="{Binding ActiveSessionTitle}" />
+          <TextBlock Classes="caption"
+                     VerticalAlignment="Center"
+                     MaxWidth="200"
+                     TextTrimming="CharacterEllipsis"
+                     IsVisible="{Binding HasActiveBranch}"
+                     Text="{Binding ActiveBranchText}"
+                     ToolTip.Tip="{Binding ActiveBranchText}"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     AutomationProperties.AutomationId="title-branch" />
         </StackPanel>
 
         <TextBox x:Name="SearchBox"
@@ -148,6 +157,13 @@
                 AutomationProperties.AutomationId="terminal-open"
                 AutomationProperties.Name="{Binding TerminalButtonText}"
                 ToolTip.Tip="{Binding TerminalButtonText}" />
+        <TextBlock Grid.Column="7"
+                   Classes="caption"
+                   Margin="14,0,0,0"
+                   VerticalAlignment="Center"
+                   IsVisible="{Binding Status.HasAheadBehind}"
+                   Text="{Binding Status.AheadBehindText}"
+                   AutomationProperties.AutomationId="status-ahead-behind" />
         <TextBlock Grid.Column="7"
                    Classes="caption"
                    HorizontalAlignment="Right"

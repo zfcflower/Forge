@@ -988,30 +988,81 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
                 token),
             ct);
 
-    private Task CreateWorktreeSessionAsync(ProjectInfo project, CancellationToken ct) =>
-        CreateAsync(
-            token => BackgroundRead.RunAsync(
-                async backgroundToken =>
-                {
-                    if (!await worktrees.IsRepositoryAsync(project.RootPath, backgroundToken).ConfigureAwait(false))
-                    {
-                        throw new InvalidOperationException(ProjectStrings.NotAGitRepository);
-                    }
+    /// <summary>
+    /// A new session on a project gets its own worktree. The repository probe runs first on the thread pool, so a folder
+    /// that is not a git repository is reported without ever asking for a branch name; only a repository then puts the
+    /// branch-name prompt on the UI thread. A blank answer cancels silently, and an unusable name stops the creation and
+    /// reports why through the same failure path as the rest of the flow. Everything after the prompt (the worktree and
+    /// the session row) runs on the thread pool like the other tree operations.
+    /// </summary>
+    private async Task CreateWorktreeSessionAsync(ProjectInfo project, CancellationToken ct)
+    {
+        var isRepository = await BackgroundRead
+            .RunAsync(token => worktrees.IsRepositoryAsync(project.RootPath, token), ct)
+            .ConfigureAwait(true);
+        if (!isRepository)
+        {
+            throw new InvalidOperationException(ProjectStrings.NotAGitRepository);
+        }
 
-                    var title = ProjectStrings.WorktreeSessionTitle();
-                    var worktree = await worktrees.CreateAsync(project.RootPath, title, backgroundToken).ConfigureAwait(false);
-                    return await catalog.CreateAsync(
-                            new SessionCreate(worktree.Path, title)
-                            {
-                                ProjectId = project.Id,
-                                WorktreePath = worktree.Path,
-                                Branch = worktree.Branch,
-                            },
-                            backgroundToken)
-                        .ConfigureAwait(false);
-                },
-                token),
-            ct);
+        var branch = await promptText(
+                Loc.Instance[GitStrings.WorktreeBranchPromptTitle],
+                DefaultBranchName())
+            .ConfigureAwait(true);
+        if (string.IsNullOrWhiteSpace(branch))
+        {
+            return;
+        }
+
+        var branchName = branch.Trim();
+        await CreateAsync(
+                token => BackgroundRead.RunAsync(
+                    async backgroundToken =>
+                    {
+                        var title = ProjectStrings.WorktreeSessionTitle();
+                        WorktreeSession worktree;
+                        try
+                        {
+                            worktree = await worktrees.CreateAsync(project.RootPath, title, branchName, backgroundToken)
+                                .ConfigureAwait(false);
+                        }
+                        catch (ArgumentException exception)
+                        {
+                            throw new InvalidOperationException(
+                                Loc.Instance.Format(GitStrings.WorktreeBranchInvalid, branchName, exception.Message),
+                                exception);
+                        }
+                        catch (GitException exception)
+                        {
+                            throw new InvalidOperationException(
+                                Loc.Instance.Format(GitStrings.WorktreeBranchUnavailable, branchName, exception.Message),
+                                exception);
+                        }
+
+                        return await catalog.CreateAsync(
+                                new SessionCreate(worktree.Path, title)
+                                {
+                                    ProjectId = project.Id,
+                                    WorktreePath = worktree.Path,
+                                    Branch = worktree.Branch,
+                                },
+                                backgroundToken)
+                            .ConfigureAwait(false);
+                    },
+                    token),
+                ct)
+            .ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// The branch name a new worktree session is prompted with: the worktree branch prefix plus a timestamped slug. The
+    /// timestamp is part of the name because an explicitly typed branch is never suffixed (unlike the title-based default,
+    /// whose Chinese title always reduced to <c>session</c>), so the default has to look distinct on its own.
+    /// </summary>
+    private string DefaultBranchName() =>
+        worktrees.Manager.Options.BranchPrefix
+        + "session-"
+        + DateTimeOffset.Now.ToString("MMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
 
     private Task CreateSessionInWorktreeAsync(ProjectInfo project, string worktreePath, string? branch, CancellationToken ct) =>
         CreateAsync(

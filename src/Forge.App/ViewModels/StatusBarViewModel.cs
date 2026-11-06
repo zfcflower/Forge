@@ -24,6 +24,7 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
     private int? approvalCount;
     private int? pluginCount;
     private int? toolCount;
+    private string aheadBehindText = string.Empty;
     private bool isHostRunning;
     private bool isHostStarting = true;
     private bool isHostFailed;
@@ -95,6 +96,24 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
         : ShellStrings.ApprovalsUnknown;
 
     public string WorkspaceText { get; }
+
+    /// <summary>
+    /// Ahead/behind of the active session's branch, e.g. "↑2 ↓0"; empty when there is no upstream or no repository. The
+    /// Git panel pushes it here whenever it re-reads the branch (a turn end and every git operation refresh it).
+    /// </summary>
+    public string AheadBehindText
+    {
+        get => aheadBehindText;
+        private set
+        {
+            if (Set(ref aheadBehindText, value))
+            {
+                OnPropertyChanged(nameof(HasAheadBehind));
+            }
+        }
+    }
+
+    public bool HasAheadBehind => aheadBehindText.Length > 0;
 
     public bool IsHostRunning
     {
@@ -170,6 +189,9 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
         mcpReady = ready;
         OnPropertyChanged(nameof(McpText));
     }
+
+    /// <summary>Called by the shell with the Git panel's "↑2 ↓0" (or an empty string when there is nothing to show).</summary>
+    public void SetAheadBehind(string? text) => AheadBehindText = text ?? string.Empty;
 
     public void SetApprovals(int? records)
     {
