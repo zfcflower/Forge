@@ -183,7 +183,7 @@ public sealed class ExtensionCommitLifecycleTests
         Assert.Empty(ExtensionAuthoringSupport.TrashEntries(fx.PluginsDirectory));
     }
 
-    [Fact(Skip = "已知缺陷: 同版本 extensions.commit 成功后旧 Worker 继续执行旧代码。新版本已上盘且审批记录已更新,工具保持注册,但 Worker 进程未重启(提交前后 pid 相同,10 秒轮询仍跑旧代码);refresh+重批不恢复,只有杀掉 Worker 或重启 Host 才会加载新代码。跨版本提交不受影响。")]
+    [Fact]
     public async Task Same_version_update_serves_the_new_code()
     {
         await using var fx = new E2eFixture();

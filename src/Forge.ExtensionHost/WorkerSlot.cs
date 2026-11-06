@@ -81,14 +81,16 @@ internal sealed class WorkerSlot(
     public PluginContributionSet Contributions => Volatile.Read(ref current)?.Contributions ?? new PluginContributionSet();
 
     /// <summary>Starts the worker when it is not running for exactly this version and image, and loads the plugin into
-    /// it.</summary>
+    /// it. The decision is about the bytes, not the version string: a live worker is reused only when it already holds
+    /// exactly the incoming image (same assembly bytes and the same digest for every loadable file). A same-version
+    /// update therefore replaces the worker instead of serving the code it loaded earlier.</summary>
     public async Task<WorkerLoadout> EnsureLoadedAsync(
         string pluginVersion,
-        PluginImage image,
+        PluginImage pluginImage,
         IReadOnlyList<Permission> permissions,
         CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(image);
+        ArgumentNullException.ThrowIfNull(pluginImage);
 
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -107,7 +109,7 @@ internal sealed class WorkerSlot(
                 session.Process.IsAlive &&
                 session.Loaded &&
                 string.Equals(version, pluginVersion, StringComparison.Ordinal) &&
-                SameImage(Volatile.Read(ref image), image))
+                SameImage(Volatile.Read(ref image), pluginImage))
             {
                 return new WorkerLoadout(session.Tools, session.Contributions, Started: false, session.Generation);
             }
@@ -122,7 +124,7 @@ internal sealed class WorkerSlot(
             try
             {
                 using var start = CancellationTokenSource.CreateLinkedTokenSource(ct, stop.Token);
-                var loaded = await StartAndLoadAsync(pluginVersion, image, permissions, start.Token).ConfigureAwait(false);
+                var loaded = await StartAndLoadAsync(pluginVersion, pluginImage, permissions, start.Token).ConfigureAwait(false);
                 return loaded with { Started = true };
             }
             catch (OperationCanceledException) when (stop.IsStopping && !ct.IsCancellationRequested)

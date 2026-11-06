@@ -149,7 +149,7 @@ public sealed partial class ExtensionHost
             await state.EnterAsync(ct).ConfigureAwait(false);
             try
             {
-                return await CommitCoreAsync(pluginId, request, ct).ConfigureAwait(false);
+                return await CommitCoreAsync(pluginId, request, state, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -162,7 +162,11 @@ public sealed partial class ExtensionHost
         }
     }
 
-    private async Task<JsonElement> CommitCoreAsync(string pluginId, ExtensionCommitRequest request, CancellationToken ct)
+    private async Task<JsonElement> CommitCoreAsync(
+        string pluginId,
+        ExtensionCommitRequest request,
+        PluginState state,
+        CancellationToken ct)
     {
         var pending = staging.PendingDirectory(pluginId);
         if (!Directory.Exists(pending))
@@ -233,6 +237,15 @@ public sealed partial class ExtensionHost
                 plugins[pluginId] = entry;
             }
 
+            // (b) The bytes that just went live must not keep running in a worker that was started for the bytes they
+            // replaced. A same-version commit leaves the version string untouched, so only the image separates the two;
+            // stopping here - with the same steps as plugin.revoke: unregister the tools, kill the process tree, then wait
+            // until nothing this plugin dispatched is still in flight - means the approval path below loads the new image
+            // in a fresh worker instead of reusing a live one. A commit that fails afterwards rolls back with the same
+            // stop, so a rollback can never leave a worker that runs the new code while the disk holds the old one. The
+            // plugin gate is held throughout, so no execution can observe the swap in between.
+            await StopPluginAsync(entry, state, ct).ConfigureAwait(false);
+
             // (c) Only this plugin is refreshed, and it goes through the existing approval path: re-hash under the gate,
             // compare with what the user approved, SetApproved, apply, publish.
             await ApproveCoreAsync(entry, entry.Version, request.SourceHash, request.DependencyHash, request.SdkVersion, ct)
@@ -245,7 +258,7 @@ public sealed partial class ExtensionHost
             throw;
         }
 
-        // (e) The commit is live now. Everything below is cleanup: it must not turn a successful swap into a failure.
+        // (d) The commit is live now. Everything below is cleanup: it must not turn a successful swap into a failure.
         ExtensionStagingArea.DeleteTrash(trash);
         if (previousVersion is not null && !string.Equals(previousVersion, entry.Version, StringComparison.Ordinal))
         {
