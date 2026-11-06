@@ -27,6 +27,9 @@ public sealed class PrCommentReplySmokeTests
             IsolatedGit.RunChecked(Repo, "push", "-q", "-u", "origin", "feature");
 
             Platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
+
+            // The platform reports the pushed commit as the head of the pull request.
+            Platform.PullRequest = PrCommentHarness.PullRequest() with { HeadRefOid = Pushed };
             Ledger = new PrReplyLedger();
             Tools = new PrCommentTools(new GitCli(), Platform, new GitToolSettings(), Ledger, null);
         }
@@ -44,11 +47,18 @@ public sealed class PrCommentReplySmokeTests
 
         public PrCommentTools Tools { get; }
 
+        /// <summary>Moves the head the platform reports for the pull request, as a push would.</summary>
+        public void MovePullRequestHead(string sha) =>
+            Platform.PullRequest = Platform.PullRequest with { HeadRefOid = sha };
+
         public Task<ToolResult> ReplyAsync(string json, CancellationToken ct = default) =>
             PrCommentHarness.InvokeAsync(Tools.Reply, Repo, json, ct);
 
         public void Dispose() => Sandbox.Dispose();
     }
+
+    /// <summary>Where an accepted <c>apply</c> reply reports the commit: the head of the pull request.</summary>
+    private static string OnPullRequestHead(string sha) => $"(on the head of pull request #5 at {sha[..7]})";
 
     [Fact]
     public async Task An_apply_reply_citing_an_unpushed_commit_is_rejected_and_nothing_is_posted()
@@ -84,7 +94,7 @@ public sealed class PrCommentReplySmokeTests
 
         Assert.False(result.IsError, result.Content);
         Assert.Contains("Posted a reply with verdict apply to thread PRRT_1 of pull request #5", result.Content);
-        Assert.Contains($"citing {fixture.Pushed[..7]} (on origin/feature at {fixture.Pushed[..7]})", result.Content);
+        Assert.Contains($"citing {fixture.Pushed[..7]} {OnPullRequestHead(fixture.Pushed)}", result.Content);
 
         var (threadId, body) = Assert.Single(fixture.Platform.Replies);
         Assert.Equal("PRRT_1", threadId);
@@ -116,7 +126,7 @@ public sealed class PrCommentReplySmokeTests
     }
 
     [Fact]
-    public async Task A_commit_below_the_remote_tip_counts_as_pushed()
+    public async Task A_commit_below_the_pull_request_head_counts_as_pushed()
     {
         if (!GitProbe.IsAvailable)
         {
@@ -127,15 +137,16 @@ public sealed class PrCommentReplySmokeTests
         fixture.Sandbox.CommitFile(fixture.Repo, "b.txt", "b\n", "second");
         IsolatedGit.RunChecked(fixture.Repo, "push", "-q");
         var tip = IsolatedGit.Head(fixture.Repo);
+        fixture.MovePullRequestHead(tip);
 
         var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed));
 
         Assert.False(result.IsError, result.Content);
-        Assert.Contains($"(on origin/feature at {tip[..7]})", result.Content);
+        Assert.Contains(OnPullRequestHead(tip), result.Content);
     }
 
     [Fact]
-    public async Task The_remote_is_read_fresh_so_a_stale_tracking_ref_does_not_fake_a_push()
+    public async Task The_pull_request_head_is_the_evidence_not_a_local_remote_tracking_ref()
     {
         if (!GitProbe.IsAvailable)
         {
@@ -169,11 +180,12 @@ public sealed class PrCommentReplySmokeTests
         var theirs = fixture.Sandbox.CommitFile(bob, "c.txt", "c\n", "from bob");
         IsolatedGit.RunChecked(bob, "push", "-q", "origin", "feature");
         Assert.NotEqual(0, IsolatedGit.Run(fixture.Repo, "cat-file", "-e", theirs + "^{commit}").ExitCode);
+        fixture.MovePullRequestHead(theirs);
 
         var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", theirs));
 
         Assert.False(result.IsError, result.Content);
-        Assert.Contains($"(on origin/feature at {theirs[..7]})", result.Content);
+        Assert.Contains(OnPullRequestHead(theirs), result.Content);
         Assert.Equal(theirs, fixture.Ledger.Get("PRRT_1")!.Commit);
     }
 
@@ -194,7 +206,7 @@ public sealed class PrCommentReplySmokeTests
         var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", elsewhere));
 
         Assert.True(result.IsError);
-        Assert.Contains("is not on origin/feature", result.Content);
+        Assert.Contains("is not on the head of pull request #5", result.Content);
         Assert.Empty(fixture.Platform.Replies);
     }
 
@@ -209,9 +221,11 @@ public sealed class PrCommentReplySmokeTests
         using var fixture = new Fixture();
         var doomed = fixture.Sandbox.CommitFile(fixture.Repo, "d.txt", "d\n", "will be rewritten");
         IsolatedGit.RunChecked(fixture.Repo, "push", "-q");
+        fixture.MovePullRequestHead(doomed);
         IsolatedGit.RunChecked(fixture.Repo, "reset", "-q", "--hard", "HEAD~1");
-        fixture.Sandbox.CommitFile(fixture.Repo, "e.txt", "e\n", "replacement");
+        var replacement = fixture.Sandbox.CommitFile(fixture.Repo, "e.txt", "e\n", "replacement");
         IsolatedGit.RunChecked(fixture.Repo, "push", "-q", "--force");
+        fixture.MovePullRequestHead(replacement);
 
         var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", doomed));
 
@@ -238,7 +252,7 @@ public sealed class PrCommentReplySmokeTests
     }
 
     [Fact]
-    public async Task A_branch_that_was_never_pushed_has_no_pushed_commits()
+    public async Task A_pull_request_head_that_cannot_be_resolved_is_a_tool_error()
     {
         if (!GitProbe.IsAvailable)
         {
@@ -246,19 +260,17 @@ public sealed class PrCommentReplySmokeTests
         }
 
         using var fixture = new Fixture();
-        IsolatedGit.RunChecked(fixture.Repo, "checkout", "-q", "-b", "feature2");
-        var local = fixture.Sandbox.CommitFile(fixture.Repo, "f.txt", "f\n", "never pushed");
-        fixture.Platform.PullRequest = PrCommentHarness.PullRequest(head: "feature2");
+        fixture.MovePullRequestHead("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", local));
+        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed));
 
         Assert.True(result.IsError);
-        Assert.Contains("feature2 does not exist on origin", result.Content);
+        Assert.Contains("The head of pull request #5 (deadbee) is not available locally", result.Content);
         Assert.Empty(fixture.Platform.Replies);
     }
 
     [Fact]
-    public async Task A_detached_head_falls_back_to_the_branch_of_the_pull_request()
+    public async Task An_apply_reply_works_from_a_detached_head_because_the_pull_request_head_is_the_evidence()
     {
         if (!GitProbe.IsAvailable)
         {
@@ -271,7 +283,7 @@ public sealed class PrCommentReplySmokeTests
         var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed));
 
         Assert.False(result.IsError, result.Content);
-        Assert.Contains("(on origin/feature at", result.Content);
+        Assert.Contains(OnPullRequestHead(fixture.Pushed), result.Content);
     }
 
     [Fact]
@@ -285,6 +297,8 @@ public sealed class PrCommentReplySmokeTests
         using var fixture = new Fixture();
         IsolatedGit.RunChecked(fixture.Repo, "remote", "set-url", "origin", Path.Combine(fixture.Sandbox.Root, "missing.git"));
 
+        // The cited commit is local, the head is not, so the head would have to be fetched - which cannot work now.
+        fixture.MovePullRequestHead("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
         var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed));
 
         Assert.True(result.IsError);
@@ -465,6 +479,56 @@ public sealed class PrCommentReplySmokeTests
         Assert.Contains("Could not post the reply.", result.Content);
         Assert.Null(ledger.Get("PRRT_1"));
         Assert.Null(ledger.CurrentUser);
+    }
+
+    [Fact]
+    public async Task A_reply_whose_answer_was_lost_is_not_posted_twice()
+    {
+        using var temp = new TempDirectory();
+        var platform = new FakePrPlatform { LoseReplyResponse = true };
+        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
+        var ledger = new PrReplyLedger();
+        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), ledger, null);
+
+        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "Out of scope."));
+
+        // The comment was created; the timeout did not become a second copy, and the verdict is registered.
+        Assert.False(result.IsError, result.Content);
+        Assert.Contains("was already on the thread", result.Content);
+        Assert.Single(platform.Replies);
+        Assert.Single(platform.Threads[0].Comments, comment => comment.Body.StartsWith("**Verdict:", StringComparison.Ordinal));
+        Assert.Equal(PrReplyVerdict.PushBack, ledger.Get("PRRT_1")!.Verdict);
+        Assert.Null(ledger.PendingReply("PRRT_1"));
+    }
+
+    [Fact]
+    public async Task A_reply_that_timed_out_without_landing_is_an_error_and_the_retry_posts_exactly_once()
+    {
+        using var temp = new TempDirectory();
+        var platform = new FakePrPlatform
+        {
+            ReplyFailure = PrResult<PrReviewComment>.Fail(GitRemoteFailureKind.TimedOut, "gh api timed out"),
+        };
+        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
+        var ledger = new PrReplyLedger();
+        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), ledger, null);
+
+        var timedOut = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "Out of scope."));
+
+        Assert.True(timedOut.IsError);
+        Assert.Contains("Could not post the reply.", timedOut.Content);
+        Assert.Empty(platform.Replies);
+        Assert.Null(ledger.Get("PRRT_1"));
+        Assert.NotNull(ledger.PendingReply("PRRT_1"));
+
+        // The agent retries the same call: the thread is read first, the reply is not there, so it is posted once.
+        platform.ReplyFailure = null;
+        var retried = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "Out of scope."));
+
+        Assert.False(retried.IsError, retried.Content);
+        Assert.Single(platform.Replies);
+        Assert.Equal(PrReplyVerdict.PushBack, ledger.Get("PRRT_1")!.Verdict);
+        Assert.Null(ledger.PendingReply("PRRT_1"));
     }
 
     [Fact]

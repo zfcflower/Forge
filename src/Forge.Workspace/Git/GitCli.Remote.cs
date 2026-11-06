@@ -347,7 +347,9 @@ public sealed partial class GitCli
 
     /// <summary>
     /// Pushes a branch. A force push is only ever a lease against a commit the caller just read with
-    /// <see cref="LsRemoteAsync"/>; there is no plain <c>--force</c>.
+    /// <see cref="LsRemoteAsync"/>; there is no plain <c>--force</c>. With <see cref="GitPushOptions.SourceCommit"/> the
+    /// refspec names that commit instead of the local branch, so the pushed content cannot drift from what the caller
+    /// checked.
     /// </summary>
     public async Task<GitRemoteResult> PushAsync(
         string workingDirectory,
@@ -393,8 +395,24 @@ public sealed partial class GitCli
             expected = observed;
         }
 
+        string? pinned = null;
+        if (push.SourceCommit is { } source)
+        {
+            if (!IsCommitHash(source))
+            {
+                return new GitRemoteResult(
+                    GitRemoteFailureKind.Other,
+                    $"SourceCommit '{source}' is not a commit hash; resolve HEAD with rev-parse first.",
+                    string.Empty);
+            }
+
+            pinned = source;
+        }
+
         var arguments = Args("push");
-        if (push.SetUpstream)
+
+        // -u needs a local source branch, so a pinned commit has its upstream written after the push instead.
+        if (push.SetUpstream && pinned is null)
         {
             arguments.Add("-u");
         }
@@ -406,7 +424,7 @@ public sealed partial class GitCli
         }
 
         arguments.Add(remote);
-        arguments.Add("refs/heads/" + branch + ":refs/heads/" + branch);
+        arguments.Add((pinned ?? "refs/heads/" + branch) + ":refs/heads/" + branch);
 
         var result = await RunNetworkAsync(workingDirectory, arguments, options, ct).ConfigureAwait(false);
         if (!result.Success)
@@ -434,7 +452,12 @@ public sealed partial class GitCli
 
         if (push.SetUpstream)
         {
-            details.Add("upstream set");
+            // A pinned push cannot use -u: git only records an upstream for a pushed local branch ref. Writing the two
+            // configuration keys git would have written keeps the branch tracking its remote counterpart.
+            if (pinned is null || await WriteUpstreamAsync(workingDirectory, branch, remote, ct).ConfigureAwait(false))
+            {
+                details.Add("upstream set");
+            }
         }
 
         if (expected is not null)
@@ -445,6 +468,37 @@ public sealed partial class GitCli
         return GitRemoteResult.Ok(details.Count == 0
             ? $"Pushed {branch} to {remote}."
             : $"Pushed {branch} to {remote} ({string.Join(", ", details)}).");
+    }
+
+    /// <summary>
+    /// Writes what <c>git push -u</c> writes for a branch: <c>branch.&lt;name&gt;.remote</c> and
+    /// <c>branch.&lt;name&gt;.merge</c>. Used when the push is pinned to a commit instead of the branch ref. A failure only
+    /// means the branch does not track its remote branch yet, so it is reported, never raised.
+    /// </summary>
+    private async Task<bool> WriteUpstreamAsync(string workingDirectory, string branch, string remote, CancellationToken ct)
+    {
+        var prefix = "branch." + branch + ".";
+        var keys = new (string Key, string Value)[]
+        {
+            (prefix + "remote", remote),
+            (prefix + "merge", "refs/heads/" + branch),
+        };
+
+        foreach (var (key, value) in keys)
+        {
+            var result = await RunCoreAsync(
+                workingDirectory,
+                Args("config", key, value),
+                new GitRunOptions(),
+                null,
+                ct).ConfigureAwait(false);
+            if (!result.Success)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

@@ -10,9 +10,10 @@ namespace Forge.Workspace;
 /// <c>review_comment_resolve</c>. Every call works in <see cref="ToolContext.WorkingDirectory"/>, the session's worktree,
 /// and on the pull request of its current branch. Results are compact text; failures are tool errors.
 /// <para>
-/// Code-enforced: an <c>apply</c> reply must cite a commit that is pushed (fresh <c>ls-remote</c> of the branch plus
-/// <c>merge-base --is-ancestor</c>, fetching first when an object is missing locally); a thread is resolved only when it
-/// carries the agent's own reply with verdict apply or push_back and nobody else wrote to it afterwards; clarify never
+/// Code-enforced: an <c>apply</c> reply must cite a commit that is on the head of the pull request (the <c>headRefOid</c>
+/// the platform reports, matched with <c>merge-base --is-ancestor</c>, fetching first when an object is missing locally);
+/// a reply whose post timed out is looked up on the thread before it is written again; a thread is resolved only when it
+/// carries the agent's own reply with verdict apply or push_back and no comment at all follows it; clarify never
 /// resolves; the thread is re-read from the platform right before replying and again before resolving, and one that is
 /// already resolved is left alone. The reply starts with a visible marker line (<see cref="PrReplyLedger.FormatMarker"/>),
 /// so the evidence survives a restart: the ledger is rebuilt from the platform, not trusted from memory.

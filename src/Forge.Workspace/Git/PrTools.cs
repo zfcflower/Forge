@@ -48,17 +48,19 @@ public sealed class PrTools
     /// the cleanup is the agent's judgement); the body's <c>## Testing</c> section is non-empty and not a platitude
     /// (<see cref="PrTestingEvidence"/>). Then HEAD and the tree are checked again, an existing open pull request for the
     /// branch is reported instead of creating another, the branch is pushed with <c>-u</c> and a lease from a fresh
-    /// <c>ls-remote</c>, and the pull request is created (draft only when asked). <c>body</c> defaults to
+    /// <c>ls-remote</c> – the refspec names the reviewed HEAD, so a commit that lands between the gates and the push is
+    /// refused as a gate-to-push race – and the pull request is created (draft only when asked). <c>body</c> defaults to
     /// <see cref="PrBodyRenderer.Render"/> of the session's plan summary and steps.
     /// </summary>
     public ITool Create { get; }
 
     /// <summary>
-    /// <c>{}</c> (Write). Fetch; merge <c>origin/&lt;base&gt;</c> when <c>origin/&lt;base&gt;..HEAD</c> holds a merge
-    /// commit, otherwise rebase onto it; conflicts stop the call with the file list and the advice to read both sides
+    /// <c>{}</c> (Write). Refuses a branch that has no pull request (pr_create owns the first publication); fetches,
+    /// merges <c>origin/&lt;base&gt;</c> when <c>origin/&lt;base&gt;..HEAD</c> holds a merge
+    /// commit, otherwise rebases onto it; conflicts stop the call with the file list and the advice to read both sides
     /// with <c>git log -p</c> and then <c>git_sync</c> continue; success pushes (<c>--force-with-lease</c> with a fresh
-    /// lease after a rebase, a plain push after a merge, refused when the remote branch holds commits this checkout never
-    /// had).
+    /// lease after a rebase, a plain push after a merge, the refspec naming the audited HEAD so a commit that lands in
+    /// between is refused, and the push refused when the remote branch holds commits this checkout never had).
     /// </summary>
     public ITool Sync { get; }
 

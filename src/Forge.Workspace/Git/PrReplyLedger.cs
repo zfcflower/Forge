@@ -34,6 +34,10 @@ public sealed record PrReplyRecord(PrReplyVerdict Verdict, string? Commit, strin
 /// user – or is the very comment this process created. A deleted reply therefore proves nothing, and a marker typed by
 /// somebody else does not unlock the thread.
 /// </para>
+/// <para>
+/// A reply whose post timed out is remembered as in flight (<see cref="BeginReply"/>) until the thread shows it or the
+/// attempt failed for a reason that posted nothing, so a retry checks the thread before writing a second copy.
+/// </para>
 /// </summary>
 public sealed class PrReplyLedger
 {
@@ -43,6 +47,7 @@ public sealed class PrReplyLedger
     private const int MaxShaLength = 40;
 
     private readonly ConcurrentDictionary<string, PrReplyRecord> byThread = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> inFlight = new(StringComparer.Ordinal);
     private volatile string? currentUser;
 
     /// <summary>The platform login learned from the reply this process posted last, or null before the first reply.</summary>
@@ -56,6 +61,40 @@ public sealed class PrReplyLedger
             currentUser = login;
         }
     }
+
+    /// <summary>
+    /// Notes the reply text this process is about to post on <paramref name="threadId"/>. It stays until
+    /// <see cref="ClearPendingReply"/> is called or <see cref="Record"/> replaces it, so a retry after a timeout can look for
+    /// exactly this text on the thread before posting it again.
+    /// </summary>
+    public void BeginReply(string threadId, string body)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(body);
+        inFlight[threadId] = body;
+    }
+
+    /// <summary>The reply text an earlier attempt started posting on the thread, or null when there is none.</summary>
+    public string? PendingReply(string threadId) =>
+        !string.IsNullOrEmpty(threadId) && inFlight.TryGetValue(threadId, out var body) ? body : null;
+
+    /// <summary>Forgets the in-flight reply of <paramref name="threadId"/>: it was posted, or it certainly was not.</summary>
+    public void ClearPendingReply(string threadId)
+    {
+        if (!string.IsNullOrEmpty(threadId))
+        {
+            inFlight.TryRemove(threadId, out _);
+        }
+    }
+
+    /// <summary>True when <paramref name="comment"/> carries exactly <paramref name="body"/>; a posted reply comes back verbatim.</summary>
+    public static bool IsSameReply(PrReviewComment comment, string body)
+    {
+        ArgumentNullException.ThrowIfNull(comment);
+        return string.Equals(Normalize(comment.Body), Normalize(body), StringComparison.Ordinal);
+    }
+
+    private static string Normalize(string? text) => (text ?? string.Empty).ReplaceLineEndings("\n").Trim();
 
     /// <summary>Remembers the verdict reply just posted on <paramref name="threadId"/>; a later reply replaces it.</summary>
     public void Record(string threadId, PrReplyVerdict verdict, string? commit, string? commentId)

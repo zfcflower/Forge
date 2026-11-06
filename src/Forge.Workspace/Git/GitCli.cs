@@ -93,8 +93,11 @@ public sealed partial class GitCli
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
 
-        var stdoutTask = PumpAsync(process.StandardOutput.BaseStream, options.OnStandardOutputLine, captureLimit, timeoutSource.Token);
-        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, Math.Min(captureLimit, ErrorCaptureCharacters), timeoutSource.Token);
+        var stdoutTask = PumpAsync(process.StandardOutput.BaseStream, options.OnStandardOutputLine, captureLimit, keepTail: false, timeoutSource.Token);
+
+        // git writes diagnostics to stderr with the decisive line last (a hook's verdict, the rejecting rule), so stderr
+        // keeps its tail: a hook that prints more than the cap must not lose the line that says why it refused.
+        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, Math.Min(captureLimit, ErrorCaptureCharacters), keepTail: true, timeoutSource.Token);
         var stdinTask = standardInput is null ? Task.CompletedTask : WriteStandardInputAsync(process, standardInput, timeoutSource.Token);
 
         var timedOut = false;
@@ -184,7 +187,7 @@ public sealed partial class GitCli
         using var process = Start(workingDirectory, arguments);
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
-        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, timeoutSource.Token);
+        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, keepTail: true, timeoutSource.Token);
 
         try
         {
@@ -221,7 +224,7 @@ public sealed partial class GitCli
         using var process = Start(workingDirectory, arguments);
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
-        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, timeoutSource.Token);
+        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, keepTail: true, timeoutSource.Token);
 
         try
         {
@@ -1021,9 +1024,16 @@ public sealed partial class GitCli
 
     /// <summary>
     /// Reads a stream as raw bytes into one decoded string, keeping every character git wrote. The capture limit
-    /// is enforced while reading, so memory stays bounded even for a huge output.
+    /// is enforced while reading, so memory stays bounded even for a huge output. Head mode keeps the first
+    /// <paramref name="captureLimit"/> characters of the captured text, tail mode the last ones; the per-line callback sees
+    /// every line either way.
     /// </summary>
-    private static async Task<PumpResult> PumpAsync(Stream stream, Action<string>? onLine, int captureLimit, CancellationToken ct)
+    private static async Task<PumpResult> PumpAsync(
+        Stream stream,
+        Action<string>? onLine,
+        int captureLimit,
+        bool keepTail,
+        CancellationToken ct)
     {
         var limit = Math.Max(0, captureLimit);
         var capture = new StringBuilder(Math.Min(limit, 64 * 1024));
@@ -1055,14 +1065,14 @@ public sealed partial class GitCli
                 var count = decoder.GetChars(bytes.AsSpan(0, read), chars, flush: false);
                 if (count > 0)
                 {
-                    Consume(chars.AsSpan(0, count), capture, line, onLine, limit, ref truncated);
+                    Consume(chars.AsSpan(0, count), capture, line, onLine, limit, keepTail, ref truncated);
                 }
             }
 
             var tail = decoder.GetChars(ReadOnlySpan<byte>.Empty, chars, flush: true);
             if (tail > 0)
             {
-                Consume(chars.AsSpan(0, tail), capture, line, onLine, limit, ref truncated);
+                Consume(chars.AsSpan(0, tail), capture, line, onLine, limit, keepTail, ref truncated);
             }
         }
         finally
@@ -1076,9 +1086,22 @@ public sealed partial class GitCli
             onLine(line.ToString());
         }
 
+        if (keepTail && capture.Length > limit)
+        {
+            DropLeading(capture, capture.Length - limit);
+            truncated = true;
+        }
+
         if (truncated && capture.Length > 0)
         {
-            capture.Append("\n… [output truncated]");
+            if (keepTail)
+            {
+                capture.Insert(0, $"[… output truncated; showing the last {capture.Length.ToString(CultureInfo.InvariantCulture)} characters]\n");
+            }
+            else
+            {
+                capture.Append("\n… [output truncated]");
+            }
         }
 
         return new PumpResult(capture.ToString(), truncated);
@@ -1090,21 +1113,36 @@ public sealed partial class GitCli
         StringBuilder? line,
         Action<string>? onLine,
         int limit,
+        bool keepTail,
         ref bool truncated)
     {
-        var room = limit - capture.Length;
-        if (room <= 0)
-        {
-            truncated = true;
-        }
-        else if (span.Length <= room)
+        if (keepTail)
         {
             capture.Append(span);
+
+            // Trim in bulk once the buffer reaches twice the limit, so keeping the tail costs O(1) per character.
+            if (capture.Length >= 2L * limit && capture.Length > limit)
+            {
+                DropLeading(capture, capture.Length - limit);
+                truncated = true;
+            }
         }
         else
         {
-            capture.Append(span[..room]);
-            truncated = true;
+            var room = limit - capture.Length;
+            if (room <= 0)
+            {
+                truncated = true;
+            }
+            else if (span.Length <= room)
+            {
+                capture.Append(span);
+            }
+            else
+            {
+                capture.Append(span[..room]);
+                truncated = true;
+            }
         }
 
         if (line is null || onLine is null)
@@ -1129,6 +1167,17 @@ public sealed partial class GitCli
             line.Clear();
             onLine(text);
         }
+    }
+
+    /// <summary>Removes the first <paramref name="count"/> characters, and a low surrogate this leaves at the front.</summary>
+    private static void DropLeading(StringBuilder capture, int count)
+    {
+        if (count < capture.Length && char.IsLowSurrogate(capture[count]))
+        {
+            count++;
+        }
+
+        capture.Remove(0, Math.Min(count, capture.Length));
     }
 
     private static async IAsyncEnumerable<string> ReadLinesAsync(Stream stream, [EnumeratorCancellation] CancellationToken ct)

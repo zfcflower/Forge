@@ -198,10 +198,20 @@ internal sealed record PrPublishOutcome(ToolResult? Failure, string Message)
 }
 
 /// <summary>
+/// The commit the caller audited and the tool it audited it for. The push publishes exactly <see cref="Head"/>: the local
+/// branch is checked against it once more right before the push and, if it moved, nothing is published.
+/// </summary>
+internal sealed record PrPublishPin(string Tool, string Head);
+
+/// <summary>
 /// Pushes the current branch for the pull request tools. The remote tip is read fresh with <c>ls-remote</c> right
 /// before the push and used as the lease. A force push (<see cref="PrPushMode.Rewrite"/>) additionally refuses when the
 /// remote branch holds commits this checkout never had – neither <c>HEAD</c> nor any earlier tip of the local branch
 /// (its reflog) contains them – because overwriting those would delete somebody else's work.
+/// <para>
+/// With a <see cref="PrPublishPin"/> the push is also pinned to the audited commit: the refspec names that commit instead
+/// of the branch ref, so a commit that lands on HEAD between the last check and the push cannot slip out unreviewed.
+/// </para>
 /// </summary>
 internal sealed class PrBranchPublisher(GitCli git, GitToolSettings settings)
 {
@@ -212,12 +222,18 @@ internal sealed class PrBranchPublisher(GitCli git, GitToolSettings settings)
         string workingDirectory,
         string branch,
         PrPushMode mode,
+        PrPublishPin? pin,
         CancellationToken ct)
     {
         var head = await git.RevParseAsync(workingDirectory, "HEAD", ct).ConfigureAwait(false);
         if (head is null)
         {
             return Fail(PrLifecycleFailure.Error(GitRemoteFailureKind.Other, "HEAD does not resolve to a commit; nothing to push."));
+        }
+
+        if (pin is not null && !string.Equals(head, pin.Head, StringComparison.Ordinal))
+        {
+            return Fail(MovedSinceAudit(pin, head));
         }
 
         var network = NetworkOptions();
@@ -248,6 +264,14 @@ internal sealed class PrBranchPublisher(GitCli git, GitToolSettings settings)
             return new PrPublishOutcome(null, $"{branch} is already on {remote} at {PrLifecycleFailure.Short(head)}; nothing to push.");
         }
 
+        // The checks above took time (ls-remote, merge-base, reflog). Read HEAD once more, so a commit that landed in
+        // between is refused instead of published, and push the audited commit itself rather than the branch ref.
+        var headNow = await git.RevParseAsync(workingDirectory, "HEAD", ct).ConfigureAwait(false);
+        if (pin is not null && !string.Equals(headNow, pin.Head, StringComparison.Ordinal))
+        {
+            return Fail(MovedSinceAudit(pin, headNow));
+        }
+
         var lease = mode != PrPushMode.FastForward;
         var result = await git.PushAsync(
             workingDirectory,
@@ -258,6 +282,7 @@ internal sealed class PrBranchPublisher(GitCli git, GitToolSettings settings)
                 SetUpstream = setUpstream,
                 ForceWithLease = lease,
                 ExpectedRemoteCommit = lease ? remoteTip ?? string.Empty : null,
+                SourceCommit = pin?.Head,
             },
             network,
             ct).ConfigureAwait(false);
@@ -266,6 +291,16 @@ internal sealed class PrBranchPublisher(GitCli git, GitToolSettings settings)
             ? new PrPublishOutcome(null, result.Message)
             : Fail(GitToolFailure.ToToolResult(result));
     }
+
+    /// <summary>The gate-to-push race: the audited commit is not HEAD any more, so nothing was pushed.</summary>
+    private static ToolResult MovedSinceAudit(PrPublishPin pin, string? headNow) =>
+        PrLifecycleFailure.Refuse(
+            pin.Tool,
+            "gate-to-push race",
+            $"HEAD was {PrLifecycleFailure.Short(pin.Head)} when the checks ran, but is {PrLifecycleFailure.Short(headNow)} now; " +
+            "the commit that would be published was never reviewed, so nothing was pushed.",
+            $"Read git_diff again at {PrLifecycleFailure.Short(headNow)} (no paths, not stat_only), commit or undo what arrived, " +
+            $"then call {pin.Tool} again.");
 
     /// <summary>Null when the push may go ahead; otherwise the refusal. The remote branch exists and differs from HEAD.</summary>
     private async Task<ToolResult?> CheckRemoteTipAsync(

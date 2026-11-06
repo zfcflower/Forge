@@ -15,13 +15,15 @@ internal sealed class PrSyncTool(GitCli git, IPrPlatform platform, GitToolSettin
     platform,
     PrTools.SyncName,
     "Bring the current branch up to date with the base of its pull request and push it. Read pr_workflow with phase " +
-    "'syncing' first. It fetches origin, then merges origin/<base> when the branch already has merge commits in " +
-    "origin/<base>..HEAD, otherwise rebases onto it (base: the open pull request's base, else the default branch). A " +
+    "'syncing' first. The branch must already have a pull request: this tool never publishes a branch nobody asked to " +
+    "review (use pr_create for that). It fetches origin, then merges origin/<base> when the branch already has merge " +
+    "commits in origin/<base>..HEAD, otherwise rebases onto it (base: the open pull request's base). A " +
     "rebase is pushed with --force-with-lease using a lease read fresh from the remote, a merge with a plain push; the " +
-    "push is refused if the remote branch holds commits this checkout never had. On conflicts it stops and lists the " +
-    "conflicted files: read both sides of each with git log -p before editing (never take one side wholesale), stage " +
-    "the resolutions, run git_sync continue, then call pr_sync again to push. HEAD changes, so re-run the tests and " +
-    "read git_diff again afterwards.",
+    "push names the audited HEAD itself, so a commit that lands while the checks run is refused (gate-to-push race) and " +
+    "the call has to be repeated; the push is refused if the remote branch holds commits this checkout never had. On " +
+    "conflicts it stops and lists the conflicted files: read both sides of each with git log -p before editing (never " +
+    "take one side wholesale), stage the resolutions, run git_sync continue, then call pr_sync again to push. HEAD " +
+    "changes, so re-run the tests and read git_diff again afterwards.",
     """
     {"type":"object","properties":{},"additionalProperties":false}
     """,
@@ -137,7 +139,17 @@ internal sealed class PrSyncTool(GitCli git, IPrPlatform platform, GitToolSettin
                 .Append('\n');
         }
 
-        var published = await new PrBranchPublisher(Git, settings).PublishAsync(directory, branch, mode, ct).ConfigureAwait(false);
+        var toPublish = await Git.RevParseAsync(directory, "HEAD", ct).ConfigureAwait(false);
+        if (toPublish is null)
+        {
+            return new ToolResult("HEAD does not resolve to a commit; nothing to sync.", IsError: true);
+        }
+
+        // The pin publishes exactly this commit: HEAD is read again right before the push and the refspec names it, so a
+        // commit that lands in between cannot be pushed unreviewed.
+        var published = await new PrBranchPublisher(Git, settings)
+            .PublishAsync(directory, branch, mode, new PrPublishPin(Tool, toPublish), ct)
+            .ConfigureAwait(false);
         if (published.Failure is not null)
         {
             return new ToolResult(
@@ -177,7 +189,18 @@ internal sealed class PrSyncTool(GitCli git, IPrPlatform platform, GitToolSettin
                     return (name, "base of PR #" + open.Number.ToString(CultureInfo.InvariantCulture), null);
                 }
             }
-            else if (!view.Success && !view.PullRequestNotFound)
+            else if (view.PullRequestNotFound)
+            {
+                // Syncing a branch that has no pull request would push commits nobody asked to review. pr_create owns
+                // that branch's first publication and its gates.
+                return (null, string.Empty, PrLifecycleFailure.Refuse(
+                    Tool,
+                    "no pull request for this branch",
+                    $"branch {branch} has no pull request, so there is nothing to sync.",
+                    "Open it first with pr_create (read pr_workflow phase 'creating'), or check with git_status that you are " +
+                    "on the branch of the pull request. pr_sync only brings an existing pull request's branch up to date."));
+            }
+            else if (!view.Success)
             {
                 note = "; the pull request could not be read: " + view.Status.Message;
             }

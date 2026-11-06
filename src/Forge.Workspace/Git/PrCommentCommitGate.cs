@@ -6,11 +6,12 @@ namespace Forge.Workspace;
 internal sealed record PrCommentCommitCheck(string? FullSha, string? Where, ToolResult? Error);
 
 /// <summary>
-/// The code-enforced rule behind an <c>apply</c> reply: the cited commit must be on the remote branch of the pull request,
-/// not merely in the local repository. Observed, never assumed – the remote tip is read from the network right now with
-/// <c>ls-remote</c> (never from a remote-tracking ref), and the commit has to be an ancestor of (or equal to) that tip
-/// according to <c>git merge-base --is-ancestor</c>. An object that is missing locally – a commit someone else pushed, or
-/// a tip that moved – is fetched once before the answer is "not found".
+/// The code-enforced rule behind an <c>apply</c> reply: the cited commit must be on the pull request's head – the
+/// <c>headRefOid</c> the platform reports for that pull request right now – not merely somewhere in the local repository
+/// and not merely on a branch that happens to share the name. Observed, never assumed: the head comes from the platform
+/// read that precedes the reply, and the cited commit has to equal it or be an ancestor of it according to
+/// <c>git merge-base --is-ancestor</c>. An object that is missing locally – a commit someone pushed, or a head that moved –
+/// is fetched once before the answer is "not found".
 /// </summary>
 internal sealed class PrCommentCommitGate(PrCommentEnvironment environment)
 {
@@ -20,83 +21,61 @@ internal sealed class PrCommentCommitGate(PrCommentEnvironment environment)
     public async Task<PrCommentCommitCheck> VerifyPushedAsync(
         string directory,
         string commit,
-        string? pullRequestHead,
+        PullRequestInfo pullRequest,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(pullRequest);
+
         var git = environment.Git;
         if (!PrReplyLedger.IsHexSha(commit))
         {
             return Fail($"commit '{commit}' is not a commit sha (7 to 40 hex digits). {ShaHint}");
         }
 
-        var status = await git.GetBranchStatusAsync(directory, ct).ConfigureAwait(false);
-        var remoteBranch = await ReadUpstreamBranchAsync(directory, status.Branch, ct).ConfigureAwait(false)
-            ?? pullRequestHead
-            ?? status.Branch;
-        if (string.IsNullOrWhiteSpace(remoteBranch))
+        var headText = pullRequest.HeadRefOid?.Trim() ?? string.Empty;
+        if (!PrReplyLedger.IsHexSha(headText))
         {
             return Fail(
-                "Cannot tell which remote branch holds this pull request: HEAD is detached and the branch has no upstream. " +
-                "Check out the branch and push it with git_sync push, then reply again.");
+                $"The platform did not report a head commit for pull request #{pullRequest.Number}, so no commit can be checked " +
+                "against it. Read the pull request again with pr_view and retry.");
         }
 
-        var remote = await git.ResolvePushRemoteAsync(directory, status.Branch ?? remoteBranch, null, ct).ConfigureAwait(false);
+        var branch = await git.GetBranchStatusAsync(directory, ct).ConfigureAwait(false);
+        var remoteBranch = PrLifecycleFailure.StripRemotePrefix(pullRequest.HeadRefName.Trim());
+        var remote = await git
+            .ResolvePushRemoteAsync(directory, branch.Branch ?? remoteBranch, null, ct)
+            .ConfigureAwait(false);
         var network = environment.NetworkOptions();
 
-        // Fresh read: the lease logic of git_sync push relies on the same rule, and so does this gate.
-        var observed = await git.LsRemoteAsync(directory, remote, remoteBranch, network, ct).ConfigureAwait(false);
-        if (!observed.Result.Success)
-        {
-            return new PrCommentCommitCheck(null, null, GitToolFailure.ToToolResult(observed.Result));
-        }
-
-        if (observed.Commit is null)
-        {
-            return Fail(
-                $"{remoteBranch} does not exist on {remote}, so commit {commit} is not pushed. Push the branch with git_sync push first.");
-        }
-
-        var fetched = false;
         var full = await ResolveCommitAsync(directory, commit, ct).ConfigureAwait(false);
-        if (full is null)
+        var tip = await ResolveCommitAsync(directory, headText, ct).ConfigureAwait(false);
+        if (full is null || tip is null)
         {
+            // The cited commit may have been pushed by somebody else, and the head may have moved past this checkout.
             var fetch = await FetchOnceAsync(directory, remote, network, ct).ConfigureAwait(false);
-            fetched = true;
             if (fetch is not null)
             {
                 return new PrCommentCommitCheck(null, null, fetch);
             }
 
-            full = await ResolveCommitAsync(directory, commit, ct).ConfigureAwait(false);
+            full ??= await ResolveCommitAsync(directory, commit, ct).ConfigureAwait(false);
+            tip ??= await ResolveCommitAsync(directory, headText, ct).ConfigureAwait(false);
             if (full is null)
             {
                 return Fail(
                     $"commit {commit} does not exist in this repository, not even after fetching {remote} (or the abbreviation is ambiguous). {ShaHint}");
             }
-        }
 
-        var tip = await ResolveCommitAsync(directory, observed.Commit, ct).ConfigureAwait(false);
-        if (tip is null)
-        {
-            if (!fetched)
-            {
-                var fetch = await FetchOnceAsync(directory, remote, network, ct).ConfigureAwait(false);
-                if (fetch is not null)
-                {
-                    return new PrCommentCommitCheck(null, null, fetch);
-                }
-            }
-
-            tip = await ResolveCommitAsync(directory, observed.Commit, ct).ConfigureAwait(false);
             if (tip is null)
             {
                 return Fail(
-                    $"The tip of {remote}/{remoteBranch} ({PrCommentText.Short(observed.Commit)}) is not available locally even after fetching; cannot check that commit {commit} is on it.");
+                    $"The head of pull request #{pullRequest.Number} ({PrCommentText.Short(headText)}) is not available locally even " +
+                    $"after fetching {remote}; cannot check that commit {commit} is on it.");
             }
         }
 
         var ancestor = await git.RunAsync(directory, ["merge-base", "--is-ancestor", full, tip], ct).ConfigureAwait(false);
-        var where = $"{remote}/{remoteBranch} at {PrCommentText.Short(tip)}";
+        var where = $"the head of pull request #{pullRequest.Number} at {PrCommentText.Short(tip)}";
         if (ancestor.Success)
         {
             return new PrCommentCommitCheck(full, where, null);
@@ -105,38 +84,15 @@ internal sealed class PrCommentCommitGate(PrCommentEnvironment environment)
         if (!ancestor.TimedOut && ancestor.ExitCode == 1)
         {
             return Fail(
-                $"commit {PrCommentText.Short(full)} is not on {where}: it has not been pushed, or the branch was rewritten after it. " +
-                "Push it with git_sync push (force_with_lease only after a rebase), then reply citing a commit that is on the remote.");
+                $"commit {PrCommentText.Short(full)} is not on {where}: it has not been pushed, or the pull request branch was " +
+                "rewritten after it. Push it with git_sync push (force_with_lease only after a rebase), then reply citing a " +
+                "commit that is on the head of the pull request.");
         }
 
         var detail = ancestor.StandardError.Trim();
         return Fail(
             $"Could not check whether commit {PrCommentText.Short(full)} is on {where}: " +
             (detail.Length > 0 ? detail : $"git exited with code {ancestor.ExitCode}."));
-    }
-
-    /// <summary>The remote branch name the local branch tracks (<c>branch.&lt;name&gt;.merge</c>), or null when it has no upstream.</summary>
-    private async Task<string?> ReadUpstreamBranchAsync(string directory, string? localBranch, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(localBranch))
-        {
-            return null;
-        }
-
-        var result = await environment.Git.RunAsync(
-            directory,
-            ["config", "--get", "branch." + localBranch + ".merge"],
-            ct).ConfigureAwait(false);
-        if (!result.Success)
-        {
-            return null;
-        }
-
-        const string HeadsPrefix = "refs/heads/";
-        var reference = result.StandardOutput.Trim();
-        return reference.StartsWith(HeadsPrefix, StringComparison.Ordinal) && reference.Length > HeadsPrefix.Length
-            ? reference[HeadsPrefix.Length..]
-            : null;
     }
 
     private async Task<string?> ResolveCommitAsync(string directory, string revision, CancellationToken ct) =>

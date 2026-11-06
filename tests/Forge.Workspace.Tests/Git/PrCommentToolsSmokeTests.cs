@@ -67,6 +67,9 @@ internal sealed class FakePrPlatform : IPrPlatform
 
     public PrResult<PrReviewComment>? ReplyFailure { get; set; }
 
+    /// <summary>When set, the reply is created but the call reports a timeout, as a lost response would.</summary>
+    public bool LoseReplyResponse { get; set; }
+
     public PrResult<PrThreadResolution>? ResolveFailure { get; set; }
 
     /// <summary>When set, a resolve call succeeds but reports the thread as still unresolved.</summary>
@@ -116,6 +119,14 @@ internal sealed class FakePrPlatform : IPrPlatform
             "https://github.com/acme/forge/pull/5#discussion_r" + nextComment);
         Replies.Add((threadId, body));
         Threads[index] = Threads[index] with { Comments = [.. Threads[index].Comments, comment] };
+        if (LoseReplyResponse)
+        {
+            // The comment exists on the platform; the answer to the caller was lost on the way back.
+            return Task.FromResult(PrResult<PrReviewComment>.Fail(
+                GitRemoteFailureKind.TimedOut,
+                "gh api timed out after sending the reply"));
+        }
+
         return Task.FromResult(PrResult<PrReviewComment>.Ok(comment));
     }
 

@@ -81,10 +81,11 @@ internal sealed class GitDiffTool(GitCli git, GitReviewLedger ledger) : GitToolB
 
         if (usedDefaultBase && !statOnly && paths.Count == 0)
         {
-            var reviewed = await Git.RevParseAsync(directory, "HEAD", ct).ConfigureAwait(false);
-            if (reviewed is not null)
+            // Record the HEAD the diff was computed from, not a re-read one: a commit that landed while the diff was
+            // being built is not part of what the agent just read.
+            if (head is not null)
             {
-                ledger.RecordReviewed(context.SessionId, directory, reviewed);
+                ledger.RecordReviewed(context.SessionId, directory, head);
             }
         }
 

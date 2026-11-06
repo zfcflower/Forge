@@ -28,7 +28,8 @@ internal sealed class PrCreateTool(
     "happened - be honest). body defaults to the plan summary plus a generated '## Plan' section; base defaults to the " +
     "repository's default branch; draft only when true. After the gates the state is read once more, an existing pull " +
     "request for the branch is reported instead of creating another, the branch is pushed with a lease read fresh from " +
-    "the remote, and the pull request is created. It is never merged.",
+    "the remote (the refspec names the audited HEAD, so a commit that lands while the checks run is refused as a " +
+    "gate-to-push race instead of being published), and the pull request is created. It is never merged.",
     """
     {"type":"object","properties":{"title":{"type":"string","description":"Pull request title (one line)."},"body":{"type":"string","description":"Description in Markdown with a non-trivial '## Testing' section; default the plan summary plus a generated '## Plan' section."},"base":{"type":"string","description":"Branch to merge into; default the repository's default branch."},"draft":{"type":"boolean","description":"Open as a draft; default false."}},"required":["title"],"additionalProperties":false}
     """,
@@ -182,8 +183,11 @@ internal sealed class PrCreateTool(
             return PrLifecycleFailure.FromPlatform(existing);
         }
 
-        // Publish: the lease is the remote tip read just now, never a cached remote-tracking ref.
-        var publish = await new PrBranchPublisher(Git, settings).PublishAsync(directory, branch, PrPushMode.New, ct).ConfigureAwait(false);
+        // Publish: the lease is the remote tip read just now, never a cached remote-tracking ref, and the refspec names
+        // the audited HEAD so a commit that lands after this point is not published unreviewed.
+        var publish = await new PrBranchPublisher(Git, settings)
+            .PublishAsync(directory, branch, PrPushMode.New, new PrPublishPin(Tool, head), ct)
+            .ConfigureAwait(false);
         if (publish.Failure is not null)
         {
             return publish.Failure;

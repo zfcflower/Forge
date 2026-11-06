@@ -10,7 +10,8 @@ internal sealed class PrCommentResolveTool(PrCommentEnvironment environment) : G
     PrCommentTools.ResolveName,
     "Mark one review thread of this branch's pull request resolved. Code-enforced: the thread must carry your own reply " +
     "with verdict apply or push_back (post it with pr_comment_reply first); a clarify reply cannot resolve, and neither " +
-    "can a thread somebody else wrote to after your verdict reply: read what they said and answer again. The thread is " +
+    "can a thread that got any comment after your verdict reply – even one from the same account, because the reviewer " +
+    "and you may share one gh login: read what was written and answer again. The thread is " +
     "re-read right before resolving; one that is already resolved is left alone. Read pr_workflow (phase " +
     "review-comments) first.",
     """
@@ -62,7 +63,7 @@ internal sealed class PrCommentResolveTool(PrCommentEnvironment environment) : G
         if (newer > 0)
         {
             return new ToolResult(
-                $"Thread {thread.Id} has {newer.ToString(CultureInfo.InvariantCulture)} comment(s) from others after your " +
+                $"Thread {thread.Id} has {newer.ToString(CultureInfo.InvariantCulture)} comment(s) after your " +
                 $"{PrReplyLedger.VerdictName(record.Verdict)} reply. Read them with pr_comments and answer again with " +
                 "pr_comment_reply before resolving.",
                 IsError: true);
@@ -86,34 +87,20 @@ internal sealed class PrCommentResolveTool(PrCommentEnvironment environment) : G
             $"(your verdict: {PrCommentText.VerdictText(record)}).");
     }
 
-    /// <summary>How many comments by someone other than the verdict reply's author follow that reply.</summary>
+    /// <summary>
+    /// How many comments follow the verdict reply. Every one counts, whatever its author: the reviewer and the agent may
+    /// act as the same gh login, so "same author" proves nothing about who wrote it or whether it was answered.
+    /// </summary>
     private static int CommentsAfter(PrReviewThread thread, PrReplyRecord record)
     {
-        var index = -1;
         for (var i = 0; i < thread.Comments.Count; i++)
         {
             if (string.Equals(thread.Comments[i].Id, record.CommentId, StringComparison.Ordinal))
             {
-                index = i;
-                break;
+                return thread.Comments.Count - i - 1;
             }
         }
 
-        if (index < 0)
-        {
-            return 0;
-        }
-
-        var author = thread.Comments[index].Author;
-        var count = 0;
-        for (var i = index + 1; i < thread.Comments.Count; i++)
-        {
-            if (author is null || !string.Equals(thread.Comments[i].Author, author, StringComparison.OrdinalIgnoreCase))
-            {
-                count++;
-            }
-        }
-
-        return count;
+        return 0;
     }
 }

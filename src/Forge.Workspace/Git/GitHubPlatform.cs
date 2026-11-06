@@ -36,8 +36,6 @@ public sealed class GitHubPlatform : IPrPlatform
     private const string ResolveMutation =
         "mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}";
 
-    private const int MaxThreadPages = 100;
-    private const int MaxCommentPages = 50;
     private const int MaxInlineBodyCharacters = 8000;
     private const int MaxMessageDetailCharacters = 500;
 
@@ -56,6 +54,19 @@ public sealed class GitHubPlatform : IPrPlatform
 
     /// <summary>Cap on a returned pull request diff; the beginning of the diff is kept when it is exceeded.</summary>
     public int MaxDiffCharacters { get; init; } = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// Safety bound on the pages of review threads read for one pull request (100 threads per page); a pull request that
+    /// needs more is refused instead of returning a partial list. Overridable so the refusal can be tested without
+    /// producing 100 pages.
+    /// </summary>
+    public int MaxThreadPages { get; init; } = 100;
+
+    /// <summary>
+    /// Safety bound on the extra comment pages read for one review thread (100 comments per page); a thread that needs more
+    /// is refused instead of returning a partial thread.
+    /// </summary>
+    public int MaxCommentPages { get; init; } = 50;
 
     public string Name => "GitHub";
 
@@ -479,11 +490,20 @@ public sealed class GitHubPlatform : IPrPlatform
     {
         var comments = new List<PrReviewComment>(item.Thread.Comments);
         var cursor = item.CommentsEndCursor;
-        for (var page = 0; page < MaxCommentPages; page++)
+        for (var page = 0; ; page++)
         {
+            if (page >= MaxCommentPages)
+            {
+                return PrResult<PrReviewThread>.Fail(
+                    GitRemoteFailureKind.Other,
+                    $"A review thread has more than {MaxCommentPages * 100} comments; refusing to return a partial thread.");
+            }
+
             if (string.IsNullOrEmpty(cursor))
             {
-                break;
+                return PrResult<PrReviewThread>.Fail(
+                    GitRemoteFailureKind.Other,
+                    "Could not read all comments of a review thread: the platform reported more pages but gave no usable cursor.");
             }
 
             var fields = new List<string> { "-f", "id=" + item.Thread.Id, "-f", "cursor=" + cursor };
@@ -505,12 +525,15 @@ public sealed class GitHubPlatform : IPrPlatform
                 return PrResult<PrReviewThread>.Ok(item.Thread with { Comments = comments });
             }
 
+            if (string.IsNullOrEmpty(parsed.EndCursor) || string.Equals(parsed.EndCursor, cursor, StringComparison.Ordinal))
+            {
+                return PrResult<PrReviewThread>.Fail(
+                    GitRemoteFailureKind.Other,
+                    "Could not read all comments of a review thread: the platform reported more pages but gave no usable cursor.");
+            }
+
             cursor = parsed.EndCursor;
         }
-
-        return PrResult<PrReviewThread>.Fail(
-            GitRemoteFailureKind.Other,
-            $"A review thread has more than {MaxCommentPages * 100} comments; refusing to return a partial thread.");
     }
 
     /// <summary>Asks gh which repository (and host) the working directory belongs to, the way every other gh command resolves it.</summary>

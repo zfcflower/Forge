@@ -10,7 +10,8 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
     PrCommentTools.ReviewResolveName,
     "Mark one local review comment resolved. verdict is apply (you changed the code) or push_back (you disagree: note is " +
     "required and must give the reasons); a comment you cannot judge is not resolved, ask the user in your answer " +
-    "instead. Only comments of this session's worktree can be resolved. The resolved flag is all the review store " +
+    "instead. Only comments of this session's worktree that were actually sent to the reviewer can be resolved: a draft " +
+    "(never sent) has nobody to answer and is refused. The resolved flag is all the review store " +
     "keeps: verdict and note are returned to you and show up in the conversation, they are not stored with the comment. " +
     "Read pr_workflow (phase review-comments) first.",
     """
@@ -62,6 +63,14 @@ internal sealed class ReviewCommentResolveTool(GitCli git, ReviewStore reviews) 
         if (comment.IsResolved)
         {
             return new ToolResult($"Review comment {idText} is already resolved. Nothing to do.");
+        }
+
+        if (comment.Status != ReviewCommentStatus.Sent)
+        {
+            return new ToolResult(
+                $"Review comment {idText} is still a draft: it was never sent to the reviewer, so there is no answer to give " +
+                "and nothing to resolve.",
+                IsError: true);
         }
 
         if (!await reviews.SetResolvedAsync(id, true, ct).ConfigureAwait(false))

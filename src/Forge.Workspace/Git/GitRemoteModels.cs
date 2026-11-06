@@ -107,6 +107,14 @@ public sealed record GitPushOptions
     /// <see cref="GitRemoteFailureKind.NonFastForward"/>: the remote moved and nothing was pushed.
     /// </summary>
     public string? ExpectedRemoteCommit { get; init; }
+
+    /// <summary>
+    /// Pushes exactly this commit to <c>refs/heads/&lt;branch&gt;</c> instead of the local branch ref, so whatever happens to
+    /// the branch between the caller's check and the push (a new commit landing on HEAD) cannot be published. When
+    /// <see cref="SetUpstream"/> is set, the upstream configuration is written after a successful push, because
+    /// <c>git push -u</c> only records an upstream for a pushed branch ref.
+    /// </summary>
+    public string? SourceCommit { get; init; }
 }
 
 /// <summary>Per-call knobs shared by the network operations.</summary>

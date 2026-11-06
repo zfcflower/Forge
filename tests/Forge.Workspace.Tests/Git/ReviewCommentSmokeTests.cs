@@ -147,8 +147,8 @@ public sealed class ReviewCommentSmokeTests : IDisposable
     [Fact]
     public async Task Apply_marks_the_comment_resolved_in_the_store()
     {
-        var id = await AddAsync("src/A.cs", 12, "please fix");
-        var untouched = await AddAsync("src/A.cs", 13, "leave me open");
+        var id = await AddAsync("src/A.cs", 12, "please fix", sent: true);
+        var untouched = await AddAsync("src/A.cs", 13, "leave me open", sent: true);
 
         var result = await ResolveAsync(ResolveJson(id, "apply"));
 
@@ -159,9 +159,26 @@ public sealed class ReviewCommentSmokeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_draft_comment_that_was_never_sent_cannot_be_resolved()
+    {
+        var draft = await AddAsync("src/A.cs", 12, "not sent yet");
+        var sent = await AddAsync("src/B.cs", 3, "sent to the reviewer", sent: true);
+
+        var refused = await ResolveAsync(ResolveJson(draft, "apply"));
+        var allowed = await ResolveAsync(ResolveJson(sent, "apply"));
+
+        Assert.True(refused.IsError);
+        Assert.Contains($"Review comment {draft} is still a draft", refused.Content);
+        Assert.Contains("never sent to the reviewer", refused.Content);
+        Assert.False((await store.GetAsync(draft))!.IsResolved);
+        Assert.False(allowed.IsError, allowed.Content);
+        Assert.True((await store.GetAsync(sent))!.IsResolved);
+    }
+
+    [Fact]
     public async Task Push_back_with_a_note_resolves_and_echoes_the_note()
     {
-        var id = await AddAsync("src/A.cs", 12, "please fix");
+        var id = await AddAsync("src/A.cs", 12, "please fix", sent: true);
 
         var result = await ResolveAsync(ResolveJson(id, "push_back", "  Out of scope for this change.  "));
 
@@ -282,7 +299,7 @@ public sealed class ReviewCommentSmokeTests : IDisposable
     [Fact]
     public async Task Resolving_removes_the_comment_from_the_default_listing()
     {
-        var id = await AddAsync("src/A.cs", 12, "please fix");
+        var id = await AddAsync("src/A.cs", 12, "please fix", sent: true);
         await AddAsync("src/B.cs", 1, "still open");
 
         await ResolveAsync(ResolveJson(id, "apply"));

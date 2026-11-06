@@ -216,7 +216,7 @@ public sealed class PrCommentResolveSmokeTests
         var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
 
         Assert.True(result.IsError);
-        Assert.Contains("1 comment(s) from others after your push_back reply", result.Content);
+        Assert.Contains("1 comment(s) after your push_back reply", result.Content);
         Assert.Empty(platform.Resolves);
     }
 
@@ -236,19 +236,34 @@ public sealed class PrCommentResolveSmokeTests
 
         Assert.True(platform.ThreadReads > readsBefore);
         Assert.True(result.IsError);
-        Assert.Contains("from others after your push_back reply", result.Content);
+        Assert.Contains("after your push_back reply", result.Content);
         Assert.Empty(platform.Resolves);
     }
 
     [Fact]
-    public async Task Follow_up_comments_by_the_agent_itself_do_not_block_resolving()
+    public async Task A_follow_up_comment_with_the_same_login_also_blocks_resolving()
     {
+        // The reviewer and the agent may share one gh account, so "same author as the verdict reply" proves nothing; any
+        // comment written after the verdict has to be read and answered first.
         using var temp = new TempDirectory();
         var thread = ThreadWithReply(
             "PRRT_1",
             PrReplyVerdict.PushBack,
-            after: [PrCommentHarness.Comment("c2", "Octo", "Plain follow-up without a marker.", 2)]);
+            after: [PrCommentHarness.Comment("c2", "Octo", "One more thing: also fix the log line.", 2)]);
         var (tools, platform, _) = Create("octo", thread);
+
+        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
+
+        Assert.True(result.IsError);
+        Assert.Contains("1 comment(s) after your push_back reply", result.Content);
+        Assert.Empty(platform.Resolves);
+    }
+
+    [Fact]
+    public async Task A_thread_whose_verdict_reply_is_the_last_comment_still_resolves()
+    {
+        using var temp = new TempDirectory();
+        var (tools, platform, _) = Create("octo", ThreadWithReply("PRRT_1", PrReplyVerdict.PushBack));
 
         var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
 

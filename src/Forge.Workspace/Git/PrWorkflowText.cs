@@ -37,7 +37,7 @@ public static class PrWorkflowText
         3. The full git_diff was read at this exact HEAD. Code only enforces that the diff was re-read; whether the cleanup is actually good is your judgement, and nothing checks it.
         4. The body has a non-empty "## Testing" section that is not a platitude ("tests pass", "tested", "n/a" and the like are refused). Code cannot tell whether you really ran anything; be honest.
 
-        After the gates it reads the state once more (HEAD unchanged, still clean), refuses if a pull request for the branch already exists (and returns its URL), pushes with -u and a lease taken from a fresh ls-remote, then creates the pull request. It never merges.
+        After the gates it reads the state once more (HEAD unchanged, still clean), refuses if a pull request for the branch already exists (and returns its URL), pushes with -u and a lease taken from a fresh ls-remote, then creates the pull request. The push names the reviewed HEAD itself: a commit that lands after the gates is refused as a gate-to-push race instead of being published, and you read git_diff again. It never merges.
 
         ## After it is created
         Read phase "checks" to watch CI and understand the merge state. For a change users can see, read phase "screenshots". Use phase "body" to adjust the description.
@@ -47,13 +47,13 @@ public static class PrWorkflowText
         # Bringing a pull request branch up to date (tool: pr_sync)
 
         ## When
-        pr_view or pr_checks reports BEHIND or DIRTY and you decided to update the branch, or pr_create refused gate 2.
+        The branch already has a pull request (pr_create made one) and pr_view or pr_checks reports BEHIND or DIRTY and you decided to update the branch, or pr_create refused gate 2.
 
         ## What pr_sync does
-        1. Fetches origin and resolves the base: the open pull request's base branch, otherwise the repository's default branch.
+        1. Refuses when the branch has no pull request: creating one is pr_create's job, with its gates. It then fetches origin and resolves the base: the open pull request's base branch.
         2. If origin/<base> is already in HEAD there is nothing to integrate.
         3. Otherwise it follows the branch's own history: any merge commit in origin/<base>..HEAD means merge, no merge commit means rebase.
-        4. Pushes: after a rebase with --force-with-lease and a lease read fresh with ls-remote, after a merge with a plain push. It refuses to overwrite remote commits that this checkout never had (someone else pushed); do not force past that refusal, read those commits first.
+        4. Pushes: after a rebase with --force-with-lease and a lease read fresh with ls-remote, after a merge with a plain push. The push names the HEAD it audited, so a commit that lands while the checks run is refused as a gate-to-push race; call pr_sync again when that happens. It refuses to overwrite remote commits that this checkout never had (someone else pushed); do not force past that refusal, read those commits first.
 
         ## Conflicts
         pr_sync stops and lists the conflicted files. Before editing any of them, read both sides:
@@ -107,7 +107,7 @@ public static class PrWorkflowText
 
         ## Judge before changing
         A review comment is a claim, not an order. For each one, read the code it points at and its context (the pull request diff helps), then give it a verdict before touching anything:
-        - apply: the comment is right. Change the code, commit, push, then reply with verdict apply and cite the pushed commit sha. The reply is refused unless that commit is on the remote and contained in the branch.
+        - apply: the comment is right. Change the code, commit, push, then reply with verdict apply and cite the pushed commit sha. The reply is refused unless that commit is the head of the pull request or is contained in it (the platform reports the head with the pull request; a commit that only exists locally is refused).
         - push_back: the comment is wrong, out of scope, or conflicts with a requirement. Reply with verdict push_back and the concrete reason (the code, the requirement, the test that shows it).
         - clarify: you cannot judge without more information. Reply with verdict clarify and a precise question. Change nothing; the thread stays open.
 
@@ -115,10 +115,10 @@ public static class PrWorkflowText
         List all threads first, group them by file, judge all of them, then make the changes in as few sensible commits as possible and push once. After that reply to each thread, then resolve.
 
         ## Resolving
-        Resolve a thread only after you replied to it with apply or push_back. A clarify thread cannot be resolved; the reviewer answers first. Outdated threads still deserve a verdict.
+        Resolve a thread only after you replied to it with apply or push_back. A clarify thread cannot be resolved; the reviewer answers first. Any comment that arrives after your verdict reply blocks resolving, even one written by the same account (the reviewer and you may share one gh login): read it and answer again. Outdated threads still deserve a verdict.
 
         ## Local comments
-        Comments the user left in Forge's own review (review_comments) get the same judgement. Read them with list, decide, make the change, then resolve them with resolve. There is no pull request reply for these.
+        Comments the user left in Forge's own review (review_comments) get the same judgement. Read them with list, decide, make the change, then resolve them with resolve. Only comments that were actually sent can be resolved; a draft has nobody to answer and is refused. There is no pull request reply for these.
 
         After pushing, watch the checks again (phase "checks"); changes made for a review can break CI.
         """;

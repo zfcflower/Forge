@@ -591,6 +591,29 @@ public sealed class PrCreateSyncSmokeTests
     }
 
     [Fact]
+    public async Task Create_refuses_a_commit_that_lands_between_the_last_gate_and_the_push()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.MarkReviewed();
+
+        // The platform read is the last step before the push; a commit landing there is exactly the gate-to-push race.
+        fixture.Platform.BeforeView = _ => fixture.Commit("late.txt", "late\n", "late commit");
+
+        var result = await fixture.CreateAsync(Args());
+
+        Assert.True(result.IsError);
+        Assert.Contains("gate-to-push race", result.Content);
+        Assert.Contains("was never reviewed", result.Content);
+        Assert.Contains("git_diff", result.Content);
+        AssertNothingPublished(fixture);
+    }
+
+    [Fact]
     public async Task Create_rechecks_the_tree_after_the_gates_and_stops_when_a_file_appeared()
     {
         if (!GitProbe.IsAvailable)
@@ -1066,6 +1089,7 @@ public sealed class PrCreateSyncSmokeTests
 
         RunGit(fixture, "checkout", "-q", "--", "base.txt");
         File.WriteAllText(Path.Combine(fixture.Work, "scratch.txt"), "untracked\n");
+        fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
 
         var untrackedOnly = await fixture.SyncAsync();
 
@@ -1124,6 +1148,27 @@ public sealed class PrCreateSyncSmokeTests
     }
 
     [Fact]
+    public async Task Sync_refuses_a_branch_without_a_pull_request_and_points_at_pr_create()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var fixture = new PrLifecycleFixture();
+        fixture.PushBranch();
+        var head = fixture.Head;
+
+        var result = await fixture.SyncAsync();
+
+        Assert.True(result.IsError);
+        Assert.Contains("pr_sync refused (no pull request for this branch)", result.Content);
+        Assert.Contains("pr_create", result.Content);
+        Assert.Equal(head, fixture.Head);
+        Assert.Equal(head, fixture.OriginTip(Branch));
+    }
+
+    [Fact]
     public async Task Sync_refuses_a_detached_head_and_the_base_branch_itself()
     {
         if (!GitProbe.IsAvailable)
@@ -1136,6 +1181,7 @@ public sealed class PrCreateSyncSmokeTests
         RunGit(fixture, "checkout", "-q", "--detach");
         var detached = await fixture.SyncAsync();
         RunGit(fixture, "checkout", "-q", "main");
+        fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
         var onBase = await fixture.SyncAsync();
 
         Assert.True(detached.IsError);
