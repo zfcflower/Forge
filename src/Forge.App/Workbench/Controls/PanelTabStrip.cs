@@ -58,12 +58,32 @@ internal sealed class PanelTabStrip : TemplatedControl
     /// <summary>Activates a tab of this strip (keyboard activation of a focused header).</summary>
     public void Activate(TabModel tab) => Layout?.ActivateTab(tab);
 
-    /// <summary>Closes a tab of this strip (the header's close button and the context menu both come through here).</summary>
-    public void CloseTab(TabModel? tab)
+    /// <summary>
+    /// Closes a tab of this strip (the header's close button, middle click and the context menu all come through here).
+    /// The layout's <see cref="WorkbenchLayout.TabCloseRequested"/> runs first and may veto the close, so a terminal with
+    /// a program still running gets to ask.
+    /// </summary>
+    public void CloseTab(TabModel? tab) => _ = CloseTabAsync(tab);
+
+    private async Task CloseTabAsync(TabModel? tab)
     {
-        if (tab is not null)
+        if (tab is null || Layout is not { } layout)
         {
-            Layout?.CloseTab(tab);
+            return;
+        }
+
+        try
+        {
+            if (layout.TabCloseRequested is { } requested && !await requested(tab).ConfigureAwait(true))
+            {
+                return;
+            }
+
+            layout.CloseTab(tab);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("[workbench] closing the tab failed: " + exception.Message);
         }
     }
 
@@ -310,7 +330,7 @@ internal sealed class PanelTabStrip : TemplatedControl
         {
             if (!ReferenceEquals(tabs[i], tab) && tabs[i].IsClosable)
             {
-                Layout.CloseTab(tabs[i]);
+                CloseTab(tabs[i]);
             }
         }
     }

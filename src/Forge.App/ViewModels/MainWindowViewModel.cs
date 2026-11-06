@@ -7,6 +7,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Terminal;
 using Forge.App.Workbench;
 using Forge.HostClient;
 using Forge.Workspace;
@@ -31,7 +32,13 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const string OpenChangesToolId = "files-open-changes";
 
+    /// <summary>Automation id (and header tool id) of the bottom group's "new terminal" button.</summary>
+    private const string NewTerminalToolId = "terminal-new";
+
     private static readonly TimeSpan LayoutSaveDelay = TimeSpan.FromMilliseconds(800);
+
+    /// <summary>Upper bound of the shutdown wait for the terminals; the coordinator itself stops waiting after four.</summary>
+    private static readonly TimeSpan TerminalShutdownBudget = TimeSpan.FromSeconds(5);
 
     private readonly AppComposition composition;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
@@ -42,6 +49,8 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, string> projectRoots = new(StringComparer.Ordinal);
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
+    private readonly TerminalWorkbench terminals;
+    private PanelToolButton newTerminalButton;
     private ReviewStore reviews;
     private PanelToolButton? openChangesTool;
     private SessionWorkspaceViewModel? activeSession;
@@ -84,7 +93,10 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
         Changes = new ChangesViewModel(composition.Git, composition.TurnCheckpoints);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
+        NewTerminalCommand = new RelayCommand(OpenTerminal);
         Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs);
+        terminals = new TerminalWorkbench(Workbench, composition.Preferences, composition.Host?.Client);
+        newTerminalButton = CreateNewTerminalButton();
         openChangesTool = new PanelToolButton(
             OpenChangesToolId,
             ShellStrings.OpenChangesTooltip,
@@ -92,6 +104,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             ShowChangesCommand);
         Workbench.FilesPanel.HeaderTools.Add(openChangesTool);
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
+        Workbench.BottomTabs.HeaderTools.Add(newTerminalButton);
         Workbench.TabClosed += OnTabClosed;
         Workbench.ActiveTabChanged += OnActiveTabChanged;
         Workbench.LayoutChanged += OnLayoutChanged;
@@ -152,6 +165,12 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public RelayCommand ShowChangesCommand { get; }
 
+    /// <summary>Opens a terminal in the active session; the status bar button, the bottom group's "+" and Ctrl+` use it.</summary>
+    public RelayCommand NewTerminalCommand { get; }
+
+    /// <summary>Text of the status-bar terminal button; re-read after a language switch.</summary>
+    public string TerminalButtonText => Loc.Instance[TerminalStrings.StatusButton];
+
     public AsyncRelayCommand RevealGeneralCommand { get; }
 
     public string ProviderNotice => composition.Provider.StatusText.Resolve();
@@ -170,6 +189,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
                 ApplyPanelContext();
+                terminals.OnActiveSessionChanged(activeSession?.SessionId, activeSession?.WorkDir);
             }
         }
     }
@@ -536,6 +556,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnSessionArchived(string sessionId)
     {
+        terminals.OnSessionArchived(sessionId);
         CloseSessionTab(sessionId);
         openTabs.Remove(sessionId);
 
@@ -644,13 +665,27 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         var menu = session?.FinishedMenu ?? emptyFinishedMenu;
         var tools = Workbench.BottomTabs.HeaderTools;
-        if (tools.Count != 1 || !ReferenceEquals(tools[0], menu))
+        if (tools.Count != 2 || !ReferenceEquals(tools[0], menu) || !ReferenceEquals(tools[1], newTerminalButton))
         {
             tools.Clear();
             tools.Add(menu);
+            tools.Add(newTerminalButton);
         }
 
         WatchFinishedMenu(menu);
+    }
+
+    /// <summary>The bottom group's "new terminal" tool; rebuilt on a language switch so its tooltip follows.</summary>
+    private PanelToolButton CreateNewTerminalButton() =>
+        new(NewTerminalToolId, Loc.Instance[TerminalStrings.NewTerminal], "IconPlus", NewTerminalCommand);
+
+    /// <summary>Opens a terminal in the active session, or says in the status bar why it cannot.</summary>
+    private void OpenTerminal()
+    {
+        if (terminals.OpenTerminal() is null)
+        {
+            Status.SetWorkspaceProblem(Loc.Instance[TerminalStrings.FailureNoSession]);
+        }
     }
 
     /// <summary>
@@ -969,6 +1004,11 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ActiveSessionTitle));
         OnPropertyChanged(nameof(ProviderNotice));
         RefreshOpenChangesTool();
+
+        // The bottom group's "new terminal" tool carries its tooltip as a plain string too; rebuild it and re-sync the row.
+        newTerminalButton = CreateNewTerminalButton();
+        SyncFinishedMenu(activeSession);
+        OnPropertyChanged(nameof(TerminalButtonText));
     }
 
     /// <summary>
@@ -1032,6 +1072,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         clock.Stop();
         layoutSaveTimer.Stop();
 
+        // Terminals are ended before the final layout capture, so no terminal tab can end up in a snapshot, and before the
+        // composition root tears the extension host down.
+        ShutdownTerminals();
         SaveLayoutOnShutdown();
 
         disposed = true;
@@ -1084,6 +1127,25 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         layoutSaveTimer.Stop();
         clock.Tick -= OnClockTick;
         layoutSaveTimer.Tick -= OnLayoutSaveTick;
+    }
+
+    /// <summary>
+    /// Ends every terminal with a bounded wait. The extension host is stopped right after this, so the wait is only about
+    /// letting the graceful <c>terminal.stop</c> finish; a host that does not answer cannot hold the window open.
+    /// </summary>
+    private void ShutdownTerminals()
+    {
+        try
+        {
+            if (!terminals.DisposeAsync().AsTask().Wait(TerminalShutdownBudget))
+            {
+                Trace.WriteLine("[terminal] shutdown timed out");
+            }
+        }
+        catch (AggregateException exception)
+        {
+            Trace.WriteLine("[terminal] shutdown failed: " + exception.Message);
+        }
     }
 
     /// <summary>

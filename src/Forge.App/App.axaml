@@ -3,6 +3,7 @@
              xmlns:views="using:Forge.App.Views"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
+             xmlns:term="using:Forge.App.Terminal"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -45,6 +46,49 @@
     </DataTemplate>
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
+    </DataTemplate>
+
+    <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
+    <DataTemplate DataType="term:TerminalViewModel" x:DataType="term:TerminalViewModel">
+      <term:TerminalView />
+    </DataTemplate>
+
+    <DataTemplate DataType="term:TerminalSettingsViewModel" x:DataType="term:TerminalSettingsViewModel">
+      <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="170,*" Margin="0,2">
+        <TextBlock Classes="label" Text="{Binding ShellLabel}" VerticalAlignment="Center" Margin="0,4" />
+        <TextBox Grid.Column="1"
+                 Classes="mono"
+                 Margin="0,4"
+                 Text="{Binding Shell, Mode=TwoWay}"
+                 PlaceholderText="pwsh"
+                 AutomationProperties.AutomationId="terminal-settings-shell"
+                 AutomationProperties.Name="{Binding ShellLabel}" />
+        <TextBlock Grid.Row="1" Classes="label" Text="{Binding ArgumentsLabel}" VerticalAlignment="Center" Margin="0,4" />
+        <TextBox Grid.Row="1"
+                 Grid.Column="1"
+                 Classes="mono"
+                 Margin="0,4"
+                 Text="{Binding Arguments, Mode=TwoWay}"
+                 PlaceholderText="-l"
+                 AutomationProperties.AutomationId="terminal-settings-arguments"
+                 AutomationProperties.Name="{Binding ArgumentsLabel}" />
+        <TextBlock Grid.Row="2" Classes="label" Text="{Binding ScrollbackLabel}" VerticalAlignment="Center" Margin="0,4" />
+        <NumericUpDown Grid.Row="2"
+                       Grid.Column="1"
+                       Margin="0,4"
+                       Minimum="1000"
+                       Maximum="100000"
+                       Increment="1000"
+                       FormatString="0"
+                       Value="{Binding ScrollbackLines, Mode=TwoWay}"
+                       AutomationProperties.AutomationId="terminal-settings-scrollback"
+                       AutomationProperties.Name="{Binding ScrollbackLabel}" />
+        <TextBlock Grid.Row="3"
+                   Grid.ColumnSpan="2"
+                   Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding Hint}" />
+      </Grid>
     </DataTemplate>
 
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->

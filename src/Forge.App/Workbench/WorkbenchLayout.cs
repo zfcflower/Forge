@@ -807,6 +807,13 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <summary>Set by the window before it closes; from then on closing floating windows does not dock them.</summary>
     public bool IsShuttingDown { get; set; }
 
+    /// <summary>
+    /// Asked before a tab is closed by its strip: returning false vetoes the close, so a feature can put a question to the
+    /// user first (the terminal asks whether to end a running program). Null means every close is allowed. The strip is the
+    /// only caller; <see cref="CloseTab"/> itself stays unconditional because the view models close their own tabs.
+    /// </summary>
+    public Func<TabModel, Task<bool>>? TabCloseRequested { get; set; }
+
     // ---------------------------------------------------------------- persistence and events
 
     public LayoutSnapshot Capture()

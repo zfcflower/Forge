@@ -25,6 +25,9 @@ internal enum TabKind
     Todo,
     Review,
     Specs,
+
+    /// <summary>An interactive terminal of the active session; it lives in the bottom group and is never persisted.</summary>
+    Terminal,
 }
 
 /// <summary>Position, size and state of a floating window in screen pixels (DIPs).</summary>
@@ -57,12 +60,17 @@ internal static class WorkbenchIds
     public const string SessionTabPrefix = "session:";
     public const string SubAgentTabPrefix = "subagent:";
 
+    /// <summary>A terminal of any session; the suffix is <c>TerminalViewModel.Id</c> and is not written to <c>open-tabs</c>.</summary>
+    public const string TerminalTabPrefix = "terminal:";
+
     /// <summary>A preview tab the user opened with "open in new tab"; the suffix is the file path.</summary>
     public const string PinnedFileTabPrefix = "file:";
 
     public static string SessionTab(string sessionId) => SessionTabPrefix + sessionId;
 
     public static string SubAgentTab(string agentId) => SubAgentTabPrefix + agentId;
+
+    public static string TerminalTab(string terminalId) => TerminalTabPrefix + terminalId;
 
     public static string PinnedFileTab(string path) => PinnedFileTabPrefix + path;
 }

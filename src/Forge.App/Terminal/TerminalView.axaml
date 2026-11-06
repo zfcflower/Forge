@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:term="using:Forge.App.Terminal"
+             x:Class="Forge.App.Terminal.TerminalView"
+             x:DataType="term:TerminalViewModel">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBackgroundBrush}">
+
+    <!-- Vetoed close: a program is still running, so the tab stays and this banner asks what to do. -->
+    <Border Grid.Row="0"
+            Classes="notice"
+            Margin="8,6,8,0"
+            IsVisible="{Binding IsClosePromptVisible}"
+            AutomationProperties.AutomationId="terminal-close-banner">
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock Classes="caption"
+                   VerticalAlignment="Center"
+                   TextWrapping="Wrap"
+                   Text="{Binding ClosePromptText}"
+                   AutomationProperties.AutomationId="terminal-close-prompt" />
+        <Button Grid.Column="1"
+                Classes="primary"
+                Margin="10,0,0,0"
+                Content="{Binding ConfirmCloseText}"
+                Command="{Binding ConfirmCloseCommand}"
+                AutomationProperties.AutomationId="terminal-close-confirm"
+                AutomationProperties.Name="{Binding ConfirmCloseText}" />
+        <Button Grid.Column="2"
+                Classes="ghost"
+                Margin="6,0,0,0"
+                Content="{Binding CancelCloseText}"
+                Command="{Binding CancelCloseCommand}"
+                AutomationProperties.AutomationId="terminal-close-cancel"
+                AutomationProperties.Name="{Binding CancelCloseText}" />
+      </Grid>
+    </Border>
+
+    <term:TerminalControl Grid.Row="1" Source="{Binding}" />
+
+    <!-- One local line after the screen: "starting", the exit code, or why the terminal stopped. -->
+    <Border Grid.Row="2"
+            Padding="10,3"
+            Background="{DynamicResource SurfaceBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,1,0,0"
+            IsVisible="{Binding ShowStatus}">
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding StatusText}"
+                 AutomationProperties.AutomationId="terminal-status" />
+    </Border>
+  </Grid>
+</UserControl>

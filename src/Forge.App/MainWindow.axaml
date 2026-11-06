@@ -14,6 +14,11 @@
         WindowDecorations="BorderOnly"
         Background="{DynamicResource SurfaceBackgroundBrush}">
 
+  <Window.KeyBindings>
+    <!-- Ctrl+` opens a terminal in the active session; a focused terminal leaves this gesture to the window. -->
+    <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding NewTerminalCommand}" />
+  </Window.KeyBindings>
+
   <Grid RowDefinitions="Auto,*,Auto">
 
     <!-- Window top: the window background itself, so there is no separate title-bar fill. The caption buttons are drawn
@@ -104,7 +109,7 @@
             Background="{DynamicResource SurfaceBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,1,0,0">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
           <Ellipse Classes="status-dot"
                    Classes.running="{Binding Status.IsHostRunning}"
@@ -129,7 +134,16 @@
                    ToolTip.Tip="{Binding GeneralWorkspaceText}"
                    MaxWidth="280"
                    VerticalAlignment="Center" />
-        <TextBlock Grid.Column="6"
+        <Button Grid.Column="6"
+                Classes="tab"
+                Margin="14,0,0,0"
+                VerticalAlignment="Center"
+                Content="{Binding TerminalButtonText}"
+                Command="{Binding NewTerminalCommand}"
+                AutomationProperties.AutomationId="terminal-open"
+                AutomationProperties.Name="{Binding TerminalButtonText}"
+                ToolTip.Tip="{Binding TerminalButtonText}" />
+        <TextBlock Grid.Column="7"
                    Classes="caption"
                    HorizontalAlignment="Right"
                    VerticalAlignment="Center"

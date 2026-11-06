@@ -32,6 +32,14 @@ internal sealed class AppPreferences : ObservableObject
     public const double DefaultUiFontSize = 13;
     public const double DefaultCodeFontSize = 13;
 
+    /// <summary>Lower bound of the terminal scrollback; below it the ring is too short to scroll a build log.</summary>
+    public const int MinScrollbackLines = 1000;
+
+    /// <summary>Upper bound of the terminal scrollback; the emulator caps there too.</summary>
+    public const int MaxScrollbackLines = 100000;
+
+    public const int DefaultScrollbackLines = 10000;
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
@@ -39,6 +47,7 @@ internal sealed class AppPreferences : ObservableObject
     private UiLanguage language = UiLanguage.System;
     private string terminalShell = string.Empty;
     private string terminalArguments = string.Empty;
+    private int terminalScrollbackLines = DefaultScrollbackLines;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -56,6 +65,13 @@ internal sealed class AppPreferences : ObservableObject
     /// <summary>Arguments for <see cref="TerminalShell"/>, space separated with double quotes for grouping.</summary>
     public string TerminalArguments { get => terminalArguments; set => Set(ref terminalArguments, value ?? string.Empty); }
 
+    /// <summary>Scrollback lines a terminal keeps; clamped to [<see cref="MinScrollbackLines"/>, <see cref="MaxScrollbackLines"/>].</summary>
+    public int TerminalScrollbackLines
+    {
+        get => terminalScrollbackLines;
+        set => Set(ref terminalScrollbackLines, Math.Clamp(value, MinScrollbackLines, MaxScrollbackLines));
+    }
+
     /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
@@ -70,6 +86,9 @@ internal sealed class AppPreferences : ObservableObject
         language = loadedLanguage;
         terminalShell = (section.TerminalShell ?? string.Empty).Trim();
         terminalArguments = section.TerminalArguments ?? string.Empty;
+        terminalScrollbackLines = section.TerminalScrollbackLines is { } scrollback
+            ? Math.Clamp(scrollback, MinScrollbackLines, MaxScrollbackLines)
+            : DefaultScrollbackLines;
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -83,6 +102,7 @@ internal sealed class AppPreferences : ObservableObject
             Language = LanguageToken(language),
             TerminalShell = terminalShell,
             TerminalArguments = terminalArguments,
+            TerminalScrollbackLines = terminalScrollbackLines,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -152,6 +172,9 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("terminalArguments")]
     public string? TerminalArguments { get; set; }
+
+    [JsonPropertyName("terminalScrollbackLines")]
+    public int? TerminalScrollbackLines { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>
