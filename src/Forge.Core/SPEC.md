@@ -36,6 +36,8 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **`todo` 工具。** 按参数决定副作用(list 只读,其余写入),审批策略与只读并发分批看到单次调用的真实副作用;update/remove 先确认条目属于 `ToolContext.SessionId`。
 
+**扩展工具仅限根 Agent。** `extension_*` 五个工具只对 `Depth == 0` 的 Agent 可见、可调用:`ToolRegistry.Select` 对子 Agent 一律剔除(无论 `ToolNames` 为 null 还是显式列出),派发查找走同一份选择结果;工具自身在 `ToolContext.AgentDepth > 0` 时也拒绝并返回错误结果。
+
 **审批路径比较按 OS,不探测文件系统。** `DefaultApprovalPolicy` 判断工作目录是否在受信目录内,比较规范化后的路径前缀:Windows 用 `OrdinalIgnoreCase`,其余平台用 `Ordinal`,不做大小写探测、不读文件系统。macOS 的 APFS 默认大小写不敏感,同一目录的其他大小写写法因此会被判为“不在受信目录内”,结果是 fail-closed 到 `Ask` 而不是误放行;测试按 `OperatingSystem.IsWindows()` 断言,不按卷的大小写敏感属性断言。
 
 **存储。** SQLite 存会话、消息、摘要、全文索引(FTS5);JSONL 为事件日志,供崩溃恢复;Artifact 内容存文件。所有写入走单写线程批量提交,返回 seq 时已落盘;提交后的取消不会让调用方误判为失败。摘要三层(近期原文 → 阶段摘要 → 会话级总摘要),只追加不改写,被压缩的原文仍可检索和取回。压缩不得拆开工具调用与其结果。

@@ -34,6 +34,11 @@ public sealed class ExtensionDisableTool : ITool
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(context);
 
+        if (ExtensionTools.RefuseSubAgent(context, Definition.Name) is { } refusal)
+        {
+            return refusal;
+        }
+
         if (!ExtensionDraftReader.TryReadIdAndVersion(call.ArgumentsJson, out var id, out var version, out var error))
         {
             return new ToolResult($"{Name}: {error}", IsError: true);
@@ -81,6 +86,11 @@ public sealed class ExtensionDeleteTool : ITool
     {
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(context);
+
+        if (ExtensionTools.RefuseSubAgent(context, Definition.Name) is { } refusal)
+        {
+            return refusal;
+        }
 
         if (!ExtensionDraftReader.TryReadIdAndVersion(call.ArgumentsJson, out var id, out var version, out var error))
         {

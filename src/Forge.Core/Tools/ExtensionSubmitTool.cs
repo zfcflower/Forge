@@ -105,6 +105,11 @@ public sealed class ExtensionSubmitTool : ITool
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(context);
 
+        if (ExtensionTools.RefuseSubAgent(context, Definition.Name) is { } refusal)
+        {
+            return refusal;
+        }
+
         var draft = ExtensionDraftReader.Read(call.ArgumentsJson, isUpdate, out var error);
         if (draft is null)
         {

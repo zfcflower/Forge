@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Forge.Core.Tools;
 
 namespace Forge.Core.Agents;
 
@@ -44,16 +45,17 @@ public sealed class ToolRegistry : IToolRegistry
 
     /// <summary>
     /// Tools visible to one agent: its definition's allow-list (null means everything) minus the sub-agent
-    /// tools once the depth limit is reached.
+    /// tools once the depth limit is reached. Only the root agent (<paramref name="isRoot"/>) may see the extension tools:
+    /// for any sub-agent they are dropped even when the allow-list is null or names them.
     /// </summary>
-    public ToolRegistry Select(IReadOnlyList<string>? toolNames, bool canSpawn, IReadOnlyList<string> subAgentTools)
+    public ToolRegistry Select(IReadOnlyList<string>? toolNames, bool canSpawn, IReadOnlyList<string> subAgentTools, bool isRoot = true)
     {
         var selected = new List<ITool>(Tools.Count);
         if (toolNames is null)
         {
             foreach (var tool in Tools)
             {
-                if (canSpawn || !IsSubAgentTool(tool, subAgentTools))
+                if ((canSpawn || !IsSubAgentTool(tool, subAgentTools)) && (isRoot || !IsExtensionTool(tool.Definition.Name)))
                 {
                     selected.Add(tool);
                 }
@@ -64,7 +66,8 @@ public sealed class ToolRegistry : IToolRegistry
             var allowed = new HashSet<string>(toolNames, StringComparer.Ordinal);
             foreach (var tool in Tools)
             {
-                if (allowed.Contains(tool.Definition.Name) && (canSpawn || !IsSubAgentTool(tool, subAgentTools)))
+                if (allowed.Contains(tool.Definition.Name) && (canSpawn || !IsSubAgentTool(tool, subAgentTools))
+                    && (isRoot || !IsExtensionTool(tool.Definition.Name)))
                 {
                     selected.Add(tool);
                 }
@@ -84,6 +87,10 @@ public sealed class ToolRegistry : IToolRegistry
 
         return new ToolRegistry(selected);
     }
+
+    private static bool IsExtensionTool(string name) =>
+        name is ExtensionToolNames.List or ExtensionToolNames.Create or ExtensionToolNames.Update
+            or ExtensionToolNames.Disable or ExtensionToolNames.Delete;
 
     private static bool IsSubAgentTool(ITool tool, IReadOnlyList<string> names)
     {

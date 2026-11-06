@@ -61,7 +61,8 @@ public sealed class AgentLoop(AgentLoopServices services)
             services.Tools,
             instance.Definition.ToolNames,
             instance.Depth < services.Options.MaxSubAgentDepth,
-            services.SubAgentToolNames);
+            services.SubAgentToolNames,
+            instance.Depth == 0);
         var provider = services.Providers(instance.Definition.Model);
 
         await PersistAsync(instance, input, null, ct).ConfigureAwait(false);
@@ -506,7 +507,8 @@ public sealed class AgentLoop(AgentLoopServices services)
         ToolSurface surface,
         IReadOnlyList<string>? toolNames,
         bool canSpawn,
-        IReadOnlyList<string> subAgentTools)
+        IReadOnlyList<string> subAgentTools,
+        bool isRoot)
     {
         private Selected? selected;
 
@@ -520,7 +522,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                 return cached.Registry;
             }
 
-            var registry = published.Tools.Select(toolNames, canSpawn, subAgentTools);
+            var registry = published.Tools.Select(toolNames, canSpawn, subAgentTools, isRoot);
             Volatile.Write(ref selected, new Selected(published.Version, registry));
             return registry;
         }

@@ -36,6 +36,11 @@ public sealed class ExtensionListTool : ITool
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(context);
 
+        if (ExtensionTools.RefuseSubAgent(context, Definition.Name) is { } refusal)
+        {
+            return refusal;
+        }
+
         IReadOnlyList<ExtensionSummary> items;
         try
         {

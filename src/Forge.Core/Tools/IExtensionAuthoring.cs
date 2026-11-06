@@ -91,6 +91,12 @@ public static class ExtensionToolNames
 /// <summary>Factory for the five extension tools. They are for the root agent only: no built-in agent lists them.</summary>
 public static class ExtensionTools
 {
+    /// <summary>Defense in depth: the tool surface already hides these tools from sub-agents; a call from depth &gt; 0 still gets an error result and never reaches authoring.</summary>
+    internal static ToolResult? RefuseSubAgent(ToolContext context, string toolName) =>
+        context.AgentDepth > 0
+            ? new ToolResult($"{toolName}: only the root agent may manage extensions.", IsError: true)
+            : null;
+
     /// <summary>
     /// Builds the five tools over one <paramref name="authoring"/> implementation. They are created once per host and
     /// registered as external tools; nothing here can approve an extension without the user.
