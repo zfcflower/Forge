@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Avalonia.Threading;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 
 namespace Forge.App;
@@ -15,6 +16,7 @@ namespace Forge.App;
 public partial class MainWindow : Window
 {
     private MainWindowViewModel? viewModel;
+    private int uiThread;
 
     public MainWindow()
     {
@@ -46,7 +48,7 @@ public partial class MainWindow : Window
             MaximizeIcon.Data = geometry;
         }
 
-        var text = maximized ? "还原" : "最大化";
+        var text = maximized ? ShellStrings.Restore : ShellStrings.Maximize;
         ToolTip.SetTip(MaximizeButton, text);
         Avalonia.Automation.AutomationProperties.SetName(MaximizeButton, text);
     }
@@ -124,6 +126,8 @@ public partial class MainWindow : Window
     protected override void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
+        uiThread = Environment.CurrentManagedThreadId;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         viewModel = DataContext as MainWindowViewModel;
         if (viewModel is null)
         {
@@ -132,6 +136,24 @@ public partial class MainWindow : Window
 
         viewModel.AttachDialogs(new ShellDialogs(this));
         _ = InitializeAsync(viewModel);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        base.OnClosed(e);
+    }
+
+    /// <summary>The maximize button's tip is owned by the code-behind (it follows the window state), so a language
+    /// switch re-applies it here; every other caption text is a binding in the XAML.</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A window of a session that is already gone (a test host) may still be subscribed; touching its buttons from
+        // another thread would queue a layout pass on the wrong dispatcher.
+        if (Environment.CurrentManagedThreadId == uiThread)
+        {
+            ApplyWindowStateChrome();
+        }
     }
 
     private static async Task InitializeAsync(MainWindowViewModel model)
@@ -143,7 +165,7 @@ public partial class MainWindow : Window
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             Console.Error.WriteLine("[shell] initialization failed: " + exception);
-            Dispatcher.UIThread.Post(() => model.Status.SetWorkspaceProblem("初始化失败:" + exception.Message));
+            Dispatcher.UIThread.Post(() => model.Status.SetWorkspaceProblem(ShellStrings.InitializationFailed(exception.Message)));
         }
     }
 }
@@ -202,8 +224,8 @@ internal sealed class ShellDialogs(Window owner) : IDialogService
     public async Task<string?> PromptTextAsync(string title, string initial)
     {
         var input = new TextBox { Text = initial, MinWidth = 320 };
-        var ok = new Button { Content = "确定", IsDefault = true };
-        var cancel = new Button { Content = "取消", IsCancel = true };
+        var ok = new Button { Content = ShellStrings.Ok, IsDefault = true };
+        var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
         var dialog = new Window
         {
             Title = title,

@@ -1,3 +1,4 @@
+using Forge.App.Localization;
 using Forge.HostClient;
 
 namespace Forge.App.Composition;
@@ -35,7 +36,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     /// <summary>The underlying client, so the agent runtime can reach the tool surface and <c>run_code</c>.</summary>
     public ExtensionHostClient Client => client;
 
-    public string? StatusDetail { get; private set; }
+    public LocText? StatusDetail { get; private set; }
 
     public int? HostProcessId => client.HostProcessId;
 
@@ -43,8 +44,9 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
 
     public int CommandCount => client.Commands.Count;
 
-    /// <summary>Raised after the host reported a status change; the payload is the sentence the status bar shows.</summary>
-    public event Action<HostStatus, string?>? StatusChanged;
+    /// <summary>Raised after the host reported a status change; the payload is the sentence the status bar shows. The
+    /// host client speaks in plain strings, so a detail that the supervisor did not compose itself is literal.</summary>
+    public event Action<HostStatus, LocText?>? StatusChanged;
 
     /// <summary>Raised when the tool or contribution surface changed, so plugin counts must be re-read.</summary>
     public event Action? SurfaceChanged;
@@ -135,7 +137,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
                 var attempt = Interlocked.Increment(ref failures);
                 if (attempt >= MaxStartAttempts)
                 {
-                    Report(HostStatus.Failed, "扩展宿主未能启动：" + FirstLine(exception.Message));
+                    Report(HostStatus.Failed, ShellStrings.HostStartFailed(FirstLine(exception.Message)));
                     return;
                 }
 
@@ -170,8 +172,8 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
             Interlocked.Exchange(ref failures, 0);
         }
 
-        StatusDetail = detail;
-        StatusChanged?.Invoke(status, detail);
+        StatusDetail = detail is null ? null : LocText.Literal(detail);
+        StatusChanged?.Invoke(status, StatusDetail);
 
         if (status == HostStatus.Failed)
         {
@@ -204,7 +206,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
         }
     }
 
-    private void Report(HostStatus status, string? detail)
+    private void Report(HostStatus status, LocText? detail)
     {
         StatusDetail = detail;
         StatusChanged?.Invoke(status, detail);

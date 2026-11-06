@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.IO;
 
@@ -181,7 +182,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
     private readonly AppPreferences current = new();
     private CancellationTokenSource? debounce;
     private byte[]? originalBytes;
-    private string? loadProblem;
+    private LocText loadProblem;
     private bool protectOriginal;
     private bool dirty;
     private bool disposed;
@@ -197,14 +198,15 @@ internal sealed class PreferencesStore : IAsyncDisposable
 
     public AppPreferences Current => current;
 
-    /// <summary>Null when the last load succeeded or the file did not exist.</summary>
+    /// <summary>Null when the last load succeeded or the file did not exist. Resolved on read, so the row in the
+    /// settings page follows a language switch.</summary>
     public string? LoadProblem
     {
         get
         {
             lock (gate)
             {
-                return loadProblem;
+                return loadProblem.IsEmpty ? null : loadProblem.Resolve();
             }
         }
     }
@@ -231,7 +233,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
         lock (gate)
         {
             loadProblem = outcome.Problem;
-            protectOriginal = outcome.Problem is not null;
+            protectOriginal = !outcome.Problem.IsEmpty;
             originalBytes = outcome.Protect ? outcome.Raw : null;
             dirty = false;
         }
@@ -385,12 +387,12 @@ internal sealed class PreferencesStore : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            return new LoadOutcome(null, null, "读取 settings.json 失败：" + exception.Message, null, false);
+            return new LoadOutcome(null, null, ShellStrings.PreferencesReadFailed(exception.Message), null, false);
         }
 
         if (bytes is null || bytes.Length == 0)
         {
-            return new LoadOutcome(null, null, null, null, false);
+            return new LoadOutcome(null, null, default, null, false);
         }
 
         JsonNode? parsed;
@@ -400,22 +402,22 @@ internal sealed class PreferencesStore : IAsyncDisposable
         }
         catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
         {
-            return new LoadOutcome(null, null, "settings.json 不是有效的 JSON：" + exception.Message, bytes, true);
+            return new LoadOutcome(null, null, ShellStrings.PreferencesInvalidJson(exception.Message), bytes, true);
         }
 
         if (parsed is not JsonObject document)
         {
-            return new LoadOutcome(null, null, "settings.json 的顶层不是 JSON 对象。", bytes, true);
+            return new LoadOutcome(null, null, ShellStrings.PreferencesNotObject(), bytes, true);
         }
 
         if (document[SectionName] is not { } node)
         {
-            return new LoadOutcome(null, null, null, null, false);
+            return new LoadOutcome(null, null, default, null, false);
         }
 
         if (node is not JsonObject)
         {
-            return new LoadOutcome(null, null, "settings.json 的 preferences 段不是 JSON 对象。", bytes, true);
+            return new LoadOutcome(null, null, ShellStrings.PreferencesSectionNotObject(), bytes, true);
         }
 
         PreferencesSection? section;
@@ -425,20 +427,20 @@ internal sealed class PreferencesStore : IAsyncDisposable
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or NotSupportedException)
         {
-            return new LoadOutcome(null, null, "settings.json 的 preferences 段无效：" + exception.Message, bytes, true);
+            return new LoadOutcome(null, null, ShellStrings.PreferencesSectionInvalid(exception.Message), bytes, true);
         }
 
         if (section is null)
         {
-            return new LoadOutcome(null, null, null, null, false);
+            return new LoadOutcome(null, null, default, null, false);
         }
 
         if (!AppPreferences.TryParseLanguage(section.Language, out var language))
         {
-            return new LoadOutcome(section, UiLanguage.System, "settings.json 的 preferences.language 无法识别：" + section.Language, bytes, true);
+            return new LoadOutcome(section, UiLanguage.System, ShellStrings.PreferencesLanguageUnknown(section.Language), bytes, true);
         }
 
-        return new LoadOutcome(section, language, null, null, false);
+        return new LoadOutcome(section, language, default, null, false);
     }
 
     /// <summary>Re-reads the whole file so the write is a merge, not an overwrite; null when it is missing.</summary>
@@ -485,7 +487,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
     private readonly record struct LoadOutcome(
         PreferencesSection? Section,
         UiLanguage? Language,
-        string? Problem,
+        LocText Problem,
         byte[]? Raw,
         bool Protect);
 }

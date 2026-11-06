@@ -3,6 +3,7 @@
         xmlns:vm="using:Forge.App.ViewModels"
         xmlns:wb="using:Forge.App.Workbench.Controls"
         xmlns:prefs="using:Forge.App.Preferences"
+        xmlns:loc="using:Forge.App.Localization"
         x:Class="Forge.App.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Forge"
@@ -50,17 +51,17 @@
                  Background="{DynamicResource SearchBoxBackgroundBrush}"
                  BorderBrush="{DynamicResource SearchBoxBorderBrush}"
                  BorderThickness="1"
-                 PlaceholderText="搜索（即将可用）"
+                 PlaceholderText="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
                  AutomationProperties.AutomationId="shell-search"
-                 AutomationProperties.Name="搜索" />
+                 AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}" />
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
           <Button Classes="ghost icon"
                   Width="30"
                   Height="26"
                   Command="{Binding ToggleSettingsCommand}"
-                  AutomationProperties.AutomationId="open-settings" AutomationProperties.Name="设置"
-                  ToolTip.Tip="设置">
+                  AutomationProperties.AutomationId="open-settings" AutomationProperties.Name="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}"
+                  ToolTip.Tip="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}">
             <PathIcon Data="{StaticResource IconGear}" Width="13" Height="13" />
           </Button>
           <Button x:Name="MinimizeButton"
@@ -68,8 +69,8 @@
                   Width="34"
                   Height="26"
                   Click="OnMinimizeClick"
-                  AutomationProperties.AutomationId="window-minimize" AutomationProperties.Name="最小化"
-                  ToolTip.Tip="最小化">
+                  AutomationProperties.AutomationId="window-minimize" AutomationProperties.Name="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}"
+                  ToolTip.Tip="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}">
             <PathIcon Data="{StaticResource IconMinimize}" Width="11" Height="11" />
           </Button>
           <Button x:Name="MaximizeButton"
@@ -77,8 +78,7 @@
                   Width="34"
                   Height="26"
                   Click="OnMaximizeClick"
-                  ToolTip.Tip="最大化"
-                  AutomationProperties.AutomationId="window-maximize" AutomationProperties.Name="最大化">
+                  AutomationProperties.AutomationId="window-maximize">
             <PathIcon x:Name="MaximizeIcon" Data="{StaticResource IconMaximize}" Width="11" Height="11" />
           </Button>
           <Button x:Name="CloseButton"
@@ -86,8 +86,8 @@
                   Width="34"
                   Height="26"
                   Click="OnCloseClick"
-                  AutomationProperties.AutomationId="window-close" AutomationProperties.Name="关闭窗口"
-                  ToolTip.Tip="关闭">
+                  AutomationProperties.AutomationId="window-close" AutomationProperties.Name="{Binding [window.closeWindow], Source={x:Static loc:Loc.Instance}}"
+                  ToolTip.Tip="{Binding [window.close], Source={x:Static loc:Loc.Instance}}">
             <PathIcon Data="{StaticResource IconClose}" Width="11" Height="11" />
           </Button>
         </StackPanel>
@@ -162,7 +162,7 @@
             <Button Grid.Column="1"
                     Classes="ghost icon"
                     Command="{Binding ToggleSettingsCommand}"
-                    AutomationProperties.AutomationId="close-settings" AutomationProperties.Name="关闭设置">
+                    AutomationProperties.AutomationId="close-settings" AutomationProperties.Name="{Binding [shell.closeSettings], Source={x:Static loc:Loc.Instance}}">
               <PathIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
             </Button>
           </Grid>

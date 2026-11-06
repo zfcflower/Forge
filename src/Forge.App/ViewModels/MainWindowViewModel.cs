@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.App.Workbench;
 using Forge.HostClient;
 using Forge.Workspace;
@@ -33,6 +34,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan LayoutSaveDelay = TimeSpan.FromMilliseconds(800);
 
     private readonly AppComposition composition;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private readonly LayoutStateLoader layoutState;
     private readonly Dictionary<string, SessionWorkspaceViewModel> sessions = new(StringComparer.Ordinal);
     private readonly HashSet<string> openTabs = new(StringComparer.Ordinal);
@@ -41,6 +43,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
     private ReviewStore reviews;
+    private PanelToolButton? openChangesTool;
     private SessionWorkspaceViewModel? activeSession;
     private FinishedSubAgentsViewModel? watchedFinishedMenu;
     private IDialogService? dialogs;
@@ -82,16 +85,18 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Changes = new ChangesViewModel(composition.Git, composition.TurnCheckpoints);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs);
-        Workbench.FilesPanel.HeaderTools.Add(new PanelToolButton(
+        openChangesTool = new PanelToolButton(
             OpenChangesToolId,
-            Strings.OpenChangesTooltip,
+            ShellStrings.OpenChangesTooltip,
             "IconRestore",
-            ShowChangesCommand));
+            ShowChangesCommand);
+        Workbench.FilesPanel.HeaderTools.Add(openChangesTool);
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
         Workbench.TabClosed += OnTabClosed;
         Workbench.ActiveTabChanged += OnActiveTabChanged;
         Workbench.LayoutChanged += OnLayoutChanged;
         Workbench.PropertyChanged += OnWorkbenchPropertyChanged;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
 
         AddProjectCommand = new AsyncRelayCommand(AddProjectAsync, () => !disposed, OnCommandFailed);
         ToggleSettingsCommand = new RelayCommand(() => Settings.IsOpen = !Settings.IsOpen);
@@ -153,7 +158,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public AsyncRelayCommand RevealGeneralCommand { get; }
 
-    public string ProviderNotice => composition.Provider.Status;
+    public string ProviderNotice => composition.Provider.StatusText.Resolve();
 
     public bool ShowProviderNotice => !composition.Provider.IsConfigured;
 
@@ -175,7 +180,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool HasActiveSession => activeSession is not null;
 
-    public string ActiveSessionTitle => activeSession?.Title ?? "没有打开的会话";
+    public string ActiveSessionTitle => activeSession?.Title ?? ShellStrings.NoOpenSession;
 
     public void AttachDialogs(IDialogService dialogService) => dialogs = dialogService;
 
@@ -188,7 +193,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Status.SetWorkspaceProblem(Strings.DatabaseProblem + exception.Message);
+            Status.SetWorkspaceProblem(ShellStrings.DatabaseProblem(exception.Message));
             return;
         }
 
@@ -215,7 +220,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or IOException)
                 {
-                    Dispatcher.UIThread.Post(() => Status.SetWorkspaceProblem(Strings.ProjectsProblem + exception.Message));
+                    Dispatcher.UIThread.Post(() => Status.SetWorkspaceProblem(ShellStrings.ProjectsProblem(exception.Message)));
                 }
             });
 
@@ -785,7 +790,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         if (activeSession is null || activeSession.WorkDir.Length == 0)
         {
-            Status.SetWorkspaceProblem(Strings.NoSession);
+            Status.SetWorkspaceProblem(new LocText(ShellStrings.NoOpenSessionKey));
             return null;
         }
 
@@ -814,7 +819,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             WorkbenchIds.ChangesTab,
             TabKind.Changes,
             Changes,
-            Strings.ChangesTitle,
+            ShellStrings.ChangesTitle,
             activate: activate,
             closable: false);
     }
@@ -828,7 +833,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var folder = await dialogs.PickFolderAsync(Strings.PickRepositoryTitle).ConfigureAwait(true);
+        var folder = await dialogs.PickFolderAsync(ShellStrings.PickRepositoryTitle).ConfigureAwait(true);
         if (string.IsNullOrWhiteSpace(folder))
         {
             return;
@@ -838,10 +843,10 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (!isRepository)
         {
             var confirmed = await dialogs.ConfirmAsync(
-                    Strings.NotRepositoryTitle,
-                    Strings.NotRepositoryMessage(folder),
-                    Strings.GitInit,
-                    Strings.Cancel)
+                    ShellStrings.NotRepositoryTitle,
+                    ShellStrings.NotRepositoryMessage(folder),
+                    ShellStrings.GitInit,
+                    ShellStrings.Cancel)
                 .ConfigureAwait(true);
             if (!confirmed)
             {
@@ -851,7 +856,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             var init = await Task.Run(() => composition.Git.RunAsync(folder, ["init"], ct), ct).ConfigureAwait(true);
             if (!init.Success)
             {
-                Status.SetWorkspaceProblem(Strings.GitInit + ": " + init.StandardError.Trim());
+                Status.SetWorkspaceProblem(ShellStrings.GitInitFailed(init.StandardError.Trim()));
                 return;
             }
         }
@@ -871,7 +876,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        var confirmed = await dialogs.ConfirmAsync(Strings.NewSessionTitle, Strings.NewSessionQuestion, Strings.Create, Strings.Cancel)
+        var confirmed = await dialogs.ConfirmAsync(ShellStrings.NewSessionTitle, ShellStrings.NewSessionQuestion, ShellStrings.Create, ShellStrings.Cancel)
             .ConfigureAwait(true);
         if (!confirmed)
         {
@@ -886,7 +891,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         catch (Exception exception) when (exception is GitException or InvalidOperationException or IOException or ArgumentException)
         {
-            Status.SetWorkspaceProblem(exception.Message);
+            Status.SetWorkspaceProblem(LocText.Literal(exception.Message));
             return false;
         }
     }
@@ -914,7 +919,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
-    private void OnCommandFailed(Exception exception) => Status.SetWorkspaceProblem(exception.Message);
+    private void OnCommandFailed(Exception exception) => Status.SetWorkspaceProblem(LocText.Literal(exception.Message));
 
     private void OnClockTick(object? sender, EventArgs e)
     {
@@ -929,7 +934,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void OnHostStatusChanged(HostStatus status, string? detail) =>
+    private void OnHostStatusChanged(HostStatus status, LocText? detail) =>
         Dispatcher.UIThread.Post(() =>
         {
             Status.SetHost(status, detail);
@@ -941,6 +946,49 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         });
 
     private void OnHostSurfaceChanged() => Dispatcher.UIThread.Post(RefreshInventory);
+
+    /// <summary>
+    /// Only the texts this view model computes have to be re-raised: the workbench titles belong to
+    /// <see cref="WorkbenchLayout"/>, the status bar to <see cref="StatusBarViewModel"/> and the settings page to
+    /// <see cref="SettingsViewModel"/>, each of which listens on its own.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(ActiveSessionTitle));
+        OnPropertyChanged(nameof(ProviderNotice));
+        RefreshOpenChangesTool();
+    }
+
+    /// <summary>
+    /// The open-changes header tool carries its tooltip as a plain string on the model, so a language switch replaces
+    /// that one item in place; the collection is a view model the panel binds to, not a control built here.
+    /// </summary>
+    private void RefreshOpenChangesTool()
+    {
+        if (openChangesTool is not { } existing)
+        {
+            return;
+        }
+
+        var tools = Workbench.FilesPanel.HeaderTools;
+        var index = tools.IndexOf(existing);
+        if (index < 0)
+        {
+            return;
+        }
+
+        openChangesTool = new PanelToolButton(
+            OpenChangesToolId,
+            ShellStrings.OpenChangesTooltip,
+            "IconRestore",
+            ShowChangesCommand);
+        tools[index] = openChangesTool;
+    }
 
     private void RefreshInventory()
     {
@@ -1008,6 +1056,18 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Workbench.ActiveTabChanged -= OnActiveTabChanged;
         Workbench.LayoutChanged -= OnLayoutChanged;
         Workbench.PropertyChanged -= OnWorkbenchPropertyChanged;
+
+        // The long-lived owners subscribe to the string table themselves; they drop it with the window.
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        Status.Dispose();
+        Settings.Dispose();
+        Projects.Dispose();
+        Files.Dispose();
+        Changes.Dispose();
+        Todos.Dispose();
+        Reviews.Dispose();
+        Specs.Dispose();
+        Workbench.Dispose();
     }
 
     /// <summary>
@@ -1020,7 +1080,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     public int OpenTabCount => openTabs.Count;
 
     public string LayoutSummary =>
-        (activeSession is null ? Strings.NoOpenSession : activeSession.WorkDir) + " · " +
+        (activeSession is null ? ShellStrings.NoOpenSession : activeSession.WorkDir) + " · " +
         openTabs.Count.ToString(CultureInfo.InvariantCulture) + " tabs";
 
     public IReadOnlyCollection<string> OpenTabIds => openTabs;

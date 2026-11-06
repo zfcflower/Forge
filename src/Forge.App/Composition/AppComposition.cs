@@ -42,13 +42,13 @@ internal sealed class AppComposition : IAsyncDisposable
         HttpClient httpClient,
         string approvalsDatabasePath,
         ExtensionHostSupervisor? host,
-        string? hostProblem,
+        LocText hostProblem,
         WorkspaceServices? workspace,
-        string? workspaceProblem,
+        LocText workspaceProblem,
         McpServices? mcp,
-        string? mcpProblem,
+        LocText mcpProblem,
         EditorServices? editor,
-        string? editorProblem,
+        LocText editorProblem,
         ProviderSettings provider,
         GitCli git,
         SqliteSessionStore sessions,
@@ -105,13 +105,14 @@ internal sealed class AppComposition : IAsyncDisposable
 
     public ProviderSettings Provider { get; private set; }
 
-    public string? HostProblem { get; }
+    /// <summary>Why the extension host is not running (it could not be located), or empty. Resolved when it is shown.</summary>
+    public LocText HostProblem { get; }
 
-    public string? WorkspaceProblem { get; }
+    public LocText WorkspaceProblem { get; }
 
-    public string? McpProblem { get; }
+    public LocText McpProblem { get; }
 
-    public string? EditorProblem { get; }
+    public LocText EditorProblem { get; }
 
     /// <summary>Null when the JIT side was not found; the status bar then says so instead of the app failing to start.</summary>
     public ExtensionHostSupervisor? Host => host;
@@ -182,7 +183,7 @@ internal sealed class AppComposition : IAsyncDisposable
 
         // 2. Extension host client (AOT side of the JIT boundary; the client owns the child process).
         ExtensionHostSupervisor? host = null;
-        string? hostProblem = null;
+        var hostProblem = default(LocText);
         var layout = JitHostLayout.Locate(out var locateProblem);
         if (layout is null)
         {
@@ -195,38 +196,38 @@ internal sealed class AppComposition : IAsyncDisposable
 
         // 3. Workspace.
         WorkspaceServices? workspace = null;
-        string? workspaceProblem = null;
+        var workspaceProblem = default(LocText);
         try
         {
             workspace = WorkspaceServices.Create(paths);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            workspaceProblem = "工作区服务不可用：" + exception.Message;
+            workspaceProblem = ShellStrings.WorkspaceServiceProblem(exception.Message);
         }
 
         // 4. MCP.
         McpServices? mcp = null;
-        string? mcpProblem = null;
+        var mcpProblem = default(LocText);
         try
         {
             mcp = McpServices.Create(paths);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            mcpProblem = "MCP 服务不可用：" + exception.Message;
+            mcpProblem = ShellStrings.McpServiceProblem(exception.Message);
         }
 
         // 5. Editor.
         EditorServices? editor = null;
-        string? editorProblem = null;
+        var editorProblem = default(LocText);
         try
         {
             editor = EditorServices.Create(paths);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            editorProblem = "编辑器服务不可用：" + exception.Message;
+            editorProblem = ShellStrings.EditorServiceProblem(exception.Message);
         }
 
         // 6. Provider settings.

@@ -8,7 +8,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
-using Forge.App.ViewModels;
+using Forge.App.Localization;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -23,16 +23,19 @@ internal sealed class FloatingPanelWindow : Window
     private ContentControl? tabContent;
     private ContentControl? previewContent;
     private Border? previewColumn;
+    private PanelIconButton? dockButton;
+    private TextBlock? titleLabel;
     private TabGroupModel? watchedPreview;
     private TabModel? watchedTab;
     private readonly List<TabModel> watchedPreviewTabs = [];
     private bool geometryReady;
+    private int uiThread;
 
     public FloatingPanelWindow(WorkbenchLayout layout, FloatingItem item)
     {
         this.layout = layout;
         this.item = item;
-        Title = item.Tab?.Title ?? Strings.FilesName;
+        Title = WindowTitle;
         WindowDecorations = WindowDecorations.BorderOnly;
         ShowInTaskbar = false;
         CanResize = true;
@@ -75,10 +78,14 @@ internal sealed class FloatingPanelWindow : Window
         }
 
         geometryReady = true;
+        uiThread = Environment.CurrentManagedThreadId;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+
         if (watchedTab is not null)
         {
             watchedTab.PropertyChanged -= OnTabChanged;
@@ -162,10 +169,12 @@ internal sealed class FloatingPanelWindow : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        ToolTip.SetTip(dock, Strings.DockBack);
+        ToolTip.SetTip(dock, ShellStrings.DockBack);
         AutomationProperties.SetAutomationId(dock, "floating-" + item.Id + "-dock");
-        AutomationProperties.SetName(dock, Strings.DockBack);
+        AutomationProperties.SetName(dock, ShellStrings.DockBack);
         dock.Click += OnDockClick;
+        dockButton = dock;
+        titleLabel = label;
 
         var filesPanel = item.FilesPanel;
         var content = new Grid { ColumnDefinitions = new ColumnDefinitions(filesPanel is null ? "*,Auto" : "*,Auto,Auto") };
@@ -260,6 +269,34 @@ internal sealed class FloatingPanelWindow : Window
         e.Handled = true;
         layout.Dock(item);
     }
+
+    /// <summary>
+    /// The dock button's text and the files panel's heading are built in code, so this window reads them again on a
+    /// language switch; a tab's title is content and is left as it is (the files panel has no such title).
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        Title = WindowTitle;
+        AutomationProperties.SetName(this, WindowTitle);
+
+        if (dockButton is { } button)
+        {
+            ToolTip.SetTip(button, ShellStrings.DockBack);
+            AutomationProperties.SetName(button, ShellStrings.DockBack);
+        }
+
+        if (item.Tab is null && titleLabel is not null)
+        {
+            titleLabel.Text = WindowTitle;
+        }
+    }
+
+    private string WindowTitle => item.Tab?.Title ?? ShellStrings.FilesTitle;
 
     private void OnTabChanged(object? sender, PropertyChangedEventArgs e)
     {

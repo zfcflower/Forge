@@ -13,11 +13,12 @@ namespace Forge.App.ViewModels;
 /// for its view model, so a feature adds its settings without editing the page. Section headings and the page's own
 /// labels are <see cref="Loc"/> keys and refresh on <see cref="Loc.LanguageChanged"/>.</para>
 /// </summary>
-internal sealed class SettingsViewModel : ObservableObject
+internal sealed class SettingsViewModel : ObservableObject, IDisposable
 {
     private readonly AppComposition composition;
     private readonly ProviderSettingsSectionViewModel provider;
     private readonly PathsSettingsSectionViewModel paths;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool isOpen;
 
     public SettingsViewModel(AppComposition composition)
@@ -67,17 +68,18 @@ internal sealed class SettingsViewModel : ObservableObject
 
         var providerSettings = composition.Provider;
         provider.Detail = providerSettings.Provider is { } snapshot
-            ? Strings.ProviderDetail(snapshot.Summary, snapshot.HasApiKey, snapshot.KeyFromEnvironment)
-            : providerSettings.Status;
+            ? ShellStrings.ProviderDetail(snapshot.Summary, snapshot.HasApiKey, snapshot.KeyFromEnvironment)
+            : providerSettings.StatusText.Resolve();
 
         if (composition.PreferencesProblem is { Length: > 0 } preferencesProblem)
         {
             paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathPreferences], preferencesProblem));
         }
 
-        if (composition.HostProblem is { Length: > 0 } hostProblem)
+        var hostProblem = composition.HostProblem;
+        if (!hostProblem.IsEmpty)
         {
-            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathHost], hostProblem));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathHost], hostProblem.Resolve()));
         }
 
         if (composition.ApprovalsDatabasePath is { Length: > 0 } approvalsDatabase)
@@ -87,14 +89,17 @@ internal sealed class SettingsViewModel : ObservableObject
 
         if (composition.Mcp is { } mcp)
         {
-            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathMcp], Strings.McpDetail(mcp.ConfiguredServers, mcp.ConfigDiagnostics)));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathMcp], ShellStrings.McpDetail(mcp.ConfiguredServers, mcp.ConfigDiagnostics)));
         }
 
         if (composition.Editor is { } editor)
         {
-            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathEditor], Strings.EditorDetail(editor.LanguageCount, editor.GrammarCount, editor.Problem)));
+            paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathEditor], ShellStrings.EditorDetail(editor.LanguageCount, editor.GrammarCount, editor.Problem)));
         }
     }
+
+    /// <summary>Drops the language subscription; the window view model disposes the settings page with itself.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 
     /// <summary>
     /// Text that caches a language-dependent value has to re-read it: the headings through <see cref="SettingsSection.Title"/>,
@@ -102,6 +107,13 @@ internal sealed class SettingsViewModel : ObservableObject
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A notification from another thread belongs to a settings page whose window is gone (a test host): rebuilding
+        // its rows there would touch bound controls off their thread.
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(ReloadText));
         OnPropertyChanged(nameof(CloseText));

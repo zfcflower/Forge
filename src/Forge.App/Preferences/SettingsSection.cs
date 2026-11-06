@@ -41,7 +41,7 @@ internal sealed class SettingsSections
         {
             if (string.Equals(existing.Id, section.Id, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("设置分区 id 重复：" + section.Id);
+                throw new InvalidOperationException("Duplicate settings section id: " + section.Id);
             }
         }
 

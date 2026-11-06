@@ -4,7 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Forge.App.ViewModels;
+using Forge.App.Localization;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -31,6 +31,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     private readonly List<TabHeaderView> headers = [];
     private StackPanel? tabsHost;
     private TabGroupModel? subscribedGroup;
+    private int attachedThread;
     private TabModel? dragTab;
     private Point dragStart;
     private TabDragMode dragMode;
@@ -100,14 +101,33 @@ internal sealed class PanelTabStrip : TemplatedControl
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        attachedThread = Environment.CurrentManagedThreadId;
         Subscribe();
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         Rebuild();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
         Unsubscribe();
         base.OnDetachedFromVisualTree(e);
+    }
+
+    /// <summary>
+    /// Every tab owns a context menu whose headers are built in code, so the strip re-reads them by rebuilding the
+    /// headers on a language switch instead of subscribing each menu to the process-wide table. A notification that
+    /// arrives on another thread belongs to a session whose window is gone (a test host) and is ignored: this control
+    /// only ever lives on the thread it was attached on.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId != attachedThread)
+        {
+            return;
+        }
+
+        Rebuild();
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -259,7 +279,7 @@ internal sealed class PanelTabStrip : TemplatedControl
     private ContextMenu BuildContextMenu(TabModel tab)
     {
         var menu = new ContextMenu();
-        var open = new MenuItem { Header = Strings.OpenInNewWindow };
+        var open = new MenuItem { Header = ShellStrings.OpenInNewWindow };
         open.Click += (_, _) => Layout?.FloatTab(tab);
         menu.Items.Add(open);
 
@@ -268,11 +288,11 @@ internal sealed class PanelTabStrip : TemplatedControl
             return menu;
         }
 
-        var close = new MenuItem { Header = Strings.Close };
+        var close = new MenuItem { Header = ShellStrings.CloseTab };
         close.Click += (_, _) => CloseTab(tab);
         menu.Items.Add(close);
 
-        var closeOthers = new MenuItem { Header = Strings.CloseOtherTabs };
+        var closeOthers = new MenuItem { Header = ShellStrings.CloseOtherTabs };
         closeOthers.Click += (_, _) => CloseOtherTabs(tab);
         menu.Items.Add(closeOthers);
         return menu;

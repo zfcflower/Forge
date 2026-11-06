@@ -1,19 +1,29 @@
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.HostClient;
 
 namespace Forge.App.ViewModels;
 
-/// <summary>The status bar: extension host state, plugin count, provider state, MCP and workspace summary.</summary>
-internal sealed class StatusBarViewModel : ObservableObject
+/// <summary>
+/// The status bar: extension host state, plugin count, provider state, MCP and workspace summary.
+/// <para>Every value is a key or a count, never a resolved sentence: the text properties compute their text in the
+/// current language, so a language switch only has to raise <c>PropertyChanged</c> (<see cref="RefreshText"/>). The
+/// startup problems and the provider status are kept as <see cref="LocText"/> because they are computed before they are
+/// shown; the exception message inside them is literal and is never translated.</para>
+/// </summary>
+internal sealed class StatusBarViewModel : ObservableObject, IDisposable
 {
     private readonly IApprovalCounter? approvals;
-    private string hostText = Strings.HostStarting;
-    private string pluginsText = Strings.PluginsUnknown;
-    private string providerText = Strings.ProviderUnknown;
-    private string mcpText = Strings.McpNone;
-    private string approvalsText = Strings.ApprovalsUnknown;
-    private string hostDetail = string.Empty;
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+    private string hostStateKey = ShellStrings.HostStartingKey;
+    private LocText hostDetail;
+    private LocText providerStatus;
+    private int? mcpConfigured;
+    private int? mcpReady;
+    private int? approvalCount;
+    private int? pluginCount;
+    private int? toolCount;
     private bool isHostRunning;
     private bool isHostStarting = true;
     private bool isHostFailed;
@@ -30,10 +40,11 @@ internal sealed class StatusBarViewModel : ObservableObject
 
         if (composition.Mcp is { } mcp)
         {
-            mcpText = Strings.Mcp(mcp.ConfiguredServers);
+            mcpConfigured = mcp.ConfiguredServers;
         }
 
         approvals = composition.ApprovalsCounter;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         _ = RefreshApprovalsAsync();
     }
 
@@ -60,50 +71,28 @@ internal sealed class StatusBarViewModel : ObservableObject
         }
     }
 
-    public string HostText
-    {
-        get => hostText;
-        private set => Set(ref hostText, value);
-    }
+    public string HostText => Loc.Instance[hostStateKey];
 
     /// <summary>Second line of the host message (the failure detail), empty when there is nothing to add.</summary>
-    public string HostDetail
-    {
-        get => hostDetail;
-        private set
-        {
-            if (Set(ref hostDetail, value))
-            {
-                OnPropertyChanged(nameof(HasHostDetail));
-            }
-        }
-    }
+    public string HostDetail => hostDetail.Resolve();
 
-    public bool HasHostDetail => hostDetail.Length > 0;
+    public bool HasHostDetail => !hostDetail.IsEmpty;
 
-    public string PluginsText
-    {
-        get => pluginsText;
-        private set => Set(ref pluginsText, value);
-    }
+    public string PluginsText => pluginCount is { } plugins && toolCount is { } tools
+        ? ShellStrings.Plugins(plugins, tools)
+        : ShellStrings.PluginsUnknown;
 
-    public string ProviderText
-    {
-        get => providerText;
-        private set => Set(ref providerText, value);
-    }
+    public string ProviderText => providerStatus.IsEmpty
+        ? ShellStrings.ProviderUnknown
+        : ShellStrings.ProviderText(providerStatus);
 
-    public string McpText
-    {
-        get => mcpText;
-        private set => Set(ref mcpText, value);
-    }
+    public string McpText => mcpConfigured is { } configured
+        ? mcpReady is { } ready ? ShellStrings.McpState(configured, ready) : ShellStrings.Mcp(configured)
+        : ShellStrings.McpNone;
 
-    public string ApprovalsText
-    {
-        get => approvalsText;
-        private set => Set(ref approvalsText, value);
-    }
+    public string ApprovalsText => approvalCount is { } count
+        ? ShellStrings.Approvals(count)
+        : ShellStrings.ApprovalsUnknown;
 
     public string WorkspaceText { get; }
 
@@ -125,50 +114,99 @@ internal sealed class StatusBarViewModel : ObservableObject
         private set => Set(ref isHostFailed, value);
     }
 
-    public void SetHost(HostStatus status, string? detail)
+    public void SetHost(HostStatus status, LocText? detail)
     {
         IsHostRunning = status == HostStatus.Running;
         IsHostStarting = status == HostStatus.Starting;
         IsHostFailed = status == HostStatus.Failed;
-        HostText = status switch
+        hostStateKey = status switch
         {
-            HostStatus.Running => Strings.HostRunning,
-            HostStatus.Starting => Strings.HostStarting,
-            HostStatus.Failed => Strings.HostFailed,
-            _ => Strings.HostStopped,
+            HostStatus.Running => ShellStrings.HostRunningKey,
+            HostStatus.Starting => ShellStrings.HostStartingKey,
+            HostStatus.Failed => ShellStrings.HostFailedKey,
+            _ => ShellStrings.HostStoppedKey,
         };
-        HostDetail = string.IsNullOrWhiteSpace(detail) ? string.Empty : detail;
+
+        hostDetail = detail is { IsEmpty: false } text && !string.IsNullOrWhiteSpace(text.Resolve()) ? text : default;
+        OnPropertyChanged(nameof(HostText));
+        OnPropertyChanged(nameof(HostDetail));
+        OnPropertyChanged(nameof(HasHostDetail));
+
         if (status != HostStatus.Running)
         {
-            PluginsText = Strings.PluginsUnknown;
+            pluginCount = null;
+            toolCount = null;
+            OnPropertyChanged(nameof(PluginsText));
         }
     }
 
     public void SetInventory(PluginInventory? inventory)
     {
-        PluginsText = inventory is null
-            ? Strings.PluginsUnknown
-            : Strings.Plugins(inventory.PluginCount, inventory.ToolCount);
+        pluginCount = inventory?.PluginCount;
+        toolCount = inventory?.ToolCount;
+        OnPropertyChanged(nameof(PluginsText));
     }
 
     public void SetHostProcess(int? processId)
     {
         if (processId is { } id && IsHostRunning)
         {
-            HostDetail = Strings.ProcessId(id);
+            SetDetail(new LocText(ShellStrings.ProcessIdKey, TextFormat.Id(id)));
         }
     }
 
-    public void ApplyProvider(ProviderSettings settings) => ProviderText = Strings.ProviderText(settings.Status);
+    public void ApplyProvider(ProviderSettings settings)
+    {
+        providerStatus = settings.StatusText;
+        OnPropertyChanged(nameof(ProviderText));
+    }
 
     /// <summary>Surfaces a storage or git problem in the status bar without pretending the app is fine.</summary>
-    public void SetWorkspaceProblem(string problem) => HostDetail = problem;
+    public void SetWorkspaceProblem(LocText problem) => SetDetail(problem);
 
-    public void SetMcp(int configured, int ready) => McpText = Strings.McpState(configured, ready);
+    public void SetMcp(int configured, int ready)
+    {
+        mcpConfigured = configured;
+        mcpReady = ready;
+        OnPropertyChanged(nameof(McpText));
+    }
 
-    public void SetApprovals(int? records) => ApprovalsText = records is { } count
-        ? Strings.Approvals(count)
-        : Strings.ApprovalsUnknown;
+    public void SetApprovals(int? records)
+    {
+        approvalCount = records;
+        OnPropertyChanged(nameof(ApprovalsText));
+    }
+
+    /// <summary>Re-reads every text that comes from <see cref="Loc"/>; an old value is never kept across a switch.</summary>
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(HostText));
+        OnPropertyChanged(nameof(HostDetail));
+        OnPropertyChanged(nameof(HasHostDetail));
+        OnPropertyChanged(nameof(PluginsText));
+        OnPropertyChanged(nameof(ProviderText));
+        OnPropertyChanged(nameof(McpText));
+        OnPropertyChanged(nameof(ApprovalsText));
+    }
+
+    /// <summary>Drops the language subscription; the window view model disposes the status bar with itself.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
+
+    private void SetDetail(LocText detail)
+    {
+        hostDetail = detail;
+        OnPropertyChanged(nameof(HostDetail));
+        OnPropertyChanged(nameof(HasHostDetail));
+    }
+
+    /// <summary>A notification from another thread belongs to a status bar whose window is gone (a test host).</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId == uiThread)
+        {
+            RefreshText();
+        }
+    }
 
     private static string Shorten(string path) =>
         path.Length <= 48 ? path : "…" + path[^47..];

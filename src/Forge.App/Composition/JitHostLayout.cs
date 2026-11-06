@@ -1,3 +1,5 @@
+using Forge.App.Localization;
+
 namespace Forge.App.Composition;
 
 /// <summary>
@@ -26,33 +28,31 @@ internal sealed record JitHostLayout(string HostPath, string WorkerPath, string 
         ["Release", "Debug"];
 #endif
 
-    /// <summary>Resolves the layout, or returns null with a sentence explaining what was searched.</summary>
-    public static JitHostLayout? Locate(out string problem)
+    /// <summary>Resolves the layout, or returns null with the sentence (as a key) explaining what was searched.</summary>
+    public static JitHostLayout? Locate(out LocText problem)
     {
         var host = Resolve(HostAssembly);
         if (host is null)
         {
-            problem =
-                "找不到 " + HostAssembly + ".dll。请先构建 JIT 部分(dotnet build Forge.slnx)，或把 " +
-                DirectoryVariable + " 指向它所在的目录。";
+            problem = ShellStrings.JitHostMissing(HostAssembly, DirectoryVariable);
             return null;
         }
 
         var worker = Resolve(WorkerAssembly);
         if (worker is null)
         {
-            problem = "找不到 " + WorkerAssembly + ".dll；请先构建 JIT 部分，或设置 " + DirectoryVariable + "。";
+            problem = ShellStrings.JitComponentMissing(WorkerAssembly, DirectoryVariable);
             return null;
         }
 
         var executor = Resolve(ExecutorAssembly);
         if (executor is null)
         {
-            problem = "找不到 " + ExecutorAssembly + ".dll；请先构建 JIT 部分，或设置 " + DirectoryVariable + "。";
+            problem = ShellStrings.JitComponentMissing(ExecutorAssembly, DirectoryVariable);
             return null;
         }
 
-        problem = string.Empty;
+        problem = default;
         return new JitHostLayout(host, worker, executor);
     }
 

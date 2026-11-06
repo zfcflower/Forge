@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Workbench;
@@ -8,13 +9,12 @@ namespace Forge.App.Workbench;
 /// The single owner of the workbench layout state (forge-app spec, "工作台布局"). No Avalonia types: controls render it
 /// and call these operations, view models open and close tabs through it, and nothing else edits the collections.
 /// UI-thread only. Every state change that the snapshot records raises <see cref="LayoutChanged"/>.
+/// <para>The titles of the fixed panels and tabs are <see cref="Loc"/> keys (a session or file title is data, never
+/// translated): <see cref="Loc.LanguageChanged"/> re-reads them, so nothing has to rebuild the workbench.</para>
 /// </summary>
-internal sealed class WorkbenchLayout : ObservableObject
+internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 {
     private const int RegionCount = 3;
-
-    private static readonly string InspectorToolsTitle =
-        Strings.TodoTitle + " | " + Strings.ReviewTitle + " | " + Strings.SpecTreeTitle;
 
     private readonly RegionModel project;
     private readonly RegionModel main;
@@ -35,6 +35,7 @@ internal sealed class WorkbenchLayout : ObservableObject
     private readonly bool[] dragCollapsed = new bool[RegionCount];
     private readonly RegionModel?[] dragRegions = new RegionModel?[RegionCount];
 
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private double windowWidth;
     private double previewWidth = WorkbenchMetrics.DefaultPreviewWidth;
 
@@ -68,39 +69,39 @@ internal sealed class WorkbenchLayout : ObservableObject
         main = new RegionModel(RegionRole.Main, 0);
         inspector = new RegionModel(RegionRole.Inspector, WorkbenchMetrics.DefaultInspectorWidth);
 
-        projectPanel = new PanelModel(WorkbenchIds.ProjectPanel, RegionRole.Project, Strings.SectionProjects)
+        projectPanel = new PanelModel(WorkbenchIds.ProjectPanel, RegionRole.Project, ShellStrings.ProjectsTitle)
         {
             Content = projectContent,
             CanPin = true,
         };
 
-        filesPanel = new PanelModel(WorkbenchIds.FilesPanel, RegionRole.Inspector, Strings.FilesName)
+        filesPanel = new PanelModel(WorkbenchIds.FilesPanel, RegionRole.Inspector, ShellStrings.FilesTitle)
         {
             Content = filesContent,
             CanPin = true,
             CanFloat = true,
         };
 
-        mainTabs = new TabGroupModel(WorkbenchIds.MainTabs, RegionRole.Main, Strings.DocumentsTitle);
+        mainTabs = new TabGroupModel(WorkbenchIds.MainTabs, RegionRole.Main, ShellStrings.DocumentsTitle);
 
-        bottomTabs = new TabGroupModel(WorkbenchIds.BottomTabs, RegionRole.Main, Strings.SubAgentsTitle)
+        bottomTabs = new TabGroupModel(WorkbenchIds.BottomTabs, RegionRole.Main, ShellStrings.SubAgentsTitle)
         {
             CanPin = true,
         };
 
-        previewTabs = new TabGroupModel(WorkbenchIds.PreviewTabs, RegionRole.Inspector, Strings.PreviewTitle)
+        previewTabs = new TabGroupModel(WorkbenchIds.PreviewTabs, RegionRole.Inspector, ShellStrings.PreviewTitle)
         {
             CanPin = true,
         };
 
-        inspectorTools = new TabGroupModel(WorkbenchIds.InspectorTools, RegionRole.Inspector, InspectorToolsTitle)
+        inspectorTools = new TabGroupModel(WorkbenchIds.InspectorTools, RegionRole.Inspector, InspectorToolsTitleText)
         {
             CanPin = true,
         };
 
-        inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.TodoTab, TabKind.Todo, todo, Strings.TodoTitle, closable: false, inspectorTools));
-        inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.ReviewTab, TabKind.Review, review, Strings.ReviewTitle, closable: false, inspectorTools));
-        inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.SpecsTab, TabKind.Specs, specs, Strings.SpecTreeTitle, closable: false, inspectorTools));
+        inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.TodoTab, TabKind.Todo, todo, ShellStrings.TodoTitle, closable: false, inspectorTools));
+        inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.ReviewTab, TabKind.Review, review, ShellStrings.ReviewTitle, closable: false, inspectorTools));
+        inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.SpecsTab, TabKind.Specs, specs, ShellStrings.SpecTreeTitle, closable: false, inspectorTools));
         inspectorTools.ActiveTab = inspectorTools.Tabs[0];
 
         project.Panels.Add(projectPanel);
@@ -120,7 +121,58 @@ internal sealed class WorkbenchLayout : ObservableObject
             group.PropertyChanged += OnGroupPropertyChanged;
         }
 
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
+
         RecomposeVisibility();
+    }
+
+    /// <summary>Drops the language subscription; the layout outlives every tab it holds, so it owns it.</summary>
+    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
+
+    /// <summary>
+    /// Re-reads the titles of the fixed panels and tabs after a language switch. A session, sub-agent or file tab is
+    /// data (its title was built from the content) and keeps its title.
+    /// </summary>
+    private void RefreshTitles()
+    {
+        projectPanel.Title = ShellStrings.ProjectsTitle;
+        filesPanel.Title = ShellStrings.FilesTitle;
+        mainTabs.Title = ShellStrings.DocumentsTitle;
+        bottomTabs.Title = ShellStrings.SubAgentsTitle;
+        previewTabs.Title = ShellStrings.PreviewTitle;
+        inspectorTools.Title = InspectorToolsTitleText;
+
+        RefreshFixedTabTitle(WorkbenchIds.TodoTab, ShellStrings.TodoTitle);
+        RefreshFixedTabTitle(WorkbenchIds.ReviewTab, ShellStrings.ReviewTitle);
+        RefreshFixedTabTitle(WorkbenchIds.SpecsTab, ShellStrings.SpecTreeTitle);
+        RefreshFixedTabTitle(WorkbenchIds.ChangesTab, ShellStrings.ChangesTitle);
+    }
+
+    /// <summary>The inspector tools group has no single heading: its title is the three tabs it holds.</summary>
+    private static string InspectorToolsTitleText =>
+        ShellStrings.TodoTitle + " | " + ShellStrings.ReviewTitle + " | " + ShellStrings.SpecTreeTitle;
+
+    private void RefreshFixedTabTitle(string id, string title)
+    {
+        if (FindTab(id) is { } tab)
+        {
+            tab.Title = title;
+        }
+    }
+
+    /// <summary>
+    /// Re-reads the fixed titles after a language switch. A notification from another thread belongs to a layout whose
+    /// window is gone (a test host); applying it would touch bound controls off their thread, so it is ignored - this
+    /// layout lives on the thread that built it.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        RefreshTitles();
     }
 
     // ---------------------------------------------------------------- regions

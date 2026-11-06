@@ -5,6 +5,7 @@ using Avalonia.Headless;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Workbench;
 using Forge.App.Workbench.Controls;
@@ -147,7 +148,7 @@ public sealed class WorkbenchControlsLifecycleTests
             var layout = WorkbenchLifecycle.NewLayout();
             layout.FilesPanel.HeaderTools.Add(new PanelToolButton(
                 "files-open-changes",
-                Strings.OpenChangesTooltip,
+                ShellStrings.OpenChangesTooltip,
                 "IconRestore",
                 new RelayCommand(() => { })));
             layout.FloatFilesPanel();

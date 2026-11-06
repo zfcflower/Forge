@@ -1,3 +1,4 @@
+using Forge.App.Localization;
 using Forge.Workspace;
 
 namespace Forge.App.Services;
@@ -80,7 +81,7 @@ internal sealed class WorktreeService
         if (!init.Success)
         {
             throw new GitException(
-                "在常规工作区执行 git init 失败：" + init.StandardError.Trim(),
+                ShellStrings.GitInitFailed(init.StandardError.Trim()).Resolve(),
                 ["init"],
                 init.ExitCode,
                 init.StandardError);

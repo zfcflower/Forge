@@ -8,7 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
-using Forge.App.ViewModels;
+using Forge.App.Localization;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -102,6 +102,7 @@ internal sealed class PanelChrome : TemplatedControl
     private RegionModel? watchedRegion;
     private bool attached;
     private bool subscribed;
+    private int attachedThread;
 
     static PanelChrome()
     {
@@ -287,6 +288,7 @@ internal sealed class PanelChrome : TemplatedControl
     {
         base.OnAttachedToVisualTree(e);
         attached = true;
+        attachedThread = Environment.CurrentManagedThreadId;
         Subscribe();
         RefreshModel();
     }
@@ -413,6 +415,7 @@ internal sealed class PanelChrome : TemplatedControl
         subscribed = true;
         model.PropertyChanged += OnModelChanged;
         layout.PropertyChanged += OnLayoutChanged;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         watchedRegion = layout.GetRegion(model.Region);
         watchedRegion.PropertyChanged += OnRegionChanged;
         if (model is TabGroupModel group)
@@ -435,6 +438,7 @@ internal sealed class PanelChrome : TemplatedControl
         }
 
         subscribed = false;
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
         if (Model is { } model)
         {
             model.PropertyChanged -= OnModelChanged;
@@ -501,6 +505,23 @@ internal sealed class PanelChrome : TemplatedControl
         }
     }
 
+    /// <summary>
+    /// The button tooltips are built in code, so this control reads them again on a language switch. It is subscribed
+    /// only while it is in the visual tree, so a panel of a closed window holds no reference to the static table.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        // A control of a window whose session is gone (a test host) still sits in the subscriber list of the
+        // process-wide table; touching its properties from another thread would queue a layout pass on the wrong
+        // dispatcher. This control lives on the thread it was attached on.
+        if (Environment.CurrentManagedThreadId != attachedThread)
+        {
+            return;
+        }
+
+        RefreshChrome();
+    }
+
     private void OnLayoutChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(WorkbenchLayout.IsBottomCollapsed) or nameof(WorkbenchLayout.IsPreviewCoveringMain))
@@ -558,7 +579,7 @@ internal sealed class PanelChrome : TemplatedControl
         MaximizeVisible = model.CanMaximize;
         FloatVisible = !model.IsFloating && (model.CanFloat || group?.ActiveTab is not null);
         FloatIcon = WorkbenchIcons.Find(this, "IconWindowExternal");
-        FloatTooltip = Strings.FloatToWindow;
+        FloatTooltip = ShellStrings.Float;
         FloatAutomationId = "panel-" + model.Id + "-float";
         PinAutomationId = "panel-" + model.Id + "-pin";
         MaximizeAutomationId = "panel-" + model.Id + "-maximize";
@@ -575,24 +596,24 @@ internal sealed class PanelChrome : TemplatedControl
         }
 
         var layout = Layout;
-        CoverTooltip = layout?.IsPreviewCoveringMain == true ? Strings.UncoverMain : Strings.CoverMain;
+        CoverTooltip = layout?.IsPreviewCoveringMain == true ? ShellStrings.Uncover : ShellStrings.Cover;
 
         if (model.Region == RegionRole.Main)
         {
             var collapsed = layout?.IsBottomCollapsed == true;
             PinIcon = WorkbenchIcons.Find(this, collapsed ? "IconChevronUp" : "IconChevronDown");
-            PinTooltip = collapsed ? Strings.PinRegion : Strings.AutoHideRegion;
+            PinTooltip = collapsed ? ShellStrings.Pin : ShellStrings.AutoHide;
         }
         else
         {
             var hidden = layout?.GetRegion(model.Region).IsAutoHidden == true;
             PinIcon = WorkbenchIcons.Find(this, hidden ? "IconPin" : "IconAutoHide");
-            PinTooltip = hidden ? Strings.PinRegion : Strings.AutoHideRegion;
+            PinTooltip = hidden ? ShellStrings.Pin : ShellStrings.AutoHide;
         }
 
         var maximized = layout is not null && ReferenceEquals(layout.GetRegion(model.Region).MaximizedPanel, model);
         MaximizeIcon = WorkbenchIcons.Find(this, maximized ? "IconRestore" : "IconMaximize");
-        MaximizeTooltip = maximized ? Strings.RestorePanel : Strings.MaximizePanel;
+        MaximizeTooltip = maximized ? ShellStrings.RestorePanel : ShellStrings.MaximizePanel;
     }
 
     /// <summary>Updates only the body when the active tab's content is re-bound (a preview file re-opened in place).</summary>
