@@ -25,6 +25,12 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public ApprovalServices? Approvals { get; set; }
 
+    /// <summary>
+    /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
+    /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
+    /// </summary>
+    public SessionToolCallRouter? ToolRouter { get; set; }
+
     public static string? UserDirectory()
     {
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -38,13 +44,14 @@ internal sealed record AgentRuntimeServices(
 /// history. A session that already has stored messages is resumed through <see cref="AgentHost.ResumeRootAsync"/>, so a
 /// reopened or restarted session continues with its context.
 /// </summary>
-internal sealed class SessionRuntime : IDisposable
+internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 {
     private readonly AgentRuntimeServices services;
     private readonly Lock gate = new();
     private AgentHost? host;
     private AgentInstance? root;
     private SessionApprovalHandler? approvalHandler;
+    private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
     private bool disposed;
 
@@ -139,7 +146,7 @@ internal sealed class SessionRuntime : IDisposable
         approvalHandler = handler;
 
         var layers = LayerSources.Resolve(BuiltInPrompts.System, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
-        return new AgentHost(
+        var built = new AgentHost(
             new AgentHostOptions
             {
                 Providers = services.ProviderFactory,
@@ -151,6 +158,36 @@ internal sealed class SessionRuntime : IDisposable
                 Todos = services.Todos,
                 Options = new AgentOptions { DefaultModel = services.Model },
             });
+
+        // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
+        builtHost = built;
+        services.ToolRouter?.Register(SessionId, this);
+        return built;
+    }
+
+    // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
+    IApprovalPolicy ISessionToolScope.Policy => SessionPolicy;
+
+    IApprovalHandler? ISessionToolScope.ApprovalHandler
+    {
+        get
+        {
+            lock (gate)
+            {
+                return approvalHandler;
+            }
+        }
+    }
+
+    ITool? ISessionToolScope.FindTool(string toolName)
+    {
+        AgentHost? current;
+        lock (gate)
+        {
+            current = disposed ? null : builtHost;
+        }
+
+        return current is not null && current.Tools.TryGet(toolName, out var tool) ? tool : null;
     }
 
     /// <summary>
@@ -219,6 +256,7 @@ internal sealed class SessionRuntime : IDisposable
         lock (gate)
         {
             disposed = true;
+            builtHost = null;
             host = null;
             root = null;
             handler = approvalHandler;
@@ -227,6 +265,7 @@ internal sealed class SessionRuntime : IDisposable
             listenedClient = null;
         }
 
+        services.ToolRouter?.Unregister(SessionId, this);
         if (client is not null)
         {
             client.ToolsChanged -= OnToolsChanged;

@@ -55,7 +55,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     /// Creates the supervisor for a resolved JIT layout. The host is started with explicit worker and executor paths so
     /// discovery inside the host cannot pick up an unrelated build.
     /// </summary>
-    public static ExtensionHostSupervisor Create(JitHostLayout layout, AppPaths paths)
+    public static ExtensionHostSupervisor Create(JitHostLayout layout, AppPaths paths, IHostToolCallRouter? toolRouter = null)
     {
         var connection = new HostConnection
         {
@@ -74,7 +74,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
             ProcessExitTimeout = TimeSpan.FromSeconds(10),
         };
 
-        return new ExtensionHostSupervisor(new ExtensionHostClient(connection, null, null, options));
+        return new ExtensionHostSupervisor(new ExtensionHostClient(connection, toolRouter, options));
     }
 
     /// <summary>Starts the host in the background; returns immediately so the window is up before the pipe is open.</summary>

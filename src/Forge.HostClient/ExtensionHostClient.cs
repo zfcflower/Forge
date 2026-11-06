@@ -33,6 +33,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
     private readonly ExtensionHostClientOptions options;
     private readonly Func<string, ITool?>? toolResolver;
     private readonly Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? approvalPath;
+    private readonly IHostToolCallRouter? router;
     private readonly SemaphoreSlim lifecycle = new(1, 1);
     private readonly Lock toolsGate = new();
     private readonly Lock contributionsGate = new();
@@ -98,6 +99,18 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         this.toolResolver = toolResolver;
         this.approvalPath = approvalPath;
         this.options = options ?? new ExtensionHostClientOptions();
+    }
+
+    /// <summary>Connects to (or starts) a host whose plugin and workflow <c>host.tool_call</c> requests are routed per
+    /// session: <paramref name="router"/> resolves the tool from, and asks the approval path of, the session the run was
+    /// registered with.</summary>
+    public ExtensionHostClient(
+        HostConnection connection,
+        IHostToolCallRouter? router,
+        ExtensionHostClientOptions? options)
+        : this(connection, null, null, options)
+    {
+        this.router = router;
     }
 
 #if DEBUG
@@ -708,7 +721,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
             return new CommandResult(Output: problem, IsError: true);
         }
 
-        var approval = approvalPath;
+        var approval = ApprovalPathFor(effectiveContext.SessionId);
         if (approval is null)
         {
             return new CommandResult(
@@ -1501,6 +1514,18 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         Volatile.Write(ref promptContributors, promptList);
     }
 
+    /// <summary>The approval path for one session: the router's when one is configured, the plain delegate otherwise.</summary>
+    private Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? ApprovalPathFor(string sessionId)
+    {
+        var routed = router;
+        if (routed is null)
+        {
+            return approvalPath;
+        }
+
+        return (approvalRequest, approvalToken) => routed.ApproveAsync(sessionId, approvalRequest, approvalToken);
+    }
+
     private Task OnRequestAsync(IpcPeer active, IpcMessage message, CancellationToken ct) =>
         string.Equals(message.Operation, Sdk.ExtensionProtocol.HostToolCall, StringComparison.Ordinal)
             ? HandleHostToolCallAsync(active, message, ct)
@@ -1541,9 +1566,13 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
             return;
         }
 
+        // The session comes from the run record the Host-validated context registered, never from the worker's message.
+        var sessionId = run.Context.SessionId;
         var tool = run.IsCode
             ? run.Registry is { } registry && registry.TryGet(call.Name, out var registered) ? registered : null
-            : toolResolver?.Invoke(call.Name);
+            : router is not null
+                ? router.Resolve(sessionId, call.Name)
+                : toolResolver?.Invoke(call.Name);
         if (tool is null)
         {
             await RespondToolOutputAsync(active, request.Id, $"Unknown tool '{call.Name}'.", isError: true)
@@ -1551,7 +1580,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
             return;
         }
 
-        var approval = approvalPath;
+        var approval = ApprovalPathFor(sessionId);
         if (approval is null)
         {
             await RespondToolOutputAsync(

@@ -69,7 +69,7 @@ internal sealed class ApprovalQueue
                 }
 
                 items.RemoveAt(index);
-                card.TryComplete(outcome ?? ApprovalCardOutcome.Deny);
+                card.TryComplete(outcome ?? card.WithdrawnOutcome);
                 card.Dispose();
                 RaiseChanged();
             });
@@ -92,7 +92,7 @@ internal sealed class ApprovalQueue
 
                     var card = items[index];
                     items.RemoveAt(index);
-                    card.TryComplete(ApprovalCardOutcome.Deny);
+                    card.TryComplete(card.WithdrawnOutcome);
                     card.Dispose();
                     removed++;
                 }
@@ -120,7 +120,7 @@ internal sealed class ApprovalQueue
                 items.Clear();
                 foreach (var card in queued)
                 {
-                    card.TryComplete(ApprovalCardOutcome.Deny);
+                    card.TryComplete(card.WithdrawnOutcome);
                     card.Dispose();
                 }
 

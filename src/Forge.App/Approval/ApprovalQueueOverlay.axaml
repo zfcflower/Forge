@@ -144,6 +144,14 @@
             <TextBlock Grid.Column="1" Classes="caption" Text="{Binding DependenciesText}" TextWrapping="Wrap" />
           </Grid>
 
+          <Grid ColumnDefinitions="70,*" IsVisible="{Binding HasTool}">
+            <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.Tool], Source={x:Static loc:Loc.Instance}}" />
+            <StackPanel Grid.Column="1" Spacing="2">
+              <SelectableTextBlock Classes="mono" Text="{Binding ToolName}" TextWrapping="Wrap" />
+              <TextBlock Classes="caption" Text="{Binding ToolDescription}" TextWrapping="Wrap" />
+              <SelectableTextBlock Classes="mono" Text="{Binding ToolSchema}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
           <Grid ColumnDefinitions="70,*">
             <TextBlock Classes="caption" Text="{Binding [Extensions.Extension.SourceHash], Source={x:Static loc:Loc.Instance}}" />
             <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding SourceHash}" TextWrapping="Wrap" />

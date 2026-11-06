@@ -15,6 +15,12 @@ internal enum ApprovalCardDecision
     /// on it (a superseded plugin card must neither commit nor discard, or it would delete the newer draft).
     /// </summary>
     Superseded,
+
+    /// <summary>
+    /// The card left the queue without a user decision because its session was released, the app is shutting down or the
+    /// waiter was cancelled. For a plugin card this is not a rejection: the staged draft stays pending.
+    /// </summary>
+    Withdrawn,
 }
 
 /// <summary>
@@ -30,6 +36,11 @@ internal readonly record struct ApprovalCardOutcome(ApprovalCardDecision Decisio
     public bool IsAllowed => Decision == ApprovalCardDecision.Allow;
 
     public bool IsSuperseded => Decision == ApprovalCardDecision.Superseded;
+
+    public bool IsWithdrawn => Decision == ApprovalCardDecision.Withdrawn;
+
+    /// <summary>The user did not decide: nobody may act on the card (neither commit nor discard).</summary>
+    public bool IsUndecided => Decision is ApprovalCardDecision.Superseded or ApprovalCardDecision.Withdrawn;
 }
 
 /// <summary>
@@ -75,6 +86,15 @@ internal abstract class ApprovalCardViewModel : ObservableObject, IDisposable
 
     public bool IsDecided => decided;
 
+    /// <summary>
+    /// What a waiter sees when the card is removed without a user decision. A tool card answers a denial (the call fails
+    /// closed); a plugin card overrides this so a withdrawal never discards its staged draft.
+    /// </summary>
+    protected virtual ApprovalCardOutcome WithdrawalOutcome => ApprovalCardOutcome.Deny;
+
+    /// <summary>The outcome the queue completes this card with when it removes it without a user decision.</summary>
+    internal ApprovalCardOutcome WithdrawnOutcome => WithdrawalOutcome;
+
     /// <summary>Completes the card once; a late click after a withdrawal changes nothing.</summary>
     public bool TryComplete(ApprovalCardOutcome outcome)
     {
@@ -91,7 +111,7 @@ internal abstract class ApprovalCardViewModel : ObservableObject, IDisposable
     /// <summary>Unsubscribes from the live string table; called when the card leaves the queue.</summary>
     public void Dispose()
     {
-        completion.TrySetResult(ApprovalCardOutcome.Deny);
+        completion.TrySetResult(WithdrawalOutcome);
         decided = true;
         Detach();
     }

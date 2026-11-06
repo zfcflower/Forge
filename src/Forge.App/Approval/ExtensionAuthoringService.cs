@@ -228,7 +228,8 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
                 {
                     ApprovalCardDecision.Allow => await CommitAsync(staged).ConfigureAwait(false),
                     ApprovalCardDecision.Deny => await DiscardAsync(staged).ConfigureAwait(false),
-                    _ => Invalid("the approval card was withdrawn before the user decided; the draft is still staged."),
+                    ApprovalCardDecision.Withdrawn => Withdrawn(staged),
+                    _ => Invalid("the approval card was replaced by a newer draft before the user decided; the newer draft is staged."),
                 };
             }
             finally
@@ -480,6 +481,27 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
             Trace.WriteLine("[approval] the previous tool names could not be read: " + exception.Message);
         }
 
+        // The approval is for this content; trust in the old code must not carry over to the new one. Rules for the old and
+        // the declared new tool names are dropped BEFORE the commit: a commit that then fails (or whose result is lost)
+        // leaves the rules cleared, never a live new version still covered by an old "always allow".
+        var before = new HashSet<string>(previousTools, StringComparer.Ordinal);
+        if (staged.Tool is { } declared && !string.IsNullOrWhiteSpace(declared.Name))
+        {
+            before.Add(declared.Name);
+        }
+
+        try
+        {
+            // Persisted rules merge in when the file read ends; clearing before that would let them come back.
+            await rules.LoadAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine("[approval] the remembered rules could not be loaded before the commit: " + exception.Message);
+        }
+
+        var cleared = before.Count == 0 ? 0 : rules.RemoveByToolNames(before);
+
         ExtensionCommitResult committed;
         try
         {
@@ -494,15 +516,14 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
             return Invalid("the user approved, but the extension could not be committed: " + Describe(exception));
         }
 
-        // The approval was for this content; trust in the old code must not carry over to the new one, so every rule that
-        // was remembered for this plugin's tool names (old and new) is dropped.
+        // Clear again with the names the host actually registered (a plugin's tool names are only known now).
         var names = new HashSet<string>(committed.ToolNames, StringComparer.Ordinal);
-        foreach (var name in previousTools)
+        foreach (var name in before)
         {
             names.Add(name);
         }
 
-        var cleared = rules.RemoveByToolNames(names);
+        cleared += rules.RemoveByToolNames(names);
         var tools = committed.ToolNames.Count == 0
             ? "it registered no tools"
             : "registered tools: " + string.Join(", ", committed.ToolNames);
@@ -540,9 +561,10 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         try
         {
             var outcome = await card.Decision.ConfigureAwait(false);
-            if (outcome.IsSuperseded)
+            if (outcome.IsUndecided)
             {
-                // A newer submission replaced the staged draft; acting on this card would discard that draft.
+                // A newer submission replaced the staged draft, or the card was withdrawn without a decision (shutdown,
+                // release): acting on it would discard a draft nobody rejected.
                 return;
             }
 
@@ -585,6 +607,18 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         return authoring.DeletePluginAsync(pluginId, version, ct);
     }
+
+    /// <summary>
+    /// The card went away without a user decision (session released, app closing). The draft is deliberately kept: it
+    /// reappears as a "submitted before restart" card, so the agent must not report a rejection.
+    /// </summary>
+    private static ExtensionSubmitResult Withdrawn(StagedExtension staged) =>
+        new(
+            ExtensionSubmitOutcome.Invalid,
+            $"the approval for '{staged.PluginId}' {staged.Version} was withdrawn before the user decided (the session closed or " +
+            "the app is shutting down). This is not a rejection: the draft is kept pending and the user can still approve or " +
+            "reject it from the extensions settings; do not resubmit it.",
+            []);
 
     private static ExtensionSubmitResult Invalid(string problem) =>
         new(ExtensionSubmitOutcome.Invalid, problem, []);

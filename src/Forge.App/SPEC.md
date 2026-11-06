@@ -148,3 +148,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
 - Worker 资源限制受威胁模型决策门控,不在此模块实现。
 - `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。
+- 插件/工作流的 `host.tool_call` 经 `SessionToolCallRouter`(`Approval/`)按 run 注册会话路由:工具取自该会话 `AgentHost.Tools`(内置+外部),策略用与 agent loop 相同的 `SessionPolicy`,Ask 走该会话的 `SessionApprovalHandler`(记住的规则与卡片会话均正确),未知/已释放会话拒绝;五个 `extension_*` 工具对插件永不可解析、永不放行(它们的策略是"免问",真正的门是插件卡)。`SessionRuntime` 在构建 host 时注册、释放时注销;`ExtensionHostSupervisor.Create` 接收路由器。
+- 插件卡无用户决定的撤回(会话释放、关闭、取消、卡片 Dispose)产出独立的 `Withdrawn`(≠ Deny):不 Discard 暂存稿,稿件留待 `extensions.pending` 重启后作为"重启前提交"卡出现;给 agent 的文本如实说"已撤回、草稿保留待定、不是拒绝"。工具卡的撤回仍是 Deny。
+- 提交时先(加载规则后)清除旧/新工具名的已记住规则,再提交,提交后按实际注册名再清一次;提交失败时规则保持已清除。`approval-rules.json` 的 `rules: null`/缺失视为损坏文件(无规则 + `.bak`),加载任务永不 Faulted,`RequestAsync` 对加载异常降级为"询问"。
+- 工作流扩展卡显示声明的工具(名称/描述/输入 schema)。

@@ -196,6 +196,7 @@ internal sealed class AppComposition : IAsyncDisposable
 
         // 2. Extension host client (AOT side of the JIT boundary; the client owns the child process).
         ExtensionHostSupervisor? host = null;
+        var toolRouter = new SessionToolCallRouter();
         var hostProblem = default(LocText);
         var layout = JitHostLayout.Locate(out var locateProblem);
         if (layout is null)
@@ -204,7 +205,7 @@ internal sealed class AppComposition : IAsyncDisposable
         }
         else
         {
-            host = ExtensionHostSupervisor.Create(layout, paths);
+            host = ExtensionHostSupervisor.Create(layout, paths, toolRouter);
         }
 
         // 2b. Approvals: the remembered rules, the queue and the host adapter that turns a plugin draft into an approval
@@ -272,6 +273,7 @@ internal sealed class AppComposition : IAsyncDisposable
             todos,
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty));
         runtimeServices.Approvals = approvals;
+        runtimeServices.ToolRouter = toolRouter;
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
         var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences, appearance);

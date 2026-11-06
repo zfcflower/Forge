@@ -28,6 +28,11 @@ depends-on: [forge-ipc]
   **只取 pending 记录**(发起调用时的 `ToolContext` 与可信链),Worker 自报的 `sessionId`/`workingDir`/`depth`
   一律忽略。未知、已结束、已取消、已超时或重放(运行已结束后再次出现)的 run 一律无效。旧的
   `HostToolWorkingDirectory` 选项保留源码兼容但不再被读取。
+- **回传调用按会话路由(`IHostToolCallRouter`)。** 构造时传入路由器后,`host.tool_call` 的工具解析与审批都走
+  `Resolve(sessionId, name)` / `ApproveAsync(sessionId, request, ct)`,`sessionId` **只取该 run 注册时的 Host 校验上下文**
+  (`run.Context.SessionId`),绝不取 Worker 消息里的字段;插件命令审批同样用其有效上下文的会话。路由器未知/已关闭的会话
+  必须 fail-closed(返回 null / Deny)。旧的 `Func<string, ITool?>` + 审批委托构造保持不变(无会话,测试沿用);
+  传了路由器则路由器优先。`run_code` 脚本内的调用仍用该次执行的注册表,但审批同样走路由器。
 - **可信调用链走私有 AsyncLocal。** 每次执行(tools/commands/prompts/code)都分配 128 位加密随机 `runId`、
   绑定当时连接世代、原始 `ToolContext`、完整可信链、自身取消生命周期和每运行回调门。嵌套代理只在本客户端执行
   某回调期间读取该私有上下文,并以新 `runId`、父链与父深度(深度由主程序推算,不取 Worker 值)发起新执行;

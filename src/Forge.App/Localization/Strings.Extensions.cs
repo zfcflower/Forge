@@ -69,6 +69,8 @@ internal static class ExtensionsStrings
     public const string ExtensionReject = "Extensions.Extension.Reject";
     public const string ExtensionApproveNote = "Extensions.Extension.ApproveNote";
     public const string ExtensionNone = "Extensions.Extension.None";
+    public const string ExtensionTool = "Extensions.Extension.Tool";
+    public const string ExtensionToolNoDescription = "Extensions.Extension.ToolNoDescription";
     public const string ExtensionDiffAdded = "Extensions.Extension.DiffAdded";
     public const string ExtensionDiffRemoved = "Extensions.Extension.DiffRemoved";
     public const string ExtensionBuildingDiff = "Extensions.Extension.BuildingDiff";
@@ -177,6 +179,8 @@ internal static class ExtensionsStrings
         Loc.Register(ExtensionReject, "拒绝", "Reject");
         Loc.Register(ExtensionApproveNote, "批准后新版本立即生效；拒绝等于什么都没发生。", "Approving makes the new version live; rejecting changes nothing.");
         Loc.Register(ExtensionNone, "无", "None");
+        Loc.Register(ExtensionTool, "工具", "Tool");
+        Loc.Register(ExtensionToolNoDescription, "（无描述）", "(no description)");
         Loc.Register(ExtensionDiffAdded, "新增行", "Added lines");
         Loc.Register(ExtensionDiffRemoved, "删除行", "Removed lines");
         Loc.Register(ExtensionBuildingDiff, "正在计算与线上版本的差异…", "Comparing with the live version…");

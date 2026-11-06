@@ -391,7 +391,18 @@ internal sealed class ApprovalRules : IAsyncDisposable
 
     private void LoadCore()
     {
-        var outcome = ReadDocument();
+        LoadOutcome outcome;
+        try
+        {
+            outcome = ReadDocument();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A read that throws must never leave the shared load task faulted: every later approval awaits it. The file
+            // is treated as unreadable (no rules, the original protected) and the failure is reported as the load problem.
+            outcome = new LoadOutcome([], "approval-rules.json 无法读取：" + exception.Message, null, false);
+        }
+
         lock (gate)
         {
             loadProblem = outcome.Problem;
@@ -458,6 +469,11 @@ internal sealed class ApprovalRules : IAsyncDisposable
         {
             return new LoadOutcome(
                 [], $"approval-rules.json 的版本 {document.Version} 无法识别。", bytes, true);
+        }
+
+        if (document.Rules is null)
+        {
+            return new LoadOutcome([], "approval-rules.json 缺少规则列表。", bytes, true);
         }
 
         var loaded = new List<ApprovalRule>(document.Rules.Count);

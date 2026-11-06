@@ -89,7 +89,15 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
         // stays synchronous, so the waiting call does not pay for an extra dispatcher hop.
         if (!rules.IsAllowed(request.ToolName, request.SideEffect, SessionId, projectId) && !rules.IsLoaded)
         {
-            await rules.LoadAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await rules.LoadAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+            {
+                // A failed rule load means "no remembered rules": the user is asked, never an exception to the agent loop.
+                System.Diagnostics.Trace.WriteLine("[approval] the remembered rules could not be loaded: " + exception.Message);
+            }
         }
 
         if (rules.IsAllowed(request.ToolName, request.SideEffect, SessionId, projectId))

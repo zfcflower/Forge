@@ -190,6 +190,8 @@ internal sealed class ExtensionApprovalCardViewModel : ApprovalCardViewModel
         _ = BuildDiffAsync();
     }
 
+    protected override ApprovalCardOutcome WithdrawalOutcome => new(ApprovalCardDecision.Withdrawn);
+
     public string PluginId => staged.PluginId;
 
     public string Version => staged.Version;
@@ -222,6 +224,18 @@ internal sealed class ExtensionApprovalCardViewModel : ApprovalCardViewModel
     public string DependenciesText => staged.Dependencies.Count == 0
         ? Loc.Instance[ExtensionsStrings.ExtensionNone]
         : string.Join(", ", staged.Dependencies.Select(static dependency => dependency.Name + " " + dependency.Version));
+
+    /// <summary>Whether the draft declares the one tool a workflow exposes; the user must see what the model will be able to call.</summary>
+    public bool HasTool => staged.Tool is not null;
+
+    public string ToolName => staged.Tool?.Name ?? string.Empty;
+
+    public string ToolDescription => staged.Tool is { } tool && !string.IsNullOrWhiteSpace(tool.Description)
+        ? tool.Description
+        : Loc.Instance[ExtensionsStrings.ExtensionToolNoDescription];
+
+    /// <summary>The declared input schema (JSON text) as the author wrote it.</summary>
+    public string ToolSchema => staged.Tool?.InputSchemaJson ?? string.Empty;
 
     public string SourceHash => staged.SourceHash;
 
@@ -331,6 +345,7 @@ internal sealed class ExtensionApprovalCardViewModel : ApprovalCardViewModel
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(KindText));
         OnPropertyChanged(nameof(PermissionsText));
+        OnPropertyChanged(nameof(ToolDescription));
         foreach (var file in files)
         {
             file.RaiseText();
