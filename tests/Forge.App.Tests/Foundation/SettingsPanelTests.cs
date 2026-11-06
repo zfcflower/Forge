@@ -65,10 +65,9 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Equal(
             shell.ViewModel.Settings.Sections.Items.Select(static section => section.Id),
             rendered);
-        // The language section ships with the shell today; a feature that adds one later appends it here too.
-        Assert.Equal(
-            [SettingsSectionIds.Provider, SettingsSectionIds.Language, SettingsSectionIds.Paths],
-            rendered);
+        // Features add their own sections in parallel; the shell's two stay at both ends.
+        Assert.Equal(SettingsSectionIds.Provider, rendered[0]);
+        Assert.Equal(SettingsSectionIds.Paths, rendered[^1]);
     }
 
     [Fact]
@@ -319,9 +318,17 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             }
         }
 
-        // The sections the shell ships today, including the language one this task added.
+        // Every reserved section id, so the parallel feature tasks need not edit this list as they land.
         private static readonly string[] KnownSectionIds =
-            [SettingsSectionIds.Provider, SettingsSectionIds.Language, SettingsSectionIds.Paths];
+        [
+            SettingsSectionIds.Provider,
+            SettingsSectionIds.Appearance,
+            SettingsSectionIds.Language,
+            SettingsSectionIds.Terminal,
+            SettingsSectionIds.Git,
+            SettingsSectionIds.Extensions,
+            SettingsSectionIds.Paths,
+        ];
 
         private static TextBlock? Heading(Window window, string id) =>
             window.GetVisualDescendants()

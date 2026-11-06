@@ -1,7 +1,9 @@
 ﻿using System.ComponentModel;
+using Avalonia;
 using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
+using Forge.App.Appearance;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Services;
@@ -33,12 +35,14 @@ internal sealed class AppComposition : IAsyncDisposable
     private readonly AgentRuntimeManager runtimes;
     private readonly PreferencesStore preferences;
     private readonly SettingsSections settings;
+    private readonly AppearanceFeature appearance;
     private bool disposed;
 
     private AppComposition(
         AppPaths paths,
         PreferencesStore preferences,
         SettingsSections settings,
+        AppearanceFeature appearance,
         HttpClient httpClient,
         string approvalsDatabasePath,
         ExtensionHostSupervisor? host,
@@ -64,6 +68,7 @@ internal sealed class AppComposition : IAsyncDisposable
         Paths = paths;
         this.preferences = preferences;
         this.settings = settings;
+        this.appearance = appearance;
         this.httpClient = httpClient;
         ApprovalsDatabasePath = approvalsDatabasePath;
         this.host = host;
@@ -169,6 +174,7 @@ internal sealed class AppComposition : IAsyncDisposable
         var paths = AppPaths.Create();
         var preferences = new PreferencesStore(paths.SettingsPath);
         var settings = new SettingsSections();
+        var appearance = AppearanceFeature.Create(preferences.Current, settings);
 
         // The language section edits AppPreferences.Language only: OnPreferencesChanged pushes the value into Loc and
         // PreferencesStore persists it, so it needs nothing but the preferences.
@@ -255,12 +261,13 @@ internal sealed class AppComposition : IAsyncDisposable
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty));
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
-        var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences);
+        var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences, appearance);
 
         return new AppComposition(
             paths,
             preferences,
             settings,
+            appearance,
             httpClient,
             approvalsDatabasePath,
             host,
@@ -296,10 +303,12 @@ internal sealed class AppComposition : IAsyncDisposable
         SqliteProjectRegistry projects,
         WorktreeService worktrees,
         AppPaths paths,
-        PreferencesStore preferences)
+        PreferencesStore preferences,
+        AppearanceFeature appearance)
     {
         await preferences.LoadAsync(CancellationToken.None).ConfigureAwait(true);
         ApplyLanguage(preferences.Current.Language);
+        appearance.ApplyLoaded();
 
         var general = await worktrees.EnsureGeneralWorkspaceAsync(paths.GeneralWorkspaceDirectory, CancellationToken.None)
             .ConfigureAwait(false);
@@ -355,6 +364,8 @@ internal sealed class AppComposition : IAsyncDisposable
 
         disposed = true;
 
+        appearance.Dispose();
+
         // A section's view model may subscribe to the process-wide Loc; Loc.Instance outlives this graph, so an
         // undisposed section would stay rooted (with the preferences it holds) after the composition is gone.
         foreach (var section in settings.Items)
@@ -396,6 +407,62 @@ internal sealed class AppComposition : IAsyncDisposable
     /// Last-resort teardown from <see cref="AppDomain.ProcessExit"/>, where nothing can be awaited. Bounded, and only the
     /// child process matters: an orphaned extension host would outlive the window.
     /// </summary>
+    /// <summary>
+    /// The font feature's two pieces: the settings section (always) and the applier that writes the font tokens into the
+    /// application resources (only when an <see cref="Application"/> exists and this is its thread - a composition built
+    /// by a plain unit test has neither, and the static defaults in <c>Tokens.axaml</c> then stand).
+    /// </summary>
+    private sealed class AppearanceFeature : IDisposable
+    {
+        private readonly AppearanceSettingsViewModel section;
+        private readonly AppearanceApplier? applier;
+        private readonly Dispatcher? dispatcher;
+
+        private AppearanceFeature(AppearanceSettingsViewModel section, AppearanceApplier? applier, Dispatcher? dispatcher)
+        {
+            this.section = section;
+            this.applier = applier;
+            this.dispatcher = dispatcher;
+        }
+
+        public static AppearanceFeature Create(AppPreferences preferences, SettingsSections settings)
+        {
+            var section = new AppearanceSettingsViewModel(preferences, SystemFontCatalog.CreateDefault());
+            settings.Add(new SettingsSection(SettingsSectionIds.Appearance, AppearanceStrings.SectionTitle, SettingsSectionIds.AppearanceOrder, section));
+
+            // AvaloniaObject.CheckAccess, not Dispatcher.UIThread: reading the latter off the UI thread creates a dispatcher there.
+            if (Application.Current is { } app && app.CheckAccess())
+            {
+                return new AppearanceFeature(section, new AppearanceApplier(preferences, app.Resources), app.Dispatcher);
+            }
+
+            return new AppearanceFeature(section, applier: null, dispatcher: null);
+        }
+
+        /// <summary>The load raises no PropertyChanged, so the loaded fonts are pushed once, on the applier's thread.</summary>
+        public void ApplyLoaded()
+        {
+            if (applier is null || dispatcher is null)
+            {
+                return;
+            }
+
+            if (dispatcher.CheckAccess())
+            {
+                applier.Apply();
+                return;
+            }
+
+            dispatcher.Post(applier.Apply);
+        }
+
+        public void Dispose()
+        {
+            applier?.Dispose();
+            section.Dispose();
+        }
+    }
+
     public void Abort()
     {
         if (host is null)

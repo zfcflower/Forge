@@ -1,5 +1,6 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:appearance="using:Forge.App.Appearance"
              xmlns:views="using:Forge.App.Views"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
@@ -113,6 +114,10 @@
                      IsChecked="{Binding IsEnglish, Mode=TwoWay}" />
         <TextBlock Classes="caption" Margin="0,6,0,0" TextWrapping="Wrap" Text="{Binding Hint}" />
       </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="appearance:AppearanceSettingsViewModel" x:DataType="appearance:AppearanceSettingsViewModel">
+      <appearance:AppearanceSettingsView />
     </DataTemplate>
 
     <DataTemplate DataType="vm:PathsSettingsSectionViewModel" x:DataType="vm:PathsSettingsSectionViewModel">
@@ -238,5 +243,6 @@
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://Forge.App/Resources/Controls.axaml" />
+    <StyleInclude Source="avares://Forge.App/Appearance/AppearanceStyles.axaml" />
   </Application.Styles>
 </Application>
