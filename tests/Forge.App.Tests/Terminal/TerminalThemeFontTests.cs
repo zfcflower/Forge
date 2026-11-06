@@ -195,7 +195,7 @@ public sealed class TerminalThemeFontTests
         var answered = await TerminalUi.WaitInsideAsync(
             scene.Window, () => scene.Host.Session.WrittenCount() > 0, TimeSpan.FromSeconds(10));
         Assert.True(answered, "the OSC 10 answer never arrived");
-        return System.Text.Encoding.Latin1.GetString(scene.Host.Session.WrittenBytes());
+        return System.Text.Encoding.Latin1.GetString(scene.Host.Session.WrittenSnapshot());
     }
 
     private static double MeasureWidth(TerminalControl control)

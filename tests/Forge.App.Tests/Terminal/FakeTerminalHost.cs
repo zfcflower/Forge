@@ -62,6 +62,8 @@ internal sealed class FakeTerminalSession : ITerminalSession
     private readonly List<TerminalSize> resizes = [];
     private int stopCalls;
     private int foregroundCalls;
+    private int barriers;
+    private TaskCompletionSource? writeSignal;
 
     public string Id { get; } = "term-" + Guid.NewGuid().ToString("N")[..8];
 
@@ -78,38 +80,72 @@ internal sealed class FakeTerminalSession : ITerminalSession
 
     public int ForegroundCalls => Volatile.Read(ref foregroundCalls);
 
-    public byte[] WrittenBytes()
+    /// <summary>The input written so far, as it stands right now. No waiting: use <see cref="WaitForWrittenAsync"/> or
+    /// <see cref="TerminalUi.WrittenAfterBarrierAsync"/> when the bytes are still on their way through the view model's
+    /// ordered writer task.</summary>
+    public byte[] WrittenSnapshot()
     {
-        // Input reaches the session through the view model's ordered writer task, so give it a moment to drain: the
-        // count has to stay unchanged for a short settling period before the bytes are taken as complete.
-        var settled = 0;
-        var last = -1;
-        for (var i = 0; i < 100 && settled < 4; i++)
-        {
-            var count = WrittenCount();
-            settled = count == last ? settled + 1 : 0;
-            last = count;
-            Thread.Sleep(10);
-        }
-
         lock (gate)
         {
-            var total = 0;
-            foreach (var chunk in writes)
-            {
-                total += chunk.Length;
-            }
-
-            var all = new byte[total];
-            var offset = 0;
-            foreach (var chunk in writes)
-            {
-                chunk.CopyTo(all, offset);
-                offset += chunk.Length;
-            }
-
-            return all;
+            return ConcatLocked();
         }
+    }
+
+    /// <summary>Waits (signalled by each write, no polling) until the bytes written so far satisfy <paramref name="condition"/>
+    /// and returns them. Throws <see cref="TimeoutException"/>, quoting what did arrive, when they never do.</summary>
+    public async Task<byte[]> WaitForWrittenAsync(Func<byte[], bool> condition, TimeSpan timeout)
+    {
+        using var deadline = new CancellationTokenSource(timeout);
+        while (true)
+        {
+            Task signal;
+            lock (gate)
+            {
+                var snapshot = ConcatLocked();
+                if (condition(snapshot))
+                {
+                    return snapshot;
+                }
+
+                signal = (writeSignal ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+            }
+
+            try
+            {
+                await signal.WaitAsync(deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException(
+                    $"The expected input never reached the session within {timeout.TotalSeconds:0} s; saw: {Convert.ToHexString(WrittenSnapshot())}.");
+            }
+        }
+    }
+
+    /// <summary>Waits until at least <paramref name="count"/> bytes were written and returns everything written so far.</summary>
+    public Task<byte[]> WaitForWrittenBytesAsync(int count, TimeSpan timeout) =>
+        WaitForWrittenAsync(bytes => bytes.Length >= count, timeout);
+
+    /// <summary>Hands out the next barrier number; see <see cref="TerminalUi.WrittenAfterBarrierAsync"/>.</summary>
+    public int NextBarrier() => Interlocked.Increment(ref barriers);
+
+    private byte[] ConcatLocked()
+    {
+        var total = 0;
+        foreach (var chunk in writes)
+        {
+            total += chunk.Length;
+        }
+
+        var all = new byte[total];
+        var offset = 0;
+        foreach (var chunk in writes)
+        {
+            chunk.CopyTo(all, offset);
+            offset += chunk.Length;
+        }
+
+        return all;
     }
 
     public int WrittenCount()
@@ -161,14 +197,27 @@ internal sealed class FakeTerminalSession : ITerminalSession
         exited.TrySetException(error);
     }
 
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> input, CancellationToken ct)
+    /// <summary>When set, every write awaits this before it is recorded - lets a test hold one write back and prove that
+    /// later input does not overtake it.</summary>
+    public Func<byte[], Task>? WriteInterceptor { get; set; }
+
+    public async ValueTask WriteAsync(ReadOnlyMemory<byte> input, CancellationToken ct)
     {
-        lock (gate)
+        var copy = input.ToArray();
+        if (WriteInterceptor is { } hook)
         {
-            writes.Add(input.ToArray());
+            await hook(copy).WaitAsync(ct).ConfigureAwait(false);
         }
 
-        return ValueTask.CompletedTask;
+        TaskCompletionSource? signal;
+        lock (gate)
+        {
+            writes.Add(copy);
+            signal = writeSignal;
+            writeSignal = null;
+        }
+
+        signal?.TrySetResult();
     }
 
     public ValueTask ResizeAsync(TerminalSize size, CancellationToken ct)
@@ -275,6 +324,53 @@ internal static class TerminalUi
         }
 
         return condition();
+    }
+
+    private static readonly byte[] BarrierMark = [0xF8, 0xF9, 0xFA, 0xFB];
+
+    /// <summary>
+    /// Returns everything the session has received once all input produced so far has been written. The view model feeds
+    /// the session through one ordered writer task, so a marker pushed behind the earlier input only shows up after it:
+    /// waiting for the marker is a deterministic "everything before this has been written" - including the case where the
+    /// expected answer is "nothing". The marker bytes (never valid UTF-8, never produced by the terminal) are stripped.
+    /// </summary>
+    public static async Task<byte[]> WrittenAfterBarrierAsync(TerminalViewModel viewModel, FakeTerminalSession session)
+    {
+        var expected = session.NextBarrier();
+        viewModel.SendInput(BarrierMark);
+        var snapshot = await session.WaitForWrittenAsync(bytes => CountMarks(bytes) >= expected, TimeSpan.FromSeconds(10));
+        var result = new List<byte>(snapshot.Length);
+        for (var index = 0; index < snapshot.Length;)
+        {
+            if (index + BarrierMark.Length <= snapshot.Length && snapshot.AsSpan(index, BarrierMark.Length).SequenceEqual(BarrierMark))
+            {
+                index += BarrierMark.Length;
+                continue;
+            }
+
+            result.Add(snapshot[index++]);
+        }
+
+        return [.. result];
+    }
+
+    private static int CountMarks(byte[] bytes)
+    {
+        var count = 0;
+        for (var index = 0; index + BarrierMark.Length <= bytes.Length;)
+        {
+            if (bytes.AsSpan(index, BarrierMark.Length).SequenceEqual(BarrierMark))
+            {
+                count++;
+                index += BarrierMark.Length;
+            }
+            else
+            {
+                index++;
+            }
+        }
+
+        return count;
     }
 
     public static T? FindByAutomationId<T>(Visual root, string automationId)

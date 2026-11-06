@@ -87,7 +87,7 @@ public sealed class TerminalInputTests
 
         public string PasteText { get; set; } = string.Empty;
 
-        public byte[] Written() => Host.Session.WrittenBytes();
+        public Task<byte[]> WrittenAsync() => TerminalUi.WrittenAfterBarrierAsync(ViewModel, Host.Session);
 
         public async ValueTask DisposeAsync()
         {
@@ -131,7 +131,7 @@ public sealed class TerminalInputTests
             scene.Press(PhysicalKey.Escape);
             scene.Press(PhysicalKey.F5);
             await Task.CompletedTask;
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal(
@@ -148,7 +148,7 @@ public sealed class TerminalInputTests
             scene.Press(PhysicalKey.D, RawInputModifiers.Control);
             scene.Press(PhysicalKey.B, RawInputModifiers.Alt);
             await Task.CompletedTask;
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal(["\x03", "\x04", "\x1b" + "b"], ToChunks(written, [1, 1, 2]));
@@ -162,7 +162,7 @@ public sealed class TerminalInputTests
             scene.Press(PhysicalKey.Tab, RawInputModifiers.Shift);
             scene.Press(PhysicalKey.Tab, RawInputModifiers.Control);
             await Task.CompletedTask;
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal("\x1b[Z\t"u8.ToArray(), written);
@@ -182,7 +182,7 @@ public sealed class TerminalInputTests
             Assert.True(applied, "DECCKM never applied");
             scene.Press(PhysicalKey.ArrowUp);
             scene.Press(PhysicalKey.ArrowUp, RawInputModifiers.Control);
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal("\x1b[A\x1bOA\x1b[1;5A"u8.ToArray(), written);
@@ -194,11 +194,11 @@ public sealed class TerminalInputTests
         var observed = await RunAsync(async scene =>
         {
             scene.Text("h\x00e9\x4e2d");
-            var first = scene.Written();
+            var first = await scene.WrittenAsync();
 
             var before = first.Length;
             scene.Text("\r");
-            var after = scene.Written();
+            var after = await scene.WrittenAsync();
             await Task.CompletedTask;
             return (first, before, after);
         });
@@ -221,7 +221,7 @@ public sealed class TerminalInputTests
             Assert.True(bracketed, "bracketed paste never applied");
             scene.PasteText = "a\r\nb\nc";
             await scene.PasteAsync();
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal("\x1b[200~a\rb\rc\x1b[201~"u8.ToArray(), written);
@@ -234,7 +234,7 @@ public sealed class TerminalInputTests
         {
             scene.PasteText = "x\r\ny";
             await scene.PasteAsync();
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal("x\ry"u8.ToArray(), written);

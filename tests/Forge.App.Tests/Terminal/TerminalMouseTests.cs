@@ -76,7 +76,7 @@ public sealed class TerminalMouseTests
             TerminalUi.Settle(Window);
         }
 
-        public byte[] Written() => Host.Session.WrittenBytes();
+        public Task<byte[]> WrittenAsync() => TerminalUi.WrittenAfterBarrierAsync(ViewModel, Host.Session);
 
         public async ValueTask DisposeAsync()
         {
@@ -124,7 +124,7 @@ public sealed class TerminalMouseTests
             scene.Mouse(at => scene.Window.MouseMove(at), 6, 3);
             scene.Mouse(at => scene.Window.MouseUp(at, MouseButton.Left), 6, 3);
             await Task.CompletedTask;
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Equal("\x1b[<0;5;3M\x1b[<32;7;4M\x1b[<0;7;4m"u8.ToArray(), written);
@@ -138,10 +138,10 @@ public sealed class TerminalMouseTests
             await scene.EnableMouseAsync("\x1b[?1000h\x1b[?1006h", MouseTracking.Normal);
             scene.Mouse(at => scene.Window.MouseDown(at, MouseButton.Left), 4, 2);
             scene.Mouse(at => scene.Window.MouseMove(at), 6, 3);
-            var afterDrag = scene.Written();
+            var afterDrag = await scene.WrittenAsync();
             scene.Mouse(at => scene.Window.MouseUp(at, MouseButton.Left), 6, 3);
             await Task.CompletedTask;
-            return (afterDrag, scene.Written());
+            return (afterDrag, await scene.WrittenAsync());
         });
 
         Assert.Equal("\x1b[<0;5;3M"u8.ToArray(), observed.afterDrag);
@@ -157,7 +157,7 @@ public sealed class TerminalMouseTests
             scene.Mouse(at => scene.Window.MouseDown(at, MouseButton.Left, RawInputModifiers.Shift), 4, 2);
             scene.Mouse(at => scene.Window.MouseUp(at, MouseButton.Left, RawInputModifiers.Shift), 6, 3);
             await Task.CompletedTask;
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Empty(written);
@@ -175,7 +175,7 @@ public sealed class TerminalMouseTests
             scene.Mouse(at => scene.Window.MouseMove(at), 6, 3);
             scene.Mouse(at => scene.Window.MouseUp(at, MouseButton.Left), 6, 3);
             await Task.CompletedTask;
-            return scene.Written();
+            return await scene.WrittenAsync();
         });
 
         Assert.Empty(written);
