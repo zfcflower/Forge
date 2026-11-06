@@ -19,6 +19,7 @@
     <Project Path="src/Forge.Workspace/Forge.Workspace.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Forge.App.LiveSwitch.Tests/Forge.App.LiveSwitch.Tests.csproj" />
     <Project Path="tests/Forge.App.Tests/Forge.App.Tests.csproj" />
     <Project Path="tests/Forge.Approval.Tests/Forge.Approval.Tests.csproj" />
     <Project Path="tests/Forge.Core.Tests/Forge.Core.Tests.csproj" />

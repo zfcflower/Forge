@@ -715,8 +715,23 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
-    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
+    /// <summary>
+    /// Drops the language subscription (a panel that is gone must not be refreshed by the next language switch) and the
+    /// file watcher with its debounce timer: a stopped <see cref="DispatcherTimer"/> stays in its dispatcher's list until
+    /// the dispatcher next runs, so its Tick handler is unhooked to end the reference to this panel.
+    /// </summary>
+    public void Dispose()
+    {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        watcher?.Dispose();
+        watcher = null;
+        if (watcherTimer is not null)
+        {
+            watcherTimer.Stop();
+            watcherTimer.Tick -= OnWatcherTick;
+            watcherTimer = null;
+        }
+    }
 }
 
 // ---------------------------------------------------------------- file document

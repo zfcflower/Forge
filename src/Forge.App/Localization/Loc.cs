@@ -8,7 +8,7 @@ namespace Forge.App.Localization;
 /// <summary>
 /// The live UI string table. Every user-visible string is a key with a Chinese and an English text, declared in a
 /// feature's own static table (one file per feature, e.g. <c>Strings.Terminal.cs</c>, each calling <see cref="Register"/>
-/// from a static initializer that <see cref="EnsureRegistered"/> triggers), so parallel features never edit one shared file.
+/// from its own <c>[ModuleInitializer]</c>), so parallel features never edit one shared file.
 /// <para>XAML binds <c>{Binding [Key], Source={x:Static loc:Loc.Instance}}</c> (compiled indexer binding, AOT safe);
 /// C# reads <c>Loc.Instance["Key"]</c> or the typed accessors the feature table exposes. Switching
 /// <see cref="Language"/> raises PropertyChanged for <c>Item[]</c> so every bound text refreshes without a restart;
@@ -107,7 +107,10 @@ internal sealed class Loc : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Runs every feature table's static registration; called once by the composition root before the first window.</summary>
+    /// <summary>
+    /// Order point called once by the composition root before the first window: the feature tables register from their own
+    /// module initializers; this only re-runs the core table's (idempotent) registration explicitly.
+    /// </summary>
     public static void EnsureRegistered()
     {
         // Each table registers from its own [ModuleInitializer] (Strings.Core.cs is the reference), which the runtime

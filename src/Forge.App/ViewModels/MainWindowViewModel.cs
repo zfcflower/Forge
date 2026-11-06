@@ -111,11 +111,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         clock.Start();
 
         layoutSaveTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = LayoutSaveDelay };
-        layoutSaveTimer.Tick += (_, _) =>
-        {
-            layoutSaveTimer.Stop();
-            _ = SaveLayoutAsync(CancellationToken.None);
-        };
+        layoutSaveTimer.Tick += OnLayoutSaveTick;
 
         if (composition.Host is { } host)
         {
@@ -383,8 +379,19 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void OnLayoutSaveTick(object? sender, EventArgs e)
+    {
+        layoutSaveTimer.Stop();
+        _ = SaveLayoutAsync(CancellationToken.None);
+    }
+
     private void ScheduleLayoutSave()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         layoutSaveTimer.Stop();
         layoutSaveTimer.Start();
     }
@@ -1068,6 +1075,15 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Reviews.Dispose();
         Specs.Dispose();
         Workbench.Dispose();
+
+        // The final layout capture and the disposals above can still raise a layout change, which restarts the save
+        // timer. Stop() only disables a DispatcherTimer: the Dispatcher drops it from its list on its next pass, so a
+        // dispatcher that is not pumped any more (a closed headless session) would keep the entry, its Tick handler,
+        // this view model and through the dialogs owner the whole window alive. Unhooking Tick ends that reference.
+        clock.Stop();
+        layoutSaveTimer.Stop();
+        clock.Tick -= OnClockTick;
+        layoutSaveTimer.Tick -= OnLayoutSaveTick;
     }
 
     /// <summary>

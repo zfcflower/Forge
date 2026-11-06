@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Forge.App.Tests" />
+    <InternalsVisibleTo Include="Forge.App.LiveSwitch.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.4" />

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.CompilerServices;
 
 namespace Forge.App.Localization;
 
@@ -7,7 +6,7 @@ namespace Forge.App.Localization;
 /// Culture-independent formatting shared by every table (task decision: sentence patterns follow the language, numbers
 /// and times do not). Thousands are always grouped with <c>,</c>; clock times are always 24-hour; identifiers (process
 /// ids, line numbers) never go through <see cref="Number(long)"/> because they must not be grouped.
-/// Only the elapsed-time pattern differs per language, so this class registers the <c>format.*</c> keys itself.
+/// Only the elapsed-time pattern differs per language; its texts live in <see cref="FormatStrings"/>.
 /// </summary>
 internal static class TextFormat
 {
@@ -16,15 +15,6 @@ internal static class TextFormat
 
     public const string SecondsKey = "format.elapsed.seconds";
     public const string MinutesSecondsKey = "format.elapsed.minutesSeconds";
-
-    [ModuleInitializer]
-    internal static void Initialize() => Register();
-
-    internal static void Register()
-    {
-        Loc.Register(SecondsKey, "{0} 秒", "{0}s");
-        Loc.Register(MinutesSecondsKey, "{0} 分 {1} 秒", "{0}m {1}s");
-    }
 
     /// <summary>Grouped count: <c>49,712</c>.</summary>
     public static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
@@ -41,15 +31,27 @@ internal static class TextFormat
     /// <summary>Local month-day and minute, 24-hour: <c>11-05 12:30</c> (default session titles).</summary>
     public static string ShortStamp(DateTimeOffset at) => at.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
 
+    /// <summary>59.95 s: from here the one-decimal seconds would display as 60.0, so it switches to minutes.</summary>
+    private const long MinuteRoundsUpTicks = 599_500_000;
+
     /// <summary>
     /// Elapsed time in the current language: under a minute <c>4.2 秒</c> / <c>4.2s</c>, otherwise
-    /// <c>3 分 05 秒</c> / <c>3m 05s</c>.
+    /// <c>3 分 05 秒</c> / <c>3m 05s</c>. The branch is decided on the value as displayed (rounded to 0.1 s), so 59.96 s is <c>1m 00s</c>, never 60.0s;
+    /// the minutes branch truncates seconds, so it can never show 60.
     /// </summary>
-    public static string Elapsed(TimeSpan elapsed) =>
-        elapsed.TotalSeconds < 60
-            ? Loc.Instance.Format(SecondsKey, elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture))
-            : Loc.Instance.Format(
-                MinutesSecondsKey,
-                ((long)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture),
-                elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture));
+    public static string Elapsed(TimeSpan elapsed)
+    {
+        long ticks = elapsed.Ticks;
+        if (ticks < MinuteRoundsUpTicks)
+        {
+            return Loc.Instance.Format(SecondsKey, elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture));
+        }
+
+        // [59.95 s, 60 s) displays as exactly one minute; beyond that minutes and seconds are truncated.
+        bool roundedUp = ticks < TimeSpan.TicksPerMinute;
+        return Loc.Instance.Format(
+            MinutesSecondsKey,
+            roundedUp ? "1" : ((long)elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture),
+            roundedUp ? "00" : elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture));
+    }
 }

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Live language-switch tests run in their own process on one shared headless session: XAML text bound to the
+       process-wide Loc stays subscribed in Avalonia statics after a headless session ends, and a binding of an old
+       session throws on the next switch and stops delivery to the live window. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <PackageReference Include="Avalonia.Headless" Version="12.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Forge.App\Forge.App.csproj" />
+  </ItemGroup>
+</Project>

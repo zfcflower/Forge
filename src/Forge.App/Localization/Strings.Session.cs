@@ -48,7 +48,7 @@ internal static class SessionStrings
     public const string StopReasonEndTurnKey = "turn.stopReason.endTurn";
     public const string StopReasonToolUseKey = "turn.stopReason.toolUse";
     public const string StopReasonMaxTokensKey = "turn.stopReason.maxTokens";
-    public const string StopReasonOtherKey = "turn.stopReason.other";
+    public const string StopReasonUnknownKey = "turn.stopReason.unknown";
 
     // ---------------------------------------------------------------- sub-agents
     public const string SubAgentQueuedKey = "subagent.queued";
@@ -179,7 +179,7 @@ internal static class SessionStrings
             StopReason.EndTurn => StopReasonEndTurnKey,
             StopReason.ToolUse => StopReasonToolUseKey,
             StopReason.MaxTokens => StopReasonMaxTokensKey,
-            _ => StopReasonOtherKey,
+            _ => StopReasonUnknownKey,
         }];
 
     // ---------------------------------------------------------------- sub-agents
@@ -303,7 +303,7 @@ internal static class SessionStrings
         Loc.Register(StopReasonEndTurnKey, "正常结束", "Finished normally");
         Loc.Register(StopReasonToolUseKey, "请求工具", "Requested tools");
         Loc.Register(StopReasonMaxTokensKey, "达到长度上限", "Hit the length limit");
-        Loc.Register(StopReasonOtherKey, "其他原因", "Other reason");
+        Loc.Register(StopReasonUnknownKey, "其他原因", "Other reason");
 
         // sub-agents
         Loc.Register(SubAgentQueuedKey, "排队中", "Queued");

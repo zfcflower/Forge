@@ -355,6 +355,13 @@ internal sealed class AppComposition : IAsyncDisposable
 
         disposed = true;
 
+        // A section's view model may subscribe to the process-wide Loc; Loc.Instance outlives this graph, so an
+        // undisposed section would stay rooted (with the preferences it holds) after the composition is gone.
+        foreach (var section in settings.Items)
+        {
+            (section.ViewModel as IDisposable)?.Dispose();
+        }
+
         runtimes.Dispose();
         await turnCheckpoints.DisposeAsync().ConfigureAwait(false);
         await uiState.DisposeAsync().ConfigureAwait(false);
