@@ -64,12 +64,23 @@ public sealed partial class GitCli
         return await RunCoreAsync(workingDirectory, arguments, options, null, ct).ConfigureAwait(false);
     }
 
+    /// <param name="standardInput">
+    /// Text written to the child's stdin as UTF-8 without a byte order mark, after which stdin is closed; null leaves stdin
+    /// alone (inherited, as for every other command).
+    /// </param>
+    /// <param name="keepCompletedResult">
+    /// A cancellation that lands after git has already exited with code 0 returns that result instead of throwing, because
+    /// the command's effect (a commit) exists and the caller has to learn about it. A cancellation that kills a running
+    /// git still throws, and so does a timeout.
+    /// </param>
     private async Task<GitCommandResult> RunCoreAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         GitRunOptions options,
         IReadOnlyDictionary<string, string>? environment,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? standardInput = null,
+        bool keepCompletedResult = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -78,12 +89,13 @@ public sealed partial class GitCli
         var captureLimit = options.MaxCapturedCharacters ?? MaxCapturedCharacters;
         var timeout = options.Timeout ?? DefaultTimeout;
 
-        using var process = Start(workingDirectory, arguments, environment);
+        using var process = Start(workingDirectory, arguments, environment, redirectInput: standardInput is not null);
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
 
         var stdoutTask = PumpAsync(process.StandardOutput.BaseStream, options.OnStandardOutputLine, captureLimit, timeoutSource.Token);
         var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, Math.Min(captureLimit, ErrorCaptureCharacters), timeoutSource.Token);
+        var stdinTask = standardInput is null ? Task.CompletedTask : WriteStandardInputAsync(process, standardInput, timeoutSource.Token);
 
         var timedOut = false;
         try
@@ -97,10 +109,59 @@ public sealed partial class GitCli
 
         var stdout = await AwaitPumpAsync(stdoutTask).ConfigureAwait(false);
         var stderr = await AwaitPumpAsync(stderrTask).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
+        await AwaitInputAsync(stdinTask).ConfigureAwait(false);
 
         var exitCode = timedOut ? -1 : ExitCodeOf(process);
+        if (!(keepCompletedResult && !timedOut && exitCode == 0))
+        {
+            ct.ThrowIfCancellationRequested();
+        }
+
         return new GitCommandResult(exitCode, stdout.Text, stderr.Text, timedOut) { IsTruncated = stdout.Truncated };
+    }
+
+    /// <summary>
+    /// Waits for the stdin writer after git has exited. The writer ends by itself once the pipe breaks; the grace period
+    /// only covers a stray grandchild that kept the read end open, which must not hang the call.
+    /// </summary>
+    private static async Task AwaitInputAsync(Task input)
+    {
+        try
+        {
+            await input.WaitAsync(PumpGracePeriod).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Feeds <paramref name="text"/> to git and closes stdin. Runs next to the output pumps, so a git that writes while it
+    /// reads cannot deadlock. A git that exits or is killed before it has read everything breaks the pipe; that is not an
+    /// error here, because the exit code and the cancellation already say what happened.
+    /// </summary>
+    private static async Task WriteStandardInputAsync(Process process, string text, CancellationToken ct)
+    {
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(text);
+            var stream = process.StandardInput.BaseStream;
+            await stream.WriteAsync(bytes, ct).ConfigureAwait(false);
+            await stream.FlushAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException or NotSupportedException)
+        {
+        }
+        finally
+        {
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
+            {
+            }
+        }
     }
 
     /// <summary>
@@ -382,7 +443,14 @@ public sealed partial class GitCli
         return commits[0];
     }
 
-    /// <summary>Stages the given paths (or everything when empty) and commits them with one message.</summary>
+    /// <summary>
+    /// Stages the given paths (or everything when empty) and commits them with one message. The message travels over
+    /// stdin (<c>commit -F -</c>), not as a <c>-m</c> argument, so its length is not bound by the operating system's
+    /// command line limit (about 32,000 characters on Windows). Once git has created the commit the call no longer
+    /// honours cancellation: the new commit is read back and returned even if <paramref name="ct"/> was cancelled in the
+    /// meantime, so the caller never loses the id of a commit that exists. The read-back is bounded by
+    /// <see cref="DefaultTimeout"/> and fails with <see cref="GitException"/> like any other command.
+    /// </summary>
     public async Task<GitCommit> CommitAsync(
         string workingDirectory,
         IReadOnlyList<string> paths,
@@ -401,9 +469,23 @@ public sealed partial class GitCli
 
         await RunCheckedAsync(workingDirectory, add, ct).ConfigureAwait(false);
 
-        var commit = Args("commit", "-m", message);
-        await RunCheckedAsync(workingDirectory, commit, ct).ConfigureAwait(false);
-        return await GetCommitAsync(workingDirectory, "HEAD", ct).ConfigureAwait(false);
+        var commit = Args("commit", "-F", "-");
+        var result = await RunCoreAsync(
+                workingDirectory,
+                commit,
+                new GitRunOptions(),
+                null,
+                ct,
+                standardInput: message,
+                keepCompletedResult: true)
+            .ConfigureAwait(false);
+        if (!result.Success)
+        {
+            throw Failure(result, commit);
+        }
+
+        // The commit exists from here on; reading it back must not be undone by a cancellation that arrives now.
+        return await GetCommitAsync(workingDirectory, "HEAD", CancellationToken.None).ConfigureAwait(false);
     }
 
     public async Task<string> GetDiffTextAsync(string workingDirectory, GitDiffOptions? options = null, CancellationToken ct = default)
@@ -880,7 +962,7 @@ public sealed partial class GitCli
         "GIT_DISCOVERY_ACROSS_FILESYSTEM",
     ];
 
-    private Process Start(string workingDirectory, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? environment = null)
+    private Process Start(string workingDirectory, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? environment = null, bool redirectInput = false)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -888,7 +970,7 @@ public sealed partial class GitCli
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            RedirectStandardInput = false,
+            RedirectStandardInput = redirectInput,
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,

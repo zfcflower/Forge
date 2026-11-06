@@ -380,9 +380,9 @@ public sealed class AgentHostStepCommitterTests
         AssertHistoryPaired(root);
     }
 
-    // Defect probe through the real loop: arguments that are valid JSON but not an object make TodoTool.Resolve throw, and
-    // AgentLoop evaluates the side effect outside its tool try/catch, so the whole turn fails instead of the call erroring.
-    [Theory(Skip = "defect: a todo call whose arguments are valid JSON but not an object ([] , null, 5, \"x\") fails the whole turn with AgentFailed (TodoTool.Resolve throws InvalidOperationException from TryGetProperty; AgentLoop.RunOneAsync/IsReadOnly call ToolRegistry.SideEffectOf outside any try/catch); the call should instead come back as an IsError tool result")]
+    // Through the real loop: arguments that are valid JSON but not an object must not throw out of the side-effect resolver
+    // (AgentLoop evaluates it outside its tool try/catch); the call comes back as an error result and the turn goes on.
+    [Theory]
     [InlineData("[]")]
     [InlineData("null")]
     [InlineData("5")]
@@ -391,13 +391,22 @@ public sealed class AgentHostStepCommitterTests
     {
         using var directory = new TempDirectory();
         await using var store = new SqliteTodoStore(directory.Path);
+        var committer = new RecordingCommitter();
+        var policy = new RecordingPolicy();
         var provider = OneCallThenDone(("c1", "todo", arguments));
-        var host = BuildHost(provider, store, new RecordingCommitter());
+        var host = BuildHost(provider, store, committer, policy);
         var root = host.CreateRoot(Session, Path.GetTempPath());
 
         var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
 
         Assert.Empty(events.OfType<AgentFailed>());
-        Assert.True(Assert.Single(ToolResults(root)).IsError);
+        var result = Assert.Single(ToolResults(root));
+        Assert.True(result.IsError);
+        Assert.Contains("JSON object", result.Content, StringComparison.Ordinal);
+        var request = Assert.Single(policy.Requests);
+        Assert.Equal(arguments, request.ArgumentsJson);
+        Assert.Equal(ToolSideEffect.Write, request.SideEffect);
+        Assert.Empty(committer.Items);
+        AssertHistoryPaired(root);
     }
 }

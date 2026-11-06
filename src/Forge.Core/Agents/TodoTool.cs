@@ -69,6 +69,11 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
         {
             using var document = JsonDocument.Parse(call.ArgumentsJson);
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return new ToolResult($"{Name} arguments must be a JSON object.", IsError: true);
+            }
+
             if (!root.TryGetProperty("operation", out var operationElement) || operationElement.ValueKind != JsonValueKind.String)
             {
                 return new ToolResult($"{Name} requires an 'operation' string.", IsError: true);
@@ -114,7 +119,12 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
         try
         {
             using var document = JsonDocument.Parse(call.ArgumentsJson);
-            if (!document.RootElement.TryGetProperty("operation", out var element) || element.ValueKind != JsonValueKind.String)
+
+            // Valid JSON that is not an object (an array, a scalar, null) cannot be a read; InvokeAsync rejects it, and the
+            // approval policy sees the conservative side effect instead of the resolver throwing out of the agent loop.
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("operation", out var element)
+                || element.ValueKind != JsonValueKind.String)
             {
                 return false;
             }

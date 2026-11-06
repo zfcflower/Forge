@@ -120,7 +120,10 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
 
     /// <summary>
     /// The plain update plus the agent-written step fields in the same write. A null property of <paramref name="step"/>
-    /// leaves that column unchanged; an empty string clears it (stored as NULL).
+    /// leaves that column unchanged; an empty string clears it (stored as NULL). Moving a step from Done to any other
+    /// status also clears its commit result (<see cref="TodoItem.CommitId"/> and <see cref="TodoItem.CommitError"/>) in
+    /// the same write: a reopened step has no commit outcome any more, and finishing it again commits it afresh. A status
+    /// that stays Done, or is not given, leaves the commit result alone.
     /// </summary>
     public async Task<TodoItem?> UpdateAsync(
         string id,
@@ -145,6 +148,7 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                     return null;
                 }
 
+                var reopened = existing.Status == TodoStatus.Done && status is { } next && next != TodoStatus.Done;
                 var item = existing with
                 {
                     Title = title ?? existing.Title,
@@ -153,12 +157,14 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                     CommitSubject = MergeStepField(step?.CommitSubject, existing.CommitSubject),
                     Summary = MergeStepField(step?.Summary, existing.Summary),
                     Verification = MergeStepField(step?.Verification, existing.Verification),
+                    CommitId = reopened ? null : existing.CommitId,
+                    CommitError = reopened ? null : existing.CommitError,
                     UpdatedAt = DateTimeOffset.UtcNow,
                 };
                 await ExecuteAsync(
                     connection,
                     transaction,
-                    "UPDATE todos SET title = $title, status = $status, note = $note, commit_subject = $subject, summary = $summary, verification = $verification, updated_at = $at WHERE id = $id",
+                    "UPDATE todos SET title = $title, status = $status, note = $note, commit_subject = $subject, summary = $summary, verification = $verification, commit_id = $commit, commit_error = $error, updated_at = $at WHERE id = $id",
                     ct,
                     ("$title", item.Title),
                     ("$status", StatusName(item.Status)),
@@ -166,6 +172,8 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                     ("$subject", item.CommitSubject ?? (object)DBNull.Value),
                     ("$summary", item.Summary ?? (object)DBNull.Value),
                     ("$verification", item.Verification ?? (object)DBNull.Value),
+                    ("$commit", item.CommitId ?? (object)DBNull.Value),
+                    ("$error", item.CommitError ?? (object)DBNull.Value),
                     ("$at", StorageDb.FormatTimestamp(item.UpdatedAt)),
                     ("$id", item.Id)).ConfigureAwait(false);
                 return item;

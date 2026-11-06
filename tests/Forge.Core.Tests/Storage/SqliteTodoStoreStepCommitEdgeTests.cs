@@ -166,7 +166,7 @@ public sealed class SqliteTodoStoreStepCommitEdgeTests
     }
 
     [Fact]
-    public async Task Four_argument_update_leaves_step_fields_and_commit_result_intact_in_both_states()
+    public async Task Four_argument_update_leaves_step_fields_and_commit_result_intact_while_the_step_stays_done()
     {
         using var directory = new TempDirectory();
         await using var store = new SqliteTodoStore(directory.Path);
@@ -180,14 +180,15 @@ public sealed class SqliteTodoStoreStepCommitEdgeTests
         await store.SetCommitResultAsync(committed.Id, "abc1234", null, default);
         await store.SetCommitResultAsync(failed.Id, null, "hook failed", default);
 
-        var afterCommitted = await store.UpdateAsync(committed.Id, "Renamed", TodoStatus.InProgress, "new note", default);
+        var afterCommitted = await store.UpdateAsync(committed.Id, "Renamed", TodoStatus.Done, "new note", default);
         var afterFailed = await store.UpdateAsync(failed.Id, null, null, "only a note", default);
 
         Assert.NotNull(afterCommitted);
         Assert.Equal(Triple("subject", "summary", "verification"), Fields(afterCommitted));
         Assert.Equal("abc1234", afterCommitted.CommitId);
         Assert.Null(afterCommitted.CommitError);
-        Assert.Equal(TodoStatus.InProgress, afterCommitted.Status);
+        Assert.Equal(TodoStatus.Done, afterCommitted.Status);
+        Assert.Equal("Renamed", afterCommitted.Title);
         Assert.NotNull(afterFailed);
         Assert.Equal(Triple("subject", "summary", "verification"), Fields(afterFailed));
         Assert.Null(afterFailed.CommitId);
@@ -196,6 +197,121 @@ public sealed class SqliteTodoStoreStepCommitEdgeTests
 
         var listed = await store.ListAsync("sess-a", default);
         Assert.Equal([afterCommitted, afterFailed], listed);
+    }
+
+    // A step moved off Done has no commit outcome any more: the sha (or the failure) is cleared in the same write, through
+    // both overloads, whatever else the call changes, while the agent-written step fields stay.
+    [Theory]
+    [InlineData(false, false, TodoStatus.Pending)]
+    [InlineData(false, false, TodoStatus.InProgress)]
+    [InlineData(false, true, TodoStatus.Pending)]
+    [InlineData(false, true, TodoStatus.InProgress)]
+    [InlineData(true, false, TodoStatus.Pending)]
+    [InlineData(true, false, TodoStatus.InProgress)]
+    [InlineData(true, true, TodoStatus.Pending)]
+    [InlineData(true, true, TodoStatus.InProgress)]
+    public async Task Reopening_a_done_step_clears_its_commit_result_in_the_same_write(bool withStep, bool commitFailed, TodoStatus target)
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var item = await store.AddAsync("sess-a", "Title", "note", null, default);
+        await store.UpdateAsync(item.Id, null, TodoStatus.Done, null, new TodoStepFields("subject", "summary", "verification"), default);
+        await store.SetCommitResultAsync(item.Id, commitFailed ? null : "abc1234", commitFailed ? "hook failed" : null, default);
+        var changed = new List<string>();
+        store.Changed += changed.Add;
+
+        var reopened = withStep
+            ? await store.UpdateAsync(item.Id, "Renamed", target, "new note", new TodoStepFields(Summary: "revised"), default)
+            : await store.UpdateAsync(item.Id, "Renamed", target, "new note", default);
+
+        Assert.NotNull(reopened);
+        Assert.Equal(target, reopened.Status);
+        Assert.Null(reopened.CommitId);
+        Assert.Null(reopened.CommitError);
+        Assert.Equal(Triple("subject", withStep ? "revised" : "summary", "verification"), Fields(reopened));
+        Assert.Equal("Renamed", reopened.Title);
+        Assert.Equal("new note", reopened.Note);
+        Assert.Equal(["sess-a"], changed);
+        Assert.Equal(reopened, Assert.Single(await store.ListAsync("sess-a", default)));
+        Assert.Equal(
+            1L,
+            await TodoSchemaRaw.ScalarAsync<long>(
+                directory,
+                "SELECT count(*) FROM todos WHERE id = $id AND commit_id IS NULL AND commit_error IS NULL",
+                ("$id", item.Id)));
+        await using var reopenedStore = new SqliteTodoStore(directory.Path);
+        Assert.Equal(reopened, Assert.Single(await reopenedStore.ListAsync("sess-a", default)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_status_that_stays_done_or_is_not_given_keeps_the_commit_result(bool commitFailed)
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var item = await store.AddAsync("sess-a", "Title", null, null, default);
+        await store.UpdateAsync(item.Id, null, TodoStatus.Done, null, default);
+        await store.SetCommitResultAsync(item.Id, commitFailed ? null : "abc1234", commitFailed ? "hook failed" : null, default);
+
+        var sameStatus = await store.UpdateAsync(item.Id, null, TodoStatus.Done, null, default);
+        var noStatus = await store.UpdateAsync(item.Id, "Renamed", null, "a note", default);
+        var stepOnly = await store.UpdateAsync(item.Id, null, null, null, new TodoStepFields(Summary: "edited"), default);
+        var sameStatusWithStep = await store.UpdateAsync(item.Id, null, TodoStatus.Done, null, new TodoStepFields(Verification: "checked"), default);
+
+        foreach (var result in new[] { sameStatus, noStatus, stepOnly, sameStatusWithStep })
+        {
+            Assert.NotNull(result);
+            Assert.Equal(TodoStatus.Done, result.Status);
+            Assert.Equal(commitFailed ? null : "abc1234", result.CommitId);
+            Assert.Equal(commitFailed ? "hook failed" : null, result.CommitError);
+        }
+
+        Assert.Equal(sameStatusWithStep, Assert.Single(await store.ListAsync("sess-a", default)));
+    }
+
+    [Fact]
+    public async Task A_reopened_step_that_is_finished_again_stays_without_a_commit_result_until_one_is_recorded()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var item = await store.AddAsync("sess-a", "Title", null, null, default);
+        await store.UpdateAsync(item.Id, null, TodoStatus.Done, null, default);
+        await store.SetCommitResultAsync(item.Id, "first-sha", null, default);
+        await store.UpdateAsync(item.Id, null, TodoStatus.Pending, null, default);
+
+        var finishedAgain = await store.UpdateAsync(item.Id, null, TodoStatus.Done, null, default);
+
+        Assert.NotNull(finishedAgain);
+        Assert.Equal(TodoStatus.Done, finishedAgain.Status);
+        Assert.Null(finishedAgain.CommitId);
+        Assert.Null(finishedAgain.CommitError);
+
+        var recorded = await store.SetCommitResultAsync(item.Id, "second-sha", null, default);
+        Assert.Equal("second-sha", recorded?.CommitId);
+        Assert.Equal("second-sha", Assert.Single(await store.ListAsync("sess-a", default)).CommitId);
+    }
+
+    [Fact]
+    public async Task Reopening_one_step_leaves_the_commit_results_of_the_other_steps_alone()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        var first = await store.AddAsync("sess-a", "First", null, null, default);
+        var second = await store.AddAsync("sess-a", "Second", null, null, default);
+        var elsewhere = await store.AddAsync("sess-b", "Elsewhere", null, null, default);
+        foreach (var id in new[] { first.Id, second.Id, elsewhere.Id })
+        {
+            await store.UpdateAsync(id, null, TodoStatus.Done, null, default);
+            await store.SetCommitResultAsync(id, "sha-" + id, null, default);
+        }
+
+        await store.UpdateAsync(first.Id, null, TodoStatus.Pending, null, default);
+
+        var items = await store.ListAsync("sess-a", default);
+        Assert.Null(items[0].CommitId);
+        Assert.Equal("sha-" + second.Id, items[1].CommitId);
+        Assert.Equal("sha-" + elsewhere.Id, Assert.Single(await store.ListAsync("sess-b", default)).CommitId);
     }
 
     [Fact]

@@ -246,34 +246,48 @@ public sealed class TodoToolStepCommitEdgeTests
         Assert.Empty(rig.Committer.Items);
     }
 
-    // Defect probe: a model that sends valid JSON which is not an object (an array, a scalar, null) makes the resolver throw.
-    // AgentLoop calls it outside any try block, so the whole turn fails instead of the call returning an error result.
-    [Theory(Skip = "defect: TodoTool.Resolve throws InvalidOperationException (TryGetProperty on a non-object root; only JsonException is caught) for arguments like [] , null, 5 or \"list\"; AgentLoop.ExecuteToolsAsync calls SideEffectOf outside any try/catch, so the whole agent turn fails with AgentFailed")]
+    // A model that sends valid JSON which is not an object (an array, a scalar, null) must not make the resolver throw:
+    // AgentLoop calls it outside any try block, so a throw would fail the whole turn instead of erroring the one call.
+    // Such a call is not a read, so it resolves like an object without an operation: Write.
+    [Theory]
     [InlineData("[]")]
     [InlineData("null")]
     [InlineData("5")]
     [InlineData("\"list\"")]
+    [InlineData("""["list"]""")]
+    [InlineData("true")]
     public void Resolve_does_not_throw_for_arguments_that_are_valid_json_but_not_an_object(string json)
     {
         var tool = new TodoTool(new LegacyStore());
+        ToolSideEffect? resolved = null;
 
-        var exception = Record.Exception(() => ToolRegistry.SideEffectOf(tool, Call(json)));
+        var exception = Record.Exception(() => resolved = ToolRegistry.SideEffectOf(tool, Call(json)));
 
         Assert.Null(exception);
+        Assert.Equal(ToolSideEffect.Write, resolved);
     }
 
-    [Theory(Skip = "defect: TodoTool.InvokeAsync throws InvalidOperationException (TryGetProperty on a non-object root; only JsonException is caught) instead of returning an invalid-arguments ToolResult for arguments like [] , null, 5 or \"list\"; AgentLoop.RunOneAsync catches it and turns it into an error result, so only direct callers of the tool see the throw")]
+    [Theory]
     [InlineData("[]")]
     [InlineData("null")]
     [InlineData("5")]
     [InlineData("\"list\"")]
+    [InlineData("""["list"]""")]
+    [InlineData("true")]
     public async Task Invoke_reports_arguments_that_are_valid_json_but_not_an_object_as_a_tool_error(string json)
     {
-        var tool = new TodoTool(new LegacyStore());
+        await using var rig = new Rig();
+        var id = await rig.AddAsync();
+        var itemsBefore = await rig.Sqlite.ListAsync(Session, default);
 
-        var result = await tool.InvokeAsync(Call(json), new ToolContext(Session, Path.GetTempPath()), CancellationToken.None);
+        var result = await rig.InvokeAsync(json);
 
         Assert.True(result.IsError);
+        Assert.Contains("JSON object", result.Content, StringComparison.Ordinal);
+        Assert.Equal(itemsBefore, await rig.Sqlite.ListAsync(Session, default));
+        Assert.Null(await rig.Sqlite.GetPlanSummaryAsync(Session, default));
+        Assert.Empty(rig.Committer.Items);
+        Assert.Equal(TodoStatus.Pending, (await rig.GetAsync(id)).Status);
     }
 
     // ---------------------------------------------------------------- update: step fields without a status change
@@ -490,6 +504,64 @@ public sealed class TodoToolStepCommitEdgeTests
 
         Assert.Contains("Step commit: committed", again.Content, StringComparison.Ordinal);
         Assert.Equal(2, rig.Committer.Items.Count);
+    }
+
+    // A reopened step has no commit outcome any more: the list must not keep advertising the old commit or its failure.
+    [Theory]
+    [InlineData("pending")]
+    [InlineData("in_progress")]
+    public async Task Reopening_a_committed_step_removes_its_commit_from_the_list(string status)
+    {
+        await using var rig = new Rig();
+        var id = await rig.AddAsync();
+        await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+        var committed = await rig.InvokeAsync("""{"operation":"list"}""");
+        Assert.Contains("[commit abc1234]", committed.Content, StringComparison.Ordinal);
+
+        var reopened = await rig.InvokeAsync(UpdateJson(id, $"\"status\":\"{status}\""));
+
+        Assert.False(reopened.IsError);
+        var listed = await rig.InvokeAsync("""{"operation":"list"}""");
+        Assert.DoesNotContain("[commit", listed.Content, StringComparison.Ordinal);
+        var stored = await rig.GetAsync(id);
+        Assert.Null(stored.CommitId);
+        Assert.Null(stored.CommitError);
+        Assert.NotEqual(TodoStatus.Done, stored.Status);
+    }
+
+    [Fact]
+    public async Task Reopening_a_step_whose_commit_failed_removes_the_failure_from_the_list()
+    {
+        await using var rig = new Rig();
+        rig.Committer.Result = new StepCommitResult(StepCommitOutcome.Failed, null, "hook rejected the commit");
+        var id = await rig.AddAsync();
+        await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+        Assert.Contains("[commit failed: hook rejected the commit]", (await rig.InvokeAsync("""{"operation":"list"}""")).Content, StringComparison.Ordinal);
+
+        await rig.InvokeAsync(UpdateJson(id, "\"status\":\"pending\""));
+
+        var listed = await rig.InvokeAsync("""{"operation":"list"}""");
+        Assert.DoesNotContain("[commit", listed.Content, StringComparison.Ordinal);
+        Assert.Null((await rig.GetAsync(id)).CommitError);
+    }
+
+    [Theory]
+    [InlineData("\"note\":\"touched\"")]
+    [InlineData("\"title\":\"renamed\"")]
+    [InlineData("\"summary\":\"edited\"")]
+    [InlineData("\"status\":\"done\"")]
+    public async Task Editing_a_committed_step_without_reopening_it_keeps_its_commit(string property)
+    {
+        await using var rig = new Rig();
+        var id = await rig.AddAsync();
+        await rig.InvokeAsync(UpdateJson(id, "\"status\":\"done\""));
+
+        var edited = await rig.InvokeAsync(UpdateJson(id, property));
+
+        Assert.False(edited.IsError);
+        Assert.Contains("[commit abc1234]", (await rig.InvokeAsync("""{"operation":"list"}""")).Content, StringComparison.Ordinal);
+        Assert.Equal("abc1234def5678", (await rig.GetAsync(id)).CommitId);
+        Assert.Single(rig.Committer.Items);
     }
 
     [Theory]
