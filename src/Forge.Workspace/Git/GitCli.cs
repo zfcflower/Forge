@@ -13,7 +13,7 @@ namespace Forge.Workspace;
 /// UTF-8 bytes decoded as they arrive, so CRLF, a missing trailing newline and control characters inside a
 /// line survive unchanged.
 /// </summary>
-public sealed class GitCli
+public sealed partial class GitCli
 {
     private const string FallbackExecutable = "git";
     private const int ErrorCaptureCharacters = 64 * 1024;

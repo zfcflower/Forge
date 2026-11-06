@@ -75,7 +75,9 @@ ThinkRail 的这些能力来自它的工具(工作区、计划步骤提交、计
 - `GitCli` 新增:`GetBranchStatusAsync`(当前分支、上游、ahead/behind,来自 `status --porcelain=v2 --branch`)、`CreateBranchAsync`、`SwitchBranchAsync`(工作树不干净时拒绝)、`SetUpstreamAsync`、`FetchAsync`、`PullAsync(策略)`、`PushAsync(setUpstream, forceWithLease 期望值)`、`RebaseAsync`/`MergeAsync`/`AbortAsync`/`ContinueAsync`、`GetConflictsAsync`、`LsRemoteAsync`。已有方法签名和语义都不变。
 - 远程写操作执行前现读状态再核对:push 先 `ls-remote` 读远程分支当前 sha,作为 `--force-with-lease=<ref>:<sha>` 的期望值;从不使用缓存的结果。
 - 删除分支沿用 `DeleteBranchAsync`;删除当前分支或某个 worktree 已检出的分支时拒绝。
-- Agent 工具 `git_status`(只读:分支、上游、ahead/behind、改动、冲突)、`git_log`(只读,供判断提交风格)、`git_diff`(只读,`base...HEAD` 加工作树)、`git_branch`(Write)、`git_sync`(fetch 为只读,pull/push/rebase/merge 为 Write;用 `IToolSideEffectResolver` 按参数判定)。
+- Agent 工具 `git_status`(只读:分支、上游、ahead/behind、改动、冲突)、`git_log`(只读,供判断提交风格)、`git_diff`(只读,`base...HEAD` 加工作树)、`git_fetch`(只读,只更新远端跟踪引用)、`git_branch`(Write)、`git_sync`(Write)。按副作用拆成两个工具名,而不是一个工具按参数判定:审批策略看到的是工具名固定的副作用。
+- pull 策略只来自设置,`git_sync` 的参数不能覆盖——策略归用户。rebase/merge **不**先 fetch:`onto` 默认是当前分支的上游,没有上游时是 `origin/<默认分支>`,取的是最后一次 fetch 到的状态;要最新就必须先显式 fetch(理由:不要 rebase 在一个你刚刚没看过的东西上)。
+- 期望失败都以 `GitRemoteResult` 返回,不抛异常,只有取消抛;失败种类由 `GitFailureClassifier` 按 git 的 stderr 判定(git 在 `LC_ALL=C` 下输出稳定的英文)。注意 git 2.56 对“落后推送”输出 `(fetch first)` 而不是经典的 `(non-fast-forward)`,两个都要认。
 - 新建会话时分支名可编辑(默认 `forge/<slug>`,按 `git check-ref-format` 校验);会话标题栏显示分支名。
 
 ### ② 步骤提交与计划摘要

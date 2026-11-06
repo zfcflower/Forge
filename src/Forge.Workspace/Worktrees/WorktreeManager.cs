@@ -128,17 +128,62 @@ public sealed class WorktreeManager
 
     public WorktreeOptions Options { get; }
 
+    /// <summary>
+    /// Creates a worktree on a caller-chosen branch name. Unlike the title overload the name is never suffixed: an
+    /// invalid name (<c>git check-ref-format --branch</c>) throws <see cref="ArgumentException"/>, and a branch that
+    /// already exists throws <see cref="GitException"/> naming it, because the user typed that exact name. The worktree
+    /// directory slug comes from the part after the last <c>/</c> and is suffixed only when that directory exists. A
+    /// null or blank <paramref name="branchName"/> falls back to the title overload.
+    /// </summary>
+    public async Task<WorktreeSession> CreateAsync(string repositoryPath, string title, string? branchName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+        {
+            return await CreateAsync(repositoryPath, title, ct).ConfigureAwait(false);
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        var repositoryRoot = await ResolveRepositoryRootAsync(repositoryPath, ct).ConfigureAwait(false);
+        if (!await git.IsValidBranchNameAsync(repositoryRoot, branchName, ct).ConfigureAwait(false))
+        {
+            throw new ArgumentException($"'{branchName}' is not a valid branch name; see git check-ref-format.", nameof(branchName));
+        }
+
+        var startPoint = StartPointName();
+        var baseCommit = await ResolveBaseCommitAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false);
+
+        // The directory is named after the last path segment; the branch keeps whatever the caller typed, slashes included.
+        var segment = branchName[(branchName.LastIndexOf('/') + 1)..];
+        var baseSlug = Slugify(segment, Options.MaxSlugLength);
+        return await CreateInRepositoryAsync(repositoryRoot, baseSlug, branchName, startPoint, baseCommit, ct).ConfigureAwait(false);
+    }
+
     public async Task<WorktreeSession> CreateAsync(string repositoryPath, string title, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
-        var repositoryRoot = await git.GetRepositoryRootAsync(repositoryPath, ct).ConfigureAwait(false)
-            ?? throw new GitException($"'{repositoryPath}' is not inside a git repository.", [], -1, string.Empty);
-
-        var startPoint = string.IsNullOrWhiteSpace(Options.StartPoint) ? "HEAD" : Options.StartPoint;
-        var baseCommit = await git.RevParseAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false)
-            ?? throw new GitException($"Start point '{startPoint}' does not resolve to a commit.", [], -1, string.Empty);
-
+        var repositoryRoot = await ResolveRepositoryRootAsync(repositoryPath, ct).ConfigureAwait(false);
+        var startPoint = StartPointName();
+        var baseCommit = await ResolveBaseCommitAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false);
         var baseSlug = Slugify(title, Options.MaxSlugLength);
+        return await CreateInRepositoryAsync(repositoryRoot, baseSlug, null, startPoint, baseCommit, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The gate-protected part both overloads share: serialize the check-then-act per repository, allocate the directory
+    /// slug, then let one <c>git worktree add -b</c> create the branch and the worktree together.
+    /// </summary>
+    /// <param name="branchName">
+    /// The caller's exact branch name, or null to mint <see cref="WorktreeOptions.BranchPrefix"/> + slug. A non-null name is
+    /// never suffixed or reused - only the directory slug may gain <c>-2</c>, <c>-3</c>... when that directory is taken.
+    /// </param>
+    private async Task<WorktreeSession> CreateInRepositoryAsync(
+        string repositoryRoot,
+        string baseSlug,
+        string? branchName,
+        string startPoint,
+        string? baseCommit,
+        CancellationToken ct)
+    {
         var attempts = Math.Max(1, Options.MaxSlugAttempts);
         var gateKey = WorkspacePaths.Normalize(repositoryRoot);
         var gate = AcquireGate(gateKey);
@@ -153,10 +198,18 @@ public sealed class WorktreeManager
             for (var attempt = 1; attempt <= attempts; attempt++)
             {
                 ct.ThrowIfCancellationRequested();
+                if (branchName is not null && existing.Contains(branchName))
+                {
+                    // Re-checked every round: a concurrent process may have taken the name since the gate was entered.
+                    throw BranchExists(branchName);
+                }
+
                 var slug = attempt == 1 ? baseSlug : $"{baseSlug}-{attempt}";
-                var branch = Options.BranchPrefix + slug;
+                var branch = branchName ?? Options.BranchPrefix + slug;
                 var path = ResolveWorktreePath(repositoryRoot, slug);
-                if (existing.Contains(branch) || WorkspacePaths.Exists(path))
+
+                // The minted branch follows the slug, so both have to be free; a caller-chosen branch only frees up a directory.
+                if (WorkspacePaths.Exists(path) || (branchName is null && existing.Contains(branch)))
                 {
                     continue;
                 }
@@ -180,16 +233,23 @@ public sealed class WorktreeManager
                 }
             }
 
+            var target = branchName ?? baseSlug;
             if (lastFailure is not null)
             {
                 throw new GitException(
-                    $"Could not create a worktree branch for '{baseSlug}' after {addAttempts} attempts: {lastFailure.Message}",
+                    $"Could not create a worktree branch for '{target}' after {addAttempts} attempts: {lastFailure.Message}",
                     lastFailure.Arguments,
                     lastFailure.ExitCode,
                     lastFailure.StandardError);
             }
 
-            throw new GitException($"Could not find an unused branch name for '{baseSlug}'.", [], -1, string.Empty);
+            throw branchName is null
+                ? new GitException($"Could not find an unused branch name for '{baseSlug}'.", [], -1, string.Empty)
+                : new GitException(
+                    $"Could not find an unused worktree directory name for branch '{branchName}' after {attempts} attempts.",
+                    [],
+                    -1,
+                    string.Empty);
         }
         finally
         {
@@ -201,6 +261,27 @@ public sealed class WorktreeManager
             ReleaseGate(gateKey, gate);
         }
     }
+
+    private string StartPointName() => string.IsNullOrWhiteSpace(Options.StartPoint) ? "HEAD" : Options.StartPoint;
+
+    private async Task<string> ResolveRepositoryRootAsync(string repositoryPath, CancellationToken ct) =>
+        await git.GetRepositoryRootAsync(repositoryPath, ct).ConfigureAwait(false)
+        ?? throw new GitException($"'{repositoryPath}' is not inside a git repository.", [], -1, string.Empty);
+
+    private async Task<string?> ResolveBaseCommitAsync(string repositoryRoot, string startPoint, CancellationToken ct) =>
+        await git.RevParseAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false)
+        ?? throw new GitException($"Start point '{startPoint}' does not resolve to a commit.", [], -1, string.Empty);
+
+    /// <summary>
+    /// A branch the caller asked for by name is already there. The user typed that exact name, so it is reported and
+    /// never suffixed, renamed or reused.
+    /// </summary>
+    private static GitException BranchExists(string branchName) =>
+        new(
+            $"Branch '{branchName}' already exists. Choose a different branch name; an existing branch is never reused.",
+            [],
+            -1,
+            string.Empty);
 
     private async Task<HashSet<string>> GetBranchNamesAsync(string repositoryRoot, CancellationToken ct)
     {
