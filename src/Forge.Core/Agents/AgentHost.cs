@@ -34,6 +34,12 @@ public sealed record AgentHostOptions
     /// <summary>Registers the <c>todo</c> tool when set; the same store backs the TODO panel.</summary>
     public ITodoStore? Todos { get; init; }
 
+    /// <summary>
+    /// Commits a checklist step when the <c>todo</c> tool marks it done (only used together with <see cref="Todos"/>).
+    /// Null leaves step commits to the host application, such as the TODO panel.
+    /// </summary>
+    public IStepCommitter? StepCommitter { get; init; }
+
     /// <summary>Overrides the default <see cref="SummaryCompactor"/> (used when a store is configured).</summary>
     public IContextCompactor? Compactor { get; init; }
 
@@ -92,7 +98,7 @@ public sealed class AgentHost
 
         if (options.Todos is { } todos)
         {
-            builtIns.Add(new TodoTool(todos));
+            builtIns.Add(new TodoTool(todos, options.StepCommitter));
         }
 
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);

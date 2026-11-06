@@ -11,7 +11,9 @@ namespace Forge.Core.Storage;
 /// </summary>
 public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
 {
-    private const string Columns = "id, session_id, title, status, note, order_index, updated_at";
+    private const string InsertColumns = "id, session_id, title, status, note, order_index, updated_at";
+
+    private const string Columns = InsertColumns + ", commit_subject, summary, verification, commit_id, commit_error";
 
     private readonly SqliteWriter _writer;
     private readonly string _databasePath;
@@ -96,7 +98,7 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                 await ExecuteAsync(
                     connection,
                     transaction,
-                    $"INSERT INTO todos ({Columns}) VALUES ($id, $session, $title, $status, $note, $order, $at)",
+                    $"INSERT INTO todos ({InsertColumns}) VALUES ($id, $session, $title, $status, $note, $order, $at)",
                     ct,
                     ("$id", created.Id),
                     ("$session", created.SessionId),
@@ -113,7 +115,20 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
         return item;
     }
 
-    public async Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct)
+    public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
+        UpdateAsync(id, title, status, note, null, ct);
+
+    /// <summary>
+    /// The plain update plus the agent-written step fields in the same write. A null property of <paramref name="step"/>
+    /// leaves that column unchanged; an empty string clears it (stored as NULL).
+    /// </summary>
+    public async Task<TodoItem?> UpdateAsync(
+        string id,
+        string? title,
+        TodoStatus? status,
+        string? note,
+        TodoStepFields? step,
+        CancellationToken ct)
     {
         StoragePaths.SafeSegment(id, nameof(id));
         if (title is not null)
@@ -135,16 +150,22 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                     Title = title ?? existing.Title,
                     Status = status ?? existing.Status,
                     Note = note ?? existing.Note,
+                    CommitSubject = MergeStepField(step?.CommitSubject, existing.CommitSubject),
+                    Summary = MergeStepField(step?.Summary, existing.Summary),
+                    Verification = MergeStepField(step?.Verification, existing.Verification),
                     UpdatedAt = DateTimeOffset.UtcNow,
                 };
                 await ExecuteAsync(
                     connection,
                     transaction,
-                    "UPDATE todos SET title = $title, status = $status, note = $note, updated_at = $at WHERE id = $id",
+                    "UPDATE todos SET title = $title, status = $status, note = $note, commit_subject = $subject, summary = $summary, verification = $verification, updated_at = $at WHERE id = $id",
                     ct,
                     ("$title", item.Title),
                     ("$status", StatusName(item.Status)),
                     ("$note", item.Note ?? (object)DBNull.Value),
+                    ("$subject", item.CommitSubject ?? (object)DBNull.Value),
+                    ("$summary", item.Summary ?? (object)DBNull.Value),
+                    ("$verification", item.Verification ?? (object)DBNull.Value),
                     ("$at", StorageDb.FormatTimestamp(item.UpdatedAt)),
                     ("$id", item.Id)).ConfigureAwait(false);
                 return item;
@@ -158,6 +179,105 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
 
         RaiseChanged(updated.SessionId);
         return updated;
+    }
+
+    /// <summary>
+    /// Stores the outcome of a step commit: the commit id or the failure reason, never both (an empty string counts as
+    /// absent). Touches no other column except <c>updated_at</c>.
+    /// </summary>
+    public async Task<TodoItem?> SetCommitResultAsync(string id, string? commitId, string? commitError, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(id, nameof(id));
+        var sha = NullIfEmpty(commitId);
+        var error = NullIfEmpty(commitError);
+        if (sha is not null && error is not null)
+        {
+            throw new ArgumentException("A step commit result is either a commit id or an error, not both.", nameof(commitError));
+        }
+
+        var updated = await _writer.WriteAsync<TodoItem?>(
+            async (connection, transaction) =>
+            {
+                var existing = await FindAsync(connection, transaction, id, ct).ConfigureAwait(false);
+                if (existing is null)
+                {
+                    return null;
+                }
+
+                var item = existing with { CommitId = sha, CommitError = error, UpdatedAt = DateTimeOffset.UtcNow };
+                await ExecuteAsync(
+                    connection,
+                    transaction,
+                    "UPDATE todos SET commit_id = $commit, commit_error = $error, updated_at = $at WHERE id = $id",
+                    ct,
+                    ("$commit", item.CommitId ?? (object)DBNull.Value),
+                    ("$error", item.CommitError ?? (object)DBNull.Value),
+                    ("$at", StorageDb.FormatTimestamp(item.UpdatedAt)),
+                    ("$id", item.Id)).ConfigureAwait(false);
+                return item;
+            },
+            ct);
+
+        if (updated is null)
+        {
+            return null;
+        }
+
+        RaiseChanged(updated.SessionId);
+        return updated;
+    }
+
+    public Task<PlanSummary?> GetPlanSummaryAsync(string sessionId, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        return _writer.ReadAsync<PlanSummary?>(
+            async connection =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT session_id, text, updated_at FROM plan_summaries WHERE session_id = $session";
+                command.Parameters.AddWithValue("$session", sessionId);
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    return null;
+                }
+
+                var row = $"plan summary of session {sessionId}";
+                return new PlanSummary(
+                    StorageDb.ReadText(reader, 0, "session_id", _databasePath, row),
+                    StorageDb.ReadText(reader, 1, "text", _databasePath, row),
+                    StorageDb.ParseCanonicalTimestamp(
+                        StorageDb.ReadText(reader, 2, "updated_at", _databasePath, row),
+                        "updated_at",
+                        _databasePath,
+                        row));
+            },
+            ct);
+    }
+
+    /// <summary>Upserts the session's plan summary and raises <see cref="Changed"/> after the commit.</summary>
+    public async Task<PlanSummary> SetPlanSummaryAsync(string sessionId, string text, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        var summary = await _writer.WriteAsync(
+            async (connection, transaction) =>
+            {
+                var written = new PlanSummary(sessionId, text, DateTimeOffset.UtcNow);
+                await ExecuteAsync(
+                    connection,
+                    transaction,
+                    "INSERT INTO plan_summaries (session_id, text, updated_at) VALUES ($session, $text, $at) ON CONFLICT (session_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
+                    ct,
+                    ("$session", written.SessionId),
+                    ("$text", written.Text),
+                    ("$at", StorageDb.FormatTimestamp(written.UpdatedAt))).ConfigureAwait(false);
+                return written;
+            },
+            ct);
+
+        RaiseChanged(summary.SessionId);
+        return summary;
     }
 
     public async Task<bool> RemoveAsync(string id, CancellationToken ct)
@@ -287,8 +407,19 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
                 StorageDb.ReadText(reader, 6, "updated_at", _databasePath, row),
                 "updated_at",
                 _databasePath,
-                row));
+                row),
+            StorageDb.ReadOptionalText(reader, 7, "commit_subject", _databasePath, row),
+            StorageDb.ReadOptionalText(reader, 8, "summary", _databasePath, row),
+            StorageDb.ReadOptionalText(reader, 9, "verification", _databasePath, row),
+            StorageDb.ReadOptionalText(reader, 10, "commit_id", _databasePath, row),
+            StorageDb.ReadOptionalText(reader, 11, "commit_error", _databasePath, row));
     }
+
+    /// <summary>Null keeps the stored value, an empty string clears it, anything else replaces it.</summary>
+    private static string? MergeStepField(string? incoming, string? existing) =>
+        incoming is null ? existing : incoming.Length == 0 ? null : incoming;
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private async Task<TodoItem?> FindAsync(
         SqliteConnection connection,

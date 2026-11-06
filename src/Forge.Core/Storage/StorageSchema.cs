@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -115,6 +115,20 @@ internal static class StorageSchema
         ) WITHOUT ROWID;
         """;
 
+    private const string V2SchemaSql = """
+        ALTER TABLE todos ADD COLUMN commit_subject TEXT NULL;
+        ALTER TABLE todos ADD COLUMN summary TEXT NULL;
+        ALTER TABLE todos ADD COLUMN verification TEXT NULL;
+        ALTER TABLE todos ADD COLUMN commit_id TEXT NULL;
+        ALTER TABLE todos ADD COLUMN commit_error TEXT NULL;
+
+        CREATE TABLE IF NOT EXISTS plan_summaries (
+            session_id TEXT PRIMARY KEY,
+            text       TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """;
+
     private const string FtsSchemaSql =
         "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(session_id UNINDEXED, seq UNINDEXED, text, tokenize='unicode61 remove_diacritics 2')";
 
@@ -191,6 +205,9 @@ internal static class StorageSchema
         {
             case 0:
                 await MigrateToV1Async(connection, transaction, databasePath, ct).ConfigureAwait(false);
+                break;
+            case 1:
+                await ExecuteAsync(connection, transaction, V2SchemaSql, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
