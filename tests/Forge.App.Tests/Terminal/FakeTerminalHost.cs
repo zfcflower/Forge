@@ -80,6 +80,18 @@ internal sealed class FakeTerminalSession : ITerminalSession
 
     public byte[] WrittenBytes()
     {
+        // Input reaches the session through the view model's ordered writer task, so give it a moment to drain: the
+        // count has to stay unchanged for a short settling period before the bytes are taken as complete.
+        var settled = 0;
+        var last = -1;
+        for (var i = 0; i < 100 && settled < 4; i++)
+        {
+            var count = WrittenCount();
+            settled = count == last ? settled + 1 : 0;
+            last = count;
+            Thread.Sleep(10);
+        }
+
         lock (gate)
         {
             var total = 0;

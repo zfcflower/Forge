@@ -63,7 +63,24 @@ public sealed partial class ExtensionHostClient : ITerminalHost
 
         var generation = Volatile.Read(ref activeGeneration);
         var payload = TerminalProtocol.SerializeStart(request);
-        var response = await SendAsync(active, TerminalOps.Start, payload, RequestBudget, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        // The request itself is not tied to ct: cancelling it would make the peer drop the answer, and with it the only
+        // way to learn the id of a terminal the host may already have built. The caller stops waiting on ct instead,
+        // and an answer that still arrives is cleaned up by AbandonStartAsync. The request stays bounded by the
+        // client's budget (or the peer's default deadline) and the connection lifetime.
+        var startTask = SendAsync(active, TerminalOps.Start, payload, RequestBudget, CancellationToken.None);
+        IpcMessage response;
+        try
+        {
+            response = await startTask.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && !startTask.IsCompleted)
+        {
+            _ = AbandonStartAsync(startTask, active, generation);
+            throw;
+        }
+
         if (!TerminalProtocol.TryReadStartResult(response.Result, out var terminalId, out var problem))
         {
             Diagnose("terminal.start returned unusable data: " + problem);
@@ -80,6 +97,63 @@ public sealed partial class ExtensionHostClient : ITerminalHost
         }
 
         return RegisterTerminal(terminalId, active);
+    }
+
+    /// <summary>Cleans up after a <c>terminal.start</c> whose caller cancelled before the answer arrived: when the host
+    /// still built a terminal it is stopped (it would otherwise occupy one of the host's terminal slots until the
+    /// connection ends) and its buffered early frames are dropped. Failures of the start (refusal, timeout, closed
+    /// connection) are observed and mean there is nothing to stop. Never throws; it ends with the start request.</summary>
+    private async Task AbandonStartAsync(Task<IpcMessage> startTask, IpcPeer active, long generation)
+    {
+        string? terminalId = null;
+        try
+        {
+            var response = await startTask.ConfigureAwait(false);
+            if (!TerminalProtocol.TryReadStartResult(response.Result, out terminalId, out _))
+            {
+                return;
+            }
+
+            if (generation != Volatile.Read(ref activeGeneration) || active.IsClosed)
+            {
+                return;
+            }
+
+            DiscardEarlyFrames(terminalId);
+            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await SendAsync(
+                    active, TerminalOps.Stop, TerminalProtocol.SerializeTerminalId(terminalId), RequestBudget, budget.Token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Best effort: a refused or timed-out start has no terminal, and a failed stop is covered by the host
+            // ending its terminals with the connection.
+            if (terminalId is not null)
+            {
+                Diagnose($"terminal '{terminalId}' of a cancelled terminal.start could not be stopped: {ex.Message}");
+            }
+        }
+        finally
+        {
+            if (terminalId is not null)
+            {
+                DiscardEarlyFrames(terminalId);
+            }
+        }
+    }
+
+    /// <summary>Drops the buffered early frames (and a buffered exit) of <paramref name="terminalId"/>.</summary>
+    private void DiscardEarlyFrames(string terminalId)
+    {
+        lock (terminalsGate)
+        {
+            if (earlyTerminalFrames.Remove(terminalId, out var dropped))
+            {
+                earlyTerminalOrder.Remove(terminalId);
+                earlyTerminalBytes -= dropped.Bytes;
+            }
+        }
     }
 
     /// <summary>Removes a session from the registry if it is still registered; a no-op when the exit notification

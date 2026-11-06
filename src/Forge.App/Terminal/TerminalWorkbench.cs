@@ -110,16 +110,23 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
         activeSessionId = sessionId;
         activeWorkDir = workDir;
 
-        var tabs = layout.BottomTabs.Tabs.ToArray();
-        for (var i = 0; i < tabs.Length; i++)
+        // A terminal tab may have been dragged out of the bottom group, so the lookup goes through the layout by id
+        // instead of scanning one group; CloseTab removes the tab from whichever group holds it.
+        TerminalViewModel[] known;
+        lock (gate)
         {
-            TabModel tab = tabs[i];
-            if (tab.Kind != TabKind.Terminal || tab.IsFloating || tab.Content is not TerminalViewModel terminal)
+            known = [.. byId.Values];
+        }
+
+        for (var i = 0; i < known.Length; i++)
+        {
+            var terminal = known[i];
+            if (string.Equals(terminal.SessionId, sessionId, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (!string.Equals(terminal.SessionId, sessionId, StringComparison.Ordinal))
+            if (layout.FindTab(WorkbenchIds.TerminalTab(terminal.Id)) is { IsFloating: false } tab)
             {
                 // Closing the tab only removes it from the group: the terminal object and its process stay alive.
                 layout.CloseTab(tab);
@@ -327,12 +334,17 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
     /// <summary>A terminal without an OSC title shows "Terminal n", which has to follow a language switch.</summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        var tabs = layout.BottomTabs.Tabs;
-        for (var i = 0; i < tabs.Count; i++)
+        TerminalViewModel[] known;
+        lock (gate)
         {
-            if (tabs[i].Content is TerminalViewModel terminal)
+            known = [.. byId.Values];
+        }
+
+        for (var i = 0; i < known.Length; i++)
+        {
+            if (layout.FindTab(WorkbenchIds.TerminalTab(known[i].Id)) is { } tab)
             {
-                tabs[i].Title = terminal.TabTitle;
+                tab.Title = known[i].TabTitle;
             }
         }
     }

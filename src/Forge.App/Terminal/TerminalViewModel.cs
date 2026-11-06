@@ -57,6 +57,11 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
     private ITerminalSession? session;
     private IClipboard? clipboard;
     private Task? pump;
+
+    // The ordered input path: UI keystrokes and the emulator's device answers all go through this one channel, drained by
+    // a single writer task, so the host sees the bytes in exactly the order they were produced.
+    private ChannelWriter<byte[]>? inputWriter;
+    private Task? inputTask;
     private string title = string.Empty;
     private string statusText = string.Empty;
     private string? problemKey;
@@ -205,16 +210,8 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
             return;
         }
 
-        ITerminalSession? active;
-        lock (gate)
-        {
-            active = session;
-        }
-
-        if (active is not null)
-        {
-            WriteQuietly(active, bytes.ToArray());
-        }
+        // Before the session exists (or after it was released) there is no channel and the bytes are dropped.
+        Volatile.Read(ref inputWriter)?.TryWrite(bytes.ToArray());
     }
 
     /// <summary>
@@ -398,6 +395,14 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
                 {
                     session = started;
                     handedOff = true;
+                    var channel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions
+                    {
+                        SingleReader = true,
+                        SingleWriter = false,
+                        AllowSynchronousContinuations = false,
+                    });
+                    Volatile.Write(ref inputWriter, channel.Writer);
+                    inputTask = Task.Run(() => RunInputAsync(started, channel.Reader));
                     columns = emulator.Columns;
                     rows = emulator.Rows;
                 }
@@ -463,6 +468,9 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
         }
         finally
         {
+            // The terminal is over (exit, failure or dispose): no further input can matter, so the writer task drains and ends.
+            Volatile.Read(ref inputWriter)?.TryComplete();
+
             // Every path that never handed the session over (a cancelled start, a failure between StartAsync and the
             // assignment) stops it here; a handed-off session belongs to DisposeAsync.
             if (!handedOff && started is not null)
@@ -513,9 +521,9 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
         }
 
         MarkDirty();
-        if (replies is not null && Volatile.Read(ref session) is { } active)
+        if (replies is not null)
         {
-            WriteQuietly(active, replies);
+            Volatile.Read(ref inputWriter)?.TryWrite(replies);
         }
     }
 
@@ -676,6 +684,7 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
         preferences.PropertyChanged -= OnPreferencesChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         lifetime.Cancel();
+        Volatile.Read(ref inputWriter)?.TryComplete();
 
         ITerminalSession? active;
         lock (gate)
@@ -702,25 +711,46 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
             }
         }
 
+        if (inputTask is { } writing)
+        {
+            try
+            {
+                await writing.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                Trace.WriteLine("[terminal] input writer ended: " + exception.Message);
+            }
+        }
+
         lifetime.Dispose();
     }
 
     // ---------------------------------------------------------------- input helpers
 
-    /// <summary>Writes without blocking the caller; a dead session only leaves a diagnostic.</summary>
-    private static void WriteQuietly(ITerminalSession active, byte[] bytes) =>
-        _ = WriteCoreAsync(active, bytes);
-
-    private static async Task WriteCoreAsync(ITerminalSession active, byte[] bytes)
+    /// <summary>The single writer of the terminal's input: it forwards queued chunks one at a time, in order. A dead
+    /// session only leaves a diagnostic; the loop ends when the channel is completed or the tab is disposed.</summary>
+    private async Task RunInputAsync(ITerminalSession active, ChannelReader<byte[]> reader)
     {
+        var ct = lifetime.Token;
         try
         {
-            await active.WriteAsync(bytes, CancellationToken.None).ConfigureAwait(false);
+            await foreach (var bytes in reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    await active.WriteAsync(bytes, ct).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is IpcConnectionClosedException or ObjectDisposedException
+                    or InvalidOperationException or IOException)
+                {
+                    Trace.WriteLine("[terminal] input was not written: " + exception.Message);
+                }
+            }
         }
-        catch (Exception exception) when (exception is IpcConnectionClosedException or ObjectDisposedException
-            or InvalidOperationException or IOException or OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            Trace.WriteLine("[terminal] input was not written: " + exception.Message);
+            // Disposed while input was queued: the session is being stopped, so the rest is dropped.
         }
     }
 

@@ -287,6 +287,7 @@ internal sealed class HostTerminalSession : ITerminalSession
             {
                 // The host cannot answer (dead connection, or it is stopping anyway); the local completion below is
                 // the session's fallback so a dispose never hangs on a host that is gone.
+                client.NoteTerminalProblem($"terminal.stop for '{Id}' did not complete ({ex.GetType().Name}): {ex.Message}");
             }
         }
 
