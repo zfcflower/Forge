@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Windows.Input;
 using Avalonia.Media;
 using Forge.Abstractions;
@@ -1014,6 +1015,9 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // The prompt can outlive the command (the window closing, the flow being cancelled): nothing is created then.
+        ct.ThrowIfCancellationRequested();
+
         var branchName = branch.Trim();
         await CreateAsync(
                 token => BackgroundRead.RunAsync(
@@ -1028,8 +1032,10 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
                         }
                         catch (ArgumentException exception)
                         {
+                            // ArgumentException.Message ends in "(Parameter 'x')"; the user gets the branch name and a
+                            // fixed reason instead, the exception stays as the inner exception for the trace.
                             throw new InvalidOperationException(
-                                Loc.Instance.Format(GitStrings.WorktreeBranchInvalid, branchName, exception.Message),
+                                Loc.Instance.Format(GitStrings.WorktreeBranchInvalid, branchName),
                                 exception);
                         }
                         catch (GitException exception)
@@ -1039,19 +1045,55 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
                                 exception);
                         }
 
-                        return await catalog.CreateAsync(
-                                new SessionCreate(worktree.Path, title)
-                                {
-                                    ProjectId = project.Id,
-                                    WorktreePath = worktree.Path,
-                                    Branch = worktree.Branch,
-                                },
-                                backgroundToken)
-                            .ConfigureAwait(false);
+                        try
+                        {
+                            return await catalog.CreateAsync(
+                                    new SessionCreate(worktree.Path, title)
+                                    {
+                                        ProjectId = project.Id,
+                                        WorktreePath = worktree.Path,
+                                        Branch = worktree.Branch,
+                                    },
+                                    backgroundToken)
+                                .ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            // The session row was not created (or the flow was cancelled right after the worktree),
+                            // so nothing refers to the folder: take the fresh, untouched worktree away again.
+                            await TryRemoveOrphanedWorktreeAsync(worktree).ConfigureAwait(false);
+                            throw;
+                        }
                     },
                     token),
                 ct)
             .ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Best-effort cleanup of a worktree whose session row could not be written. The removal is never forced: a worktree
+    /// that holds anything (it was created a moment ago, so only a concurrent edit could) is left alone. The branch that
+    /// <c>git worktree add</c> created stays behind, since the removal API of <see cref="WorktreeManager"/> keeps it and
+    /// this view model has no branch-delete call; a leftover <c>forge/…</c> branch is visible and deletable in the Git
+    /// panel. Failures are traced, never thrown: the caller is already reporting the original error.
+    /// </summary>
+    private async Task TryRemoveOrphanedWorktreeAsync(WorktreeSession worktree)
+    {
+        try
+        {
+            await worktrees.Manager
+                .RemoveAsync(
+                    worktree.RepositoryRoot,
+                    worktree.Path,
+                    force: false,
+                    baseBranch: worktree.BaseCommit,
+                    ct: CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine($"[worktree] could not remove the unused worktree '{worktree.Path}': {exception.Message}");
+        }
     }
 
     /// <summary>

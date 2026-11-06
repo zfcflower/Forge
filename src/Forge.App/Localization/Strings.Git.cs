@@ -99,7 +99,7 @@ internal static class GitStrings
     /// <summary>Title of the prompt that asks for the new session's branch name.</summary>
     public const string WorktreeBranchPromptTitle = "git.worktree.branchPromptTitle";
 
-    /// <summary>Format: <c>{0}</c> is the branch name, <c>{1}</c> the reason.</summary>
+    /// <summary>Format: <c>{0}</c> is the branch name; the reason (git's branch naming rules) is part of the text.</summary>
     public const string WorktreeBranchInvalid = "git.worktree.branchInvalid";
 
     /// <summary>Format: <c>{0}</c> is the branch name, <c>{1}</c> the reason.</summary>
@@ -186,8 +186,8 @@ internal static class GitStrings
         Loc.Register(WorktreeBranchPromptTitle, "新会话的分支名", "Branch name for the new session");
         Loc.Register(
             WorktreeBranchInvalid,
-            "分支名 {0} 无效：{1}",
-            "The branch name {0} is invalid: {1}");
+            "分支名 {0} 无效：不符合 Git 的分支命名规则（例如不能含空格、~、^、:、?、*、[ 或 ..）。",
+            "The branch name {0} is invalid: it breaks Git's branch naming rules (for example no spaces, ~, ^, :, ?, *, [ or ..).");
         Loc.Register(
             WorktreeBranchUnavailable,
             "无法创建分支 {0}：{1}",

@@ -176,6 +176,14 @@
                        AutomationProperties.AutomationId="git-hint" />
           </StackPanel>
         </Border>
+
+        <!-- The last re-read of the state failed: shown beside the result above, never in place of it. -->
+        <Border Classes="notice error" IsVisible="{Binding HasRefreshProblem}">
+          <TextBlock Classes="caption"
+                     Text="{Binding RefreshProblemText}"
+                     TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="git-refresh-problem" />
+        </Border>
       </StackPanel>
     </ScrollViewer>
   </Grid>

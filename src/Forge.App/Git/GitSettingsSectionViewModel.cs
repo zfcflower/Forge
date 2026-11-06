@@ -13,21 +13,39 @@ namespace Forge.App.Git;
 /// <c>gitPullStrategy</c> = <c>"ff-only"</c> (default) | <c>"rebase"</c> | <c>"merge"</c>, unknown tokens fall back to the
 /// default; <c>gitNetworkTimeoutSeconds</c> = integer clamped to [10, 600], default 120.</para>
 /// </summary>
-internal sealed class GitSettingsSectionViewModel : ObservableObject
+internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposable
 {
     private readonly AppPreferences preferences;
 
+    /// <summary>The thread the section was built on (the UI thread); a language notification from another one is not ours.</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
+
     /// <summary>Replaced (not mutated) on a language switch: the picker only re-reads its items for a new list.</summary>
     private GitPullStrategyOption[] options = CreateOptions();
+
+    private bool disposed;
 
     public GitSettingsSectionViewModel(AppPreferences preferences)
     {
         ArgumentNullException.ThrowIfNull(preferences);
         this.preferences = preferences;
 
-        // One section lives as long as the window, so the subscription is never dropped: the picker's labels are
-        // <see cref="Loc"/> keys and have to be re-read after a language switch, like the section heading itself.
+        // The picker's labels are <see cref="Loc"/> keys and have to be re-read after a language switch, like the
+        // section heading itself. The section is disposed with the composition (which disposes every IDisposable
+        // settings section), and Dispose drops this subscription so the process-wide Loc does not keep it alive.
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+    }
+
+    /// <summary>Drops the <see cref="Loc.LanguageChanged"/> subscription; idempotent.</summary>
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
     }
 
     /// <summary>The three strategies in display order, with localized labels.</summary>
@@ -67,6 +85,13 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        // A notification from another thread belongs to a window that is gone (a test host): the picker bound to
+        // these properties lives on its own thread.
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
         options = CreateOptions();
         OnPropertyChanged(nameof(PullStrategies));
         OnPropertyChanged(nameof(SelectedPullStrategy));
