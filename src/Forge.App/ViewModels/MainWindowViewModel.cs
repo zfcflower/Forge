@@ -687,7 +687,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         if (terminals.OpenTerminal() is null)
         {
-            Status.SetWorkspaceProblem(Loc.Instance[TerminalStrings.FailureNoSession]);
+            Status.SetWorkspaceProblem(new LocText(TerminalStrings.FailureNoSession));
         }
     }
 
