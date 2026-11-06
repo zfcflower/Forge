@@ -1,5 +1,6 @@
 using Avalonia.Headless;
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Xunit;
 
@@ -110,7 +111,7 @@ public sealed class TranscriptReplayTests
             CancellationToken.None);
 
         Assert.False(card.HasUsage);
-        Assert.Contains(Strings.None, card.Header);
+        Assert.Contains(TextFormat.None, card.Header);
     }
 
     [Fact]

@@ -34,16 +34,38 @@ internal enum AgentState
 
 internal static class AgentStateClassifier
 {
-    /// <summary>Maps the localized status text of an agent row to its state; anything unknown is neutral "ended".</summary>
-    public static AgentState Classify(string statusText) => statusText switch
+    /// <summary>
+    /// Maps the status text of an agent row to its state; anything unknown is neutral "ended". The texts are compared in
+    /// the current language: the snapshots are built at the same moment and rebuilt on a language switch, so the two
+    /// always agree. Not constants any more, because the texts follow the UI language.
+    /// </summary>
+    public static AgentState Classify(string statusText)
     {
-        Strings.SubAgentQueued => AgentState.Queued,
-        Strings.SubAgentRunning => AgentState.Running,
-        Strings.SubAgentCompleted => AgentState.Completed,
-        Strings.SubAgentFailed => AgentState.Failed,
-        Strings.SubAgentStopped => AgentState.Stopped,
-        _ => AgentState.Ended,
-    };
+        if (Matches(statusText, SessionStrings.SubAgentQueued))
+        {
+            return AgentState.Queued;
+        }
+
+        if (Matches(statusText, SessionStrings.SubAgentRunning))
+        {
+            return AgentState.Running;
+        }
+
+        if (Matches(statusText, SessionStrings.SubAgentCompleted))
+        {
+            return AgentState.Completed;
+        }
+
+        if (Matches(statusText, SessionStrings.SubAgentFailed))
+        {
+            return AgentState.Failed;
+        }
+
+        return Matches(statusText, SessionStrings.SubAgentStopped) ? AgentState.Stopped : AgentState.Ended;
+    }
+
+    private static bool Matches(string statusText, string candidate) =>
+        string.Equals(statusText, candidate, StringComparison.Ordinal);
 }
 
 /// <summary>

@@ -1,7 +1,8 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:controls="using:Forge.App.Workbench.Controls"
-                    xmlns:vm="using:Forge.App.ViewModels">
+                    xmlns:vm="using:Forge.App.ViewModels"
+                    xmlns:loc="using:Forge.App.Localization">
 
   <!-- Workbench chrome icons (same family as the token geometries: filled paths in a 24x24 box). -->
   <!-- A pushpin: pin the region back to the surrounding layout. -->
@@ -120,7 +121,7 @@
                                       IsVisible="{TemplateBinding IsClosable}"
                                       Opacity="0"
                                       IsHitTestVisible="False"
-                                      ToolTip.Tip="{x:Static vm:Strings.Close}"
+                                      ToolTip.Tip="{Binding [workbench.closeTab], Source={x:Static loc:Loc.Instance}}"
                                       AutomationProperties.AutomationId="{TemplateBinding CloseAutomationId}" />
           </Grid>
         </Border>
