@@ -34,7 +34,7 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **会话目录与恢复。** 会话元数据(项目、worktree、分支、父会话、Agent 种类、任务、归档状态、最后活动)是 `sessions` 表的列,`ISessionCatalog` 与 `ISessionStore` 由同一 `SqliteSessionStore` 实现。能力只经 `SessionCatalogs.From` 读取:`LoggingSessionStore` 总实现该接口,须读 `SupportsCatalog`,内层非目录时按无目录处理。子会话带 `ParentSessionId`/`AgentKind`/`Task` 并继承父会话的 worktree 与项目;每回合持久化后 `TouchAsync`,失败不影响循环。`ResumeRootAsync` 用与压缩器相同规则重建上下文(摘要视图 + 未摘要尾部),丢弃孤立首个工具结果与末尾无结果的工具回合。一个 `AgentHost` 对应一个主会话;`AgentScope` 为 AsyncLocal,名额池与 id 计数在实例内,多主会话可并发。
 
-**`todo` 工具。** 按参数决定副作用(list 只读,其余写入),审批策略与只读并发分批看到单次调用的真实副作用;update/remove 先确认条目属于 `ToolContext.SessionId`。
+**`todo` 工具。** 按参数决定副作用(list 只读,其余写入),审批策略与只读并发分批看到单次调用的真实副作用;update/remove 先确认条目属于 `ToolContext.SessionId`。update 接受 `commit_subject`/`summary`/`verification`;状态变为 done 时经 `AgentHostOptions.StepCommitter`(`IStepCommitter`,契约在 `Forge.Abstractions`,由 App 实现,见 forge-app)提交这一步,结果(短 sha 或失败原因)写进工具结果,提交失败不回滚 done 状态。`plan_summary` 操作读写会话级计划摘要(`plan_summaries` 表),供 PR 正文渲染。
 
 **扩展编写工具(`Tools/IExtensionAuthoring.cs`)。** Core 只声明窄接口 `IExtensionAuthoring`(`ListAsync`/`SubmitAsync(ExtensionDraft)`/`DisableAsync`/`DeleteAsync`),由 App 用 HostClient 实现;Core 没有提交或批准能力,人工闸门只在 App 的实现里。五个工具 `extension_list`(只读)、`extension_create`/`extension_update`(同一个类,schema 字节一致;参数 `id`、`version`、`kind`(`workflow`/`plugin`)、`files`、`permissions`、`dependencies`)、`extension_disable`、`extension_delete`:参数全走 `JsonDocument` 本地校验,不合规返回错误结果且不调 authoring;提交调用阻塞到用户决定,结果是已注册的工具名、拒绝/撤卡原因或编译诊断;`OperationCanceledException` 透传。它们不进内置 Agent 白名单,内置 Agent 的可缓存工具集不变。
 
