@@ -74,6 +74,39 @@ public sealed class TerminalStartCancellationTests
     }
 
     [Fact]
+    public async Task Cancellation_that_races_with_the_answer_still_stops_the_terminal_the_host_built()
+    {
+        await using var host = new FakeHost();
+        await using var client = ClientFactory.Create(host);
+        await client.StartConnectedAsync(host);
+        const string terminalId = "t-raced";
+        using var cancellation = new CancellationTokenSource();
+
+        // The host cancels the caller and answers in the same breath, so the answer may already be in when the
+        // cancellation is observed. The race cannot be pinned to one order from outside, but either order must end with
+        // the terminal stopped (before the fix, the answer-first order orphaned it).
+        host.On(
+            TerminalOps.Start,
+            (_, _) =>
+            {
+                cancellation.Cancel();
+                return Task.FromResult(Json.Element(TerminalFixtures.StartResultJson(terminalId)));
+            });
+
+        var starting = client.StartAsync(TerminalFixtures.Request(), cancellation.Token).AsTask();
+        try
+        {
+            var session = await starting.Bounded();
+            Assert.NotNull(session); // the answer won the race and was handed out normally
+        }
+        catch (OperationCanceledException)
+        {
+            var stops = await host.WaitForRequestsAsync(TerminalOps.Stop, 1).Bounded();
+            Assert.Equal(terminalId, Assert.Single(stops).Arguments!.Value.GetProperty("terminalId").GetString());
+        }
+    }
+
+    [Fact]
     public async Task Cancelled_start_that_the_host_then_refuses_sends_no_stop_and_leaves_no_unobserved_exception()
     {
         var unobserved = new List<Exception>();

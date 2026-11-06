@@ -741,9 +741,11 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
                 {
                     await active.WriteAsync(bytes, ct).ConfigureAwait(false);
                 }
-                catch (Exception exception) when (exception is IpcConnectionClosedException or ObjectDisposedException
-                    or InvalidOperationException or IOException)
+                catch (Exception exception) when (exception is not OutOfMemoryException
+                    && !(exception is OperationCanceledException && ct.IsCancellationRequested))
                 {
+                    // Any failure of one chunk (closed session, timeout, ...) must not end the writer: later input
+                    // still goes out in order. Only the tab's own cancellation ends the loop (outer catch).
                     Trace.WriteLine("[terminal] input was not written: " + exception.Message);
                 }
             }

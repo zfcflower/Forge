@@ -75,7 +75,7 @@ public sealed partial class ExtensionHostClient : ITerminalHost
         {
             response = await startTask.WaitAsync(ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested && !startTask.IsCompleted)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _ = AbandonStartAsync(startTask, active, generation);
             throw;

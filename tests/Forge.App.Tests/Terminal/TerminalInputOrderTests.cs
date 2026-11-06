@@ -188,4 +188,26 @@ public sealed class TerminalInputOrderTests
         // The first chunk is lost with its failed write (a dead session only leaves a diagnostic); the rest keeps its order.
         Assert.Equal("Y2Z3", observed);
     }
+
+    [Fact]
+    public async Task Input_after_a_write_that_timed_out_is_still_delivered_in_order()
+    {
+        var observed = await RunAsync(async scene =>
+        {
+            var calls = 0;
+            scene.Host.Session.WriteInterceptor = _ =>
+                Interlocked.Increment(ref calls) == 1
+                    ? Task.FromException(new TimeoutException("the write timed out"))
+                    : Task.CompletedTask;
+
+            scene.ViewModel.SendInput("X1"u8);
+            scene.ViewModel.SendInput("Y2"u8);
+            scene.ViewModel.SendInput("Z3"u8);
+            var written = await scene.Host.Session.WaitForWrittenBytesAsync(4, TimeSpan.FromSeconds(10));
+            return Encoding.ASCII.GetString(written);
+        });
+
+        // An unexpected failure type must not end the writer: the first chunk is lost, the rest keeps its order.
+        Assert.Equal("Y2Z3", observed);
+    }
 }
