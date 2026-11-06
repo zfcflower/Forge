@@ -94,7 +94,11 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
         Changes = new ChangesViewModel(composition.Git, composition.TurnCheckpoints);
-        GitPanel = new GitPanelViewModel(composition.Git, composition.GitPanelSettings, ConfirmGitActionAsync);
+        GitPanel = new GitPanelViewModel(
+            composition.Git,
+            composition.GitPanelSettings,
+            ConfirmGitActionAsync,
+            composition.GitPullRequests);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         NewTerminalCommand = new RelayCommand(OpenTerminal);
         Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs);
@@ -585,6 +589,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         terminals.OnSessionArchived(sessionId);
         CloseSessionTab(sessionId);
         openTabs.Remove(sessionId);
+        GitPanel.ReleaseSession(sessionId);
 
         if (sessions.TryGetValue(sessionId, out var session) && !session.IsRunning)
         {
@@ -765,6 +770,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             session.TabTitleChanged -= OnSessionTitleChanged;
             openTabs.Remove(session.SessionId);
+
+            // A wait for checks that this session started ends with its tab; the session keeps running without it.
+            GitPanel.ReleaseSession(session.SessionId);
             if (!session.IsRunning)
             {
                 ReleaseClosedSession(session);
@@ -835,6 +843,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
                 break;
             case nameof(GitPanelViewModel.AheadBehindText):
                 Status.SetAheadBehind(GitPanel.AheadBehindText);
+                break;
+            case nameof(GitPanelViewModel.ChecksText):
+                Status.SetChecks(GitPanel.ChecksText);
                 break;
             case nameof(GitPanelViewModel.Title):
                 if (Workbench.FindTab(WorkbenchIds.GitTab) is { } tab)

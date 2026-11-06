@@ -183,6 +183,13 @@ internal sealed class AppComposition : IAsyncDisposable
     /// </summary>
     public IStepCommitter TodoStepCommitter { get; private set; } = null!;
 
+    /// <summary>
+    /// What the Git tab needs to show the branch's pull request and to wait for its checks: the same platform and poller the
+    /// agent's pull request tools use, the wait timing and notification settings (all read live from the preferences) and
+    /// the system notifier.
+    /// </summary>
+    public GitPrServices GitPullRequests { get; private set; } = null!;
+
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
 
     public static AppComposition Create()
@@ -291,15 +298,23 @@ internal sealed class AppComposition : IAsyncDisposable
         var gitToolSettings = GitToolPreferences.ToolSettings(preferences.Current);
         var reviewLedger = new GitReviewLedger();
         var gitTools = new GitTools(git, gitToolSettings, reviewLedger);
-        var gh = new GhCli(git: git) { NetworkTimeout = gitToolSettings.NetworkTimeout };
-        var prPlatform = new GitHubPlatform(gh);
+        // The gh executable is a preference that is loaded after this graph is built and can change while the app runs, so
+        // gh, the platform and the poller timing are all resolved from the live preferences on each use.
+        var gh = new ConfiguredGh(() => preferences.Current.GitGhPath, git, gitToolSettings.NetworkTimeout);
+        var prPlatform = new ConfiguredPrPlatform(gh);
         var prChecksPoller = new PrChecksPoller(prPlatform, TimeProvider.System);
+        Func<PrChecksPollerOptions> checksOptions = () => GitToolPreferences.ChecksOptions(preferences.Current);
         IReadOnlyList<ITool> pullRequestTools =
         [
             .. new PrTools(git, prPlatform, gitToolSettings, reviewLedger, todos).All,
-            .. new PrCheckTools(prPlatform, prChecksPoller, static () => new PrChecksPollerOptions()).All,
-            .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, PrCommentUser.FromGh(gh)).All,
+            .. new PrCheckTools(prPlatform, prChecksPoller, checksOptions).All,
+            .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
         ];
+        var gitPullRequests = new GitPrServices(
+            prPlatform,
+            prChecksPoller,
+            checksOptions,
+            new SystemNotifier(() => preferences.Current.GitNotifications));
         var runtimeServices = new AgentRuntimeServices(
             BuildProviderFactory(provider, httpClient),
             host?.Client,
@@ -357,6 +372,7 @@ internal sealed class AppComposition : IAsyncDisposable
             initialization);
         composition.Approvals = approvals;
         composition.TodoStepCommitter = stepCommitter;
+        composition.GitPullRequests = gitPullRequests;
         return composition;
     }
 

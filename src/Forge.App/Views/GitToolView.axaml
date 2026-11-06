@@ -81,6 +81,131 @@
           </Grid>
         </StackPanel>
 
+        <!-- The branch's pull request: its header, "Wait for checks" with live progress and the verdict, and the gh hint. -->
+        <StackPanel Spacing="4" IsVisible="{Binding ShowPullRequest}">
+          <TextBlock Classes="label" Text="{Binding [git.label.pullRequest], Source={x:Static loc:Loc.Instance}}" />
+          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasPullRequest}">
+            <TextBlock Classes="caption"
+                       Text="{Binding PullRequestHeaderText}"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding PullRequestHeaderText}"
+                       AutomationProperties.AutomationId="git-pr-header" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       Margin="8,0,0,0"
+                       Text="{Binding PullRequestStateText}"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       AutomationProperties.AutomationId="git-pr-state" />
+          </Grid>
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding HasPullRequestNotice}"
+                     Text="{Binding PullRequestNoticeText}"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     AutomationProperties.AutomationId="git-pr-notice" />
+          <!-- gh is missing or not signed in: only the pull request part is affected, local git works. -->
+          <Border Classes="notice" IsVisible="{Binding HasGhNotReady}">
+            <StackPanel Spacing="3">
+              <TextBlock Classes="caption"
+                         Text="{Binding GhNotReadyText}"
+                         TextWrapping="Wrap"
+                         AutomationProperties.AutomationId="git-gh-not-ready" />
+              <TextBlock Classes="caption"
+                         IsVisible="{Binding HasGhNotReadyDetail}"
+                         Text="{Binding GhNotReadyDetail}"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource TextSecondaryBrush}"
+                         AutomationProperties.AutomationId="git-gh-not-ready-detail" />
+            </StackPanel>
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasPullRequest}">
+            <Button Classes="ghost"
+                    IsVisible="{Binding ShowWaitButton}"
+                    Content="{Binding [git.button.waitChecks], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding WaitForChecksCommand}"
+                    AutomationProperties.AutomationId="git-wait-checks"
+                    AutomationProperties.Name="{Binding [git.button.waitChecks], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="ghost"
+                    IsVisible="{Binding ShowCancelWait}"
+                    Content="{Binding [git.button.cancelWait], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding CancelWaitCommand}"
+                    AutomationProperties.AutomationId="git-wait-cancel"
+                    AutomationProperties.Name="{Binding [git.button.cancelWait], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+          <StackPanel Spacing="2" IsVisible="{Binding HasWatchProgress}">
+            <TextBlock Classes="label" Text="{Binding [git.label.checks], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption"
+                       Text="{Binding WatchProgressText}"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="git-watch-progress" />
+            <TextBlock Classes="caption"
+                       Text="{Binding WatchMergeText}"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       AutomationProperties.AutomationId="git-watch-merge" />
+          </StackPanel>
+          <Border Classes="notice" Classes.error="{Binding WatchVerdictIsProblem}" IsVisible="{Binding HasWatchVerdict}">
+            <TextBlock Classes="caption"
+                       Text="{Binding WatchVerdictText}"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="git-watch-verdict" />
+          </Border>
+        </StackPanel>
+
+        <!-- Review threads of the pull request, unresolved first. Read-only: replying and resolving are the agent's tools. -->
+        <StackPanel Spacing="4" IsVisible="{Binding ShowReview}">
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Classes="label" Text="{Binding [git.label.review], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       Margin="8,0,0,0"
+                       Text="{Binding ReviewSummaryText}"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       AutomationProperties.AutomationId="git-review-summary" />
+          </Grid>
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding HasReviewNotice}"
+                     Text="{Binding ReviewNoticeText}"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     AutomationProperties.AutomationId="git-review-notice" />
+          <ItemsControl ItemsSource="{Binding ReviewThreads}" IsVisible="{Binding HasReviewThreads}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="git:GitReviewThreadItem">
+                <Border Classes="notice" Margin="0,0,0,4">
+                  <StackPanel Spacing="2">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="mono"
+                                 Text="{Binding LocationText}"
+                                 TextTrimming="CharacterEllipsis"
+                                 ToolTip.Tip="{Binding LocationText}" />
+                      <TextBlock Grid.Column="1"
+                                 Classes="caption"
+                                 Margin="8,0,0,0"
+                                 Text="{Binding StatusText}"
+                                 Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </Grid>
+                    <TextBlock Classes="caption" Text="{Binding FirstCommentText}" TextWrapping="Wrap" />
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding HasReplies}"
+                               Text="{Binding RepliesText}"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding HasVerdict}"
+                               Text="{Binding VerdictText}"
+                               FontWeight="SemiBold" />
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding HasVerdictReply}"
+                               Text="{Binding VerdictReplyText}"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
         <!-- The in-progress rebase/merge and the files it stopped on. -->
         <Border Classes="notice" IsVisible="{Binding HasOperation}">
           <StackPanel Spacing="4">

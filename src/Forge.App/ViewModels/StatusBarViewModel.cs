@@ -25,6 +25,7 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
     private int? pluginCount;
     private int? toolCount;
     private string aheadBehindText = string.Empty;
+    private string checksText = string.Empty;
     private bool isHostRunning;
     private bool isHostStarting = true;
     private bool isHostFailed;
@@ -115,6 +116,24 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
 
     public bool HasAheadBehind => aheadBehindText.Length > 0;
 
+    /// <summary>
+    /// The CI marker of the active session's pull request ("CI ✓", "CI ✗", "CI …"), shown next to ahead/behind; empty when
+    /// no wait for checks is running or has reported for that session's worktree. The Git panel pushes it here.
+    /// </summary>
+    public string ChecksText
+    {
+        get => checksText;
+        private set
+        {
+            if (Set(ref checksText, value))
+            {
+                OnPropertyChanged(nameof(HasChecks));
+            }
+        }
+    }
+
+    public bool HasChecks => checksText.Length > 0;
+
     public bool IsHostRunning
     {
         get => isHostRunning;
@@ -192,6 +211,9 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
 
     /// <summary>Called by the shell with the Git panel's "↑2 ↓0" (or an empty string when there is nothing to show).</summary>
     public void SetAheadBehind(string? text) => AheadBehindText = text ?? string.Empty;
+
+    /// <summary>Called by the shell with the Git panel's CI marker (or an empty string when there is nothing to show).</summary>
+    public void SetChecks(string? text) => ChecksText = text ?? string.Empty;
 
     public void SetApprovals(int? records)
     {

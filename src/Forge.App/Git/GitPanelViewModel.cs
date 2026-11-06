@@ -33,9 +33,11 @@ internal sealed record GitPanelSettings(Func<GitPullStrategy> PullStrategy, Func
 /// item ends. There is no automatic fetch; refresh happens on attach, after every operation, after each main-session turn
 /// and on demand.</para>
 /// <para>The title bar shows <see cref="BranchText"/> next to the session title and the status bar shows
-/// <see cref="AheadBehindText"/>; both are empty when the session is not in a repository.</para>
+/// <see cref="AheadBehindText"/> and <see cref="ChecksText"/>; all are empty when the session is not in a repository.</para>
+/// <para>The branch's pull request, the "Wait for checks" watch and the review threads are the second half of the panel
+/// (<c>GitPanelViewModel.PullRequest.cs</c>); they exist only when <see cref="GitPrServices"/> were passed in.</para>
 /// </summary>
-internal sealed class GitPanelViewModel : ObservableObject, IDisposable
+internal sealed partial class GitPanelViewModel : ObservableObject, IDisposable
 {
     /// <summary>How much of a commit hash the detached-head text keeps (git's own short form).</summary>
     private const int ShortCommitLength = 7;
@@ -80,7 +82,15 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
     private bool disposed;
 
     /// <param name="confirm">Asks the user (title, message) before a destructive action such as deleting a branch.</param>
-    public GitPanelViewModel(GitCli git, GitPanelSettings settings, Func<string, string, Task<bool>> confirm)
+    /// <param name="pullRequests">
+    /// The pull request platform, poller and notifier; null (the default) makes the panel purely local: no gh process is
+    /// started and the pull request, wait and review members stay empty.
+    /// </param>
+    public GitPanelViewModel(
+        GitCli git,
+        GitPanelSettings settings,
+        Func<string, string, Task<bool>> confirm,
+        GitPrServices? pullRequests = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(settings);
@@ -89,6 +99,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         this.git = git;
         this.settings = settings;
         this.confirm = confirm;
+        this.pullRequests = pullRequests;
         current = emptyState;
 
         RefreshCommand = new RelayCommand(() => Launch(RefreshAsync), CanRead);
@@ -101,6 +112,8 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         DeleteBranchCommand = new RelayCommand(() => Launch(DeleteBranchAsync), CanOperate);
         AbortOperationCommand = new RelayCommand(() => Launch(AbortOperationAsync), CanOperate);
         ContinueOperationCommand = new RelayCommand(() => Launch(ContinueOperationAsync), CanOperate);
+        WaitForChecksCommand = new RelayCommand(StartWatch, CanWaitForChecks);
+        CancelWaitCommand = new RelayCommand(CancelWait, CanCancelWait);
         commands =
         [
             RefreshCommand,
@@ -113,6 +126,8 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
             DeleteBranchCommand,
             AbortOperationCommand,
             ContinueOperationCommand,
+            WaitForChecksCommand,
+            CancelWaitCommand,
         ];
 
         // The panel has to re-read its title and every formatted text on a language switch, the same way the settings
@@ -341,6 +356,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         // Cancel only: the git call in flight may still be registering on a token, and it reports cancellation as an
         // OperationCanceledException that the work item already handles.
         CancelRead();
+        DisposePullRequests();
         lifetime.Cancel();
         RefreshBusy();
     }
@@ -424,6 +440,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
             if (IsCurrentRead(source))
             {
                 Apply(read);
+                BeginPullRequestRead();
             }
         }
         catch (OperationCanceledException)
@@ -554,6 +571,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
 
     private void CancelRead()
     {
+        CancelPullRequestRead();
         var running = readSource;
         if (running is null)
         {
@@ -595,7 +613,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         WorktreeState? oldest = null;
         foreach (var candidate in worktrees.Values)
         {
-            if (candidate.Writing || ReferenceEquals(candidate, current))
+            if (candidate.Writing || candidate.Watch is { Running: true } || ReferenceEquals(candidate, current))
             {
                 continue;
             }
@@ -907,6 +925,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         ConflictedFiles.Clear();
         NewBranchName = string.Empty;
         SelectedBranch = null;
+        ResetPullRequest();
         RaiseTexts();
         RefreshBusy();
         NotifyCommands();
@@ -931,6 +950,7 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasHint));
         OnPropertyChanged(nameof(RefreshProblemText));
         OnPropertyChanged(nameof(HasRefreshProblem));
+        RaisePullRequestTexts();
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -939,6 +959,11 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         // raised here are bound to controls that live on their own thread.
         if (!disposed && Environment.CurrentManagedThreadId == uiThread)
         {
+            if (reviewPhase == ReviewPhase.Loaded)
+            {
+                RebuildReviewItems();
+            }
+
             RaiseTexts();
         }
     }
@@ -989,6 +1014,9 @@ internal sealed class GitPanelViewModel : ObservableObject, IDisposable
         public bool Writing { get; set; }
 
         public PanelResult Result { get; set; } = PanelResult.None;
+
+        /// <summary>The wait on this worktree's pull request, running or finished; null before the first one. A running one keeps the entry from being evicted.</summary>
+        public WatchState? Watch { get; set; }
 
         /// <summary>Order of attachment, for eviction.</summary>
         public long LastUsed { get; set; }

@@ -147,7 +147,7 @@
       <ap:ExtensionsSettingsView />
     </DataTemplate>
 
-    <!-- The git section: pull strategy, network timeout and step commits, edited live on the preferences they belong to. -->
+    <!-- The git section: pull strategy, network timeout, step commits, the checks wait timing, system notifications and the gh path, edited live on the preferences they belong to. -->
     <DataTemplate DataType="git:GitSettingsSectionViewModel" x:DataType="git:GitSettingsSectionViewModel">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="150,*" Margin="0,3">
@@ -198,6 +198,66 @@
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
                    Text="{Binding [git.settings.stepCommitsHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.checksPoll], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="10"
+                         Maximum="300"
+                         Increment="5"
+                         FormatString="0"
+                         Value="{Binding ChecksPollSeconds, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-checks-poll"
+                         AutomationProperties.Name="{Binding [git.settings.checksPoll], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.checksMaxWait], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="1"
+                         Maximum="180"
+                         Increment="5"
+                         FormatString="0"
+                         Value="{Binding ChecksMaxWaitMinutes, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-checks-max-wait"
+                         AutomationProperties.Name="{Binding [git.settings.checksMaxWait], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [git.settings.checksHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.notifications], Source={x:Static loc:Loc.Instance}}" />
+          <CheckBox Grid.Column="1"
+                    IsChecked="{Binding Notifications, Mode=TwoWay}"
+                    AutomationProperties.AutomationId="git-notifications"
+                    AutomationProperties.Name="{Binding [git.settings.notifications], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [git.settings.notificationsHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.ghPath], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Grid.Column="1"
+                   MinWidth="260"
+                   HorizontalAlignment="Left"
+                   PlaceholderText="gh"
+                   Text="{Binding GhPath, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="git-gh-path"
+                   AutomationProperties.Name="{Binding [git.settings.ghPath], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [git.settings.ghPathHint], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
     </DataTemplate>
 

@@ -52,6 +52,13 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxGitNetworkTimeoutSeconds = 600;
     public const int DefaultGitNetworkTimeoutSeconds = 120;
     public const bool DefaultGitStepCommits = true;
+    public const int MinGitChecksPollSeconds = 10;
+    public const int MaxGitChecksPollSeconds = 300;
+    public const int DefaultGitChecksPollSeconds = 30;
+    public const int MinGitChecksMaxWaitMinutes = 1;
+    public const int MaxGitChecksMaxWaitMinutes = 180;
+    public const int DefaultGitChecksMaxWaitMinutes = 30;
+    public const bool DefaultGitNotifications = true;
 
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
@@ -64,6 +71,10 @@ internal sealed class AppPreferences : ObservableObject
     private string gitPullStrategy = DefaultGitPullStrategy;
     private int gitNetworkTimeoutSeconds = DefaultGitNetworkTimeoutSeconds;
     private bool gitStepCommits = DefaultGitStepCommits;
+    private int gitChecksPollSeconds = DefaultGitChecksPollSeconds;
+    private int gitChecksMaxWaitMinutes = DefaultGitChecksMaxWaitMinutes;
+    private bool gitNotifications = DefaultGitNotifications;
+    private string gitGhPath = string.Empty;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -108,6 +119,29 @@ internal sealed class AppPreferences : ObservableObject
     /// </summary>
     public bool GitStepCommits { get => gitStepCommits; set => Set(ref gitStepCommits, value); }
 
+    /// <summary>Seconds between two polls of a pull request's checks in wait mode; clamped to [<see cref="MinGitChecksPollSeconds"/>, <see cref="MaxGitChecksPollSeconds"/>].</summary>
+    public int GitChecksPollSeconds
+    {
+        get => gitChecksPollSeconds;
+        set => Set(ref gitChecksPollSeconds, Math.Clamp(value, MinGitChecksPollSeconds, MaxGitChecksPollSeconds));
+    }
+
+    /// <summary>Longest wait mode keeps polling, in minutes; clamped to [<see cref="MinGitChecksMaxWaitMinutes"/>, <see cref="MaxGitChecksMaxWaitMinutes"/>].</summary>
+    public int GitChecksMaxWaitMinutes
+    {
+        get => gitChecksMaxWaitMinutes;
+        set => Set(ref gitChecksMaxWaitMinutes, Math.Clamp(value, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes));
+    }
+
+    /// <summary>Whether the end of a checks wait raises a system notification (default on).</summary>
+    public bool GitNotifications { get => gitNotifications; set => Set(ref gitNotifications, value); }
+
+    /// <summary>
+    /// The GitHub CLI executable; empty (default) means <c>gh</c> from PATH. Trimmed. Read at the start of every <c>gh</c>
+    /// call, so a change applies to the next call without a restart.
+    /// </summary>
+    public string GitGhPath { get => gitGhPath; set => Set(ref gitGhPath, (value ?? string.Empty).Trim()); }
+
     /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
@@ -130,6 +164,14 @@ internal sealed class AppPreferences : ObservableObject
             ? Math.Clamp(seconds, MinGitNetworkTimeoutSeconds, MaxGitNetworkTimeoutSeconds)
             : DefaultGitNetworkTimeoutSeconds;
         gitStepCommits = section.GitStepCommits ?? DefaultGitStepCommits;
+        gitChecksPollSeconds = section.GitChecksPollSeconds is { } pollSeconds
+            ? Math.Clamp(pollSeconds, MinGitChecksPollSeconds, MaxGitChecksPollSeconds)
+            : DefaultGitChecksPollSeconds;
+        gitChecksMaxWaitMinutes = section.GitChecksMaxWaitMinutes is { } waitMinutes
+            ? Math.Clamp(waitMinutes, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes)
+            : DefaultGitChecksMaxWaitMinutes;
+        gitNotifications = section.GitNotifications ?? DefaultGitNotifications;
+        gitGhPath = (section.GitGhPath ?? string.Empty).Trim();
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -147,6 +189,10 @@ internal sealed class AppPreferences : ObservableObject
             GitPullStrategy = gitPullStrategy,
             GitNetworkTimeoutSeconds = gitNetworkTimeoutSeconds,
             GitStepCommits = gitStepCommits,
+            GitChecksPollSeconds = gitChecksPollSeconds,
+            GitChecksMaxWaitMinutes = gitChecksMaxWaitMinutes,
+            GitNotifications = gitNotifications,
+            GitGhPath = gitGhPath,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -236,6 +282,18 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("gitStepCommits")]
     public bool? GitStepCommits { get; set; }
+
+    [JsonPropertyName("gitChecksPollSeconds")]
+    public int? GitChecksPollSeconds { get; set; }
+
+    [JsonPropertyName("gitChecksMaxWaitMinutes")]
+    public int? GitChecksMaxWaitMinutes { get; set; }
+
+    [JsonPropertyName("gitNotifications")]
+    public bool? GitNotifications { get; set; }
+
+    [JsonPropertyName("gitGhPath")]
+    public string? GitGhPath { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>
