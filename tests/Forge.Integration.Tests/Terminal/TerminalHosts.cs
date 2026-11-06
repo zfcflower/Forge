@@ -21,9 +21,18 @@ internal static class TerminalShells
             return "/bin/sh";
         }
 
+        // Same rule as the product default: Store app execution aliases are skipped because their children escape the
+        // terminal's job.
         foreach (var candidate in FindOnPath("pwsh.exe"))
         {
             return candidate;
+        }
+
+        var programFiles = Path.Combine(
+            Environment.GetEnvironmentVariable("ProgramFiles") ?? @"C:\Program Files", "PowerShell", "7", "pwsh.exe");
+        if (File.Exists(programFiles))
+        {
+            return programFiles;
         }
 
         var systemRoot = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
@@ -31,6 +40,26 @@ internal static class TerminalShells
         return File.Exists(desktop)
             ? desktop
             : Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
+    }
+
+    private static bool IsAppExecutionAlias(string path)
+    {
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            return false;
+        }
+
+        var aliasDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(localAppData, "Microsoft", "WindowsApps")));
+        for (var directory = Path.GetDirectoryName(Path.GetFullPath(path)); directory is not null; directory = Path.GetDirectoryName(directory))
+        {
+            if (string.Equals(directory, aliasDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static IEnumerable<string> FindOnPath(string fileName)
@@ -48,7 +77,7 @@ internal static class TerminalShells
                 continue;
             }
 
-            if (File.Exists(candidate))
+            if (File.Exists(candidate) && !IsAppExecutionAlias(candidate))
             {
                 yield return candidate;
                 yield break;

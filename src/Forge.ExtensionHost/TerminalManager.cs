@@ -302,8 +302,11 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
     }
 
     /// <summary>
-    /// Resolves the shell the request names, or the platform default: on Windows <c>pwsh.exe</c> on the PATH, then the
-    /// shipped Windows PowerShell, then <c>%COMSPEC%</c>; on POSIX <c>$SHELL</c> when it names an existing file, then
+    /// Resolves the shell the request names, or the platform default: on Windows the first real <c>pwsh.exe</c> on the PATH, then
+    /// <c>%ProgramFiles%\PowerShell\7\pwsh.exe</c>, then the shipped Windows PowerShell, then <c>%COMSPEC%</c>. Microsoft Store app execution aliases
+    /// (<c>%LOCALAPPDATA%\Microsoft\WindowsApps</c>) are skipped for the default: a packaged process's children are not
+    /// created inside the private job the host puts the shell in, so stop, host shutdown and the busy probe would miss
+    /// them. On POSIX <c>$SHELL</c> when it names an existing file, then
     /// <c>/bin/sh</c> with <c>-l</c>. A shell the caller named is used exactly as given, including its arguments.
     /// </summary>
     private static (string Shell, IReadOnlyList<string> Arguments) ResolveShell(TerminalStartRequest request)
@@ -319,7 +322,12 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
         if (OperatingSystem.IsWindows())
         {
             var shell =
-                FindOnPath("pwsh.exe")
+                FindOnPath("pwsh.exe", skipAppExecutionAliases: true)
+                ?? ExistingFile(Path.Combine(
+                    Environment.GetEnvironmentVariable("ProgramFiles") ?? @"C:\Program Files",
+                    "PowerShell",
+                    "7",
+                    "pwsh.exe"))
                 ?? ExistingFile(Path.Combine(
                     Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows",
                     "System32",
@@ -331,7 +339,7 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
             {
                 throw new HostOperationException(
                     "terminal_start_failed",
-                    "No default shell was found: pwsh.exe is not on the PATH, Windows PowerShell is missing and COMSPEC is not set.");
+                    "No default shell was found: no real pwsh.exe is installed, Windows PowerShell is missing and COMSPEC is not set.");
             }
 
             return (RequireShellFile(shell), arguments ?? []);
@@ -367,7 +375,41 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
         return resolved;
     }
 
-    private static string? FindOnPath(string fileName)
+    /// <summary>True for a file under <c>%LOCALAPPDATA%\Microsoft\WindowsApps</c>, where Microsoft Store app execution
+    /// aliases live. Decided by path only; the alias's reparse tag is not read.</summary>
+    private static bool IsAppExecutionAlias(string path)
+    {
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            return false;
+        }
+
+        try
+        {
+            var aliasDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(localAppData, "Microsoft", "WindowsApps")));
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+            while (directory is not null)
+            {
+                if (string.Equals(directory, aliasDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                directory = Path.GetDirectoryName(directory);
+            }
+        }
+        catch (ArgumentException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
+
+        return false;
+    }
+
+    private static string? FindOnPath(string fileName, bool skipAppExecutionAliases = false)
     {
         var path = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrEmpty(path))
@@ -387,7 +429,7 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
                 continue;
             }
 
-            if (ExistingFile(candidate) is { } found)
+            if (ExistingFile(candidate) is { } found && !(skipAppExecutionAliases && IsAppExecutionAlias(found)))
             {
                 return found;
             }
