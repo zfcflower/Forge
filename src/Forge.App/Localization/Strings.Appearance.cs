@@ -24,5 +24,17 @@ internal static class AppearanceStrings
     /// <summary>Idempotent: registering the same key with the same texts twice is a no-op.</summary>
     internal static void Register()
     {
+        Loc.Register(SectionTitle, "外观", "Appearance");
+
+        Loc.Register(UiGroupTitle, "界面字体", "Interface font");
+        Loc.Register(CodeGroupTitle, "代码字体", "Code font");
+
+        Loc.Register(FamilyLabel, "字体", "Font family");
+        Loc.Register(SizeLabel, "字号", "Size");
+        Loc.Register(FamilyPlaceholder, "从已安装字体中选择，或输入逗号分隔的回退列表", "Pick an installed font or type a comma-separated fallback list");
+        Loc.Register(Reset, "恢复默认", "Restore defaults");
+
+        Loc.Register(UiPreview, "界面文字预览 The quick brown fox", "Interface preview — 界面文字 The quick brown fox");
+        Loc.Register(CodePreview, "代码预览 0O1lI {}[] => != 中文", "Code preview 0O1lI {}[] => != 中文");
     }
 }

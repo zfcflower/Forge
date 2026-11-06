@@ -1,0 +1,104 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:appearance="using:Forge.App.Appearance"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Appearance.AppearanceSettingsView"
+             x:DataType="appearance:AppearanceSettingsViewModel">
+  <StackPanel Spacing="{StaticResource Space4}">
+
+    <!-- Interface font: the tree, tabs, chat and buttons. -->
+    <StackPanel Spacing="{StaticResource Space2}">
+      <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding Ui.Title}" />
+
+      <StackPanel Spacing="2">
+        <TextBlock Classes="label" FontSize="{DynamicResource FontSizeXs}" Text="{Binding Ui.FamilyLabel}" />
+        <AutoCompleteBox x:Name="UiFamilyBox"
+                         ItemsSource="{Binding Ui.Families}"
+                         FilterMode="Contains"
+                         Text="{Binding Ui.FamilyText}"
+                         PlaceholderText="{Binding [appearance.family.placeholder], Source={x:Static loc:Loc.Instance}}"
+                         AutomationProperties.AutomationId="appearance-ui-family"
+                         AutomationProperties.Name="{Binding Ui.FamilyLabel}"
+                         SelectionChanged="OnFamilySelectionChanged"
+                         LostFocus="OnFamilyLostFocus" />
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" Spacing="{StaticResource Space2}">
+        <TextBlock Classes="label"
+                   FontSize="{DynamicResource FontSizeXs}"
+                   VerticalAlignment="Center"
+                   Text="{Binding Ui.SizeLabel}" />
+        <NumericUpDown Width="96"
+                       Value="{Binding Ui.Size}"
+                       Minimum="{x:Static appearance:FontGroupViewModel.MinSizeDecimal}"
+                       Maximum="{x:Static appearance:FontGroupViewModel.MaxSizeDecimal}"
+                       Increment="{x:Static appearance:FontGroupViewModel.SizeStepDecimal}"
+                       FormatString="0"
+                       AutomationProperties.AutomationId="appearance-ui-size"
+                       AutomationProperties.Name="{Binding Ui.SizeLabel}" />
+        <Button Classes="link"
+                VerticalAlignment="Center"
+                Command="{Binding Ui.ResetCommand}"
+                Content="{Binding Ui.ResetText}"
+                AutomationProperties.AutomationId="appearance-ui-reset" />
+      </StackPanel>
+
+      <Border Background="{DynamicResource SurfaceMutedBrush}"
+              CornerRadius="{StaticResource RadiusMd}"
+              Padding="{StaticResource PaddingCard}">
+        <TextBlock Text="{Binding Ui.PreviewText}"
+                   FontFamily="{Binding Ui.PreviewFamily}"
+                   FontSize="{Binding Ui.PreviewSize}"
+                   AutomationProperties.AutomationId="appearance-ui-preview" />
+      </Border>
+    </StackPanel>
+
+    <!-- Code font: file preview, diff, tool arguments/results and the terminal. -->
+    <StackPanel Spacing="{StaticResource Space2}">
+      <TextBlock Classes="h2" FontSize="{DynamicResource FontSizeMd}" Text="{Binding Code.Title}" />
+
+      <StackPanel Spacing="2">
+        <TextBlock Classes="label" FontSize="{DynamicResource FontSizeXs}" Text="{Binding Code.FamilyLabel}" />
+        <AutoCompleteBox x:Name="CodeFamilyBox"
+                         ItemsSource="{Binding Code.Families}"
+                         FilterMode="Contains"
+                         Text="{Binding Code.FamilyText}"
+                         PlaceholderText="{Binding [appearance.family.placeholder], Source={x:Static loc:Loc.Instance}}"
+                         AutomationProperties.AutomationId="appearance-code-family"
+                         AutomationProperties.Name="{Binding Code.FamilyLabel}"
+                         SelectionChanged="OnFamilySelectionChanged"
+                         LostFocus="OnFamilyLostFocus" />
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" Spacing="{StaticResource Space2}">
+        <TextBlock Classes="label"
+                   FontSize="{DynamicResource FontSizeXs}"
+                   VerticalAlignment="Center"
+                   Text="{Binding Code.SizeLabel}" />
+        <NumericUpDown Width="96"
+                       Value="{Binding Code.Size}"
+                       Minimum="{x:Static appearance:FontGroupViewModel.MinSizeDecimal}"
+                       Maximum="{x:Static appearance:FontGroupViewModel.MaxSizeDecimal}"
+                       Increment="{x:Static appearance:FontGroupViewModel.SizeStepDecimal}"
+                       FormatString="0"
+                       AutomationProperties.AutomationId="appearance-code-size"
+                       AutomationProperties.Name="{Binding Code.SizeLabel}" />
+        <Button Classes="link"
+                VerticalAlignment="Center"
+                Command="{Binding Code.ResetCommand}"
+                Content="{Binding Code.ResetText}"
+                AutomationProperties.AutomationId="appearance-code-reset" />
+      </StackPanel>
+
+      <Border Background="{DynamicResource SurfaceMutedBrush}"
+              CornerRadius="{StaticResource RadiusMd}"
+              Padding="{StaticResource PaddingCard}">
+        <TextBlock Text="{Binding Code.PreviewText}"
+                   FontFamily="{Binding Code.PreviewFamily}"
+                   FontSize="{Binding Code.PreviewSize}"
+                   AutomationProperties.AutomationId="appearance-code-preview" />
+      </Border>
+    </StackPanel>
+
+  </StackPanel>
+</UserControl>
