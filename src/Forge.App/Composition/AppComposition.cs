@@ -13,6 +13,7 @@ using Forge.Approval;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
 using Forge.HostClient;
+using Forge.IO.Tools;
 using Forge.Workspace;
 
 namespace Forge.App.Composition;
@@ -330,6 +331,11 @@ internal sealed class AppComposition : IAsyncDisposable
             Git: gitTools);
         runtimeServices.Approvals = approvals;
         runtimeServices.PullRequestTools = pullRequestTools;
+        // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
+        // options are read through a factory, so a preference change (ripgrep path, shell, bash timeout) applies to the
+        // next call without rebuilding the tool surface.
+        var fileTools = new FileTools(() => ToolPreferences.From(preferences.Current));
+        runtimeServices.FileTools = fileTools.All;
         var stepCommitter = new StepCommitter(
             git,
             todos,

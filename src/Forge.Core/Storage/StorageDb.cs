@@ -12,6 +12,15 @@ internal static class StorageDb
     /// <summary>The round-trip timestamp shape every store in <c>forge.db</c> writes and the only one it accepts.</summary>
     public const string TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffffffzzz";
 
+    /// <summary>
+    /// <see cref="TimestampFormat"/> as a SQLite <c>GLOB</c> pattern. The schema's v3 triggers match every timestamp
+    /// write against it, so the shape this codebase reads is enforced by the database instead of only by its writers:
+    /// a tool that opens <c>forge.db</c> on its own can no longer store a value every later read would refuse.
+    /// </summary>
+    public const string TimestampGlobPattern =
+        "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]." +
+        "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][+-][0-9][0-9]:[0-9][0-9]";
+
     public static string DatabasePath(string dataDirectory) =>
         Path.Combine(Path.GetFullPath(dataDirectory), FileName);
 
@@ -79,8 +88,7 @@ internal static class StorageDb
     /// </summary>
     public static DateTimeOffset ParseCanonicalTimestamp(string value, string column, string databasePath, string row)
     {
-        if (!DateTimeOffset.TryParseExact(value, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ||
-            !string.Equals(FormatTimestamp(parsed), value, StringComparison.Ordinal))
+        if (!TryParseCanonical(value, out var parsed))
         {
             throw Malformed(
                 databasePath,
@@ -91,6 +99,52 @@ internal static class StorageDb
         }
 
         return parsed;
+    }
+
+    /// <summary>
+    /// Rewrites a stored timestamp that names an unambiguous instant (any ISO-8601 spelling that carries its own
+    /// numeric offset, or <c>Z</c>) but is not the shape this codebase reads — a narrower fraction written by another
+    /// tool, a <c>Z</c> suffix, surrounding blanks. The instant and its offset are preserved; only the text is
+    /// canonicalized. Returns null for anything else, and the caller leaves those rows alone: a value without an
+    /// offset would be read in the local time zone, so repairing it would invent an instant rather than restore one.
+    /// </summary>
+    public static string? TryNormalizeTimestamp(string value)
+    {
+        var text = value.AsSpan().Trim();
+        if (text.Length == 0 || !CarriesOffset(text))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? FormatTimestamp(parsed)
+            : null;
+    }
+
+    private static bool TryParseCanonical(string value, out DateTimeOffset parsed) =>
+        DateTimeOffset.TryParseExact(value, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed) &&
+        string.Equals(FormatTimestamp(parsed), value, StringComparison.Ordinal);
+
+    /// <summary>True when the text ends in <c>Z</c> or a <c>±hh:mm</c> offset, i.e. it does not rely on the local zone.</summary>
+    private static bool CarriesOffset(ReadOnlySpan<char> text)
+    {
+        if (text[^1] is 'Z' or 'z')
+        {
+            return true;
+        }
+
+        if (text.Length < 6)
+        {
+            return false;
+        }
+
+        var tail = text[^6..];
+        return tail[0] is '+' or '-'
+            && char.IsAsciiDigit(tail[1])
+            && char.IsAsciiDigit(tail[2])
+            && tail[3] == ':'
+            && char.IsAsciiDigit(tail[4])
+            && char.IsAsciiDigit(tail[5]);
     }
 
     public static string ReadText(SqliteDataReader reader, int ordinal, string column, string databasePath, string row)

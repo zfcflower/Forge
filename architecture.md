@@ -18,6 +18,7 @@ depends-on: [forge-goal]
 | 项目 | 职责 |
 |---|---|
 | `Forge.Abstractions` | 主程序内部共享契约(工具、审批、存储、提示词、Agent 事件);零外部依赖 |
+| `Forge.IO` | 文件与进程原语 + Agent 的文件/搜索/shell 工具:`AtomicFile`、工作区路径守卫、有界文件读写、目录遍历、`.gitignore` 匹配、grep 引擎、`ProcessRunner`、7 个 `ITool`(`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash`);只依赖 BCL 与 `Abstractions` |
 | `Forge.Ipc`(新增) | 命名管道 + 4 字节长度前缀 JSON 的协议、帧编解码、协议版本;主程序、宿主、Worker 共用;须 AOT 兼容 |
 | `Forge.Plugin.Sdk`(新增) | 供插件源码引用的稳定 SDK 与契约,独立版本化,不依赖 Core |
 | `Forge.Core` | Agent 循环、会话、模型提供方(OpenAI 兼容、Anthropic)、SubAgent 调度与提示词缓存、提示词三层合成 |
@@ -29,7 +30,7 @@ depends-on: [forge-goal]
 | `Forge.HostClient`(新增,AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Plugin.Sdk |
 | `Forge.App` | Avalonia 桌面 UI 与组合根(含 `ExtensionHostClient`);唯一知道所有主程序项目的层 |
 
-主程序侧(Native AOT):`Abstractions`、`Ipc` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
+主程序侧(Native AOT):`Abstractions`、`IO`、`Ipc` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
 
 ## 关键决策
 
@@ -39,6 +40,8 @@ depends-on: [forge-goal]
 - Agent 流式输出按渲染帧批量合并,每帧最多更新一次 UI(已确认)。
 
 **会话与工作区一对一。** 每个会话绑定一个 Git Worktree,会话的工具调用、文件读写和终端的工作目录均限定在其中;并行会话之间不共享工作目录。
+
+**文件与命令能力留在进程内,不走 shell。** Agent 读写文件、列目录、找文件、搜内容全部由 `Forge.IO` 的原生实现完成,不启动外部进程;只有真正需要外部程序时才创建子进程(搜索可由可选的 ripgrep 加速,但它只做加速,不是前提)。工具面固定为 `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 七个,名字与内置 Agent 的白名单一致;`bash` 先用 Direct(参数向量、不经 shell),只有出现 shell 语法时才走平台解释器。所有工具都有按字节的输出上限、超时、取消与工作区路径校验,超限只截断结果而不会停止读取子进程管道。(已确认)
 
 **Native AOT 主程序(已确认要求;可行性已由 Stage 0 实测确认)。** 主程序不可变、Native AOT 发布;不在其中使用 Roslyn 动态编译或 `AssemblyLoadContext` 加载插件。五个主程序项目(`Abstractions`/`Core`/`Workspace`/`Mcp`/`Editor`)已开启 `IsAotCompatible` 且 AOT 分析器 0 警告;Workspace 的 JSON 输出改走反射无关的 `JsonPayload`,持久化类型走 `WorkspaceJsonContext` 源生成。实测(win-x64):AOT 产物 25.3 MiB,headless 对话 81-84ms、GUI 到窗口句柄 166ms。风险:Avalonia 与 Microsoft.Data.Sqlite/SQLitePCLRaw 未声明 AOT 兼容,靠实测背书,CI 需三平台冒烟;原生库不能静态链接,"单文件"不成立;Linux/macOS 发布未在本机验证(需 CI)。只有核心依赖确实无法解决时才重新评估放弃 AOT。
 

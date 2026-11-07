@@ -2,4 +2,7 @@
   <PropertyGroup>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
+  </ItemGroup>
 </Project>

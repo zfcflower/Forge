@@ -43,6 +43,16 @@ internal sealed record AgentRuntimeServices(
     public IReadOnlyList<ITool> PullRequestTools { get; set; } = [];
 
     /// <summary>
+    /// The workspace file and shell tools (<c>read</c>, <c>write</c>, <c>edit</c>, <c>ls</c>, <c>find</c>, <c>grep</c>,
+    /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
+    /// <see cref="ToolContext"/>. Empty in a unit test, where an agent therefore cannot touch files at all. The read-only
+    /// ones pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>; <c>write</c>/<c>edit</c> ask and
+    /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. None of them is offered to <c>run_code</c> scripts, whose
+    /// calls never pass the per-call approval card.
+    /// </summary>
+    public IReadOnlyList<ITool> FileTools { get; set; } = [];
+
+    /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
     /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
     /// </summary>
@@ -285,6 +295,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             tools.AddRange(git.All);
         }
 
+        tools.AddRange(services.FileTools);
         tools.AddRange(services.PullRequestTools);
         return tools;
     }

@@ -9,8 +9,8 @@ namespace Forge.Core.Tests.Storage;
 
 /// <summary>
 /// Pins the forge.db v1 → v2 step (five step columns on <c>todos</c> plus the <c>plan_summaries</c> table) and the whole
-/// v0 → v2 ladder: data survives, the step is atomic, concurrent first opens apply it once, and a newer file is refused
-/// without a single write.
+/// ladder a v0 or v1 file climbs to the current schema: data survives, each step is atomic, concurrent first opens apply
+/// it once, and a newer file is refused without a single write.
 /// </summary>
 public sealed class StorageSchemaV2MigrationTests
 {
@@ -55,7 +55,7 @@ public sealed class StorageSchemaV2MigrationTests
             await store.AddAsync("sess-a", "T", null, null, default);
         }
 
-        Assert.Equal(2L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.Equal(["session_id", "text", "updated_at"], await TodoSchemaRaw.ColumnsAsync(directory, "plan_summaries"));
 
@@ -125,7 +125,7 @@ public sealed class StorageSchemaV2MigrationTests
             Assert.Equal(sessionBBefore, await store.ListAsync("sess-b", default));
         }
 
-        Assert.Equal(2L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "plan_summaries"));
         Assert.Equal(rawRowsBefore, await TodoSchemaRaw.V1TodoRowsAsync(directory));
@@ -163,7 +163,7 @@ public sealed class StorageSchemaV2MigrationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task V0_database_reaches_v2_in_one_open_through_a_read_or_a_write(bool throughWrite)
+    public async Task V0_database_reaches_the_current_schema_in_one_open_through_a_read_or_a_write(bool throughWrite)
     {
         using var directory = new TempDirectory();
         var createdAt = new DateTimeOffset(2024, 5, 1, 12, 0, 0, TimeSpan.Zero).ToString("O", CultureInfo.InvariantCulture);
@@ -183,7 +183,7 @@ public sealed class StorageSchemaV2MigrationTests
             }
         }
 
-        Assert.Equal(2L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.Equal(["session_id", "text", "updated_at"], await TodoSchemaRaw.ColumnsAsync(directory, "plan_summaries"));
         foreach (var table in new[] { "projects", "ui_state", "turn_checkpoints" })
@@ -246,7 +246,7 @@ public sealed class StorageSchemaV2MigrationTests
         await TodoSchemaRaw.ExecuteAsync(directory, cleanupSql);
         var titles = (await store.ListAsync("sess-a", default)).Select(item => item.Title).ToArray();
         Assert.Equal(["Keep", "Keep too"], titles);
-        Assert.Equal(2L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "plan_summaries"));
         Assert.Equal(
@@ -321,7 +321,7 @@ public sealed class StorageSchemaV2MigrationTests
             await sessions.DisposeAsync();
         }
 
-        Assert.Equal(2L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
         var columns = await TodoSchemaRaw.ColumnsAsync(directory, "todos");
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, columns);
         Assert.Equal(columns.Length, columns.Distinct(StringComparer.Ordinal).Count());
@@ -352,7 +352,7 @@ public sealed class StorageSchemaV2MigrationTests
             Assert.DoesNotContain("fatal", result.Output, StringComparison.OrdinalIgnoreCase);
         }
 
-        Assert.Equal(2L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
         var columns = await TodoSchemaRaw.ColumnsAsync(directory, "todos");
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, columns);
         Assert.Equal(rowsBefore, await TodoSchemaRaw.V1TodoRowsAsync(directory));
@@ -381,7 +381,7 @@ public sealed class StorageSchemaV2MigrationTests
             await TodoSchemaRaw.DowngradeToV1Async(directory);
         }
 
-        await TodoSchemaRaw.SetUserVersionAsync(directory, 3);
+        await TodoSchemaRaw.SetUserVersionAsync(directory, 4);
         var schemaBefore = await TodoSchemaRaw.SchemaSnapshotAsync(directory);
         var rowsBefore = await TodoSchemaRaw.V1TodoRowsAsync(directory);
 
@@ -399,11 +399,11 @@ public sealed class StorageSchemaV2MigrationTests
         {
             var refusal = await Assert.ThrowsAsync<InvalidDataException>(attempt);
             Assert.True(
-                refusal.Message.Contains("schema 3", StringComparison.Ordinal) && refusal.Message.Contains("supports 2", StringComparison.Ordinal),
+                refusal.Message.Contains("schema 4", StringComparison.Ordinal) && refusal.Message.Contains("supports 3", StringComparison.Ordinal),
                 $"{name}: unexpected refusal message '{refusal.Message}'");
         }
 
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(schemaBefore, await TodoSchemaRaw.SchemaSnapshotAsync(directory));
         Assert.Equal(rowsBefore, await TodoSchemaRaw.V1TodoRowsAsync(directory));
         if (!v1Shaped)

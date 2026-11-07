@@ -1,43 +1,23 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Forge.IO;
 
 namespace Forge.Workspace;
 
 internal static class WorkspacePaths
 {
-    public static string Normalize(string path)
-    {
-        var full = Path.GetFullPath(path);
-        return Path.TrimEndingDirectorySeparator(full) is { Length: > 0 } trimmed ? trimmed : full;
-    }
+    public static string Normalize(string path) => WorkspacePath.Normalize(path);
 
-    public static string NormalizeCandidate(string path) => Normalize(path);
+    public static string NormalizeCandidate(string path) => WorkspacePath.Normalize(path);
 
     /// <summary>
     /// True when both spellings name the same path. The normalized spellings are compared first; when they differ, the
     /// links of every existing component are resolved too, because git reports resolved paths while a caller may pass a
     /// path through a symlink (macOS <c>/tmp</c> and <c>/var</c> are links).
     /// </summary>
-    public static bool Equals(string left, string right)
-    {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return string.Equals(Normalize(left), Normalize(right), comparison)
-            || string.Equals(ResolveRealPath(left), ResolveRealPath(right), comparison);
-    }
+    public static bool Equals(string left, string right) => WorkspacePath.SamePath(left, right);
 
-    public static bool IsUnder(string path, string root)
-    {
-        var normalizedPath = Normalize(path);
-        var normalizedRoot = Normalize(root);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!normalizedPath.StartsWith(normalizedRoot, comparison))
-        {
-            return false;
-        }
-
-        return normalizedPath.Length == normalizedRoot.Length
-            || normalizedPath[normalizedRoot.Length] is '/' or '\\';
-    }
+    public static bool IsUnder(string path, string root) => WorkspacePath.IsUnder(path, root);
 
     public static string FileName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
 
@@ -61,27 +41,7 @@ internal static class WorkspacePaths
     /// path. Components that do not exist yet are appended unchanged, so a not-yet-created file still yields the
     /// directory it would really land in.
     /// </summary>
-    public static string ResolveRealPath(string path)
-    {
-        var full = Normalize(path);
-        var root = Path.GetPathRoot(full) ?? string.Empty;
-        var current = root;
-        foreach (var segment in full[root.Length..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
-        {
-            current = Path.Combine(current, segment);
-            if (!Exists(current))
-            {
-                break;
-            }
-
-            if (ResolveLinkTarget(current) is { } target)
-            {
-                current = target;
-            }
-        }
-
-        return Normalize(current);
-    }
+    public static string ResolveRealPath(string path) => WorkspacePath.ResolveRealPath(path);
 
     /// <summary>
     /// Verifies that <paramref name="fullPath"/> is inside <paramref name="root"/> and reaches it without passing
@@ -121,24 +81,6 @@ internal static class WorkspacePaths
             throw new ArgumentException(
                 $"'{fullPath}' resolves to '{realTarget}', which is outside the workspace '{realRoot}'.",
                 parameterName);
-        }
-    }
-
-    private static string? ResolveLinkTarget(string path)
-    {
-        try
-        {
-            FileSystemInfo info = Directory.Exists(path) ? new DirectoryInfo(path) : new FileInfo(path);
-            if ((info.Attributes & FileAttributes.ReparsePoint) == 0)
-            {
-                return null;
-            }
-
-            return info.ResolveLinkTarget(returnFinalTarget: true) is { } target ? Normalize(target.FullName) : null;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            return null;
         }
     }
 }

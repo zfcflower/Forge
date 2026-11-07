@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -129,6 +129,23 @@ internal static class StorageSchema
         );
         """;
 
+    /// <summary>
+    /// Every timestamp column of <c>forge.db</c>, with the columns that identify its row. The v3 step repairs stored
+    /// values against this list and builds the write guards from it, so a column added to the schema later has one
+    /// place to register.
+    /// </summary>
+    private static readonly (string Table, string[] Key, string[] Columns)[] TimestampColumns =
+    [
+        ("sessions", ["id"], ["created_at", "last_active_at"]),
+        ("messages", ["session_id", "seq"], ["at"]),
+        ("summaries", ["id"], ["at"]),
+        ("projects", ["id"], ["added_at"]),
+        ("todos", ["id"], ["updated_at"]),
+        ("ui_state", ["key"], ["updated_at"]),
+        ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
+        ("plan_summaries", ["session_id"], ["updated_at"]),
+    ];
+
     private const string FtsSchemaSql =
         "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(session_id UNINDEXED, seq UNINDEXED, text, tokenize='unicode61 remove_diacritics 2')";
 
@@ -209,6 +226,9 @@ internal static class StorageSchema
             case 1:
                 await ExecuteAsync(connection, transaction, V2SchemaSql, ct).ConfigureAwait(false);
                 break;
+            case 2:
+                await MigrateToV3Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
         }
@@ -263,6 +283,112 @@ internal static class StorageSchema
             update.Parameters.AddWithValue("$id", id);
             await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The v3 step: repair timestamps a writer outside Forge stored in another legal spelling, then make the database
+    /// itself refuse that spelling. The repair runs first, because the guards it installs afterwards would reject the
+    /// very history being repaired; both halves share the step's transaction, so an interrupted upgrade leaves the
+    /// data and the trigger set exactly as they were.
+    /// </summary>
+    private static async Task MigrateToV3Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        foreach (var (table, key, columns) in TimestampColumns)
+        {
+            foreach (var column in columns)
+            {
+                await NormalizeTimestampColumnAsync(connection, transaction, table, key, column, ct).ConfigureAwait(false);
+            }
+        }
+
+        await ExecuteAsync(connection, transaction, TimestampGuardSql(), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rewrites the rows of one timestamp column whose text is a legal instant but not the shape this codebase reads.
+    /// Rows whose text names no unambiguous instant are left exactly as they are: the strict read reports them with
+    /// their row id, and inventing a value here would hide the only evidence of what went wrong.
+    /// </summary>
+    private static async Task NormalizeTimestampColumnAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string table,
+        string[] key,
+        string column,
+        CancellationToken ct)
+    {
+        var stale = new List<(object[] Key, string Value)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText =
+                $"SELECT {string.Join(", ", key)}, {column} FROM {table} " +
+                $"WHERE {column} IS NOT NULL AND NOT ({column} GLOB $pattern)";
+            select.Parameters.AddWithValue("$pattern", StorageDb.TimestampGlobPattern);
+            await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (reader.GetValue(key.Length) is not string text || StorageDb.TryNormalizeTimestamp(text) is not { } normalized)
+                {
+                    continue;
+                }
+
+                var values = new object[key.Length];
+                for (var index = 0; index < key.Length; index++)
+                {
+                    values[index] = reader.GetValue(index);
+                }
+
+                stale.Add((values, normalized));
+            }
+        }
+
+        var predicate = string.Join(" AND ", key.Select(static name => $"{name} = ${name}"));
+        foreach (var (values, value) in stale)
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = $"UPDATE {table} SET {column} = $value WHERE {predicate}";
+            update.Parameters.AddWithValue("$value", value);
+            for (var index = 0; index < key.Length; index++)
+            {
+                update.Parameters.AddWithValue("$" + key[index], values[index]);
+            }
+
+            await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// One <c>BEFORE INSERT</c> and one <c>BEFORE UPDATE</c> trigger per timestamp column, each aborting any write whose
+    /// text does not match <see cref="StorageDb.TimestampGlobPattern"/>. The database enforces the shape the readers
+    /// require, so neither a newer build nor a script that opens <c>forge.db</c> on its own can store a value every
+    /// later read would refuse; a nullable column still accepts NULL.
+    /// </summary>
+    private static string TimestampGuardSql()
+    {
+        var sql = new System.Text.StringBuilder();
+        foreach (var (table, _, columns) in TimestampColumns)
+        {
+            foreach (var column in columns)
+            {
+                var condition =
+                    $"NEW.{column} IS NOT NULL AND NOT (NEW.{column} GLOB '{StorageDb.TimestampGlobPattern}')";
+                var message = $"{table}.{column} must hold the canonical forge.db timestamp (yyyy-MM-ddTHH:mm:ss.fffffff+HH:mm)";
+                foreach (var (kind, suffix) in new[] { ("INSERT", "insert"), ("UPDATE", "update") })
+                {
+                    var name = $"trg_{table}_{column}_{suffix}";
+                    sql.Append($"DROP TRIGGER IF EXISTS {name};\n");
+                    sql.Append($"CREATE TRIGGER {name} BEFORE {kind} ON {table} FOR EACH ROW WHEN {condition}\n");
+                    sql.Append($"BEGIN SELECT RAISE(ABORT, '{message}'); END;\n");
+                }
+            }
+        }
+
+        return sql.ToString();
     }
 
     /// <summary>

@@ -60,6 +60,11 @@ internal sealed class AppPreferences : ObservableObject
     public const int DefaultGitChecksMaxWaitMinutes = 30;
     public const bool DefaultGitNotifications = true;
 
+    /// <summary>Longest a <c>bash</c> call may run unless the model asks for less; clamped to [<see cref=MinToolBashTimeoutSeconds/>, <see cref=MaxToolBashTimeoutSeconds/>].</summary>
+    public const int MinToolBashTimeoutSeconds = 1;
+    public const int MaxToolBashTimeoutSeconds = 600;
+    public const int DefaultToolBashTimeoutSeconds = 120;
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
@@ -75,6 +80,9 @@ internal sealed class AppPreferences : ObservableObject
     private int gitChecksMaxWaitMinutes = DefaultGitChecksMaxWaitMinutes;
     private bool gitNotifications = DefaultGitNotifications;
     private string gitGhPath = string.Empty;
+    private string toolsShellPath = string.Empty;
+    private string toolsRipgrepPath = string.Empty;
+    private int toolsBashTimeoutSeconds = DefaultToolBashTimeoutSeconds;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -143,6 +151,25 @@ internal sealed class AppPreferences : ObservableObject
     public string GitGhPath { get => gitGhPath; set => Set(ref gitGhPath, (value ?? string.Empty).Trim()); }
 
     /// <summary>
+    /// The shell a script-mode <c>bash</c> call runs in; empty (default) means the platform default (<c>pwsh</c> then
+    /// <c>cmd</c> on Windows, <c>/bin/bash</c> then <c>/bin/sh</c> elsewhere). Trimmed; read when the file tools are built.
+    /// </summary>
+    public string ToolsShellPath { get => toolsShellPath; set => Set(ref toolsShellPath, (value ?? string.Empty).Trim()); }
+
+    /// <summary>
+    /// An optional ripgrep executable used to speed up <c>grep</c>; empty (default) means the managed search engine. Trimmed;
+    /// read when the file tools are built.
+    /// </summary>
+    public string ToolsRipgrepPath { get => toolsRipgrepPath; set => Set(ref toolsRipgrepPath, (value ?? string.Empty).Trim()); }
+
+    /// <summary>Default timeout of a <c>bash</c> call in seconds; clamped to [<see cref=MinToolBashTimeoutSeconds/>, <see cref=MaxToolBashTimeoutSeconds/>].</summary>
+    public int ToolsBashTimeoutSeconds
+    {
+        get => toolsBashTimeoutSeconds;
+        set => Set(ref toolsBashTimeoutSeconds, Math.Clamp(value, MinToolBashTimeoutSeconds, MaxToolBashTimeoutSeconds));
+    }
+
+    /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
     /// Values go through the same validation as the setters.
@@ -172,6 +199,11 @@ internal sealed class AppPreferences : ObservableObject
             : DefaultGitChecksMaxWaitMinutes;
         gitNotifications = section.GitNotifications ?? DefaultGitNotifications;
         gitGhPath = (section.GitGhPath ?? string.Empty).Trim();
+        toolsShellPath = (section.ToolsShellPath ?? string.Empty).Trim();
+        toolsRipgrepPath = (section.ToolsRipgrepPath ?? string.Empty).Trim();
+        toolsBashTimeoutSeconds = section.ToolsBashTimeoutSeconds is { } bashTimeout
+            ? Math.Clamp(bashTimeout, MinToolBashTimeoutSeconds, MaxToolBashTimeoutSeconds)
+            : DefaultToolBashTimeoutSeconds;
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -193,6 +225,9 @@ internal sealed class AppPreferences : ObservableObject
             GitChecksMaxWaitMinutes = gitChecksMaxWaitMinutes,
             GitNotifications = gitNotifications,
             GitGhPath = gitGhPath,
+            ToolsShellPath = toolsShellPath,
+            ToolsRipgrepPath = toolsRipgrepPath,
+            ToolsBashTimeoutSeconds = toolsBashTimeoutSeconds,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -294,6 +329,15 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("gitGhPath")]
     public string? GitGhPath { get; set; }
+
+    [JsonPropertyName("toolsShellPath")]
+    public string? ToolsShellPath { get; set; }
+
+    [JsonPropertyName("toolsRipgrepPath")]
+    public string? ToolsRipgrepPath { get; set; }
+
+    [JsonPropertyName("toolsBashTimeoutSeconds")]
+    public int? ToolsBashTimeoutSeconds { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>

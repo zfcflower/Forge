@@ -46,7 +46,9 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **存储。** SQLite 存会话、消息、摘要、全文索引(FTS5);JSONL 为事件日志,供崩溃恢复;Artifact 内容存文件。所有写入走单写线程批量提交,返回 seq 时已落盘;提交后的取消不会让调用方误判为失败。摘要三层(近期原文 → 阶段摘要 → 会话级总摘要),只追加不改写,被压缩的原文仍可检索和取回。压缩不得拆开工具调用与其结果。
 
-**forge.db 版本阶梯。** `PRAGMA user_version` 是唯一权威(0 = 无标记旧库,1 = 工作台表,2 = 当前:`todos` 加 `commit_subject`/`summary`/`verification`/`commit_id`/`commit_error` 五列、新表 `plan_summaries(session_id PK, text, updated_at)`)。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写入版本号,事务内重读版本防止多进程重复迁移;读到更高版本立即 `InvalidDataException`,不降级不写库。旧会话回填 Active 与最后活动 = 创建时间(严格解析,失败整步回滚)。排序用 `last_active_ticks`(UTC ticks)而非 ISO 文本。`messages_fts` 与阶梯解耦(可用性取决于 SQLite 编译选项),首次建表与回填同事务,单条坏消息只跳过(派生数据)。
+**forge.db 版本阶梯。** `PRAGMA user_version` 是唯一权威(0 = 无标记旧库,1 = 工作台表,2 = `todos` 加 `commit_subject`/`summary`/`verification`/`commit_id`/`commit_error` 五列、新表 `plan_summaries(session_id PK, text, updated_at)`;3 = 当前:一次性规范化历史时间戳,并为每个时间戳列装写守卫)。每步在一个 `BEGIN IMMEDIATE` 事务内执行并同事务写入版本号,事务内重读版本防止多进程重复迁移;读到更高版本立即 `InvalidDataException`,不降级不写库。旧会话回填 Active 与最后活动 = 创建时间(严格解析,失败整步回滚)。排序用 `last_active_ticks`(UTC ticks)而非 ISO 文本。`messages_fts` 与阶梯解耦(可用性取决于 SQLite 编译选项),首次建表与回填同事务,单条坏消息只跳过(派生数据)。
+
+**forge.db 时间戳由库自己把关。** 时间戳列只存 `ToString("O")` 形状的文本(带 offset、固定 7 位小数),读取严格、不兼容其它写法。进程外工具直接改库曾写入 6 位小数的 ISO 文本,一行坏值就让整个 `forge.db` 读不出来(左栏项目树空白、添加项目报错)。因此 3 号步骤先就地规范化:凡文本自带 `Z` 或 `±hh:mm`、能解析出唯一时刻的,改写为规范形状(时刻与 offset 不变);无 offset 或无法解析的值原样保留,由严格读取指名报错——迁移不猜时间。规范化之后给 8 张表 10 个时间戳列各建 `BEFORE INSERT`/`BEFORE UPDATE` 触发器(`NEW.col IS NOT NULL AND NOT (NEW.col GLOB <规范形状>)` 时 `RAISE(ABORT)`),任何写者(本程序、外部脚本、旧构建)都写不进非规范文本,可空列(`turn_checkpoints.ended_at`)仍允许 NULL。新增时间戳列必须登记进 `StorageSchema.TimestampColumns`,否则既不会被规范化也没有守卫。审批库 `approvals.db` 不在此列,仍按其 SPEC 只接受规范文本。
 
 **工作台存储。** `projects` / `todos` / `ui_state` / `turn_checkpoints` 与会话同库:每个 store 一条长连接 + `SemaphoreSlim` 串行 + 每写一个 `BEGIN IMMEDIATE`(deferred 读后升级会静默丢更新),读用池化短连接。`ITodoStore.Changed` 在提交后、写锁外触发,订阅者异常被吞。路径唯一性靠 `root_key`(Windows 大写)唯一索引,General 项目由部分唯一索引保证单例,再次注册即改指向。TODO 序号会话内致密。检查点以 (session, turn) 为主键,已完成轮次不被再次 Begin 改写。`synchronous=NORMAL`:这些是体验数据,丢失不影响安全(审批库用 FULL)。
 

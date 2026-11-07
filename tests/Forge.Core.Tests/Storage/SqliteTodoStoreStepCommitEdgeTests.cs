@@ -680,6 +680,10 @@ public sealed class SqliteTodoStoreStepCommitEdgeTests
         using var directory = new TempDirectory();
         await using var store = new SqliteTodoStore(directory.Path);
         await store.GetPlanSummaryAsync("sess-warmup", default);
+
+        // The v3 write guards refuse that spelling, so the row is planted with the guard out of the way: a database
+        // written before v3 (or by a tool that dropped the trigger) must still be reported, never read in the local zone.
+        await TodoSchemaRaw.ExecuteAsync(directory, "DROP TRIGGER trg_plan_summaries_updated_at_insert");
         await TodoSchemaRaw.ExecuteAsync(
             directory,
             "INSERT INTO plan_summaries (session_id, text, updated_at) VALUES ('sess-bad', 'text', '2024-05-01 12:00:00')");
