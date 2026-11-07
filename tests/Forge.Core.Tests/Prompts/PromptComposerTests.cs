@@ -22,7 +22,7 @@ public class PromptComposerTests
         Assert.True(system < global);
         Assert.True(global < project);
         Assert.True(project < role);
-        Assert.Contains(PromptSourceText.Lf(BuiltInPrompts.System), prompt.StablePrefix, StringComparison.Ordinal);
+        Assert.Contains(BuiltInPrompts.System, prompt.StablePrefix, StringComparison.Ordinal);
         Assert.Contains("Project-specific system text.", prompt.StablePrefix, StringComparison.Ordinal);
         Assert.EndsWith("Role text.", prompt.StablePrefix, StringComparison.Ordinal);
     }

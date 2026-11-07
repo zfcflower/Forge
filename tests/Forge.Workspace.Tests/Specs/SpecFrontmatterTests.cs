@@ -5,9 +5,7 @@ namespace Forge.Workspace.Tests.Specs;
 
 public sealed class SpecFrontmatterTests
 {
-    // The sample is a source literal, so its line endings follow the checkout (CRLF on Windows); the parser keeps
-    // body bytes as they are, so the fixture is pinned to the canonical \n form before it is parsed.
-    private static readonly string Sample = """
+    private const string Sample = """
         ---
         id: forge-core
         type: module-design
@@ -25,7 +23,7 @@ public sealed class SpecFrontmatterTests
         # Core module
 
         Body text.
-        """.ReplaceLineEndings("\n");
+        """;
 
     private static SpecFrontmatter Parse(string text)
     {
