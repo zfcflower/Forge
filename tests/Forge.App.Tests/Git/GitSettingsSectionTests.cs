@@ -275,9 +275,14 @@ public sealed class GitSettingsSectionTests
                 if (RenderedSectionIds().Count == viewModel.Settings.Sections.Items.Count
                     && HeadingsSettled())
                 {
-                    return;
+                    break;
                 }
             }
+
+            // The git section body only renders once selected; this test reads it, so select it before reading.
+            viewModel.Settings.SelectedSection = viewModel.Settings.Sections.Items.Single(
+                static item => string.Equals(item.Id, SettingsSectionIds.Git, StringComparison.Ordinal));
+            Settle(Window);
         }
 
         /// <summary>All three section headings are laid out at distinct heights, so order assertions are stable.</summary>
@@ -294,7 +299,7 @@ public sealed class GitSettingsSectionTests
             var heading = Heading("git");
             var provider = Heading(SettingsSectionIds.Provider);
             var paths = Heading(SettingsSectionIds.Paths);
-            var texts = heading?.Parent is Visual body
+            var texts = ControlOf<ScrollViewer>("settings-body") is { } body
                 ? body.GetVisualDescendants().OfType<TextBlock>().Select(static block => block.Text ?? string.Empty).ToList()
                 : new List<string>();
             return (

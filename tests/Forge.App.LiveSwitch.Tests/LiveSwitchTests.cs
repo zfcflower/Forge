@@ -508,6 +508,10 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
                         }
                     }
 
+                    // The language section body (its three radio choices) only renders once selected.
+                    ViewModel.Settings.SelectedSection = ViewModel.Settings.Sections.Items.Single(
+                        static item => string.Equals(item.Id, SettingsSectionIds.Language, StringComparison.Ordinal));
+                    Settle(Window);
                     return 0;
                 },
                 token);
