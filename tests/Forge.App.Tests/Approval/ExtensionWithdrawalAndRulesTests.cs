@@ -51,8 +51,7 @@ public sealed class ExtensionWithdrawalAndRulesTests
         var result = await submit.WaitAsync(ApprovalFixtures.StepTimeout);
 
         Assert.Equal(ApprovalCardDecision.Withdrawn, (await card.Decision).Decision);
-        Assert.NotEqual(ExtensionSubmitOutcome.Rejected, result.Outcome);
-        Assert.NotEqual(ExtensionSubmitOutcome.Approved, result.Outcome);
+        Assert.Equal(ExtensionSubmitOutcome.Withdrawn, result.Outcome);
         Assert.Contains("withdrawn", result.Message);
         Assert.Contains("not a rejection", result.Message);
         Assert.Contains("pending", result.Message);

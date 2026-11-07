@@ -40,6 +40,12 @@ public enum ExtensionSubmitOutcome
     /// <summary>The user rejected; the draft was discarded and any live version is unchanged.</summary>
     Rejected,
 
+    /// <summary>
+    /// The approval card went away before the user decided (the session closed or the app is shutting down). This is
+    /// not a rejection: the draft stays staged pending and the user can still approve or reject it from the settings.
+    /// </summary>
+    Withdrawn,
+
     /// <summary>The draft never reached the user: validation or compile errors, a blocked id/version, or a host failure.</summary>
     Invalid,
 }

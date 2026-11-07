@@ -164,7 +164,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - 子 Agent 的 `host.tool_call`/`run_code` 内部调用:其 `ToolContext.SessionId` 是子会话 id,但子 Agent 与根共用 AgentHost。`SessionRuntime.RunTurnAsync` 消费事件时,`AgentSubAgentStarted`(任意深度)把 `ChildSessionId` 登记为根 scope 的别名,`AgentSubAgentFinished` 或运行时释放时注销(释放时清掉全部别名,释放后不再登记)。子调用按根的工具集解析(变更仍须审批卡;`extension_*` 仍不可达),卡片显示根会话(与 Core 一致)。别名登记发生在事件被消费时,先于子 Agent 的首次模型往返,实际不会落后于其首个工具调用。
 - 插件命令审批的 `ToolName` 是 `plugin-command:<pluginId>:<name>`(`ExtensionHostClient.PluginCommandApprovalName`):模型侧工具名只含字母数字、`_`、`-`,不含 `:`,因此永远不会与内置/外部工具名相等,策略 Allow 规则与"始终允许"都碰不到它。插件命令卡不可记住(`ApprovalRules.IsRememberable` 为 false,无记住按钮,`Allow` 也拒绝入库),每次调用单独确认;卡片标题"插件命令审批"。
 - 同一会话可同时显示多张工具卡:Core 的 approvalGate 只串行 agent loop 自己的调用,路由器进来的插件/工作流调用不经过它。每次请求有自己的卡与等待,决定和取消只影响自己的卡(`SessionApprovalHandler`/`ApprovalQueue` 按卡片实例工作)。不加跨组件闸门:agent loop 持着工具调用等插件步骤时再加闸会死锁。
-- 插件卡无用户决定的撤回(会话释放、关闭、取消、卡片 Dispose)产出独立的 `Withdrawn`(≠ Deny):不 Discard 暂存稿,稿件留待 `extensions.pending` 重启后作为"重启前提交"卡出现;给 agent 的文本如实说"已撤回、草稿保留待定、不是拒绝"。工具卡的撤回仍是 Deny。
+- 插件卡无用户决定的撤回(会话释放、关闭、取消、卡片 Dispose)产出独立的 `Withdrawn`(≠ Deny,映射到 Core `ExtensionSubmitOutcome.Withdrawn` 而非 `Invalid`):不 Discard 暂存稿,稿件留待 `extensions.pending` 重启后作为"重启前提交"卡出现;给 agent 的文本如实说"已撤回、草稿保留待定、不是拒绝"。工具卡的撤回仍是 Deny。
 - 提交时先(加载规则后)清除旧/新工具名的已记住规则,再提交,提交后按实际注册名再清一次;提交失败时规则保持已清除。`approval-rules.json` 的 `rules: null`/缺失视为损坏文件(无规则 + `.bak`),加载任务永不 Faulted,`RequestAsync` 对加载异常降级为"询问"。
 - 工作流扩展卡显示声明的工具(名称/描述/输入 schema)。
 

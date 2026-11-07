@@ -161,6 +161,15 @@ public sealed class ExtensionSubmitTool : ITool
                 return new ToolResult(Append(builder, result.Message));
             }
 
+            case ExtensionSubmitOutcome.Withdrawn:
+            {
+                var builder = new StringBuilder(192);
+                builder.Append("The approval for extension '").Append(draft.Id).Append("' version '").Append(draft.Version)
+                    .Append("' was withdrawn before the user decided. This is not a rejection: the draft is kept pending ")
+                    .Append("and the user can still decide later; do not resend the same draft.");
+                return new ToolResult(Append(builder, result.Message));
+            }
+
             case ExtensionSubmitOutcome.Invalid:
                 var reason = string.IsNullOrWhiteSpace(result.Message)
                     ? $"extension '{draft.Id}' version '{draft.Version}' was not accepted and no reason was reported."

@@ -614,7 +614,7 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
     /// </summary>
     private static ExtensionSubmitResult Withdrawn(StagedExtension staged) =>
         new(
-            ExtensionSubmitOutcome.Invalid,
+            ExtensionSubmitOutcome.Withdrawn,
             $"the approval for '{staged.PluginId}' {staged.Version} was withdrawn before the user decided (the session closed or " +
             "the app is shutting down). This is not a rejection: the draft is kept pending and the user can still approve or " +
             "reject it from the extensions settings; do not resubmit it.",
