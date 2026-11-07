@@ -18,7 +18,11 @@ public partial class App : Application
     private MainWindowViewModel? viewModel;
     private bool shutdownFinished;
 
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        Views.TrimmedTextToolTip.Install();
+        AvaloniaXamlLoader.Load(this);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {

@@ -21,18 +21,21 @@ internal static class WorkbenchStripText
 }
 
 /// <summary>
-/// The button strip an auto-hidden side region collapses to: one rotated button per panel title, sitting on the window
-/// edge of the side of Main the region is docked on. Clicking a button opens the region's drawer.
+/// The dock bar on the window edge of a side region (image-4 style): one rotated tab per panel title, each with a thick
+/// indicator bar along its outer (window-edge) side. Strips are shown only for auto-hidden regions. Clicking a tab toggles
+/// that region's drawer.
 /// </summary>
 internal sealed class AutoHideStrip : Panel
 {
     public static readonly StyledProperty<IBrush?> SeparatorBrushProperty =
         AvaloniaProperty.Register<AutoHideStrip, IBrush?>(nameof(SeparatorBrush));
 
-    private readonly StackPanel buttons = new() { Orientation = Orientation.Vertical };
+    private readonly StackPanel buttons = new() { Orientation = Orientation.Vertical, Spacing = 2, Margin = new Thickness(0, 4, 0, 4) };
     private readonly ScrollViewer scroller;
     private readonly Border separator = new();
+    private readonly List<Border> bars = [];
     private RegionEdge edge;
+    private bool isRegionShown;
 
     public AutoHideStrip()
     {
@@ -45,7 +48,7 @@ internal sealed class AutoHideStrip : Panel
         };
         Children.Add(scroller);
         Children.Add(separator);
-        WorkbenchResources.Link(this, BackgroundProperty, "SurfaceBackgroundBrush");
+        WorkbenchResources.Link(this, BackgroundProperty, "DockStripBackgroundBrush");
         WorkbenchResources.Link(separator, Border.BackgroundProperty, "BorderBrush");
     }
 
@@ -53,14 +56,35 @@ internal sealed class AutoHideStrip : Panel
 
     public RegionRole Role { get; set; }
 
-    /// <summary>The window edge the strip sits on; it decides which way the button text is rotated.</summary>
+    /// <summary>The window edge the strip sits on; it decides which side the indicator bars and separator are on.</summary>
     public RegionEdge Edge
     {
         get => edge;
         set
         {
+            if (edge == value)
+            {
+                return;
+            }
+
             edge = value;
-            InvalidateVisual();
+            Rebuild();
+        }
+    }
+
+    /// <summary>True while the auto-hidden region's drawer is open; the indicator bars follow it.</summary>
+    public bool IsRegionShown
+    {
+        get => isRegionShown;
+        set
+        {
+            if (isRegionShown == value)
+            {
+                return;
+            }
+
+            isRegionShown = value;
+            UpdateBars();
         }
     }
 
@@ -70,10 +94,11 @@ internal sealed class AutoHideStrip : Panel
         set => SetValue(SeparatorBrushProperty, value);
     }
 
-    /// <summary>Rebuilds the buttons; called when a panel is added, removed, hidden or renamed.</summary>
+    /// <summary>Rebuilds the tabs; called when a panel is added, removed, hidden or renamed.</summary>
     public void Rebuild()
     {
         buttons.Children.Clear();
+        bars.Clear();
         AutomationProperties.SetAutomationId(this, "autohide-" + Role);
         if (Layout is not { } layout)
         {
@@ -81,7 +106,6 @@ internal sealed class AutoHideStrip : Panel
         }
 
         var region = layout.GetRegion(Role);
-        var angle = edge == RegionEdge.Left ? 90 : -90;
         for (var i = 0; i < region.Panels.Count; i++)
         {
             var panel = region.Panels[i];
@@ -93,15 +117,36 @@ internal sealed class AutoHideStrip : Panel
             var button = new AutoHideButton
             {
                 Content = WorkbenchStripText.Label(panel.Title),
-                Margin = new Thickness(0, 0, 2, 0),
             };
             ToolTip.SetTip(button, panel.Title);
             AutomationProperties.SetAutomationId(button, "autohide-" + Role + "-" + panel.Id);
             AutomationProperties.SetName(button, panel.Title);
             button.Click += OnButtonClick;
-            var rotate = new LayoutTransformControl { LayoutTransform = new RotateTransform(angle) };
-            rotate.Child = button;
-            buttons.Children.Add(rotate);
+
+            // Text reads top to bottom on both edges, like the reference dock bars.
+            var rotate = new LayoutTransformControl { LayoutTransform = new RotateTransform(90), Child = button };
+            var bar = new Border
+            {
+                Width = WorkbenchMetrics.DockIndicatorWidth,
+                CornerRadius = new CornerRadius(1.5),
+                Margin = new Thickness(1, 2, 1, 2),
+            };
+            bars.Add(bar);
+            var tab = new DockPanel { LastChildFill = true };
+            DockPanel.SetDock(bar, edge == RegionEdge.Left ? Dock.Left : Dock.Right);
+            tab.Children.Add(bar);
+            tab.Children.Add(rotate);
+            buttons.Children.Add(tab);
+        }
+
+        UpdateBars();
+    }
+
+    private void UpdateBars()
+    {
+        for (var i = 0; i < bars.Count; i++)
+        {
+            WorkbenchResources.Link(bars[i], Border.BackgroundProperty, isRegionShown ? "DockIndicatorIdleBrush" : "AccentBrush");
         }
     }
 
@@ -109,14 +154,20 @@ internal sealed class AutoHideStrip : Panel
     {
         var x = edge == RegionEdge.Left ? Math.Max(0, finalSize.Width - 1) : 0;
         separator.Arrange(new Rect(x, 0, 1, finalSize.Height));
-        scroller.Arrange(new Rect(0, 0, finalSize.Width, finalSize.Height));
+        var inner = edge == RegionEdge.Left ? new Rect(0, 0, Math.Max(0, finalSize.Width - 1), finalSize.Height) : new Rect(1, 0, Math.Max(0, finalSize.Width - 1), finalSize.Height);
+        scroller.Arrange(inner);
         return finalSize;
     }
 
     private void OnButtonClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        Layout?.ToggleDrawer(Role);
         e.Handled = true;
+        if (Layout is not { } layout)
+        {
+            return;
+        }
+
+        layout.ToggleDrawer(Role);
     }
 }
 

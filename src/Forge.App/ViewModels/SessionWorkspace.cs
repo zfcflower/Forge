@@ -8,6 +8,8 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Services;
+using Forge.Core.Agents;
 using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
@@ -38,8 +40,18 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     /// <summary>Text of a child agent that arrived before its <c>AgentSubAgentStarted</c> reached the dispatcher.</summary>
     private readonly ConcurrentDictionary<string, StringBuilder> earlyDeltas = new(StringComparer.Ordinal);
+    private readonly ObservableCollection<QueuedMessageViewModel> queued = [];
     private string draft = string.Empty;
     private bool isRunning;
+
+    /// <summary>The message a redirect sends once the cancelled turn has wound down.</summary>
+    private string? redirectText;
+
+    /// <summary>Set by Stop: the queue waits until the user sends again.</summary>
+    private bool queuePaused;
+
+    /// <summary>The root agent is rebuilt for the next turn, so its accumulated usage starts again from zero.</summary>
+    private bool rootRebuilt;
     private bool subAgentsCollapsed;
     private CancellationTokenSource? turn;
     private int turnNumber;
@@ -52,7 +64,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         TurnCheckpointService? checkpoints,
         ISessionStore? store,
         ProviderSettings provider,
-        Action<SubAgentViewModel>? subAgentOpened = null)
+        Action<SubAgentViewModel>? subAgentOpened = null,
+        ComposerPreferences? composerPreferences = null,
+        Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
+        Func<IReadOnlyList<SlashEntry>>? skillSource = null)
     {
         Info = session;
         this.runtime = runtime;
@@ -66,6 +81,18 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         Finished = new ReadOnlyObservableCollection<SubAgentViewModel>(finished);
         SendCommand = new AsyncRelayCommand(SendAsync, EvaluateCanSend, OnSendFailed);
         CancelCommand = new RelayCommand(Cancel, () => isRunning);
+        QueueCommand = new RelayCommand(Queue, CanSendWhileRunning);
+        InterjectCommand = new RelayCommand(Interject, CanSendWhileRunning);
+        RedirectCommand = new RelayCommand(Redirect, CanSendWhileRunning);
+        Queued = new ReadOnlyObservableCollection<QueuedMessageViewModel>(queued);
+        Composer = new ComposerViewModel(
+            provider,
+            ApplyRootDefinition,
+            composerPreferences ?? ComposerPreferences.Shared,
+            session.WorkspacePath,
+            () => ProviderSettings.Load(AppPaths.Create().SettingsPath),
+            fileSource,
+            skillSource);
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         if (!provider.IsConfigured)
         {
@@ -106,6 +133,25 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand SendCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    /// <summary>While a turn runs: keep the draft in the queue; it is sent when the turn (and the ones before it) ends.</summary>
+    public RelayCommand QueueCommand { get; }
+
+    /// <summary>While a turn runs: hand the draft to the running agent at its next tool batch, else put it first in the queue.</summary>
+    public RelayCommand InterjectCommand { get; }
+
+    /// <summary>While a turn runs: stop it and send the draft right after.</summary>
+    public RelayCommand RedirectCommand { get; }
+
+    /// <summary>Messages waiting for the running turn: interjections not yet delivered, then the queue in sending order.</summary>
+    public ReadOnlyObservableCollection<QueuedMessageViewModel> Queued { get; }
+
+    public bool HasQueued => queued.Count > 0;
+
+    /// <summary>True after Stop while messages wait: the queue resumes with the next send.</summary>
+    public bool QueuePaused => queuePaused && queued.Count > 0 && !isRunning;
+
+    public ComposerViewModel Composer { get; }
 
     public RelayCommand ToggleSubAgentsCommand { get; }
 
@@ -359,7 +405,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Stops the running turn; queued messages stay and wait for the next send.</summary>
     public void Cancel()
+    {
+        queuePaused = true;
+        redirectText = null;
+        CancelTurn();
+        RefreshCanSend();
+    }
+
+    private void CancelTurn()
     {
         try
         {
@@ -413,15 +468,44 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
     }
 
-    private bool EvaluateCanSend() => !isRunning && !string.IsNullOrWhiteSpace(draft);
+    /// <summary>Idle with a draft to send, or with queued messages waiting (an empty send resumes the queue).</summary>
+    private bool EvaluateCanSend() => !isRunning && (!string.IsNullOrWhiteSpace(draft) || HasSendableQueue());
+
+    private bool HasSendableQueue() => queued.Any(message => !message.IsInterjection);
+
+    private bool CanSendWhileRunning() => isRunning && !string.IsNullOrWhiteSpace(draft);
 
     private void RefreshCanSend()
     {
         OnPropertyChanged(nameof(CanSendNow));
+        OnPropertyChanged(nameof(QueuePaused));
         SendCommand.NotifyCanExecuteChanged();
+        QueueCommand.NotifyCanExecuteChanged();
+        InterjectCommand.NotifyCanExecuteChanged();
+        RedirectCommand.NotifyCanExecuteChanged();
     }
 
     private async Task SendAsync(CancellationToken ignored)
+    {
+        var text = draft.Trim();
+        if (text.Length > 0)
+        {
+            Draft = string.Empty;
+        }
+        else if (TakeQueued() is { } next)
+        {
+            text = next;
+        }
+        else
+        {
+            return;
+        }
+
+        queuePaused = false;
+        await RunTurnAsync(text).ConfigureAwait(true);
+    }
+
+    private void Queue()
     {
         var text = draft.Trim();
         if (text.Length == 0)
@@ -430,6 +514,173 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         Draft = string.Empty;
+        AddQueued(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued), queued.Count);
+        if (!isRunning)
+        {
+            ScheduleNext();
+        }
+    }
+
+    private void Interject()
+    {
+        var text = draft.Trim();
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        Draft = string.Empty;
+        var delivered = isRunning && runtime.TryInterject(text);
+        var front = queued.TakeWhile(message => message.IsInterjection).Count();
+        AddQueued(new QueuedMessageViewModel(text, delivered, RemoveQueued), delivered ? front : 0);
+        if (!isRunning)
+        {
+            ScheduleNext();
+        }
+    }
+
+    private void Redirect()
+    {
+        var text = draft.Trim();
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        Draft = string.Empty;
+        if (!isRunning)
+        {
+            queuePaused = false;
+            AddQueued(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued), 0);
+            ScheduleNext();
+            return;
+        }
+
+        redirectText = text;
+        CancelTurn();
+    }
+
+    private void AddQueued(QueuedMessageViewModel message, int index)
+    {
+        queued.Insert(Math.Clamp(index, 0, queued.Count), message);
+        OnQueueChanged();
+    }
+
+    private void RemoveQueued(QueuedMessageViewModel message)
+    {
+        if (queued.Remove(message))
+        {
+            OnQueueChanged();
+        }
+    }
+
+    private void OnQueueChanged()
+    {
+        OnPropertyChanged(nameof(HasQueued));
+        RefreshCanSend();
+    }
+
+    /// <summary>Removes and returns the first queued (not interjected) message.</summary>
+    private string? TakeQueued()
+    {
+        var next = queued.FirstOrDefault(message => !message.IsInterjection);
+        if (next is null)
+        {
+            return null;
+        }
+
+        queued.Remove(next);
+        OnQueueChanged();
+        return next.Text;
+    }
+
+    /// <summary>
+    /// After a turn: interjections the agent never reached go back to the front of the queue, then the redirect message
+    /// or the head of the queue is sent on the next dispatcher pass (unless Stop paused the queue).
+    /// </summary>
+    private void ScheduleNext()
+    {
+        if (!isRunning)
+        {
+            var undelivered = runtime.TakeUndeliveredInterjections();
+            foreach (var leftover in queued.Where(message => message.IsInterjection).ToList())
+            {
+                queued.Remove(leftover);
+            }
+
+            for (var i = undelivered.Count - 1; i >= 0; i--)
+            {
+                queued.Insert(0, new QueuedMessageViewModel(undelivered[i], isInterjection: false, RemoveQueued));
+            }
+
+            OnQueueChanged();
+        }
+
+        if (disposed || isRunning)
+        {
+            return;
+        }
+
+        var redirect = redirectText;
+        redirectText = null;
+        if (redirect is null && (queuePaused || !HasSendableQueue()))
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => _ = RunNextAsync(redirect));
+    }
+
+    private async Task RunNextAsync(string? redirect)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        if (isRunning)
+        {
+            // Something else started in between: the redirect waits in the queue like any other message.
+            if (redirect is not null)
+            {
+                AddQueued(new QueuedMessageViewModel(redirect, isInterjection: false, RemoveQueued), 0);
+            }
+
+            return;
+        }
+
+        var text = redirect ?? (queuePaused ? null : TakeQueued());
+        if (text is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await RunTurnAsync(text).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            OnSendFailed(exception);
+        }
+    }
+
+    private void ApplyRootDefinition(AgentDefinition? definition)
+    {
+        if (runtime.SetRootDefinition(definition))
+        {
+            rootRebuilt = true;
+        }
+    }
+
+    private async Task RunTurnAsync(string text)
+    {
+        if (rootRebuilt)
+        {
+            rootRebuilt = false;
+            agentUsage.Remove("root");
+        }
+
         turnStartedAt = DateTimeOffset.Now;
         Transcript.AddUserMessage(text, turnStartedAt);
         var card = Transcript.BeginTurn(turnStartedAt);
@@ -496,6 +747,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 this.turn = null;
                 IsRunning = false;
                 TurnCompleted?.Invoke(this);
+                ScheduleNext();
             }
         }
     }
@@ -624,10 +876,26 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             case AgentCompacted compacted:
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));
                 break;
+            case AgentInterjected interjected:
+                OnInterjected(interjected);
+                break;
             case AgentFailed failed:
                 Card(failed.AgentId)?.AddNotice(LocText.Literal(failed.Error), isError: true);
                 break;
         }
+    }
+
+    private void OnInterjected(AgentInterjected interjected)
+    {
+        var chip = queued.FirstOrDefault(message =>
+            message.IsInterjection && string.Equals(message.Text, interjected.Text, StringComparison.Ordinal));
+        if (chip is not null)
+        {
+            queued.Remove(chip);
+            OnQueueChanged();
+        }
+
+        Card(interjected.AgentId)?.AddNotice(SessionStrings.ComposerInterjectedNotice(interjected.Text));
     }
 
     /// <summary>
@@ -776,6 +1044,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         finishedMenu.RefreshText();
+        Composer.RefreshText();
+        foreach (var message in queued)
+        {
+            message.RefreshText();
+        }
 
         // The left panel's agent rows copy the sub-agents' status texts, so they have to be rebuilt in the new language.
         AgentTreeChanged?.Invoke();

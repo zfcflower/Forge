@@ -115,6 +115,37 @@ internal sealed class PanelChrome : TemplatedControl
     private PanelIconButton? coverButton;
     private PanelIconButton? pinButton;
     private PanelIconButton? maximizeButton;
+    private PanelIconButton? minimizeButton;
+
+    public static readonly StyledProperty<bool> MinimizeVisibleProperty =
+        AvaloniaProperty.Register<PanelChrome, bool>(nameof(MinimizeVisible));
+    public static readonly StyledProperty<Geometry?> MinimizeIconProperty =
+        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(MinimizeIcon));
+    public static readonly StyledProperty<string?> MinimizeTooltipProperty =
+        AvaloniaProperty.Register<PanelChrome, string?>(nameof(MinimizeTooltip));
+    public static readonly StyledProperty<string?> MinimizeAutomationIdProperty =
+        AvaloniaProperty.Register<PanelChrome, string?>(nameof(MinimizeAutomationId));
+
+    public bool MinimizeVisible
+    {
+        get => GetValue(MinimizeVisibleProperty);
+        set => SetValue(MinimizeVisibleProperty, value);
+    }
+    public Geometry? MinimizeIcon
+    {
+        get => GetValue(MinimizeIconProperty);
+        set => SetValue(MinimizeIconProperty, value);
+    }
+    public string? MinimizeTooltip
+    {
+        get => GetValue(MinimizeTooltipProperty);
+        set => SetValue(MinimizeTooltipProperty, value);
+    }
+    public string? MinimizeAutomationId
+    {
+        get => GetValue(MinimizeAutomationIdProperty);
+        set => SetValue(MinimizeAutomationIdProperty, value);
+    }
     private PanelIconButton? floatButton;
     private PanelIconButton? closeButton;
     private TabModel? watchedTab;
@@ -331,6 +362,7 @@ internal sealed class PanelChrome : TemplatedControl
         coverButton = e.NameScope.Find<PanelIconButton>("PART_Cover");
         pinButton = e.NameScope.Find<PanelIconButton>("PART_Pin");
         maximizeButton = e.NameScope.Find<PanelIconButton>("PART_Maximize");
+        minimizeButton = e.NameScope.Find<PanelIconButton>("PART_Minimize");
         floatButton = e.NameScope.Find<PanelIconButton>("PART_Float");
         closeButton = e.NameScope.Find<PanelIconButton>("PART_Close");
         if (coverButton is not null)
@@ -346,6 +378,11 @@ internal sealed class PanelChrome : TemplatedControl
         if (maximizeButton is not null)
         {
             maximizeButton.Click += OnMaximizeClick;
+        }
+
+        if (minimizeButton is not null)
+        {
+            minimizeButton.Click += OnMinimizeClick;
         }
 
         if (floatButton is not null)
@@ -416,6 +453,14 @@ internal sealed class PanelChrome : TemplatedControl
         Layout.SetAutoHidden(model.Region, !Layout.GetRegion(model.Region).IsAutoHidden);
     }
 
+    private void OnMinimizeClick(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model)
+        {
+            Layout?.ToggleMinimize(model);
+        }
+    }
+
     private void OnMaximizeClick(object? sender, RoutedEventArgs e)
     {
         if (Model is { } model)
@@ -446,17 +491,33 @@ internal sealed class PanelChrome : TemplatedControl
     /// Closes the preview group: every tab leaves, the group stops being docked-visible and its borrowed column width
     /// returns to Main — the same end state as closing the group's last remaining tab.
     /// </summary>
-    private void OnCloseClick(object? sender, RoutedEventArgs e)
+    private async void OnCloseClick(object? sender, RoutedEventArgs e)
     {
         if (Layout is not { } layout || Model is not TabGroupModel { Id: WorkbenchIds.PreviewTabs } group)
         {
             return;
         }
 
-        var tabs = group.Tabs;
-        for (var i = tabs.Count - 1; i >= 0; i--)
+        try
         {
-            layout.CloseTab(tabs[i]);
+            var tabs = group.Tabs;
+            for (var i = tabs.Count - 1; i >= 0; i--)
+            {
+                if (i >= tabs.Count)
+                {
+                    continue;
+                }
+
+                if (!await layout.TryCloseTabAsync(tabs[i]).ConfigureAwait(true))
+                {
+                    return;
+                }
+
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("[workbench] closing the preview group failed: " + exception.Message);
         }
     }
 
@@ -478,6 +539,12 @@ internal sealed class PanelChrome : TemplatedControl
         {
             maximizeButton.Click -= OnMaximizeClick;
             maximizeButton = null;
+        }
+
+        if (minimizeButton is not null)
+        {
+            minimizeButton.Click -= OnMinimizeClick;
+            minimizeButton = null;
         }
 
         if (floatButton is not null)
@@ -585,6 +652,8 @@ internal sealed class PanelChrome : TemplatedControl
         propertyName is nameof(PanelModel.Title)
             or nameof(PanelModel.IsVisible)
             or nameof(PanelModel.CanMaximize)
+            or nameof(PanelModel.CanMinimize)
+            or nameof(PanelModel.IsMinimized)
             or nameof(PanelModel.IsFloating)
             or nameof(TabGroupModel.ActiveTab);
 
@@ -650,6 +719,7 @@ internal sealed class PanelChrome : TemplatedControl
             CoverVisible = false;
             PinVisible = false;
             MaximizeVisible = false;
+            MinimizeVisible = false;
             FloatVisible = false;
             CloseVisible = false;
             return;
@@ -682,12 +752,14 @@ internal sealed class PanelChrome : TemplatedControl
 
         PinVisible = model.CanPin;
         MaximizeVisible = model.CanMaximize;
+        MinimizeVisible = model.CanMinimize;
         FloatVisible = !model.IsFloating && (model.CanFloat || group?.ActiveTab is not null);
         FloatIcon = WorkbenchIcons.Find(this, "IconWindowExternal");
         FloatTooltip = ShellStrings.Float;
         FloatAutomationId = "panel-" + model.Id + "-float";
         PinAutomationId = "panel-" + model.Id + "-pin";
         MaximizeAutomationId = "panel-" + model.Id + "-maximize";
+        MinimizeAutomationId = "panel-" + model.Id + "-minimize";
 
         RefreshChrome();
     }
@@ -719,6 +791,10 @@ internal sealed class PanelChrome : TemplatedControl
         var maximized = layout is not null && ReferenceEquals(layout.GetRegion(model.Region).MaximizedPanel, model);
         MaximizeIcon = WorkbenchIcons.Find(this, maximized ? "IconRestore" : "IconMaximize");
         MaximizeTooltip = maximized ? ShellStrings.RestorePanel : ShellStrings.MaximizePanel;
+        var minimized = model.IsMinimized;
+        MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconRestore" : "IconMinimize");
+        MinimizeTooltip = minimized ? ShellStrings.RestorePanel : ShellStrings.MinimizePanel;
+        PseudoClasses.Set(":minimized", minimized);
     }
 
     /// <summary>Updates only the body when the active tab's content is re-bound (a preview file re-opened in place).</summary>

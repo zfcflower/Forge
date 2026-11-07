@@ -30,6 +30,39 @@ internal static class SessionStrings
     public const string ReadFailedKey = "session.readFailed";
     public const string ProviderMissingKey = "session.providerMissing";
 
+    // ---------------------------------------------------------------- composer
+    public const string ComposerAgentKey = "session.composer.agent";
+    public const string ComposerAgentDefaultKey = "session.composer.agentDefault";
+    public const string ComposerAgentDefaultDescriptionKey = "session.composer.agentDefaultDescription";
+    public const string ComposerAgentTooltipKey = "session.composer.agentTooltip";
+    public const string ComposerModelTooltipKey = "session.composer.modelTooltip";
+    public const string ComposerSearchModelsKey = "session.composer.searchModels";
+    public const string ComposerNoModelsKey = "session.composer.noModels";
+    public const string ComposerPinKey = "session.composer.pin";
+    public const string ComposerEffortKey = "session.composer.effort";
+    public const string ComposerEffortOffKey = "session.composer.effort.off";
+    public const string ComposerEffortLowKey = "session.composer.effort.low";
+    public const string ComposerEffortMediumKey = "session.composer.effort.medium";
+    public const string ComposerEffortHighKey = "session.composer.effort.high";
+    public const string ComposerSaveDefaultsKey = "session.composer.saveDefaults";
+    public const string ComposerDefaultsSavedKey = "session.composer.defaultsSaved";
+    public const string ComposerRefreshKey = "session.composer.refresh";
+    public const string ComposerRunningMenuKey = "session.composer.runningMenu";
+    public const string ComposerInterjectKey = "session.composer.interject";
+    public const string ComposerInterjectHintKey = "session.composer.interjectHint";
+    public const string ComposerQueueKey = "session.composer.queue";
+    public const string ComposerQueueHintKey = "session.composer.queueHint";
+    public const string ComposerRedirectKey = "session.composer.redirect";
+    public const string ComposerRedirectHintKey = "session.composer.redirectHint";
+    public const string ComposerStopHintKey = "session.composer.stopHint";
+    public const string ComposerQueuedKey = "session.composer.queued";
+    public const string ComposerInterjectingKey = "session.composer.interjecting";
+    public const string ComposerRemoveQueuedKey = "session.composer.removeQueued";
+    public const string ComposerQueuePausedKey = "session.composer.queuePaused";
+    public const string ComposerInterjectedNoticeKey = "session.composer.interjectedNotice";
+    public const string ComposerSkillKey = "session.composer.skill";
+    public const string ComposerCommandKey = "session.composer.command";
+    public const string ComposerNoMatchesKey = "session.composer.noMatches";
     // ---------------------------------------------------------------- turn card and the notices around it
     public const string TurnHeaderKey = "turn.header";
     public const string TurnRunningKey = "turn.running";
@@ -114,6 +147,30 @@ internal static class SessionStrings
     /// <summary>The notice shown when the session started without a model provider.</summary>
     public static LocText ProviderMissing(string status) => new(ProviderMissingKey, status);
 
+    // ---------------------------------------------------------------- composer
+    public static string ComposerAgentDefault => Loc.Instance[ComposerAgentDefaultKey];
+
+    public static string ComposerAgentDefaultDescription => Loc.Instance[ComposerAgentDefaultDescriptionKey];
+
+    public static string ComposerSkill => Loc.Instance[ComposerSkillKey];
+
+    public static string ComposerCommand => Loc.Instance[ComposerCommandKey];
+
+    public static string ComposerQueued => Loc.Instance[ComposerQueuedKey];
+
+    public static string ComposerInterjecting => Loc.Instance[ComposerInterjectingKey];
+
+    public static string ComposerDefaultsSaved => Loc.Instance[ComposerDefaultsSavedKey];
+
+    public static string ComposerEffortName(ThinkingEffort effort) => Loc.Instance[effort switch
+    {
+        ThinkingEffort.Low => ComposerEffortLowKey,
+        ThinkingEffort.Medium => ComposerEffortMediumKey,
+        ThinkingEffort.High => ComposerEffortHighKey,
+        _ => ComposerEffortOffKey,
+    }];
+
+    public static LocText ComposerInterjectedNotice(string text) => new(ComposerInterjectedNoticeKey, text);
     // ---------------------------------------------------------------- turn card
     /// <summary>
     /// <c>第 3 轮 · 12:30:45 · 4.2 秒 · 输入 900 · 输出 80</c> / <c>Turn 3 · 12:30:45 · 4.2s · in 900 · out 80</c>; a side
@@ -281,7 +338,38 @@ internal static class SessionStrings
         Loc.Register(SendTooltipKey, "发送 (Ctrl+Enter)", "Send (Ctrl+Enter)");
         Loc.Register(StopTurnKey, "停止本轮", "Stop this turn");
         Loc.Register(StopNameKey, "停止", "Stop");
-        Loc.Register(StoppedKey, "已停止", "Stopped");
+        Loc.Register(ComposerAgentKey, "代理", "Agent");
+        Loc.Register(ComposerAgentDefaultKey, "Agent", "Agent");
+        Loc.Register(ComposerAgentDefaultDescriptionKey, "主编码代理（默认）", "Main coding agent (default)");
+        Loc.Register(ComposerAgentTooltipKey, "选择本会话后续轮次使用的代理", "Choose the agent for the next turns of this session");
+        Loc.Register(ComposerModelTooltipKey, "选择模型与思考力度", "Choose the model and thinking effort");
+        Loc.Register(ComposerSearchModelsKey, "搜索模型", "Search models");
+        Loc.Register(ComposerNoModelsKey, "没有匹配的模型", "No matching models");
+        Loc.Register(ComposerPinKey, "固定到顶部", "Pin to top");
+        Loc.Register(ComposerEffortKey, "力度", "Effort");
+        Loc.Register(ComposerEffortOffKey, "关闭", "Off");
+        Loc.Register(ComposerEffortLowKey, "低", "Low");
+        Loc.Register(ComposerEffortMediumKey, "中", "Medium");
+        Loc.Register(ComposerEffortHighKey, "高", "High");
+        Loc.Register(ComposerSaveDefaultsKey, "新会话的默认值", "Defaults for new sessions");
+        Loc.Register(ComposerDefaultsSavedKey, "已保存为新会话的默认值", "Saved as defaults for new sessions");
+        Loc.Register(ComposerRefreshKey, "刷新", "Refresh");
+        Loc.Register(ComposerRunningMenuKey, "本轮运行中：选择如何发送", "A turn is running: choose how to send");
+        Loc.Register(ComposerInterjectKey, "插话", "Interject");
+        Loc.Register(ComposerInterjectHintKey, "在下一批工具调用后交给正在运行的代理", "Hand to the running agent after its next tool batch");
+        Loc.Register(ComposerQueueKey, "排队", "Queue");
+        Loc.Register(ComposerQueueHintKey, "本轮结束后自动发送 (Ctrl+Enter)", "Send automatically when this turn ends (Ctrl+Enter)");
+        Loc.Register(ComposerRedirectKey, "转弯", "Redirect");
+        Loc.Register(ComposerRedirectHintKey, "停止本轮并立即发送", "Stop this turn and send right away");
+        Loc.Register(ComposerStopHintKey, "停止本轮，暂停队列", "Stop this turn and pause the queue");
+        Loc.Register(ComposerQueuedKey, "排队", "Queued");
+        Loc.Register(ComposerInterjectingKey, "插话", "Interjecting");
+        Loc.Register(ComposerRemoveQueuedKey, "移除", "Remove");
+        Loc.Register(ComposerQueuePausedKey, "队列已暂停：发送或按 Ctrl+Enter 继续", "Queue paused: send or press Ctrl+Enter to resume");
+        Loc.Register(ComposerInterjectedNoticeKey, "插话：{0}", "Interjected: {0}");
+        Loc.Register(ComposerSkillKey, "技能", "Skill");
+        Loc.Register(ComposerCommandKey, "命令", "Command");
+        Loc.Register(ComposerNoMatchesKey, "没有匹配项", "No matches");        Loc.Register(StoppedKey, "已停止", "Stopped");
         Loc.Register(ReadFailedKey, "读取会话失败：{0}", "Could not read the session: {0}");
         Loc.Register(ProviderMissingKey, "尚未配置模型提供方：{0}", "No model provider is configured: {0}");
 

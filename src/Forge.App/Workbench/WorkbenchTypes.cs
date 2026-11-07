@@ -45,6 +45,7 @@ internal static class WorkbenchIds
 {
     public const string ProjectPanel = "projects";
     public const string FilesPanel = "files";
+    public const string GitPanel = "git-panel";
     public const string MainTabs = "main";
     public const string BottomTabs = "bottom";
     public const string PreviewTabs = "preview";
@@ -53,7 +54,6 @@ internal static class WorkbenchIds
     public const string TodoTab = "todo";
     public const string ReviewTab = "review";
     public const string SpecsTab = "specs";
-    public const string GitTab = "git";
     public const string ChangesTab = "changes";
 
     /// <summary>The reusable preview tab: a plain click on a file replaces its content.</summary>
@@ -95,7 +95,10 @@ internal static class WorkbenchMetrics
     public const double SplitterHitWidth = 6;
 
     /// <summary>Width of the button strip an auto-hidden region leaves on its window edge.</summary>
-    public const double AutoHideStripWidth = 24;
+    public const double AutoHideStripWidth = 32;
+
+    /// <summary>Thickness of the indicator bar beside each dock-strip tab.</summary>
+    public const double DockIndicatorWidth = 3;
 
     /// <summary>How far past its minimum width a side region must be pushed, as a fraction of that minimum, before it collapses.</summary>
     public const double CollapseOvershoot = 0.5;

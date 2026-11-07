@@ -1,4 +1,5 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
@@ -41,10 +42,13 @@
               </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
           </ItemsControl>
-          <Border Grid.Column="1" Classes="tree-row-content">
+          <Border Grid.Column="1"
+                  Classes="tree-row-content"
+                  Classes.active-session="{Binding IsActiveSession}">
             <Grid>
               <!-- Project / worktree / session rows: the chevron leads, then icon, title and trailing tools. -->
-              <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" IsVisible="{Binding !IsAgent}">
+              <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto"
+                    IsVisible="{Binding !IsAgent}">
                 <Border Grid.Column="0" Width="8">
                   <Button Classes="tree-chevron-button"
                           Command="{Binding ToggleCommand}"
@@ -58,17 +62,18 @@
                           Stretch="Uniform" />
                   </Button>
                 </Border>
-                <Path Grid.Column="1"
-                      Classes="tree-icon"
-                      Data="{Binding Icon}"
-                      Margin="14,0,6,0" />
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <wc:LineIcon Grid.Column="1"
+                             Classes="tree-icon"
+                             Data="{Binding Icon}"
+                             Margin="14,0,6,0" />
+                <Grid Grid.Column="2" ColumnDefinitions="*,Auto" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Title}"
                              TextWrapping="NoWrap"
                              VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis" />
-                  <Ellipse Classes="status-dot running" IsVisible="{Binding IsRunning}" />
-                </StackPanel>
+                             TextTrimming="CharacterEllipsis"
+                             Margin="0,0,6,0" />
+                  <Ellipse Grid.Column="1" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+                </Grid>
                 <Button Grid.Column="3"
                         Classes="ghost icon"
                         Width="20"
@@ -78,7 +83,7 @@
                         ToolTip.Tip="{Binding [project.newSessionTooltip], Source={x:Static loc:Loc.Instance}}"
                         AutomationProperties.AutomationId="project-new-session"
                         AutomationProperties.Name="{Binding [project.newSessionTooltip], Source={x:Static loc:Loc.Instance}}">
-                  <PathIcon Data="{StaticResource IconPlusSmall}" Width="9" Height="9" />
+                  <wc:LineIcon Data="{StaticResource IconPlusSmall}" Width="12" Height="12" />
                 </Button>
                 <Button Grid.Column="4"
                         Classes="ghost icon"
@@ -93,33 +98,39 @@
                 </Button>
               </Grid>
               <!-- Agent rows: icon first, then title, the chevron and the grey status text. No guide lines. -->
-              <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsAgent}">
-                <Path Grid.Column="0"
-                      Classes="tree-icon"
-                      Classes.agent-running="{Binding IsAgentRunning}"
-                      Classes.agent-running-animated="{Binding IsAgentRunningAnimated}"
-                      Classes.agent-queued="{Binding IsAgentQueued}"
-                      Classes.agent-completed="{Binding IsAgentCompleted}"
-                      Classes.agent-failed="{Binding IsAgentFailed}"
-                      Classes.agent-stopped="{Binding IsAgentStopped}"
-                      Data="{Binding Icon}"
-                      Margin="0,0,6,0" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <Grid ColumnDefinitions="Auto,*"
+                    IsVisible="{Binding IsAgent}">
+                <wc:LineIcon Grid.Column="0"
+                             Classes="tree-icon"
+                             Classes.agent-running="{Binding IsAgentRunning}"
+                             Classes.agent-running-animated="{Binding IsAgentRunningAnimated}"
+                             Classes.agent-queued="{Binding IsAgentQueued}"
+                             Classes.agent-completed="{Binding IsAgentCompleted}"
+                             Classes.agent-failed="{Binding IsAgentFailed}"
+                             Classes.agent-stopped="{Binding IsAgentStopped}"
+                             Data="{Binding Icon}"
+                             Margin="0,0,6,0" />
+                <Grid Grid.Column="1" ColumnDefinitions="*,Auto,Auto" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Title}"
-                             MaxWidth="260"
                              TextWrapping="NoWrap"
                              VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis" />
+                             TextTrimming="CharacterEllipsis"
+                             Margin="0,0,6,0" />
                   <Path Data="{StaticResource TreeChevronGeometry}"
                         Classes="tree-chevron"
                         Classes.expanded="{Binding ChevronRotated}"
                         IsVisible="{Binding HasToggle}"
                         Width="8"
                         Height="8"
+                        Grid.Column="1"
                         HorizontalAlignment="Center"
                         Stretch="Uniform" />
-                  <TextBlock Classes="caption" Text="{Binding StatusText}" VerticalAlignment="Center" IsVisible="{Binding HasStatusText}" />
-                </StackPanel>
+                  <TextBlock Grid.Column="2"
+                             Classes="caption"
+                             Text="{Binding StatusText}"
+                             VerticalAlignment="Center"
+                             IsVisible="{Binding HasStatusText}" />
+                </Grid>
               </Grid>
             </Grid>
           </Border>
@@ -128,7 +139,7 @@
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,Auto,*" Background="Transparent">
     <Button Grid.Row="0"
             Classes="primary"
             Margin="8,6"

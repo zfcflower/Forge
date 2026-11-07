@@ -116,7 +116,7 @@ internal static class RegionWidthSolver
     /// <item><paramref name="hidden"/> marks regions the user already auto-hid; they take no width and are kept as is.</item>
     /// <item>The space to fill is <paramref name="windowWidth"/> minus one <see cref="WorkbenchMetrics.RegionSplitterWidth"/>
     /// per gap between docked regions and one <see cref="WorkbenchMetrics.AutoHideStripWidth"/> per window edge that
-    /// carries at least one hidden region (<paramref name="edges"/> gives each side region's edge; Main's entry is ignored).</item>
+    /// carries at least one auto-hidden side region (<paramref name="edges"/> gives each side region's edge; Main's entry is ignored).</item>
     /// <item>Surplus goes to Main. A shortfall shrinks Main to its minimum, then the side regions in
     /// <paramref name="shrinkOrder"/> (visual indices, Inspector first) to their minimum, then hides them in the same
     /// order until it fits; hiding recomputes the chrome. <paramref name="protectedIndex"/> (or -1) shrinks but never
@@ -300,10 +300,14 @@ internal static class RegionWidthSolver
             if (!hidden[i])
             {
                 docked++;
-                continue;
             }
 
             if (i == mainIndex)
+            {
+                continue;
+            }
+
+            if (!hidden[i])
             {
                 continue;
             }

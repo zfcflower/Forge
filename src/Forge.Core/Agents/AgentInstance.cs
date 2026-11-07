@@ -14,6 +14,9 @@ public sealed class AgentInstance
 {
     private readonly List<AgentMessage> history = [];
     private readonly StringBuilder streaming = new();
+    private readonly Lock interjectionGate = new();
+    private List<string>? interjections;
+    private int pendingInterjections;
     private string lastText = string.Empty;
     private int running;
 
@@ -57,6 +60,41 @@ public sealed class AgentInstance
     public IReadOnlyList<ChatMessage> History => [.. history.Select(static entry => entry.Message)];
 
     internal List<AgentMessage> Messages => history;
+
+    /// <summary>True while at least one interjection waits for the next tool-batch boundary.</summary>
+    public bool HasInterjections => Volatile.Read(ref pendingInterjections) > 0;
+
+    /// <summary>
+    /// Queues a user message for the run driving this instance. The loop delivers it at the next tool-batch boundary, after
+    /// the batch's results, without dropping any call; a run that ends without another batch leaves it pending, and the
+    /// host takes it back with <see cref="TakeInterjections"/> (typically to send it as the next turn). Thread-safe.
+    /// </summary>
+    public void Interject(string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        lock (interjectionGate)
+        {
+            (interjections ??= []).Add(text);
+            Volatile.Write(ref pendingInterjections, interjections.Count);
+        }
+    }
+
+    /// <summary>Removes and returns the interjections not delivered yet, oldest first; empty when there are none.</summary>
+    public IReadOnlyList<string> TakeInterjections()
+    {
+        if (Volatile.Read(ref pendingInterjections) == 0)
+        {
+            return [];
+        }
+
+        lock (interjectionGate)
+        {
+            var taken = interjections;
+            interjections = null;
+            Volatile.Write(ref pendingInterjections, 0);
+            return taken is null ? [] : taken;
+        }
+    }
 
     internal bool TryAcquire() => Interlocked.CompareExchange(ref running, 1, 0) == 0;
 

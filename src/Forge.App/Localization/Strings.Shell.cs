@@ -48,6 +48,7 @@ internal static class ShellStrings
     public const string AutoHideKey = "workbench.autoHide";
     public const string MaximizePanelKey = "workbench.maximizePanel";
     public const string RestorePanelKey = "workbench.restorePanel";
+    public const string MinimizePanelKey = "workbench.minimizePanel";
     public const string FloatKey = "workbench.float";
     public const string DockBackKey = "workbench.dockBack";
     public const string CoverKey = "workbench.cover";
@@ -174,6 +175,7 @@ internal static class ShellStrings
     public static string MaximizePanel => Loc.Instance[MaximizePanelKey];
 
     public static string RestorePanel => Loc.Instance[RestorePanelKey];
+    public static string MinimizePanel => Loc.Instance[MinimizePanelKey];
 
     public static string Float => Loc.Instance[FloatKey];
 
@@ -339,6 +341,7 @@ internal static class ShellStrings
         Loc.Register(AutoHideKey, "自动隐藏", "Auto-hide");
         Loc.Register(MaximizePanelKey, "放大", "Maximize");
         Loc.Register(RestorePanelKey, "还原", "Restore");
+        Loc.Register(MinimizePanelKey, "缩小", "Minimize");
         Loc.Register(FloatKey, "浮动到新窗口", "Float to a new window");
         Loc.Register(DockBackKey, "停靠回主窗口", "Dock back to the main window");
         Loc.Register(CoverKey, "铺满主区", "Cover main area");

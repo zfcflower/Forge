@@ -22,8 +22,9 @@ internal abstract class WorkbenchSplitter : TemplatedControl
     protected WorkbenchSplitter()
     {
         IsTabStop = false;
-        Cursor = IsVerticalLine ? HorizontalDragCursor : VerticalDragCursor;
     }
+
+    protected void RefreshCursor() => Cursor = IsVerticalLine ? HorizontalDragCursor : VerticalDragCursor;
 
     /// <summary>True when the line runs vertically (so the pointer travels horizontally).</summary>
     protected abstract bool IsVerticalLine { get; }
@@ -97,6 +98,8 @@ internal sealed class RegionSplitter : WorkbenchSplitter
 {
     private int splitterIndex;
 
+    public RegionSplitter() => RefreshCursor();
+
     /// <summary>Index of the gap in the sequence of docked regions, left to right.</summary>
     public int SplitterIndex
     {
@@ -136,6 +139,11 @@ internal sealed class PanelSplitter : WorkbenchSplitter
     private PanelSplitterKind kind;
     private double startValue;
 
+    static PanelSplitter()
+    {
+        IsVerticalProperty.Changed.AddClassHandler<PanelSplitter>((splitter, _) => splitter.RefreshCursor());
+    }
+
     public WorkbenchLayout? Layout { get; set; }
 
     public PanelSplitterKind Kind
@@ -145,6 +153,7 @@ internal sealed class PanelSplitter : WorkbenchSplitter
         {
             kind = value;
             SetCurrentValue(IsVerticalProperty, value == PanelSplitterKind.Preview);
+            RefreshCursor();
         }
     }
 
@@ -171,7 +180,9 @@ internal sealed class PanelSplitter : WorkbenchSplitter
         startValue = kind switch
         {
             PanelSplitterKind.Bottom => layout.BottomHeight,
-            PanelSplitterKind.Preview => layout.PreviewWidth,
+            PanelSplitterKind.Preview => TrackLength > 0
+                ? RegionPresenter.PreviewColumnWidth(layout, TrackLength, true)
+                : layout.PreviewWidth,
             _ => layout.InspectorSplitRatio,
         };
     }
@@ -195,11 +206,11 @@ internal sealed class PanelSplitter : WorkbenchSplitter
             case PanelSplitterKind.Preview:
             {
                 var direction = layout.IsPreviewLeftOfFiles ? 1 : -1;
-                var maximum = Math.Max(WorkbenchMetrics.PreviewMinWidth, TrackLength - WorkbenchMetrics.SideMinWidth);
-                layout.PreviewWidth = Math.Clamp(
+                var maximum = Math.Max(WorkbenchMetrics.PreviewMinWidth, TrackLength - WorkbenchMetrics.SideMinWidth - WorkbenchMetrics.PanelSplitterWidth);
+                layout.ResizePreviewColumn(Math.Clamp(
                     startValue + (delta * direction),
                     WorkbenchMetrics.PreviewMinWidth,
-                    maximum);
+                    maximum));
                 break;
             }
 

@@ -42,6 +42,8 @@ internal class PanelModel(string id, RegionRole region, string title) : Observab
     private string title = title;
     private bool isVisible = true;
     private bool canMaximize;
+    private bool canMinimize;
+    private bool isMinimized;
     private bool isFloating;
 
     public string Id { get; } = id;
@@ -75,6 +77,18 @@ internal class PanelModel(string id, RegionRole region, string title) : Observab
     {
         get => canMaximize;
         set => Set(ref canMaximize, value);
+    }
+
+    public bool CanMinimize
+    {
+        get => canMinimize;
+        set => Set(ref canMinimize, value);
+    }
+
+    public bool IsMinimized
+    {
+        get => isMinimized;
+        set => Set(ref isMinimized, value);
     }
 
     /// <summary>The pin / auto-hide button applies (panels of a side region and the bottom group).</summary>

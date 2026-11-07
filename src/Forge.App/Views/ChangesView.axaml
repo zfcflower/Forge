@@ -1,4 +1,5 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
@@ -89,7 +90,7 @@
                 ToolTip.Tip="{Binding [changes.refresh], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="refresh-changes"
                 AutomationProperties.Name="{Binding [changes.refresh.name], Source={x:Static loc:Loc.Instance}}">
-          <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+          <wc:LineIcon Data="{StaticResource IconRefresh}" Width="13" Height="13" />
         </Button>
       </Grid>
     </Border>

@@ -133,6 +133,25 @@ public sealed class MainWindowWorkbenchIntegrationTests
     }
 
     [Fact]
+    public async Task Opening_the_same_path_as_preview_and_pinned_shares_one_document()
+    {
+        await RunAsync(async harness =>
+        {
+            var preview = await harness.OpenFromPanelAsync(AlphaFile, newTab: false);
+            var document = (FileDocumentViewModel)preview.Content;
+            var row = harness.Files.Rows.First(row => string.Equals(row.RelativePath, AlphaFile, StringComparison.Ordinal));
+            row.OpenInNewTabCommand.Execute(null);
+            await Task.Delay(300);
+            var tabs = harness.ViewModel.Workbench.PreviewTabs.Tabs
+                .Where(static tab => tab.Content is FileDocumentViewModel d && d.Path.EndsWith(AlphaFile, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var only = Assert.Single(tabs);
+            Assert.Same(preview, only);
+            Assert.Same(document, only.Content);
+        });
+    }
+
+    [Fact]
     public async Task Show_changes_opens_the_fixed_changes_tab()
     {
         await RunAsync(

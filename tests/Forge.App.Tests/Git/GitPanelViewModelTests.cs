@@ -804,9 +804,6 @@ public sealed class GitPanelViewModelTests
                             Branch = TextOf(window, "git-branch"),
                             Upstream = TextOf(window, "git-upstream"),
                             AheadBehind = TextOf(window, "git-ahead-behind"),
-                            HasFetch = ControlOf<Button>(window, "git-fetch") is not null,
-                            HasPull = ControlOf<Button>(window, "git-pull") is not null,
-                            HasPush = ControlOf<Button>(window, "git-push") is not null,
                             HasPicker = ControlOf<ComboBox>(window, "git-branch-picker") is not null,
                         };
                     }
@@ -820,9 +817,6 @@ public sealed class GitPanelViewModelTests
             Assert.Equal("main", rendered.Branch);
             Assert.Equal("origin/main", rendered.Upstream);
             Assert.Equal(Loc.Instance.Format(GitStrings.AheadBehind, 0, 0), rendered.AheadBehind);
-            Assert.True(rendered.HasFetch);
-            Assert.True(rendered.HasPull);
-            Assert.True(rendered.HasPush);
             Assert.True(rendered.HasPicker);
         }
         finally

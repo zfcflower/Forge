@@ -3,6 +3,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Composition;
@@ -28,7 +29,7 @@ public sealed class WorkbenchControlsTests
     private const double NoMovement = 0;
     private const int NoFloatingItems = 0;
     private const double NoStripOffset = 0;
-    private const double NarrowWindowWidth = 1000;
+    private const double NarrowWindowWidth = 1040;
     private const double WideWorkbenchWidth = 1600;
     private const int OneFloatingItem = 1;
     private const int OriginalTabIndex = 0;
@@ -74,7 +75,7 @@ public sealed class WorkbenchControlsTests
     }
 
     [Fact]
-    public async Task Regions_and_gaps_fill_the_window_width_so_the_splitter_hit_areas_take_no_layout_space()
+    public async Task Regions_gaps_and_edge_strips_fill_the_window_width_so_the_splitter_hit_areas_take_no_layout_space()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
@@ -391,7 +392,7 @@ public sealed class WorkbenchControlsTests
 
         Assert.Equal(widths.before + DragDistance, widths.after, Precision);
         Assert.Equal(widths.after, widths.chrome, Precision);
-        Assert.Equal(WorkbenchMetrics.DefaultInspectorWidth + WorkbenchMetrics.DefaultPreviewWidth + DragDistance, widths.inspector, Precision);
+        Assert.Equal(WorkbenchMetrics.DefaultInspectorWidth + WorkbenchMetrics.DefaultPreviewWidth, widths.inspector, Precision);
     }
 
     [Fact]
@@ -418,7 +419,7 @@ public sealed class WorkbenchControlsTests
 
         Assert.Equal(widths.before - DragDistance, widths.after, Precision);
         Assert.Equal(widths.after, widths.chrome, Precision);
-        Assert.Equal(WorkbenchMetrics.DefaultInspectorWidth + WorkbenchMetrics.DefaultPreviewWidth - DragDistance, widths.inspector, Precision);
+        Assert.Equal(WorkbenchMetrics.DefaultInspectorWidth + WorkbenchMetrics.DefaultPreviewWidth, widths.inspector, Precision);
     }
 
     // ---------------------------------------------------------------- covering Main
@@ -551,6 +552,51 @@ public sealed class WorkbenchControlsTests
 
         Assert.Equal(new Rect(0, 0, WorkbenchMetrics.AutoHideStripWidth, WorkbenchUi.WindowHeight), strip);
     }
+
+    [Fact]
+    public async Task Docked_region_has_no_edge_strip_until_it_is_auto_hidden()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var bounds = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            var strip = WorkbenchUi.Find<AutoHideStrip>(scene.Window, WorkbenchUi.StripId(RegionRole.Project));
+            var docked = strip.Bounds;
+            WorkbenchUi.ClickPin(scene, ProjectPanelId);
+            return (Docked: docked, Hidden: strip.Bounds);
+        });
+
+        Assert.Equal(default, bounds.Docked);
+        Assert.Equal(WorkbenchMetrics.AutoHideStripWidth, bounds.Hidden.Width);
+    }
+
+    [Fact]
+    public async Task Strip_indicator_uses_accent_when_closed_and_idle_color_when_open()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var colors = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.ClickPin(scene, ProjectPanelId);
+            var strip = WorkbenchUi.Find<AutoHideStrip>(scene.Window, WorkbenchUi.StripId(RegionRole.Project));
+            string closed = IndicatorColor(strip);
+            WorkbenchUi.ClickStripButton(scene, RegionRole.Project, ProjectPanelId);
+            string open = IndicatorColor(strip);
+            return (closed, open);
+        });
+
+        Assert.Equal("#FF3A8F5C", colors.closed);
+        Assert.Equal("#FFC8C8C8", colors.open);
+    }
+
+    private static string IndicatorColor(AutoHideStrip strip) =>
+        strip.GetVisualDescendants().OfType<Border>()
+            .Single(border => Math.Abs(border.Bounds.Width - WorkbenchMetrics.DockIndicatorWidth) < 0.1)
+            .Background is SolidColorBrush brush
+                ? brush.Color.ToString().ToUpperInvariant()
+                : throw new InvalidOperationException("The strip indicator has no solid color.");
 
     [Fact]
     public async Task Strip_button_opens_the_drawer_over_main()
@@ -1043,7 +1089,8 @@ public sealed class WorkbenchControlsTests
             return WorkbenchUi.Find<Border>(scene.Window, "drawer-Project").Bounds.Right;
         });
 
-        Assert.Equal(WorkbenchUi.WindowWidth, drawerRight);
+        // The drawer opens beside the edge strip, which stays visible.
+        Assert.Equal(WorkbenchUi.WindowWidth - WorkbenchMetrics.AutoHideStripWidth, drawerRight);
     }
 
     // ---------------------------------------------------------------- tabs

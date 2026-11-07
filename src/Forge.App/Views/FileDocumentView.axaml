@@ -1,48 +1,80 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.FileDocumentView"
              x:DataType="vm:FileDocumentViewModel">
-  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}">
+  <UserControl.KeyBindings>
+    <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
+  </UserControl.KeyBindings>
+  <UserControl.Styles>
+    <Style Selector="wc|PanelIconButton.active /template/ Border#PART_Background">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="TextBox#Editor">
+      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Auto" />
+    </Style>
+    <Style Selector="TextBox#Editor.wrap">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Disabled" />
+    </Style>
+    <Style Selector="ListBox#LineList">
+      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Auto" />
+    </Style>
+    <Style Selector="ListBox#LineList.wrap">
+      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Disabled" />
+    </Style>
+    <Style Selector="ListBox#LineList.wrap wc|SyntaxLineText">
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+  <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
     <Border Classes="toolbar">
-      <Grid ColumnDefinitions="*,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
         <TextBlock Classes="mono" Text="{Binding PathDisplay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="1"
-                   Classes="caption"
-                   IsVisible="{Binding IsLoading}"
-                   Text="{Binding [files.loading], Source={x:Static loc:Loc.Instance}}"
-                   VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Classes="caption" Margin="6,0" Text="*" IsVisible="{Binding IsDirty}" VerticalAlignment="Center" />
+        <wc:PanelIconButton Grid.Column="2" Icon="{DynamicResource IconWrap}" Classes.active="{Binding WrapLines}"
+                            Command="{Binding ToggleWrapCommand}" ToolTip.Tip="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="file-wrap" AutomationProperties.Name="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}" />
+        <wc:PanelIconButton Grid.Column="3" Margin="2,0,0,0" Icon="{DynamicResource IconEdit}" Classes.active="{Binding IsEditing}"
+                            Command="{Binding ToggleEditCommand}" ToolTip.Tip="{Binding [files.edit], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="file-edit" AutomationProperties.Name="{Binding [files.edit], Source={x:Static loc:Loc.Instance}}" />
+        <wc:PanelIconButton Grid.Column="4" Margin="2,0,0,0" Icon="{DynamicResource IconSave}" Command="{Binding SaveCommand}"
+                            ToolTip.Tip="{Binding [files.save], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="file-save" AutomationProperties.Name="{Binding [files.save], Source={x:Static loc:Loc.Instance}}" />
+        <wc:PanelIconButton Grid.Column="5" Margin="2,0,0,0" Icon="{DynamicResource IconCopy}" Click="OnCopyClick"
+                            ToolTip.Tip="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="file-copy" AutomationProperties.Name="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}" />
       </Grid>
     </Border>
-
-    <ListBox Grid.Row="1"
-             ItemsSource="{Binding LineItems}"
-             Padding="0,2"
-             ScrollViewer.HorizontalScrollBarVisibility="Auto">
+    <StackPanel Grid.Row="1">
+      <TextBlock Margin="12,6" Classes="caption" IsVisible="{Binding IsLoading}" Text="{Binding [files.loading], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasError}" Text="{Binding Error}"
+                 Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-error" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasSaveError}" Text="{Binding SaveError}"
+                 Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-save-error" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasCopyError}" Text="{Binding CopyError}"
+                 Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-copy-error" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasLspStatus}" Text="{Binding LspStatus}"
+                 Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-lsp-status" />
+    </StackPanel>
+    <TextBox x:Name="Editor" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True"
+             FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+             Classes.wrap="{Binding WrapLines}" IsVisible="{Binding IsEditing}" Text="{Binding EditText, Mode=TwoWay}"
+             NewLine="{Binding NewLineText}"
+             ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="file-editor" />
+    <ListBox x:Name="LineList" Grid.Row="2" IsVisible="{Binding !IsEditing}" Classes.wrap="{Binding WrapLines}"
+             SelectionMode="Multiple" ItemsSource="{Binding LineItems}" Padding="0,2">
       <ListBox.ItemTemplate>
         <DataTemplate x:DataType="vm:FileLineViewModel">
-          <Grid ColumnDefinitions="52,*" Height="17">
-            <TextBlock Classes="mono"
-                       Text="{Binding Number}"
-                       Foreground="{DynamicResource TextMutedBrush}"
-                       TextAlignment="Right"
-                       Margin="0,0,8,0" />
-            <TextBlock Grid.Column="1"
-                       Classes="mono"
-                       Text="{Binding Text}"
-                       Foreground="{DynamicResource TextPrimaryBrush}" />
+          <Grid ColumnDefinitions="52,*" MinHeight="17">
+            <TextBlock Classes="mono" Text="{Binding Number}" Foreground="{DynamicResource TextMutedBrush}"
+                       TextAlignment="Right" VerticalAlignment="Top" Margin="0,0,8,0" />
+            <wc:SyntaxLineText Grid.Column="1" Classes="mono" Segments="{Binding Segments}" />
           </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>
-
-    <TextBlock Grid.Row="1"
-               Margin="12"
-               Classes="caption"
-               TextWrapping="Wrap"
-               IsVisible="{Binding HasError}"
-               Text="{Binding Error}"
-               Foreground="{DynamicResource DangerBrush}" />
   </Grid>
 </UserControl>

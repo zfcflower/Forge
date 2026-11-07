@@ -1,4 +1,5 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
@@ -70,7 +71,7 @@
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
+  <Grid RowDefinitions="Auto,*" Background="Transparent" Margin="8,6">
     <Grid ColumnDefinitions="*,Auto">
       <TextBlock Classes="caption" Text="{Binding Summary}" VerticalAlignment="Center" />
       <Button Grid.Column="1"
@@ -79,7 +80,7 @@
               ToolTip.Tip="{Binding [spec.refresh], Source={x:Static loc:Loc.Instance}}"
               AutomationProperties.AutomationId="refresh-specs"
               AutomationProperties.Name="{Binding [spec.refresh.name], Source={x:Static loc:Loc.Instance}}">
-        <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+        <wc:LineIcon Data="{StaticResource IconRefresh}" Width="13" Height="13" />
       </Button>
     </Grid>
 

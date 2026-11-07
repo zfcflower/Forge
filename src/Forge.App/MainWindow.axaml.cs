@@ -53,26 +53,35 @@ public partial class MainWindow : Window
         Avalonia.Automation.AutomationProperties.SetName(MaximizeButton, text);
     }
 
-    /// <summary>A window larger than the screen is clamped by the platform but laid out at the requested size.</summary>
     private void ClampToScreen()
     {
         if (Screens.Primary is not { } screen)
         {
+            System.Diagnostics.Trace.WriteLine("[shell] no screen available for startup placement");
             return;
         }
 
-        var scaling = screen.Scaling <= 0 ? 1 : screen.Scaling;
-        var availableWidth = (screen.WorkingArea.Width / scaling) - 16;
-        var availableHeight = (screen.WorkingArea.Height / scaling) - 16;
-        if (Width > availableWidth)
+        ApplyStartupPlacement(screen.WorkingArea, screen.Scaling, default);
+    }
+
+    internal void ApplyStartupPlacement(Avalonia.PixelRect workingArea, double scaling, Avalonia.Size frameInsets)
+    {
+        if (workingArea.Width <= 0 || workingArea.Height <= 0 || !double.IsFinite(scaling) || scaling <= 0)
         {
-            Width = Math.Max(MinWidth, availableWidth);
+            System.Diagnostics.Trace.WriteLine("[shell] invalid screen geometry for startup placement");
+            return;
         }
 
-        if (Height > availableHeight)
-        {
-            Height = Math.Max(MinHeight, availableHeight);
-        }
+        var availableWidth = Math.Max(1, (workingArea.Width / scaling) - 16 - frameInsets.Width);
+        var availableHeight = Math.Max(1, (workingArea.Height / scaling) - 16 - frameInsets.Height);
+        // On small or high-DPI screens, the usual minimum must not force the window off-screen.
+        MinWidth = Math.Min(MinWidth, availableWidth);
+        MinHeight = Math.Min(MinHeight, availableHeight);
+        Width = Math.Min(Width, availableWidth);
+        Height = Math.Min(Height, availableHeight);
+        Position = new Avalonia.PixelPoint(
+            workingArea.X + (int)Math.Round((workingArea.Width - ((Width + frameInsets.Width) * scaling)) / 2),
+            workingArea.Y + (int)Math.Round((workingArea.Height - ((Height + frameInsets.Height) * scaling)) / 2));
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
@@ -81,6 +90,18 @@ public partial class MainWindow : Window
         if (viewModel is null)
         {
             return;
+        }
+
+        var confirmed = closeConfirmed;
+        closeConfirmed = false;
+        if (!e.Cancel && !confirmed && viewModel.HasUnsavedFiles)
+        {
+            e.Cancel = true;
+            if (!closeConfirming)
+            {
+                closeConfirming = true;
+                _ = ConfirmCloseAsync(viewModel);
+            }
         }
 
         if (e.Cancel)
@@ -92,6 +113,29 @@ public partial class MainWindow : Window
         }
 
         viewModel.PrepareForShutdown();
+    }
+
+    private bool closeConfirmed;
+    private bool closeConfirming;
+
+    private async Task ConfirmCloseAsync(MainWindowViewModel model)
+    {
+        try
+        {
+            if (await model.ConfirmCloseWindowAsync().ConfigureAwait(true))
+            {
+                closeConfirmed = true;
+                Close();
+            }
+        }
+        catch (InvalidOperationException exception)
+        {
+            System.Diagnostics.Trace.WriteLine("[shell] close confirmation failed: " + exception.Message);
+        }
+        finally
+        {
+            closeConfirming = false;
+        }
     }
 
     /// <summary>The client area extends into the title bar, so the header drags the window and a double click maximizes it.</summary>
@@ -107,6 +151,16 @@ public partial class MainWindow : Window
 
     protected override void OnOpened(EventArgs e)
     {
+        if (WindowState == WindowState.Normal && (Screens.ScreenFromWindow(this) ?? Screens.Primary) is { } screen)
+        {
+            // The actual desktop scale and native frame are only reliable after the platform has opened the window.
+            var frame = FrameSize ?? ClientSize;
+            var insets = new Avalonia.Size(
+                Math.Max(0, frame.Width - ClientSize.Width),
+                Math.Max(0, frame.Height - ClientSize.Height));
+            ApplyStartupPlacement(screen.WorkingArea, DesktopScaling, insets);
+        }
+
         base.OnOpened(e);
         uiThread = Environment.CurrentManagedThreadId;
         Loc.Instance.LanguageChanged += OnLanguageChanged;

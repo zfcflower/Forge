@@ -8,8 +8,8 @@ namespace Forge.App.Tests.Workbench;
 /// shrinks Main first and then the other regions nearest-first; a side region collapses only when pushed more than
 /// <see cref="WorkbenchMetrics.CollapseOvershoot"/> × its minimum past it; Main never collapses; the uncollapsed widths
 /// keep their start sum; a drag is recomputed from the start widths. Fit: surplus goes to Main; a shortfall shrinks
-/// Main, then the side regions, then hides them in shrink order; protected regions never hide; strips and gaps are
-/// counted once per edge and per gap. Also pins that a drag call allocates nothing.
+/// Main, then the side regions, then hides them in shrink order; protected regions never hide; both edge strips are
+/// always reserved and gaps are counted once per gap. Also pins that a drag call allocates nothing.
 /// </summary>
 public sealed class RegionWidthSolverTests
 {
@@ -37,6 +37,12 @@ public sealed class RegionWidthSolverTests
 
     private const double Splitter = WorkbenchMetrics.RegionSplitterWidth;
     private const double Strip = WorkbenchMetrics.AutoHideStripWidth;
+
+    // Docked regions have only the splitters between them; strips are reserved only for auto-hidden regions.
+    private const double DockedChrome = 2 * Splitter;
+
+    // Narrow enough that the inspector must hide, wide enough that the project then still fits beside Main.
+    private const double HideOneWindow = 660;
 
     private const double HugeDelta = 1e6;
     private const double SmallDrag = 100;
@@ -373,7 +379,7 @@ public sealed class RegionWidthSolverTests
     public void Fit_widening_gives_surplus_to_main_and_leaves_sides_alone()
     {
         const double surplus = SmallDrag;
-        const double window = Total + 2 * Splitter + surplus;
+        const double window = Total + DockedChrome + surplus;
 
         var (widths, hidden) = FitDefault(window, DefaultStart(), NoneHidden());
 
@@ -387,7 +393,7 @@ public sealed class RegionWidthSolverTests
     public void Fit_narrowing_shrinks_main_before_any_side_region()
     {
         const double shortfall = SmallDrag;
-        const double window = Total + 2 * Splitter - shortfall;
+        const double window = Total + DockedChrome - shortfall;
 
         var (widths, hidden) = FitDefault(window, DefaultStart(), NoneHidden());
 
@@ -401,7 +407,7 @@ public sealed class RegionWidthSolverTests
     public void Fit_narrowing_shrinks_inspector_before_project_once_main_is_at_minimum()
     {
         const double shortfall = MainSlack + PartialShortfall;
-        const double window = Total + 2 * Splitter - shortfall;
+        const double window = Total + DockedChrome - shortfall;
 
         var (widths, hidden) = FitDefault(window, DefaultStart(), NoneHidden());
 
@@ -415,7 +421,7 @@ public sealed class RegionWidthSolverTests
     public void Fit_narrowing_shrinks_project_once_inspector_is_at_minimum()
     {
         const double shortfall = MainSlack + InspectorSlack + PartialShortfall;
-        const double window = Total + 2 * Splitter - shortfall;
+        const double window = Total + DockedChrome - shortfall;
 
         var (widths, hidden) = FitDefault(window, DefaultStart(), NoneHidden());
 
@@ -428,7 +434,7 @@ public sealed class RegionWidthSolverTests
     [Fact]
     public void Fit_narrowing_hides_inspector_before_project_when_shrinking_is_not_enough()
     {
-        const double window = 600;
+        const double window = HideOneWindow;
 
         var (widths, hidden) = FitDefault(window, DefaultStart(), NoneHidden());
 
@@ -451,7 +457,7 @@ public sealed class RegionWidthSolverTests
     [Fact]
     public void Fit_hide_order_follows_shrink_order_when_project_comes_first()
     {
-        const double window = 600;
+        const double window = HideOneWindow;
         int[] shrinkOrder = [ProjectIndex, InspectorIndex];
 
         var (_, hidden) = FitWith(window, DefaultStart(), DefaultMins(), NoneHidden(), DefaultEdges(), MainIndex, shrinkOrder, NoProtectedRegion);
@@ -537,7 +543,7 @@ public sealed class RegionWidthSolverTests
     [Fact]
     public void Fit_main_below_minimum_is_filled_from_oversized_inspector_without_hiding()
     {
-        const double window = ProjectStart + UndersizedMain + InspectorStart + 2 * Splitter;
+        const double window = ProjectStart + UndersizedMain + InspectorStart + DockedChrome;
         double[] widths = [ProjectStart, UndersizedMain, InspectorStart];
 
         var (outWidths, hidden) = FitDefault(window, widths, NoneHidden());
@@ -551,7 +557,7 @@ public sealed class RegionWidthSolverTests
     [Fact]
     public void Fit_main_below_minimum_shrinks_sides_to_minimum_then_hides_inspector()
     {
-        const double window = 600;
+        const double window = HideOneWindow;
         double[] widths = [ProjectStart, UndersizedMainTight, OversizedInspector];
 
         var (outWidths, hidden) = FitDefault(window, widths, NoneHidden());

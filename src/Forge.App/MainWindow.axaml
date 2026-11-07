@@ -1,4 +1,5 @@
 <Window xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ap="using:Forge.App.Approval"
         xmlns:vm="using:Forge.App.ViewModels"
@@ -12,6 +13,7 @@
         Height="900"
         MinWidth="900"
         MinHeight="560"
+        WindowStartupLocation="CenterScreen"
         WindowDecorations="BorderOnly"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
@@ -35,10 +37,12 @@
             BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0,8,0">
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <TextBlock Text="Forge"
-                     Classes="h2"
-                     VerticalAlignment="Center"
-                     Foreground="{DynamicResource AccentTextBrush}" />
+          <Image x:Name="AppLogo"
+                 Source="avares://Forge.App/Assets/forge.png"
+                 Width="18"
+                 Height="18"
+                 VerticalAlignment="Center"
+                 AutomationProperties.Name="Forge" />
           <TextBlock Classes="caption"
                      VerticalAlignment="Center"
                      MaxWidth="320"
@@ -79,7 +83,7 @@
                   Command="{Binding ToggleSettingsCommand}"
                   AutomationProperties.AutomationId="open-settings" AutomationProperties.Name="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}">
-            <PathIcon Data="{StaticResource IconGear}" Width="15" Height="15" />
+            <wc:LineIcon Data="{StaticResource IconGear}" Width="15" Height="15" />
           </Button>
           <Button x:Name="MinimizeButton"
                   Classes="ghost icon"
@@ -88,7 +92,7 @@
                   Click="OnMinimizeClick"
                   AutomationProperties.AutomationId="window-minimize" AutomationProperties.Name="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}">
-            <PathIcon Data="{StaticResource IconMinimize}" Width="11" Height="11" />
+            <wc:LineIcon Data="{StaticResource IconMinimize}" Width="13" Height="13" />
           </Button>
           <Button x:Name="MaximizeButton"
                   Classes="ghost icon"
@@ -96,7 +100,7 @@
                   Height="26"
                   Click="OnMaximizeClick"
                   AutomationProperties.AutomationId="window-maximize">
-            <PathIcon x:Name="MaximizeIcon" Data="{StaticResource IconMaximize}" Width="11" Height="11" />
+            <wc:LineIcon x:Name="MaximizeIcon" Data="{StaticResource IconMaximize}" Width="13" Height="13" />
           </Button>
           <Button x:Name="CloseButton"
                   Classes="ghost icon"
@@ -105,7 +109,7 @@
                   Click="OnCloseClick"
                   AutomationProperties.AutomationId="window-close" AutomationProperties.Name="{Binding [window.closeWindow], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [window.close], Source={x:Static loc:Loc.Instance}}">
-            <PathIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            <wc:LineIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
           </Button>
         </StackPanel>
       </Grid>
@@ -210,7 +214,7 @@
                     Classes="ghost icon"
                     Command="{Binding ToggleSettingsCommand}"
                     AutomationProperties.AutomationId="close-settings" AutomationProperties.Name="{Binding [shell.closeSettings], Source={x:Static loc:Loc.Instance}}">
-              <PathIcon Data="{StaticResource IconClose}" Width="13" Height="13" />
+              <wc:LineIcon Data="{StaticResource IconClose}" Width="13" Height="13" />
             </Button>
           </Grid>
 

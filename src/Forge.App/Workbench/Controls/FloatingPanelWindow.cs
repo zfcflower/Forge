@@ -38,6 +38,9 @@ internal sealed class FloatingPanelWindow : Window
         this.item = item;
         Title = WindowTitle;
         WindowDecorations = WindowDecorations.BorderOnly;
+        // Same as the main window: without the extend hints Windows keeps a system-frame-high white band at the top.
+        ExtendClientAreaToDecorationsHint = true;
+        ExtendClientAreaTitleBarHeightHint = -1;
         ShowInTaskbar = false;
         CanResize = true;
         MinWidth = 240;

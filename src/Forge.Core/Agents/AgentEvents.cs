@@ -9,6 +9,9 @@ public interface IAgentEventSink
     void Emit(AgentEvent value);
 }
 
+/// <summary>A user interjection (see <see cref="AgentInstance.Interject"/>) was handed to the agent as a user message.</summary>
+public sealed record AgentInterjected(string AgentId, string Text, DateTimeOffset At) : AgentEvent(AgentId);
+
 internal sealed class ChannelEventSink(ChannelWriter<AgentEvent> writer) : IAgentEventSink
 {
     public void Emit(AgentEvent value) => writer.TryWrite(value);

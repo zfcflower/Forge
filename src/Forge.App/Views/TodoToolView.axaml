@@ -1,10 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.TodoToolView"
              x:DataType="vm:TodoListViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="Transparent" Margin="8,6">
     <TextBlock Classes="caption" Text="{Binding Summary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
 
     <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,8,0,6">
@@ -19,7 +20,7 @@
               Command="{Binding AddCommand}"
               AutomationProperties.AutomationId="add-task"
               AutomationProperties.Name="{Binding [todo.add], Source={x:Static loc:Loc.Instance}}">
-        <PathIcon Data="{StaticResource IconPlus}" Width="11" Height="11" />
+        <wc:LineIcon Data="{StaticResource IconPlus}" Width="13" Height="13" />
       </Button>
     </Grid>
 
@@ -62,15 +63,15 @@
                         AutomationProperties.Name="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}" />
                 <Button Grid.Column="4" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveUpCommand}"
                         ToolTip.Tip="{Binding [todo.moveUp], Source={x:Static loc:Loc.Instance}}">
-                  <PathIcon Data="{StaticResource IconChevronUp}" Width="9" Height="9" />
+                  <wc:LineIcon Data="{StaticResource IconChevronUp}" Width="12" Height="12" />
                 </Button>
                 <Button Grid.Column="5" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveDownCommand}"
                         ToolTip.Tip="{Binding [todo.moveDown], Source={x:Static loc:Loc.Instance}}">
-                  <PathIcon Data="{StaticResource IconChevronDown}" Width="9" Height="9" />
+                  <wc:LineIcon Data="{StaticResource IconChevronDown}" Width="12" Height="12" />
                 </Button>
                 <Button Grid.Column="6" Classes="ghost icon" Width="20" Height="20" Command="{Binding RemoveCommand}"
                         ToolTip.Tip="{Binding [todo.delete], Source={x:Static loc:Loc.Instance}}">
-                  <PathIcon Data="{StaticResource IconTrash}" Width="9" Height="9" />
+                  <wc:LineIcon Data="{StaticResource IconTrash}" Width="12" Height="12" />
                 </Button>
 
                 <Grid Grid.Row="1"

@@ -43,6 +43,23 @@ internal static class InspectorStrings
     public const string FilesStatusWorkingTree = "files.status.workingTree";
     public const string FilesStatusStaged = "files.status.staged";
     public const string FilesStatusStagedAndUnstaged = "files.status.stagedAndUnstaged";
+    public const string FilesBinary = "files.binary";
+    public const string FilesUnsaved = "files.unsaved";
+    public const string FilesSaveFailed = "files.saveFailed";
+    public const string FilesLspUnavailable = "files.lsp.unavailable";
+    public const string FilesLspStopped = "files.lsp.stopped";
+    public const string FilesSave = "files.save";
+    public const string FilesWrap = "files.wrap";
+    public const string FilesEdit = "files.edit";
+    public const string FilesCopy = "files.copy";
+    public const string FilesCopyFailed = "files.copyFailed";
+    public const string FilesBusy = "files.busy";
+    public const string FilesDiscardTitle = "files.discard.title";
+    public const string FilesDiscardMessage = "files.discard.message";
+    public const string FilesDiscardConfirm = "files.discard.confirm";
+    public const string FilesArchiveTitle = "files.archive.title";
+    public const string FilesArchiveMessage = "files.archive.message";
+    public const string FilesArchiveConfirm = "files.archive.confirm";
 
     // ---------------------------------------------------------------- changes document
     public const string ChangesByTurn = "changes.byTurn";
@@ -122,6 +139,23 @@ internal static class InspectorStrings
         Loc.Register(FilesStatusWorkingTree, "工作区", "Working tree");
         Loc.Register(FilesStatusStaged, "已暂存", "Staged");
         Loc.Register(FilesStatusStagedAndUnstaged, "已暂存并有未暂存改动", "Staged and unstaged");
+        Loc.Register(FilesBinary, "不是文本文件：{0}", "Not a text file: {0}");
+        Loc.Register(FilesUnsaved, "有未保存的修改，已取消重新加载。", "Unsaved edits; reload cancelled.");
+        Loc.Register(FilesSaveFailed, "保存失败：{0}", "Save failed: {0}");
+        Loc.Register(FilesLspUnavailable, "语言服务不可用：{0}", "Language server unavailable: {0}");
+        Loc.Register(FilesLspStopped, "语言服务未能启动，编辑不受影响。", "The language server could not start; editing is unaffected.");
+        Loc.Register(FilesSave, "保存", "Save");
+        Loc.Register(FilesWrap, "换行", "Wrap");
+        Loc.Register(FilesEdit, "编辑", "Edit");
+        Loc.Register(FilesCopy, "复制", "Copy");
+        Loc.Register(FilesCopyFailed, "复制失败：{0}", "Copy failed: {0}");
+        Loc.Register(FilesBusy, "文件正在保存，请稍后再试", "The file is being saved, try again in a moment");
+        Loc.Register(FilesDiscardTitle, "放弃未保存的修改？", "Discard unsaved edits?");
+        Loc.Register(FilesDiscardMessage, "{0} 有未保存的修改，继续将丢失这些修改。", "{0} has unsaved edits that will be lost.");
+        Loc.Register(FilesDiscardConfirm, "放弃修改", "Discard");
+        Loc.Register(FilesArchiveTitle, "归档会话？", "Archive the session?");
+        Loc.Register(FilesArchiveMessage, "{0} 有未保存的修改。归档不会保存也不会丢弃它们，文件会继续保持打开。", "{0} has unsaved edits. Archiving neither saves nor discards them; the file stays open.");
+        Loc.Register(FilesArchiveConfirm, "仍然归档", "Archive anyway");
 
         Loc.Register(ChangesByTurn, "按轮次", "By turn");
         Loc.Register(ChangesUncommitted, "未提交改动", "Uncommitted");
@@ -233,4 +267,7 @@ internal static class InspectorStrings
 
     /// <summary>"文件监视不可用：<c>message</c>" — the OS message is inserted as is.</summary>
     public static LocText WatchUnavailable(string message) => new(FilesWatchUnavailable, LocText.Literal(message));
+    public static LocText FileBinary(string path) => new(FilesBinary, LocText.Literal(path));
+    public static string FileDiscardMessage(string name) => Loc.Instance.Format(FilesDiscardMessage, name);
+    public static string FileArchiveMessage(string name) => Loc.Instance.Format(FilesArchiveMessage, name);
 }

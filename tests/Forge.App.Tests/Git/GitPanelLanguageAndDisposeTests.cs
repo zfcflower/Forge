@@ -179,7 +179,7 @@ public sealed class GitPanelLanguageAndDisposeTests
                             viewModel.GitPanel.Attach(Context(viewModel.ActiveSession!.SessionId, work));
                             await WaitIdleAsync(viewModel.GitPanel);
 
-                            var tab = viewModel.Workbench.FindTab(WorkbenchIds.GitTab);
+                            var tab = viewModel.Workbench.GitPanel;
                             Assert.NotNull(tab);
                             var chineseBranch = Loc.Instance.Format(GitStrings.DetachedHead, head[..7]);
                             Assert.Equal(chineseBranch, viewModel.ActiveBranchText);

@@ -77,6 +77,7 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
 {
     private bool isExpanded = true;
     private bool isRunning;
+    private bool isActiveSession;
     private string title = string.Empty;
     private string subtitle = string.Empty;
     private string statusText = string.Empty;
@@ -226,6 +227,12 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         }
     }
 
+    public bool IsActiveSession
+    {
+        get => isActiveSession;
+        set => Set(ref isActiveSession, value);
+    }
+
     public string RunningText => isRunning ? ProjectStrings.RunningLabel : string.Empty;
 
     /// <summary>
@@ -340,6 +347,43 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     }
 
     public void NotifyChildrenChanged() => OnPropertyChanged(nameof(HasToggle));
+
+    /// <summary>
+    /// What a click anywhere on the row does: a row that opens something (a session) opens it, any other row with
+    /// children expands or collapses, and a childless project/worktree/general row starts a new session. Returns false
+    /// when the row has no action.
+    /// </summary>
+    public bool Activate()
+    {
+        if (OpenCommand is { } open)
+        {
+            if (open.CanExecute(null))
+            {
+                open.Execute(null);
+            }
+
+            return true;
+        }
+
+        if (HasToggle)
+        {
+            ToggleCommand.Execute(null);
+            return true;
+        }
+
+        // A leaf container row (an empty project, worktree or the general group) starts a session, its row action.
+        if (NewSessionCommand is { } create)
+        {
+            if (create.CanExecute(null))
+            {
+                create.Execute(null);
+            }
+
+            return true;
+        }
+
+        return false;
+    }
 }
 
 /// <summary>One planned node of a rebuild; plain data, so the tree can be planned on a pool thread.</summary>
@@ -398,6 +442,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     private bool busy;
     private bool refreshPending;
     private LocText status;
+    private string activeSessionId = string.Empty;
 
     public ProjectTreeViewModel(
         IProjectRegistry projects,
@@ -450,6 +495,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
 
     /// <summary>Called after a session was archived, so the shell can drop its runtime when nothing else uses it.</summary>
     public Action<string>? SessionArchived { get; set; }
+    public Func<string, Task<bool>>? ArchiveGuard { get; set; }
 
     /// <summary>The status line under the add-project button: stored as a key, so it re-renders when the language changes.</summary>
     public string StatusText => status.Resolve();
@@ -547,9 +593,24 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         }
     }
 
+    public void SetActiveSession(string? sessionId)
+    {
+        activeSessionId = sessionId ?? string.Empty;
+        foreach (var node in Enumerate(Sections))
+        {
+            node.IsActiveSession = node.Kind == TreeNodeKind.Session
+                && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Archives a session: it leaves the worktree list and shows up under "历史".</summary>
     public async Task ArchiveAsync(string sessionId, CancellationToken ct)
     {
+        if (ArchiveGuard is { } guard && !await guard(sessionId).ConfigureAwait(true))
+        {
+            return;
+        }
+
         await BackgroundRead.RunAsync(token => catalog.SetStatusAsync(sessionId, SessionStatus.Archived, token), ct)
             .ConfigureAwait(true);
         SessionArchived?.Invoke(sessionId);
@@ -909,6 +970,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         node.HistoryCount = plan.HistoryCount;
         node.IsArchived = plan.IsArchived;
         node.StatusText = plan.StatusText;
+        node.IsActiveSession = plan.Kind == TreeNodeKind.Session
+            && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
         node.Icon = IconOf(plan);
         switch (plan.Kind)
         {

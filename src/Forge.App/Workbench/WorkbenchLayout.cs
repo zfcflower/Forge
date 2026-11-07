@@ -22,6 +22,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     private readonly PanelModel projectPanel;
     private readonly PanelModel filesPanel;
+    private readonly PanelModel? gitPanel;
     private readonly TabGroupModel mainTabs;
     private readonly TabGroupModel bottomTabs;
     private readonly TabGroupModel previewTabs;
@@ -63,7 +64,8 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <param name="todo">View model of the TODO tab of the inspector tools group.</param>
     /// <param name="review">View model of the review tab.</param>
     /// <param name="specs">View model of the spec tree tab.</param>
-    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs)
+    /// <param name="gitContent">View model of the Git panel, stacked under the project panel; null leaves the panel out.</param>
+    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs, object? gitContent = null)
     {
         project = new RegionModel(RegionRole.Project, WorkbenchMetrics.DefaultProjectWidth);
         main = new RegionModel(RegionRole.Main, 0);
@@ -105,6 +107,16 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         inspectorTools.ActiveTab = inspectorTools.Tabs[0];
 
         project.Panels.Add(projectPanel);
+        if (gitContent is not null)
+        {
+            gitPanel = new PanelModel(WorkbenchIds.GitPanel, RegionRole.Project, "Git")
+            {
+                Content = gitContent,
+                CanPin = true,
+            };
+            project.Panels.Add(gitPanel);
+        }
+
         main.Panels.Add(mainTabs);
         main.Panels.Add(bottomTabs);
         inspector.Panels.Add(previewTabs);
@@ -431,6 +443,9 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     public PanelModel FilesPanel => filesPanel;
 
+    /// <summary>The Git panel under the project panel; null when the layout was built without Git content.</summary>
+    public PanelModel? GitPanel => gitPanel;
+
     /// <summary>Session tabs.</summary>
     public TabGroupModel MainTabs => mainTabs;
 
@@ -469,7 +484,63 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             return;
         }
 
+        for (int i = 0; i < region.Panels.Count; i++)
+        {
+            region.Panels[i].IsMinimized = false;
+        }
+
         region.MaximizedPanel = panel;
+        UpdateCanMinimize(region);
+    }
+
+    public void ToggleMinimize(PanelModel panel)
+    {
+        if (panel is null)
+        {
+            return;
+        }
+
+        RegionModel region = GetRegion(panel.Region);
+        if (panel.IsMinimized)
+        {
+            panel.IsMinimized = false;
+            UpdateCanMinimize(region);
+            return;
+        }
+
+        if (!panel.CanMinimize || !panel.IsVisible)
+        {
+            return;
+        }
+
+        region.MaximizedPanel = null;
+        panel.IsMinimized = true;
+        UpdateCanMinimize(region);
+    }
+
+    public void ResizePreviewColumn(double width)
+    {
+        if (!double.IsFinite(width))
+        {
+            return;
+        }
+
+        if (!inspectorHasPreviewColumn)
+        {
+            PreviewWidth = width;
+            return;
+        }
+
+        double maximum = inspector.Width - WorkbenchMetrics.SideMinWidth - WorkbenchMetrics.PanelSplitterWidth;
+        double clamped = Math.Clamp(width, WorkbenchMetrics.PreviewMinWidth, Math.Max(WorkbenchMetrics.PreviewMinWidth, maximum));
+        if (clamped == previewWidth)
+        {
+            return;
+        }
+
+        previewWidth = clamped;
+        OnPropertyChanged(nameof(PreviewWidth));
+        OnLayoutChanged();
     }
 
     /// <summary>True when the preview group sits left of the files column (Inspector right of Main), false when right of it.</summary>
@@ -821,6 +892,42 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// only caller; <see cref="CloseTab"/> itself stays unconditional because the view models close their own tabs.
     /// </summary>
     public Func<TabModel, Task<bool>>? TabCloseRequested { get; set; }
+    public Func<TabModel, Task<bool>>? ContentCloseGuard { get; set; }
+    private readonly SemaphoreSlim closeGate = new(1, 1);
+
+    public async Task<bool> TryCloseTabAsync(TabModel tab)
+    {
+        await closeGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (tab.Group is null)
+            {
+                return true;
+            }
+
+            if (!await RequestCloseAsync(tab).ConfigureAwait(true))
+            {
+                return false;
+            }
+
+            CloseTab(tab);
+            return true;
+        }
+        finally
+        {
+            closeGate.Release();
+        }
+    }
+
+    public async Task<bool> RequestCloseAsync(TabModel tab)
+    {
+        if (TabCloseRequested is { } terminal && !await terminal(tab).ConfigureAwait(true))
+        {
+            return false;
+        }
+
+        return ContentCloseGuard is not { } guard || await guard(tab).ConfigureAwait(true);
+    }
 
     // ---------------------------------------------------------------- persistence and events
 
@@ -1198,6 +1305,9 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         UpdateCanMaximize(project);
         UpdateCanMaximize(main);
         UpdateCanMaximize(inspector);
+        UpdateCanMinimize(project);
+        UpdateCanMinimize(main);
+        UpdateCanMinimize(inspector);
 
         if (!previewTabs.IsVisible)
         {
@@ -1228,6 +1338,60 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         {
             region.MaximizedPanel = null;
         }
+    }
+
+    private void UpdateCanMinimize(RegionModel region)
+    {
+        var panels = region.Panels;
+        int visible = 0;
+        for (int i = 0; i < panels.Count; i++)
+        {
+            if (panels[i].IsVisible)
+            {
+                visible++;
+            }
+        }
+
+        for (int i = 0; i < panels.Count; i++)
+        {
+            PanelModel panel = panels[i];
+            if (!panel.IsVisible || visible < 2)
+            {
+                panel.IsMinimized = false;
+                panel.CanMinimize = false;
+                continue;
+            }
+
+            bool hasPeer = HasExpandedPeer(region, panel);
+            if (panel.IsMinimized && !hasPeer)
+            {
+                panel.IsMinimized = false;
+            }
+
+            panel.CanMinimize = panel.IsMinimized || hasPeer;
+        }
+    }
+
+    private bool HasExpandedPeer(RegionModel region, PanelModel panel)
+    {
+        var panels = region.Panels;
+        for (int i = 0; i < panels.Count; i++)
+        {
+            PanelModel other = panels[i];
+            if (ReferenceEquals(other, panel) || !other.IsVisible || other.IsMinimized)
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(region, inspector) && ReferenceEquals(other, previewTabs) && !ReferenceEquals(panel, previewTabs))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private void Subscribe(FloatingItem item) => item.PropertyChanged += OnFloatingItemChanged;

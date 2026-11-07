@@ -6,6 +6,8 @@ using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Services;
+using Forge.Editor.Highlighting;
+using Forge.Editor.TextMate;
 using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
@@ -736,24 +738,26 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
 
 // ---------------------------------------------------------------- file document
 
-internal sealed record FileLineViewModel(int Number, string Text);
+internal sealed record FileTextSegment(string Text, TokenCategory Category);
+
+internal sealed record FileLineViewModel(int Number, string Text, IReadOnlyList<FileTextSegment> Segments);
 
 /// <summary>
 /// Read-only file view: one entry per line with its number, virtualized in the view. The file's content and path are data
 /// and are never translated; only the tab title's leading mark and the placeholder before a file is loaded come from the
 /// string table, and both are read when the property is read.
 /// </summary>
-internal sealed class FileDocumentViewModel : ObservableObject
+internal sealed partial class FileDocumentViewModel : ObservableObject
 {
-    private const int MaxLines = 20000;
-
+    private readonly GrammarRegistry? grammars;
     private string path = string.Empty;
     private string? fileName;
     private LocText error;
     private bool isLoading;
 
-    private FileDocumentViewModel()
+    private FileDocumentViewModel(GrammarRegistry? grammars)
     {
+        this.grammars = grammars;
         LineItems = new ReadOnlyObservableCollection<FileLineViewModel>(Lines);
         LoadCommand = new AsyncRelayCommand(
             ct => LoadAsync(path, ct),
@@ -761,7 +765,7 @@ internal sealed class FileDocumentViewModel : ObservableObject
             exception => SetError(LocText.Literal(exception.Message)));
     }
 
-    public ObservableCollection<FileLineViewModel> Lines { get; } = [];
+    public RangeObservableCollection<FileLineViewModel> Lines { get; } = [];
 
     public ReadOnlyObservableCollection<FileLineViewModel> LineItems { get; }
 
@@ -782,7 +786,7 @@ internal sealed class FileDocumentViewModel : ObservableObject
     public string PathDisplay => path;
 
     /// <summary>The mark followed by the file name, or the generic word until a file is loaded.</summary>
-    public string TabTitle => InspectorStrings.FileTabTitle(fileName ?? Loc.Instance[InspectorStrings.FilesName]);
+    public string TabTitle => InspectorStrings.FileTabTitle((fileName ?? Loc.Instance[InspectorStrings.FilesName]) + (IsDirty ? " *" : string.Empty));
 
     public bool IsLoading
     {
@@ -795,91 +799,87 @@ internal sealed class FileDocumentViewModel : ObservableObject
 
     public bool HasError => !error.IsEmpty;
 
-    public static FileDocumentViewModel Create() => new();
-
-    /// <summary>Replaces this fixed document's content with another file.</summary>
-    public void Reload(FileDocumentViewModel other)
-    {
-        Path = other.Path;
-        fileName = other.fileName;
-        OnPropertyChanged(nameof(TabTitle));
-        Lines.Clear();
-        foreach (var line in other.Lines)
-        {
-            Lines.Add(line);
-        }
-
-        SetError(other.error);
-    }
-
-    public async Task LoadAsync(string filePath, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return;
-        }
-
-        Path = System.IO.Path.GetFullPath(filePath);
-        fileName = System.IO.Path.GetFileName(Path);
-        OnPropertyChanged(nameof(TabTitle));
-        Lines.Clear();
-        SetError(default);
-        IsLoading = true;
-        try
-        {
-            var lines = await Task.Run(
-                    async () =>
-                    {
-                        if (!File.Exists(filePath))
-                        {
-                            return null;
-                        }
-
-                        var info = new FileInfo(filePath);
-                        if (info.Length > 8 * 1024 * 1024)
-                        {
-                            // Shown as the document's only line, so it is resolved here, on the pool thread; Loc reads
-                            // are thread-safe.
-                            return new[] { InspectorStrings.FileTooLarge(info.Length).Resolve() };
-                        }
-
-                        var read = await File.ReadAllLinesAsync(filePath, ct).ConfigureAwait(false);
-                        return read.Length > MaxLines ? read[..MaxLines] : read;
-                    },
-                    ct)
-                .ConfigureAwait(true);
-
-            if (lines is null)
-            {
-                SetError(InspectorStrings.FileMissing(filePath));
-                return;
-            }
-
-            for (var i = 0; i < lines.Length; i++)
-            {
-                Lines.Add(new FileLineViewModel(i + 1, lines[i].Replace("\t", "    ", StringComparison.Ordinal)));
-            }
-
-            if (lines.Length == MaxLines)
-            {
-                SetError(InspectorStrings.LinesTruncated(MaxLines));
-            }
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            SetError(LocText.Literal(exception.Message));
-        }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
-
     private void SetError(LocText value)
     {
         error = value;
         OnPropertyChanged(nameof(Error));
         OnPropertyChanged(nameof(HasError));
+    }
+
+    private const long HighlightMaxChars = 1L << 20;
+
+    private static FileLineViewModel[] CreateLineItems(
+        string[] lines,
+        string filePath,
+        GrammarRegistry? grammars,
+        CancellationToken ct)
+    {
+        if (lines.Length == 0)
+        {
+            return [];
+        }
+
+        var normalizedLines = new string[lines.Length];
+        var total = 0L;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            normalizedLines[i] = lines[i].Replace("\t", "    ", StringComparison.Ordinal);
+            total += normalizedLines[i].Length;
+        }
+
+        HighlightResult? highlight = null;
+        if (total <= HighlightMaxChars && grammars?.GetScopeNameForFile(filePath) is { } scopeName)
+        {
+            var source = new StringHighlightSource(string.Join('\n', normalizedLines));
+            highlight = new Tokenizer(grammars).Highlight(source, scopeName, ct);
+        }
+
+        var items = new FileLineViewModel[lines.Length];
+        for (var i = 0; i < lines.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var text = normalizedLines[i];
+            var segments = highlight is null
+                ? new[] { new FileTextSegment(text, TokenCategory.None) }
+                : CreateSegments(text, highlight, i);
+            items[i] = new FileLineViewModel(i + 1, text, segments);
+        }
+
+        return items;
+    }
+
+    private static IReadOnlyList<FileTextSegment> CreateSegments(string text, HighlightResult highlight, int line)
+    {
+        var tokens = highlight.GetTokens(line).Span;
+        var segments = new List<FileTextSegment>(tokens.Length);
+        var position = 0;
+        foreach (var token in tokens)
+        {
+            var start = Math.Clamp(token.Start, position, text.Length);
+            var end = Math.Clamp(token.End, start, text.Length);
+            if (start > position)
+            {
+                segments.Add(new FileTextSegment(text[position..start], TokenCategory.None));
+            }
+
+            if (end > start)
+            {
+                segments.Add(new FileTextSegment(text[start..end], highlight.GetCategory(token.ScopeId)));
+                position = end;
+            }
+        }
+
+        if (position < text.Length)
+        {
+            segments.Add(new FileTextSegment(text[position..], TokenCategory.None));
+        }
+
+        if (segments.Count == 0)
+        {
+            segments.Add(new FileTextSegment(text, TokenCategory.None));
+        }
+
+        return segments;
     }
 }
 

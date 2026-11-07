@@ -74,12 +74,7 @@ internal sealed class PanelTabStrip : TemplatedControl
 
         try
         {
-            if (layout.TabCloseRequested is { } requested && !await requested(tab).ConfigureAwait(true))
-            {
-                return;
-            }
-
-            layout.CloseTab(tab);
+            await layout.TryCloseTabAsync(tab).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -313,25 +308,33 @@ internal sealed class PanelTabStrip : TemplatedControl
         menu.Items.Add(close);
 
         var closeOthers = new MenuItem { Header = ShellStrings.CloseOtherTabs };
-        closeOthers.Click += (_, _) => CloseOtherTabs(tab);
+        closeOthers.Click += (_, _) => _ = CloseOtherTabsAsync(tab);
         menu.Items.Add(closeOthers);
         return menu;
     }
 
-    private void CloseOtherTabs(TabModel tab)
+    private async Task CloseOtherTabsAsync(TabModel tab)
     {
-        if (Layout is null || tab.Group is not { } group)
+        if (Layout is not { } layout || tab.Group is not { } group)
         {
             return;
         }
 
-        var tabs = group.Tabs.ToArray();
-        for (var i = 0; i < tabs.Length; i++)
+        try
         {
-            if (!ReferenceEquals(tabs[i], tab) && tabs[i].IsClosable)
+            var tabs = group.Tabs.ToArray();
+            for (var i = 0; i < tabs.Length; i++)
             {
-                CloseTab(tabs[i]);
+                if (!ReferenceEquals(tabs[i], tab) && tabs[i].IsClosable
+                    && !await layout.TryCloseTabAsync(tabs[i]).ConfigureAwait(true))
+                {
+                    return;
+                }
             }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("[workbench] closing the other tabs failed: " + exception.Message);
         }
     }
 

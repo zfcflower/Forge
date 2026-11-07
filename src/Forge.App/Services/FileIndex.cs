@@ -23,9 +23,14 @@ internal sealed class FileIndex
     /// <summary>Child names per directory, so adding a path never scans the sibling list.</summary>
     private readonly Dictionary<string, HashSet<string>> namesByDirectory = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly List<string> files = [];
+
     private FileIndex(int fileCount) => FileCount = fileCount;
 
     public int FileCount { get; }
+
+    /// <summary>Every indexed file as a '/'-separated path relative to the root, in index order.</summary>
+    public IReadOnlyList<string> Files => files;
 
     public static async Task<FileIndex> BuildAsync(string root, GitCli git, CancellationToken ct)
     {
@@ -67,6 +72,7 @@ internal sealed class FileIndex
         foreach (var path in paths)
         {
             index.Add(path);
+            index.files.Add(path);
         }
 
         index.Sort();

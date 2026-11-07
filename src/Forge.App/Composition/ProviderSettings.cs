@@ -30,6 +30,10 @@ internal sealed class ProviderSection
     [JsonPropertyName("thinking")]
     public string? Thinking { get; set; }
 
+    /// <summary>Other model ids the same endpoint serves; the composer's model picker offers them next to <see cref="Model"/>.</summary>
+    [JsonPropertyName("models")]
+    public List<string>? Models { get; set; }
+
     [JsonPropertyName("maxOutputTokens")]
     public int? MaxOutputTokens { get; set; }
 
@@ -63,9 +67,11 @@ internal sealed class ProviderSnapshot
         ThinkingEffort thinking,
         int? maxOutputTokens,
         string? apiKey,
-        bool keyFromEnvironment)
+        bool keyFromEnvironment,
+        IReadOnlyList<string> models)
     {
         Kind = kind;
+        Models = models;
         BaseUrl = baseUrl;
         Model = model;
         Thinking = thinking;
@@ -83,6 +89,9 @@ internal sealed class ProviderSnapshot
     public ThinkingEffort Thinking { get; }
 
     public int? MaxOutputTokens { get; }
+
+    /// <summary>The configured <see cref="Model"/> first, then the extra <c>models</c> of the section, without duplicates.</summary>
+    public IReadOnlyList<string> Models { get; }
 
     public bool HasApiKey => !string.IsNullOrWhiteSpace(apiKey);
 
@@ -155,7 +164,17 @@ internal sealed class ProviderSnapshot
             key = section.ApiKey.Trim();
         }
 
-        return new ProviderSnapshot(kind, baseUrl, model, thinking, section.MaxOutputTokens, key, fromEnvironment);
+        var models = new List<string> { model };
+        foreach (var extra in section.Models ?? [])
+        {
+            var name = (extra ?? string.Empty).Trim();
+            if (name.Length > 0 && !models.Contains(name, StringComparer.Ordinal))
+            {
+                models.Add(name);
+            }
+        }
+
+        return new ProviderSnapshot(kind, baseUrl, model, thinking, section.MaxOutputTokens, key, fromEnvironment, models);
     }
 }
 

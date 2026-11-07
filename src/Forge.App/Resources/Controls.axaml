@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls">
 
   <!-- Text ramp. -->
   <Style Selector="TextBlock">
@@ -165,8 +166,9 @@
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
   </Style>
 
+  <!-- Transparent so a toolbar takes the colour of its region: white in Main, the sidebar grey at the sides. -->
   <Style Selector="Border.toolbar">
-    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
     <Setter Property="Padding" Value="8,4" />
@@ -256,7 +258,11 @@
   </Style>
 
   <Style Selector="ListBoxItem:selected Border.tree-row-content">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+  </Style>
+
+  <Style Selector="Border.tree-row-content.active-session">
+    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
   </Style>
 
   <Style Selector="Path.tree-chevron">
@@ -282,6 +288,13 @@
     <Setter Property="StrokeLineCap" Value="Round" />
     <Setter Property="StrokeJoin" Value="Round" />
     <Setter Property="Fill" Value="Transparent" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="wc|LineIcon.tree-icon">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
@@ -327,27 +340,27 @@
   </Style>
 
   <!-- Agent kind icons are coloured by run state; ended/unknown falls back to the muted stroke above. -->
-  <Style Selector="Path.tree-icon.agent-running">
-    <Setter Property="Stroke" Value="{DynamicResource RunningBrush}" />
+  <Style Selector="wc|LineIcon.tree-icon.agent-running">
+    <Setter Property="Foreground" Value="{DynamicResource RunningBrush}" />
   </Style>
 
-  <Style Selector="Path.tree-icon.agent-queued">
-    <Setter Property="Stroke" Value="{DynamicResource TextMutedBrush}" />
+  <Style Selector="wc|LineIcon.tree-icon.agent-queued">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
-  <Style Selector="Path.tree-icon.agent-completed">
-    <Setter Property="Stroke" Value="{DynamicResource SuccessBrush}" />
+  <Style Selector="wc|LineIcon.tree-icon.agent-completed">
+    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
   </Style>
 
-  <Style Selector="Path.tree-icon.agent-failed">
-    <Setter Property="Stroke" Value="{DynamicResource DangerBrush}" />
+  <Style Selector="wc|LineIcon.tree-icon.agent-failed">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
   </Style>
 
-  <Style Selector="Path.tree-icon.agent-stopped">
-    <Setter Property="Stroke" Value="{DynamicResource WarningBrush}" />
+  <Style Selector="wc|LineIcon.tree-icon.agent-stopped">
+    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
   </Style>
 
-  <Style Selector="Path.tree-icon.agent-running-animated">
+  <Style Selector="wc|LineIcon.tree-icon.agent-running-animated">
     <Style.Animations>
       <Animation Duration="0:0:1.6" IterationCount="INFINITE">
         <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
@@ -355,6 +368,42 @@
         <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1" /></KeyFrame>
       </Animation>
     </Style.Animations>
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-keyword">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxKeywordBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-string">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxStringBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-comment">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxCommentBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-number">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxNumberBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-type">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxTypeBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-function">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxFunctionBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-variable">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxVariableBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-preprocessor">
+    <Setter Property="Foreground" Value="{DynamicResource SyntaxPreprocessorBrush}" />
+  </Style>
+
+  <Style Selector="wc|SyntaxTokenTextBlock.syntax-invalid">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
   </Style>
 
   <Style Selector="Ellipse.status-dot">
@@ -434,6 +483,13 @@
   <Style Selector="CheckBox">
     <Setter Property="MinHeight" Value="20" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+  </Style>
+
+  <!-- Side panels follow their column: a text keeps to one line and is cut to an ellipsis instead of wrapping, and
+       TrimmedTextToolTip shows the whole of a cut text on hover. A text that sets its own wrapping keeps it. -->
+  <Style Selector="wc|PanelChrome:sidebar TextBlock">
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
 </Styles>

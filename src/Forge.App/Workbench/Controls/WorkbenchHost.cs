@@ -93,12 +93,7 @@ internal sealed class WorkbenchHost : Panel
         var size = new Size(
             double.IsFinite(availableSize.Width) ? availableSize.Width : 0,
             double.IsFinite(availableSize.Height) ? availableSize.Height : 0);
-        for (var i = 0; i < Children.Count; i++)
-        {
-            Children[i].Measure(size);
-        }
-
-        return size;
+        return LayoutChildren(size, measureOnly: true);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
@@ -106,7 +101,7 @@ internal sealed class WorkbenchHost : Panel
         arranging = true;
         try
         {
-            return ArrangeCore(finalSize);
+            return LayoutChildren(finalSize, measureOnly: false);
         }
         finally
         {
@@ -119,7 +114,8 @@ internal sealed class WorkbenchHost : Panel
         }
     }
 
-    private Size ArrangeCore(Size finalSize)
+    /// <summary>Uses the same region, drawer and cover slots for measurement and arrangement.</summary>
+    private Size LayoutChildren(Size finalSize, bool measureOnly)
     {
         var width = finalSize.Width;
         var height = finalSize.Height;
@@ -127,7 +123,7 @@ internal sealed class WorkbenchHost : Panel
         {
             for (var i = 0; i < Children.Count; i++)
             {
-                Children[i].Arrange(default);
+                Place(Children[i], default, measureOnly);
             }
 
             return finalSize;
@@ -146,21 +142,21 @@ internal sealed class WorkbenchHost : Panel
             var region = layout.Order[i];
             var isDocked = region.Role == RegionRole.Main || !region.IsAutoHidden;
             regionDocked[(int)region.Role] = isDocked;
+            if (region.Role != RegionRole.Main && region.IsAutoHidden)
+            {
+                if (layout.EdgeOf(region.Role) == RegionEdge.Left)
+                {
+                    leftStrips++;
+                }
+                else
+                {
+                    rightStrips++;
+                }
+            }
+
             if (!isDocked)
             {
                 regionRects[(int)region.Role] = default;
-                if (region.Role != RegionRole.Main)
-                {
-                    if (layout.EdgeOf(region.Role) == RegionEdge.Left)
-                    {
-                        leftStrips++;
-                    }
-                    else
-                    {
-                        rightStrips++;
-                    }
-                }
-
                 continue;
             }
 
@@ -196,8 +192,8 @@ internal sealed class WorkbenchHost : Panel
         if (drawerOpen && drawerRole is { } drawn)
         {
             var region = layout.GetRegion(drawn);
-            var drawerWidth = Math.Min(Math.Max(region.Width, WorkbenchMetrics.SideMinWidth), width);
-            var drawerX = layout.EdgeOf(drawn) == RegionEdge.Left ? 0 : Math.Max(0, width - drawerWidth);
+            var drawerWidth = Math.Min(Math.Max(region.Width, WorkbenchMetrics.SideMinWidth), Math.Max(0, width - leftPad - rightPad));
+            var drawerX = layout.EdgeOf(drawn) == RegionEdge.Left ? leftPad : Math.Max(0, width - rightPad - drawerWidth);
             drawerRect = new Rect(drawerX, 0, drawerWidth, height);
         }
 
@@ -239,13 +235,13 @@ internal sealed class WorkbenchHost : Panel
                         coverRect.Y - union.Y,
                         coverRect.Width,
                         coverRect.Height);
-                    presenter.Arrange(union);
+                    Place(presenter, union, measureOnly);
                 }
                 else
                 {
                     presenter.RegionRect = new Rect(0, 0, rect.Width, rect.Height);
                     presenter.PreviewCoverRect = default;
-                    presenter.Arrange(rect);
+                    Place(presenter, rect, measureOnly);
                 }
 
                 continue;
@@ -257,13 +253,13 @@ internal sealed class WorkbenchHost : Panel
                 var drawerWidth = Math.Max(0, drawerRect.Width - 1);
                 presenter.RegionRect = new Rect(0, 0, drawerWidth, drawerRect.Height);
                 presenter.PreviewCoverRect = default;
-                presenter.Arrange(new Rect(drawerRect.X + inset, drawerRect.Y, drawerWidth, drawerRect.Height));
+                Place(presenter, new Rect(drawerRect.X + inset, drawerRect.Y, drawerWidth, drawerRect.Height), measureOnly);
                 continue;
             }
 
             presenter.RegionRect = default;
             presenter.PreviewCoverRect = default;
-            presenter.Arrange(default);
+            Place(presenter, default, measureOnly);
         }
 
         var leftIndex = 0;
@@ -277,23 +273,30 @@ internal sealed class WorkbenchHost : Panel
                 continue;
             }
 
-            if (regionDocked[index])
+            if (region.Role == RegionRole.Main)
             {
-                strip.Arrange(default);
+                Place(strip, default, measureOnly);
+                continue;
+            }
+
+            if (!region.IsAutoHidden)
+            {
+                Place(strip, default, measureOnly);
                 continue;
             }
 
             var edge = EdgeOf(layout, region.Role);
             strip.Edge = edge;
+            strip.IsRegionShown = drawerOpen && drawerRole == region.Role;
             var stripWidth = WorkbenchMetrics.AutoHideStripWidth;
             if (edge == RegionEdge.Left)
             {
-                strip.Arrange(new Rect(leftIndex * stripWidth, 0, stripWidth, height));
+                Place(strip, new Rect(leftIndex * stripWidth, 0, stripWidth, height), measureOnly);
                 leftIndex++;
             }
             else
             {
-                strip.Arrange(new Rect(width - ((rightIndex + 1) * stripWidth), 0, stripWidth, height));
+                Place(strip, new Rect(width - ((rightIndex + 1) * stripWidth), 0, stripWidth, height), measureOnly);
                 rightIndex++;
             }
         }
@@ -320,22 +323,25 @@ internal sealed class WorkbenchHost : Panel
             var gapX = regionRects[dockedRoles[i]].Right;
             splitter.SplitterIndex = splitterIndex;
             var blocked = drawerOpen || (coverRect.Width > 0 && gapX >= coverRect.X && gapX < coverRect.Right);
-            splitter.Arrange(blocked
+            Place(splitter, blocked
                 ? default
                 : new Rect(
                     gapX + ((WorkbenchMetrics.RegionSplitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
                     0,
                     WorkbenchMetrics.SplitterHitWidth,
-                    height));
+                    height), measureOnly);
             splitterIndex++;
         }
 
         for (var i = splitterIndex; i < regionSplitters.Length; i++)
         {
-            regionSplitters[i]?.Arrange(default);
+            if (regionSplitters[i] is { } splitter)
+            {
+                Place(splitter, default, measureOnly);
+            }
         }
 
-        drawerSurface.Arrange(drawerOpen ? drawerRect : default);
+        Place(drawerSurface, drawerOpen ? drawerRect : default, measureOnly);
 
         if (swapping)
         {
@@ -348,16 +354,25 @@ internal sealed class WorkbenchHost : Panel
                 regionDocked[2],
                 regionRects[2]);
             dropOverlay.SetHovered(swapHovered);
-            dropOverlay.Arrange(new Rect(0, 0, width, height));
+            Place(dropOverlay, new Rect(0, 0, width, height), measureOnly);
         }
         else
         {
             dropOverlay.IsVisible = false;
             dropOverlay.Clear();
-            dropOverlay.Arrange(default);
+            Place(dropOverlay, default, measureOnly);
         }
 
         return finalSize;
+    }
+
+    private static void Place(Control child, Rect rect, bool measureOnly)
+    {
+        child.Measure(rect.Size);
+        if (!measureOnly)
+        {
+            child.Arrange(rect);
+        }
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)

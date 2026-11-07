@@ -126,6 +126,8 @@ public sealed class AgentLoop(AgentLoopServices services)
             {
                 await PersistAsync(instance, ChatMessage.User(steering), null, ct).ConfigureAwait(false);
             }
+
+            await DeliverInterjectionsAsync(instance, sink).ConfigureAwait(false);
         }
 
         throw new AgentTurnLimitException(
@@ -185,6 +187,33 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Hands the user's interjections to the model at a tool-batch boundary: all pending ones become one user message after
+    /// the batch's results, and each is reported so the UI can show where it landed. Nothing is skipped.
+    /// </summary>
+    private async ValueTask DeliverInterjectionsAsync(AgentInstance instance, IAgentEventSink sink)
+    {
+        if (!instance.HasInterjections)
+        {
+            return;
+        }
+
+        var taken = instance.TakeInterjections();
+        if (taken.Count == 0)
+        {
+            return;
+        }
+
+        var at = DateTimeOffset.UtcNow;
+        foreach (var text in taken)
+        {
+            sink.Emit(new AgentInterjected(instance.Id, text, at));
+        }
+
+        var message = taken.Count == 1 ? taken[0] : string.Join("\n\n", taken);
+        await PersistAsync(instance, ChatMessage.User(message), null, CancellationToken.None).ConfigureAwait(false);
     }
 
     private static ChatMessage WithInstructions(ChatMessage message, string instructions)

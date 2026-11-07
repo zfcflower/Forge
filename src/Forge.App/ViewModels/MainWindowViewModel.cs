@@ -91,6 +91,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
                 StringComparer.Ordinal),
         };
         Projects.SessionArchived = OnSessionArchived;
+        Projects.ArchiveGuard = ConfirmArchiveAsync;
         Projects.AgentTrees = sessionId =>
             sessions.TryGetValue(sessionId, out var session) ? session.AgentSnapshots() : [];
         Files = new FilesPanelViewModel(
@@ -109,20 +110,12 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             composition.GitPullRequests);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         NewTerminalCommand = new RelayCommand(OpenTerminal);
-        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs);
+        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GitPanel);
         terminals = new TerminalWorkbench(Workbench, composition.Preferences, composition.Host?.Client);
         newTerminalButton = CreateNewTerminalButton();
 
-        // Appended after the three default tool tabs, so the existing order (TODO | Review | Specs) does not move; the
-        // group's active tab is the one the layout constructor set, so opening the Git tab does not steal the view.
-        Workbench.OpenTab(
-            Workbench.InspectorTools,
-            WorkbenchIds.GitTab,
-            TabKind.Git,
-            GitPanel,
-            GitPanel.Title,
-            activate: false,
-            closable: false);
+        // Git is its own panel, stacked under the project panel on the left; its title follows the view model.
+        Workbench.GitPanel!.Title = GitPanel.Title;
         GitPanel.PropertyChanged += OnGitPanelPropertyChanged;
         openChangesTool = new PanelToolButton(
             OpenChangesToolId,
@@ -138,7 +131,10 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         Workbench.ProjectPanel.HeaderTools.Add(refreshProjectsTool);
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
         Workbench.BottomTabs.HeaderTools.Add(newTerminalButton);
+        // The Git panel's remote operations are icons in its title bar, like the project panel's tools.
+        RefreshGitTools();
         Workbench.TabClosed += OnTabClosed;
+        Workbench.ContentCloseGuard = ConfirmCloseTabAsync;
         Workbench.ActiveTabChanged += OnActiveTabChanged;
         Workbench.LayoutChanged += OnLayoutChanged;
         Workbench.PropertyChanged += OnWorkbenchPropertyChanged;
@@ -222,6 +218,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (Set(ref activeSession, value))
             {
+                Projects.SetActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
                 ApplyPanelContext();
@@ -749,6 +746,25 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// (Re)builds the Git panel's title-bar tools - fetch, pull, push, refresh; the panel never fetches on its own, so every
+    /// network call is one of these. Rebuilt on a language switch so the tooltips follow. The ids are the AutomationIds.
+    /// </summary>
+    private void RefreshGitTools()
+    {
+        if (Workbench.GitPanel is not { } panel)
+        {
+            return;
+        }
+
+        var tools = panel.HeaderTools;
+        tools.Clear();
+        tools.Add(new PanelToolButton("git-fetch", Loc.Instance[GitStrings.ButtonFetch], "IconGitFetch", GitPanel.FetchCommand));
+        tools.Add(new PanelToolButton("git-pull", Loc.Instance[GitStrings.ButtonPull], "IconGitPull", GitPanel.PullCommand));
+        tools.Add(new PanelToolButton("git-push", Loc.Instance[GitStrings.ButtonPush], "IconGitPush", GitPanel.PushCommand));
+        tools.Add(new PanelToolButton("git-refresh", Loc.Instance[GitStrings.ButtonRefresh], "IconRefresh", GitPanel.RefreshCommand));
+    }
+
     /// <summary>Opens a terminal in the active session, or says in the status bar why it cannot.</summary>
     private void OpenTerminal()
     {
@@ -805,6 +821,12 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnTabClosed(object? sender, TabModel tab)
     {
+        if (tab.Content is FileDocumentViewModel file)
+        {
+            file.PropertyChanged -= OnFileDocumentChanged;
+            _ = file.ReleaseDocumentAsync();
+        }
+
         if (tab.Kind == TabKind.Session && tab.Content is SessionWorkspaceViewModel session)
         {
             session.TabTitleChanged -= OnSessionTitleChanged;
@@ -887,9 +909,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
                 Status.SetChecks(GitPanel.ChecksText);
                 break;
             case nameof(GitPanelViewModel.Title):
-                if (Workbench.FindTab(WorkbenchIds.GitTab) is { } tab)
+                if (Workbench.GitPanel is { } panel)
                 {
-                    tab.Title = GitPanel.Title;
+                    panel.Title = GitPanel.Title;
                 }
 
                 break;
@@ -913,18 +935,231 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var id = newTab ? WorkbenchIds.PinnedFileTab(resolved) : WorkbenchIds.PreviewTab;
+        var workspace = activeSession?.WorkDir;
+        if (FindFileTab(resolved) is { Content: FileDocumentViewModel same } sameTab)
+        {
+            if (!same.IsDirty && !same.IsSaving)
+            {
+                same.Workspace = workspace;
+                await same.LoadAsync(resolved, ct).ConfigureAwait(true);
+                sameTab.Title = same.TabTitle;
+            }
+
+            Workbench.ActivateTab(sameTab);
+            return;
+        }
+
         if (Workbench.FindTab(id) is { Content: FileDocumentViewModel open } tab)
         {
-            await open.LoadAsync(resolved, ct).ConfigureAwait(true);
+            if (open.IsDirty && !await ConfirmDiscardManyAsync(() => [open]).ConfigureAwait(true))
+            {
+                return;
+            }
+
+            open.Workspace = workspace;
+            await open.LoadAsync(resolved, ct, discardEdits: true).ConfigureAwait(true);
             tab.Title = open.TabTitle;
             Workbench.ActivateTab(tab);
             return;
         }
 
-        var document = FileDocumentViewModel.Create();
-        await document.LoadAsync(resolved, ct).ConfigureAwait(true);
-        Workbench.OpenTab(Workbench.PreviewTabs, id, TabKind.FilePreview, document, document.TabTitle);
+        var document = FileDocumentViewModel.Create(composition.Editor?.Grammars, composition.Editor?.Sessions);
+        document.Workspace = workspace;
+        var opened = false;
+        try
+        {
+            await document.LoadAsync(resolved, ct).ConfigureAwait(true);
+            if (Workbench.FindTab(id) is not null || FindFileTab(resolved) is not null)
+            {
+                return;
+            }
+
+            Workbench.OpenTab(Workbench.PreviewTabs, id, TabKind.FilePreview, document, document.TabTitle);
+            document.PropertyChanged += OnFileDocumentChanged;
+            opened = true;
+        }
+        finally
+        {
+            if (!opened)
+            {
+                await document.ReleaseDocumentAsync().ConfigureAwait(true);
+            }
+        }
     }
+
+    private TabModel? FindFileTab(string resolved)
+    {
+        var full = Path.GetFullPath(resolved);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var tab in Workbench.PreviewTabs.Tabs)
+        {
+            if (tab.Content is FileDocumentViewModel file && string.Equals(file.Path, full, comparison))
+            {
+                return tab;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnFileDocumentChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(FileDocumentViewModel.TabTitle) || sender is not FileDocumentViewModel file)
+        {
+            return;
+        }
+
+        foreach (var tab in Workbench.PreviewTabs.Tabs)
+        {
+            if (ReferenceEquals(tab.Content, file))
+            {
+                tab.Title = file.TabTitle;
+            }
+        }
+    }
+
+    private async Task<bool> ConfirmDiscardAsync(FileDocumentViewModel file, bool archive = false)
+    {
+        if (dialogs is null)
+        {
+            Status.SetWorkspaceProblem(new LocText(InspectorStrings.FilesUnsaved));
+            return false;
+        }
+
+        var name = Path.GetFileName(file.Path);
+        return await dialogs.ConfirmAsync(
+                Loc.Instance[archive ? InspectorStrings.FilesArchiveTitle : InspectorStrings.FilesDiscardTitle],
+                archive ? InspectorStrings.FileArchiveMessage(name) : InspectorStrings.FileDiscardMessage(name),
+                Loc.Instance[archive ? InspectorStrings.FilesArchiveConfirm : InspectorStrings.FilesDiscardConfirm],
+                ShellStrings.Cancel)
+            .ConfigureAwait(true);
+    }
+
+    private async Task<bool> ConfirmDiscardManyAsync(Func<List<FileDocumentViewModel>> collect, bool archive = false)
+    {
+        for (var round = 0; round < 2; round++)
+        {
+            var snapshot = new List<(FileDocumentViewModel File, string Text)>();
+            foreach (var file in collect())
+            {
+                if (file.IsSaving)
+                {
+                    Status.SetWorkspaceProblem(new LocText(InspectorStrings.FilesBusy));
+                    return false;
+                }
+
+                if (file.IsDirty)
+                {
+                    snapshot.Add((file, file.EditText));
+                }
+            }
+
+            if (snapshot.Count == 0)
+            {
+                return true;
+            }
+
+            foreach (var (file, _) in snapshot)
+            {
+                if (!await ConfirmDiscardAsync(file, archive).ConfigureAwait(true))
+                {
+                    return false;
+                }
+            }
+
+            if (SnapshotStillCurrent(snapshot, collect()))
+            {
+                return true;
+            }
+        }
+
+        Status.SetWorkspaceProblem(new LocText(InspectorStrings.FilesUnsaved));
+        return false;
+    }
+
+    private static bool SnapshotStillCurrent(List<(FileDocumentViewModel File, string Text)> snapshot, List<FileDocumentViewModel> now)
+    {
+        foreach (var file in now)
+        {
+            if (!file.IsDirty)
+            {
+                continue;
+            }
+
+            var found = false;
+            foreach (var (known, text) in snapshot)
+            {
+                if (ReferenceEquals(known, file))
+                {
+                    found = string.Equals(text, file.EditText, StringComparison.Ordinal);
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private List<FileDocumentViewModel> DirtyFiles(string? underRoot)
+    {
+        var result = new List<FileDocumentViewModel>();
+        string? prefix = null;
+        if (!string.IsNullOrEmpty(underRoot))
+        {
+            prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(underRoot)) + Path.DirectorySeparatorChar;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var tab in Workbench.PreviewTabs.Tabs)
+        {
+            if (tab.Content is FileDocumentViewModel { IsDirty: true } file
+                && (prefix is null || file.Path.StartsWith(prefix, comparison)))
+            {
+                result.Add(file);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<bool> ConfirmCloseTabAsync(TabModel tab)
+    {
+        return tab.Content is not FileDocumentViewModel { IsDirty: true } file
+            || await ConfirmDiscardManyAsync(() => [file]).ConfigureAwait(true);
+    }
+
+    private Task<bool> ConfirmArchiveAsync(string sessionId)
+    {
+        if (!sessions.TryGetValue(sessionId, out var session) || string.IsNullOrEmpty(session.WorkDir))
+        {
+            return Task.FromResult(true);
+        }
+
+        var root = session.WorkDir;
+        return ConfirmDiscardManyAsync(() => DirtyFiles(root), archive: true);
+    }
+    public bool HasUnsavedFiles
+    {
+        get
+        {
+            foreach (var tab in Workbench.PreviewTabs.Tabs)
+            {
+                if (tab.Content is FileDocumentViewModel { IsDirty: true })
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    public Task<bool> ConfirmCloseWindowAsync() => ConfirmDiscardManyAsync(() => DirtyFiles(null));
 
     /// <summary>
     /// File-panel rows carry workspace-relative paths, while spec-tree rows and restored snapshots are already absolute.
@@ -1114,6 +1349,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ProviderNotice));
         RefreshOpenChangesTool();
         RefreshProjectTools();
+        RefreshGitTools();
 
         // The bottom group's "new terminal" tool carries its tooltip as a plain string too; rebuild it and re-sync the row.
         newTerminalButton = CreateNewTerminalButton();
@@ -1214,6 +1450,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         composition.Runtimes.Dispose();
 
         Workbench.TabClosed -= OnTabClosed;
+        Workbench.ContentCloseGuard = null;
         Workbench.ActiveTabChanged -= OnActiveTabChanged;
         Workbench.LayoutChanged -= OnLayoutChanged;
         Workbench.PropertyChanged -= OnWorkbenchPropertyChanged;

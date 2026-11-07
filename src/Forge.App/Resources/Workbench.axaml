@@ -4,15 +4,15 @@
                     xmlns:vm="using:Forge.App.ViewModels"
                     xmlns:loc="using:Forge.App.Localization">
 
-  <!-- Workbench chrome icons (same family as the token geometries: filled paths in a 24x24 box). -->
+  <!-- Workbench chrome icons (same line family as the token geometries: strokes on a 24x24 grid). -->
   <!-- A pushpin: pin the region back to the surrounding layout. -->
-  <StreamGeometry x:Key="IconPin">F0 M9.4 2.8h5.2v1.9h-1.5v4.6l3 3v1.9h-4.2v6.1L12 22.6l-.9-2.3v-6.1H6.9v-1.9l3-3V4.7H8.4V2.8z</StreamGeometry>
-  <!-- An arrow towards the window edge between two rails: auto-hide the region. -->
-  <StreamGeometry x:Key="IconAutoHide">F0 M3 4h18v2H3zM3 18h18v2H3zM13 7l-5 5 5 5v-3.5h4v-3h-4z</StreamGeometry>
+  <StreamGeometry x:Key="IconPin">M9 4h6M10 4v5l-3 3v2h10v-2l-3-3V4M12 14v6</StreamGeometry>
+  <!-- An arrow towards the window edge rail: auto-hide the region. -->
+  <StreamGeometry x:Key="IconAutoHide">M4 4v16M20 12H9M13 8l-4 4 4 4</StreamGeometry>
   <!-- Four corner brackets: spread the preview group over the whole Main region. -->
-  <StreamGeometry x:Key="IconCoverMain">F0 M3 3h7v2H5v5H3zM21 3v7h-2V5h-5V3zM3 21v-7h2v5h5v2zM21 21h-7v-2h5v-5h2z</StreamGeometry>
+  <StreamGeometry x:Key="IconCoverMain">M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5</StreamGeometry>
   <!-- A frame with an arrow pointing into it: dock the floating window back. -->
-  <StreamGeometry x:Key="IconDockBack">F0 M2 4h20v2H2zM2 18h20v2H2zM2 4v16h2V4zM22 4v16h-2V4zM11 8l-4 4 4 4v-3h5v-2h-5z</StreamGeometry>
+  <StreamGeometry x:Key="IconDockBack">M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 12H8M11 9l-3 3 3 3</StreamGeometry>
 
   <!-- Title-bar tools of the model: a PanelToolButton renders as an icon button, every other item keeps its own template. -->
   <controls:HeaderToolTemplate x:Key="WorkbenchHeaderToolTemplate" />
@@ -33,8 +33,8 @@
                 BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="{TemplateBinding BorderThickness}"
                 CornerRadius="{TemplateBinding CornerRadius}">
-          <PathIcon Width="13"
-                    Height="13"
+          <controls:LineIcon Width="14"
+                    Height="14"
                     Data="{TemplateBinding Icon}"
                     Foreground="{DynamicResource TextSecondaryBrush}"
                     HorizontalAlignment="Center"
@@ -45,7 +45,7 @@
     <Style Selector="^:pointerover /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
     </Style>
-    <Style Selector="^:pointerover /template/ PathIcon">
+    <Style Selector="^:pointerover /template/ controls|LineIcon">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
     <Style Selector="^:pressed /template/ Border#PART_Background">
@@ -57,10 +57,11 @@
     </Style>
   </ControlTheme>
 
-  <!-- A strip button: 24 px across the strip, as long as its title needs once the strip rotates it. -->
+  <!-- A dock-strip tab: 34 px across the 40 px strip (indicator bar, gaps and separator take the rest), as long as its rotated title needs. -->
   <ControlTheme x:Key="{x:Type controls:AutoHideButton}" TargetType="controls:AutoHideButton">
-    <Setter Property="Height" Value="24" />
-    <Setter Property="Padding" Value="2,0" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -69,6 +70,7 @@
       <ControlTemplate>
         <Border Name="PART_Background"
                 Background="{TemplateBinding Background}"
+                CornerRadius="{TemplateBinding CornerRadius}"
                 Padding="{TemplateBinding Padding}">
           <ContentPresenter Content="{TemplateBinding Content}"
                             HorizontalContentAlignment="Center"
@@ -88,22 +90,25 @@
     </Style>
   </ControlTheme>
 
-  <!-- One tab: inactive tabs sit on a light green, the active tab on the panel surface; both carry a 1 px border
-       and 5 px rounded top corners, so the active tab reads as a connected sheet over its panel body. -->
+  <!-- One tab, Visual Studio tool-window style: an inactive tab is plain, centred, muted text on the title bar; the active
+       tab is a 1 px frame with rounded top corners, filled with the panel body's colour and standing on the title bar's
+       bottom line so it merges with the body below. Only the active tab shows its close button. -->
   <ControlTheme x:Key="{x:Type controls:TabHeaderView}" TargetType="controls:TabHeaderView">
-    <Setter Property="Height" Value="28" />
-    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Height" Value="25" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="VerticalAlignment" Value="Bottom" />
+    <Setter Property="MinWidth" Value="64" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="Focusable" Value="True" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Name="PART_Root"
-                Background="{DynamicResource AccentSubtleBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="5,5,0,0"
-                Padding="8,0,4,0">
-          <Grid ColumnDefinitions="Auto,Auto" VerticalAlignment="Center">
+                Background="Transparent"
+                BorderBrush="Transparent"
+                BorderThickness="1,1,1,0"
+                CornerRadius="4,4,0,0"
+                Padding="12,0,4,0">
+          <Grid ColumnDefinitions="Auto,Auto" HorizontalAlignment="Center" VerticalAlignment="Center">
             <TextBlock Name="PART_Label"
                        Grid.Column="0"
                        Text="{TemplateBinding TabTitle}"
@@ -117,28 +122,33 @@
                                       Grid.Column="1"
                                       Width="16"
                                       Height="16"
-                                      Margin="4,0,0,0"
+                                      Margin="6,0,0,0"
                                       VerticalAlignment="Center"
                                       Icon="{DynamicResource IconClose}"
                                       IsVisible="{TemplateBinding IsClosable}"
-                                      Opacity="0"
-                                      IsHitTestVisible="False"
                                       ToolTip.Tip="{Binding [workbench.closeTab], Source={x:Static loc:Loc.Instance}}"
                                       AutomationProperties.AutomationId="{TemplateBinding CloseAutomationId}" />
           </Grid>
         </Border>
       </ControlTemplate>
     </Setter>
-    <Style Selector="^:pointerover /template/ Border#PART_Root">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Style Selector="^ /template/ controls|PanelIconButton#PART_Close">
+      <Setter Property="Opacity" Value="0" />
+      <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
-    <Style Selector="^:pointerover /template/ controls|PanelIconButton#PART_Close">
-      <Setter Property="Opacity" Value="1" />
-      <Setter Property="IsHitTestVisible" Value="True" />
+    <Style Selector="^:pointerover /template/ TextBlock#PART_Label">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="^:selected">
+      <Setter Property="ZIndex" Value="1" />
     </Style>
     <Style Selector="^:selected /template/ Border#PART_Root">
-      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="Background" Value="{Binding $parent[controls:PanelChrome].Background}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+    <Style Selector="^:selected /template/ controls|PanelIconButton#PART_Close, ^:pointerover /template/ controls|PanelIconButton#PART_Close">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="IsHitTestVisible" Value="True" />
     </Style>
     <Style Selector="^:selected /template/ TextBlock#PART_Label">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
@@ -156,25 +166,30 @@
                       VerticalScrollBarVisibility="Disabled"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch">
-          <StackPanel Name="PART_Tabs" Orientation="Horizontal" VerticalAlignment="Stretch" />
+          <StackPanel Name="PART_Tabs" Orientation="Horizontal" VerticalAlignment="Stretch" Margin="4,0,0,0" />
         </ScrollViewer>
       </ControlTemplate>
     </Setter>
   </ControlTheme>
 
-  <!-- A panel: 28 px title bar over the body. -->
+  <!-- A panel: 28 px title bar over the body. Background is the body colour (white in Main, the sidebar grey at the
+       sides); the active tab borrows it so it merges with the body. The title bar's bottom line is drawn under the tab
+       strip, so the active tab covers it. -->
   <ControlTheme x:Key="{x:Type controls:PanelChrome}" TargetType="controls:PanelChrome">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
     <Setter Property="Template">
       <ControlTemplate>
-        <Border Name="PART_Body" Background="{DynamicResource SurfaceBrush}" ClipToBounds="True">
+        <Border Name="PART_Body" Background="{TemplateBinding Background}" ClipToBounds="True">
           <Grid RowDefinitions="28,*">
             <Border Name="PART_TitleBar"
                     Grid.Row="0"
                     Height="28"
-                    Background="{DynamicResource PanelTitleBarBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="0,0,0,1">
+                    Background="{DynamicResource PanelTitleBarBrush}">
               <Grid ColumnDefinitions="*,Auto">
+                <Border Grid.ColumnSpan="2"
+                        Height="1"
+                        VerticalAlignment="Bottom"
+                        Background="{DynamicResource BorderBrush}" />
                 <TextBlock Name="PART_Title"
                            Grid.Column="0"
                            Margin="8,0,0,0"
@@ -218,6 +233,12 @@
                                             ToolTip.Tip="{TemplateBinding PinTooltip}"
                                             AutomationProperties.Name="{TemplateBinding PinTooltip}"
                                             AutomationProperties.AutomationId="{TemplateBinding PinAutomationId}" />
+                  <controls:PanelIconButton Name="PART_Minimize"
+                                            IsVisible="{TemplateBinding MinimizeVisible}"
+                                            Icon="{TemplateBinding MinimizeIcon}"
+                                            ToolTip.Tip="{TemplateBinding MinimizeTooltip}"
+                                            AutomationProperties.Name="{TemplateBinding MinimizeTooltip}"
+                                            AutomationProperties.AutomationId="{TemplateBinding MinimizeAutomationId}" />
                   <controls:PanelIconButton Name="PART_Maximize"
                                             IsVisible="{TemplateBinding MaximizeVisible}"
                                             Icon="{TemplateBinding MaximizeIcon}"
@@ -239,7 +260,7 @@
                 </StackPanel>
               </Grid>
             </Border>
-            <ContentControl Grid.Row="1"
+            <ContentControl Name="PART_Content" Grid.Row="1"
                             Content="{TemplateBinding Body}"
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch"
@@ -248,8 +269,14 @@
         </Border>
       </ControlTemplate>
     </Setter>
-    <Style Selector="^:sidebar /template/ Border#PART_Body">
+    <Style Selector="^:sidebar">
       <Setter Property="Background" Value="{DynamicResource SidebarBrush}" />
+    </Style>
+    <Style Selector="^:sidebar /template/ Border#PART_TitleBar">
+      <Setter Property="Background" Value="{DynamicResource SidebarTitleBarBrush}" />
+    </Style>
+    <Style Selector="^:minimized /template/ ContentControl#PART_Content">
+      <Setter Property="IsVisible" Value="False" />
     </Style>
   </ControlTheme>
 

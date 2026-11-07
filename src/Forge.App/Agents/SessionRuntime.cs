@@ -77,6 +77,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private readonly Lock gate = new();
     private AgentHost? host;
     private AgentInstance? root;
+    private AgentInstance? activeRoot;
+    private AgentDefinition? rootDefinition;
+    private bool rootStale;
+    private List<string>? undelivered;
     private SessionApprovalHandler? approvalHandler;
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
@@ -121,17 +125,107 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         ArgumentNullException.ThrowIfNull(sink);
 
         var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
-        await Task.Run(
-                async () =>
-                {
-                    await foreach (var value in agentHost.RunAsync(agent, userText, ct).ConfigureAwait(false))
+        lock (gate)
+        {
+            activeRoot = agent;
+        }
+
+        try
+        {
+            await Task.Run(
+                    async () =>
                     {
-                        TrackSubAgent(value);
-                        sink(value);
-                    }
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
+                        await foreach (var value in agentHost.RunAsync(agent, userText, ct).ConfigureAwait(false))
+                        {
+                            TrackSubAgent(value);
+                            sink(value);
+                        }
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // Interject and this hand-back share the lock, so a message is either delivered by the loop or handed back.
+            lock (gate)
+            {
+                activeRoot = null;
+                var left = agent.TakeInterjections();
+                if (left.Count > 0)
+                {
+                    (undelivered ??= []).AddRange(left);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The definition the root agent runs with from the next turn on: null is the default main agent with the configured
+    /// model. A change rebuilds the root from the store before the next turn, so the conversation keeps its context; the
+    /// turn already running keeps the definition it started with.
+    /// </summary>
+    public AgentDefinition? RootDefinition
+    {
+        get
+        {
+            lock (gate)
+            {
+                return rootDefinition;
+            }
+        }
+    }
+
+    /// <summary>Sets <see cref="RootDefinition"/>; returns false when it is unchanged (same kind and model settings).</summary>
+    public bool SetRootDefinition(AgentDefinition? definition)
+    {
+        lock (gate)
+        {
+            if (SameDefinition(rootDefinition, definition))
+            {
+                return false;
+            }
+
+            rootDefinition = definition;
+            rootStale = true;
+            return true;
+        }
+    }
+
+    private static bool SameDefinition(AgentDefinition? left, AgentDefinition? right) =>
+        left is null || right is null
+            ? left is null && right is null
+            : string.Equals(left.Name, right.Name, StringComparison.Ordinal) && left.Model == right.Model &&
+              string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal) &&
+              ReferenceEquals(left.ToolNames, right.ToolNames);
+
+    /// <summary>
+    /// Hands a user message to the running root turn; the loop delivers it at the next tool-batch boundary. False when no
+    /// turn is running, in which case the caller should queue the message instead.
+    /// </summary>
+    public bool TryInterject(string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        lock (gate)
+        {
+            if (disposed || activeRoot is null)
+            {
+                return false;
+            }
+
+            activeRoot.Interject(text);
+            return true;
+        }
+    }
+
+    /// <summary>Interjections the last turn ended without delivering, oldest first; each is returned once.</summary>
+    public IReadOnlyList<string> TakeUndeliveredInterjections()
+    {
+        lock (gate)
+        {
+            var taken = undelivered;
+            undelivered = null;
+            return taken is null ? [] : taken;
+        }
     }
 
     /// <summary>
@@ -183,22 +277,27 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         AgentHost built;
         AgentInstance agent;
+        AgentDefinition? definition;
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (host is not null && root is not null)
+            if (host is not null && root is not null && !rootStale)
             {
                 return (host, root);
             }
 
-            built = Build();
+            // A changed root definition reuses the host (its tools, approval handler and router registration) and only
+            // rebuilds the root agent from the store.
+            built = host ?? Build();
+            definition = rootDefinition;
         }
 
-        agent = await built.ResumeRootAsync(SessionId, Session.WorkspacePath, CancellationToken.None).ConfigureAwait(false);
+        agent = await built.ResumeRootAsync(SessionId, Session.WorkspacePath, CancellationToken.None, definition).ConfigureAwait(false);
         lock (gate)
         {
             host ??= built;
             root = agent;
+            rootStale = !SameDefinition(rootDefinition, definition);
 
             // Subscribed here rather than in Build: a registration that arrives before the host field is set would otherwise
             // be handed to nothing, and the loop built afterwards already reads the current surface.

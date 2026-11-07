@@ -1,49 +1,17 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:git="using:Forge.App.Git"
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.GitToolView"
              x:DataType="git:GitPanelViewModel">
-  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,*" Background="Transparent">
 
-    <!-- Remote operations: the panel never fetches on its own, so every network call is one of these buttons. -->
-    <Border Classes="toolbar">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
-        <Button Classes="ghost"
-                Margin="0,0,4,0"
-                Content="{Binding [git.button.fetch], Source={x:Static loc:Loc.Instance}}"
-                Command="{Binding FetchCommand}"
-                AutomationProperties.AutomationId="git-fetch"
-                AutomationProperties.Name="{Binding [git.button.fetch], Source={x:Static loc:Loc.Instance}}" />
-        <Button Grid.Column="1"
-                Classes="ghost"
-                Margin="0,0,4,0"
-                Content="{Binding [git.button.pull], Source={x:Static loc:Loc.Instance}}"
-                Command="{Binding PullCommand}"
-                AutomationProperties.AutomationId="git-pull"
-                AutomationProperties.Name="{Binding [git.button.pull], Source={x:Static loc:Loc.Instance}}" />
-        <Button Grid.Column="2"
-                Classes="ghost"
-                Content="{Binding [git.button.push], Source={x:Static loc:Loc.Instance}}"
-                Command="{Binding PushCommand}"
-                AutomationProperties.AutomationId="git-push"
-                AutomationProperties.Name="{Binding [git.button.push], Source={x:Static loc:Loc.Instance}}" />
-        <TextBlock Grid.Column="4"
-                   Classes="caption"
-                   Margin="0,0,8,0"
-                   VerticalAlignment="Center"
-                   IsVisible="{Binding IsBusy}"
-                   Text="{Binding [git.state.busy], Source={x:Static loc:Loc.Instance}}" />
-        <Button Grid.Column="5"
-                Classes="ghost icon"
-                Command="{Binding RefreshCommand}"
-                ToolTip.Tip="{Binding [git.button.refresh], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="git-refresh"
-                AutomationProperties.Name="{Binding [git.button.refresh], Source={x:Static loc:Loc.Instance}}">
-          <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
-        </Button>
-      </Grid>
-    </Border>
+    <!-- Fetch, pull, push and refresh are icons in the panel's title bar; this line only says one is running. -->
+    <TextBlock Classes="caption"
+               Margin="8,4,8,0"
+               IsVisible="{Binding IsBusy}"
+               Text="{Binding [git.state.busy], Source={x:Static loc:Loc.Instance}}" />
 
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
       <StackPanel Margin="8,6" Spacing="8">
@@ -55,7 +23,7 @@
 
         <!-- Branch, upstream and divergence as of the last fetch. -->
         <StackPanel Spacing="3" IsVisible="{Binding HasRepository}">
-          <Grid ColumnDefinitions="Auto,*">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
             <TextBlock Classes="label" Text="{Binding [git.label.branch], Source={x:Static loc:Loc.Instance}}" />
             <TextBlock Grid.Column="1"
                        Classes="mono"
@@ -64,7 +32,7 @@
                        AutomationProperties.Name="{Binding BranchText}"
                        TextTrimming="CharacterEllipsis" />
           </Grid>
-          <Grid ColumnDefinitions="Auto,*">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
             <TextBlock Classes="label" Text="{Binding [git.label.upstream], Source={x:Static loc:Loc.Instance}}" />
             <TextBlock Grid.Column="1"
                        Classes="caption"
@@ -72,7 +40,7 @@
                        AutomationProperties.AutomationId="git-upstream"
                        TextTrimming="CharacterEllipsis" />
           </Grid>
-          <Grid ColumnDefinitions="Auto,*">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
             <TextBlock Classes="label" Text="{Binding [git.label.aheadBehind], Source={x:Static loc:Loc.Instance}}" />
             <TextBlock Grid.Column="1"
                        Classes="caption"
@@ -135,7 +103,7 @@
           <!-- Screenshots of the change: the button shows the command the project declared before it runs it. -->
           <StackPanel Spacing="4" IsVisible="{Binding ShowScreenshots}">
             <TextBlock Classes="label" Text="{Binding [git.label.screenshots], Source={x:Static loc:Loc.Instance}}" />
-            <Grid ColumnDefinitions="Auto,*">
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
               <Button Classes="ghost"
                       Content="{Binding [git.button.screenshots], Source={x:Static loc:Loc.Instance}}"
                       Command="{Binding ScreenshotsCommand}"
@@ -178,7 +146,7 @@
 
         <!-- Review threads of the pull request, unresolved first. Read-only: replying and resolving are the agent's tools. -->
         <StackPanel Spacing="4" IsVisible="{Binding ShowReview}">
-          <Grid ColumnDefinitions="Auto,*">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
             <TextBlock Classes="label" Text="{Binding [git.label.review], Source={x:Static loc:Loc.Instance}}" />
             <TextBlock Grid.Column="1"
                        Classes="caption"

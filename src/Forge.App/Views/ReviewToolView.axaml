@@ -3,7 +3,7 @@
              xmlns:vm="using:Forge.App.ViewModels"
              x:Class="Forge.App.Views.ReviewToolView"
              x:DataType="vm:ReviewPanelViewModel">
-  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SurfaceBrush}" Margin="8,6">
+  <Grid RowDefinitions="Auto,*" Background="Transparent" Margin="8,6">
     <TextBlock Classes="caption" Text="{Binding Summary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
 
     <ListBox x:Name="CommentList"

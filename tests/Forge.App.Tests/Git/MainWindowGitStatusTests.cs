@@ -107,34 +107,42 @@ public sealed class MainWindowGitStatusTests
     }
 
     [Fact]
-    public async Task The_inspector_tool_group_appends_the_git_tab_after_the_existing_three()
+    public async Task Git_is_an_independent_panel_under_the_project_panel()
     {
         var plain = NewTempDir();
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
         try
         {
-            var ids = await session.Dispatch(
+            var (tabIds, panelIds, gitContent, gitTools) = await session.Dispatch(
                 async () =>
                 {
                     await using var harness = await AppHarness.OpenWithSession(plain);
-                    var tabs = harness.ViewModel.Workbench.InspectorTools.Tabs;
-                    var result = tabs
-                        .Select(static tab => (tab.Id, tab.Kind, Content: tab.Content?.GetType().FullName, tab.Title))
+                    var workbench = harness.ViewModel.Workbench;
+                    var tabs = workbench.InspectorTools.Tabs.Select(static tab => tab.Id).ToList();
+                    var panels = workbench.Project.Panels.Select(static panel => panel.Id).ToList();
+                    var content = workbench.GitPanel?.Content?.GetType().FullName;
+                    var git = harness.ViewModel.GitPanel;
+                    var tools = workbench.GitPanel!.HeaderTools.OfType<PanelToolButton>()
+                        .Select(tool => (tool.Id, tool.IconKey, Bound: ReferenceEquals(tool.Command, tool.Id switch
+                        {
+                            "git-fetch" => git.FetchCommand,
+                            "git-pull" => git.PullCommand,
+                            "git-push" => git.PushCommand,
+                            _ => git.RefreshCommand,
+                        })))
                         .ToList();
                     harness.Detach(harness.ViewModel);
-                    return result;
+                    return (tabs, panels, content, tools);
                 },
                 CancellationToken.None);
 
-            Assert.Equal(
-                new[] { WorkbenchIds.TodoTab, WorkbenchIds.ReviewTab, WorkbenchIds.SpecsTab, WorkbenchIds.GitTab },
-                ids.Select(static tab => tab.Id));
-            Assert.Equal(
-                new[] { TabKind.Todo, TabKind.Review, TabKind.Specs, TabKind.Git },
-                ids.Select(static tab => tab.Kind));
-
-            var git = ids[^1];
-            Assert.Equal(typeof(Forge.App.Git.GitPanelViewModel).FullName, git.Content);
+            Assert.Equal(new[] { WorkbenchIds.TodoTab, WorkbenchIds.ReviewTab, WorkbenchIds.SpecsTab }, tabIds);
+            Assert.Equal(new[] { WorkbenchIds.ProjectPanel, WorkbenchIds.GitPanel }, panelIds);
+            Assert.Equal(typeof(Forge.App.Git.GitPanelViewModel).FullName, gitContent);
+            // Fetch, pull, push and refresh are icon tools in the Git panel's title bar, each bound to its command.
+            Assert.Equal(new[] { "git-fetch", "git-pull", "git-push", "git-refresh" }, gitTools.Select(static tool => tool.Id));
+            Assert.Equal(new[] { "IconGitFetch", "IconGitPull", "IconGitPush", "IconRefresh" }, gitTools.Select(static tool => tool.IconKey));
+            Assert.All(gitTools, static tool => Assert.True(tool.Bound, tool.Id));
         }
         finally
         {

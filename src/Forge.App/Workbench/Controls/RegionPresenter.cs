@@ -19,6 +19,9 @@ internal sealed class RegionPresenter : Panel
     private readonly PanelSplitter inspectorSplitter = new() { Kind = PanelSplitterKind.Inspector };
     private readonly BottomCollapsedStrip bottomStrip = new();
     private PanelModel? lastMaximized;
+    private Rect[] childRects = [];
+    private Rect regionRect;
+    private Rect previewCoverRect;
 
     public RegionPresenter(WorkbenchLayout layout, RegionRole role)
     {
@@ -42,10 +45,32 @@ internal sealed class RegionPresenter : Panel
     public RegionRole Role { get; }
 
     /// <summary>The region's own rectangle in this control's coordinates; smaller than the bounds when the preview covers Main.</summary>
-    public Rect RegionRect { get; set; }
+    public Rect RegionRect
+    {
+        get => regionRect;
+        set
+        {
+            if (regionRect != value)
+            {
+                regionRect = value;
+                InvalidateMeasure();
+            }
+        }
+    }
 
     /// <summary>Where the preview group goes while it covers Main, in this control's coordinates; empty otherwise.</summary>
-    public Rect PreviewCoverRect { get; set; }
+    public Rect PreviewCoverRect
+    {
+        get => previewCoverRect;
+        set
+        {
+            if (previewCoverRect != value)
+            {
+                previewCoverRect = value;
+                InvalidateMeasure();
+            }
+        }
+    }
 
     /// <summary>
     /// Width of the preview column as <see cref="ArrangeInspector"/> lays it out: the preview width clamped to the column
@@ -83,6 +108,7 @@ internal sealed class RegionPresenter : Panel
         Children.Add(previewSplitter);
         Children.Add(inspectorSplitter);
         Children.Add(bottomStrip);
+        childRects = new Rect[Children.Count];
         bottomStrip.Rebuild();
         InvalidateMeasure();
     }
@@ -95,21 +121,45 @@ internal sealed class RegionPresenter : Panel
         var size = new Size(
             double.IsFinite(availableSize.Width) ? availableSize.Width : 0,
             double.IsFinite(availableSize.Height) ? availableSize.Height : 0);
+        UpdateChildRects();
         for (var i = 0; i < Children.Count; i++)
         {
-            Children[i].Measure(size);
+            Children[i].Measure(childRects[i].Size);
         }
 
         return size;
     }
 
+    private void Place(Control? chrome, Rect rect)
+    {
+        if (chrome is null)
+        {
+            return;
+        }
+
+        childRects[Children.IndexOf(chrome)] = rect;
+    }
+
     protected override Size ArrangeOverride(Size finalSize)
     {
-        ResetChildren();
+        UpdateChildRects();
+        for (var i = 0; i < Children.Count; i++)
+        {
+            // Splitter changes can invalidate only arrange; measure at the new slot before arranging.
+            Children[i].Measure(childRects[i].Size);
+            Children[i].Arrange(childRects[i]);
+        }
+
+        return finalSize;
+    }
+
+    private void UpdateChildRects()
+    {
+        Array.Clear(childRects);
         var body = RegionRect;
         if (body.Width <= 0 || body.Height <= 0)
         {
-            return finalSize;
+            return;
         }
 
         var region = Layout.GetRegion(Role);
@@ -119,8 +169,8 @@ internal sealed class RegionPresenter : Panel
         ApplyMaximizedChrome(maximizedChrome);
         if (maximizedChrome is not null)
         {
-            maximizedChrome.Arrange(body);
-            return finalSize;
+            Place(maximizedChrome, body);
+            return;
         }
 
         switch (Role)
@@ -135,8 +185,6 @@ internal sealed class RegionPresenter : Panel
                 ArrangeStack(body);
                 break;
         }
-
-        return finalSize;
     }
 
     /// <summary>
@@ -156,7 +204,15 @@ internal sealed class RegionPresenter : Panel
         for (var i = 0; i < chromes.Count; i++)
         {
             var chrome = chromes[i];
-            chrome.IsVisible = !engage || ReferenceEquals(chrome, maximized);
+            var visible = !engage || ReferenceEquals(chrome, maximized);
+            if (!visible && chrome.IsVisible)
+            {
+                // Hidden controls skip arrange, so clear only the chrome being collapsed before hiding it.
+                chrome.Measure(default);
+                chrome.Arrange(default);
+            }
+
+            chrome.IsVisible = visible;
         }
 
         if (!engage)
@@ -197,29 +253,37 @@ internal sealed class RegionPresenter : Panel
         if (collapsed && bottomChrome is not null && Layout.BottomHasContent)
         {
             var stripHeight = Math.Min(WorkbenchMetrics.AutoHideStripWidth, body.Height);
-            mainChrome?.Arrange(new Rect(body.X, body.Y, body.Width, Math.Max(0, body.Height - stripHeight)));
-            bottomStrip.Arrange(new Rect(body.X, body.Y + body.Height - stripHeight, body.Width, stripHeight));
+            Place(mainChrome, new Rect(body.X, body.Y, body.Width, Math.Max(0, body.Height - stripHeight)));
+            Place(bottomStrip, new Rect(body.X, body.Y + body.Height - stripHeight, body.Width, stripHeight));
             return;
         }
 
         if (!bottomVisible)
         {
-            mainChrome?.Arrange(body);
+            Place(mainChrome, body);
             return;
         }
 
         var splitterHeight = WorkbenchMetrics.PanelSplitterWidth;
         var space = Math.Max(0, body.Height - splitterHeight);
+        if (Layout.MainTabs.IsMinimized || group.IsMinimized)
+        {
+            var title = Math.Min(PanelChrome.TitleBarHeight, space);
+            var topHeight = Layout.MainTabs.IsMinimized ? title : Math.Max(0, space - title);
+            Place(mainChrome, new Rect(body.X, body.Y, body.Width, topHeight));
+            Place(bottomChrome, new Rect(body.X, body.Y + topHeight + splitterHeight, body.Width, Math.Max(0, space - topHeight)));
+            return;
+        }
         var bottomHeight = Math.Clamp(
             Layout.BottomHeight,
             WorkbenchMetrics.PanelMinHeight,
             Math.Max(WorkbenchMetrics.PanelMinHeight, space - WorkbenchMetrics.PanelMinHeight));
         bottomHeight = Math.Min(bottomHeight, space);
         var mainHeight = Math.Max(0, space - bottomHeight);
-        mainChrome?.Arrange(new Rect(body.X, body.Y, body.Width, mainHeight));
-        bottomChrome?.Arrange(new Rect(body.X, body.Y + mainHeight + splitterHeight, body.Width, bottomHeight));
+        Place(mainChrome, new Rect(body.X, body.Y, body.Width, mainHeight));
+        Place(bottomChrome, new Rect(body.X, body.Y + mainHeight + splitterHeight, body.Width, bottomHeight));
         bottomSplitter.TrackLength = body.Height;
-        bottomSplitter.Arrange(new Rect(
+        Place(bottomSplitter, new Rect(
             body.X,
             body.Y + mainHeight + ((splitterHeight - WorkbenchMetrics.SplitterHitWidth) / 2),
             body.Width,
@@ -248,7 +312,7 @@ internal sealed class RegionPresenter : Panel
             {
                 if (chromes[i].Model is { IsVisible: true })
                 {
-                    chromes[i].Arrange(body);
+                    Place(chromes[i], body);
                     return;
                 }
             }
@@ -257,7 +321,19 @@ internal sealed class RegionPresenter : Panel
         }
 
         var splitterHeight = WorkbenchMetrics.PanelSplitterWidth;
-        var height = (body.Height - ((visible - 1) * splitterHeight)) / visible;
+        var minimized = 0;
+        for (var i = 0; i < chromes.Count; i++)
+        {
+            if (chromes[i].Model is { IsVisible: true, IsMinimized: true })
+            {
+                minimized++;
+            }
+        }
+        var title = PanelChrome.TitleBarHeight;
+        var expanded = visible - minimized;
+        var height = expanded > 0
+            ? (body.Height - ((visible - 1) * splitterHeight) - (minimized * title)) / expanded
+            : 0;
         var y = body.Y;
         for (var i = 0; i < chromes.Count; i++)
         {
@@ -266,8 +342,9 @@ internal sealed class RegionPresenter : Panel
                 continue;
             }
 
-            chromes[i].Arrange(new Rect(body.X, y, body.Width, Math.Max(0, height)));
-            y += height + splitterHeight;
+            var slot = chromes[i].Model!.IsMinimized ? title : Math.Max(0, height);
+            Place(chromes[i], new Rect(body.X, y, body.Width, slot));
+            y += slot + splitterHeight;
         }
     }
 
@@ -284,7 +361,14 @@ internal sealed class RegionPresenter : Panel
 
         var previewColumn = default(Rect);
         var filesColumn = body;
-        if (previewVisible)
+        var previewMinimized = previewVisible && filesColumnVisible && Layout.PreviewTabs.IsMinimized;
+        if (previewMinimized)
+        {
+            var title = Math.Min(PanelChrome.TitleBarHeight, body.Height);
+            Place(previewChrome!, new Rect(body.X, body.Y, body.Width, title));
+            filesColumn = new Rect(body.X, body.Y + title, body.Width, Math.Max(0, body.Height - title));
+        }
+        else if (previewVisible)
         {
             var previewWidth = PreviewColumnWidth(Layout, body.Width, filesColumnVisible);
 
@@ -308,7 +392,7 @@ internal sealed class RegionPresenter : Panel
                 previewSplitter.TrackLength = body.Width;
                 // The 1 px gap between the two columns; the hit band straddles it on whichever side the preview column sits.
                 var gapX = Layout.IsPreviewLeftOfFiles ? previewColumn.Right : filesColumn.Right;
-                previewSplitter.Arrange(new Rect(
+                Place(previewSplitter, new Rect(
                     gapX + ((splitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
                     body.Y,
                     WorkbenchMetrics.SplitterHitWidth,
@@ -316,10 +400,10 @@ internal sealed class RegionPresenter : Panel
             }
         }
 
-        if (previewVisible)
+        if (previewVisible && !previewMinimized)
         {
             var coverRect = PreviewCoverRect;
-            previewChrome!.Arrange(coverRect.Width > 0 && coverRect.Height > 0 ? coverRect : previewColumn);
+            Place(previewChrome!, coverRect.Width > 0 && coverRect.Height > 0 ? coverRect : previewColumn);
         }
 
         if (!filesColumnVisible)
@@ -335,14 +419,22 @@ internal sealed class RegionPresenter : Panel
                 WorkbenchMetrics.PanelMinHeight,
                 Math.Max(WorkbenchMetrics.PanelMinHeight, space - WorkbenchMetrics.PanelMinHeight));
             filesHeight = Math.Min(filesHeight, space);
-            filesChrome!.Arrange(new Rect(filesColumn.X, filesColumn.Y, filesColumn.Width, filesHeight));
-            toolsChrome!.Arrange(new Rect(
+            if (Layout.FilesPanel.IsMinimized || Layout.InspectorTools.IsMinimized)
+            {
+                var title = Math.Min(PanelChrome.TitleBarHeight, space);
+                filesHeight = Layout.FilesPanel.IsMinimized ? title : Math.Max(0, space - title);
+                Place(filesChrome!, new Rect(filesColumn.X, filesColumn.Y, filesColumn.Width, filesHeight));
+                Place(toolsChrome!, new Rect(filesColumn.X, filesColumn.Y + filesHeight + splitterWidth, filesColumn.Width, Math.Max(0, space - filesHeight)));
+                return;
+            }
+            Place(filesChrome!, new Rect(filesColumn.X, filesColumn.Y, filesColumn.Width, filesHeight));
+            Place(toolsChrome!, new Rect(
                 filesColumn.X,
                 filesColumn.Y + filesHeight + splitterWidth,
                 filesColumn.Width,
                 Math.Max(0, space - filesHeight)));
             inspectorSplitter.TrackLength = filesColumn.Height;
-            inspectorSplitter.Arrange(new Rect(
+            Place(inspectorSplitter, new Rect(
                 filesColumn.X,
                 filesColumn.Y + filesHeight + ((splitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
                 filesColumn.Width,
@@ -352,20 +444,11 @@ internal sealed class RegionPresenter : Panel
 
         if (filesVisible)
         {
-            filesChrome!.Arrange(filesColumn);
+            Place(filesChrome!, filesColumn);
             return;
         }
 
-        toolsChrome!.Arrange(filesColumn);
-    }
-
-    /// <summary>Gives every child an empty rectangle: an unused splitter or strip then paints nothing and cannot be hit.</summary>
-    private void ResetChildren()
-    {
-        for (var i = 0; i < Children.Count; i++)
-        {
-            Children[i].Arrange(default);
-        }
+        Place(toolsChrome!, filesColumn);
     }
 
     private PanelChrome? ChromeOf(PanelModel? panel)

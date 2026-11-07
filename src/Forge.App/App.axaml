@@ -366,6 +366,9 @@
 
   <Application.Styles>
     <FluentTheme />
+    <Style Selector=":is(Window)">
+      <Setter Property="Icon" Value="avares://Forge.App/Assets/forge.ico" />
+    </Style>
     <StyleInclude Source="avares://Forge.App/Resources/Controls.axaml" />
     <StyleInclude Source="avares://Forge.App/Appearance/AppearanceStyles.axaml" />
   </Application.Styles>
