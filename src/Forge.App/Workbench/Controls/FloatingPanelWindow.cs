@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
@@ -209,8 +210,13 @@ internal sealed class FloatingPanelWindow : Window
         Grid.SetColumn(dock, dockColumn);
         content.Children.Add(dock);
         bar.Child = content;
+
+        // The window drops the system title bar, so this bar is what drags it and what a double click maximizes.
+        bar.PointerPressed += OnTitleBarPointerPressed;
         return bar;
     }
+
+    private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e) => WindowCaption.Handle(this, e);
 
     private Control BuildTabBody(TabModel tab)
     {

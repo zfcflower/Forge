@@ -2,10 +2,10 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
-using Avalonia.VisualTree;
 using Avalonia.Threading;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
+using Forge.App.Workbench.Controls;
 
 namespace Forge.App;
 
@@ -95,24 +95,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>The client area extends into the title bar, so the header drags the window and a double click maximizes it.</summary>
-    private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (e.Source is Control source && (source is Button or TextBox || source.FindAncestorOfType<Button>() is not null))
-        {
-            return;
-        }
-
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-        {
-            if (e.ClickCount == 2)
-            {
-                ToggleMaximize();
-                return;
-            }
-
-            BeginMoveDrag(e);
-        }
-    }
+    private void OnTitleBarPointerPressed(object? sender, PointerPressedEventArgs e) => WindowCaption.Handle(this, e);
 
     private void OnMinimizeClick(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
@@ -120,8 +103,7 @@ public partial class MainWindow : Window
 
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Close();
 
-    private void ToggleMaximize() =>
-        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void ToggleMaximize() => WindowCaption.ToggleMaximize(this);
 
     protected override void OnOpened(EventArgs e)
     {

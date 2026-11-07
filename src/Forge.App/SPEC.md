@@ -143,8 +143,9 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - 浮动默认尺寸 900×640(文件 panel 320×420)。文件 panel 的浮动窗口标题栏同样带它的工具按钮。最小化期间不写回几何(否则存下 -32000 坐标)。
 - 关停:主窗口确认真正关闭后才置 `IsShuttingDown`(关闭被取消就复位),之后关浮动窗口不回位,浮动项照常进快照。
 - 浮动窗口整体带 1px 边框(`BorderBrush`):`BorderOnly` 装饰下系统边框几乎不可见,靠它把浮出面板与背景分开。
+- 浮出窗口的标题条可拖动窗口、双击最大化/还原:热区只有它自己那条 28 px 标题条(文件 panel 窗口里是右侧那条),左侧预览组的选项卡条仍归选项卡手势;按在工具按钮/停靠按钮/输入框上不拖动。最大化沿用 `FloatGeometry.IsMaximized` 持久化,不新增状态。
 
-**窗口顶部。** `WindowDecorations="BorderOnly"` + `ExtendClientAreaToDecorationsHint="True"` + `ExtendClientAreaTitleBarHeightHint="-1"`:保留系统可缩放边框、去掉系统标题栏,且客户区一直铺到窗口上边缘(不设扩展提示时 Windows 会在顶部留一条系统框高的白带,实测 6.5 px)。标题行由 App 自绘,故窗口底色 = `SurfaceBackgroundBrush`、无独立标题栏底色。标题行 40 px:左 Forge + 会话标题(其后灰显当前分支,无分支即隐藏),中 380×26 占位搜索框(无行为),右 设置/最小化/最大化/关闭(设置紧挨最小化左侧);提供方状态移到状态栏。搜索框背景比窗口亮一档、边框 1 px 且比窗口暗一档(亮/暗各一对令牌)。标题行可拖动、双击最大化。
+**窗口顶部。** `WindowDecorations="BorderOnly"` + `ExtendClientAreaToDecorationsHint="True"` + `ExtendClientAreaTitleBarHeightHint="-1"`:保留系统可缩放边框、去掉系统标题栏,且客户区一直铺到窗口上边缘(不设扩展提示时 Windows 会在顶部留一条系统框高的白带,实测 6.5 px)。标题行由 App 自绘,故窗口底色 = `SurfaceBackgroundBrush`、无独立标题栏底色。标题行 40 px:左 Forge + 会话标题(其后灰显当前分支,无分支即隐藏),中 380×26 占位搜索框(无行为),右 设置/最小化/最大化/关闭(设置紧挨最小化左侧);提供方状态移到状态栏。搜索框背景比窗口亮一档、边框 1 px 且比窗口暗一档(亮/暗各一对令牌)。标题行可拖动、双击最大化,与浮出窗口共用 `Workbench/Controls/WindowCaption.cs` 的同一套按下分类(`CaptionPress`:按钮/输入框上的按下不拖动,双击最大化,其余左键按下移动;三连击按移动处理)——自绘标题栏的两处窗口只有这一份规则,`MainWindow` 与 `FloatingPanelWindow` 都只转调它,`ToggleMaximize` 按钮同路。
 
 **交互终端(`Terminal/**`)。** 终端是底部组里的选项卡(`TabKind.Terminal`,id 前缀 `terminal:`),可开多个,也可浮出。工作目录取会话的 worktree。
 - **VT 引擎(`Terminal/Vt/`)**:纯 BCL、不依赖 Avalonia,AOT 无警告。包括 DEC ANSI 解析器(UTF-8 跨分块续接,非法字节输出 U+FFFD)、主屏和备用屏、回滚环(偏好 `TerminalScrollbackLines`,1000–100000,默认 10000)、SGR 16/256/truecolor、DECSET/DECRST(含鼠标 1000/1002/1003/1006、2004 括号粘贴、2026 同步输出)、OSC 0/1/2 标题、OSC 8 链接、OSC 52 只写剪贴板、OSC 10/11 按主题回答,以及 xterm 按键与 SGR 鼠标编码、East Asian Width 宽字符。缩放时不重排行。实测吞吐约 99 MiB/s(20 MiB 混合文本),稳态滚动零分配。**已记录偏差**:在整屏顶行执行 `CSI M` 时,被删的行会进回滚(xterm 不会),这是为了保证不丢内容。
