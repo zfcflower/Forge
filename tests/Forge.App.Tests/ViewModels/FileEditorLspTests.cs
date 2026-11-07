@@ -3,7 +3,13 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Input;
+using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.VisualTree;
+using AvaloniaEdit;
+using Forge.App.Tests.Workbench;
+using Forge.App.Views;
 using Forge.App.ViewModels;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
@@ -47,6 +53,46 @@ public sealed class FileEditorLspTests : IDisposable
     }
 
     [Fact]
+    public async Task Typing_and_saving_in_the_real_editor_send_exact_didChange_and_didSave_then_closing_the_view_sends_didClose()
+    {
+        var path = Path.Combine(root, "Program.cs");
+        await File.WriteAllTextAsync(path, "class A { }\nclass B { }\n");
+        await using var lsp = new FakeLsp();
+        await Ui(async () =>
+        {
+            var model = FileDocumentViewModel.Create(null, lsp.Pool);
+            model.Workspace = root;
+            await model.LoadAsync(path, CancellationToken.None);
+            await model.LspOpening;
+            await lsp.Server!.WaitForAsync("textDocument/didOpen");
+            var view = new FileDocumentView { DataContext = model };
+            var window = new Window { Width = 800, Height = 400, Content = view };
+            window.Show();
+            WorkbenchUi.Settle(window);
+            var editor = view.GetVisualDescendants().OfType<TextEditor>().Single();
+            editor.TextArea.Focus();
+            editor.CaretOffset = "class A { }\n".Length;
+            window.KeyTextInput("X");
+            WorkbenchUi.Settle(window);
+            using var change = JsonDocument.Parse(await lsp.Server.WaitForAsync("textDocument/didChange"));
+            var change0 = change.RootElement.GetProperty("params").GetProperty("contentChanges")[0];
+            Assert.Equal("X", change0.GetProperty("text").GetString());
+            var start = change0.GetProperty("range").GetProperty("start");
+            Assert.Equal(1, start.GetProperty("line").GetInt32());
+            Assert.Equal(0, start.GetProperty("character").GetInt32());
+            var end = change0.GetProperty("range").GetProperty("end");
+            Assert.Equal(1, end.GetProperty("line").GetInt32());
+            Assert.Equal(0, end.GetProperty("character").GetInt32());
+            window.KeyPressQwerty(PhysicalKey.S, RawInputModifiers.Control);
+            await lsp.Server.WaitForAsync("textDocument/didSave");
+            Assert.Equal("class A { }\nXclass B { }\n", await File.ReadAllTextAsync(path));
+            window.Close();
+            await model.ReleaseDocumentAsync();
+            await lsp.Server.WaitForAsync("textDocument/didClose");
+        });
+    }
+
+    [Fact]
     public async Task Loading_another_file_closes_the_previous_document_on_the_server()
     {
         var first = Path.Combine(root, "A.cs");
@@ -65,7 +111,7 @@ public sealed class FileEditorLspTests : IDisposable
             await model.LspOpening;
             await lsp.Server.WaitForAsync("textDocument/didClose");
             await lsp.Server.WaitForAsync("textDocument/didOpen", occurrence: 2);
-            Assert.Equal("class B { }", model.Lines[0].Text);
+            Assert.Equal("class B { }", model.GetLinesText(1, 1).TrimEnd('\r', '\n'));
             await model.ReleaseDocumentAsync();
         });
     }
@@ -84,7 +130,7 @@ public sealed class FileEditorLspTests : IDisposable
             Assert.Same(load, await Task.WhenAny(load, Task.Delay(TimeSpan.FromSeconds(5))));
             await load;
             Assert.True(model.HasDocument);
-            Assert.Equal("class A { }", model.Lines[0].Text);
+            Assert.Equal("class A { }", model.GetLinesText(1, 1).TrimEnd('\r', '\n'));
             Assert.False(model.LspOpening.IsCompleted);
             lsp.Gate.SetResult();
             await model.LspOpening;
@@ -114,7 +160,7 @@ public sealed class FileEditorLspTests : IDisposable
             await Task.Delay(300);
             Assert.False(model.HasDocument);
             Assert.Equal(string.Empty, model.EditText);
-            Assert.Empty(model.Lines);
+            Assert.Null(model.EditorDocument);
             Assert.Equal(0, lsp.Server?.Count("textDocument/didOpen") ?? 0);
         });
     }
@@ -134,14 +180,14 @@ public sealed class FileEditorLspTests : IDisposable
             catch (OperationCanceledException) { System.Diagnostics.Trace.WriteLine("[test-lsp] load cancelled"); }
             Assert.False(model.HasDocument);
             Assert.Equal(string.Empty, model.EditText);
-            Assert.Empty(model.Lines);
+            Assert.Null(model.EditorDocument);
             Assert.False(model.IsLoading);
         });
     }
 
     private static async Task Ui(Func<Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
     }

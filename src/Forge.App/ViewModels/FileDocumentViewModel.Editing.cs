@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Forge.App.Editing;
 using Forge.App.Localization;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
@@ -15,8 +16,8 @@ internal sealed partial class FileDocumentViewModel
     private LanguageSession? session;
     private string? openWorkspace;
     private TextDocument? document;
+    private ForgeEditorMirror? editorMirror;
     private AsyncRelayCommand? saveCommand;
-    private AsyncRelayCommand? refreshCommand;
     private CancellationTokenSource? loadCts;
     private int loadVersion;
     private CancellationTokenSource? lspCts;
@@ -24,10 +25,10 @@ internal sealed partial class FileDocumentViewModel
     private bool isEditing;
     private bool wrapLines;
     private bool isSaving;
-    private bool previewStale;
     private string editText = string.Empty;
     private LocText saveError;
     private LocText lspStatus;
+    private LocText editorNotice;
     private LocText copyError;
     private RelayCommand? toggleWrapCommand;
     private RelayCommand? toggleEditCommand;
@@ -35,8 +36,13 @@ internal sealed partial class FileDocumentViewModel
     public string? Workspace { get; set; }
     public Task LspOpening => lspOpening;
     public bool HasDocument => document is not null;
-    public bool IsDirty => document?.IsDirty ?? false;
-    public bool CanSave => document is not null && IsDirty && !isSaving;
+    internal TextDocument? EditorDocument => document;
+    internal ForgeEditorMirror? EditorMirror => editorMirror;
+    public bool IsEditorFaulted => editorMirror?.IsFaulted ?? false;
+    internal GrammarRegistry? Grammars => grammars;
+    private string CurrentText => document is { } current ? current.Snapshot.GetText() : editText;
+    public bool IsDirty => IsEditorFaulted || (document?.IsDirty ?? false);
+    public bool CanSave => document is not null && IsDirty && !isSaving && !IsEditorFaulted;
     public string NewLineText => document?.FileFormat?.LineEnding switch
     {
         LineEnding.CrLf => "\r\n",
@@ -61,16 +67,13 @@ internal sealed partial class FileDocumentViewModel
                 return;
             }
 
-            if (Set(ref isEditing, value) && !value && previewStale)
-            {
-                RefreshCommand.Execute(null);
-            }
+            Set(ref isEditing, value);
         }
     }
 
     public string EditText
     {
-        get => editText;
+        get => CurrentText;
         set => ApplyEdit(value ?? string.Empty);
     }
 
@@ -90,6 +93,8 @@ internal sealed partial class FileDocumentViewModel
     public bool HasSaveError => !saveError.IsEmpty;
     public string? LspStatus => lspStatus.IsEmpty ? null : lspStatus.Resolve();
     public bool HasLspStatus => !lspStatus.IsEmpty;
+    public string? EditorNotice => editorNotice.IsEmpty ? null : editorNotice.Resolve();
+    public bool HasEditorNotice => !editorNotice.IsEmpty;
     public string? CopyError => copyError.IsEmpty ? null : copyError.Resolve();
     public bool HasCopyError => !copyError.IsEmpty;
     public RelayCommand ToggleWrapCommand => toggleWrapCommand ??= new RelayCommand(() => WrapLines = !WrapLines);
@@ -101,15 +106,6 @@ internal sealed partial class FileDocumentViewModel
         {
             Trace.WriteLine("[file] save failed: " + exception.Message);
             SetSaveError(new LocText(InspectorStrings.FilesSaveFailed, LocText.Literal(exception.Message)));
-        });
-
-    private AsyncRelayCommand RefreshCommand => refreshCommand ??= new AsyncRelayCommand(
-        RefreshPreviewCoreAsync,
-        null,
-        exception =>
-        {
-            Trace.WriteLine("[file] preview refresh failed: " + exception.Message);
-            SetError(LocText.Literal(exception.Message));
         });
 
     public static FileDocumentViewModel Create(GrammarRegistry? grammars = null, LanguageSessionPool? sessions = null) =>
@@ -147,10 +143,10 @@ internal sealed partial class FileDocumentViewModel
             Path = full;
             fileName = System.IO.Path.GetFileName(full);
             OnPropertyChanged(nameof(TabTitle));
-            Lines.ReplaceAll([]);
             SetError(default);
             SetSaveError(default);
             SetLspStatus(default);
+            ReportEditorNotice(default);
             IsLoading = true;
             var read = await Task.Run(() => ReadFileAsync(full, token), token).ConfigureAwait(true);
             token.ThrowIfCancellationRequested();
@@ -167,7 +163,6 @@ internal sealed partial class FileDocumentViewModel
             }
 
             AttachDocument(read.Document, read.Text ?? string.Empty);
-            await RefreshPreviewCoreAsync(token).ConfigureAwait(true);
         }
         catch (OperationCanceledException) when (version != loadVersion && !ct.IsCancellationRequested)
         {
@@ -205,7 +200,6 @@ internal sealed partial class FileDocumentViewModel
         loadCts?.Cancel();
         loadVersion++;
         IsLoading = false;
-        Lines.ReplaceAll([]);
         await ReleaseCoreAsync().ConfigureAwait(true);
     }
 
@@ -221,14 +215,17 @@ internal sealed partial class FileDocumentViewModel
         var pool = sessions;
         var workspace = openWorkspace;
         document = null;
+        editorMirror?.Dispose();
+        editorMirror = null;
+        OnPropertyChanged(nameof(IsEditorFaulted));
         session = null;
         openWorkspace = null;
         isEditing = false;
         editText = string.Empty;
-        previewStale = false;
         OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(EditText));
         OnPropertyChanged(nameof(HasDocument));
+        OnPropertyChanged(nameof(EditorDocument));
         NotifyDirty();
         if (pool is not null && workspace is not null)
         {
@@ -285,10 +282,15 @@ internal sealed partial class FileDocumentViewModel
     {
         document = doc;
         editText = text;
-        previewStale = true;
+        isEditing = true;
+        editorMirror?.Dispose();
+        editorMirror = new ForgeEditorMirror(this, doc);
+        OnPropertyChanged(nameof(IsEditorFaulted));
         OnPropertyChanged(nameof(EditText));
+        OnPropertyChanged(nameof(IsEditing));
         OnPropertyChanged(nameof(NewLineText));
         OnPropertyChanged(nameof(HasDocument));
+        OnPropertyChanged(nameof(EditorDocument));
         NotifyDirty();
         var pool = sessions;
         var workspace = Workspace;
@@ -355,7 +357,7 @@ internal sealed partial class FileDocumentViewModel
     private void ApplyEdit(string value)
     {
         var doc = document;
-        var old = editText;
+        var old = CurrentText;
         if (doc is null || string.Equals(old, value, StringComparison.Ordinal))
         {
             return;
@@ -387,7 +389,6 @@ internal sealed partial class FileDocumentViewModel
 
         editText = value;
         doc.ApplyChange(new TextChange(prefix, old.Length - prefix - suffix, value.Substring(prefix, value.Length - prefix - suffix)));
-        previewStale = true;
         OnPropertyChanged(nameof(EditText));
         NotifyDirty();
     }
@@ -397,6 +398,12 @@ internal sealed partial class FileDocumentViewModel
         var doc = document;
         if (doc is null || isSaving)
         {
+            return;
+        }
+
+        if (IsEditorFaulted)
+        {
+            SetSaveError(new LocText(InspectorStrings.FilesEditorDesynced));
             return;
         }
 
@@ -434,50 +441,9 @@ internal sealed partial class FileDocumentViewModel
         }
     }
 
-    private async Task RefreshPreviewCoreAsync(CancellationToken ct)
-    {
-        if (document is not { } doc || !previewStale)
-        {
-            return;
-        }
-
-        var committed = false;
-        try
-        {
-            do
-            {
-                previewStale = false;
-                var text = editText;
-                var file = Path;
-                var items = await Task.Run(() => CreateLineItems(SplitLines(text), file, grammars, ct), ct).ConfigureAwait(true);
-                if (!ReferenceEquals(doc, document))
-                {
-                    committed = true;
-                    return;
-                }
-
-                if (!previewStale)
-                {
-                    Lines.ReplaceAll(items);
-                    committed = true;
-                    return;
-                }
-            }
-            while (!isEditing);
-            committed = true;
-        }
-        finally
-        {
-            if (!committed && ReferenceEquals(doc, document))
-            {
-                previewStale = true;
-            }
-        }
-    }
-
     public string GetLinesText(int firstLine, int lastLine)
     {
-        var text = editText;
+        var text = CurrentText;
         var line = 1;
         var start = firstLine <= 1 ? 0 : -1;
         for (var i = 0; i < text.Length; i++)
@@ -506,6 +472,22 @@ internal sealed partial class FileDocumentViewModel
         }
 
         return start < 0 ? string.Empty : text.Substring(start);
+    }
+
+    internal void NotifyDocumentEdited() => NotifyDirty();
+
+    internal void ReportEditorFault(LocText notice)
+    {
+        ReportEditorNotice(notice);
+        OnPropertyChanged(nameof(IsEditorFaulted));
+        NotifyDirty();
+    }
+
+    internal void ReportEditorNotice(LocText notice)
+    {
+        editorNotice = notice;
+        OnPropertyChanged(nameof(EditorNotice));
+        OnPropertyChanged(nameof(HasEditorNotice));
     }
 
     public void ReportCopyError(string message)
@@ -537,28 +519,4 @@ internal sealed partial class FileDocumentViewModel
         saveCommand?.NotifyCanExecuteChanged();
     }
 
-    private static string[] SplitLines(string text)
-    {
-        var list = new List<string>();
-        var start = 0;
-        for (var i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-            if (c is not ('\n' or '\r'))
-            {
-                continue;
-            }
-
-            list.Add(text.Substring(start, i - start));
-            if (c == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
-            {
-                i++;
-            }
-
-            start = i + 1;
-        }
-
-        list.Add(text.Substring(start));
-        return [.. list];
-    }
 }

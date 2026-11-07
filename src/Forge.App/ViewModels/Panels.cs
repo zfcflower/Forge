@@ -738,12 +738,8 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
 
 // ---------------------------------------------------------------- file document
 
-internal sealed record FileTextSegment(string Text, TokenCategory Category);
-
-internal sealed record FileLineViewModel(int Number, string Text, IReadOnlyList<FileTextSegment> Segments);
-
 /// <summary>
-/// Read-only file view: one entry per line with its number, virtualized in the view. The file's content and path are data
+/// File view model: the native editor renders and highlights the text. The file's content and path are data
 /// and are never translated; only the tab title's leading mark and the placeholder before a file is loaded come from the
 /// string table, and both are read when the property is read.
 /// </summary>
@@ -758,16 +754,11 @@ internal sealed partial class FileDocumentViewModel : ObservableObject
     private FileDocumentViewModel(GrammarRegistry? grammars)
     {
         this.grammars = grammars;
-        LineItems = new ReadOnlyObservableCollection<FileLineViewModel>(Lines);
         LoadCommand = new AsyncRelayCommand(
             ct => LoadAsync(path, ct),
             () => path.Length > 0,
             exception => SetError(LocText.Literal(exception.Message)));
     }
-
-    public RangeObservableCollection<FileLineViewModel> Lines { get; } = [];
-
-    public ReadOnlyObservableCollection<FileLineViewModel> LineItems { get; }
 
     public AsyncRelayCommand LoadCommand { get; }
 
@@ -806,81 +797,6 @@ internal sealed partial class FileDocumentViewModel : ObservableObject
         OnPropertyChanged(nameof(HasError));
     }
 
-    private const long HighlightMaxChars = 1L << 20;
-
-    private static FileLineViewModel[] CreateLineItems(
-        string[] lines,
-        string filePath,
-        GrammarRegistry? grammars,
-        CancellationToken ct)
-    {
-        if (lines.Length == 0)
-        {
-            return [];
-        }
-
-        var normalizedLines = new string[lines.Length];
-        var total = 0L;
-        for (var i = 0; i < lines.Length; i++)
-        {
-            normalizedLines[i] = lines[i].Replace("\t", "    ", StringComparison.Ordinal);
-            total += normalizedLines[i].Length;
-        }
-
-        HighlightResult? highlight = null;
-        if (total <= HighlightMaxChars && grammars?.GetScopeNameForFile(filePath) is { } scopeName)
-        {
-            var source = new StringHighlightSource(string.Join('\n', normalizedLines));
-            highlight = new Tokenizer(grammars).Highlight(source, scopeName, ct);
-        }
-
-        var items = new FileLineViewModel[lines.Length];
-        for (var i = 0; i < lines.Length; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var text = normalizedLines[i];
-            var segments = highlight is null
-                ? new[] { new FileTextSegment(text, TokenCategory.None) }
-                : CreateSegments(text, highlight, i);
-            items[i] = new FileLineViewModel(i + 1, text, segments);
-        }
-
-        return items;
-    }
-
-    private static IReadOnlyList<FileTextSegment> CreateSegments(string text, HighlightResult highlight, int line)
-    {
-        var tokens = highlight.GetTokens(line).Span;
-        var segments = new List<FileTextSegment>(tokens.Length);
-        var position = 0;
-        foreach (var token in tokens)
-        {
-            var start = Math.Clamp(token.Start, position, text.Length);
-            var end = Math.Clamp(token.End, start, text.Length);
-            if (start > position)
-            {
-                segments.Add(new FileTextSegment(text[position..start], TokenCategory.None));
-            }
-
-            if (end > start)
-            {
-                segments.Add(new FileTextSegment(text[start..end], highlight.GetCategory(token.ScopeId)));
-                position = end;
-            }
-        }
-
-        if (position < text.Length)
-        {
-            segments.Add(new FileTextSegment(text[position..], TokenCategory.None));
-        }
-
-        if (segments.Count == 0)
-        {
-            segments.Add(new FileTextSegment(text, TokenCategory.None));
-        }
-
-        return segments;
-    }
 }
 
 // ---------------------------------------------------------------- changes document

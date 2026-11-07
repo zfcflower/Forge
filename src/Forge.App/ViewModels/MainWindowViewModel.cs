@@ -29,7 +29,7 @@ internal interface IDialogService
 /// Root view model: owns the workbench layout, the open sessions, the panels and the persistence of the layout and the
 /// open tabs. Every background task is started here; the view only renders.
 /// </summary>
-internal sealed class MainWindowViewModel : ObservableObject, IDisposable
+internal sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const string OpenChangesToolId = "files-open-changes";
 
@@ -824,6 +824,8 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (tab.Content is FileDocumentViewModel file)
         {
             file.PropertyChanged -= OnFileDocumentChanged;
+            DetachEditorNavigation(file);
+            file.DisposeReview();
             _ = file.ReleaseDocumentAsync();
         }
 
@@ -926,7 +928,9 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OpenFile(string path, bool newTab) => _ = OpenFileAsync(path, newTab, CancellationToken.None);
 
-    private async Task OpenFileAsync(string path, bool newTab, CancellationToken ct)
+    private async Task OpenFileAsync(
+        string path, bool newTab, CancellationToken ct, string? workspaceOverride = null,
+        Review.ReviewOwner? reviewOwnerOverride = null, bool hasReviewOwnerOverride = false)
     {
         var resolved = ResolveFilePath(path);
         if (resolved is null)
@@ -935,12 +939,11 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var id = newTab ? WorkbenchIds.PinnedFileTab(resolved) : WorkbenchIds.PreviewTab;
-        var workspace = activeSession?.WorkDir;
+        var workspace = hasReviewOwnerOverride ? workspaceOverride : activeSession?.WorkDir;
         if (FindFileTab(resolved) is { Content: FileDocumentViewModel same } sameTab)
         {
             if (!same.IsDirty && !same.IsSaving)
             {
-                same.Workspace = workspace;
                 await same.LoadAsync(resolved, ct).ConfigureAwait(true);
                 sameTab.Title = same.TabTitle;
             }
@@ -957,6 +960,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             open.Workspace = workspace;
+            ConfigureReview(open, reviewOwnerOverride, hasReviewOwnerOverride);
             await open.LoadAsync(resolved, ct, discardEdits: true).ConfigureAwait(true);
             tab.Title = open.TabTitle;
             Workbench.ActivateTab(tab);
@@ -965,6 +969,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         var document = FileDocumentViewModel.Create(composition.Editor?.Grammars, composition.Editor?.Sessions);
         document.Workspace = workspace;
+        ConfigureReview(document, reviewOwnerOverride, hasReviewOwnerOverride);
         var opened = false;
         try
         {
@@ -976,14 +981,44 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
 
             Workbench.OpenTab(Workbench.PreviewTabs, id, TabKind.FilePreview, document, document.TabTitle);
             document.PropertyChanged += OnFileDocumentChanged;
+            AttachEditorNavigation(document);
             opened = true;
         }
         finally
         {
             if (!opened)
             {
+                document.DisposeReview();
                 await document.ReleaseDocumentAsync().ConfigureAwait(true);
             }
+        }
+    }
+
+    private void ConfigureReview(FileDocumentViewModel document, Review.ReviewOwner? ownerOverride = null, bool hasOverride = false)
+    {
+        var session = activeSession;
+        Review.ReviewOwner? owner = hasOverride
+            ? ownerOverride
+            : session is { WorkDir.Length: > 0 }
+                ? new Review.ReviewOwner(session.WorkDir, session.SessionId)
+                : null;
+        document.ConfigureReview(
+            new Review.ReviewServices(
+                reviews,
+                (sessionId, text, withdrawn) => sessions.TryGetValue(sessionId, out var target) && target.TryQueueReview(text, withdrawn),
+                () => _ = RefreshReviewsAsync()),
+            owner);
+    }
+
+    private async Task RefreshReviewsAsync()
+    {
+        try
+        {
+            await Reviews.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            Trace.WriteLine("[review] panel refresh failed: " + exception.Message);
         }
     }
 

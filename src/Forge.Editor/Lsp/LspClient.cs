@@ -852,7 +852,15 @@ public sealed class LspClient : IAsyncDisposable
             incomplete.ValueKind == JsonValueKind.True;
 
         var limit = Math.Max(1, _options.MaxCompletionItems);
+        // Items with defaults cannot be applied safely without the advertised itemDefaults capability.
+        if (result.ValueKind == JsonValueKind.Object &&
+            result.TryGetProperty("itemDefaults", out var itemDefaults) && itemDefaults.ValueKind != JsonValueKind.Null)
+        {
+            return new CompletionResult([], isIncomplete, itemsElement.GetArrayLength());
+        }
+
         var items = new List<CompletionItem>(Math.Min(itemsElement.GetArrayLength(), limit));
+        var malformed = 0;
         foreach (var item in itemsElement.EnumerateArray())
         {
             if (items.Count >= limit)
@@ -860,52 +868,172 @@ public sealed class LspClient : IAsyncDisposable
                 break;
             }
 
-            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("label", out var label))
+            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("label", out var label) || label.ValueKind != JsonValueKind.String)
             {
+                malformed++;
                 continue;
             }
 
-            var kind = item.TryGetProperty("kind", out var kindElement) && kindElement.ValueKind == JsonValueKind.Number
-                ? (CompletionItemKind)kindElement.GetInt32()
-                : CompletionItemKind.Text;
+            var kind = CompletionItemKind.Text;
+            if (item.TryGetProperty("kind", out var kindElement) && kindElement.ValueKind != JsonValueKind.Null)
+            {
+                if (kindElement.ValueKind != JsonValueKind.Number || !kindElement.TryGetInt32(out var kindValue) || kindValue is < 1 or > 25)
+                {
+                    malformed++;
+                    continue;
+                }
+
+                kind = (CompletionItemKind)kindValue;
+            }
 
             var detail = item.TryGetProperty("detail", out var detailElement) && detailElement.ValueKind == JsonValueKind.String
                 ? detailElement.GetString()
                 : null;
 
             string? documentation = null;
-            if (item.TryGetProperty("documentation", out var documentationElement))
+            if (item.TryGetProperty("documentation", out var documentationElement) && documentationElement.ValueKind != JsonValueKind.Null)
             {
-                documentation = documentationElement.ValueKind switch
+                if (documentationElement.ValueKind == JsonValueKind.String)
                 {
-                    JsonValueKind.String => documentationElement.GetString(),
-                    JsonValueKind.Object when documentationElement.TryGetProperty("value", out var value) => value.GetString(),
-                    _ => null,
-                };
+                    documentation = documentationElement.GetString();
+                }
+                else if (documentationElement.ValueKind == JsonValueKind.Object &&
+                    documentationElement.TryGetProperty("value", out var documentationValue) && documentationValue.ValueKind == JsonValueKind.String)
+                {
+                    documentation = documentationValue.GetString();
+                }
+                else
+                {
+                    malformed++;
+                    continue;
+                }
             }
 
             var insertText = item.TryGetProperty("insertText", out var insertElement) && insertElement.ValueKind == JsonValueKind.String
                 ? insertElement.GetString()
                 : null;
 
-            LspTextEdit? textEdit = null;
-            if (item.TryGetProperty("textEdit", out var textEditElement) && textEditElement.ValueKind == JsonValueKind.Object)
+            // A malformed edit must never become a 0:0 replacement; the item is excluded and counted.
+            if (!TryReadCompletionEdits(item, out var textEdit, out var additionalEdits, out var insertFormat))
             {
-                var range = textEditElement.TryGetProperty("range", out var editRange)
-                    ? ParseRange(editRange)
-                    : textEditElement.TryGetProperty("insert", out var insertRange) ? ParseRange(insertRange) : default;
-                var newText = textEditElement.TryGetProperty("newText", out var newTextElement) ? newTextElement.GetString() ?? string.Empty : string.Empty;
-                textEdit = new LspTextEdit(range, newText);
+                malformed++;
+                continue;
             }
 
             var sortText = item.TryGetProperty("sortText", out var sortElement) && sortElement.ValueKind == JsonValueKind.String
                 ? sortElement.GetString()
                 : null;
 
-            items.Add(new CompletionItem(label.GetString() ?? string.Empty, kind, detail, documentation, insertText, textEdit, sortText));
+            var filterText = item.TryGetProperty("filterText", out var filterElement) && filterElement.ValueKind == JsonValueKind.String
+                ? filterElement.GetString()
+                : null;
+
+            items.Add(new CompletionItem(label.GetString() ?? string.Empty, kind, detail, documentation, insertText, textEdit, sortText, insertFormat, additionalEdits, filterText));
         }
 
-        return new CompletionResult(items, isIncomplete);
+        return new CompletionResult(items, isIncomplete, malformed);
+    }
+
+    private static bool TryReadCompletionEdits(
+        JsonElement item,
+        out LspTextEdit? textEdit,
+        out IReadOnlyList<LspTextEdit>? additionalEdits,
+        out InsertTextFormat format)
+    {
+        textEdit = null;
+        additionalEdits = null;
+        format = InsertTextFormat.PlainText;
+
+        if (item.TryGetProperty("insertTextFormat", out var formatElement) && formatElement.ValueKind != JsonValueKind.Null)
+        {
+            if (formatElement.ValueKind != JsonValueKind.Number || !formatElement.TryGetInt32(out var formatValue) || formatValue is not (1 or 2))
+            {
+                return false;
+            }
+
+            format = (InsertTextFormat)formatValue;
+        }
+
+        if (item.TryGetProperty("textEdit", out var textEditElement) && textEditElement.ValueKind != JsonValueKind.Null)
+        {
+            textEdit = ParseTextEditStrict(textEditElement);
+            if (textEdit is null)
+            {
+                return false;
+            }
+        }
+
+        if (item.TryGetProperty("additionalTextEdits", out var additionalElement) && additionalElement.ValueKind != JsonValueKind.Null)
+        {
+            if (additionalElement.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var list = new List<LspTextEdit>(additionalElement.GetArrayLength());
+            foreach (var editElement in additionalElement.EnumerateArray())
+            {
+                var edit = ParseTextEditStrict(editElement);
+                if (edit is null)
+                {
+                    return false;
+                }
+
+                list.Add(edit);
+            }
+
+            additionalEdits = list.Count == 0 ? null : list;
+        }
+
+        return true;
+    }
+
+    private static LspTextEdit? ParseTextEditStrict(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("newText", out var newText) || newText.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        // InsertReplaceEdit is not accepted: the client does not advertise insertReplaceSupport.
+        if (!element.TryGetProperty("range", out var rangeElement))
+        {
+            return null;
+        }
+
+        return TryParseRangeStrict(rangeElement, out var range) ? new LspTextEdit(range, newText.GetString() ?? string.Empty) : null;
+    }
+
+    private static bool TryParseRangeStrict(JsonElement element, out LspRange range)
+    {
+        range = default;
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("start", out var startElement) || !TryParsePositionStrict(startElement, out var start) ||
+            !element.TryGetProperty("end", out var endElement) || !TryParsePositionStrict(endElement, out var end) ||
+            end.Line < start.Line || (end.Line == start.Line && end.Character < start.Character))
+        {
+            return false;
+        }
+
+        range = new LspRange(start, end);
+        return true;
+    }
+
+    private static bool TryParsePositionStrict(JsonElement element, out LspPosition position)
+    {
+        position = default;
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("line", out var line) || line.ValueKind != JsonValueKind.Number ||
+            !line.TryGetInt32(out var lineValue) || lineValue < 0 ||
+            !element.TryGetProperty("character", out var character) || character.ValueKind != JsonValueKind.Number ||
+            !character.TryGetInt32(out var characterValue) || characterValue < 0)
+        {
+            return false;
+        }
+
+        position = new LspPosition(lineValue, characterValue);
+        return true;
     }
 
     private static IReadOnlyList<DocumentSymbol> ParseSymbols(JsonElement result)

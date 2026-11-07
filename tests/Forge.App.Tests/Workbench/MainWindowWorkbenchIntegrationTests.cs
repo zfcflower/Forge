@@ -84,7 +84,8 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
                 var document = (FileDocumentViewModel)tab.Content;
                 Assert.False(document.HasError, document.Error);
-                Assert.NotEmpty(document.Lines);
+                Assert.True(document.HasDocument);
+                Assert.False(string.IsNullOrEmpty(document.EditText));
             });
     }
 
@@ -128,7 +129,8 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
                 var document = (FileDocumentViewModel)tab.Content;
                 Assert.False(document.HasError, document.Error);
-                Assert.NotEmpty(document.Lines);
+                Assert.True(document.HasDocument);
+                Assert.False(string.IsNullOrEmpty(document.EditText));
             });
     }
 
@@ -284,7 +286,8 @@ public sealed class MainWindowWorkbenchIntegrationTests
                 var tab = Assert.IsType<TabModel>(harness.ViewModel.Workbench.FindTab(WorkbenchIds.PreviewTab));
                 var document = Assert.IsType<FileDocumentViewModel>(tab.Content);
                 Assert.False(document.HasError, document.Error);
-                Assert.NotEmpty(document.Lines);
+                Assert.True(document.HasDocument);
+                Assert.False(string.IsNullOrEmpty(document.EditText));
                 return Task.CompletedTask;
             });
     }
@@ -357,12 +360,54 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
     private static Task RunAsync(Func<Harness, Task> body) => RunAsync(new Scenario(), body);
 
+    [Fact]
+    public async Task A_pinned_file_keeps_the_review_owner_of_the_session_that_opened_it_when_another_session_reopens_it()
+    {
+        await RunAsync(
+            2,
+            async harness =>
+            {
+                var owner = Assert.IsType<SessionWorkspaceViewModel>(harness.ViewModel.ActiveSession);
+                var tab = await harness.OpenFromPanelAsync(AlphaFile, newTab: true);
+                var document = Assert.IsType<FileDocumentViewModel>(tab.Content);
+                Assert.Equal(owner.SessionId, document.ReviewOwner?.SessionId);
+                harness.ViewModel.Workbench.ActivateTab(
+                    Assert.IsType<TabModel>(harness.ViewModel.Workbench.FindTab(WorkbenchIds.SessionTab(harness.OtherSessionId))));
+                Assert.Equal(harness.OtherSessionId, harness.ViewModel.ActiveSession?.SessionId);
+                Assert.NotEqual(owner.SessionId, harness.OtherSessionId);
+                var again = await harness.OpenFromPanelAsync(AlphaFile, newTab: true);
+                Assert.Same(tab, again);
+                Assert.Same(document, again.Content);
+                Assert.Equal(owner.SessionId, document.ReviewOwner?.SessionId);
+            });
+    }
+
+    [Fact]
+    public async Task A_reused_preview_tab_rebinds_its_review_owner_to_the_session_that_opens_the_next_file()
+    {
+        await RunAsync(
+            2,
+            async harness =>
+            {
+                var first = Assert.IsType<SessionWorkspaceViewModel>(harness.ViewModel.ActiveSession);
+                var tab = await harness.OpenFromPanelAsync(AlphaFile, newTab: false);
+                var document = Assert.IsType<FileDocumentViewModel>(tab.Content);
+                Assert.Equal(first.SessionId, document.ReviewOwner?.SessionId);
+                harness.ViewModel.Workbench.ActivateTab(
+                    Assert.IsType<TabModel>(harness.ViewModel.Workbench.FindTab(WorkbenchIds.SessionTab(harness.OtherSessionId))));
+                var reused = await harness.OpenFromPanelAsync(BetaFile, newTab: false);
+                Assert.Same(document, reused.Content);
+                Assert.EndsWith(BetaFile, document.Path, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(harness.OtherSessionId, document.ReviewOwner?.SessionId);
+            });
+    }
+
     private static Task RunAsync(int sessionCount, Func<Harness, Task> body) =>
         RunAsync(new Scenario { SessionCount = sessionCount }, body);
 
     private static async Task RunAsync(Scenario scenario, Func<Harness, Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {

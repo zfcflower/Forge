@@ -100,7 +100,7 @@ public sealed class FileEditorInteractionTests : IDisposable
                 var model = FileDocumentViewModel.Create();
                 await model.LoadAsync(path, CancellationToken.None);
                 var host = Show(model);
-                var scroller = Scroller(host.List);
+                var scroller = host.Editor.GetVisualDescendants().OfType<ScrollViewer>().First();
                 Assert.True(scroller.Viewport.Width <= 240.5, path + " viewport " + scroller.Viewport.Width);
                 Assert.True(scroller.Extent.Width > 1000, path + " extent " + scroller.Extent.Width);
                 var end = scroller.Extent.Width - scroller.Viewport.Width;
@@ -121,15 +121,13 @@ public sealed class FileEditorInteractionTests : IDisposable
             var model = FileDocumentViewModel.Create();
             await model.LoadAsync(path, CancellationToken.None);
             var host = Show(model);
-            var scroller = Scroller(host.List);
-            var line = host.List.GetVisualDescendants().OfType<Forge.App.Workbench.Controls.SyntaxLineText>().First();
-            var heightBefore = line.Bounds.Height;
+            var scroller = host.Editor.GetVisualDescendants().OfType<ScrollViewer>().First();
+            var heightBefore = scroller.Extent.Height;
             WorkbenchUi.Click(host.Window, WorkbenchUi.CentreOf(WorkbenchUi.Find<Control>(host.Window, "file-wrap"), host.Window));
             Assert.True(model.WrapLines);
-            line = host.List.GetVisualDescendants().OfType<Forge.App.Workbench.Controls.SyntaxLineText>().First();
-            Assert.True(line.Bounds.Height > heightBefore * 3,
-                $"height {heightBefore} -> {line.Bounds.Height}; wrapping={line.TextWrapping}; width={line.Bounds.Width}; classes={host.List.Classes}; "
-                + $"viewport={scroller.Viewport}; extent={scroller.Extent}; hbar={scroller.HorizontalScrollBarVisibility}");
+            WorkbenchUi.Settle(host.Window);
+            Assert.True(scroller.Extent.Height > heightBefore * 3,
+                $"height {heightBefore} -> {scroller.Extent.Height}; viewport={scroller.Viewport}; extent={scroller.Extent}; hbar={scroller.HorizontalScrollBarVisibility}");
             Assert.True(scroller.Extent.Width <= scroller.Viewport.Width + 1, "extent " + scroller.Extent.Width + " viewport " + scroller.Viewport.Width);
             Assert.True(host.View.Bounds.Height <= host.Window.Height + 0.5);
             host.Window.Close();
@@ -145,11 +143,9 @@ public sealed class FileEditorInteractionTests : IDisposable
             var model = FileDocumentViewModel.Create();
             await model.LoadAsync(path, CancellationToken.None);
             var host = Show(model, width: 600);
-            WorkbenchUi.Click(host.Window, WorkbenchUi.CentreOf(WorkbenchUi.Find<Control>(host.Window, "file-edit"), host.Window));
-            Assert.True(model.IsEditing);
-            var editor = WorkbenchUi.Find<TextBox>(host.Window, "file-editor");
-            editor.Focus();
-            editor.CaretIndex = 0;
+            var editor = host.Editor;
+            editor.TextArea.Focus();
+            editor.CaretOffset = 0;
             WorkbenchUi.Settle(host.Window);
             host.Window.KeyTextInput("X");
             WorkbenchUi.Settle(host.Window);
@@ -176,7 +172,7 @@ public sealed class FileEditorInteractionTests : IDisposable
     {
         var first = Write("a.txt", "a\n");
         var second = Write("b.txt", "b\n");
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await using var shell = await ShellFixture.OpenAsync(session);
         await session.Dispatch(async () =>
         {
@@ -209,7 +205,7 @@ public sealed class FileEditorInteractionTests : IDisposable
 
     private static async Task Ui(Func<Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
     }
@@ -231,7 +227,7 @@ public sealed class FileEditorInteractionTests : IDisposable
     }
 
     private static ScrollViewer Scroller(ListBox list) => list.GetVisualDescendants().OfType<ScrollViewer>().First();
-    private sealed record FileHost(Window Window, FileDocumentView View, ListBox List);
+    private sealed record FileHost(Window Window, FileDocumentView View, AvaloniaEdit.TextEditor Editor);
 
     private static FileHost Show(FileDocumentViewModel model, double width = 240, double height = 400)
     {
@@ -239,8 +235,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         var window = new Window { Width = width, Height = height, Content = view };
         window.Show();
         WorkbenchUi.Settle(window);
-        var list = view.GetVisualDescendants().OfType<ListBox>().Single(static l => l.Name == "LineList");
-        return new FileHost(window, view, list);
+        return new FileHost(window, view, view.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single());
     }
 
     private sealed class Dialogs(Func<int, bool> answer) : IDialogService

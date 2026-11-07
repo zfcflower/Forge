@@ -1,26 +1,135 @@
+using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using AvaloniaEdit.Editing;
+using Forge.App.Editing;
+using Forge.App.Review;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
 
 public partial class FileDocumentView : UserControl
 {
+    private FileDocumentViewModel? model;
+    private ForgeEditorBridge? bridge;
+    private ReviewOverlay? review;
+    private bool attached;
+
     public FileDocumentView()
     {
         InitializeComponent();
-        LineList.KeyDown += OnListKeyDown;
+        DataContextChanged += OnDataContextChanged;
+        Editor.AddHandler(InputElement.KeyDownEvent, OnEditorKeyDown, RoutingStrategies.Tunnel);
+        InitEditorLsp();
+        review = new ReviewOverlay(Editor, new ReviewOverlayParts
+        {
+            Layer = ReviewLayer,
+            Icon = ReviewIconButton,
+            Composer = ReviewComposer,
+            RangeText = ReviewRangeText,
+            BodyBox = ReviewBodyBox,
+            ComposerStatus = ReviewComposerStatus,
+            SaveButton = ReviewSaveButton,
+            SendButton = ReviewSendButton,
+            DeleteButton = ReviewDeleteButton,
+            CancelButton = ReviewCancelButton,
+            SendAllButton = ReviewSendAll,
+            StatusText = ReviewStatus,
+        });
     }
 
-    private void OnListKeyDown(object? sender, KeyEventArgs e)
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        if (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        base.OnAttachedToVisualTree(e);
+        attached = true;
+        Editor.ActualThemeVariantChanged += OnThemeChanged;
+        Connect();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        attached = false;
+        Editor.ActualThemeVariantChanged -= OnThemeChanged;
+        Disconnect();
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        if (attached)
         {
-            e.Handled = true;
-            _ = CopyAsync();
+            Connect();
         }
+    }
+
+    private void Connect()
+    {
+        Disconnect();
+        model = DataContext as FileDocumentViewModel;
+        if (model is null)
+        {
+            return;
+        }
+
+        model.PropertyChanged += OnModelPropertyChanged;
+        review?.Bind(model.ReviewController);
+        Rebind();
+    }
+
+    private void Disconnect()
+    {
+        DetachEditorLsp();
+        if (model is not null)
+        {
+            model.PropertyChanged -= OnModelPropertyChanged;
+            model = null;
+        }
+
+        review?.Bind(null);
+        bridge?.Dispose();
+        bridge = null;
+    }
+
+    private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(FileDocumentViewModel.EditorDocument))
+        {
+            Rebind();
+        }
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs e) => bridge?.ApplyTheme();
+
+    private void Rebind()
+    {
+        DetachEditorLsp();
+        bridge?.Dispose();
+        bridge = null;
+        if (model?.EditorMirror is not { } mirror)
+        {
+            review?.Refresh();
+            return;
+        }
+
+        bridge = new ForgeEditorBridge(Editor, model, mirror, model.Path);
+        AttachEditorLsp(model);
+        review?.Refresh();
+    }
+
+    private void OnEditorKeyDown(object? sender, KeyEventArgs e)
+    {
+        var copy = e.Key == Key.C && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Meta
+            || e.Key == Key.Insert && e.KeyModifiers == KeyModifiers.Control;
+        if (!copy || Editor.TextArea.Selection is not SimpleSelection { IsEmpty: false })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _ = CopyAsync();
     }
 
     private void OnCopyClick(object? sender, RoutedEventArgs e) => _ = CopyAsync();
@@ -38,7 +147,7 @@ public partial class FileDocumentView : UserControl
             return;
         }
 
-        var text = SelectedText(model);
+        var text = Editor.SelectionLength > 0 ? Editor.SelectedText : Editor.Document?.Text ?? string.Empty;
         try
         {
             await clipboard.SetTextAsync(text).ConfigureAwait(true);
@@ -51,24 +160,4 @@ public partial class FileDocumentView : UserControl
         }
     }
 
-    private string SelectedText(FileDocumentViewModel model)
-    {
-        if (model.IsEditing)
-        {
-            return string.IsNullOrEmpty(Editor.SelectedText) ? model.EditText : Editor.SelectedText;
-        }
-
-        var first = int.MaxValue;
-        var last = 0;
-        foreach (var item in LineList.SelectedItems ?? Array.Empty<object>())
-        {
-            if (item is FileLineViewModel line)
-            {
-                first = Math.Min(first, line.Number);
-                last = Math.Max(last, line.Number);
-            }
-        }
-
-        return last == 0 ? model.EditText : model.GetLinesText(first, last);
-    }
 }

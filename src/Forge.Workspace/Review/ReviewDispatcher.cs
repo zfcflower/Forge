@@ -24,7 +24,8 @@ public sealed class ReviewDispatcher
         long commentId,
         IReadOnlyList<FileDiff>? diff = null,
         int contextLines = 2,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<ReviewComment, string?>? liveQuote = null)
     {
         var comment = await store.GetAsync(commentId, ct).ConfigureAwait(false);
         if (comment is null)
@@ -32,7 +33,7 @@ public sealed class ReviewDispatcher
             return null;
         }
 
-        return new ReviewDispatch(Render([comment], diff, contextLines, numbered: false, heading: "Review comment"), [comment.Id]);
+        return new ReviewDispatch(Render([comment], diff, contextLines, numbered: false, heading: "Review comment", liveQuote), [comment.Id]);
     }
 
     public async Task<ReviewDispatch?> SendSingleAsync(
@@ -57,7 +58,19 @@ public sealed class ReviewDispatcher
         IReadOnlyList<FileDiff>? diff = null,
         int contextLines = 2,
         CancellationToken ct = default) =>
-        BuildManyAsync(workspacePath, sessionId, diff, contextLines, ct);
+        BuildManyAsync(workspacePath, sessionId, null, diff, contextLines, null, ct);
+
+    /// <summary>One message with only the drafts of <paramref name="filePath"/>; marks nothing sent.</summary>
+    public Task<ReviewDispatch?> BuildFileAsync(
+        string workspacePath,
+        string sessionId,
+        string filePath,
+        Func<ReviewComment, string?>? liveQuote = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        return BuildManyAsync(workspacePath, sessionId, filePath, null, 2, liveQuote, ct);
+    }
 
     public async Task<ReviewDispatch?> SendAllAsync(
         string workspacePath,
@@ -66,7 +79,7 @@ public sealed class ReviewDispatcher
         int contextLines = 2,
         CancellationToken ct = default)
     {
-        var dispatch = await BuildManyAsync(workspacePath, sessionId, diff, contextLines, ct).ConfigureAwait(false);
+        var dispatch = await BuildManyAsync(workspacePath, sessionId, null, diff, contextLines, null, ct).ConfigureAwait(false);
         if (dispatch is null)
         {
             return null;
@@ -79,11 +92,15 @@ public sealed class ReviewDispatcher
     private async Task<ReviewDispatch?> BuildManyAsync(
         string workspacePath,
         string sessionId,
+        string? filePath,
         IReadOnlyList<FileDiff>? diff,
         int contextLines,
+        Func<ReviewComment, string?>? liveQuote,
         CancellationToken ct)
     {
-        var drafts = await store.GetDraftsAsync(workspacePath, sessionId, ct).ConfigureAwait(false);
+        var drafts = filePath is null
+            ? await store.GetDraftsAsync(workspacePath, sessionId, ct).ConfigureAwait(false)
+            : await store.GetDraftsAsync(workspacePath, sessionId, filePath, ct).ConfigureAwait(false);
         if (drafts.Count == 0)
         {
             return null;
@@ -96,7 +113,7 @@ public sealed class ReviewDispatcher
             .ToArray();
         var ids = ordered.Select(static comment => comment.Id).ToArray();
         var heading = $"Review comments ({ordered.Length.ToString(CultureInfo.InvariantCulture)})";
-        return new ReviewDispatch(Render(ordered, diff, contextLines, numbered: true, heading), ids);
+        return new ReviewDispatch(Render(ordered, diff, contextLines, numbered: true, heading, liveQuote), ids);
     }
 
     private static string Render(
@@ -104,7 +121,8 @@ public sealed class ReviewDispatcher
         IReadOnlyList<FileDiff>? diff,
         int contextLines,
         bool numbered,
-        string heading)
+        string heading,
+        Func<ReviewComment, string?>? liveQuote = null)
     {
         var builder = new StringBuilder();
         builder.Append("## ").Append(heading).Append("\n");
@@ -124,9 +142,18 @@ public sealed class ReviewDispatcher
                 builder.Append("base: `").Append(comment.BaseCommit).Append("`\n");
             }
 
+            var live = liveQuote?.Invoke(comment);
             var file = FindFile(diff, comment.FilePath);
-            var quote = file is null ? null : comment.Anchor?.Quote(file, contextLines);
-            if (quote is not null)
+            var quote = live is not null || file is null ? null : comment.Anchor?.Quote(file, contextLines);
+            if (live is not null)
+            {
+                var liveFence = FenceFor(live);
+                builder.Append('\n')
+                    .Append(liveFence).Append("text\n")
+                    .Append(live).Append('\n')
+                    .Append(liveFence).Append('\n');
+            }
+            else if (quote is not null)
             {
                 var fence = FenceFor(quote.Text);
                 builder.Append('\n')

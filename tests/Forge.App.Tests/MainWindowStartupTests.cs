@@ -21,7 +21,7 @@ public sealed class MainWindowStartupTests
     public async Task Startup_fits_and_centres_the_entire_frame_in_the_working_area(
         int x, int y, int width, int height, double scaling, double frameWidth, double frameHeight)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             () =>
             {
@@ -59,7 +59,7 @@ public sealed class MainWindowStartupTests
     [Fact]
     public async Task Opening_the_shell_applies_the_logo_and_screen_placement()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             () =>
             {
@@ -101,7 +101,7 @@ public sealed class MainWindowStartupTests
     [Fact]
     public async Task Embedded_windows_icon_contains_all_shell_and_high_DPI_sizes()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             () =>
             {
@@ -141,7 +141,7 @@ public sealed class MainWindowStartupTests
     [Fact]
     public async Task Embedded_logo_preserves_transparent_background_and_visible_artwork()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             () =>
             {

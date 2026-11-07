@@ -70,6 +70,49 @@ public sealed class ComposerQueueTests
     }
 
     [Fact]
+    public async Task A_queued_review_message_removed_before_it_is_sent_reports_the_withdrawal_once()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = "first";
+            workspace.SendCommand.Execute(null);
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && workspace.IsRunning));
+            var withdrawals = 0;
+            Assert.True(workspace.TryQueueReview("review text", () => withdrawals++));
+            var chip = Assert.Single(workspace.Queued);
+            Assert.Equal("review text", chip.Text);
+            Assert.Equal(0, withdrawals);
+            chip.RemoveCommand.Execute(null);
+            Assert.Empty(workspace.Queued);
+            Assert.Equal(1, withdrawals);
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => !workspace.IsRunning));
+            await PumpAsync(40);
+            Assert.Equal(1, provider.Calls);
+            Assert.Equal(1, withdrawals);
+        });
+    }
+
+    [Fact]
+    public async Task A_queued_review_message_that_is_sent_never_reports_a_withdrawal()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = "first";
+            workspace.SendCommand.Execute(null);
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && workspace.IsRunning));
+            var withdrawals = 0;
+            Assert.True(workspace.TryQueueReview("review text", () => withdrawals++));
+            Assert.False(workspace.TryQueueReview("   ", () => withdrawals++));
+            Assert.Single(workspace.Queued);
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 2 && !workspace.IsRunning && workspace.Queued.Count == 0));
+            Assert.Equal(["first", "review text"], provider.Seen);
+            Assert.Equal(0, withdrawals);
+        });
+    }
+
+    [Fact]
     public async Task Redirect_stops_the_turn_and_sends_the_new_message()
     {
         await RunAsync(

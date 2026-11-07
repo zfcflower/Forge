@@ -170,6 +170,37 @@ public sealed class ReviewStore
             Limit = MaxQueryLimit,
         }, ct);
 
+    public Task<IReadOnlyList<ReviewComment>> GetDraftsAsync(string workspacePath, string sessionId, string filePath, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        return QueryAsync(new ReviewQuery
+        {
+            WorkspacePath = workspacePath,
+            SessionId = sessionId,
+            FilePath = filePath,
+            Status = ReviewCommentStatus.Draft,
+            Limit = MaxQueryLimit,
+        }, ct);
+    }
+
+    /// <summary>Moves a draft to the lines its code now occupies; sent comments keep the lines they were sent with.</summary>
+    public async Task<bool> UpdateLocationAsync(long id, int newLineStart, int newLineEnd, DiffAnchor? anchor, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(newLineStart, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(newLineEnd, newLineStart);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE review_comments SET new_line_start = $start, new_line_end = $end, anchor_json = $anchor, updated_at = $now WHERE id = $id AND status = $draft";
+        command.Parameters.AddWithValue("$start", newLineStart);
+        command.Parameters.AddWithValue("$end", newLineEnd);
+        command.Parameters.AddWithValue("$anchor", anchor is null ? DBNull.Value : JsonSerializer.Serialize(anchor, WorkspaceJsonContext.Default.DiffAnchor));
+        command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$draft", StatusText(ReviewCommentStatus.Draft));
+        command.Parameters.AddWithValue("$id", id);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
     public async Task<bool> UpdateBodyAsync(long id, string body, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
@@ -240,6 +271,43 @@ public sealed class ReviewStore
         }
 
         return updated.OrderBy(comment => order.TryGetValue(comment.Id, out var position) ? position : int.MaxValue).ToArray();
+    }
+
+    public async Task<bool> UpdateDraftBodyAsync(long id, string body, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(body);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE review_comments SET body = $body, updated_at = $now WHERE id = $id AND status = $draft";
+        command.Parameters.AddWithValue("$body", body);
+        command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$draft", StatusText(ReviewCommentStatus.Draft));
+        command.Parameters.AddWithValue("$id", id);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<int> RestoreDraftsAsync(IReadOnlyList<long> ids, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+        {
+            return 0;
+        }
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        var names = new List<string>(ids.Count);
+        for (var i = 0; i < ids.Count; i++)
+        {
+            var name = "$id" + i.ToString(CultureInfo.InvariantCulture);
+            names.Add(name);
+            command.Parameters.AddWithValue(name, ids[i]);
+        }
+        command.CommandText =
+            $"UPDATE review_comments SET status = $draft, sent_at = NULL, updated_at = $now WHERE status = $sent AND id IN ({string.Join(", ", names)})";
+        command.Parameters.AddWithValue("$sent", StatusText(ReviewCommentStatus.Sent));
+        command.Parameters.AddWithValue("$draft", StatusText(ReviewCommentStatus.Draft));
+        command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)

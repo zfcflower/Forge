@@ -6,7 +6,7 @@ using Xunit;
 namespace Forge.App.Tests;
 
 [CollectionDefinition("forge-app-ui", DisableParallelization = true)]
-public sealed class HeadlessCollection
+public sealed class HeadlessCollection : ICollectionFixture<SharedHeadlessFixture>
 {
 }
 

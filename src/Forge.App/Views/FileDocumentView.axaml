@@ -3,6 +3,7 @@
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:loc="using:Forge.App.Localization"
+             xmlns:ae="using:AvaloniaEdit"
              x:Class="Forge.App.Views.FileDocumentView"
              x:DataType="vm:FileDocumentViewModel">
   <UserControl.KeyBindings>
@@ -12,21 +13,30 @@
     <Style Selector="wc|PanelIconButton.active /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
     </Style>
-    <Style Selector="TextBox#Editor">
-      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Auto" />
+    <Style Selector="Button.reviewIcon, Button.reviewMarker">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="0" />
     </Style>
-    <Style Selector="TextBox#Editor.wrap">
-      <Setter Property="TextWrapping" Value="Wrap" />
-      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Disabled" />
+    <Style Selector="Button.reviewMarker.lost">
+      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
     </Style>
-    <Style Selector="ListBox#LineList">
-      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Auto" />
+    <Style Selector="Path.reviewGlyph">
+      <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="StrokeThickness" Value="1.6" />
     </Style>
-    <Style Selector="ListBox#LineList.wrap">
-      <Setter Property="(ScrollViewer.HorizontalScrollBarVisibility)" Value="Disabled" />
+    <Style Selector="Button.reviewMarker.lost Path.reviewGlyph">
+      <Setter Property="Stroke" Value="{DynamicResource DangerBrush}" />
     </Style>
-    <Style Selector="ListBox#LineList.wrap wc|SyntaxLineText">
-      <Setter Property="TextWrapping" Value="Wrap" />
+    <Style Selector="Border.reviewComposer">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
     </Style>
   </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
@@ -37,15 +47,16 @@
         <wc:PanelIconButton Grid.Column="2" Icon="{DynamicResource IconWrap}" Classes.active="{Binding WrapLines}"
                             Command="{Binding ToggleWrapCommand}" ToolTip.Tip="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="file-wrap" AutomationProperties.Name="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}" />
-        <wc:PanelIconButton Grid.Column="3" Margin="2,0,0,0" Icon="{DynamicResource IconEdit}" Classes.active="{Binding IsEditing}"
-                            Command="{Binding ToggleEditCommand}" ToolTip.Tip="{Binding [files.edit], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="file-edit" AutomationProperties.Name="{Binding [files.edit], Source={x:Static loc:Loc.Instance}}" />
-        <wc:PanelIconButton Grid.Column="4" Margin="2,0,0,0" Icon="{DynamicResource IconSave}" Command="{Binding SaveCommand}"
+        <wc:PanelIconButton Grid.Column="3" Margin="2,0,0,0" Icon="{DynamicResource IconSave}" Command="{Binding SaveCommand}"
                             ToolTip.Tip="{Binding [files.save], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="file-save" AutomationProperties.Name="{Binding [files.save], Source={x:Static loc:Loc.Instance}}" />
-        <wc:PanelIconButton Grid.Column="5" Margin="2,0,0,0" Icon="{DynamicResource IconCopy}" Click="OnCopyClick"
+        <wc:PanelIconButton Grid.Column="4" Margin="2,0,0,0" Icon="{DynamicResource IconCopy}" Click="OnCopyClick"
                             ToolTip.Tip="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="file-copy" AutomationProperties.Name="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}" />
+        <Button x:Name="ReviewSendAll" Grid.Column="5" Margin="2,0,0,0" Classes="icon" IsVisible="False"
+                AutomationProperties.AutomationId="review-send-all">
+          <Path Classes="reviewGlyph" Data="{DynamicResource IconSend}" Width="14" Height="14" Stretch="Uniform" />
+        </Button>
       </Grid>
     </Border>
     <StackPanel Grid.Row="1">
@@ -58,23 +69,41 @@
                  Foreground="{DynamicResource DangerBrush}" AutomationProperties.AutomationId="file-copy-error" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasLspStatus}" Text="{Binding LspStatus}"
                  Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-lsp-status" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasEditorNotice}" Text="{Binding EditorNotice}"
+                 Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-editor-notice" />
+      <TextBlock x:Name="ReviewStatus" Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="False"
+                 Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-review-status" />
     </StackPanel>
-    <TextBox x:Name="Editor" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True"
-             FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
-             Classes.wrap="{Binding WrapLines}" IsVisible="{Binding IsEditing}" Text="{Binding EditText, Mode=TwoWay}"
-             NewLine="{Binding NewLineText}"
-             ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="file-editor" />
-    <ListBox x:Name="LineList" Grid.Row="2" IsVisible="{Binding !IsEditing}" Classes.wrap="{Binding WrapLines}"
-             SelectionMode="Multiple" ItemsSource="{Binding LineItems}" Padding="0,2">
-      <ListBox.ItemTemplate>
-        <DataTemplate x:DataType="vm:FileLineViewModel">
-          <Grid ColumnDefinitions="52,*" MinHeight="17">
-            <TextBlock Classes="mono" Text="{Binding Number}" Foreground="{DynamicResource TextMutedBrush}"
-                       TextAlignment="Right" VerticalAlignment="Top" Margin="0,0,8,0" />
-            <wc:SyntaxLineText Grid.Column="1" Classes="mono" Segments="{Binding Segments}" />
-          </Grid>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+    <Grid Grid.Row="2">
+      <ae:TextEditor x:Name="Editor" ShowLineNumbers="True" WordWrap="{Binding WrapLines}"
+                     FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+                     Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
+                     LineNumbersForeground="{DynamicResource TextMutedBrush}"
+                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                     IsReadOnly="{Binding IsEditorFaulted}"
+                     IsVisible="{Binding HasDocument}" AutomationProperties.AutomationId="file-editor" />
+      <Canvas x:Name="ReviewLayer" ClipToBounds="True">
+        <Button x:Name="ReviewIconButton" Classes="reviewIcon" Width="26" Height="26" IsVisible="False"
+                AutomationProperties.AutomationId="review-add">
+          <Path Classes="reviewGlyph" Data="M4 5h16v11H9l-4 4v-4H4z" Width="14" Height="14" Stretch="Uniform" />
+        </Button>
+        <Border x:Name="ReviewComposer" Classes="reviewComposer" IsVisible="False"
+                AutomationProperties.AutomationId="review-composer">
+          <StackPanel Spacing="6">
+            <TextBlock x:Name="ReviewRangeText" Classes="mono" />
+            <TextBox x:Name="ReviewBodyBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" MaxHeight="160"
+                     AutomationProperties.AutomationId="review-body" />
+            <TextBlock x:Name="ReviewComposerStatus" Classes="caption" TextWrapping="Wrap" IsVisible="False"
+                       Foreground="{DynamicResource TextMutedBrush}" />
+            <WrapPanel Orientation="Horizontal" ItemSpacing="6" LineSpacing="6" HorizontalAlignment="Right">
+              <Button x:Name="ReviewDeleteButton" AutomationProperties.AutomationId="review-delete" />
+              <Button x:Name="ReviewCancelButton" AutomationProperties.AutomationId="review-cancel" />
+              <Button x:Name="ReviewSaveButton" AutomationProperties.AutomationId="review-save" />
+              <Button x:Name="ReviewSendButton" Classes="primary" AutomationProperties.AutomationId="review-send" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+      </Canvas>
+    </Grid>
   </Grid>
 </UserControl>

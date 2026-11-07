@@ -209,6 +209,13 @@ public enum CompletionItemKind
 
 public sealed record LspTextEdit(LspRange Range, string NewText);
 
+/// <summary>The wire <c>insertTextFormat</c>. The client advertises no snippet support, so a server should send plain text.</summary>
+public enum InsertTextFormat
+{
+    PlainText = 1,
+    Snippet = 2,
+}
+
 public sealed record CompletionItem(
     string Label,
     CompletionItemKind Kind,
@@ -216,9 +223,13 @@ public sealed record CompletionItem(
     string? Documentation,
     string? InsertText,
     LspTextEdit? TextEdit,
-    string? SortText);
+    string? SortText,
+    InsertTextFormat InsertTextFormat = InsertTextFormat.PlainText,
+    IReadOnlyList<LspTextEdit>? AdditionalTextEdits = null,
+    string? FilterText = null);
 
-public sealed record CompletionResult(IReadOnlyList<CompletionItem> Items, bool IsIncomplete);
+/// <param name="MalformedItems">Items the server sent with an invalid label, kind, format or edit; they are excluded and must be reported by the caller.</param>
+public sealed record CompletionResult(IReadOnlyList<CompletionItem> Items, bool IsIncomplete, int MalformedItems = 0);
 
 public sealed record HoverInfo(string Markup, LspRange? Range);
 

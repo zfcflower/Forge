@@ -68,7 +68,7 @@ public sealed class WindowCaptionTests
     [Fact]
     public async Task Toggling_maximize_alternates_a_window_between_normal_and_maximized()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var states = await session.Dispatch(
             () =>
             {
@@ -98,7 +98,7 @@ public sealed class WindowCaptionTests
     [Fact]
     public async Task A_left_press_on_the_floating_title_bar_starts_a_window_move()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var result = await session.Dispatch(
             () =>
             {
@@ -130,7 +130,7 @@ public sealed class WindowCaptionTests
     [Fact]
     public async Task A_press_on_the_floating_dock_button_keeps_its_clicks_and_starts_no_move()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var result = await session.Dispatch(
             () =>
             {
@@ -166,7 +166,7 @@ public sealed class WindowCaptionTests
     [Fact]
     public async Task A_double_press_on_the_floating_title_bar_maximizes_the_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var result = await session.Dispatch(
             () =>
             {
@@ -215,7 +215,7 @@ public sealed class WindowCaptionTests
     [Fact]
     public async Task Only_the_title_bar_of_the_floating_files_panel_drags_its_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var result = await session.Dispatch(
             () =>
             {
@@ -257,7 +257,7 @@ public sealed class WindowCaptionTests
     [Fact]
     public async Task The_main_window_title_row_hands_its_press_to_the_caption_rule()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var result = await session.Dispatch(
             () =>
             {

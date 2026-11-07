@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Avalonia.Threading;
 using Forge.Abstractions;
@@ -49,6 +50,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     /// <summary>Set by Stop: the queue waits until the user sends again.</summary>
     private bool queuePaused;
+    private readonly ConditionalWeakTable<QueuedMessageViewModel, Action> reviewWithdrawn = new();
 
     /// <summary>The root agent is rebuilt for the next turn, so its accumulated usage starts again from zero.</summary>
     private bool rootRebuilt;
@@ -521,6 +523,27 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
     }
 
+    public bool TryQueueReview(string text, Action? withdrawn = null)
+    {
+        if (disposed || string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var message = new QueuedMessageViewModel(text.Trim(), isInterjection: false, RemoveQueuedReview);
+        if (withdrawn is not null)
+        {
+            reviewWithdrawn.Add(message, withdrawn);
+        }
+        AddQueued(message, queued.Count);
+        if (!isRunning)
+        {
+            ScheduleNext();
+        }
+
+        return true;
+    }
+
     private void Interject()
     {
         var text = draft.Trim();
@@ -574,6 +597,24 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void RemoveQueuedReview(QueuedMessageViewModel message)
+    {
+        if (queued.Remove(message))
+        {
+            OnQueueChanged();
+            NotifyWithdrawn(message);
+        }
+    }
+
+    private void NotifyWithdrawn(QueuedMessageViewModel message)
+    {
+        if (reviewWithdrawn.TryGetValue(message, out var withdrawn))
+        {
+            reviewWithdrawn.Remove(message);
+            withdrawn();
+        }
+    }
+
     private void OnQueueChanged()
     {
         OnPropertyChanged(nameof(HasQueued));
@@ -590,6 +631,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         queued.Remove(next);
+        reviewWithdrawn.Remove(next);
         OnQueueChanged();
         return next.Text;
     }
@@ -1014,6 +1056,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        foreach (var message in queued.ToArray())
+        {
+            NotifyWithdrawn(message);
+        }
         coalescer.Dispose();
         Cancel();
         turn?.Dispose();

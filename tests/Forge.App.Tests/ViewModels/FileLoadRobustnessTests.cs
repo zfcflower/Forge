@@ -30,9 +30,8 @@ public sealed class FileLoadRobustnessTests : IDisposable
             var model = FileDocumentViewModel.Create();
             await model.LoadAsync(path, CancellationToken.None);
             Assert.False(model.HasError, model.Error);
-            Assert.True(model.Lines.Count >= 25000, "lines " + model.Lines.Count);
-            Assert.Equal("l24999", model.Lines[24999].Text);
-            Assert.Contains("l24999", model.GetLinesText(25000, 25000), StringComparison.Ordinal);
+            Assert.Equal(25000, model.EditText.Count(static c => c == '\n'));
+            Assert.Equal("l24999\n", model.GetLinesText(25000, 25000));
         });
     }
 
@@ -52,7 +51,7 @@ public sealed class FileLoadRobustnessTests : IDisposable
             Assert.True(model.HasError);
             Assert.False(string.IsNullOrWhiteSpace(model.Error));
             Assert.False(model.HasDocument);
-            Assert.Empty(model.Lines);
+            Assert.Null(model.EditorDocument);
             Assert.False(model.IsLoading);
             var view = new FileDocumentView { DataContext = model };
             var window = new Window { Width = 600, Height = 300, Content = view };
@@ -85,7 +84,7 @@ public sealed class FileLoadRobustnessTests : IDisposable
             await model.LoadAsync(good, CancellationToken.None);
             Assert.False(model.HasError, model.Error);
             Assert.True(model.HasDocument);
-            Assert.Equal("fine", model.Lines[0].Text);
+            Assert.Equal("fine", model.GetLinesText(1, 1).TrimEnd('\r', '\n'));
         });
     }
 
@@ -121,7 +120,7 @@ public sealed class FileLoadRobustnessTests : IDisposable
             Assert.Equal(Path.GetFullPath(small), model.Path);
             Assert.False(model.HasError, model.Error);
             Assert.False(model.IsLoading);
-            Assert.Equal("winner", model.Lines[0].Text);
+            Assert.Equal("winner", model.GetLinesText(1, 1).TrimEnd('\r', '\n'));
             Assert.Equal("winner\n", model.EditText);
         });
     }
@@ -147,7 +146,7 @@ public sealed class FileLoadRobustnessTests : IDisposable
 
     private static async Task Ui(Func<Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
     }

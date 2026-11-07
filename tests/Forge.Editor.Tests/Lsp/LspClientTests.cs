@@ -474,6 +474,153 @@ public class LspClientTests
     }
 
     [Fact]
+    public async Task Completion_preserves_dollar_text_and_parses_the_insert_text_format()
+    {
+        var result = await CompleteAsync("""
+            {"items":[
+              {"label":"default","insertText":"$1 and ${2:x} and $0"},
+              {"label":"plain","insertText":"$0","insertTextFormat":1},
+              {"label":"snippet","insertText":"for ${1:i}","insertTextFormat":2},
+              {"label":"nullFormat","insertText":"$x","insertTextFormat":null}
+            ]}
+            """);
+        Assert.Equal(0, result.MalformedItems);
+        Assert.Equal(["default", "plain", "snippet", "nullFormat"], result.Items.Select(static i => i.Label));
+        Assert.Equal(["$1 and ${2:x} and $0", "$0", "for ${1:i}", "$x"], result.Items.Select(static i => i.InsertText));
+        Assert.Equal(
+            [InsertTextFormat.PlainText, InsertTextFormat.PlainText, InsertTextFormat.Snippet, InsertTextFormat.PlainText],
+            result.Items.Select(static i => i.InsertTextFormat));
+    }
+
+    private const string Range01 = """{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}""";
+
+    public static TheoryData<string> MalformedEditItems => new()
+    {
+        """{"label":"bad","additionalTextEdits":"x"}""",
+        """{"label":"bad","additionalTextEdits":{"range":""" + Range01 + ""","newText":"x"}}""",
+        """{"label":"bad","additionalTextEdits":[{"range":""" + Range01 + """}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":""" + Range01 + ""","newText":5}]}""",
+        """{"label":"bad","additionalTextEdits":[{"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":-1,"character":0},"end":{"line":0,"character":1}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":0,"character":-1},"end":{"line":0,"character":1}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":0,"character":3},"end":{"line":0,"character":1}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":2,"character":0},"end":{"line":1,"character":5}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1.5}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":0,"character":0}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":"0:0-0:1","newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":{"start":{"line":3000000000,"character":0},"end":{"line":3000000000,"character":1}},"newText":"x"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"range":""" + Range01 + ""","newText":"ok"},{"newText":"missing range"}]}""",
+        """{"label":"bad","additionalTextEdits":[{"insert":""" + Range01 + ""","replace":""" + Range01 + ""","newText":"x"}]}""",
+        """{"label":"bad","textEdit":{"insert":""" + Range01 + ""","replace":""" + Range01 + ""","newText":"x"}}""",
+        """{"label":"bad","textEdit":"x"}""",
+        """{"label":"bad","textEdit":{"range":""" + Range01 + """}}""",
+        """{"label":"bad","textEdit":{"range":{"start":{"line":-1,"character":0},"end":{"line":0,"character":1}},"newText":"x"}}""",
+    };
+
+    [Fact]
+    public async Task Completion_counts_invalid_insert_text_formats_and_keeps_the_valid_items()
+    {
+        var result = await CompleteAsync("""
+            [{"label":"zero","insertTextFormat":0},
+             {"label":"three","insertTextFormat":3},
+             {"label":"text","insertTextFormat":"1"},
+             {"label":"bool","insertTextFormat":true},
+             {"label":"fraction","insertTextFormat":1.5},
+             {"label":"ok","insertTextFormat":2}]
+            """);
+        Assert.Equal(5, result.MalformedItems);
+        var item = Assert.Single(result.Items);
+        Assert.Equal("ok", item.Label);
+        Assert.Equal(InsertTextFormat.Snippet, item.InsertTextFormat);
+    }
+
+    [Fact]
+    public async Task Completion_parses_additional_text_edits_with_exact_ranges_and_text()
+    {
+        var result = await CompleteAsync("""
+            [{"label":"withEdits","textEdit":{"range":{"start":{"line":1,"character":2},"end":{"line":1,"character":4}},"newText":"main"},
+              "additionalTextEdits":[
+                {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"import x;\n"},
+                {"range":{"start":{"line":3,"character":1},"end":{"line":3,"character":4}},"newText":"y"}]},
+             {"label":"emptyList","additionalTextEdits":[]},
+             {"label":"nullList","additionalTextEdits":null},
+             {"label":"none"}]
+            """);
+        Assert.Equal(0, result.MalformedItems);
+        var first = result.Items[0];
+        Assert.Equal(new LspTextEdit(new LspRange(new LspPosition(1, 2), new LspPosition(1, 4)), "main"), first.TextEdit);
+        Assert.Equal(
+            [
+                new LspTextEdit(new LspRange(new LspPosition(0, 0), new LspPosition(0, 0)), "import x;\n"),
+                new LspTextEdit(new LspRange(new LspPosition(3, 1), new LspPosition(3, 4)), "y"),
+            ],
+            first.AdditionalTextEdits);
+        Assert.All(result.Items.Skip(1), static item => Assert.Null(item.AdditionalTextEdits));
+        Assert.Equal(4, result.Items.Count);
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedEditItems))]
+    public async Task A_malformed_or_unsupported_edit_excludes_only_its_item_and_never_throws(string badItem)
+    {
+        var valid = """{"label":"ok","textEdit":{"range":""" + Range01 + ""","newText":"x"}}""";
+        var result = await CompleteAsync("[" + valid + "," + badItem + "," + valid.Replace("\"ok\"", "\"ok2\"", StringComparison.Ordinal) + "]");
+        Assert.Equal(["ok", "ok2"], result.Items.Select(static i => i.Label));
+        Assert.Equal(1, result.MalformedItems);
+    }
+
+    [Fact]
+    public async Task Item_defaults_are_rejected_and_every_item_is_counted()
+    {
+        var result = await CompleteAsync("""
+            {"isIncomplete":true,"itemDefaults":{"editRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}},
+             "items":[{"label":"a"},{"label":"b"},{"label":"c"}]}
+            """);
+        Assert.Empty(result.Items);
+        Assert.True(result.IsIncomplete);
+        Assert.Equal(3, result.MalformedItems);
+        var withNull = await CompleteAsync("""{"itemDefaults":null,"items":[{"label":"a"}]}""");
+        Assert.Equal("a", Assert.Single(withNull.Items).Label);
+        Assert.Equal(0, withNull.MalformedItems);
+    }
+
+    [Fact]
+    public async Task Wrong_label_kind_and_documentation_are_counted_without_dropping_the_valid_items()
+    {
+        var result = await CompleteAsync("""
+            [{"label":"first","kind":3},
+             {"label":7},
+             {"kind":3},
+             "string",
+             null,
+             {"label":"badKind","kind":"x"},
+             {"label":"zero","kind":0},
+             {"label":"big","kind":26},
+             {"label":"fraction","kind":1.5},
+             {"label":"badDoc","documentation":5},
+             {"label":"badDoc2","documentation":{"kind":"markdown"}},
+             {"label":"second","kind":null,"documentation":{"kind":"markdown","value":"d"}}]
+            """);
+        Assert.Equal(["first", "second"], result.Items.Select(static i => i.Label));
+        Assert.Equal(CompletionItemKind.Function, result.Items[0].Kind);
+        Assert.Equal(CompletionItemKind.Text, result.Items[1].Kind);
+        Assert.Equal("d", result.Items[1].Documentation);
+        Assert.Equal(10, result.MalformedItems);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"text\"")]
+    [InlineData("42")]
+    [InlineData("{\"items\":5}")]
+    public async Task A_non_list_result_yields_no_items_and_no_exception(string response)
+    {
+        var result = await CompleteAsync(response);
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.MalformedItems);
+    }
+
+    [Fact]
     public async Task Document_symbols_keep_hierarchy_and_accept_location_form()
     {
         using var dir = new TempDirectory();
@@ -885,6 +1032,21 @@ public class LspClientTests
         await client.DisposeAsync();
 
         Assert.True(client.IsClosed);
+    }
+
+    private static async Task<CompletionResult> CompleteAsync(string response)
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, "{\"completionProvider\":{}}");
+        var document = new TextDocument("abcdef", dir.PathOf("c.cs"));
+        var call = client.RequestCompletionAsync(document, 1);
+        using (var request = await LspHarness.ReceiveMethodAsync(server, "textDocument/completion"))
+        {
+            await server.RespondAsync(request.RootElement.GetProperty("id"), response);
+        }
+
+        return await call.WaitAsync(Patience);
     }
 
     private static Task<DiagnosticSnapshot> NextDiagnostics(DiagnosticsStore store)
