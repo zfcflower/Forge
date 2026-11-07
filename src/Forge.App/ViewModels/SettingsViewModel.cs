@@ -20,6 +20,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly PathsSettingsSectionViewModel paths;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool isOpen;
+    private SettingsSection? selectedSection;
 
     public SettingsViewModel(AppComposition composition)
     {
@@ -38,11 +39,19 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        SelectedSection = Sections.Items.FirstOrDefault();
         Rebuild();
     }
 
     /// <summary>The page body, ordered by each section's <see cref="SettingsSection.Order"/>.</summary>
     public SettingsSections Sections { get; }
+
+    /// <summary>The section shown in the right-hand pane; the left nav highlights it.</summary>
+    public SettingsSection? SelectedSection
+    {
+        get => selectedSection;
+        set => Set(ref selectedSection, value);
+    }
 
     public bool IsOpen
     {

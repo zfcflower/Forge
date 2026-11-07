@@ -44,13 +44,25 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Equal(Loc.Instance[CoreStrings.SettingsSectionPaths], paths.Title);
         Assert.True(provided.Top < paths.Top, "the provider section must be drawn above the paths section");
 
+        // The provider section is selected by default and its body renders in the right pane.
         var provider = Assert.IsType<ProviderSettingsSectionViewModel>(
             shell.ViewModel.Settings.Sections.Items[0].ViewModel);
-        Assert.Contains(provider.Detail, provided.Texts);
-        Assert.Contains(provider.Hint, provided.Texts);
+        var providerTexts = await session.Dispatch(() => PanelShell.SelectedTexts(shell.Window), token);
+        Assert.Contains(provider.Detail, providerTexts);
+        Assert.Contains(provider.Hint, providerTexts);
 
-        Assert.Contains(shell.Composition.Paths.SettingsPath, paths.Texts);
-        Assert.Contains(shell.Composition.Paths.GeneralWorkspaceDirectory, paths.Texts);
+        // Selecting the paths section swaps its body into the right pane.
+        await session.Dispatch(
+            () =>
+            {
+                shell.ViewModel.Settings.SelectedSection = shell.ViewModel.Settings.Sections.Items[^1];
+                PanelShell.Settle(shell.Window);
+                return 0;
+            },
+            token);
+        var pathsTexts = await session.Dispatch(() => PanelShell.SelectedTexts(shell.Window), token);
+        Assert.Contains(shell.Composition.Paths.SettingsPath, pathsTexts);
+        Assert.Contains(shell.Composition.Paths.GeneralWorkspaceDirectory, pathsTexts);
     }
 
     [Fact]
@@ -81,6 +93,16 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
 
         try
         {
+            // Select the paths section so its rows are the ones in the right pane.
+            await session.Dispatch(
+                () =>
+                {
+                    shell.ViewModel.Settings.SelectedSection = shell.ViewModel.Settings.Sections.Items[^1];
+                    PanelShell.Settle(shell.Window);
+                    return 0;
+                },
+                token);
+
             await SwitchAsync(session, shell.Window, UiLanguage.Chinese, token);
 
             var chinese = await session.Dispatch(
@@ -240,23 +262,25 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                 token);
         }
 
-        /// <summary>One rendered section: the heading, its text lines, and where the heading sits.</summary>
-        public static (string? Title, IReadOnlyList<string> Texts, double Top) Section(Window window, string id)
+        /// <summary>One nav entry: its heading and where it sits in the left column.</summary>
+        public static (string? Title, double Top) Section(Window window, string id)
         {
             var heading = Heading(window, id);
-            if (heading?.Parent is not Visual body)
-            {
-                return (null, [], double.NaN);
-            }
+            var origin = heading?.TranslatePoint(new Point(0, 0), window);
+            return (heading?.Text, origin?.Y ?? double.NaN);
+        }
 
-            var texts = body.GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Select(static block => block.Text ?? string.Empty)
-                .ToList();
-
-            // Bounds are parent-relative, so the headings are compared after mapping both onto the window.
-            var origin = heading.TranslatePoint(new Point(0, 0), window) ?? new Point(double.NaN, double.NaN);
-            return (heading.Text, texts, origin.Y);
+        /// <summary>The text lines of the section body shown in the right pane (the selected section).</summary>
+        public static IReadOnlyList<string> SelectedTexts(Window window)
+        {
+            var body = window.GetVisualDescendants()
+                .FirstOrDefault(control => string.Equals(AutomationProperties.GetAutomationId(control), "settings-body", StringComparison.Ordinal));
+            return body is null
+                ? []
+                : body.GetVisualDescendants()
+                    .OfType<TextBlock>()
+                    .Select(static block => block.Text ?? string.Empty)
+                    .ToList();
         }
 
         /// <summary>Everything the open panel shows, read in one UI dispatch.</summary>
@@ -270,7 +294,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                     .Where(static text => !string.IsNullOrEmpty(text))
                     .Select(static text => text!)
                     .ToList(),
-                Section(window, SettingsSectionIds.Paths).Texts);
+                SelectedTexts(window));
 
         public static IReadOnlyList<string> RenderedSectionIds(Window window) =>
             window.GetVisualDescendants()

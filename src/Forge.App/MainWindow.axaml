@@ -192,7 +192,7 @@
             Opacity="0.92"
             IsVisible="{Binding Settings.IsOpen}">
       <Border Classes="card"
-              Width="660"
+              Width="720"
               MaxHeight="560"
               Padding="20"
               HorizontalAlignment="Center"
@@ -212,21 +212,32 @@
             </Button>
           </Grid>
 
-          <ScrollViewer Grid.Row="1" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
-            <ItemsControl ItemsSource="{Binding Settings.Sections.Items}">
-              <ItemsControl.ItemTemplate>
+          <!-- Two columns: a section nav on the left, the selected section's body on the right. -->
+          <Grid Grid.Row="1" ColumnDefinitions="180,*" Margin="0,12,0,0">
+            <ListBox Grid.Column="0"
+                     ItemsSource="{Binding Settings.Sections.Items}"
+                     SelectedItem="{Binding Settings.SelectedSection, Mode=TwoWay}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     AutomationProperties.AutomationId="settings-nav">
+              <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="prefs:SettingsSection">
-                  <StackPanel Spacing="8" Margin="0,0,0,10">
-                    <TextBlock Classes="section-title"
-                               Text="{Binding Title}"
-                               AutomationProperties.AutomationId="{Binding Id}" />
-                    <ContentControl Content="{Binding ViewModel}" />
-                    <Border Classes="divider" Margin="0,2,0,0" />
-                  </StackPanel>
+                  <TextBlock Text="{Binding Title}"
+                             FontSize="{DynamicResource FontSizeSm}"
+                             Padding="10,7"
+                             VerticalAlignment="Center"
+                             AutomationProperties.AutomationId="{Binding Id}" />
                 </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ScrollViewer Grid.Column="1"
+                          Margin="16,0,0,0"
+                          VerticalScrollBarVisibility="Auto"
+                          AutomationProperties.AutomationId="settings-body">
+              <ContentControl Content="{Binding Settings.SelectedSection.ViewModel}" />
+            </ScrollViewer>
+          </Grid>
 
           <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,16,0,0">
             <Button Classes="primary"
