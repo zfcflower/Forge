@@ -6,12 +6,16 @@ namespace Forge.Integration.Tests;
 
 public sealed class ConcurrencyAndIsolationTests
 {
+    /// <summary>Beta's tools carry this prefix so they do not clash with alpha's same-named <see cref="PluginSources.Standard"/>
+    /// tools; the host refuses a tool name that another plugin already publishes.</summary>
+    private const string BetaToolPrefix = "b_";
+
     [Fact]
     public async Task Sixteen_parallel_calls_across_two_plugins_correlate_to_their_own_results()
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b"));
+        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b", toolPrefix: BetaToolPrefix));
         await fx.StartAsync();
         await fx.ApproveAsync("alpha");
         await fx.ApproveAsync("beta");
@@ -23,7 +27,10 @@ public sealed class ConcurrencyAndIsolationTests
         var calls = Enumerable.Range(0, 16).Select(index =>
         {
             var plugin = index % 2 == 0 ? "alpha" : "beta";
-            var tool = fx.ToolOf(plugin, "echo");
+            var echoName = plugin == "alpha"
+                ? PluginSources.EchoTool
+                : BetaToolPrefix + PluginSources.EchoTool;
+            var tool = fx.ToolOf(plugin, echoName);
             var text = $"call-{index:D2}";
             return (Expected: $"{(plugin == "alpha" ? "a" : "b")}:{text}",
                     Pending: fx.InvokeAsync(tool, $$"""{"text":"{{text}}"}"""));

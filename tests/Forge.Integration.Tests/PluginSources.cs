@@ -26,7 +26,11 @@ internal static class PluginSources
     /// <summary><c>spawnAndCrash</c>: starts that child process and then ends the worker.</summary>
     public const string SpawnAndCrashTool = "spawnAndCrash";
 
-    public static string Standard(string id, string echoPrefix = "echo", string version = "1.0.0") =>
+    public static string Standard(
+        string id,
+        string echoPrefix = "echo",
+        string version = "1.0.0",
+        string toolPrefix = "") =>
         $$"""
         public sealed class TestPlugin : IPlugin
         {
@@ -51,7 +55,7 @@ internal static class PluginSources
             private const string Prefix = "{{echoPrefix}}";
 
             public ToolDeclaration Declaration { get; } =
-                new("echo", "Echoes the text argument", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+                new("{{toolPrefix}}echo", "Echoes the text argument", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
 
             public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
                 Task.FromResult(new ToolResult(Prefix + ":" + TestPlugin.Arg(invocation.Arguments, "text")));
@@ -60,7 +64,7 @@ internal static class PluginSources
         public sealed class PidTool : IPluginTool
         {
             public ToolDeclaration Declaration { get; } =
-                new("pid", "Reports the worker process id", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+                new("{{toolPrefix}}pid", "Reports the worker process id", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
 
             public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
                 Task.FromResult(new ToolResult(Environment.ProcessId.ToString()));
@@ -69,7 +73,7 @@ internal static class PluginSources
         public sealed class SleepTool : IPluginTool
         {
             public ToolDeclaration Declaration { get; } =
-                new("sleep", "Sleeps without honoring cancellation", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+                new("{{toolPrefix}}sleep", "Sleeps without honoring cancellation", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
 
             public async Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
             {
@@ -88,7 +92,7 @@ internal static class PluginSources
         public sealed class ThrowTool : IPluginTool
         {
             public ToolDeclaration Declaration { get; } =
-                new("throw", "Always throws", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
+                new("{{toolPrefix}}throw", "Always throws", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly);
 
             public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct) =>
                 throw new InvalidOperationException("boom:" + TestPlugin.Arg(invocation.Arguments, "text"));
@@ -97,7 +101,7 @@ internal static class PluginSources
         public sealed class CallHostTool : IPluginTool
         {
             public ToolDeclaration Declaration { get; } =
-                new("callHost", "Calls a main-program tool", "{\"type\":\"object\"}", ToolSideEffect.Execute);
+                new("{{toolPrefix}}callHost", "Calls a main-program tool", "{\"type\":\"object\"}", ToolSideEffect.Execute);
 
             public async Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
             {
@@ -114,7 +118,7 @@ internal static class PluginSources
         public sealed class CrashTool : IPluginTool
         {
             public ToolDeclaration Declaration { get; } =
-                new("crash", "Terminates the worker process", "{\"type\":\"object\"}", ToolSideEffect.Execute);
+                new("{{toolPrefix}}crash", "Terminates the worker process", "{\"type\":\"object\"}", ToolSideEffect.Execute);
 
             public Task<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
             {

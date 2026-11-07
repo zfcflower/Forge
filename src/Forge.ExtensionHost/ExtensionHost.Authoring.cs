@@ -286,16 +286,11 @@ public sealed partial class ExtensionHost
             await StopPluginAsync(entry, state, ct).ConfigureAwait(false);
 
             // (c) Only this plugin is refreshed, and it goes through the existing approval path: re-hash under the gate,
-            // compare with what the user approved, SetApproved, apply, publish.
+            // compare with what the user approved, SetApproved, apply, publish. A tool-name clash with another plugin is
+            // refused inside ApplyCoreAsync before anything is published (the names exist only once the worker loaded), and
+            // the catch below rolls the whole commit back, so the colliding tools are never registered.
             await ApproveCoreAsync(entry, entry.Version, request.SourceHash, request.DependencyHash, request.SdkVersion, ct)
                 .ConfigureAwait(false);
-
-            // A C# plugin's tool names exist only once its worker loaded, i.e. after the approval step. A clash with another
-            // plugin is refused here by rolling the whole commit back, so the extension never keeps shadowing the other tool.
-            if (FindToolCollision(pluginId, [.. entry.Tools.Select(static tool => tool.Name)]) is { } pluginCollision)
-            {
-                throw new HostOperationException("invalid_extension", pluginCollision);
-            }
         }
         catch
         {

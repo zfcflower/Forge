@@ -13,6 +13,9 @@ namespace Forge.Integration.Tests;
 /// truncated by the main program; nesting back into <c>run_code</c> or around a call cycle is refused.</summary>
 public sealed class RunCodeScriptTests
 {
+    /// <summary>Beta's tools carry this prefix so they do not clash with alpha's same-named <see cref="PluginSources.Standard"/>
+    /// tools; the host refuses a tool name that another plugin already publishes.</summary>
+    private const string BetaToolPrefix = "b_";
     [Fact]
     public async Task Script_returns_real_arithmetic_result()
     {
@@ -234,11 +237,11 @@ public sealed class RunCodeScriptTests
                 return name switch
                 {
                     "toEchoB" => new NestingTool("toEchoB", (call, context, ct) =>
-                        home.ToolOf("beta", "echo").InvokeAsync(
-                            new ToolCall(call.Id, "echo", call.ArgumentsJson), context, ct)),
+                        home.ToolOf("beta", BetaToolPrefix + PluginSources.EchoTool).InvokeAsync(
+                            new ToolCall(call.Id, PluginSources.EchoTool, call.ArgumentsJson), context, ct)),
                     "toB" => new NestingTool("toB", (call, context, ct) =>
-                        home.ToolOf("beta", "callHost").InvokeAsync(
-                            new ToolCall(call.Id, "callHost", call.ArgumentsJson), context, ct)),
+                        home.ToolOf("beta", BetaToolPrefix + PluginSources.CallHostTool).InvokeAsync(
+                            new ToolCall(call.Id, PluginSources.CallHostTool, call.ArgumentsJson), context, ct)),
                     "backToA" => new NestingTool("backToA", (call, context, ct) =>
                         home.ToolOf("alpha", "echo").InvokeAsync(
                             new ToolCall(call.Id, "echo", call.ArgumentsJson), context, ct)),
@@ -252,7 +255,7 @@ public sealed class RunCodeScriptTests
             });
         box = fx;
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b"));
+        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b", toolPrefix: BetaToolPrefix));
         await fx.StartAsync();
         await fx.ApproveViaStatusAsync("alpha");
         await fx.ApproveViaStatusAsync("beta");
@@ -320,8 +323,8 @@ public sealed class RunCodeScriptTests
                 {
                     arrivedB.Enqueue("b");
                     await WaitForAsync(arrivedA, home.Ct);
-                    var nested = await home.ToolOf("beta", "echo").InvokeAsync(
-                        new ToolCall(call.Id, "echo", """{"text":"nested"}"""), context, ct);
+                    var nested = await home.ToolOf("beta", BetaToolPrefix + PluginSources.EchoTool).InvokeAsync(
+                        new ToolCall(call.Id, PluginSources.EchoTool, """{"text":"nested"}"""), context, ct);
                     var outcomeB = "nested-error=" + nested.IsError + ":" + nested.Content;
                     nestedOutcomes.Enqueue(outcomeB);
                     await WaitForCountAsync(nestedOutcomes, 2, home.Ct);
@@ -349,7 +352,7 @@ public sealed class RunCodeScriptTests
             approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
         box = fx;
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b"));
+        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b", toolPrefix: BetaToolPrefix));
         await fx.StartAsync();
         await fx.ApproveViaStatusAsync("alpha");
         await fx.ApproveViaStatusAsync("beta");
@@ -359,7 +362,7 @@ public sealed class RunCodeScriptTests
             "tools of both plugins");
 
         var rootA = fx.InvokeAsync("alpha", "callHost", """{"target":"gatedToB","args":{}}""");
-        var rootB = fx.InvokeAsync("beta", "callHost", """{"target":"gatedToA","args":{}}""");
+        var rootB = fx.InvokeAsync("beta", BetaToolPrefix + PluginSources.CallHostTool, """{"target":"gatedToA","args":{}}""");
         var roots = await Task.WhenAll(rootA, rootB).WaitAsync(TimeSpan.FromSeconds(90), fx.Ct);
 
         Assert.All(roots, root => Assert.True(root.IsError, root.Content));

@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Forge.HostClient;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -118,6 +119,93 @@ public sealed class ExtensionHardeningTests
         var update = await fx.Client.StageExtensionAsync(
             ExtensionAuthoringSupport.StageWorkflowRequest("owner", Workflow, version: "1.1.0", toolName: "shared-tool"), fx.Ct);
         Assert.Empty(update.Diagnostics);
+    }
+
+    [Fact]
+    public async Task Tool_names_of_a_CSharp_plugin_owned_by_another_plugin_are_refused_at_commit_before_registration()
+    {
+        await using var fx = NewFixture();
+        await fx.StartAsync();
+
+        // Both C# plugins expose the same six tool names, so beta clashes with alpha as soon as its worker loads.
+        var alpha = await fx.Client.StageExtensionAsync(
+            ExtensionAuthoringSupport.StagePluginRequest("alpha"), fx.Ct);
+        Assert.Empty(alpha.Diagnostics);
+        await fx.Client.CommitExtensionAsync(
+            new Sdk.ExtensionCommitRequest("alpha", alpha.SourceHash, alpha.DependencyHash, alpha.SdkVersion), fx.Ct);
+        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+
+        var beta = await fx.Client.StageExtensionAsync(
+            ExtensionAuthoringSupport.StagePluginRequest("beta"), fx.Ct);
+        Assert.Empty(beta.Diagnostics);
+
+        // The client's tool table is the observable surface of tools.register frames. The handler runs on the client's
+        // frame thread, which processes every frame the host wrote before the commit's error response, so a beta
+        // registration can never slip past this probe. A commit that briefly registered beta and rolled it back would
+        // show beta's tools here between the register and the unregister.
+        var betaToolsSeen = 0;
+        fx.Client.ToolsChanged += () =>
+        {
+            var seen = fx.ToolsOf("beta").Count;
+            if (seen > Volatile.Read(ref betaToolsSeen))
+            {
+                Volatile.Write(ref betaToolsSeen, seen);
+            }
+        };
+
+        await ExtensionAuthoringSupport.AssertHostErrorAsync(
+            () => fx.Client.CommitExtensionAsync(
+                new Sdk.ExtensionCommitRequest("beta", beta.SourceHash, beta.DependencyHash, beta.SdkVersion), fx.Ct),
+            "invalid_extension",
+            PluginSources.EchoTool);
+
+        // Beta's tools were never registered: no window in which beta shadowed alpha's tools.
+        Assert.Equal(0, Volatile.Read(ref betaToolsSeen));
+        Assert.False(Directory.Exists(ExtensionAuthoringSupport.LiveDirectory(fx.PluginsDirectory, "beta")));
+        Assert.Empty(fx.ToolsOf("beta"));
+        Assert.All(fx.Client.Tools, tool => Assert.Equal("alpha", ((ExtensionHostTool)tool).PluginId));
+
+        var echo = await fx.InvokeAsync("alpha", PluginSources.EchoTool, """{"text":"still-here"}""");
+        Assert.False(echo.IsError, echo.Content);
+        Assert.Equal("x:still-here", echo.Content);
+    }
+
+    [Fact]
+    public async Task Approving_a_CSharp_plugin_whose_tools_are_owned_by_another_plugin_is_refused_and_leaves_no_approval()
+    {
+        await using var fx = new E2eFixture();
+        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
+        fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b"));
+        await fx.StartAsync();
+        await fx.ApproveAsync("alpha");
+        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+
+        var betaToolsSeen = 0;
+        fx.Client.ToolsChanged += () =>
+        {
+            var seen = fx.ToolsOf("beta").Count;
+            if (seen > Volatile.Read(ref betaToolsSeen))
+            {
+                Volatile.Write(ref betaToolsSeen, seen);
+            }
+        };
+
+        await ExtensionAuthoringSupport.AssertHostErrorAsync(
+            () => fx.ApproveViaStatusAsync("beta"),
+            "invalid_extension",
+            "alpha");
+
+        // The refusal propagated to the client, beta's tools were never registered, and the Approved record the
+        // approval step wrote was withdrawn again: no residue of the refused approval may survive.
+        Assert.Equal(0, Volatile.Read(ref betaToolsSeen));
+        Assert.Empty(fx.ToolsOf("beta"));
+        var record = fx.ReadRecord("beta", "1.0.0");
+        Assert.True(record is null || !string.Equals(record.Status, "Approved", StringComparison.Ordinal));
+        Assert.All(fx.Client.Tools, tool => Assert.Equal("alpha", ((ExtensionHostTool)tool).PluginId));
+
+        var echo = await fx.InvokeAsync("alpha", PluginSources.EchoTool, """{"text":"still-here"}""");
+        Assert.False(echo.IsError, echo.Content);
+        Assert.Equal("a:still-here", echo.Content);
     }
 
     [Theory]

@@ -7,6 +7,9 @@ namespace Forge.Integration.Tests;
 /// <summary>Same-root siblings queue on a busy worker; cross-root nested calls fail fast with plugin_busy.</summary>
 public sealed class NestedRootQueueTests
 {
+    /// <summary>Side B's tools carry this prefix so they do not clash with side A's same-named
+    /// <see cref="PluginSources.Standard"/> tools; the host refuses a tool name another plugin already publishes.</summary>
+    private const string SideBToolPrefix = "b_";
     [Fact]
     public async Task Same_script_root_fans_out_beyond_plugin_capacity_and_all_succeed()
     {
@@ -134,7 +137,7 @@ public sealed class NestedRootQueueTests
             approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
         relay = new QueueRelayTool(fx);
         fx.WritePlugin("sideA", PluginSources.Standard("sideA", echoPrefix: "a"));
-        fx.WritePlugin("sideB", PluginSources.Standard("sideB", echoPrefix: "b"));
+        fx.WritePlugin("sideB", PluginSources.Standard("sideB", echoPrefix: "b", toolPrefix: SideBToolPrefix));
         await fx.StartAsync();
         await fx.ApproveAsync("sideA");
         await fx.ApproveAsync("sideB");
@@ -148,10 +151,10 @@ public sealed class NestedRootQueueTests
             JsonSerializer.Serialize(new
             {
                 target = QueueRelayTool.Name,
-                args = new { mode = "pairedOnce", plugin = "sideB", text = "x" },
+                args = new { mode = "pairedOnce", plugin = "sideB", tool = SideBToolPrefix + PluginSources.EchoTool, text = "x" },
             }));
         var towardsA = fx.InvokeAsync(
-            "sideB", "callHost",
+            "sideB", SideBToolPrefix + PluginSources.CallHostTool,
             JsonSerializer.Serialize(new
             {
                 target = QueueRelayTool.Name,
@@ -222,6 +225,9 @@ public sealed class NestedRootQueueTests
                 case "pairedOnce":
                 {
                     var text = args.GetProperty("text").GetString() ?? string.Empty;
+                    var tool = args.TryGetProperty("tool", out var toolElement) && toolElement.ValueKind == JsonValueKind.String
+                        ? toolElement.GetString()!
+                        : "echo";
                     if (Interlocked.Increment(ref pairedEntered) == 2)
                     {
                         pairedEnterGate.TrySetResult();
@@ -242,7 +248,7 @@ public sealed class NestedRootQueueTests
                     try
                     {
                         nested = await fx.InvokeAsync(
-                            plugin, "echo", JsonSerializer.Serialize(new { text })).ConfigureAwait(false);
+                            plugin, tool, JsonSerializer.Serialize(new { text })).ConfigureAwait(false);
                     }
                     catch
                     {

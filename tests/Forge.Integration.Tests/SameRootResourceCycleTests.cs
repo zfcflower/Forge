@@ -81,7 +81,7 @@ public sealed class SameRootResourceCycleTests
             var afterP = await fx.InvokeAsync("pa", PluginSources.EchoTool, """{"text":"after"}""");
             Assert.False(afterP.IsError, afterP.Content);
             Assert.Equal("p:after", afterP.Content);
-            var afterQ = await fx.InvokeAsync("pb", PluginSources.EchoTool, """{"text":"after"}""");
+            var afterQ = await fx.InvokeAsync("pb", ToolPrefixOf("pb") + PluginSources.EchoTool, """{"text":"after"}""");
             Assert.False(afterQ.IsError, afterQ.Content);
             Assert.Equal("q:after", afterQ.Content);
         }
@@ -198,11 +198,20 @@ public sealed class SameRootResourceCycleTests
         _ => throw new ArgumentOutOfRangeException(nameof(pluginId), pluginId, "no echo prefix is defined for this plugin"),
     };
 
+    /// <summary>Pa keeps the plain <see cref="PluginSources.Standard"/> names; pb prefixes its tool names so they do not
+    /// clash with pa's - the host refuses a tool name that another plugin already publishes.</summary>
+    private static string ToolPrefixOf(string pluginId) => pluginId switch
+    {
+        "pa" => string.Empty,
+        "pb" => "q_",
+        _ => throw new ArgumentOutOfRangeException(nameof(pluginId), pluginId, "no tool prefix is defined for this plugin"),
+    };
+
     private static async Task StartPluginsAsync(E2eFixture fx, params string[] pluginIds)
     {
         foreach (var id in pluginIds)
         {
-            fx.WritePlugin(id, PluginSources.Standard(id, echoPrefix: PrefixOf(id)));
+            fx.WritePlugin(id, PluginSources.Standard(id, echoPrefix: PrefixOf(id), toolPrefix: ToolPrefixOf(id)));
         }
 
         await fx.StartAsync();

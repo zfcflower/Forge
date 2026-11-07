@@ -809,7 +809,21 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
 
         approvals.SetApproved(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
-        await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+        try
+        {
+            await ApplyCoreAsync(entry, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is HostOperationException)
+        {
+            // Applying the approval can only fail this way with a refusal it must propagate - for example the loaded tool
+            // names clash with tools another plugin publishes, which ApplyCoreAsync refuses before publishing anything.
+            // The record written above must not survive such a refusal: an Approved record whose apply was refused is the
+            // "looks approved, refuses to run" state this path exists to prevent. Every other HostOperationException of
+            // the apply is already reported as a load failure inside ApplyCoreAsync, and a cancellation keeps the record
+            // (the hashes were verified before it was written, so a cancelled apply can simply be re-applied).
+            WithdrawApprovalWrittenBy(entry.Id, version, sourceHash, dependencyHash, sdkVersion);
+            throw;
+        }
 
         if (!entry.Decision.IsAllowed)
         {
@@ -1224,23 +1238,55 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             return;
         }
 
+        WorkerLoadout loadout;
         try
         {
             var slot = GetWorker(entry);
-            var loadout = await slot
+            loadout = await slot
                 .EnsureLoadedAsync(entry.Version, image, entry.Manifest.Permissions, ct)
                 .ConfigureAwait(false);
-            entry.Tools = loadout.Tools;
-            entry.Contributions = loadout.Contributions;
+        }
+        catch (Exception exception) when (exception is HostOperationException or IpcTimeoutException or IpcConnectionClosedException or IOException)
+        {
+            await NoteLoadFailureAsync(entry, exception, ct).ConfigureAwait(false);
+            return;
+        }
+
+        entry.Tools = loadout.Tools;
+        entry.Contributions = loadout.Contributions;
+
+        // The tool names of a C# plugin exist only once its worker loaded, so this is the first point at which a clash
+        // with a tool another plugin publishes can be decided. It is refused before anything is sent to the main program:
+        // the colliding tool set is never registered, so no window exists in which two same-named tools are live and a
+        // model call could reach the wrong one. Unlike a load failure this refusal propagates to the caller: a commit
+        // must roll back, and an approve must not leave the approval record it just wrote behind.
+        if (FindToolCollision(entry.Id, [.. entry.Tools.Select(static tool => tool.Name)]) is { } collision)
+        {
+            await UnregisterAllAsync(entry.Id, ct).ConfigureAwait(false);
+            await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+            throw new HostOperationException("invalid_extension", collision);
+        }
+
+        try
+        {
             await PublishAsync(entry.Id, loadout, ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is HostOperationException or IpcTimeoutException or IpcConnectionClosedException or IOException)
         {
-            entry.Issues.Add(new PluginIssue(entry.Id, PluginIssueKind.LoadFailed, exception.Message, entry.Directory));
-            Console.Error.WriteLine($"forge-extension-host: {entry.Id} ({PluginIssueKind.LoadFailed}): {exception.Message}");
-            await UnregisterAllAsync(entry.Id, ct).ConfigureAwait(false);
-            await StopWorkerAsync(entry.Id).ConfigureAwait(false);
+            await NoteLoadFailureAsync(entry, exception, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Records a load or publish failure on the entry, logs it, and stops the plugin, so a refused apply never leaves a
+    /// running worker or a tool registration behind. The caller decides whether to return or throw afterwards.
+    /// </summary>
+    private async Task NoteLoadFailureAsync(PluginEntry entry, Exception exception, CancellationToken ct)
+    {
+        entry.Issues.Add(new PluginIssue(entry.Id, PluginIssueKind.LoadFailed, exception.Message, entry.Directory));
+        Console.Error.WriteLine($"forge-extension-host: {entry.Id} ({PluginIssueKind.LoadFailed}): {exception.Message}");
+        await UnregisterAllAsync(entry.Id, ct).ConfigureAwait(false);
+        await StopWorkerAsync(entry.Id).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -120,11 +120,19 @@ internal sealed class SameRootResourceCycleRelay(E2eFixture fx) : ITool
         }
     }
 
-    private Task<ToolResult> CallAsync(string pluginId, string tool, string argumentsJson, CancellationToken ct) =>
-        fx.ToolOf(pluginId, tool).InvokeAsync(
-            new ToolCall(Guid.NewGuid().ToString("N"), tool, argumentsJson),
+    /// <summary>Pb's tools are prefixed (<c>q_</c>) so they do not clash with pa's same-named Standard tools; the host
+    /// refuses a tool name that another plugin already publishes. Everything else uses the plain names.</summary>
+    private static string ToolNameOf(string pluginId, string tool) =>
+        string.Equals(pluginId, "pb", StringComparison.Ordinal) ? "q_" + tool : tool;
+
+    private Task<ToolResult> CallAsync(string pluginId, string tool, string argumentsJson, CancellationToken ct)
+    {
+        var toolName = ToolNameOf(pluginId, tool);
+        return fx.ToolOf(pluginId, toolName).InvokeAsync(
+            new ToolCall(Guid.NewGuid().ToString("N"), toolName, argumentsJson),
             new ToolContext("cycle-session", fx.Root),
             ct).AsTask();
+    }
 
     /// <summary>The outcome text a caller sees: <c>ok:</c> or <c>error:</c> plus the exact content of the inner result.</summary>
     internal static string Render(ToolResult result) => (result.IsError ? "error:" : "ok:") + result.Content;
