@@ -94,6 +94,9 @@ internal sealed class PanelChrome : TemplatedControl
     public static readonly StyledProperty<string?> FloatAutomationIdProperty =
         AvaloniaProperty.Register<PanelChrome, string?>(nameof(FloatAutomationId));
 
+    public static readonly StyledProperty<bool> SidebarProperty =
+        AvaloniaProperty.Register<PanelChrome, bool>(nameof(Sidebar));
+
     private PanelIconButton? coverButton;
     private PanelIconButton? pinButton;
     private PanelIconButton? maximizeButton;
@@ -108,6 +111,8 @@ internal sealed class PanelChrome : TemplatedControl
     {
         ModelProperty.Changed.AddClassHandler<PanelChrome>((chrome, _) => chrome.Resubscribe());
         LayoutProperty.Changed.AddClassHandler<PanelChrome>((chrome, _) => chrome.Resubscribe());
+        SidebarProperty.Changed.AddClassHandler<PanelChrome>((chrome, e) =>
+            chrome.PseudoClasses.Set(":sidebar", e.NewValue is true));
     }
 
     public PanelModel? Model
@@ -157,6 +162,13 @@ internal sealed class PanelChrome : TemplatedControl
     {
         get => GetValue(BodyProperty);
         set => SetValue(BodyProperty, value);
+    }
+
+    /// <summary>True for the panels of a sidebar region (Project or Inspector); their body uses the sidebar surface.</summary>
+    public bool Sidebar
+    {
+        get => GetValue(SidebarProperty);
+        set => SetValue(SidebarProperty, value);
     }
 
     public bool CoverVisible

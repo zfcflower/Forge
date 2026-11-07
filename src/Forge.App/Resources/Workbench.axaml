@@ -166,12 +166,12 @@
   <ControlTheme x:Key="{x:Type controls:PanelChrome}" TargetType="controls:PanelChrome">
     <Setter Property="Template">
       <ControlTemplate>
-        <Border Background="{DynamicResource SurfaceBrush}" ClipToBounds="True">
+        <Border Name="PART_Body" Background="{DynamicResource SurfaceBrush}" ClipToBounds="True">
           <Grid RowDefinitions="28,*">
             <Border Name="PART_TitleBar"
                     Grid.Row="0"
                     Height="28"
-                    Background="{DynamicResource SurfaceBackgroundBrush}"
+                    Background="{DynamicResource PanelTitleBarBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,0,1">
               <Grid ColumnDefinitions="*,Auto">
@@ -242,6 +242,9 @@
         </Border>
       </ControlTemplate>
     </Setter>
+    <Style Selector="^:sidebar /template/ Border#PART_Body">
+      <Setter Property="Background" Value="{DynamicResource SidebarBrush}" />
+    </Style>
   </ControlTheme>
 
   <!-- The 2 px splitter between two docked regions: a 6 px hit band with the line centred in it. -->

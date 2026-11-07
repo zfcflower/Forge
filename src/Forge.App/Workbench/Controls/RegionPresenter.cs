@@ -50,9 +50,10 @@ internal sealed class RegionPresenter : Panel
         chromes.Clear();
         Children.Clear();
         var region = Layout.GetRegion(Role);
+        var sidebar = Role is RegionRole.Project or RegionRole.Inspector;
         for (var i = 0; i < region.Panels.Count; i++)
         {
-            var chrome = new PanelChrome { Model = region.Panels[i], Layout = Layout };
+            var chrome = new PanelChrome { Model = region.Panels[i], Layout = Layout, Sidebar = sidebar };
             chromes.Add(chrome);
             Children.Add(chrome);
         }

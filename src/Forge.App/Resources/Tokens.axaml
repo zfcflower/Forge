@@ -5,7 +5,7 @@
   <!-- Layer 1: primitives. Grey/white body; eye-care green only as accent. -->
   <Color x:Key="LightBackground">#F5F6F5</Color>
   <Color x:Key="LightPanel">#FFFFFF</Color>
-  <Color x:Key="LightBorder">#E3E6E3</Color>
+  <Color x:Key="LightBorder">#FAFAFA</Color>
   <Color x:Key="LightText">#2B2F2C</Color>
   <Color x:Key="LightAccent">#3A8F5C</Color>
 
@@ -73,6 +73,8 @@
       <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource LightPanel}" />
       <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F0F2F0" />
       <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#F8F9F8" />
+      <SolidColorBrush x:Key="SidebarBrush" Color="#F8F8F8" />
+      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#F4F4F5" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource LightText}" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#3F4541" />
@@ -133,6 +135,8 @@
       <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource DarkPanel}" />
       <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2B302D" />
       <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#222523" />
+      <SolidColorBrush x:Key="SidebarBrush" Color="{StaticResource DarkPanel}" />
+      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="{StaticResource DarkBackground}" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource DarkText}" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#C3CAC5" />
