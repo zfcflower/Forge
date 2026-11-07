@@ -88,7 +88,8 @@
     </Style>
   </ControlTheme>
 
-  <!-- One tab: transparent, active tab on the surface brush with a 2 px accent underline. -->
+  <!-- One tab: inactive tabs sit on a light green, the active tab on the panel surface; both carry a 1 px border
+       and 5 px rounded top corners, so the active tab reads as a connected sheet over its panel body. -->
   <ControlTheme x:Key="{x:Type controls:TabHeaderView}" TargetType="controls:TabHeaderView">
     <Setter Property="Height" Value="28" />
     <Setter Property="MinWidth" Value="0" />
@@ -97,9 +98,10 @@
     <Setter Property="Template">
       <ControlTemplate>
         <Border Name="PART_Root"
-                Background="Transparent"
-                BorderBrush="Transparent"
-                BorderThickness="0,0,0,2"
+                Background="{DynamicResource AccentSubtleBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="5,5,0,0"
                 Padding="8,0,4,0">
           <Grid ColumnDefinitions="Auto,Auto" VerticalAlignment="Center">
             <TextBlock Name="PART_Label"
@@ -136,7 +138,7 @@
     </Style>
     <Style Selector="^:selected /template/ Border#PART_Root">
       <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     </Style>
     <Style Selector="^:selected /template/ TextBlock#PART_Label">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />

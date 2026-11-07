@@ -139,7 +139,12 @@ internal sealed class FloatingPanelWindow : Window
         var body = item.Tab is { } tab ? BuildTabBody(tab) : BuildFilesBody();
         Grid.SetRow(body, 1);
         grid.Children.Add(body);
-        return grid;
+
+        // A 1 px frame around the whole floating window: with BorderOnly decorations the OS chrome is barely
+        // visible, so the frame is what separates the floating panel from whatever is behind it.
+        var frame = new Border { Child = grid, BorderThickness = new Thickness(1) };
+        WorkbenchResources.Link(frame, Border.BorderBrushProperty, "BorderBrush");
+        return frame;
     }
 
     private Control BuildTitleBar()
