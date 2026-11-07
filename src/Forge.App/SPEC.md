@@ -34,7 +34,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 - **DispatcherTimer 与释放。** `DispatcherTimer.Stop()` 只是停用,调度器下次轮询才把它移出列表;不再泵的调度器会一直持有 `Tick` 目标。长生命周期所有者在 `Dispose` 里停止计时器并解开 `Tick`(`MainWindowViewModel`、`FilesPanelViewModel`);`AppComposition.DisposeAsync` 释放实现了 `IDisposable` 的设置分区视图模型。
 
 **工作台布局。** 三个区域按角色命名,不按位置:项目区、主区、检视区。默认顺序 项目 | 主 | 检视,可以拖拽互换,内容跟着角色走。
-- 项目区:顶部常规对话区,其下 项目 → worktree → 会话;归档会话收进各 worktree 的“历史 (n)”。
+- 项目区:顶部常规对话区,其下 项目 → worktree → 会话;归档会话收进各 worktree 的“历史 (n)”。项目 panel 的标题栏右侧放“新建常规对话”与“刷新项目”两个工具(`Workbench.ProjectPanel.HeaderTools`,语言切换时原位重建),panel 体内不再有自己的工具条——标题栏归 `PanelChrome` 所有,体内再放一条工具条会看着像断掉的第二层标题栏;体内只有“添加项目”主按钮、状态文本和树。
 - 主区:主选项卡组(只放会话标签)+ 底部组(子 Agent 选项卡组,命令行以后也放这里)。
 - 检视区:文件 panel(全部 | 已改动)在上,TODO | 评审 | 规格树 | Git 选项卡组在下。Git 选项卡显示分支/上游/超前落后、fetch/pull/push、进行中的 rebase/merge 与冲突文件、远程与分支列表,随活动会话刷新(attach、每回合结束、每次操作后;不自动 fetch);超前落后文本同时上状态栏,分支名显示在标题行会话标题之后。分支有 PR 时,Git 选项卡还显示 PR 头(#号、标题、状态)、“等待检查 / 取消等待”与实时进度,以及只读的评审线程列表,CI 标记 `CI ✓/✗/…` 上状态栏(见下一段)。在文件 panel 里点文件,会在检视区靠主区一侧打开**预览组**(选项卡组,做文件预览与逐行审阅)。预览列与文件列之间的分隔条命中带骑在 1px 缝隙上(`IsPreviewLeftOfFiles` 时在预览列右缘,否则在文件列右缘);铺满主区时覆盖矩形用与显示相同的列宽(`RegionPresenter.PreviewColumnWidth`),覆盖右缘正好落在文件列左缘(留 1px 分隔)。原中区的固定“文件”“改动”两个标签都移进预览组:
   - “全部”里单击复用预览选项卡,右键才新建。
@@ -100,6 +100,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 **树一律扁平虚拟化。** 项目树、文件树、规格树、Diff 都是扁平 `RangeObservableCollection` 行列表 + 虚拟化 `ListBox`;展开/折叠只对子树做区间插入/删除,展开状态跨刷新保留(按路径/id 记住);文件树与规格树刷新仍是整表 `ReplaceAll`,滚动位置会回到顶部(未改为按路径 diff 的区间更新);行模型负责缩进档数与引导线,视图不递归。后台计划只吃 UI 线程上快照好的不可变数据(会话运行集合、Agent 层级都归调度器所有)。
 
 **树与图标。** 文件树、项目树、规格树同一套样式(参考用户 2026-11-05 给的图):
+- 标题栏/工具按钮的图标是 24 网格的填充路径(`Resources/Tokens.axaml`、`Workbench.axaml`,`F0` 前缀 = even-odd),同一个家族内最细处不低 2 单位——12–15px 渲染时低于这个尺寸就糊成点。设置按钮是六齿齿轮(`IconGear`):八齿在 13–15px 下读成一团星芒,六齿才看得出是齿轮。panel 工具图标 13px、设置 15px、窗口最小化/最大化 11px。
 - 行高 28px;图标与箭头都是 1.25px 描边线框,不填充(`TreeIcons`,无图标包)。文件夹分闭合/打开两种,展开时换成打开的;文件是带折角的纸张;规格节点用文件图标,有子节点的用文件夹图标。
 - 箭头是细线折线 `TreeChevronGeometry`,折叠向右,展开时 rotate 90°。
 - 缩进:每级 `IndentMarks.Step` = 箭头槽宽(8px)+ 箭头与图标间距(14px)= 22px;子项箭头的左边缘与父项图标的左边缘对齐,子项图标落在父项文字起点;没有箭头的文件行,图标与同级文件夹的图标对齐。Agent 行保持 16px 一级、不画引导线。
@@ -143,7 +144,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - 关停:主窗口确认真正关闭后才置 `IsShuttingDown`(关闭被取消就复位),之后关浮动窗口不回位,浮动项照常进快照。
 - 浮动窗口整体带 1px 边框(`BorderBrush`):`BorderOnly` 装饰下系统边框几乎不可见,靠它把浮出面板与背景分开。
 
-**窗口顶部。** `WindowDecorations="BorderOnly"`:保留系统可缩放边框、去掉系统标题栏,标题行由 App 自绘,故窗口底色 = `SurfaceBackgroundBrush`、无独立标题栏底色。标题行 40 px:左 Forge + 会话标题(其后灰显当前分支,无分支即隐藏),中 380×26 占位搜索框(无行为),右 设置/最小化/最大化/关闭(设置紧挨最小化左侧);提供方状态移到状态栏。搜索框背景比窗口亮一档、边框 1 px 且比窗口暗一档(亮/暗各一对令牌)。标题行可拖动、双击最大化。
+**窗口顶部。** `WindowDecorations="BorderOnly"` + `ExtendClientAreaToDecorationsHint="True"` + `ExtendClientAreaTitleBarHeightHint="-1"`:保留系统可缩放边框、去掉系统标题栏,且客户区一直铺到窗口上边缘(不设扩展提示时 Windows 会在顶部留一条系统框高的白带,实测 6.5 px)。标题行由 App 自绘,故窗口底色 = `SurfaceBackgroundBrush`、无独立标题栏底色。标题行 40 px:左 Forge + 会话标题(其后灰显当前分支,无分支即隐藏),中 380×26 占位搜索框(无行为),右 设置/最小化/最大化/关闭(设置紧挨最小化左侧);提供方状态移到状态栏。搜索框背景比窗口亮一档、边框 1 px 且比窗口暗一档(亮/暗各一对令牌)。标题行可拖动、双击最大化。
 
 **交互终端(`Terminal/**`)。** 终端是底部组里的选项卡(`TabKind.Terminal`,id 前缀 `terminal:`),可开多个,也可浮出。工作目录取会话的 worktree。
 - **VT 引擎(`Terminal/Vt/`)**:纯 BCL、不依赖 Avalonia,AOT 无警告。包括 DEC ANSI 解析器(UTF-8 跨分块续接,非法字节输出 U+FFFD)、主屏和备用屏、回滚环(偏好 `TerminalScrollbackLines`,1000–100000,默认 10000)、SGR 16/256/truecolor、DECSET/DECRST(含鼠标 1000/1002/1003/1006、2004 括号粘贴、2026 同步输出)、OSC 0/1/2 标题、OSC 8 链接、OSC 52 只写剪贴板、OSC 10/11 按主题回答,以及 xterm 按键与 SGR 鼠标编码、East Asian Width 宽字符。缩放时不重排行。实测吞吐约 99 MiB/s(20 MiB 混合文本),稳态滚动零分配。**已记录偏差**:在整屏顶行执行 `CSI M` 时,被删的行会进回滚(xterm 不会),这是为了保证不丢内容。

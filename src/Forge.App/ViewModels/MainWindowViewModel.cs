@@ -36,6 +36,12 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>Automation id (and header tool id) of the bottom group's "new terminal" button.</summary>
     private const string NewTerminalToolId = "terminal-new";
 
+    /// <summary>Automation id (and header tool id) of the project panel's "new general chat" button.</summary>
+    private const string NewGeneralSessionToolId = "new-general-session";
+
+    /// <summary>Automation id (and header tool id) of the project panel's refresh button.</summary>
+    private const string RefreshProjectsToolId = "refresh-projects";
+
     private static readonly TimeSpan LayoutSaveDelay = TimeSpan.FromMilliseconds(800);
 
     /// <summary>Upper bound of the shutdown wait for the terminals; the coordinator itself stops waiting after four.</summary>
@@ -54,6 +60,8 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     private PanelToolButton newTerminalButton;
     private ReviewStore reviews;
     private PanelToolButton? openChangesTool;
+    private PanelToolButton? newGeneralSessionTool;
+    private PanelToolButton? refreshProjectsTool;
     private SessionWorkspaceViewModel? activeSession;
     private FinishedSubAgentsViewModel? watchedFinishedMenu;
     private IDialogService? dialogs;
@@ -122,6 +130,12 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
             "IconRestore",
             ShowChangesCommand);
         Workbench.FilesPanel.HeaderTools.Add(openChangesTool);
+        // The project panel's two tools live in its title bar: the panel chrome owns the bar, so a toolbar of its own
+        // inside the body would read as a second, broken title row.
+        newGeneralSessionTool = CreateNewGeneralSessionTool();
+        refreshProjectsTool = CreateRefreshProjectsTool();
+        Workbench.ProjectPanel.HeaderTools.Add(newGeneralSessionTool);
+        Workbench.ProjectPanel.HeaderTools.Add(refreshProjectsTool);
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
         Workbench.BottomTabs.HeaderTools.Add(newTerminalButton);
         Workbench.TabClosed += OnTabClosed;
@@ -710,6 +724,31 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
     private PanelToolButton CreateNewTerminalButton() =>
         new(NewTerminalToolId, Loc.Instance[TerminalStrings.NewTerminal], "IconPlus", NewTerminalCommand);
 
+    /// <summary>The project panel's "new general chat" tool; rebuilt on a language switch so its tooltip follows.</summary>
+    private PanelToolButton CreateNewGeneralSessionTool() =>
+        new(NewGeneralSessionToolId, ProjectStrings.NewGeneralSessionTooltip, "IconPlus", Projects.GeneralSessionCommand);
+
+    /// <summary>The project panel's refresh tool; rebuilt on a language switch so its tooltip follows.</summary>
+    private PanelToolButton CreateRefreshProjectsTool() =>
+        new(RefreshProjectsToolId, ProjectStrings.RefreshProjectsName, "IconRefresh", Projects.RefreshCommand);
+
+    /// <summary>Replaces the project panel's two header tools in place, keeping their position in the title bar.</summary>
+    private void RefreshProjectTools()
+    {
+        var tools = Workbench.ProjectPanel.HeaderTools;
+        if (newGeneralSessionTool is { } sessionTool && tools.IndexOf(sessionTool) is var sessionIndex && sessionIndex >= 0)
+        {
+            newGeneralSessionTool = CreateNewGeneralSessionTool();
+            tools[sessionIndex] = newGeneralSessionTool;
+        }
+
+        if (refreshProjectsTool is { } refreshTool && tools.IndexOf(refreshTool) is var refreshIndex && refreshIndex >= 0)
+        {
+            refreshProjectsTool = CreateRefreshProjectsTool();
+            tools[refreshIndex] = refreshProjectsTool;
+        }
+    }
+
     /// <summary>Opens a terminal in the active session, or says in the status bar why it cannot.</summary>
     private void OpenTerminal()
     {
@@ -1074,6 +1113,7 @@ internal sealed class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ActiveSessionTitle));
         OnPropertyChanged(nameof(ProviderNotice));
         RefreshOpenChangesTool();
+        RefreshProjectTools();
 
         // The bottom group's "new terminal" tool carries its tooltip as a plain string too; rebuild it and re-sync the row.
         newTerminalButton = CreateNewTerminalButton();

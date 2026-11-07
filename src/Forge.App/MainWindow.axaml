@@ -13,6 +13,8 @@
         MinWidth="900"
         MinHeight="560"
         WindowDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="-1"
         Background="{DynamicResource SurfaceBackgroundBrush}">
 
   <Window.KeyBindings>
@@ -77,7 +79,7 @@
                   Command="{Binding ToggleSettingsCommand}"
                   AutomationProperties.AutomationId="open-settings" AutomationProperties.Name="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}">
-            <PathIcon Data="{StaticResource IconGear}" Width="13" Height="13" />
+            <PathIcon Data="{StaticResource IconGear}" Width="15" Height="15" />
           </Button>
           <Button x:Name="MinimizeButton"
                   Classes="ghost icon"
@@ -103,7 +105,7 @@
                   Click="OnCloseClick"
                   AutomationProperties.AutomationId="window-close" AutomationProperties.Name="{Binding [window.closeWindow], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [window.close], Source={x:Static loc:Loc.Instance}}">
-            <PathIcon Data="{StaticResource IconClose}" Width="11" Height="11" />
+            <PathIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
           </Button>
         </StackPanel>
       </Grid>
@@ -208,7 +210,7 @@
                     Classes="ghost icon"
                     Command="{Binding ToggleSettingsCommand}"
                     AutomationProperties.AutomationId="close-settings" AutomationProperties.Name="{Binding [shell.closeSettings], Source={x:Static loc:Loc.Instance}}">
-              <PathIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+              <PathIcon Data="{StaticResource IconClose}" Width="13" Height="13" />
             </Button>
           </Grid>
 

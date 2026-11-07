@@ -6,7 +6,7 @@
 
   <!-- Workbench chrome icons (same family as the token geometries: filled paths in a 24x24 box). -->
   <!-- A pushpin: pin the region back to the surrounding layout. -->
-  <StreamGeometry x:Key="IconPin">F0 M9 2h6v2h-1.6v4.9l3.1 3.1V14h-4.1v7.6L12 23l-.4-1.4V14H7.5v-2l3.1-3.1V4H9z</StreamGeometry>
+  <StreamGeometry x:Key="IconPin">F0 M9.4 2.8h5.2v1.9h-1.5v4.6l3 3v1.9h-4.2v6.1L12 22.6l-.9-2.3v-6.1H6.9v-1.9l3-3V4.7H8.4V2.8z</StreamGeometry>
   <!-- An arrow towards the window edge between two rails: auto-hide the region. -->
   <StreamGeometry x:Key="IconAutoHide">F0 M3 4h18v2H3zM3 18h18v2H3zM13 7l-5 5 5 5v-3.5h4v-3h-4z</StreamGeometry>
   <!-- Four corner brackets: spread the preview group over the whole Main region. -->
@@ -33,8 +33,8 @@
                 BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="{TemplateBinding BorderThickness}"
                 CornerRadius="{TemplateBinding CornerRadius}">
-          <PathIcon Width="12"
-                    Height="12"
+          <PathIcon Width="13"
+                    Height="13"
                     Data="{TemplateBinding Icon}"
                     Foreground="{DynamicResource TextSecondaryBrush}"
                     HorizontalAlignment="Center"

@@ -179,23 +179,24 @@
   <FontFamily x:Key="FontUi">fonts:Inter#Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif</FontFamily>
   <FontFamily x:Key="FontMono">Consolas, Cascadia Mono, Menlo, monospace</FontFamily>
 
-  <!-- Icon geometry (single family: simple filled paths). -->
-  <StreamGeometry x:Key="IconPlus">M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z</StreamGeometry>
-  <StreamGeometry x:Key="IconClose">M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z</StreamGeometry>
-  <StreamGeometry x:Key="IconPlusSmall">M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z</StreamGeometry>
-  <StreamGeometry x:Key="IconSend">M3 20.5 21 12 3 3.5 3 10l12 2-12 2z</StreamGeometry>
-  <StreamGeometry x:Key="IconGear">M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4a8.9 8.9 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a9 9 0 0 0-2-1.2L16 2h-4l-.4 2.6a9 9 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A8.9 8.9 0 0 0 3 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a9 9 0 0 0 2 1.2L8 22h4l.4-2.6a9 9 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z</StreamGeometry>
-  <StreamGeometry x:Key="IconStop">M6 6h12v12H6z</StreamGeometry>
-  <StreamGeometry x:Key="IconRefresh">M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z</StreamGeometry>
+  <!-- Icon geometry (single family: filled paths on a 24 grid, thinnest feature 2 units so the set still reads at 13 px). -->
+  <StreamGeometry x:Key="IconPlus">M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z</StreamGeometry>
+  <StreamGeometry x:Key="IconClose">M6.05 4.65 12 10.6 17.95 4.65 19.35 6.05 13.4 12 19.35 17.95 17.95 19.35 12 13.4 6.05 19.35 4.65 17.95 10.6 12 4.65 6.05z</StreamGeometry>
+  <StreamGeometry x:Key="IconPlusSmall">M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z</StreamGeometry>
+  <StreamGeometry x:Key="IconSend">M3.2 20.8 21 12 3.2 3.2 3.2 9.8 14.6 12 3.2 14.2z</StreamGeometry>
+  <!-- A six-tooth gear: fewer, wider teeth than an eight-tooth ring so it stays a gear at 13 px. -->
+  <StreamGeometry x:Key="IconGear">F0 M8.4 5.76A7.2 7.2 0 0 1 9.89 5.11L10.13 2.38A9.8 9.8 0 0 1 13.87 2.38L14.11 5.11A7.2 7.2 0 0 1 16.91 6.73L19.4 5.57A9.8 9.8 0 0 1 21.27 8.81L19.02 10.38A7.2 7.2 0 0 1 19.02 13.62L21.27 15.19A9.8 9.8 0 0 1 19.4 18.43L16.91 17.27A7.2 7.2 0 0 1 14.11 18.89L13.87 21.62A9.8 9.8 0 0 1 10.13 21.62L9.89 18.89A7.2 7.2 0 0 1 7.09 17.27L4.6 18.43A9.8 9.8 0 0 1 2.73 15.19L4.98 13.62A7.2 7.2 0 0 1 4.98 10.38L2.73 8.81A9.8 9.8 0 0 1 4.6 5.57L7.09 6.73ZM8.7 12A3.3 3.3 0 1 0 15.3 12A3.3 3.3 0 1 0 8.7 12Z</StreamGeometry>
+  <StreamGeometry x:Key="IconStop">M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z</StreamGeometry>
+  <StreamGeometry x:Key="IconRefresh">M13 2.4 7.9 7.5 13 12.6V9.2a5.6 5.6 0 1 1-5.3 7.4H5.5A7.7 7.7 0 1 0 13 4.8z</StreamGeometry>
   <StreamGeometry x:Key="IconChevronDown">M7 10l5 5 5-5z</StreamGeometry>
   <StreamGeometry x:Key="IconMinimize">M4 11h16v2H4z</StreamGeometry>
   <!-- A window with an arrow leaving it: "move to a window of its own". -->
   <StreamGeometry x:Key="IconWindowExternal">F1 M2 4h9v2H4v14h14v-7h2v9H2z M13 2h9v9h-2V5.4l-8.3 8.3-1.4-1.4L18.6 4H13z</StreamGeometry>
-  <StreamGeometry x:Key="IconMaximize">F0 M4 4h16v16H4z M6 6h12v12H6z</StreamGeometry>
+  <StreamGeometry x:Key="IconMaximize">F0 M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5zm2 1.5v11h12V7z</StreamGeometry>
   <!-- Two overlapping windows: the maximize button turns into "restore" while the window is maximized. -->
   <StreamGeometry x:Key="IconRestore">F0 M7 3h14v14h-4V7H7z M3 7h14v14H3z M5 9h10v10H5z</StreamGeometry>
   <StreamGeometry x:Key="TreeChevronGeometry">M9 5 15 12 9 19</StreamGeometry>
   <StreamGeometry x:Key="IconChevronUp">M7 14l5-5 5 5z</StreamGeometry>
-  <StreamGeometry x:Key="IconTrash">M9 3v1H4v2h1v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6h1V4h-5V3H9zM6 6h12v13H6V6z</StreamGeometry>
+  <StreamGeometry x:Key="IconTrash">F0 M9.2 3h5.6l.7 1.5h4v2H4.5v-2h4zm-2.9 5h11.4v12.4a1.6 1.6 0 0 1-1.6 1.6H7.9a1.6 1.6 0 0 1-1.6-1.6zm3.4 2.2v9h1.9v-9zm3.4 0v9h1.9v-9z</StreamGeometry>
 
 </ResourceDictionary>
