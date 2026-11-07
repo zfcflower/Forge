@@ -1,0 +1,5 @@
+# All text files are LF in both the repository and the working tree, so checkouts
+# are byte-identical on every platform. Without this, a Windows checkout (CI's
+# default) expands to CRLF, which is why prompt and spec-frontmatter tests used to
+# re-normalize their source literals; that workaround is removed with this file.
+* text=auto eol=lf
