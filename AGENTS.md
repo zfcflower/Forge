@@ -44,3 +44,8 @@
 ## 并行与串行
 
 后续模块里没有相互依赖的部分并行派给多个 Worker(各自副本、各自归属路径);有依赖的串行。接口契约先由主 Agent 定稿,再并行实现。
+
+## 换行约定
+
+- 换行由 `.gitattributes`(`* text=auto eol=lf`)统一为 LF:仓库与工作树都是 LF,三平台检出一致。不要再用 `core.autocrlf=true` 让 Windows 检出变 CRLF——这正是此前 CI 换行失败与测试侧逐处归一化(`PromptSourceText`、`SpecFrontmatterTests` 的 `ReplaceLineEndings`)的根源,现已移除。`.gitattributes` 的 `eol=lf` 优先于 `core.autocrlf`,所以本机 system 级 `core.autocrlf=true` 不再影响本仓库。
+- 若本地工作树仍是旧 CRLF 检出,一次性重归一化:`git add --renormalize .` 后 `git checkout -- .`(或 `git rm -r --cached . && git reset --hard`)。新克隆无需任何设置。
