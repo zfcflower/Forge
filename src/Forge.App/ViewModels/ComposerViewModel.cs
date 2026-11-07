@@ -164,6 +164,7 @@ internal sealed class ComposerViewModel : ObservableObject
     private readonly Func<ProviderSettings>? reloadSettings;
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
+    private readonly Func<CancellationToken, Task<IReadOnlyList<string>>>? modelSource;
     private readonly List<ComposerModelOption> allModels = [];
     private readonly ProviderSnapshot? snapshot;
     private IReadOnlyList<string> modelNames;
@@ -191,7 +192,8 @@ internal sealed class ComposerViewModel : ObservableObject
         string workspace,
         Func<ProviderSettings>? reloadSettings = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
-        Func<IReadOnlyList<SlashEntry>>? skillSource = null)
+        Func<IReadOnlyList<SlashEntry>>? skillSource = null,
+        Func<CancellationToken, Task<IReadOnlyList<string>>>? modelSource = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(apply);
@@ -203,6 +205,7 @@ internal sealed class ComposerViewModel : ObservableObject
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
         this.skillSource = skillSource ?? DiscoverSkills;
         snapshot = provider.Provider;
+        this.modelSource = modelSource ?? (snapshot?.SupportsModelDiscovery == true ? snapshot.FetchModelsAsync : null);
         modelNames = snapshot?.Models ?? [];
 
         var agents = new List<ComposerAgentOption> { new(null) };
@@ -233,7 +236,7 @@ internal sealed class ComposerViewModel : ObservableObject
         Models = [];
         RebuildModels();
         SaveDefaultsCommand = new RelayCommand(SaveDefaults, () => snapshot is not null);
-        RefreshCommand = new RelayCommand(Refresh);
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync, onError: OnRefreshFailed);
         Apply();
     }
 
@@ -354,7 +357,32 @@ internal sealed class ComposerViewModel : ObservableObject
 
     public RelayCommand SaveDefaultsCommand { get; }
 
-    public RelayCommand RefreshCommand { get; }
+    public AsyncRelayCommand RefreshCommand { get; }
+
+    internal async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        Status = null;
+        skills = null;
+        files = null;
+        if (reloadSettings is not null)
+        {
+            // Only the list is refreshed: the provider of this session was built from the settings at start-up.
+            if (reloadSettings().Provider is { } reloaded)
+            {
+                modelNames = reloaded.Models;
+            }
+        }
+
+        RebuildModels();
+        if (modelSource is null)
+        {
+            return;
+        }
+
+        modelNames = await modelSource(cancellationToken).ConfigureAwait(true);
+        RebuildModels();
+        Status = SessionStrings.ComposerModelsFetched(modelNames.Count);
+    }
 
     /// <summary>The definition the root agent should run with, or null for the untouched default.</summary>
     public AgentDefinition? CurrentDefinition()
@@ -644,28 +672,7 @@ internal sealed class ComposerViewModel : ObservableObject
         Status = SessionStrings.ComposerDefaultsSaved;
     }
 
-    private void Refresh()
-    {
-        Status = null;
-        skills = null;
-        files = null;
-        if (reloadSettings is not null)
-        {
-            try
-            {
-                // Only the list is refreshed: the provider of this session was built from the settings at start-up.
-                if (reloadSettings().Provider is { } reloaded)
-                {
-                    modelNames = reloaded.Models;
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-            {
-            }
-        }
-
-        RebuildModels();
-    }
+    private void OnRefreshFailed(Exception exception) => Status = SessionStrings.ComposerModelFetchFailed(exception.Message);
 
     private void Apply() => apply(CurrentDefinition());
 }

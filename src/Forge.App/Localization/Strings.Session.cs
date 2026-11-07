@@ -47,6 +47,8 @@ internal static class SessionStrings
     public const string ComposerSaveDefaultsKey = "session.composer.saveDefaults";
     public const string ComposerDefaultsSavedKey = "session.composer.defaultsSaved";
     public const string ComposerRefreshKey = "session.composer.refresh";
+    public const string ComposerModelsFetchedKey = "session.composer.modelsFetched";
+    public const string ComposerModelFetchFailedKey = "session.composer.modelFetchFailed";
     public const string ComposerRunningMenuKey = "session.composer.runningMenu";
     public const string ComposerInterjectKey = "session.composer.interject";
     public const string ComposerInterjectHintKey = "session.composer.interjectHint";
@@ -161,6 +163,12 @@ internal static class SessionStrings
     public static string ComposerInterjecting => Loc.Instance[ComposerInterjectingKey];
 
     public static string ComposerDefaultsSaved => Loc.Instance[ComposerDefaultsSavedKey];
+
+    public static string ComposerModelsFetched(int count) =>
+        Loc.Instance.Format(ComposerModelsFetchedKey, TextFormat.Number(count));
+
+    public static string ComposerModelFetchFailed(string message) =>
+        Loc.Instance.Format(ComposerModelFetchFailedKey, message);
 
     public static string ComposerEffortName(ThinkingEffort effort) => Loc.Instance[effort switch
     {
@@ -354,6 +362,8 @@ internal static class SessionStrings
         Loc.Register(ComposerSaveDefaultsKey, "新会话的默认值", "Defaults for new sessions");
         Loc.Register(ComposerDefaultsSavedKey, "已保存为新会话的默认值", "Saved as defaults for new sessions");
         Loc.Register(ComposerRefreshKey, "刷新", "Refresh");
+        Loc.Register(ComposerModelsFetchedKey, "已加载 {0} 个模型", "Loaded {0} models");
+        Loc.Register(ComposerModelFetchFailedKey, "拉取模型失败：{0}", "Could not fetch models: {0}");
         Loc.Register(ComposerRunningMenuKey, "本轮运行中：选择如何发送", "A turn is running: choose how to send");
         Loc.Register(ComposerInterjectKey, "插话", "Interject");
         Loc.Register(ComposerInterjectHintKey, "在下一批工具调用后交给正在运行的代理", "Hand to the running agent after its next tool batch");

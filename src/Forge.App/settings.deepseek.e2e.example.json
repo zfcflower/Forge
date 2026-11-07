@@ -1,0 +1,12 @@
+{
+  "provider": {
+    "kind": "openai-compatible",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "models": [
+      "deepseek-reasoner"
+    ],
+    "thinking": "off",
+    "apiKeyEnv": "DEEPSEEK_API_KEY"
+  }
+}

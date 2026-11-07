@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Forge.Abstractions;
@@ -58,6 +59,8 @@ internal sealed partial class SettingsJsonContext : JsonSerializerContext
 /// </summary>
 internal sealed class ProviderSnapshot
 {
+    private static readonly HttpClient ModelListHttpClient = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly TimeSpan ModelListTimeout = TimeSpan.FromSeconds(20);
     private readonly string? apiKey;
 
     private ProviderSnapshot(
@@ -67,6 +70,7 @@ internal sealed class ProviderSnapshot
         ThinkingEffort thinking,
         int? maxOutputTokens,
         string? apiKey,
+        string? apiKeyEnvironmentVariable,
         bool keyFromEnvironment,
         IReadOnlyList<string> models)
     {
@@ -77,6 +81,7 @@ internal sealed class ProviderSnapshot
         Thinking = thinking;
         MaxOutputTokens = maxOutputTokens;
         this.apiKey = apiKey;
+        ApiKeyEnvironmentVariable = apiKeyEnvironmentVariable;
         KeyFromEnvironment = keyFromEnvironment;
     }
 
@@ -95,6 +100,10 @@ internal sealed class ProviderSnapshot
 
     public bool HasApiKey => !string.IsNullOrWhiteSpace(apiKey);
 
+    public bool SupportsModelDiscovery => string.Equals(Kind, ProviderFactory.OpenAiCompatibleKind, StringComparison.Ordinal);
+
+    private string? ApiKeyEnvironmentVariable { get; }
+
     /// <summary>Where the key came from, for the settings panel; the key itself is never exposed.</summary>
     public bool KeyFromEnvironment { get; }
 
@@ -106,6 +115,74 @@ internal sealed class ProviderSnapshot
     public IChatProvider CreateProvider(HttpClient httpClient) =>
         new RetryingChatProvider(
             ProviderFactory.Create(new ProviderConfig("forge", Kind, BaseUrl, apiKey), httpClient));
+
+    public Task<IReadOnlyList<string>> FetchModelsAsync(CancellationToken cancellationToken) =>
+        FetchModelsAsync(ModelListHttpClient, cancellationToken);
+
+    internal async Task<IReadOnlyList<string>> FetchModelsAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+
+        if (!SupportsModelDiscovery)
+        {
+            throw new NotSupportedException("Model discovery is only supported for OpenAI-compatible providers.");
+        }
+
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            var setup = string.IsNullOrWhiteSpace(ApiKeyEnvironmentVariable)
+                ? "Configure provider.apiKey or provider.apiKeyEnv"
+                : "Set the '" + ApiKeyEnvironmentVariable + "' environment variable";
+            throw new InvalidOperationException(setup + " before refreshing models.");
+        }
+
+        var baseUri = new Uri(BaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, "models"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ModelListTimeout);
+
+        try
+        {
+            using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token).ConfigureAwait(false);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.Array)
+            {
+                throw new JsonException("The model list response must contain a 'data' array.");
+            }
+
+            var models = new List<string>();
+            foreach (var item in data.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Object &&
+                    item.TryGetProperty("id", out var id) &&
+                    id.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(id.GetString()))
+                {
+                    var name = id.GetString()!.Trim();
+                    if (!models.Contains(name, StringComparer.Ordinal))
+                    {
+                        models.Add(name);
+                    }
+                }
+            }
+
+            return models;
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("Timed out while fetching the provider model list.", exception);
+        }
+    }
 
     public override string ToString() => "ProviderSnapshot(" + Kind + ", " + BaseUrl + ", " + Model + ")";
 
@@ -174,7 +251,7 @@ internal sealed class ProviderSnapshot
             }
         }
 
-        return new ProviderSnapshot(kind, baseUrl, model, thinking, section.MaxOutputTokens, key, fromEnvironment, models);
+        return new ProviderSnapshot(kind, baseUrl, model, thinking, section.MaxOutputTokens, key, keyVariable, fromEnvironment, models);
     }
 }
 
