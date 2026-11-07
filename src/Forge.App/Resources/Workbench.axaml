@@ -230,6 +230,12 @@
                                             ToolTip.Tip="{TemplateBinding FloatTooltip}"
                                             AutomationProperties.Name="{TemplateBinding FloatTooltip}"
                                             AutomationProperties.AutomationId="{TemplateBinding FloatAutomationId}" />
+                  <controls:PanelIconButton Name="PART_Close"
+                                            IsVisible="{TemplateBinding CloseVisible}"
+                                            Icon="{TemplateBinding CloseIcon}"
+                                            ToolTip.Tip="{TemplateBinding CloseTooltip}"
+                                            AutomationProperties.Name="{TemplateBinding CloseTooltip}"
+                                            AutomationProperties.AutomationId="{TemplateBinding CloseAutomationId}" />
                 </StackPanel>
               </Grid>
             </Border>

@@ -350,6 +350,14 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         OnLayoutChanged();
     }
 
+    /// <summary>
+    /// Ends a panel splitter drag. The splitter writes through the <see cref="PreviewWidth"/>, <see cref="BottomHeight"/>
+    /// and <see cref="InspectorSplitRatio"/> setters while it moves, so the value already raised <see cref="LayoutChanged"/>
+    /// on the last change; this final raise makes the snapshot trigger independent of that, mirroring
+    /// <see cref="EndSplitterDrag"/> (a drag whose last moves were all clamped still gets its final state saved).
+    /// </summary>
+    public void EndPanelSplitterDrag() => OnLayoutChanged();
+
     /// <summary>Effective minimum width of a region; the Inspector's grows by the preview column while the preview group is open in it.</summary>
     public double MinWidthOf(RegionRole role) => role switch
     {

@@ -29,8 +29,10 @@ public sealed class WorkbenchControlsTests
     private const int NoFloatingItems = 0;
     private const double NoStripOffset = 0;
     private const double NarrowWindowWidth = 1000;
+    private const double WideWorkbenchWidth = 1600;
     private const int OneFloatingItem = 1;
     private const int OriginalTabIndex = 0;
+    private const int Precision = 3;
     private const string ProjectPanelId = "projects";
     private const string FilesPanelId = "files";
     private const string ToolsPanelId = "inspector-tools";
@@ -263,6 +265,261 @@ public sealed class WorkbenchControlsTests
         Assert.True(visible);
     }
 
+    [Fact]
+    public async Task Close_button_is_hidden_while_the_preview_group_is_closed()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var visible = await WorkbenchUi.QueryAsync(session, () =>
+            WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.CloseId(PreviewPanelId)).IsVisible);
+
+        Assert.False(visible);
+    }
+
+    [Fact]
+    public async Task Close_button_appears_once_the_preview_group_opens()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var visible = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenPreviewTab(scene);
+            return WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.CloseId(PreviewPanelId)).IsVisible;
+        });
+
+        Assert.True(visible);
+    }
+
+    [Fact]
+    public async Task Close_button_closes_the_preview_group_and_returns_its_width_to_main()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var state = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), WideWorkbenchWidth);
+            WorkbenchUi.OpenPreviewTab(scene);
+            scene.Layout.OpenTab(scene.Layout.PreviewTabs, WorkbenchIds.ChangesTab, TabKind.Changes, new object(), "changes");
+            WorkbenchUi.Settle(scene.Window);
+            double mainBefore = scene.Layout.Main.Width;
+            double inspectorBefore = scene.Layout.Inspector.Width;
+
+            WorkbenchUi.Click(scene.Window, WorkbenchUi.CentreOf(
+                WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.CloseId(PreviewPanelId)), scene.Window));
+
+            return (
+                Tabs: scene.Layout.PreviewTabs.Tabs.Count,
+                Visible: scene.Layout.PreviewTabs.IsVisible,
+                Inspector: scene.Layout.Inspector.Width,
+                Main: scene.Layout.Main.Width,
+                ButtonVisible: WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.CloseId(PreviewPanelId)).IsVisible,
+                mainBefore,
+                inspectorBefore);
+        });
+
+        Assert.Equal(NoFloatingItems, state.Tabs);
+        Assert.False(state.Visible);
+        Assert.False(state.ButtonVisible);
+        Assert.Equal(state.inspectorBefore - WorkbenchMetrics.DefaultPreviewWidth, state.Inspector, Precision);
+        Assert.Equal(state.mainBefore + WorkbenchMetrics.DefaultPreviewWidth, state.Main, Precision);
+    }
+
+    // ---------------------------------------------------------------- preview column splitter
+
+    [Fact]
+    public async Task Preview_splitter_hit_band_straddles_the_preview_files_gap_when_the_preview_is_left_of_files()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var straddles = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenPreviewTab(scene);
+            var splitter = WorkbenchUi.Find<Control>(scene.Window, "panel-splitter-preview");
+            var preview = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId));
+            return (
+                StraddlesGap: splitter.Bounds.X < preview.Bounds.Right && splitter.Bounds.Right > preview.Bounds.Right,
+                MovedOffLeftEdge: splitter.Bounds.X > preview.Bounds.X);
+        });
+
+        Assert.True(straddles.StraddlesGap);
+        Assert.True(straddles.MovedOffLeftEdge);
+    }
+
+    [Fact]
+    public async Task Preview_splitter_hit_band_straddles_the_preview_files_gap_when_the_preview_is_right_of_files()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var straddles = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenPreviewTab(scene);
+            scene.Layout.SwapRegions(RegionRole.Project, RegionRole.Inspector);
+            WorkbenchUi.Settle(scene.Window);
+            var splitter = WorkbenchUi.Find<Control>(scene.Window, "panel-splitter-preview");
+            var preview = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId));
+            return (
+                StraddlesGap: splitter.Bounds.X < preview.Bounds.X && splitter.Bounds.Right > preview.Bounds.X,
+                LeftOfPreview: splitter.Bounds.X < preview.Bounds.X);
+        });
+
+        Assert.True(straddles.StraddlesGap);
+        Assert.True(straddles.LeftOfPreview);
+    }
+
+    [Fact]
+    public async Task Dragging_the_preview_splitter_right_widens_the_preview_when_it_is_left_of_files()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var widths = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), WideWorkbenchWidth);
+            WorkbenchUi.OpenPreviewTab(scene);
+            double before = scene.Layout.PreviewWidth;
+
+            WorkbenchUi.DragPreviewSplitter(scene, DragDistance);
+
+            return (
+                before,
+                after: scene.Layout.PreviewWidth,
+                inspector: scene.Layout.Inspector.Width,
+                chrome: WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId)).Bounds.Width);
+        });
+
+        Assert.Equal(widths.before + DragDistance, widths.after, Precision);
+        Assert.Equal(widths.after, widths.chrome, Precision);
+        Assert.Equal(WorkbenchMetrics.DefaultInspectorWidth + WorkbenchMetrics.DefaultPreviewWidth + DragDistance, widths.inspector, Precision);
+    }
+
+    [Fact]
+    public async Task Dragging_the_preview_splitter_right_narrows_the_preview_when_it_is_right_of_files()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var widths = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), WideWorkbenchWidth);
+            WorkbenchUi.OpenPreviewTab(scene);
+            scene.Layout.SwapRegions(RegionRole.Project, RegionRole.Inspector);
+            WorkbenchUi.Settle(scene.Window);
+            double before = scene.Layout.PreviewWidth;
+
+            WorkbenchUi.DragPreviewSplitter(scene, DragDistance);
+
+            return (
+                before,
+                after: scene.Layout.PreviewWidth,
+                inspector: scene.Layout.Inspector.Width,
+                chrome: WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId)).Bounds.Width);
+        });
+
+        Assert.Equal(widths.before - DragDistance, widths.after, Precision);
+        Assert.Equal(widths.after, widths.chrome, Precision);
+        Assert.Equal(WorkbenchMetrics.DefaultInspectorWidth + WorkbenchMetrics.DefaultPreviewWidth - DragDistance, widths.inspector, Precision);
+    }
+
+    // ---------------------------------------------------------------- covering Main
+
+    [Fact]
+    public async Task Cover_spreads_the_preview_over_main_and_its_own_column()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var cover = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenPreviewTab(scene);
+            WorkbenchUi.Click(scene.Window, WorkbenchUi.CentreOf(
+                WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.CoverId(PreviewPanelId)), scene.Window));
+
+            var inspector = WorkbenchUi.Region(scene.Window, RegionRole.Inspector);
+            var main = WorkbenchUi.Region(scene.Window, RegionRole.Main);
+            var preview = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId));
+            var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
+            var origin = inspector.TranslatePoint(new Point(0, 0), scene.Window) ?? throw new InvalidOperationException("presenter not in window");
+            var coverWindow = new Rect(origin + inspector.PreviewCoverRect.Position, inspector.PreviewCoverRect.Size);
+            var filesWindow = new Rect(origin + files.Bounds.Position, files.Bounds.Size);
+            return (
+                ChromeFillsCover: preview.Bounds == inspector.PreviewCoverRect,
+                CoversMain: coverWindow.Contains(main.Bounds),
+                StartsAtMain: Math.Abs(coverWindow.Left - main.Bounds.X) < 0.01,
+                EndsAtFilesColumn: Math.Abs(filesWindow.X - coverWindow.Right - WorkbenchMetrics.PanelSplitterWidth) < 0.01,
+                FilesStillVisible: files.Bounds.Width > 0);
+        });
+
+        Assert.True(cover.ChromeFillsCover);
+        Assert.True(cover.CoversMain);
+        Assert.True(cover.StartsAtMain);
+        Assert.True(cover.EndsAtFilesColumn);
+        Assert.True(cover.FilesStillVisible);
+    }
+
+    [Fact]
+    public async Task Cover_spreads_the_preview_over_main_and_its_own_column_when_it_is_right_of_files()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var cover = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenPreviewTab(scene);
+            scene.Layout.SwapRegions(RegionRole.Project, RegionRole.Inspector);
+            WorkbenchUi.Settle(scene.Window);
+            WorkbenchUi.Click(scene.Window, WorkbenchUi.CentreOf(
+                WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.CoverId(PreviewPanelId)), scene.Window));
+
+            var inspector = WorkbenchUi.Region(scene.Window, RegionRole.Inspector);
+            var main = WorkbenchUi.Region(scene.Window, RegionRole.Main);
+            var preview = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId));
+            var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
+            var origin = inspector.TranslatePoint(new Point(0, 0), scene.Window) ?? throw new InvalidOperationException("presenter not in window");
+            var coverWindow = new Rect(origin + inspector.PreviewCoverRect.Position, inspector.PreviewCoverRect.Size);
+            var filesWindow = new Rect(origin + files.Bounds.Position, files.Bounds.Size);
+            return (
+                ChromeFillsCover: preview.Bounds == inspector.PreviewCoverRect,
+                CoversMain: coverWindow.Contains(main.Bounds),
+                EndsAtMain: Math.Abs(coverWindow.Right - main.Bounds.Right) < 0.01,
+                StartsAtFilesColumn: Math.Abs(coverWindow.Left - filesWindow.Right - WorkbenchMetrics.PanelSplitterWidth) < 0.01,
+                FilesStillVisible: files.Bounds.Width > 0);
+        });
+
+        Assert.True(cover.ChromeFillsCover);
+        Assert.True(cover.CoversMain);
+        Assert.True(cover.EndsAtMain);
+        Assert.True(cover.StartsAtFilesColumn);
+        Assert.True(cover.FilesStillVisible);
+    }
+
+    [Fact]
+    public async Task Clicking_cover_again_returns_the_preview_to_its_column()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var restored = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenPreviewTab(scene);
+            var coverButton = WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.CoverId(PreviewPanelId));
+            WorkbenchUi.Click(scene.Window, WorkbenchUi.CentreOf(coverButton, scene.Window));
+            WorkbenchUi.Click(scene.Window, WorkbenchUi.CentreOf(coverButton, scene.Window));
+
+            var inspector = WorkbenchUi.Region(scene.Window, RegionRole.Inspector);
+            var preview = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(PreviewPanelId));
+            var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
+            return (
+                CoverCleared: inspector.PreviewCoverRect == default,
+                BackToColumn: preview.Bounds.Width < inspector.RegionRect.Width && files.Bounds.X > preview.Bounds.Right,
+                InspectorBackToRegion: inspector.Bounds == new Rect(WorkbenchUi.WindowWidth - inspector.RegionRect.Width, 0, inspector.RegionRect.Width, WorkbenchUi.WindowHeight));
+        });
+
+        Assert.True(restored.CoverCleared);
+        Assert.True(restored.BackToColumn);
+        Assert.True(restored.InspectorBackToRegion);
+    }
+
     // ---------------------------------------------------------------- auto-hide, strips and drawers
 
     [Fact]
@@ -468,14 +725,16 @@ public sealed class WorkbenchControlsTests
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var toolsHeight = await WorkbenchUi.QueryAsync(session, () =>
+        var tools = await WorkbenchUi.QueryAsync(session, () =>
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
             WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-            return WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId)).Bounds.Height;
+            var chrome = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId));
+            return (Height: chrome.Bounds.Height, Visible: chrome.IsVisible);
         });
 
-        Assert.Equal(NoMovement, toolsHeight);
+        Assert.Equal(NoMovement, tools.Height);
+        Assert.False(tools.Visible);
     }
 
     [Fact]
@@ -483,15 +742,95 @@ public sealed class WorkbenchControlsTests
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var toolsHeight = await WorkbenchUi.QueryAsync(session, () =>
+        var tools = await WorkbenchUi.QueryAsync(session, () =>
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
             WorkbenchUi.ClickMaximize(scene, FilesPanelId);
             WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-            return WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId)).Bounds.Height;
+            var chrome = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId));
+            return (Height: chrome.Bounds.Height, Visible: chrome.IsVisible);
         });
 
-        Assert.True(toolsHeight > NoMovement);
+        Assert.True(tools.Height > NoMovement);
+        Assert.True(tools.Visible);
+    }
+
+    [Fact]
+    public async Task Maximize_fades_the_maximized_panel_in()
+    {
+        TreeMotion.ReducedMotion = false;
+        try
+        {
+            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+            var fade = await session.Dispatch(async () =>
+            {
+                var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+                WorkbenchUi.ClickMaximize(scene, FilesPanelId);
+                var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
+                var animated = (files.Transitions?.Count ?? 0) > 0;
+
+                // The fade just started: the chrome must still be ramping up (the transition cannot have finished yet).
+                var midFade = files.Opacity < 1;
+
+                // Settle and give the transition real time until it completes; bounded, no Sleep.
+                var settled = false;
+                for (var i = 0; i < 100 && !settled; i++)
+                {
+                    WorkbenchUi.Settle(scene.Window);
+                    if (files.Opacity >= 1)
+                    {
+                        settled = true;
+                        break;
+                    }
+
+                    await Task.Delay(10);
+                }
+
+                return (animated, midFade, settled, opacity: files.Opacity);
+            }, WorkbenchUi.Budget());
+
+            Assert.True(fade.animated);
+            Assert.True(fade.midFade);
+            Assert.True(fade.settled);
+            Assert.Equal(1, fade.opacity);
+        }
+        finally
+        {
+            TreeMotion.ReducedMotion = false;
+        }
+    }
+
+    [Fact]
+    public async Task Reduced_motion_skips_the_maximize_fade()
+    {
+        TreeMotion.ReducedMotion = true;
+        try
+        {
+            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+            var state = await WorkbenchUi.QueryAsync(session, () =>
+            {
+                var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+                WorkbenchUi.ClickMaximize(scene, FilesPanelId);
+                var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
+                var tools = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId));
+                return (
+                    Transitions: files.Transitions?.Count ?? 0,
+                    Opacity: files.Opacity,
+                    ToolsVisible: tools.IsVisible,
+                    FillsRegion: files.Bounds.Size == WorkbenchUi.Region(scene.Window, RegionRole.Inspector).Bounds.Size);
+            });
+
+            Assert.Equal(0, state.Transitions);
+            Assert.Equal(1, state.Opacity);
+            Assert.False(state.ToolsVisible);
+            Assert.True(state.FillsRegion);
+        }
+        finally
+        {
+            TreeMotion.ReducedMotion = false;
+        }
     }
 
     // ---------------------------------------------------------------- splitter drags
@@ -1059,10 +1398,10 @@ internal static class WorkbenchUi
     public static WorkbenchLayout NewLayout() => new(new object(), new object(), new object(), new object(), new object());
 
     /// <summary>A window with the host as its content, shown and laid out once.</summary>
-    public static Scene Open(WorkbenchLayout layout)
+    public static Scene Open(WorkbenchLayout layout, double width = WindowWidth)
     {
         var host = new WorkbenchHost { Layout = layout };
-        var window = new Window { Width = WindowWidth, Height = WindowHeight, Content = host };
+        var window = new Window { Width = width, Height = WindowHeight, Content = host };
         window.Show();
         Settle(window);
         return new Scene(window, host, layout);
@@ -1096,6 +1435,8 @@ internal static class WorkbenchUi
     public static string FloatPanelId(string panel) => "panel-" + panel + "-float";
 
     public static string CoverId(string panel) => "panel-" + panel + "-cover";
+
+    public static string CloseId(string panel) => "panel-" + panel + "-close";
 
     public static string StripId(RegionRole role) => "autohide-" + role;
 
@@ -1173,6 +1514,21 @@ internal static class WorkbenchUi
         var splitter = Find<Control>(scene.Window, splitterId);
         var from = CentreOf(splitter, scene.Window);
         var to = Offset(from, dx, dy);
+        scene.Window.MouseDown(from, MouseButton.Left);
+        scene.Window.MouseMove(to);
+        scene.Window.MouseUp(to, MouseButton.Left);
+        Settle(scene.Window);
+    }
+
+    /// <summary>
+    /// Drags the preview splitter from a point inside its hit band that is clear of the files/tools splitter corner: the
+    /// two bands overlap in a few pixels around the files panel's bottom edge, where the later splitter wins the hit test.
+    /// </summary>
+    public static void DragPreviewSplitter(Scene scene, double dx)
+    {
+        var splitter = Find<Control>(scene.Window, "panel-splitter-preview");
+        var from = PointIn(splitter, new Point(1, 100), scene.Window);
+        var to = Offset(from, dx, 0);
         scene.Window.MouseDown(from, MouseButton.Left);
         scene.Window.MouseMove(to);
         scene.Window.MouseUp(to, MouseButton.Left);

@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Threading;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -16,6 +18,7 @@ internal sealed class RegionPresenter : Panel
     private readonly PanelSplitter previewSplitter = new() { Kind = PanelSplitterKind.Preview };
     private readonly PanelSplitter inspectorSplitter = new() { Kind = PanelSplitterKind.Inspector };
     private readonly BottomCollapsedStrip bottomStrip = new();
+    private PanelModel? lastMaximized;
 
     public RegionPresenter(WorkbenchLayout layout, RegionRole role)
     {
@@ -43,6 +46,24 @@ internal sealed class RegionPresenter : Panel
 
     /// <summary>Where the preview group goes while it covers Main, in this control's coordinates; empty otherwise.</summary>
     public Rect PreviewCoverRect { get; set; }
+
+    /// <summary>
+    /// Width of the preview column as <see cref="ArrangeInspector"/> lays it out: the preview width clamped to the column
+    /// space, and to the side minimum while the files column is visible. The host's cover rectangle uses the same width, so
+    /// the covered area ends exactly where the files column begins.
+    /// </summary>
+    internal static double PreviewColumnWidth(WorkbenchLayout layout, double columnWidth, bool filesColumnVisible)
+    {
+        var previewWidth = Math.Min(
+            Math.Max(WorkbenchMetrics.PreviewMinWidth, layout.PreviewWidth),
+            Math.Max(WorkbenchMetrics.PreviewMinWidth, columnWidth));
+        if (filesColumnVisible)
+        {
+            previewWidth = Math.Min(previewWidth, Math.Max(0, columnWidth - WorkbenchMetrics.PanelSplitterWidth - WorkbenchMetrics.SideMinWidth));
+        }
+
+        return previewWidth;
+    }
 
     /// <summary>Recreates one chrome per panel; called when the panel list of the region changes.</summary>
     public void Rebuild()
@@ -92,7 +113,11 @@ internal sealed class RegionPresenter : Panel
         }
 
         var region = Layout.GetRegion(Role);
-        if (region.MaximizedPanel is { IsVisible: true } maximized && ChromeOf(maximized) is { } maximizedChrome)
+        var maximizedChrome = region.MaximizedPanel is { IsVisible: true } maximized && ChromeOf(maximized) is { } chrome
+            ? chrome
+            : null;
+        ApplyMaximizedChrome(maximizedChrome);
+        if (maximizedChrome is not null)
         {
             maximizedChrome.Arrange(body);
             return finalSize;
@@ -112,6 +137,54 @@ internal sealed class RegionPresenter : Panel
         }
 
         return finalSize;
+    }
+
+    /// <summary>
+    /// While a panel is maximized its chrome is the only visible one (the others collapse, not just to empty rectangles);
+    /// restoring brings every chrome back. The change fades the affected chromes in unless reduced motion is on — the
+    /// maximized panel on engage, the whole region on restore.
+    /// </summary>
+    private void ApplyMaximizedChrome(PanelChrome? maximized)
+    {
+        if (ReferenceEquals(maximized?.Model, lastMaximized))
+        {
+            return;
+        }
+
+        lastMaximized = maximized?.Model;
+        var engage = maximized is not null;
+        for (var i = 0; i < chromes.Count; i++)
+        {
+            var chrome = chromes[i];
+            chrome.IsVisible = !engage || ReferenceEquals(chrome, maximized);
+        }
+
+        if (!engage)
+        {
+            for (var i = 0; i < chromes.Count; i++)
+            {
+                FadeIn(chromes[i]);
+            }
+
+            return;
+        }
+
+        FadeIn(maximized!);
+    }
+
+    /// <summary>Ramps the chrome in from transparent; with reduced motion the final opacity applies immediately.</summary>
+    private static void FadeIn(PanelChrome chrome)
+    {
+        if (TreeMotion.ReducedMotion)
+        {
+            chrome.Opacity = 1;
+            return;
+        }
+
+        // Start transparent in this arrange pass; the posted restore runs after layout, so the Opacity transition
+        // animates the fade. A window that is gone by then just keeps a detached chrome at full opacity.
+        chrome.Opacity = 0;
+        Dispatcher.UIThread.Post(() => chrome.Opacity = 1);
     }
 
     private void ArrangeMain(Rect body)
@@ -213,13 +286,7 @@ internal sealed class RegionPresenter : Panel
         var filesColumn = body;
         if (previewVisible)
         {
-            var previewWidth = Math.Min(
-                Math.Max(WorkbenchMetrics.PreviewMinWidth, Layout.PreviewWidth),
-                Math.Max(WorkbenchMetrics.PreviewMinWidth, body.Width));
-            if (filesColumnVisible)
-            {
-                previewWidth = Math.Min(previewWidth, Math.Max(0, body.Width - splitterWidth - WorkbenchMetrics.SideMinWidth));
-            }
+            var previewWidth = PreviewColumnWidth(Layout, body.Width, filesColumnVisible);
 
             if (Layout.IsPreviewLeftOfFiles)
             {
@@ -239,8 +306,10 @@ internal sealed class RegionPresenter : Panel
             if (filesColumnVisible)
             {
                 previewSplitter.TrackLength = body.Width;
+                // The 1 px gap between the two columns; the hit band straddles it on whichever side the preview column sits.
+                var gapX = Layout.IsPreviewLeftOfFiles ? previewColumn.Right : filesColumn.Right;
                 previewSplitter.Arrange(new Rect(
-                    previewColumn.X + ((splitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
+                    gapX + ((splitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
                     body.Y,
                     WorkbenchMetrics.SplitterHitWidth,
                     body.Height));

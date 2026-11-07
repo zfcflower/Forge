@@ -432,6 +432,21 @@ public sealed class WorkbenchLayoutRegionTests
     }
 
     [Fact]
+    public void EndPanelSplitterDrag_raises_LayoutChanged()
+    {
+        // A panel splitter (bottom height, preview width, inspector ratio) writes through the layout setters while it
+        // moves; ending the drag must still raise once, so the final state is snapshotted even when the last moves were
+        // clamped to an unchanged value.
+        var layout = NewLayoutAt(WideWindowWidth);
+        int raised = 0;
+        layout.LayoutChanged += (_, _) => raised++;
+
+        layout.EndPanelSplitterDrag();
+
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
     public void Dragging_a_side_past_its_minimum_auto_hides_it()
     {
         var layout = NewLayoutAt(WideWindowWidth);

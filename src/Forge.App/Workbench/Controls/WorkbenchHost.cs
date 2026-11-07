@@ -209,9 +209,9 @@ internal sealed class WorkbenchHost : Panel
         if (covering)
         {
             var inspector = regionRects[(int)RegionRole.Inspector];
-            var previewWidth = Math.Min(
-                Math.Max(WorkbenchMetrics.PreviewMinWidth, layout.PreviewWidth),
-                Math.Max(WorkbenchMetrics.PreviewMinWidth, inspector.Width));
+            // Same width the presenter lays the column out at, so the covered area ends exactly where the files column begins.
+            var filesColumnVisible = layout.FilesPanel.IsVisible || layout.InspectorTools.IsVisible;
+            var previewWidth = RegionPresenter.PreviewColumnWidth(layout, inspector.Width, filesColumnVisible);
             var column = layout.IsPreviewLeftOfFiles
                 ? new Rect(inspector.X, inspector.Y, previewWidth, inspector.Height)
                 : new Rect(inspector.Right - previewWidth, inspector.Y, previewWidth, inspector.Height);

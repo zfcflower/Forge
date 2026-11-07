@@ -1,6 +1,8 @@
 using System.Collections;
 using System.ComponentModel;
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -9,6 +11,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Forge.App.Localization;
+using Forge.App.ViewModels;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -97,10 +100,23 @@ internal sealed class PanelChrome : TemplatedControl
     public static readonly StyledProperty<bool> SidebarProperty =
         AvaloniaProperty.Register<PanelChrome, bool>(nameof(Sidebar));
 
+    public static readonly StyledProperty<bool> CloseVisibleProperty =
+        AvaloniaProperty.Register<PanelChrome, bool>(nameof(CloseVisible));
+
+    public static readonly StyledProperty<Geometry?> CloseIconProperty =
+        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(CloseIcon));
+
+    public static readonly StyledProperty<string?> CloseTooltipProperty =
+        AvaloniaProperty.Register<PanelChrome, string?>(nameof(CloseTooltip));
+
+    public static readonly StyledProperty<string?> CloseAutomationIdProperty =
+        AvaloniaProperty.Register<PanelChrome, string?>(nameof(CloseAutomationId));
+
     private PanelIconButton? coverButton;
     private PanelIconButton? pinButton;
     private PanelIconButton? maximizeButton;
     private PanelIconButton? floatButton;
+    private PanelIconButton? closeButton;
     private TabModel? watchedTab;
     private RegionModel? watchedRegion;
     private bool attached;
@@ -113,6 +129,23 @@ internal sealed class PanelChrome : TemplatedControl
         LayoutProperty.Changed.AddClassHandler<PanelChrome>((chrome, _) => chrome.Resubscribe());
         SidebarProperty.Changed.AddClassHandler<PanelChrome>((chrome, e) =>
             chrome.PseudoClasses.Set(":sidebar", e.NewValue is true));
+    }
+
+    /// <summary>The maximize fade-in of the region presenter drives <see cref="Visual.Opacity"/>; reduced motion skips it.</summary>
+    public PanelChrome()
+    {
+        if (!TreeMotion.ReducedMotion)
+        {
+            Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = OpacityProperty,
+                    Duration = TimeSpan.FromMilliseconds(120),
+                    Easing = new CubicEaseOut(),
+                },
+            ];
+        }
     }
 
     public PanelModel? Model
@@ -267,6 +300,30 @@ internal sealed class PanelChrome : TemplatedControl
         set => SetValue(FloatAutomationIdProperty, value);
     }
 
+    public bool CloseVisible
+    {
+        get => GetValue(CloseVisibleProperty);
+        set => SetValue(CloseVisibleProperty, value);
+    }
+
+    public Geometry? CloseIcon
+    {
+        get => GetValue(CloseIconProperty);
+        set => SetValue(CloseIconProperty, value);
+    }
+
+    public string? CloseTooltip
+    {
+        get => GetValue(CloseTooltipProperty);
+        set => SetValue(CloseTooltipProperty, value);
+    }
+
+    public string? CloseAutomationId
+    {
+        get => GetValue(CloseAutomationIdProperty);
+        set => SetValue(CloseAutomationIdProperty, value);
+    }
+
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
         base.OnApplyTemplate(e);
@@ -275,6 +332,7 @@ internal sealed class PanelChrome : TemplatedControl
         pinButton = e.NameScope.Find<PanelIconButton>("PART_Pin");
         maximizeButton = e.NameScope.Find<PanelIconButton>("PART_Maximize");
         floatButton = e.NameScope.Find<PanelIconButton>("PART_Float");
+        closeButton = e.NameScope.Find<PanelIconButton>("PART_Close");
         if (coverButton is not null)
         {
             coverButton.Click += OnCoverClick;
@@ -293,6 +351,11 @@ internal sealed class PanelChrome : TemplatedControl
         if (floatButton is not null)
         {
             floatButton.Click += OnFloatClick;
+        }
+
+        if (closeButton is not null)
+        {
+            closeButton.Click += OnCloseClick;
         }
     }
 
@@ -379,6 +442,24 @@ internal sealed class PanelChrome : TemplatedControl
         }
     }
 
+    /// <summary>
+    /// Closes the preview group: every tab leaves, the group stops being docked-visible and its borrowed column width
+    /// returns to Main — the same end state as closing the group's last remaining tab.
+    /// </summary>
+    private void OnCloseClick(object? sender, RoutedEventArgs e)
+    {
+        if (Layout is not { } layout || Model is not TabGroupModel { Id: WorkbenchIds.PreviewTabs } group)
+        {
+            return;
+        }
+
+        var tabs = group.Tabs;
+        for (var i = tabs.Count - 1; i >= 0; i--)
+        {
+            layout.CloseTab(tabs[i]);
+        }
+    }
+
     private void DetachButtons()
     {
         if (coverButton is not null)
@@ -403,6 +484,12 @@ internal sealed class PanelChrome : TemplatedControl
         {
             floatButton.Click -= OnFloatClick;
             floatButton = null;
+        }
+
+        if (closeButton is not null)
+        {
+            closeButton.Click -= OnCloseClick;
+            closeButton = null;
         }
     }
 
@@ -564,6 +651,7 @@ internal sealed class PanelChrome : TemplatedControl
             PinVisible = false;
             MaximizeVisible = false;
             FloatVisible = false;
+            CloseVisible = false;
             return;
         }
 
@@ -586,6 +674,11 @@ internal sealed class PanelChrome : TemplatedControl
         CoverVisible = layout is not null && model.Id == WorkbenchIds.PreviewTabs && layout.PreviewTabs.IsVisible;
         CoverIcon = WorkbenchIcons.Find(this, "IconCoverMain");
         CoverAutomationId = "panel-" + model.Id + "-cover";
+
+        CloseVisible = layout is not null && model.Id == WorkbenchIds.PreviewTabs && layout.PreviewTabs.IsVisible;
+        CloseIcon = WorkbenchIcons.Find(this, "IconClose");
+        CloseTooltip = ShellStrings.Close;
+        CloseAutomationId = "panel-" + model.Id + "-close";
 
         PinVisible = model.CanPin;
         MaximizeVisible = model.CanMaximize;

@@ -217,7 +217,6 @@ internal sealed class PanelSplitter : WorkbenchSplitter
         }
     }
 
-    protected override void OnEndDrag()
-    {
-    }
+    /// <summary>Ends the drag by telling the layout to snapshot: the final width/ratio already went through its setters.</summary>
+    protected override void OnEndDrag() => Layout?.EndPanelSplitterDrag();
 }

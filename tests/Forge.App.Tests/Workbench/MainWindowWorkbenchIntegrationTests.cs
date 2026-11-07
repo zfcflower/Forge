@@ -35,6 +35,12 @@ public sealed class MainWindowWorkbenchIntegrationTests
     private const double RestoredPreviewWidth = 700;
     private const double RestoredPreviewHeight = 500;
     private const double RestoredInspectorWidth = 320;
+    private const double WideWindowWidth = 1600;
+    private const double RegionDragDelta = 40;
+    private const double AdjustedBottomHeight = 300;
+    private const double AdjustedPreviewWidth = 500;
+    private const double AdjustedInspectorSplit = 0.7;
+    private const int Precision = 3;
 
     [Fact]
     public async Task Single_click_reuses_the_preview_tab_for_the_next_file()
@@ -264,6 +270,57 @@ public sealed class MainWindowWorkbenchIntegrationTests
             });
     }
 
+    [Fact]
+    public async Task Adjusted_region_panel_and_preview_widths_are_saved_and_restored_after_a_restart()
+    {
+        await RunAsync(
+            async harness =>
+            {
+                var layout = harness.ViewModel.Workbench;
+                layout.SetWindowWidth(WideWindowWidth);
+                await harness.OpenFromPanelAsync(AlphaFile, newTab: false);
+
+                // The exact paths the splitters drive: region drag, then the panel height, split ratio and preview width.
+                layout.BeginSplitterDrag(0);
+                layout.UpdateSplitterDrag(RegionDragDelta);
+                layout.EndSplitterDrag();
+                layout.BottomHeight = AdjustedBottomHeight;
+                layout.InspectorSplitRatio = AdjustedInspectorSplit;
+                layout.PreviewWidth = AdjustedPreviewWidth;
+                double adjustedProject = layout.Project.Width;
+
+                // The 800 ms debounced save reaches the store by itself; pump the dispatcher with real time until it does.
+                await PumpUntilAsync(async () =>
+                {
+                    var entry = await Task.Run(() => harness.Composition.UiState.GetAsync("layout", CancellationToken.None));
+                    if (entry is not { Version: LayoutSnapshot.CurrentVersion } || entry.Json is not { } json)
+                    {
+                        return false;
+                    }
+
+                    var saved = JsonSerializer.Deserialize(json, WorkbenchJsonContext.Default.LayoutSnapshot);
+                    return saved is { BottomHeight: AdjustedBottomHeight, PreviewWidth: AdjustedPreviewWidth, InspectorSplitRatio: AdjustedInspectorSplit };
+                });
+
+                // A restart: a fresh view model over the same store restores what the adjustments produced.
+                var second = new MainWindowViewModel(harness.Composition);
+                try
+                {
+                    await second.InitializeAsync();
+
+                    Assert.Equal(adjustedProject, second.Workbench.Project.Width, Precision);
+                    Assert.Equal(AdjustedBottomHeight, second.Workbench.BottomHeight, Precision);
+                    Assert.Equal(AdjustedInspectorSplit, second.Workbench.InspectorSplitRatio, Precision);
+                    Assert.Equal(AdjustedPreviewWidth, second.Workbench.PreviewWidth, Precision);
+                    Assert.True(second.Workbench.PreviewTabs.IsVisible);
+                }
+                finally
+                {
+                    second.Dispose();
+                }
+            });
+    }
+
     // ---------------------------------------------------------------- harness
 
     /// <summary>What a test wants seeded before the view model restores: files, the layout, and the open tabs.</summary>
@@ -303,6 +360,41 @@ public sealed class MainWindowWorkbenchIntegrationTests
                 return 0;
             },
             CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Pumps the dispatcher until <paramref name="condition"/> holds. The file and tab actions of the view model are
+    /// fire-and-forget and read from disk on a pool thread, so a plain <c>Task.Yield</c> loop would race the read.
+    /// </summary>
+    private static async Task PumpUntilAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < PumpIterations; i++)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(PumpDelayMilliseconds);
+        }
+
+        Assert.True(condition(), "the pending file action did not finish");
+    }
+
+    /// <summary>Like <see cref="PumpUntilAsync(Func{bool})"/>, for conditions that have to read the store first.</summary>
+    private static async Task PumpUntilAsync(Func<Task<bool>> condition)
+    {
+        for (var i = 0; i < PumpIterations; i++)
+        {
+            if (await condition())
+            {
+                return;
+            }
+
+            await Task.Delay(PumpDelayMilliseconds);
+        }
+
+        Assert.True(await condition(), "the pending layout save did not finish");
     }
 
     /// <summary>One throw-away data root, a real composition root, and the root view model restored over it.</summary>
@@ -467,25 +559,6 @@ public sealed class MainWindowWorkbenchIntegrationTests
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
             }
-        }
-
-        /// <summary>
-        /// Pumps the dispatcher until <paramref name="condition"/> holds. The file and tab actions of the view model are
-        /// fire-and-forget and read from disk on a pool thread, so a plain <c>Task.Yield</c> loop would race the read.
-        /// </summary>
-        private static async Task PumpUntilAsync(Func<bool> condition)
-        {
-            for (var i = 0; i < PumpIterations; i++)
-            {
-                if (condition())
-                {
-                    return;
-                }
-
-                await Task.Delay(PumpDelayMilliseconds);
-            }
-
-            Assert.True(condition(), "the pending file action did not finish");
         }
     }
 
