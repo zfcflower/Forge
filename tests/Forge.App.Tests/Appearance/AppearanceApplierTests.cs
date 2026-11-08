@@ -30,13 +30,25 @@ public sealed class AppearanceApplierTests : IDisposable
         Assert.Equal(11, Value<double>("FontSizeXs"));
         Assert.Equal(12, Value<double>("FontSizeSm"));
         Assert.Equal(13, Value<double>("FontSizeBase"));
-        Assert.Equal(15, Value<double>("FontSizeMd"));
+        Assert.Equal(14, Value<double>("FontSizeMd"));
         Assert.Equal(18, Value<double>("FontSizeLg"));
         Assert.Equal(22, Value<double>("FontSizeXl"));
         Assert.Equal(13, Value<double>("FontSizeCode"));
         // Fluent reads these two for its own controls and popups.
         Assert.Equal(Chain(FontFamily.Parse(AppPreferences.DefaultUiFontFamily)), Chain(Value<FontFamily>("ContentControlThemeFontFamily")));
         Assert.Equal(13, Value<double>("ControlContentThemeFontSize"));
+    }
+
+    [Fact]
+    public void The_default_interface_family_starts_on_the_system_font_and_leaves_inter_out()
+    {
+        // The interface starts on the system chain, not the embedded Inter: Inter reads visibly larger at the same
+        // pixel size because of its bigger x-height, so putting it back into the default would silently inflate every
+        // label. Inter only comes in through an explicit "fonts:Inter#Inter" in the settings.
+        var families = FontFamily.Parse(AppPreferences.DefaultUiFontFamily).FamilyNames;
+
+        Assert.Equal("Segoe UI", families[0]);
+        Assert.DoesNotContain(families, static family => family.Contains("Inter", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -48,6 +60,7 @@ public sealed class AppearanceApplierTests : IDisposable
 
         Assert.NotSame(before, applier.Tokens);
         Assert.Equal(20, Value<double>("FontSizeBase"));
+        // 22 * 20/13 = 33.85, rounded away from zero.
         Assert.Equal(34, Value<double>("FontSizeXl"));
         Assert.Equal(20, Value<double>("ControlContentThemeFontSize"));
         Assert.Equal(13, Value<double>("FontSizeCode"));
@@ -98,7 +111,7 @@ public sealed class AppearanceApplierTests : IDisposable
     {
         var before = applier.Tokens;
 
-        preferences.UiFontSize = 13;
+        preferences.UiFontSize = AppPreferences.DefaultUiFontSize;
         preferences.CodeFontFamily = AppPreferences.DefaultCodeFontFamily;
         applier.Apply();
 

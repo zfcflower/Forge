@@ -138,7 +138,7 @@ internal sealed class FloatingPanelWindow : Window
 
     private Control BuildContent()
     {
-        var grid = new Grid { RowDefinitions = new RowDefinitions("28,*") };
+        var grid = new Grid { RowDefinitions = new RowDefinitions($"{PanelChrome.TitleBarHeight},*") };
         grid.Children.Add(BuildTitleBar());
         var body = item.Tab is { } tab ? BuildTabBody(tab) : BuildFilesBody();
         Grid.SetRow(body, 1);
@@ -159,17 +159,18 @@ internal sealed class FloatingPanelWindow : Window
             BorderThickness = new Thickness(0, 0, 0, 1),
             Padding = new Thickness(8, 0, 4, 0),
         };
-        WorkbenchResources.Link(bar, Border.BackgroundProperty, "SurfaceBackgroundBrush");
+        WorkbenchResources.Link(bar, Border.BackgroundProperty, "PanelTitleBarBrush");
         WorkbenchResources.Link(bar, Border.BorderBrushProperty, "BorderBrush");
 
         var label = new TextBlock
         {
             Text = Title,
-            FontSize = 12,
+            FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap,
         };
+        WorkbenchResources.Link(label, TextBlock.FontSizeProperty, "FontSizeMd");
         WorkbenchResources.Link(label, TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
         var dock = new PanelIconButton
@@ -247,7 +248,7 @@ internal sealed class FloatingPanelWindow : Window
                 VerticalContentAlignment = VerticalAlignment.Stretch,
             };
             var strip = new PanelTabStrip { Layout = layout, Group = preview, Height = PanelChrome.TitleBarHeight };
-            var column = new Grid { RowDefinitions = new RowDefinitions("28,*") };
+            var column = new Grid { RowDefinitions = new RowDefinitions($"{PanelChrome.TitleBarHeight},*") };
             column.Children.Add(strip);
             Grid.SetRow(previewContent, 1);
             column.Children.Add(previewContent);

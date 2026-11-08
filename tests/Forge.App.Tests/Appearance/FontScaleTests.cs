@@ -14,14 +14,14 @@ public sealed class FontScaleTests
     {
         var tokens = FontScale.Compute(FontScale.ReferenceSize);
 
-        Assert.Equal(new FontSizeTokens(11, 12, 13, 15, 18, 22), tokens);
+        Assert.Equal(new FontSizeTokens(11, 12, 13, 14, 18, 22), tokens);
         Assert.Equal(FontScale.Default, tokens);
     }
 
     [Fact]
     public void The_smallest_size_keeps_every_token_whole_and_positive()
     {
-        // 11/12/13/15/18/22 * 9/13, rounded: 8. 8. 9. 10. 12. 15.
+        // 11/12/13/14/18/22 * 9/13, rounded: 8. 8. 9. 10. 12. 15.
         var tokens = FontScale.Compute(9);
 
         Assert.Equal(new FontSizeTokens(8, 8, 9, 10, 12, 15), tokens);
@@ -31,10 +31,10 @@ public sealed class FontScaleTests
     [Fact]
     public void The_largest_size_scales_every_token_up()
     {
-        // 11/12/13/15/18/22 * 28/13, rounded: 24. 26. 28. 32. 39. 47.
+        // 11/12/13/14/18/22 * 28/13, rounded: 24. 26. 28. 30. 39. 47.
         var tokens = FontScale.Compute(28);
 
-        Assert.Equal(new FontSizeTokens(24, 26, 28, 32, 39, 47), tokens);
+        Assert.Equal(new FontSizeTokens(24, 26, 28, 30, 39, 47), tokens);
         Assert.Equal(28, tokens.Base);
     }
 

@@ -1,9 +1,11 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Forge.App.Localization;
 
 namespace Forge.App.Workbench.Controls;
@@ -18,18 +20,28 @@ internal enum TabDragMode
 
 /// <summary>
 /// The tab strip of a <see cref="PanelChrome"/>: horizontal and scrollable. It owns the tab drag state — reordering
-/// inside the group and floating a tab out of it — and gives every tab its own context menu instance.
+/// inside the group and floating a tab out of it — and gives every tab its own context menu instance. When the tabs no
+/// longer fit, an ellipsis button pinned to the strip's right edge lists the ones that were clipped.
 /// </summary>
 internal sealed class PanelTabStrip : TemplatedControl
 {
+    /// <summary>Half a pixel: a tab whose edge lands exactly on the viewport edge still counts as visible.</summary>
+    private const double ClippedEdge = 0.5;
+
     public static readonly StyledProperty<WorkbenchLayout?> LayoutProperty =
         AvaloniaProperty.Register<PanelTabStrip, WorkbenchLayout?>(nameof(Layout));
 
     public static readonly StyledProperty<TabGroupModel?> GroupProperty =
         AvaloniaProperty.Register<PanelTabStrip, TabGroupModel?>(nameof(Group));
 
+    /// <summary>True while at least one tab does not fit in the strip; the ellipsis button is visible exactly then.</summary>
+    public static readonly StyledProperty<bool> HasOverflowProperty =
+        AvaloniaProperty.Register<PanelTabStrip, bool>(nameof(HasOverflow));
+
     private readonly List<TabHeaderView> headers = [];
     private StackPanel? tabsHost;
+    private ScrollViewer? scroller;
+    private PanelIconButton? overflowButton;
     private TabGroupModel? subscribedGroup;
     private int attachedThread;
     private TabModel? dragTab;
@@ -53,6 +65,12 @@ internal sealed class PanelTabStrip : TemplatedControl
     {
         get => GetValue(GroupProperty);
         set => SetValue(GroupProperty, value);
+    }
+
+    public bool HasOverflow
+    {
+        get => GetValue(HasOverflowProperty);
+        set => SetValue(HasOverflowProperty, value);
     }
 
     /// <summary>Activates a tab of this strip (keyboard activation of a focused header).</summary>
@@ -109,8 +127,21 @@ internal sealed class PanelTabStrip : TemplatedControl
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
         base.OnApplyTemplate(e);
+        if (overflowButton is not null)
+        {
+            overflowButton.Click -= OnOverflowClick;
+        }
+
         tabsHost = e.NameScope.Find<StackPanel>("PART_Tabs");
+        scroller = e.NameScope.Find<ScrollViewer>("PART_Scroller");
+        overflowButton = e.NameScope.Find<PanelIconButton>("PART_Overflow");
+        if (overflowButton is not null)
+        {
+            overflowButton.Click += OnOverflowClick;
+        }
+
         Rebuild();
+        RefreshOverflow();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -119,11 +150,15 @@ internal sealed class PanelTabStrip : TemplatedControl
         attachedThread = Environment.CurrentManagedThreadId;
         Subscribe();
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        // The answer to "do the tabs fit" only exists once a layout pass has placed them, and it changes with the
+        // panel's width, the tab set and the tab titles; one cheap pass keeps it current without a second layout round.
+        LayoutUpdated += OnStripLayoutUpdated;
         Rebuild();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        LayoutUpdated -= OnStripLayoutUpdated;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         Unsubscribe();
         base.OnDetachedFromVisualTree(e);
@@ -260,7 +295,7 @@ internal sealed class PanelTabStrip : TemplatedControl
             tab,
             new FloatGeometry(
                 Math.Max(0, x - 80),
-                Math.Max(0, y - 14),
+                Math.Max(0, y - (PanelChrome.TitleBarHeight / 2)),
                 WorkbenchMetrics.FloatingTabWidth,
                 WorkbenchMetrics.FloatingTabHeight,
                 false));
@@ -289,6 +324,10 @@ internal sealed class PanelTabStrip : TemplatedControl
         }
 
         RefreshActive();
+        if (overflowButton is not null)
+        {
+            AutomationProperties.SetAutomationId(overflowButton, "tabs-" + group.Id + "-overflow");
+        }
     }
 
     private ContextMenu BuildContextMenu(TabModel tab)
@@ -344,6 +383,137 @@ internal sealed class PanelTabStrip : TemplatedControl
         for (var i = 0; i < headers.Count; i++)
         {
             headers[i].IsActive = ReferenceEquals(headers[i].Model, active);
+        }
+    }
+
+    private void OnStripLayoutUpdated(object? sender, EventArgs e) => RefreshOverflow();
+
+    /// <summary>Rereads the overflow flag after a layout pass; writing it only on a flip keeps a steady title bar free.</summary>
+    private void RefreshOverflow()
+    {
+        var overflow = HasClippedTab();
+        if (overflow != HasOverflow)
+        {
+            HasOverflow = overflow;
+        }
+    }
+
+    private bool HasClippedTab()
+    {
+        if (scroller is not { } viewer || tabsHost is not { } host)
+        {
+            return false;
+        }
+
+        double left = viewer.Offset.X;
+        double right = left + viewer.Viewport.Width;
+        if (!(viewer.Viewport.Width > 0))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < headers.Count; i++)
+        {
+            TabHeaderView header = headers[i];
+            if (header.IsVisible && header.Bounds.Width > 0
+                && IsClipped(host.Bounds.X + header.Bounds.X, header.Bounds.Width, left, right))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The tabs the strip had to clip, in strip order: what the ellipsis button lists.</summary>
+    private List<TabModel> CollectClippedTabs()
+    {
+        var clipped = new List<TabModel>();
+        if (scroller is not { } viewer || tabsHost is not { } host)
+        {
+            return clipped;
+        }
+
+        double left = viewer.Offset.X;
+        double right = left + viewer.Viewport.Width;
+        for (var i = 0; i < headers.Count; i++)
+        {
+            TabHeaderView header = headers[i];
+            if (!header.IsVisible || header.Model is not { } tab || header.Bounds.Width <= 0)
+            {
+                continue;
+            }
+
+            if (IsClipped(host.Bounds.X + header.Bounds.X, header.Bounds.Width, left, right))
+            {
+                clipped.Add(tab);
+            }
+        }
+
+        return clipped;
+    }
+
+    /// <summary>A tab counts as reachable only while it sits entirely inside the strip's viewport, left or right edge.</summary>
+    private static bool IsClipped(double start, double width, double viewportLeft, double viewportRight) =>
+        start < viewportLeft - ClippedEdge || start + width > viewportRight + ClippedEdge;
+
+    /// <summary>
+    /// Opens the list of clipped tabs: the ellipsis button's click handler. The menu is rebuilt on every open instead of
+    /// bound, because which tabs are clipped is a property of the current layout, not of the group.
+    /// </summary>
+    private void OnOverflowClick(object? sender, RoutedEventArgs e)
+    {
+        if (overflowButton is not { } button)
+        {
+            return;
+        }
+
+        if (BuildClippedMenu() is not { } menu)
+        {
+            return;
+        }
+
+        button.Flyout = menu;
+        menu.ShowAt(button);
+    }
+
+    /// <summary>
+    /// Builds the menu of the tabs the strip had to clip, or null when nothing is clipped. A test seam as well: a headless
+    /// host has no popup surface, so a test reads the menu here instead of pressing the ellipsis button.
+    /// </summary>
+    internal MenuFlyout? BuildClippedMenu()
+    {
+        List<TabModel> clipped = CollectClippedTabs();
+        if (clipped.Count == 0)
+        {
+            RefreshOverflow();
+            return null;
+        }
+
+        var menu = new MenuFlyout();
+        for (var i = 0; i < clipped.Count; i++)
+        {
+            TabModel tab = clipped[i];
+            var item = new MenuItem { Header = tab.Title };
+            AutomationProperties.SetAutomationId(item, "tab-" + tab.Id + "-overflow-item");
+            item.Click += (_, _) => ActivateAndReveal(tab);
+            menu.Items.Add(item);
+        }
+
+        return menu;
+    }
+
+    /// <summary>Activates a tab picked from the clipped list and scrolls it into the strip, so the click has a visible effect.</summary>
+    private void ActivateAndReveal(TabModel tab)
+    {
+        Layout?.ActivateTab(tab);
+        for (var i = 0; i < headers.Count; i++)
+        {
+            if (ReferenceEquals(headers[i].Model, tab))
+            {
+                headers[i].BringIntoView();
+                return;
+            }
         }
     }
 

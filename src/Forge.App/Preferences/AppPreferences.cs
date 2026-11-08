@@ -28,10 +28,12 @@ internal sealed class AppPreferences : ObservableObject
     public const double MinFontSize = 9;
     public const double MaxFontSize = 28;
     /// <summary>
-    /// <c>fonts:Inter#Inter</c> is the embedded Inter registered by <c>WithInterFont()</c>; a bare <c>Inter</c> only
-    /// matches an installed system font and would silently fall through to the next family.
+    /// The interface starts on the system <c>Segoe UI</c> chain rather than the embedded Inter: Inter reads visibly
+    /// larger at the same pixel size because of its bigger x-height. Inter still ships with the app
+    /// (<c>WithInterFont()</c> registers its collection as <c>fonts:Inter</c>), so <c>fonts:Inter#Inter</c> stays a valid
+    /// choice — a bare <c>Inter</c> only matches an OS-installed font and would silently fall through to the next family.
     /// </summary>
-    public const string DefaultUiFontFamily = "fonts:Inter#Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif";
+    public const string DefaultUiFontFamily = "Segoe UI, PingFang SC, Microsoft YaHei, sans-serif";
     public const string DefaultCodeFontFamily = "Consolas, Cascadia Mono, Menlo, monospace";
     public const double DefaultUiFontSize = 13;
     public const double DefaultCodeFontSize = 13;
@@ -65,6 +67,20 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxToolBashTimeoutSeconds = 600;
     public const int DefaultToolBashTimeoutSeconds = 120;
 
+    /// <summary>Editor indentation width; clamped to [<see cref="MinEditorIndentationSize"/>, <see cref="MaxEditorIndentationSize"/>].</summary>
+    public const int MinEditorIndentationSize = 1;
+    public const int MaxEditorIndentationSize = 8;
+    public const int DefaultEditorIndentationSize = 4;
+
+    /// <summary>The largest column a ruler may mark; beyond it the ruler would never be reached by a sane line.</summary>
+    public const int MaxEditorColumnRuler = 400;
+
+    /// <summary>The three TextMate theme tokens: follow the UI, always light, always dark.</summary>
+    public const string EditorThemeAuto = "auto";
+    public const string EditorThemeLight = "light";
+    public const string EditorThemeDark = "dark";
+    public const string DefaultEditorTheme = EditorThemeAuto;
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
@@ -83,6 +99,20 @@ internal sealed class AppPreferences : ObservableObject
     private string toolsShellPath = string.Empty;
     private string toolsRipgrepPath = string.Empty;
     private int toolsBashTimeoutSeconds = DefaultToolBashTimeoutSeconds;
+    private bool editorShowLineNumbers = true;
+    private bool editorWordWrap;
+    private bool editorShowSpaces;
+    private bool editorShowTabs;
+    private bool editorShowEndOfLine;
+    private bool editorShowControlCharacters;
+    private bool editorScrollBelowDocument = true;
+    private bool editorHighlightCurrentLine = true;
+    private bool editorHyperlinks = true;
+    private bool editorAutoFolding = true;
+    private int editorIndentationSize = DefaultEditorIndentationSize;
+    private bool editorTabsToSpaces = true;
+    private string editorColumnRulers = string.Empty;
+    private string editorTheme = DefaultEditorTheme;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -169,6 +199,56 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref toolsBashTimeoutSeconds, Math.Clamp(value, MinToolBashTimeoutSeconds, MaxToolBashTimeoutSeconds));
     }
 
+    /// <summary>Whether the editor shows a line-number margin (default on).</summary>
+    public bool EditorShowLineNumbers { get => editorShowLineNumbers; set => Set(ref editorShowLineNumbers, value); }
+
+    /// <summary>Word wrap a newly opened file starts with (default off, matching the wrap icon's default state).</summary>
+    public bool EditorWordWrap { get => editorWordWrap; set => Set(ref editorWordWrap, value); }
+
+    /// <summary>Whether spaces are drawn as interpuncts (default off).</summary>
+    public bool EditorShowSpaces { get => editorShowSpaces; set => Set(ref editorShowSpaces, value); }
+
+    /// <summary>Whether tabs are drawn as arrows (default off).</summary>
+    public bool EditorShowTabs { get => editorShowTabs; set => Set(ref editorShowTabs, value); }
+
+    /// <summary>Whether line ends are drawn as pilcrows (default off).</summary>
+    public bool EditorShowEndOfLine { get => editorShowEndOfLine; set => Set(ref editorShowEndOfLine, value); }
+
+    /// <summary>Whether other control characters are drawn as boxes (default off).</summary>
+    public bool EditorShowControlCharacters { get => editorShowControlCharacters; set => Set(ref editorShowControlCharacters, value); }
+
+    /// <summary>Whether the editor may scroll past the last line (default on).</summary>
+    public bool EditorScrollBelowDocument { get => editorScrollBelowDocument; set => Set(ref editorScrollBelowDocument, value); }
+
+    /// <summary>Whether the caret's line is highlighted (default on).</summary>
+    public bool EditorHighlightCurrentLine { get => editorHighlightCurrentLine; set => Set(ref editorHighlightCurrentLine, value); }
+
+    /// <summary>Whether http/https/mailto text is clickable with Ctrl/Cmd (default on).</summary>
+    public bool EditorHyperlinks { get => editorHyperlinks; set => Set(ref editorHyperlinks, value); }
+
+    /// <summary>Whether foldable ranges are computed while editing (default on).</summary>
+    public bool EditorAutoFolding { get => editorAutoFolding; set => Set(ref editorAutoFolding, value); }
+
+    /// <summary>Indentation width in columns; clamped to [<see cref="MinEditorIndentationSize"/>, <see cref="MaxEditorIndentationSize"/>].</summary>
+    public int EditorIndentationSize
+    {
+        get => editorIndentationSize;
+        set => Set(ref editorIndentationSize, Math.Clamp(value, MinEditorIndentationSize, MaxEditorIndentationSize));
+    }
+
+    /// <summary>Whether Tab inserts spaces instead of a tab character (default on).</summary>
+    public bool EditorTabsToSpaces { get => editorTabsToSpaces; set => Set(ref editorTabsToSpaces, value); }
+
+    /// <summary>
+    /// Comma-separated column numbers that draw a ruler; empty (default) draws none. Stored as typed (only trimmed): a
+    /// settings field is edited one character at a time, and rewriting the list under the caret fights the user. The
+    /// editor parses it with <see cref="ParseRulers"/>.
+    /// </summary>
+    public string EditorColumnRulers { get => editorColumnRulers; set => Set(ref editorColumnRulers, (value ?? string.Empty).Trim()); }
+
+    /// <summary>TextMate theme token: <c>auto</c> (default), <c>light</c> or <c>dark</c>; unknown tokens mean the default.</summary>
+    public string EditorTheme { get => editorTheme; set => Set(ref editorTheme, ThemeToken(value)); }
+
     /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
@@ -204,6 +284,22 @@ internal sealed class AppPreferences : ObservableObject
         toolsBashTimeoutSeconds = section.ToolsBashTimeoutSeconds is { } bashTimeout
             ? Math.Clamp(bashTimeout, MinToolBashTimeoutSeconds, MaxToolBashTimeoutSeconds)
             : DefaultToolBashTimeoutSeconds;
+        editorShowLineNumbers = section.EditorShowLineNumbers ?? true;
+        editorWordWrap = section.EditorWordWrap ?? false;
+        editorShowSpaces = section.EditorShowSpaces ?? false;
+        editorShowTabs = section.EditorShowTabs ?? false;
+        editorShowEndOfLine = section.EditorShowEndOfLine ?? false;
+        editorShowControlCharacters = section.EditorShowControlCharacters ?? false;
+        editorScrollBelowDocument = section.EditorScrollBelowDocument ?? true;
+        editorHighlightCurrentLine = section.EditorHighlightCurrentLine ?? true;
+        editorHyperlinks = section.EditorHyperlinks ?? true;
+        editorAutoFolding = section.EditorAutoFolding ?? true;
+        editorIndentationSize = section.EditorIndentationSize is { } indentationSize
+            ? Math.Clamp(indentationSize, MinEditorIndentationSize, MaxEditorIndentationSize)
+            : DefaultEditorIndentationSize;
+        editorTabsToSpaces = section.EditorTabsToSpaces ?? true;
+        editorColumnRulers = (section.EditorColumnRulers ?? string.Empty).Trim();
+        editorTheme = ThemeToken(section.EditorTheme);
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -228,6 +324,20 @@ internal sealed class AppPreferences : ObservableObject
             ToolsShellPath = toolsShellPath,
             ToolsRipgrepPath = toolsRipgrepPath,
             ToolsBashTimeoutSeconds = toolsBashTimeoutSeconds,
+            EditorShowLineNumbers = editorShowLineNumbers,
+            EditorWordWrap = editorWordWrap,
+            EditorShowSpaces = editorShowSpaces,
+            EditorShowTabs = editorShowTabs,
+            EditorShowEndOfLine = editorShowEndOfLine,
+            EditorShowControlCharacters = editorShowControlCharacters,
+            EditorScrollBelowDocument = editorScrollBelowDocument,
+            EditorHighlightCurrentLine = editorHighlightCurrentLine,
+            EditorHyperlinks = editorHyperlinks,
+            EditorAutoFolding = editorAutoFolding,
+            EditorIndentationSize = editorIndentationSize,
+            EditorTabsToSpaces = editorTabsToSpaces,
+            EditorColumnRulers = editorColumnRulers,
+            EditorTheme = editorTheme,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -260,6 +370,38 @@ internal sealed class AppPreferences : ObservableObject
         UiLanguage.English => "english",
         _ => "system",
     };
+
+    /// <summary>The valid ruler columns of <paramref name="value"/>, ascending and deduplicated; the editor feeds them to the view.</summary>
+    internal static IReadOnlyList<int> ParseRulers(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var columns = new List<int>(4);
+        foreach (var part in value.Split([',', ';', ' ', '\t'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!int.TryParse(part, out var column) || column < 1 || column > MaxEditorColumnRuler || columns.Contains(column))
+            {
+                continue;
+            }
+
+            columns.Add(column);
+        }
+
+        columns.Sort();
+        return columns;
+    }
+
+    /// <summary>Reads a theme token; a missing or unknown value means “follow the UI”.</summary>
+    internal static string ThemeToken(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            EditorThemeLight => EditorThemeLight,
+            EditorThemeDark => EditorThemeDark,
+            _ => EditorThemeAuto,
+        };
 
     private static string Family(string? value, string fallback)
     {
@@ -338,6 +480,48 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("toolsBashTimeoutSeconds")]
     public int? ToolsBashTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("editorShowLineNumbers")]
+    public bool? EditorShowLineNumbers { get; set; }
+
+    [JsonPropertyName("editorWordWrap")]
+    public bool? EditorWordWrap { get; set; }
+
+    [JsonPropertyName("editorShowSpaces")]
+    public bool? EditorShowSpaces { get; set; }
+
+    [JsonPropertyName("editorShowTabs")]
+    public bool? EditorShowTabs { get; set; }
+
+    [JsonPropertyName("editorShowEndOfLine")]
+    public bool? EditorShowEndOfLine { get; set; }
+
+    [JsonPropertyName("editorShowControlCharacters")]
+    public bool? EditorShowControlCharacters { get; set; }
+
+    [JsonPropertyName("editorScrollBelowDocument")]
+    public bool? EditorScrollBelowDocument { get; set; }
+
+    [JsonPropertyName("editorHighlightCurrentLine")]
+    public bool? EditorHighlightCurrentLine { get; set; }
+
+    [JsonPropertyName("editorHyperlinks")]
+    public bool? EditorHyperlinks { get; set; }
+
+    [JsonPropertyName("editorAutoFolding")]
+    public bool? EditorAutoFolding { get; set; }
+
+    [JsonPropertyName("editorIndentationSize")]
+    public int? EditorIndentationSize { get; set; }
+
+    [JsonPropertyName("editorTabsToSpaces")]
+    public bool? EditorTabsToSpaces { get; set; }
+
+    [JsonPropertyName("editorColumnRulers")]
+    public string? EditorColumnRulers { get; set; }
+
+    [JsonPropertyName("editorTheme")]
+    public string? EditorTheme { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>

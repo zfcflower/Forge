@@ -1,12 +1,15 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Ellipse = Avalonia.Controls.Shapes.Ellipse;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Composition;
+using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Workbench;
 using Forge.App.Workbench.Controls;
@@ -58,7 +61,7 @@ public sealed class WorkbenchControlsTests
     }
 
     [Fact]
-    public async Task Docked_regions_are_separated_by_the_two_pixel_region_gap()
+    public async Task Docked_regions_are_separated_by_the_one_pixel_region_gap()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
@@ -100,7 +103,7 @@ public sealed class WorkbenchControlsTests
     }
 
     [Fact]
-    public async Task Region_splitter_line_is_two_pixels_wide()
+    public async Task Region_splitter_line_is_one_pixel_wide()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
@@ -161,6 +164,68 @@ public sealed class WorkbenchControlsTests
         Assert.Equal(WorkbenchMetrics.PanelSplitterWidth, lineHeight);
     }
 
+    // ---------------------------------------------------------------- title-bar and tab typography
+
+    [Fact]
+    public async Task Panel_titles_are_semibold_at_the_emphasis_size()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var title = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var window = WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window;
+            var chrome = WorkbenchUi.Find<PanelChrome>(window, WorkbenchUi.PanelId(ProjectPanelId));
+            var block = LabelOf(chrome, "PART_Title");
+            return (Weight: block.FontWeight, Size: block.FontSize, Emphasis: WorkbenchUi.FontSizeResource("FontSizeMd"));
+        });
+
+        Assert.True(title.Emphasis is not null, "FontSizeMd must be in the application resources");
+        Assert.Equal(FontWeight.SemiBold, title.Weight);
+        // The panel title reads the emphasis token of the appearance ramp, so it follows the interface font size.
+        Assert.Equal(title.Emphasis, title.Size);
+    }
+
+    [Fact]
+    public async Task A_panel_title_bar_is_as_high_as_the_title_bar_constant()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var height = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var window = WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window;
+            var chrome = WorkbenchUi.Find<PanelChrome>(window, WorkbenchUi.PanelId(ProjectPanelId));
+            return chrome.GetVisualDescendants().OfType<Border>().Single(static border => border.Name == "PART_TitleBar").Bounds.Height;
+        });
+
+        Assert.Equal(PanelChrome.TitleBarHeight, height);
+    }
+
+    [Fact]
+    public async Task Tab_labels_are_semibold_at_the_emphasis_size()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var tab = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
+            WorkbenchUi.Settle(scene.Window);
+            var header = WorkbenchUi.Header(scene, FirstTabId);
+            var label = LabelOf(header, "PART_Label");
+            return (Height: header.Bounds.Height, Weight: label.FontWeight, Size: label.FontSize, Emphasis: WorkbenchUi.FontSizeResource("FontSizeMd"));
+        });
+
+        Assert.True(tab.Emphasis is not null, "FontSizeMd must be in the application resources");
+        Assert.Equal(FontWeight.SemiBold, tab.Weight);
+        // The tab text shares the emphasis token with the panel title, so both grow together with the interface size.
+        Assert.Equal(tab.Emphasis, tab.Size);
+        // The theme's TabHeaderView height; the tab sits on the 28 px title bar's bottom line without being clipped.
+        Assert.Equal(25, tab.Height);
+    }
+
+    private static TextBlock LabelOf(Visual root, string name) =>
+        root.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Name == name);
+
     // ---------------------------------------------------------------- title-bar buttons by capability
 
     [Fact]
@@ -186,25 +251,19 @@ public sealed class WorkbenchControlsTests
     }
 
     [Fact]
-    public async Task Maximize_button_is_hidden_while_its_region_shows_one_panel()
+    public async Task Panel_title_bars_have_no_maximize_button()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var visible = await WorkbenchUi.QueryAsync(session, () =>
-            WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.MaximizeId(ProjectPanelId)).IsVisible);
+        // The inspector shows two panels, which is the case that used to put a maximize button on both title bars.
+        var found = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            return WorkbenchUi.TryFind<Control>(scene.Window, "panel-" + FilesPanelId + "-maximize") is not null
+                || WorkbenchUi.TryFind<Control>(scene.Window, "panel-" + ToolsPanelId + "-maximize") is not null;
+        });
 
-        Assert.False(visible);
-    }
-
-    [Fact]
-    public async Task Maximize_button_is_shown_once_its_region_shows_two_panels()
-    {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
-
-        var visible = await WorkbenchUi.QueryAsync(session, () =>
-            WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.MaximizeId(FilesPanelId)).IsVisible);
-
-        Assert.True(visible);
+        Assert.False(found);
     }
 
     [Fact]
@@ -740,143 +799,124 @@ public sealed class WorkbenchControlsTests
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
             WorkbenchUi.OpenBottomTab(scene);
-            WorkbenchUi.ClickPin(scene, BottomPanelId);
+            // No title-bar button collapses the group any more: the session's own sub-agent toggle is the entry.
+            scene.Layout.IsBottomCollapsed = true;
+            WorkbenchUi.Settle(scene.Window);
             return WorkbenchUi.Find<BottomCollapsedStrip>(scene.Window, "autohide-bottom").Bounds;
         });
 
         Assert.Equal((WorkbenchMetrics.AutoHideStripWidth, WorkbenchUi.WindowHeight), (strip.Height, strip.Bottom));
     }
 
-    // ---------------------------------------------------------------- maximize
-
     [Fact]
-    public async Task Maximize_gives_the_panel_the_whole_region()
+    public async Task A_stacked_region_draws_a_separator_above_the_lower_panel_title_bar()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var sizes = await WorkbenchUi.QueryAsync(session, () =>
+        var geometry = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-            return (
-                Region: WorkbenchUi.Region(scene.Window, RegionRole.Inspector).Bounds.Size,
-                Panel: WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId)).Bounds.Size);
+            var o = new object();
+            var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o));
+            scene.Window.RequestedThemeVariant = ThemeVariant.Light;
+            WorkbenchUi.Settle(scene.Window);
+            var presenter = WorkbenchUi.Region(scene.Window, RegionRole.Project);
+            var project = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ProjectPanelId));
+            var git = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId("git-panel"));
+            var gapTop = project.Bounds.Y + project.Bounds.Height;
+            var line = presenter.GetVisualChildren()
+                .OfType<Border>()
+                .FirstOrDefault(border => border.Bounds.Width > 0
+                    && Math.Abs(border.Bounds.Height - WorkbenchMetrics.PanelSplitterWidth) < Precision
+                    && Math.Abs(border.Bounds.Y - gapTop) < Precision);
+            return (Gap: git.Bounds.Y - gapTop, LineY: line?.Bounds.Y,
+                LineColour: line is null ? (Color?)null : Assert.IsAssignableFrom<ISolidColorBrush>(line.Background).Color);
         });
 
-        Assert.Equal(sizes.Region, sizes.Panel);
+        // The gap used to be empty, so the Git panel's title bar had no top line while the inspector's had one.
+        Assert.Equal(WorkbenchMetrics.PanelSplitterWidth, geometry.Gap, Precision);
+        Assert.Equal(Color.Parse("#D4D4D8"), geometry.LineColour);
     }
 
     [Fact]
-    public async Task Maximize_hides_the_other_panels_of_the_region()
+    public async Task The_bottom_group_title_bar_has_no_pin()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var tools = await WorkbenchUi.QueryAsync(session, () =>
+        // The pin's "collapse into a strip" is what 缩小/还原 already does for the tabs the user wants to keep in place.
+        var visible = await WorkbenchUi.QueryAsync(session, () =>
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-            var chrome = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId));
-            return (Height: chrome.Bounds.Height, Visible: chrome.IsVisible);
+            WorkbenchUi.OpenBottomTab(scene);
+            return WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.PinId(BottomPanelId)).IsEffectivelyVisible;
         });
 
-        Assert.Equal(NoMovement, tools.Height);
-        Assert.False(tools.Visible);
+        Assert.False(visible);
     }
 
     [Fact]
-    public async Task Clicking_maximize_again_restores_the_other_panels()
+    public async Task The_pin_shows_its_state_solid_when_docked_and_outline_when_auto_hidden()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var tools = await WorkbenchUi.QueryAsync(session, () =>
+        var state = await WorkbenchUi.QueryAsync(session, () =>
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-            WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-            var chrome = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId));
-            return (Height: chrome.Bounds.Height, Visible: chrome.IsVisible);
+            var pin = WorkbenchUi.Find<PanelIconButton>(scene.Window, WorkbenchUi.PinId(ProjectPanelId));
+            var docked = (pin.IsIconFilled, pin.Icon, Tip: ToolTip.GetTip(pin) as string);
+            WorkbenchUi.ClickPin(scene, ProjectPanelId);
+            var autoHidden = (pin.IsIconFilled, pin.Icon, Tip: ToolTip.GetTip(pin) as string);
+            return (Docked: docked, AutoHidden: autoHidden,
+                SolidIcon: WorkbenchIcons.Find(scene.Window, "IconPinSolid"),
+                OutlineIcon: WorkbenchIcons.Find(scene.Window, "IconPin"));
         });
 
-        Assert.True(tools.Height > NoMovement);
-        Assert.True(tools.Visible);
+        Assert.True(state.Docked.IsIconFilled);
+        Assert.Same(state.SolidIcon, state.Docked.Icon);
+        Assert.False(state.AutoHidden.IsIconFilled);
+        Assert.Same(state.OutlineIcon, state.AutoHidden.Icon);
+        Assert.Equal(ShellStrings.AutoHide, state.Docked.Tip);
+        Assert.Equal(ShellStrings.AutoHide, state.AutoHidden.Tip);
     }
 
     [Fact]
-    public async Task Maximize_fades_the_maximized_panel_in()
+    public async Task Hovering_an_icon_button_paints_it_with_the_button_brush()
     {
-        TreeMotion.ReducedMotion = false;
-        try
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var colours = await WorkbenchUi.QueryAsync(session, () =>
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            scene.Window.RequestedThemeVariant = ThemeVariant.Light;
+            WorkbenchUi.Settle(scene.Window);
+            var pin = WorkbenchUi.Find<Control>(scene.Window, WorkbenchUi.PinId(ProjectPanelId));
+            scene.Window.MouseMove(WorkbenchUi.CentreOf(pin, scene.Window));
+            WorkbenchUi.Settle(scene.Window);
+            var background = pin.GetVisualDescendants().OfType<Border>().First(border => border.Name == "PART_Background");
+            return Assert.IsAssignableFrom<ISolidColorBrush>(background.Background).Color;
+        });
 
-            var fade = await session.Dispatch(async () =>
-            {
-                var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-                WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-                var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
-                var animated = (files.Transitions?.Count ?? 0) > 0;
-
-                // The fade just started: the chrome must still be ramping up (the transition cannot have finished yet).
-                var midFade = files.Opacity < 1;
-
-                // Settle and give the transition real time until it completes; bounded, no Sleep.
-                var settled = false;
-                for (var i = 0; i < 100 && !settled; i++)
-                {
-                    WorkbenchUi.Settle(scene.Window);
-                    if (files.Opacity >= 1)
-                    {
-                        settled = true;
-                        break;
-                    }
-
-                    await Task.Delay(10);
-                }
-
-                return (animated, midFade, settled, opacity: files.Opacity);
-            }, WorkbenchUi.Budget());
-
-            Assert.True(fade.animated);
-            Assert.True(fade.midFade);
-            Assert.True(fade.settled);
-            Assert.Equal(1, fade.opacity);
-        }
-        finally
-        {
-            TreeMotion.ReducedMotion = false;
-        }
+        Assert.Equal(Color.Parse("#D4D4D8"), colours);
     }
 
     [Fact]
-    public async Task Reduced_motion_skips_the_maximize_fade()
+    public async Task A_tool_tab_without_a_close_box_centres_its_label()
     {
-        TreeMotion.ReducedMotion = true;
-        try
-        {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-            var state = await WorkbenchUi.QueryAsync(session, () =>
-            {
-                var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-                WorkbenchUi.ClickMaximize(scene, FilesPanelId);
-                var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(FilesPanelId));
-                var tools = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ToolsPanelId));
-                return (
-                    Transitions: files.Transitions?.Count ?? 0,
-                    Opacity: files.Opacity,
-                    ToolsVisible: tools.IsVisible,
-                    FillsRegion: files.Bounds.Size == WorkbenchUi.Region(scene.Window, RegionRole.Inspector).Bounds.Size);
-            });
-
-            Assert.Equal(0, state.Transitions);
-            Assert.Equal(1, state.Opacity);
-            Assert.False(state.ToolsVisible);
-            Assert.True(state.FillsRegion);
-        }
-        finally
+        var label = await WorkbenchUi.QueryAsync(session, () =>
         {
-            TreeMotion.ReducedMotion = false;
-        }
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            var header = WorkbenchUi.Find<TabHeaderView>(scene.Window, "tab-" + WorkbenchIds.SpecsTab);
+            var text = header.GetVisualDescendants().OfType<TextBlock>().First(block => block.Name == "PART_Label");
+            var origin = text.TranslatePoint(default, header) ?? default;
+            return (Closable: header.IsClosable,
+                Offset: origin.X + (text.Bounds.Width / 2) - (header.Bounds.Width / 2),
+                Width: header.Bounds.Width);
+        });
+
+        Assert.False(label.Closable);
+        Assert.True(label.Width > 0);
+        Assert.InRange(label.Offset, -1, 1);
     }
 
     // ---------------------------------------------------------------- splitter drags
@@ -1416,6 +1456,68 @@ public sealed class MainWindowSmokeTests
 
         Assert.InRange(height, MinimumVisibleHeight, CompactHeightLimit);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Window_header_uses_the_same_chrome_colour_as_a_panel_title_bar(bool dark)
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        await using var shell = await ShellFixture.OpenAsync(session);
+
+        var colours = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            shell.Window.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
+            WorkbenchUi.Settle(shell.Window);
+            var header = shell.Window.GetVisualDescendants().OfType<Border>().First(border => border.Name == "TitleBar");
+            var chrome = WorkbenchUi.Find<PanelChrome>(shell.Window, WorkbenchUi.PanelId("main"));
+            var bar = chrome.GetVisualDescendants().OfType<Border>().First(border => border.Name == "PART_TitleBar");
+            return (Header: Colour(header), Bar: Colour(bar));
+        });
+
+        Assert.Equal(colours.Bar, colours.Header);
+    }
+
+    [Fact]
+    public async Task Window_header_replaces_the_search_box_with_the_magnifier_and_the_host_state()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        await using var shell = await ShellFixture.OpenAsync(session);
+
+        var header = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var terminal = WorkbenchUi.Find<Button>(shell.Window, "terminal-open");
+            var settings = WorkbenchUi.Find<Button>(shell.Window, "open-settings");
+            var host = WorkbenchUi.Find<StackPanel>(shell.Window, "host-state");
+            var titleRow = shell.Window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "TitleBar");
+            var dots = shell.Window.GetVisualDescendants().OfType<Ellipse>().Where(e => e.Classes.Contains("status-dot")).ToList();
+            return (
+                HasTerminal: terminal.IsEffectivelyVisible,
+                TerminalLeftOfSettings: terminal.Bounds.X < settings.Bounds.X,
+                SameRow: ReferenceEquals(terminal.Parent, settings.Parent) && titleRow.IsVisualAncestorOf(terminal),
+                SearchBox: WorkbenchUi.TryFind<TextBox>(shell.Window, "shell-search") is not null,
+                Magnifier: WorkbenchUi.TryFind<LineIcon>(shell.Window, "shell-search") is not null,
+                HostLabel: host.IsEffectivelyVisible ? TextOf(host) : null,
+                RightAligned: (host.TranslatePoint(default, titleRow) is { } origin)
+                    && origin.X + host.Bounds.Width > titleRow.Bounds.Width / 2,
+                DotColours: dots.Select(dot => Assert.IsAssignableFrom<ISolidColorBrush>(dot.Fill).Color).Distinct().Count());
+        });
+
+        Assert.True(header.HasTerminal);
+        Assert.True(header.TerminalLeftOfSettings);
+        Assert.True(header.SameRow);
+        Assert.False(header.SearchBox);
+        Assert.True(header.Magnifier);
+        Assert.Equal(Loc.Instance[ShellStrings.HostNameKey], header.HostLabel);
+        Assert.True(header.RightAligned);
+        // The header dot and the status bar dot both read the same host state, so they must paint the same colour.
+        Assert.Equal(1, header.DotColours);
+    }
+
+    private static string TextOf(StackPanel panel) =>
+        string.Concat(panel.GetVisualDescendants().OfType<TextBlock>().Select(block => block.Text));
+
+    private static Color Colour(Border border) => Assert.IsAssignableFrom<ISolidColorBrush>(border.Background).Color;
 }
 
 /// <summary>Shared UI-thread helpers: opening windows, finding automation ids and driving pointer and key events.</summary>
@@ -1477,8 +1579,6 @@ internal static class WorkbenchUi
 
     public static string PinId(string panel) => "panel-" + panel + "-pin";
 
-    public static string MaximizeId(string panel) => "panel-" + panel + "-maximize";
-
     public static string FloatPanelId(string panel) => "panel-" + panel + "-float";
 
     public static string CoverId(string panel) => "panel-" + panel + "-cover";
@@ -1515,6 +1615,13 @@ internal static class WorkbenchUi
     public static Border LineOf(Control splitter) =>
         splitter.GetVisualDescendants().OfType<Border>().Single(static border => border.Name == "PART_Line");
 
+    /// <summary>
+    /// A size token of the running application's resources (<c>Tokens.axaml</c> or the appearance applier's child), so a
+    /// test compares a control's font size against the token it reads instead of a copied number. UI thread only.
+    /// </summary>
+    public static double? FontSizeResource(string key) =>
+        Application.Current!.Resources.TryGetResource(key, null, out var value) ? value as double? : null;
+
     /// <summary>Distance between two controls: horizontal by default, vertical when <paramref name="vertical"/> is set.</summary>
     public static double GapBetween(Visual first, Visual second, bool vertical = false) => vertical
         ? second.Bounds.Y - first.Bounds.Bottom
@@ -1539,9 +1646,6 @@ internal static class WorkbenchUi
 
     public static void ClickPin(Scene scene, string panel) =>
         Click(scene.Window, CentreOf(Find<Control>(scene.Window, PinId(panel)), scene.Window));
-
-    public static void ClickMaximize(Scene scene, string panel) =>
-        Click(scene.Window, CentreOf(Find<Control>(scene.Window, MaximizeId(panel)), scene.Window));
 
     public static void ClickStripButton(Scene scene, RegionRole role, string panel) =>
         Click(scene.Window, CentreOf(Find<AutoHideButton>(scene.Window, "autohide-" + role + "-" + panel), scene.Window));

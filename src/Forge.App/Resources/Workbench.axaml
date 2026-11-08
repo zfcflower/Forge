@@ -5,10 +5,12 @@
                     xmlns:loc="using:Forge.App.Localization">
 
   <!-- Workbench chrome icons (same line family as the token geometries: strokes on a 24x24 grid). -->
-  <!-- A pushpin: pin the region back to the surrounding layout. -->
+  <!-- A pushpin, two states of one button. The outline version means "this panel is auto-hidden" (clicking docks it
+       back); the solid silhouette below means "this panel is docked" (clicking auto-hides it). The tooltip is the
+       same word in both states — the button is named after the thing it does to the region, not after its state. -->
   <StreamGeometry x:Key="IconPin">M9 4h6M10 4v5l-3 3v2h10v-2l-3-3V4M12 14v6</StreamGeometry>
-  <!-- An arrow towards the window edge rail: auto-hide the region. -->
-  <StreamGeometry x:Key="IconAutoHide">M4 4v16M20 12H9M13 8l-4 4 4 4</StreamGeometry>
+  <!-- The same pushpin as a closed silhouette, drawn to be filled: head bar, body with its plate, and the needle. -->
+  <StreamGeometry x:Key="IconPinSolid">M9 3.5h6v1.5H9zM10 5h4v6h3v3H7v-3h3zM11.4 14h1.2v6.5h-1.2z</StreamGeometry>
   <!-- Four corner brackets: spread the preview group over the whole Main region. -->
   <StreamGeometry x:Key="IconCoverMain">M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5</StreamGeometry>
   <!-- A frame with an arrow pointing into it: dock the floating window back. -->
@@ -17,7 +19,8 @@
   <!-- Title-bar tools of the model: a PanelToolButton renders as an icon button, every other item keeps its own template. -->
   <controls:HeaderToolTemplate x:Key="WorkbenchHeaderToolTemplate" />
 
-  <!-- A 20x20 transparent icon button; the icon is a 12 px geometry. -->
+  <!-- A 20x20 transparent icon button; the icon is a 12 px geometry. A closed-path icon renders solid when
+       IsIconFilled is set: the fill follows the same brush as the stroke, including on hover. -->
   <ControlTheme x:Key="{x:Type controls:PanelIconButton}" TargetType="controls:PanelIconButton">
     <Setter Property="Width" Value="20" />
     <Setter Property="Height" Value="20" />
@@ -43,13 +46,21 @@
       </ControlTemplate>
     </Setter>
     <Style Selector="^:pointerover /template/ Border#PART_Background">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
     </Style>
     <Style Selector="^:pointerover /template/ controls|LineIcon">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
+    <Style Selector="^[IsIconFilled=True] /template/ controls|LineIcon">
+      <Setter Property="Fill" Value="{DynamicResource TextSecondaryBrush}" />
+      <!-- No stroke: a solid icon is its silhouette, and the fixed 1.25 px stroke would fatten small shapes into blobs. -->
+      <Setter Property="StrokeThickness" Value="0" />
+    </Style>
+    <Style Selector="^[IsIconFilled=True]:pointerover /template/ controls|LineIcon">
+      <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
     <Style Selector="^:pressed /template/ Border#PART_Background">
-      <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
     </Style>
     <Style Selector="^:focus-visible /template/ Border#PART_Background">
       <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -79,10 +90,10 @@
       </ControlTemplate>
     </Setter>
     <Style Selector="^:pointerover /template/ Border#PART_Background">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
     </Style>
     <Style Selector="^:pressed /template/ Border#PART_Background">
-      <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
     </Style>
     <Style Selector="^:focus-visible /template/ Border#PART_Background">
       <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -112,7 +123,8 @@
             <TextBlock Name="PART_Label"
                        Grid.Column="0"
                        Text="{TemplateBinding TabTitle}"
-                       FontSize="{DynamicResource FontSizeSm}"
+                       FontSize="{DynamicResource FontSizeMd}"
+                       FontWeight="SemiBold"
                        TextWrapping="NoWrap"
                        TextTrimming="CharacterEllipsis"
                        MaxWidth="180"
@@ -136,6 +148,12 @@
       <Setter Property="Opacity" Value="0" />
       <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
+    <!-- A tab without a close box has no slot to reserve, so its label gets equal padding on both sides and lands on the
+         tab's centre. A closable tab keeps 12/4: the 16 px slot plus its gap sit on the right and the label is centred
+         with them. -->
+    <Style Selector="^[IsClosable=False] /template/ Border#PART_Root">
+      <Setter Property="Padding" Value="12,0,12,0" />
+    </Style>
     <Style Selector="^:pointerover /template/ TextBlock#PART_Label">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
@@ -158,23 +176,47 @@
     </Style>
   </ControlTheme>
 
-  <!-- The tab strip itself: horizontal, scrollable, no scrollbars in a title bar. -->
+  <!-- The tab strip itself: horizontal and scrollable, no scrollbars in a title bar. Once the tabs no longer fit, an
+       ellipsis button sits in a column of its own at the right edge and lists the ones the strip had to clip. The column
+       is Auto-sized and its child is collapsed while there is no overflow, so the button only takes width once the
+       strip is already too narrow — a hidden button reserves nothing, a shown one keeps the tabs off itself, and the
+       decision cannot oscillate (showing it narrows the viewport, which never un-clips a tab). -->
   <ControlTheme x:Key="{x:Type controls:PanelTabStrip}" TargetType="controls:PanelTabStrip">
     <Setter Property="Template">
       <ControlTemplate>
-        <ScrollViewer HorizontalScrollBarVisibility="Hidden"
-                      VerticalScrollBarVisibility="Disabled"
-                      HorizontalAlignment="Stretch"
-                      VerticalAlignment="Stretch">
-          <StackPanel Name="PART_Tabs" Orientation="Horizontal" VerticalAlignment="Stretch" Margin="4,0,0,0" />
-        </ScrollViewer>
+        <Grid ColumnDefinitions="*,Auto">
+          <ScrollViewer Name="PART_Scroller"
+                        Grid.Column="0"
+                        HorizontalScrollBarVisibility="Hidden"
+                        VerticalScrollBarVisibility="Disabled"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch">
+            <StackPanel Name="PART_Tabs" Orientation="Horizontal" VerticalAlignment="Stretch" Margin="4,0,0,0" />
+          </ScrollViewer>
+          <Border Name="PART_OverflowHost"
+                  Grid.Column="1"
+                  Width="26"
+                  VerticalAlignment="Stretch"
+                  IsVisible="{TemplateBinding HasOverflow}">
+            <controls:PanelIconButton Name="PART_Overflow"
+                                      Width="20"
+                                      Height="20"
+                                      Margin="0,0,3,0"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Center"
+                                      Icon="{DynamicResource IconEllipsisSolid}"
+                                      IsIconFilled="True"
+                                      ToolTip.Tip="{Binding [workbench.moreTabs], Source={x:Static loc:Loc.Instance}}"
+                                      AutomationProperties.Name="{Binding [workbench.moreTabs], Source={x:Static loc:Loc.Instance}}" />
+          </Border>
+        </Grid>
       </ControlTemplate>
     </Setter>
   </ControlTheme>
 
   <!-- A panel: 28 px title bar over the body. Background is the body colour (white in Main, the sidebar grey at the
        sides); the active tab borrows it so it merges with the body. The title bar's bottom line is drawn under the tab
-       strip, so the active tab covers it. -->
+       strip, so the active tab covers it. Every panel, in every region, wears the same chrome colour. -->
   <ControlTheme x:Key="{x:Type controls:PanelChrome}" TargetType="controls:PanelChrome">
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
     <Setter Property="Template">
@@ -194,7 +236,8 @@
                            Grid.Column="0"
                            Margin="8,0,0,0"
                            VerticalAlignment="Center"
-                           FontSize="{DynamicResource FontSizeSm}"
+                           FontSize="{DynamicResource FontSizeMd}"
+                           FontWeight="SemiBold"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            Foreground="{DynamicResource TextSecondaryBrush}"
@@ -230,6 +273,7 @@
                   <controls:PanelIconButton Name="PART_Pin"
                                             IsVisible="{TemplateBinding PinVisible}"
                                             Icon="{TemplateBinding PinIcon}"
+                                            IsIconFilled="{TemplateBinding PinFilled}"
                                             ToolTip.Tip="{TemplateBinding PinTooltip}"
                                             AutomationProperties.Name="{TemplateBinding PinTooltip}"
                                             AutomationProperties.AutomationId="{TemplateBinding PinAutomationId}" />
@@ -239,12 +283,6 @@
                                             ToolTip.Tip="{TemplateBinding MinimizeTooltip}"
                                             AutomationProperties.Name="{TemplateBinding MinimizeTooltip}"
                                             AutomationProperties.AutomationId="{TemplateBinding MinimizeAutomationId}" />
-                  <controls:PanelIconButton Name="PART_Maximize"
-                                            IsVisible="{TemplateBinding MaximizeVisible}"
-                                            Icon="{TemplateBinding MaximizeIcon}"
-                                            ToolTip.Tip="{TemplateBinding MaximizeTooltip}"
-                                            AutomationProperties.Name="{TemplateBinding MaximizeTooltip}"
-                                            AutomationProperties.AutomationId="{TemplateBinding MaximizeAutomationId}" />
                   <controls:PanelIconButton Name="PART_Float"
                                             IsVisible="{TemplateBinding FloatVisible}"
                                             Icon="{TemplateBinding FloatIcon}"
@@ -272,21 +310,18 @@
     <Style Selector="^:sidebar">
       <Setter Property="Background" Value="{DynamicResource SidebarBrush}" />
     </Style>
-    <Style Selector="^:sidebar /template/ Border#PART_TitleBar">
-      <Setter Property="Background" Value="{DynamicResource SidebarTitleBarBrush}" />
-    </Style>
     <Style Selector="^:minimized /template/ ContentControl#PART_Content">
       <Setter Property="IsVisible" Value="False" />
     </Style>
   </ControlTheme>
 
-  <!-- The 2 px splitter between two docked regions: a 6 px hit band with the line centred in it. -->
+  <!-- The 1 px splitter between two docked regions: a 6 px hit band with the line centred in it. -->
   <ControlTheme x:Key="{x:Type controls:RegionSplitter}" TargetType="controls:RegionSplitter">
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="Transparent">
           <Border Name="PART_Line"
-                  Width="2"
+                  Width="1"
                   HorizontalAlignment="Center"
                   Background="{DynamicResource BorderBrush}" />
         </Border>

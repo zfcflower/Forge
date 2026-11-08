@@ -5,20 +5,18 @@
   <!-- Layer 1: primitives. VS Code-style neutral grey/white body; eye-care green only as accent. -->
   <Color x:Key="LightBackground">#F8F8F8</Color>
   <Color x:Key="LightPanel">#FFFFFF</Color>
-  <Color x:Key="LightBorder">#E5E5E5</Color>
   <Color x:Key="LightText">#3B3B3B</Color>
   <Color x:Key="LightAccent">#3A8F5C</Color>
 
   <Color x:Key="DarkBackground">#181818</Color>
   <Color x:Key="DarkPanel">#1F1F1F</Color>
-  <Color x:Key="DarkBorder">#2B2B2B</Color>
   <Color x:Key="DarkText">#CCCCCC</Color>
   <Color x:Key="DarkAccent">#5FBF86</Color>
 
   <sys:Double x:Key="FontSizeXs">11</sys:Double>
   <sys:Double x:Key="FontSizeSm">12</sys:Double>
   <sys:Double x:Key="FontSizeBase">13</sys:Double>
-  <sys:Double x:Key="FontSizeMd">15</sys:Double>
+  <sys:Double x:Key="FontSizeMd">14</sys:Double>
   <sys:Double x:Key="FontSizeLg">18</sys:Double>
   <sys:Double x:Key="FontSizeXl">22</sys:Double>
   <!-- Code text: the code font size itself, not a step of the UI scale. -->
@@ -74,16 +72,22 @@
       <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F2F2F2" />
       <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#F8F8F8" />
       <SolidColorBrush x:Key="SidebarBrush" Color="#F8F8F8" />
-      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#F8F8F8" />
-      <SolidColorBrush x:Key="SidebarTitleBarBrush" Color="#EFEFEF" />
+      <!-- One chrome colour: the window header row, every panel title bar (and the tab strip drawn on it), the dock
+           strips and a floated panel's own title bar. One step darker than the window body, so the chrome reads as a
+           separate surface without a second grey appearing on the same row. -->
+      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#EFEFEF" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource LightText}" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#4A4A4A" />
       <SolidColorBrush x:Key="TextMutedBrush" Color="#6E6E6E" />
       <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
 
-      <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource LightBorder}" />
+      <SolidColorBrush x:Key="BorderBrush" Color="#D4D4D8" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#CECECE" />
+      <!-- What an icon button shows under the pointer, and while pressed. One step darker than the chrome it sits on,
+           so the hover is unmistakable on a title bar and on a white panel body alike. -->
+      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#D4D4D8" />
+      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#C4C4C9" />
 
       <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource LightAccent}" />
       <SolidColorBrush x:Key="AccentTextBrush" Color="#2F7449" />
@@ -111,12 +115,12 @@
       <SolidColorBrush x:Key="DiffHunkBrush" Color="#F0F0F0" />
       <SolidColorBrush x:Key="RunningBrush" Color="#2F7449" />
 
-      <!-- Search box: one step lighter than the window background, with a border one step darker. -->
-      <SolidColorBrush x:Key="SearchBoxBackgroundBrush" Color="#FFFFFF" />
-      <SolidColorBrush x:Key="SearchBoxBorderBrush" Color="#E5E5E5" />
+      <!-- Editor selection: brand blue at ~24% alpha, so the code underneath keeps its own colour. -->
+      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#3D3399FF" />
+      <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59F5C542" />
 
       <!-- VS Code-style chrome: dock strips, indicator bars and flat tabs. -->
-      <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#F8F8F8" />
+      <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#EFEFEF" />
       <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#C8C8C8" />
       <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#E9E9E9" />
       <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#F0F0F0" />
@@ -151,16 +155,17 @@
       <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2A2A2A" />
       <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#1A1A1A" />
       <SolidColorBrush x:Key="SidebarBrush" Color="#181818" />
-      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="{StaticResource DarkBackground}" />
-      <SolidColorBrush x:Key="SidebarTitleBarBrush" Color="#101010" />
+      <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#101010" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource DarkText}" />
       <SolidColorBrush x:Key="TextSecondaryBrush" Color="#BBBBBB" />
       <SolidColorBrush x:Key="TextMutedBrush" Color="#9D9D9D" />
       <SolidColorBrush x:Key="TextOnAccentBrush" Color="#12211A" />
 
-      <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource DarkBorder}" />
+      <SolidColorBrush x:Key="BorderBrush" Color="#3F3F46" />
       <SolidColorBrush x:Key="BorderStrongBrush" Color="#3C3C3C" />
+      <SolidColorBrush x:Key="IconButtonHoverBrush" Color="#3F3F46" />
+      <SolidColorBrush x:Key="IconButtonPressedBrush" Color="#4A4A52" />
 
       <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource DarkAccent}" />
       <SolidColorBrush x:Key="AccentTextBrush" Color="#79CC9A" />
@@ -188,10 +193,10 @@
       <SolidColorBrush x:Key="DiffHunkBrush" Color="#262626" />
       <SolidColorBrush x:Key="RunningBrush" Color="#79CC9A" />
 
-      <SolidColorBrush x:Key="SearchBoxBackgroundBrush" Color="#1F1F1F" />
-      <SolidColorBrush x:Key="SearchBoxBorderBrush" Color="#2B2B2B" />
+      <SolidColorBrush x:Key="EditorSelectionBrush" Color="#4D5AA9FF" />
+      <SolidColorBrush x:Key="EditorSearchResultBrush" Color="#59B58B00" />
 
-      <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#181818" />
+      <SolidColorBrush x:Key="DockStripBackgroundBrush" Color="#101010" />
       <SolidColorBrush x:Key="DockIndicatorIdleBrush" Color="#4A4A4A" />
       <SolidColorBrush x:Key="TabActiveBackgroundBrush" Color="#2E2E2E" />
       <SolidColorBrush x:Key="TabHoverBackgroundBrush" Color="#262626" />
@@ -202,10 +207,11 @@
 
   <!-- Fonts. These static values are the defaults (the designer and a test without an applier use them);
        AppearanceApplier replaces them at runtime with the values from the preferences.
-       The interface font spells the embedded Inter as "fonts:Inter#Inter": the package registers its collection as
-       fonts:Inter (WithInterFont), and a keyless "Inter" only searches the OS-installed fonts, so it silently falls
-       through to Segoe UI even though Inter ships with the app. -->
-  <FontFamily x:Key="FontUi">fonts:Inter#Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif</FontFamily>
+       The static default is the system Segoe UI chain, not the embedded Inter: Inter reads visibly larger at the same
+       pixel size because of its bigger x-height. Inter still ships with the app (WithInterFont registers it as the
+       "fonts:Inter" collection), so typing "fonts:Inter#Inter" in the settings selects it; a bare "Inter" only
+       searches the OS-installed fonts and would fall through to the next family. -->
+  <FontFamily x:Key="FontUi">Segoe UI, PingFang SC, Microsoft YaHei, sans-serif</FontFamily>
   <FontFamily x:Key="FontMono">Consolas, Cascadia Mono, Menlo, monospace</FontFamily>
 
   <!-- Icon geometry: one line (outline) family on a 24 grid, drawn by LineIcon with a fixed ~1.25 px stroke so every
@@ -227,7 +233,8 @@
   <!-- A window with an arrow leaving it: "move to a window of its own". -->
   <StreamGeometry x:Key="IconWindowExternal">M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5M14 4h6v6M20 4l-9 9</StreamGeometry>
   <StreamGeometry x:Key="IconMaximize">M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z</StreamGeometry>
-  <!-- Two overlapping windows: the maximize button turns into "restore" while the window is maximized. -->
+  <!-- Two overlapping windows: the window's own maximize button and a panel's minimize button both turn into "restore"
+       while they are active. Panels have no maximize of their own. -->
   <StreamGeometry x:Key="IconRestore">M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3M5 8h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z</StreamGeometry>
   <StreamGeometry x:Key="TreeChevronGeometry">M9 5 15 12 9 19</StreamGeometry>
   <StreamGeometry x:Key="IconChevronUp">M6 15l6-6 6 6</StreamGeometry>
@@ -236,10 +243,20 @@
   <StreamGeometry x:Key="IconGitFetch">M7 17a4 4 0 0 1-.5-8A6 6 0 0 1 18 8.5a4.25 4.25 0 0 1-1 8.5M12 11v9M9 17l3 3 3-3</StreamGeometry>
   <StreamGeometry x:Key="IconGitPull">M12 4v12M7 11l5 5 5-5M5 20h14</StreamGeometry>
   <StreamGeometry x:Key="IconGitPush">M12 20V8M7 13l5-5 5 5M5 4h14</StreamGeometry>
+  <!-- Magnifier: the window header's search affordance, which is not a working feature yet. -->
+  <StreamGeometry x:Key="IconSearch">M4 10.5A7 7 0 1 0 18 10.5A7 7 0 1 0 4 10.5ZM16.2 15.7 21 20.5</StreamGeometry>
+  <!-- Terminal: a rounded window with its screen filled in — the header's "open a terminal" button, drawn as two shapes
+       because only the screen is filled while the frame stays a line. -->
+  <StreamGeometry x:Key="IconTerminalFrame">M6.5 3.5h11a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3v-11a3 3 0 0 1 3-3z</StreamGeometry>
+  <StreamGeometry x:Key="IconTerminalScreen">M3.5 13.5h17v4a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3z</StreamGeometry>
   <!-- Composer icons. -->
   <StreamGeometry x:Key="IconArrowUp">M12 19V5M6 11l6-6 6 6</StreamGeometry>
   <StreamGeometry x:Key="IconEllipsis">M5.5 12h.01M12 12h.01M18.5 12h.01</StreamGeometry>
+  <!-- Solid dots: three closed circles, drawn to be filled and left unstroked — the tab strip's "more tabs than fit" button. -->
+  <StreamGeometry x:Key="IconEllipsisSolid">M4.8 12A1.7 1.7 0 1 0 8.2 12A1.7 1.7 0 1 0 4.8 12ZM10.3 12A1.7 1.7 0 1 0 13.7 12A1.7 1.7 0 1 0 10.3 12ZM15.8 12A1.7 1.7 0 1 0 19.2 12A1.7 1.7 0 1 0 15.8 12Z</StreamGeometry>
   <StreamGeometry x:Key="IconStar">M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z</StreamGeometry>
   <StreamGeometry x:Key="IconSparkle">M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8zM18 15l.8 2.2 2.2.8-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z</StreamGeometry>
+  <!-- Folder: the composer strip's project button, drawn as an outline so it sits at the weight of the text beside it. -->
+  <StreamGeometry x:Key="IconFolder">M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2.2h8.8A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z</StreamGeometry>
 
 </ResourceDictionary>

@@ -33,8 +33,8 @@ internal static class FontScale
     /// <summary>The UI size the token defaults were designed for.</summary>
     public const double ReferenceSize = 13;
 
-    /// <summary>11/12/13/15/18/22, the scale at <see cref="ReferenceSize"/>.</summary>
-    public static readonly FontSizeTokens Default = new(11, 12, 13, 15, 18, 22);
+    /// <summary>11/12/13/14/18/22, the scale at <see cref="ReferenceSize"/>.</summary>
+    public static readonly FontSizeTokens Default = new(11, 12, 13, 14, 18, 22);
 
     /// <summary>
     /// Every token of <see cref="Default"/> times <paramref name="uiSize"/>/<see cref="ReferenceSize"/>, rounded to a whole

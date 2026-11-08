@@ -83,10 +83,10 @@ internal static class WorkbenchMetrics
     public const double SideMinWidth = 200;
     public const double MainMinWidth = 360;
     public const double DefaultProjectWidth = 260;
-    public const double DefaultInspectorWidth = 300;
+    public const double DefaultInspectorWidth = 275;
 
     /// <summary>Width of the visible line between regions; the drag hit area is wider (<see cref="SplitterHitWidth"/>).</summary>
-    public const double RegionSplitterWidth = 2;
+    public const double RegionSplitterWidth = 1;
 
     /// <summary>Width of the visible line between panels inside a region.</summary>
     public const double PanelSplitterWidth = 1;

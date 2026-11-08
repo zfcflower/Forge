@@ -269,14 +269,14 @@ public sealed class WindowCaptionTests
                     window.Show();
                     Settle();
                     var bar = window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "TitleBar");
-                    var search = window.GetVisualDescendants().OfType<TextBox>().Single(box => box.Name == "SearchBox");
+                    var terminal = WorkbenchUi.Find<Button>(window, "terminal-open");
                     WindowCaption.BeginMove = (movedWindow, _) => moved.Add(movedWindow);
 
                     RaisePress(bar, window);
                     var afterTitleRow = moved.ToArray();
 
-                    // The placeholder search box lives in the title row but owns its own presses.
-                    RaisePress(search, window);
+                    // The terminal button lives in the title row but owns its own presses.
+                    RaisePress(terminal, window);
                     return (AfterTitleRow: afterTitleRow, AfterSearch: moved.Count);
                 }
                 finally

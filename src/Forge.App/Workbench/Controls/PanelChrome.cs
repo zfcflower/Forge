@@ -1,8 +1,6 @@
 using System.Collections;
 using System.ComponentModel;
 using Avalonia;
-using Avalonia.Animation;
-using Avalonia.Animation.Easings;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -67,23 +65,14 @@ internal sealed class PanelChrome : TemplatedControl
     public static readonly StyledProperty<Geometry?> PinIconProperty =
         AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(PinIcon));
 
+    public static readonly StyledProperty<bool> PinFilledProperty =
+        AvaloniaProperty.Register<PanelChrome, bool>(nameof(PinFilled));
+
     public static readonly StyledProperty<string?> PinTooltipProperty =
         AvaloniaProperty.Register<PanelChrome, string?>(nameof(PinTooltip));
 
     public static readonly StyledProperty<string?> PinAutomationIdProperty =
         AvaloniaProperty.Register<PanelChrome, string?>(nameof(PinAutomationId));
-
-    public static readonly StyledProperty<bool> MaximizeVisibleProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(MaximizeVisible));
-
-    public static readonly StyledProperty<Geometry?> MaximizeIconProperty =
-        AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(MaximizeIcon));
-
-    public static readonly StyledProperty<string?> MaximizeTooltipProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(MaximizeTooltip));
-
-    public static readonly StyledProperty<string?> MaximizeAutomationIdProperty =
-        AvaloniaProperty.Register<PanelChrome, string?>(nameof(MaximizeAutomationId));
 
     public static readonly StyledProperty<bool> FloatVisibleProperty =
         AvaloniaProperty.Register<PanelChrome, bool>(nameof(FloatVisible));
@@ -114,7 +103,6 @@ internal sealed class PanelChrome : TemplatedControl
 
     private PanelIconButton? coverButton;
     private PanelIconButton? pinButton;
-    private PanelIconButton? maximizeButton;
     private PanelIconButton? minimizeButton;
 
     public static readonly StyledProperty<bool> MinimizeVisibleProperty =
@@ -160,23 +148,6 @@ internal sealed class PanelChrome : TemplatedControl
         LayoutProperty.Changed.AddClassHandler<PanelChrome>((chrome, _) => chrome.Resubscribe());
         SidebarProperty.Changed.AddClassHandler<PanelChrome>((chrome, e) =>
             chrome.PseudoClasses.Set(":sidebar", e.NewValue is true));
-    }
-
-    /// <summary>The maximize fade-in of the region presenter drives <see cref="Visual.Opacity"/>; reduced motion skips it.</summary>
-    public PanelChrome()
-    {
-        if (!TreeMotion.ReducedMotion)
-        {
-            Transitions =
-            [
-                new DoubleTransition
-                {
-                    Property = OpacityProperty,
-                    Duration = TimeSpan.FromMilliseconds(120),
-                    Easing = new CubicEaseOut(),
-                },
-            ];
-        }
     }
 
     public PanelModel? Model
@@ -271,6 +242,13 @@ internal sealed class PanelChrome : TemplatedControl
         set => SetValue(PinIconProperty, value);
     }
 
+    /// <summary>True while the pin is the solid one: the region is docked, so the click auto-hides it.</summary>
+    public bool PinFilled
+    {
+        get => GetValue(PinFilledProperty);
+        set => SetValue(PinFilledProperty, value);
+    }
+
     public string? PinTooltip
     {
         get => GetValue(PinTooltipProperty);
@@ -281,30 +259,6 @@ internal sealed class PanelChrome : TemplatedControl
     {
         get => GetValue(PinAutomationIdProperty);
         set => SetValue(PinAutomationIdProperty, value);
-    }
-
-    public bool MaximizeVisible
-    {
-        get => GetValue(MaximizeVisibleProperty);
-        set => SetValue(MaximizeVisibleProperty, value);
-    }
-
-    public Geometry? MaximizeIcon
-    {
-        get => GetValue(MaximizeIconProperty);
-        set => SetValue(MaximizeIconProperty, value);
-    }
-
-    public string? MaximizeTooltip
-    {
-        get => GetValue(MaximizeTooltipProperty);
-        set => SetValue(MaximizeTooltipProperty, value);
-    }
-
-    public string? MaximizeAutomationId
-    {
-        get => GetValue(MaximizeAutomationIdProperty);
-        set => SetValue(MaximizeAutomationIdProperty, value);
     }
 
     public bool FloatVisible
@@ -361,7 +315,6 @@ internal sealed class PanelChrome : TemplatedControl
         DetachButtons();
         coverButton = e.NameScope.Find<PanelIconButton>("PART_Cover");
         pinButton = e.NameScope.Find<PanelIconButton>("PART_Pin");
-        maximizeButton = e.NameScope.Find<PanelIconButton>("PART_Maximize");
         minimizeButton = e.NameScope.Find<PanelIconButton>("PART_Minimize");
         floatButton = e.NameScope.Find<PanelIconButton>("PART_Float");
         closeButton = e.NameScope.Find<PanelIconButton>("PART_Close");
@@ -373,11 +326,6 @@ internal sealed class PanelChrome : TemplatedControl
         if (pinButton is not null)
         {
             pinButton.Click += OnPinClick;
-        }
-
-        if (maximizeButton is not null)
-        {
-            maximizeButton.Click += OnMaximizeClick;
         }
 
         if (minimizeButton is not null)
@@ -444,12 +392,6 @@ internal sealed class PanelChrome : TemplatedControl
             return;
         }
 
-        if (model.Region == RegionRole.Main)
-        {
-            Layout.IsBottomCollapsed = !Layout.IsBottomCollapsed;
-            return;
-        }
-
         Layout.SetAutoHidden(model.Region, !Layout.GetRegion(model.Region).IsAutoHidden);
     }
 
@@ -458,14 +400,6 @@ internal sealed class PanelChrome : TemplatedControl
         if (Model is { } model)
         {
             Layout?.ToggleMinimize(model);
-        }
-    }
-
-    private void OnMaximizeClick(object? sender, RoutedEventArgs e)
-    {
-        if (Model is { } model)
-        {
-            Layout?.ToggleMaximize(model);
         }
     }
 
@@ -533,12 +467,6 @@ internal sealed class PanelChrome : TemplatedControl
         {
             pinButton.Click -= OnPinClick;
             pinButton = null;
-        }
-
-        if (maximizeButton is not null)
-        {
-            maximizeButton.Click -= OnMaximizeClick;
-            maximizeButton = null;
         }
 
         if (minimizeButton is not null)
@@ -651,7 +579,6 @@ internal sealed class PanelChrome : TemplatedControl
     private static bool AffectsPanelChrome(string? propertyName) =>
         propertyName is nameof(PanelModel.Title)
             or nameof(PanelModel.IsVisible)
-            or nameof(PanelModel.CanMaximize)
             or nameof(PanelModel.CanMinimize)
             or nameof(PanelModel.IsMinimized)
             or nameof(PanelModel.IsFloating)
@@ -667,7 +594,7 @@ internal sealed class PanelChrome : TemplatedControl
 
     private void OnRegionChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(RegionModel.IsAutoHidden) or nameof(RegionModel.MaximizedPanel))
+        if (e.PropertyName is nameof(RegionModel.IsAutoHidden))
         {
             RefreshChrome();
         }
@@ -692,7 +619,7 @@ internal sealed class PanelChrome : TemplatedControl
 
     private void OnLayoutChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(WorkbenchLayout.IsBottomCollapsed) or nameof(WorkbenchLayout.IsPreviewCoveringMain))
+        if (e.PropertyName is nameof(WorkbenchLayout.IsPreviewCoveringMain))
         {
             RefreshChrome();
         }
@@ -718,7 +645,6 @@ internal sealed class PanelChrome : TemplatedControl
             TabGroup = null;
             CoverVisible = false;
             PinVisible = false;
-            MaximizeVisible = false;
             MinimizeVisible = false;
             FloatVisible = false;
             CloseVisible = false;
@@ -751,14 +677,12 @@ internal sealed class PanelChrome : TemplatedControl
         CloseAutomationId = "panel-" + model.Id + "-close";
 
         PinVisible = model.CanPin;
-        MaximizeVisible = model.CanMaximize;
         MinimizeVisible = model.CanMinimize;
         FloatVisible = !model.IsFloating && (model.CanFloat || group?.ActiveTab is not null);
         FloatIcon = WorkbenchIcons.Find(this, "IconWindowExternal");
         FloatTooltip = ShellStrings.Float;
         FloatAutomationId = "panel-" + model.Id + "-float";
         PinAutomationId = "panel-" + model.Id + "-pin";
-        MaximizeAutomationId = "panel-" + model.Id + "-maximize";
         MinimizeAutomationId = "panel-" + model.Id + "-minimize";
 
         RefreshChrome();
@@ -775,22 +699,13 @@ internal sealed class PanelChrome : TemplatedControl
         var layout = Layout;
         CoverTooltip = layout?.IsPreviewCoveringMain == true ? ShellStrings.Uncover : ShellStrings.Cover;
 
-        if (model.Region == RegionRole.Main)
-        {
-            var collapsed = layout?.IsBottomCollapsed == true;
-            PinIcon = WorkbenchIcons.Find(this, collapsed ? "IconChevronUp" : "IconChevronDown");
-            PinTooltip = collapsed ? ShellStrings.Pin : ShellStrings.AutoHide;
-        }
-        else
-        {
-            var hidden = layout?.GetRegion(model.Region).IsAutoHidden == true;
-            PinIcon = WorkbenchIcons.Find(this, hidden ? "IconPin" : "IconAutoHide");
-            PinTooltip = hidden ? ShellStrings.Pin : ShellStrings.AutoHide;
-        }
+        // One button, one word: the pin shows the state (solid = docked, outline = auto-hidden), the tooltip names the
+        // action the region takes.
+        var autoHidden = layout?.GetRegion(model.Region).IsAutoHidden == true;
+        PinIcon = WorkbenchIcons.Find(this, autoHidden ? "IconPin" : "IconPinSolid");
+        PinFilled = !autoHidden;
+        PinTooltip = ShellStrings.AutoHide;
 
-        var maximized = layout is not null && ReferenceEquals(layout.GetRegion(model.Region).MaximizedPanel, model);
-        MaximizeIcon = WorkbenchIcons.Find(this, maximized ? "IconRestore" : "IconMaximize");
-        MaximizeTooltip = maximized ? ShellStrings.RestorePanel : ShellStrings.MaximizePanel;
         var minimized = model.IsMinimized;
         MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconRestore" : "IconMinimize");
         MinimizeTooltip = minimized ? ShellStrings.RestorePanel : ShellStrings.MinimizePanel;

@@ -15,6 +15,16 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
 {
     private static readonly TimeSpan Budget = TimeSpan.FromSeconds(30);
 
+    /// <summary>The only properties a language switch may refresh: the texts cached from <see cref="Loc"/>.</summary>
+    private static readonly string[] CachedTexts =
+    [
+        nameof(FontGroupViewModel.Title),
+        nameof(FontGroupViewModel.FamilyLabel),
+        nameof(FontGroupViewModel.SizeLabel),
+        nameof(FontGroupViewModel.ResetText),
+        nameof(FontGroupViewModel.PreviewText),
+    ];
+
     private readonly UiLanguage previousLanguage = Loc.Instance.Language;
     private readonly AppPreferences preferences = new();
     private readonly AppearanceSettingsViewModel viewModel;
@@ -303,21 +313,48 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Unrelated_preference_changes_do_not_touch_the_editors()
+    public async Task An_unrelated_preference_change_leaves_the_inputs_alone_and_a_language_switch_only_refreshes_text()
     {
-        var raised = 0;
-        viewModel.Ui.PropertyChanged += (_, _) => raised++;
-        viewModel.Code.PropertyChanged += (_, _) => raised++;
+        // The catalog publishes the families from the background and raises Families on both groups; wait for it first, so
+        // only the changes below reach the collectors.
+        await viewModel.FamiliesLoaded.WaitAsync(Budget);
 
+        var ui = new List<string?>();
+        var code = new List<string?>();
+        viewModel.Ui.PropertyChanged += (_, e) => ui.Add(e.PropertyName);
+        viewModel.Code.PropertyChanged += (_, e) => code.Add(e.PropertyName);
+
+        // A preference the section does not edit: no notification at all, not even a text refresh.
         preferences.TerminalShell = "pwsh";
-        preferences.Language = UiLanguage.Chinese;
 
-        Assert.Equal(0, raised);
+        Assert.Empty(ui);
+        Assert.Empty(code);
+
+        // Storing the language is not the switch itself (the composition root pushes the stored value into Loc); the
+        // switch refreshes the cached texts and must leave the values being edited alone.
+        Loc.Instance.Language = UiLanguage.English;
+        preferences.Language = UiLanguage.Chinese;
+        Loc.Instance.Language = UiLanguage.Chinese;
+
+        Assert.Contains(nameof(FontGroupViewModel.Title), ui);
+        Assert.Contains(nameof(FontGroupViewModel.Title), code);
+        Assert.All(ui.Concat(code), raised => Assert.Contains(raised, CachedTexts));
+        Assert.DoesNotContain(nameof(FontGroupViewModel.FamilyText), ui);
+        Assert.DoesNotContain(nameof(FontGroupViewModel.FamilyText), code);
+        Assert.DoesNotContain(nameof(FontGroupViewModel.Size), ui);
+        Assert.DoesNotContain(nameof(FontGroupViewModel.Size), code);
+        Assert.Equal(AppPreferences.DefaultUiFontFamily, viewModel.Ui.FamilyText);
+        Assert.Equal(13m, viewModel.Ui.Size);
+        Assert.Equal(AppPreferences.DefaultCodeFontFamily, viewModel.Code.FamilyText);
+        Assert.Equal(13m, viewModel.Code.Size);
     }
 
     [Fact]
     public void Switching_the_language_refreshes_every_cached_text()
     {
+        // The texts asserted first are the English ones; state that instead of inheriting it from another test.
+        Loc.Instance.Language = UiLanguage.English;
+
         Assert.Equal("Interface font", viewModel.Ui.Title);
         Assert.Equal("Code font", viewModel.Code.Title);
         var englishPreview = viewModel.Ui.PreviewText;
@@ -351,6 +388,8 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     [Fact]
     public void A_language_switch_does_not_disturb_pending_edits()
     {
+        // English to Chinese is a real switch; Chinese to Chinese raises nothing and would make this vacuous.
+        Loc.Instance.Language = UiLanguage.English;
         viewModel.Ui.FamilyText = "pending";
         viewModel.Ui.Size = 17m;
 
@@ -361,8 +400,11 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     }
 
     [Fact]
-    public void After_dispose_neither_preference_nor_language_changes_reach_the_groups()
+    public async Task After_dispose_neither_preference_nor_language_changes_reach_the_groups()
     {
+        // The families land after the constructor; wait for them, so nothing but the changes below can raise.
+        await viewModel.FamiliesLoaded.WaitAsync(Budget);
+
         viewModel.Dispose();
         viewModel.Dispose();
         var raised = new List<string?>();
@@ -370,6 +412,8 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
         viewModel.Ui.PropertyChanged += handler;
         viewModel.Code.PropertyChanged += handler;
 
+        // English to Chinese is a real switch; Chinese to Chinese raises nothing and would make this vacuous.
+        Loc.Instance.Language = UiLanguage.English;
         preferences.UiFontFamily = "Georgia";
         preferences.CodeFontSize = 20;
         Loc.Instance.Language = UiLanguage.Chinese;
