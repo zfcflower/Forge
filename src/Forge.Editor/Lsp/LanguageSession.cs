@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Forge.Editor.Folding;
 using Forge.Editor.Text;
 
 namespace Forge.Editor.Lsp;
@@ -308,6 +309,22 @@ public sealed class LanguageSession : IAsyncDisposable
 
     public async Task<IReadOnlyList<DocumentSymbol>?> RequestDocumentSymbolsAsync(TextDocument document, CancellationToken ct = default) =>
         await InvokeAsync(document, client => client.RequestDocumentSymbolsAsync(document, ct), ct).ConfigureAwait(false);
+
+    /// <summary>Foldable ranges from the server, or null when the session is not ready or the server cannot fold.</summary>
+    public async Task<IReadOnlyList<FoldingRange>?> RequestFoldingRangesAsync(TextDocument document, CancellationToken ct = default) =>
+        await InvokeAsync(document, client => client.RequestFoldingRangesAsync(document, ct), ct).ConfigureAwait(false);
+
+    /// <summary>What the server declared in <c>initialize</c>; null before the handshake. Used to pick completion triggers and the folding source.</summary>
+    public LspServerCapabilities? Capabilities
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _client?.Capabilities;
+            }
+        }
+    }
 
     public Task<HoverInfo?> RequestHoverAsync(TextDocument document, int offset, CancellationToken ct = default) =>
         InvokeNullableAsync(document, client => client.RequestHoverAsync(document, offset, ct), ct);

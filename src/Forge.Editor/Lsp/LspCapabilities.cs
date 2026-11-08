@@ -22,7 +22,10 @@ public sealed record LspServerCapabilities(
     bool SupportsWorkspaceFolders,
     PositionEncoding PositionEncoding,
     SemanticTokensCapability? SemanticTokens,
-    JsonElement Raw)
+    JsonElement Raw,
+    bool SupportsFoldingRanges = false,
+    IReadOnlyList<string>? CompletionTriggerCharacters = null,
+    bool SupportsCompletionResolve = false)
 {
     public static LspServerCapabilities Parse(JsonElement result, PositionEncoding preferred)
     {
@@ -86,7 +89,43 @@ public sealed record LspServerCapabilities(
                 supported.ValueKind == JsonValueKind.True,
             PositionEncoding: encoding,
             SemanticTokens: ParseSemanticTokens(capabilities),
-            Raw: result.Clone());
+            Raw: result.Clone(),
+            SupportsFoldingRanges: Has(capabilities, "foldingRangeProvider"),
+            CompletionTriggerCharacters: ParseCompletionTriggers(capabilities),
+            SupportsCompletionResolve: capabilities.ValueKind == JsonValueKind.Object &&
+                capabilities.TryGetProperty("completionProvider", out var completionProvider) &&
+                completionProvider.ValueKind == JsonValueKind.Object &&
+                completionProvider.TryGetProperty("resolveProvider", out var resolveProvider) &&
+                resolveProvider.ValueKind == JsonValueKind.True);
+    }
+
+    /// <summary>The single characters that open the completion list by themselves, as the server declared them.</summary>
+    private static IReadOnlyList<string> ParseCompletionTriggers(JsonElement capabilities)
+    {
+        if (capabilities.ValueKind != JsonValueKind.Object ||
+            !capabilities.TryGetProperty("completionProvider", out var provider) ||
+            provider.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        var triggers = ReadStrings(provider, "triggerCharacters");
+        if (triggers.Count == 0)
+        {
+            return [];
+        }
+
+        var cleaned = new List<string>(triggers.Count);
+        foreach (var trigger in triggers)
+        {
+            // A trigger is one typed character; anything else is a server bug the editor must not chase.
+            if (trigger.Length == 1 && !char.IsControl(trigger[0]))
+            {
+                cleaned.Add(trigger);
+            }
+        }
+
+        return cleaned;
     }
 
     private static bool Has(JsonElement capabilities, string name) =>

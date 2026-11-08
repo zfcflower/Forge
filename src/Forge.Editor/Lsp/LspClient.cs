@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Forge.Editor.Folding;
 using Forge.Editor.Highlighting;
 using Forge.Editor.Text;
 
@@ -319,6 +320,29 @@ public sealed class LspClient : IAsyncDisposable
 
     public Task<IReadOnlyList<LspLocation>> RequestDefinitionAsync(TextDocument document, int offset, CancellationToken ct = default) =>
         RequestLocationsAsync("textDocument/definition", document, offset, Capabilities is { SupportsDefinition: false }, null, ct);
+
+    /// <summary>
+    /// Asks the server for foldable line ranges. The result uses the same shape as the structural heuristic, so the editor
+    /// treats both alike; an undeclared capability is an empty result, never an error.
+    /// </summary>
+    public async Task<IReadOnlyList<FoldingRange>> RequestFoldingRangesAsync(TextDocument document, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (Capabilities is { SupportsFoldingRanges: false })
+        {
+            return [];
+        }
+
+        var uri = UriFor(document);
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("textDocument/foldingRange", writer =>
+        {
+            writer.WriteStartObject();
+            WriteTextDocumentIdentifier(writer, uri);
+            writer.WriteEndObject();
+        }, timeout.Token).ConfigureAwait(false);
+        return ParseFoldingRanges(result);
+    }
 
     public Task<IReadOnlyList<LspLocation>> RequestReferencesAsync(
         TextDocument document,
@@ -1034,6 +1058,72 @@ public sealed class LspClient : IAsyncDisposable
 
         position = new LspPosition(lineValue, characterValue);
         return true;
+    }
+
+    /// <summary>
+    /// Reads <c>textDocument/foldingRange</c> results. A range whose lines are inverted, out of order or identical is
+    /// dropped rather than folded into a wrong section; the server's optional reason chooses the drawing kind.
+    /// </summary>
+    private static IReadOnlyList<FoldingRange> ParseFoldingRanges(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var ranges = new List<Folding.FoldingRange>(result.GetArrayLength());
+        foreach (var item in result.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("startLine", out var startElement) || startElement.ValueKind != JsonValueKind.Number ||
+                !item.TryGetProperty("endLine", out var endElement) || endElement.ValueKind != JsonValueKind.Number ||
+                !startElement.TryGetInt32(out var start) || !endElement.TryGetInt32(out var end) ||
+                start < 0 || end < 0 || end <= start)
+            {
+                continue;
+            }
+
+            var kind = FoldingKind.Block;
+            if (item.TryGetProperty("kind", out var kindElement) && kindElement.ValueKind == JsonValueKind.String &&
+                kindElement.GetString() is "region" or "imports" or "comment")
+            {
+                kind = FoldingKind.Region;
+            }
+
+            var endLine = end;
+            // An endLine that points at the first line of the next block hides a fold marker that belongs to it.
+            if (item.TryGetProperty("endCharacter", out var endCharacter) && endCharacter.ValueKind == JsonValueKind.Number &&
+                endCharacter.TryGetInt32(out var endCharacterValue) && endCharacterValue == 0)
+            {
+                endLine--;
+            }
+
+            if (endLine > start)
+            {
+                ranges.Add(new FoldingRange(start, endLine, kind));
+            }
+        }
+
+        if (ranges.Count == 0)
+        {
+            return [];
+        }
+
+        ranges.Sort(static (a, b) => a.StartLine != b.StartLine ? a.StartLine.CompareTo(b.StartLine) : b.EndLine.CompareTo(a.EndLine));
+        var kept = new List<FoldingRange>(ranges.Count);
+        var previousStart = -1;
+        foreach (var range in ranges)
+        {
+            if (range.StartLine == previousStart)
+            {
+                continue;
+            }
+
+            previousStart = range.StartLine;
+            kept.Add(range);
+        }
+
+        return kept;
     }
 
     private static IReadOnlyList<DocumentSymbol> ParseSymbols(JsonElement result)

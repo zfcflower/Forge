@@ -1034,6 +1034,70 @@ public class LspClientTests
         Assert.True(client.IsClosed);
     }
 
+    [Fact]
+    public async Task Folding_ranges_come_from_the_server_only_when_it_declares_the_capability()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, "{}");
+        var document = new TextDocument("a\nb\n", dir.PathOf("a.cs"));
+
+        Assert.False(client.Capabilities.SupportsFoldingRanges);
+        Assert.Empty(await client.RequestFoldingRangesAsync(document));
+    }
+
+    [Fact]
+    public async Task Folding_ranges_are_normalised_and_bad_entries_dropped()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, "{\"foldingRangeProvider\":true}");
+        var document = new TextDocument("a\nb\nc\nd\ne\n", dir.PathOf("a.cs"));
+
+        var call = client.RequestFoldingRangesAsync(document);
+        using (var request = await LspHarness.ReceiveMethodAsync(server, "textDocument/foldingRange"))
+        {
+            Assert.Equal(client.UriFor(document), request.RootElement.GetProperty("params").GetProperty("textDocument").GetProperty("uri").GetString());
+            await server.RespondAsync(request.RootElement.GetProperty("id"), """
+                [{"startLine":0,"endLine":3},
+                 {"startLine":1,"endLine":2,"kind":"region"},
+                 {"startLine":2,"endLine":2},
+                 {"startLine":4,"endLine":1},
+                 {"startLine":-1,"endLine":3},
+                 {"startLine":"x","endLine":3},
+                 {"startLine":2,"endLine":4,"endCharacter":0}]
+                """);
+        }
+
+        var ranges = await call.WaitAsync(Patience);
+
+        Assert.Equal([new Forge.Editor.Folding.FoldingRange(0, 3), new Forge.Editor.Folding.FoldingRange(1, 2, Forge.Editor.Folding.FoldingKind.Region), new Forge.Editor.Folding.FoldingRange(2, 3)], ranges);
+    }
+
+    [Fact]
+    public async Task Completion_triggers_and_resolve_support_are_read_from_the_server_capabilities()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(
+            server,
+            "{\"completionProvider\":{\"triggerCharacters\":[\".\",\":\",\"::\",\"\"],\"resolveProvider\":true}}");
+
+        Assert.True(client.Capabilities.SupportsCompletionResolve);
+        Assert.Equal([".", ":"], client.Capabilities.CompletionTriggerCharacters);
+    }
+
+    [Fact]
+    public async Task A_server_without_completion_triggers_reports_an_empty_list()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, "{\"completionProvider\":{}}");
+
+        Assert.False(client.Capabilities.SupportsCompletionResolve);
+        Assert.Empty(client.Capabilities.CompletionTriggerCharacters!);
+    }
+
     private static async Task<CompletionResult> CompleteAsync(string response)
     {
         using var dir = new TempDirectory();
