@@ -50,6 +50,28 @@ internal sealed class EditorLspDiagnosticRenderer : IBackgroundRenderer, IDispos
             .OrderBy(static diagnostic => (int)diagnostic.Severity)];
     }
 
+    /// <summary>Every diagnostic whose range touches <paramref name="line"/> (1-based); used when the pointer is on the
+    /// end-of-line badge rather than on the squiggled text.</summary>
+    public IReadOnlyList<EditorLspDiagnostic> FindOnLine(int line)
+    {
+        if (markers.Count == 0 || line < 1 || line > document.LineCount)
+        {
+            return [];
+        }
+
+        var start = document.GetLineByNumber(line).Offset;
+        var end = document.GetLineByNumber(line).EndOffset;
+        var found = markers.FindOverlappingSegments(start, Math.Max(end - start, 0));
+        if (found.Count == 0)
+        {
+            return [];
+        }
+
+        return [.. found
+            .Select(static marker => marker.Diagnostic with { Start = marker.StartOffset, End = marker.EndOffset })
+            .OrderBy(static diagnostic => (int)diagnostic.Severity)];
+    }
+
     public void Draw(TextView textView, DrawingContext drawingContext)
     {
         if (markers.Count == 0 || !textView.VisualLinesValid || textView.VisualLines.Count == 0)

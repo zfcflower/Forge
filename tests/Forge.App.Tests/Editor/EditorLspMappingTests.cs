@@ -62,18 +62,19 @@ public class EditorLspMappingTests
             Item("viaEdit", edit: Edit(0, 4, 0, 6, "viaEdit")),
             Item("beforeCaret", edit: Edit(0, 0, 0, 2, "x")),
             Item("afterCaret", edit: Edit(0, 4, 0, 5, "x")),
-            Item("snip", insert: "for ${1}", format: InsertTextFormat.Snippet),
+            Item("snip", insert: "for ${1:i} = 0;", format: InsertTextFormat.Snippet),
             Item("lines", insert: "a\nb\r\nc"),
         };
         var map = Map("foo.ba", 6, items, malformed: 2, newLine: "\r\n");
         Assert.Equal(4, map.Completion.PrefixStart);
         Assert.Equal(6, map.Completion.RequestOffset);
-        Assert.Equal(1, map.SkippedSnippets);
+        Assert.Equal(1, map.ConvertedSnippets);
         Assert.Equal(4, map.InvalidItems);
-        Assert.Equal(["bar", "lines", "viaEdit"], map.Completion.Items.Select(static i => i.Label));
+        Assert.Equal(["bar", "lines", "snip", "viaEdit"], map.Completion.Items.Select(static i => i.Label));
         Assert.Equal(new EditorLspEdit(4, 6, "bar"), map.Completion.Items[0].Edit);
         Assert.Equal(new EditorLspEdit(4, 6, "a\r\nb\r\nc"), map.Completion.Items[1].Edit);
-        Assert.Equal(new EditorLspEdit(4, 6, "viaEdit"), map.Completion.Items[2].Edit);
+        Assert.Equal(new EditorLspEdit(4, 6, "for i = 0;"), map.Completion.Items[2].Edit);
+        Assert.Equal(new EditorLspEdit(4, 6, "viaEdit"), map.Completion.Items[3].Edit);
     }
 
     [Fact]

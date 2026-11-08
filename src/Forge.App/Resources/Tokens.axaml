@@ -21,6 +21,9 @@
   <sys:Double x:Key="FontSizeXl">22</sys:Double>
   <!-- Code text: the code font size itself, not a step of the UI scale. -->
   <sys:Double x:Key="FontSizeCode">13</sys:Double>
+  <!-- The header's FORGE wordmark: sized to the 18px logo it sits beside (same as FontSizeCode, this is its own
+       size rather than a step of the UI scale). -->
+  <sys:Double x:Key="FontSizeWordmark">18</sys:Double>
 
   <sys:Double x:Key="Space1">4</sys:Double>
   <sys:Double x:Key="Space2">8</sys:Double>
@@ -256,7 +259,22 @@
   <StreamGeometry x:Key="IconEllipsisSolid">M4.8 12A1.7 1.7 0 1 0 8.2 12A1.7 1.7 0 1 0 4.8 12ZM10.3 12A1.7 1.7 0 1 0 13.7 12A1.7 1.7 0 1 0 10.3 12ZM15.8 12A1.7 1.7 0 1 0 19.2 12A1.7 1.7 0 1 0 15.8 12Z</StreamGeometry>
   <StreamGeometry x:Key="IconStar">M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z</StreamGeometry>
   <StreamGeometry x:Key="IconSparkle">M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8zM18 15l.8 2.2 2.2.8-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z</StreamGeometry>
+  <!-- Composer strip icons: one per counter, same line family and weight as the text next to them. -->
+  <!-- Three stacked layers: the one button that carries all four counters. -->
+  <StreamGeometry x:Key="IconLayers">M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5</StreamGeometry>
+  <!-- A shield with a check inside: the approval counter. -->
+  <StreamGeometry x:Key="IconShieldCheck">M12 3.5 5 6v6c0 4.2 3 7.6 7 8.5 4-.9 7-4.3 7-8.5V6zM9 12l2 2 4-4</StreamGeometry>
+  <!-- An open book: the skills counter. -->
+  <StreamGeometry x:Key="IconBook">M4 5.5C6.5 4.5 9 4.5 12 5.5v13C9 17.5 6.5 17.5 4 18.5zM12 5.5c3-1 5.5-1 8 0v13c-2.5-1-5-1-8 0z</StreamGeometry>
+  <!-- A plug with two prongs: the MCP counter. -->
+  <StreamGeometry x:Key="IconPlug">M9 3v4M15 3v4M6 7h12v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4zM12 15v5</StreamGeometry>
+  <!-- A wrench: the tools counter. -->
+  <StreamGeometry x:Key="IconWrench">M14.7 3.3a4.6 4.6 0 0 0-5.9 5.9L3 15v3h3l5.8-5.8a4.6 4.6 0 0 0 5.9-5.9l-2.6 2.6-3-3z</StreamGeometry>
   <!-- Folder: the composer strip's project button, drawn as an outline so it sits at the weight of the text beside it. -->
   <StreamGeometry x:Key="IconFolder">M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2.2h8.8A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z</StreamGeometry>
+  <!-- A chat bubble with a tail at its bottom left: the session tab's prefix. It is one closed outline, so the tab can
+       fill it while it is active (solid bubble) and leave it stroked while it is not (line bubble) without a second
+       geometry. -->
+  <StreamGeometry x:Key="IconChat">M6.5 4h11a3.5 3.5 0 0 1 3.5 3.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-3.5 3.5V17H6.5A3.5 3.5 0 0 1 3 13.5v-6A3.5 3.5 0 0 1 6.5 4z</StreamGeometry>
 
 </ResourceDictionary>

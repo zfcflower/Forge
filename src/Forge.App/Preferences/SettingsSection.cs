@@ -62,16 +62,39 @@ internal static class SettingsSectionIds
     public const string Provider = "provider";
     public const string Appearance = "appearance";
     public const string Language = "language";
+    public const string Editor = "editor";
     public const string Terminal = "terminal";
     public const string Git = "git";
     public const string Extensions = "extensions";
     public const string Paths = "paths";
 
+    /// <summary>The four session-instrument sections: what a session can use and what it has used, read-only.</summary>
+    public const string Approvals = "approvals";
+
+    public const string Skills = "skills";
+
+    public const string Mcp = "mcp";
+
+    public const string Tools = "tools";
+
     public const int ProviderOrder = 100;
     public const int AppearanceOrder = 200;
     public const int LanguageOrder = 300;
+
+    /// <summary>The editor sits between the language choice and the terminal: it is a display choice like appearance, not a tool.</summary>
+    public const int EditorOrder = 350;
+
     public const int TerminalOrder = 400;
     public const int GitOrder = 500;
     public const int ExtensionsOrder = 600;
     public const int PathsOrder = 900;
+
+    /// <summary>The instrument sections sit after the extension host and before the paths diagnostics.</summary>
+    public const int ApprovalsOrder = 700;
+
+    public const int SkillsOrder = 710;
+
+    public const int McpOrder = 720;
+
+    public const int ToolsOrder = 730;
 }

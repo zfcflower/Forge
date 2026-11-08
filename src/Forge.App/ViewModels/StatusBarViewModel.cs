@@ -80,6 +80,19 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
 
     public bool HasHostDetail => !hostDetail.IsEmpty;
 
+    /// <summary>
+    /// The host state plus whatever detail the status bar used to spell out (a failure message, the process id). The title
+    /// row is the only place left for it, so its tooltip is the one that has to carry both.
+    /// </summary>
+    public string HostTooltip
+    {
+        get
+        {
+            var detail = hostDetail.Resolve();
+            return detail.Length == 0 ? HostText : HostText + " · " + detail;
+        }
+    }
+
     public string PluginsText => pluginCount is { } plugins && toolCount is { } tools
         ? ShellStrings.Plugins(plugins, tools)
         : ShellStrings.PluginsUnknown;
@@ -169,6 +182,7 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HostText));
         OnPropertyChanged(nameof(HostDetail));
         OnPropertyChanged(nameof(HasHostDetail));
+        OnPropertyChanged(nameof(HostTooltip));
 
         if (status != HostStatus.Running)
         {
@@ -241,6 +255,7 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
         hostDetail = detail;
         OnPropertyChanged(nameof(HostDetail));
         OnPropertyChanged(nameof(HasHostDetail));
+        OnPropertyChanged(nameof(HostTooltip));
     }
 
     /// <summary>A notification from another thread belongs to a status bar whose window is gone (a test host).</summary>

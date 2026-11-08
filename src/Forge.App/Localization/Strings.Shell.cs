@@ -44,11 +44,10 @@ internal static class ShellStrings
 
     // ---------------------------------------------------------------- workbench title-bar buttons
 
-    public const string PinKey = "workbench.pin";
     public const string AutoHideKey = "workbench.autoHide";
-    public const string MaximizePanelKey = "workbench.maximizePanel";
     public const string RestorePanelKey = "workbench.restorePanel";
     public const string MinimizePanelKey = "workbench.minimizePanel";
+    public const string MoreTabsKey = "workbench.moreTabs";
     public const string FloatKey = "workbench.float";
     public const string DockBackKey = "workbench.dockBack";
     public const string CoverKey = "workbench.cover";
@@ -66,6 +65,8 @@ internal static class ShellStrings
     public const string HostRunningKey = "status.host.running";
     public const string HostStoppedKey = "status.host.stopped";
     public const string HostFailedKey = "status.host.failed";
+    /// <summary>Just the noun: the window header shows it next to a coloured dot, without the state spelled out.</summary>
+    public const string HostNameKey = "status.host.name";
     public const string PluginsUnknownKey = "status.plugins.unknown";
     public const string PluginsKey = "status.plugins";
     public const string McpNoneKey = "status.mcp.none";
@@ -168,14 +169,12 @@ internal static class ShellStrings
 
     public static string ChangesTitle => Loc.Instance[ChangesTitleKey];
 
-    public static string Pin => Loc.Instance[PinKey];
-
     public static string AutoHide => Loc.Instance[AutoHideKey];
-
-    public static string MaximizePanel => Loc.Instance[MaximizePanelKey];
 
     public static string RestorePanel => Loc.Instance[RestorePanelKey];
     public static string MinimizePanel => Loc.Instance[MinimizePanelKey];
+
+    public static string MoreTabs => Loc.Instance[MoreTabsKey];
 
     public static string Float => Loc.Instance[FloatKey];
 
@@ -337,11 +336,10 @@ internal static class ShellStrings
         Loc.Register(SpecTreeTitleKey, "规格树", "Spec tree");
         Loc.Register(ChangesTitleKey, "± 改动", "± Changes");
 
-        Loc.Register(PinKey, "停靠", "Dock");
         Loc.Register(AutoHideKey, "自动隐藏", "Auto-hide");
-        Loc.Register(MaximizePanelKey, "放大", "Maximize");
         Loc.Register(RestorePanelKey, "还原", "Restore");
         Loc.Register(MinimizePanelKey, "缩小", "Minimize");
+        Loc.Register(MoreTabsKey, "被遮挡的标签", "Hidden tabs");
         Loc.Register(FloatKey, "浮动到新窗口", "Float to a new window");
         Loc.Register(DockBackKey, "停靠回主窗口", "Dock back to the main window");
         Loc.Register(CoverKey, "铺满主区", "Cover main area");
@@ -355,6 +353,7 @@ internal static class ShellStrings
         Loc.Register(HostRunningKey, "扩展宿主：运行中", "Extension host: running");
         Loc.Register(HostStoppedKey, "扩展宿主：已停止", "Extension host: stopped");
         Loc.Register(HostFailedKey, "扩展宿主：失败", "Extension host: failed");
+        Loc.Register(HostNameKey, "扩展宿主", "Extension host");
         Loc.Register(PluginsUnknownKey, "插件：未知", "Plugins: unknown");
         Loc.Register(PluginsKey, "插件 {0} · 工具 {1}", "Plugins {0} · Tools {1}");
         Loc.Register(McpNoneKey, "MCP：0 个配置", "MCP: 0 configured");

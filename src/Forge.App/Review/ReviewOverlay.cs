@@ -45,7 +45,7 @@ internal sealed class ReviewOverlay : IDisposable
     private readonly ReviewOverlayParts ui;
     private readonly List<Button> markers = [];
     private FileReviewController? controller;
-    private (int Start, int End)? pending;
+    private PendingRange? pending;
     private bool pendingFromGutter;
     private IPointer? gutterPointer;
     private TextDocument? gutterDocument;
@@ -231,7 +231,10 @@ internal sealed class ReviewOverlay : IDisposable
             last--;
         }
 
-        SetPending(startLine, last, fromGutter: false);
+        // The icon follows the pointer's end of the selection: the moving end of the selection is where the mouse let go.
+        var anchor = area.Selection.EndPosition;
+        var anchorOffset = Math.Clamp(doc.GetOffset(anchor.Location), 0, doc.TextLength);
+        SetPending(startLine, last, fromGutter: false, anchorOffset);
     }
 
     private void OnCaretMoved(object? sender, EventArgs e)
@@ -292,13 +295,14 @@ internal sealed class ReviewOverlay : IDisposable
 
         if (textView.GetDocumentLineByVisualTop(y + textView.ScrollOffset.Y) is { } line)
         {
-            SetPending(line.LineNumber, line.LineNumber, fromGutter: true);
+            SetPending(line.LineNumber, line.LineNumber, fromGutter: true, line.Offset);
         }
     }
 
-    private void SetPending(int start, int end, bool fromGutter)
+    /// <param name="anchorOffset">Document offset the floating icon hangs off; the icon sits at its bottom right.</param>
+    private void SetPending(int start, int end, bool fromGutter, int anchorOffset)
     {
-        pending = (start, end);
+        pending = new PendingRange(start, end, anchorOffset);
         pendingFromGutter = fromGutter;
         Layout();
     }
@@ -552,11 +556,16 @@ internal sealed class ReviewOverlay : IDisposable
             return;
         }
 
-        var span = LineSpan(viewport, doc, range.End);
-        var x = Math.Max(viewport.X + Edge, viewport.Right - Edge - IconSize - Gap - markerSize);
-        var maxY = Math.Max(viewport.Top + Gap, viewport.Bottom - IconSize - Gap);
-        Canvas.SetLeft(ui.Icon, x);
-        Canvas.SetTop(ui.Icon, Math.Clamp(span.Top, viewport.Top + Gap, maxY));
+        // Bottom right of the anchor: just below the line's last visual line, just right of the offset. The icon used to
+        // hug the right edge of the viewport, far away from the text the user had just selected.
+        var offset = Math.Clamp(range.AnchorOffset, 0, doc.TextLength);
+        var bottom = textView.GetVisualPosition(new TextViewPosition(doc.GetLocation(offset)), VisualYPosition.LineBottom);
+        var anchor = new Point(
+            viewport.X + bottom.X - textView.ScrollOffset.X,
+            viewport.Y + bottom.Y - textView.ScrollOffset.Y);
+        var placed = ReviewIconPlacement.Find(viewport, anchor);
+        Canvas.SetLeft(ui.Icon, placed.X);
+        Canvas.SetTop(ui.Icon, placed.Y);
         ui.Icon.IsVisible = true;
     }
 
@@ -644,4 +653,7 @@ internal sealed class ReviewOverlay : IDisposable
         var end = body.IndexOfAny(['\r', '\n']);
         return end < 0 ? body : body[..end];
     }
+
+    /// <summary>A pending review range and the document offset the floating icon hangs off (its bottom right).</summary>
+    private readonly record struct PendingRange(int Start, int End, int AnchorOffset);
 }

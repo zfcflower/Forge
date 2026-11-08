@@ -616,13 +616,6 @@ internal sealed class WorkbenchHost : Panel
                 InvalidateArrange();
                 UpdateZOrder();
                 break;
-            case nameof(RegionModel.MaximizedPanel):
-                if (sender is RegionModel region)
-                {
-                    presenters[(int)region.Role]?.InvalidateArrange();
-                }
-
-                break;
         }
     }
 

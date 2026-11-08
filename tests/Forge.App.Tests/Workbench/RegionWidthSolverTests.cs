@@ -45,7 +45,12 @@ public sealed class RegionWidthSolverTests
     private const double HideOneWindow = 660;
 
     private const double HugeDelta = 1e6;
-    private const double SmallDrag = 100;
+    /// <summary>
+    /// One drag notch that the width solver can absorb without clamping in the cases under test. It has to stay inside a
+    /// window: above <c>ProjectSlack</c> (or the case that expects the project to hit its minimum stops before it) and below
+    /// <c>InspectorSlack</c> (or a case that expects the inspector to shrink by the drag distance clamps instead).
+    /// </summary>
+    private const double SmallDrag = 70;
     private const double MediumDrag = 200;
     private const double PartialShortfall = 50;
     private const double UndersizedMain = 300;

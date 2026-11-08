@@ -69,7 +69,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         Action<SubAgentViewModel>? subAgentOpened = null,
         ComposerPreferences? composerPreferences = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
-        Func<IReadOnlyList<SlashEntry>>? skillSource = null)
+        Func<IReadOnlyList<SlashEntry>>? skillSource = null,
+        ISessionInstrumentSources? instrumentSources = null)
     {
         Info = session;
         this.runtime = runtime;
@@ -96,6 +97,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             fileSource,
             skillSource);
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
+        Instruments = new SessionInstrumentsViewModel(
+            session,
+            instrumentSources ?? EmptySessionInstrumentSources.Instance,
+            runtime.ToolNames,
+            () => Composer.Model);
         if (!provider.IsConfigured)
         {
             Transcript.AddNotice(SessionStrings.ProviderMissing(provider.Status), isError: true);
@@ -110,14 +116,13 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     public string Title => Info.Title;
 
-    public string DocumentsGlyph => "◆";
-
-    /// <summary>Distinct glyph prefix so session, file and changes tabs are told apart at a glance.</summary>
-    public string TabTitle => DocumentsGlyph + " " + Info.Title;
+    /// <summary>
+    /// The tab's label. The session tab's marker is not part of it: the tab strip draws that one as a chat bubble icon for
+    /// session tabs, so the title stays plain text for tooltips, automation and window titles.
+    /// </summary>
+    public string TabTitle => Info.Title;
 
     public string WorkDir => Info.WorkspacePath;
-
-    public string WorkDirDisplay => Info.WorkspacePath;
 
     public string BranchText => string.IsNullOrEmpty(Info.Branch) ? string.Empty : Info.Branch;
 
@@ -154,6 +159,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     public bool QueuePaused => queuePaused && queued.Count > 0 && !isRunning;
 
     public ComposerViewModel Composer { get; }
+
+    /// <summary>The readout above the input: usage, the four counters, the project and the git markers.</summary>
+    public SessionInstrumentsViewModel Instruments { get; }
+
+    /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
+    internal IReadOnlyList<string> ToolNames() => runtime.ToolNames();
 
     public RelayCommand ToggleSubAgentsCommand { get; }
 
@@ -266,7 +277,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private void OnAgentStateChanged() => AgentTreeChanged?.Invoke();
 
     /// <summary>The toggle that collapses the region (and, collapsed, shows how many sub-agents are still running).</summary>
-    public string SubAgentToggleText => SessionStrings.SubAgentsToggle(subAgents.Count, subAgentsCollapsed);
+    public string SubAgentToggleText => SessionStrings.SubAgentsToggle(subAgents.Count);
 
     public string SubAgentToggleName => SessionStrings.SubAgentsToggleName;
 
@@ -291,7 +302,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         try
         {
             var messages = await TranscriptReplay.ReadAsync(store, SessionId, ct).ConfigureAwait(true);
-            TranscriptReplay.Apply(Transcript, messages);
+            Instruments.SeedHistory(TranscriptReplay.Apply(Transcript, messages));
 
             await RestoreSubAgentsAsync(SessionId, "root", ct).ConfigureAwait(true);
 
@@ -504,6 +515,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         queuePaused = false;
+        Instruments.NoteDraft(text);
         await RunTurnAsync(text).ConfigureAwait(true);
     }
 
@@ -724,6 +736,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         turnStartedAt = DateTimeOffset.Now;
+        Instruments.RefreshCounters();
+        Instruments.RefreshSources();
         Transcript.AddUserMessage(text, turnStartedAt);
         var card = Transcript.BeginTurn(turnStartedAt);
         turnNumber = card.Round;
@@ -904,6 +918,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 FinishSubAgent(subFinished);
                 break;
             case AgentToolStarted started:
+                Instruments.NoteToolUsed(started.Call.Name);
                 Card(started.AgentId)?.AddTool(started.Call);
                 break;
             case AgentToolFinished finishedTool:
@@ -950,10 +965,22 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         agentUsage[completed.AgentId] = completed.Usage;
         var delta = new TokenUsage(
             Math.Max(0, completed.Usage.InputTokens - previous.InputTokens),
-            Math.Max(0, completed.Usage.OutputTokens - previous.OutputTokens));
-        if (delta.InputTokens == 0 && delta.OutputTokens == 0)
+            Math.Max(0, completed.Usage.OutputTokens - previous.OutputTokens),
+            Math.Max(0, completed.Usage.CacheReadTokens - previous.CacheReadTokens),
+            Math.Max(0, completed.Usage.CacheWriteTokens - previous.CacheWriteTokens));
+        if (delta.InputTokens == 0 && delta.OutputTokens == 0 && delta.CacheReadTokens == 0 && delta.CacheWriteTokens == 0)
         {
             return;
+        }
+
+        // The strip reports the root agent's spend (the context window and the price belong to that model); a sub-agent's
+        // usage stays on its own tab, and its turn card still gets its own delta here.
+        Instruments.AddTurn(completed.AgentId, delta);
+        if (string.Equals(completed.AgentId, "root", StringComparison.Ordinal))
+        {
+            // The session's tool set only exists once the first turn built the agent host, so the denominator is refreshed
+            // after the turn that created it instead of before.
+            Instruments.RefreshCounters();
         }
 
         Card(completed.AgentId)?.AddUsage(delta, completed.Stop);
@@ -1056,6 +1083,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        Instruments.Dispose();
         foreach (var message in queued.ToArray())
         {
             NotifyWithdrawn(message);

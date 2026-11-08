@@ -340,6 +340,30 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         return built;
     }
 
+    /// <summary>
+    /// Names of the tools this session can call right now, sorted ordinally. Empty until the first turn built the agent
+    /// host: building it here would register the scope and subscribe to the extension host as a side effect of a readout.
+    /// </summary>
+    internal IReadOnlyList<string> ToolNames()
+    {
+        lock (gate)
+        {
+            if (disposed || builtHost is null)
+            {
+                return [];
+            }
+
+            var definitions = builtHost.Tools.Definitions;
+            var names = new string[definitions.Count];
+            for (var i = 0; i < definitions.Count; i++)
+            {
+                names[i] = definitions[i].Name;
+            }
+
+            return names;
+        }
+    }
+
     // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
     IApprovalPolicy ISessionToolScope.Policy => SessionPolicy;
 

@@ -6,14 +6,140 @@
              x:Class="Forge.App.Views.SessionView"
              x:DataType="vm:SessionWorkspaceViewModel">
   <UserControl.Styles>
+    <!-- The composer is two rounded panels sharing one outline, exactly like the reference: the white strip carries the
+         session's readout and buttons, and the grey input panel lies over the bottom of it, so its own rounded top edge is
+         the seam between the zones while its left, right and bottom edges coincide with the strip's. The card itself only
+         supplies the rounded clip and the focus state. -->
     <Style Selector="Border.composer-card">
-      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="10" />
+      <!-- No clip: each panel draws the part of the shared outline it owns, so the 1 px stroke along the arcs is the panels'
+           own border and is not shaved off by a clip curve drawn at the same radius. -->
     </Style>
-    <Style Selector="Border.composer-card.focused">
+
+    <!-- 44 px tall with its bottom 10 px (the grey panel's corner radius) behind the grey panel: the visible white band stays
+         34 px, and the white panel's straight side borders run all the way down to where the grey panel's side borders
+         begin, so the outline never steps in at the seam. -->
+    <Style Selector="Border.instrument-strip">
+      <Setter Property="Height" Value="44" />
+      <Setter Property="Padding" Value="11,0,11,10" />
+      <!-- Square bottom corners: square is what lets the side borders reach past the seam without curving inwards. -->
+      <Setter Property="CornerRadius" Value="10,10,0,0" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <!-- No bottom edge: the grey panel's top edge is the seam, and two 1 px strokes there would read as a thick line. -->
+      <Setter Property="BorderThickness" Value="1,1,1,0" />
+      <!-- The width rule is the only thing that gives way; clipping guarantees that a pathological branch name can never
+           paint outside the card. -->
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <!-- The grey panel keeps all four corners rounded: its top arcs are drawn over the white panel's last 10 px, against the
+         white behind them, while the straight part of its top border is the seam between the zones. Its left, right and
+         bottom borders land on the same pixels as the white panel's, so the outline stays one straight line per side. -->
+    <Style Selector="Border.composer-body">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Margin" Value="0,-10,0,0" />
+    </Style>
+
+    <!-- Focus lights up the shared outline: both panels draw part of it, so both take the accent. -->
+    <Style Selector="Border.composer-card.focused Border.instrument-strip">
       <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Border.composer-card.focused Border.composer-body">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="TextBlock.instrument-info">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.instrument-meta">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.instrument-pill">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.instrument-pill > TextBlock">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="Button.instrument-chip">
+      <Setter Property="Height" Value="24" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="Padding" Value="7,0" />
+      <!-- Icon, label and count are one centred group inside the chip. -->
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.instrument-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <!-- Toggled on: the chip itself is the state readout, so it takes the accent wash instead of a word. -->
+    <Style Selector="Button.instrument-chip.active /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+
+    <Style Selector="Button.instrument-project">
+      <Setter Property="Height" Value="24" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="Padding" Value="7,0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.instrument-project:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.instrument-count">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Border.instrument-divider">
+      <Setter Property="Width" Value="1" />
+      <Setter Property="Height" Value="14" />
+      <Setter Property="Margin" Value="4,0" />
+      <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- The context bar is drawn, not a ProgressBar: the control's theme decides its own track size, while two borders keep
+         the width exactly what the style says. The fill's width is computed by the view model. -->
+    <Style Selector="Border.instrument-track">
+      <Setter Property="Width" Value="54" />
+      <Setter Property="Height" Value="4" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Border.instrument-fill">
+      <Setter Property="Height" Value="4" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
     </Style>
 
     <!-- the input sits borderless inside the card -->
@@ -198,264 +324,416 @@
         <TextBlock Classes="h2"
                    Text="{Binding [session.startConversation], Source={x:Static loc:Loc.Instance}}"
                    HorizontalAlignment="Center" />
-        <TextBlock Classes="caption"
-                   TextAlignment="Center"
-                   Text="{Binding WorkDirDisplay}" />
+        <!-- The workspace button above already names the folder; the empty state keeps the hint only. -->
         <TextBlock Classes="caption"
                    TextAlignment="Center"
                    Text="{Binding [session.chatHint], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
     </Panel>
 
-    <Grid Grid.Row="1" RowDefinitions="Auto,Auto" Margin="12,6,12,8">
+    <Grid Grid.Row="1" Margin="12,6,12,8">
       <Border x:Name="ComposerCard"
               Classes="composer-card"
               Classes.focused="{Binding #Input.IsKeyboardFocusWithin}">
-        <Grid RowDefinitions="Auto,Auto,Auto">
-          <!-- queued and interjected messages -->
-          <StackPanel Grid.Row="0"
-                      Spacing="4"
-                      Margin="8,8,8,0"
-                      IsVisible="{Binding HasQueued}">
-            <ItemsControl ItemsSource="{Binding Queued}"
-                          AutomationProperties.AutomationId="composer-queue">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <WrapPanel />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:QueuedMessageViewModel">
-                  <Border Classes="queued-chip"
-                          Classes.interjection="{Binding IsInterjection}"
-                          ToolTip.Tip="{Binding Text}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <TextBlock Classes="queued-label" Text="{Binding Label}" VerticalAlignment="Center" />
-                      <TextBlock Text="{Binding Preview}"
-                                 MaxWidth="260"
-                                 TextTrimming="CharacterEllipsis"
-                                 VerticalAlignment="Center" />
-                      <Button Classes="icon composer-mini"
-                              Command="{Binding RemoveCommand}"
-                              IsVisible="{Binding CanRemove}"
-                              AutomationProperties.Name="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}"
-                              ToolTip.Tip="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}">
-                        <wc:LineIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
-                      </Button>
-                    </StackPanel>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <TextBlock Classes="caption"
-                       IsVisible="{Binding QueuePaused}"
-                       Text="{Binding [session.composer.queuePaused], Source={x:Static loc:Loc.Instance}}" />
-          </StackPanel>
-
-          <TextBox x:Name="Input"
-                   Grid.Row="1"
-                   Classes="composer-input"
-                   Text="{Binding Draft, Mode=TwoWay}"
-                   AcceptsReturn="True"
-                   TextWrapping="Wrap"
-                   MinHeight="44"
-                   MaxHeight="180"
-                   VerticalContentAlignment="Top"
-                   PlaceholderText="{Binding [session.messagePlaceholder], Source={x:Static loc:Loc.Instance}}"
-                   AutomationProperties.AutomationId="session-input"
-                   AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}" />
-
-          <!-- toolbar: agent and model chips on the left, send / running menu on the right -->
-          <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto" Margin="6,0,6,6">
-            <Button x:Name="AgentChip"
-                    Classes="composer-chip"
-                    AutomationProperties.AutomationId="composer-agent"
-                    AutomationProperties.Name="{Binding [session.composer.agent], Source={x:Static loc:Loc.Instance}}"
-                    ToolTip.Tip="{Binding [session.composer.agentTooltip], Source={x:Static loc:Loc.Instance}}">
-              <StackPanel Orientation="Horizontal" Spacing="5">
-                <wc:LineIcon Data="{StaticResource IconSparkle}" Width="13" Height="13" />
-                <TextBlock Text="{Binding Composer.AgentLabel}" VerticalAlignment="Center" />
-                <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
-              </StackPanel>
-              <Button.Flyout>
-                <Flyout Placement="TopEdgeAlignedLeft">
-                  <ItemsControl ItemsSource="{Binding Composer.Agents}"
-                                MinWidth="260"
-                                AutomationProperties.AutomationId="composer-agent-list">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="vm:ComposerAgentOption">
-                        <Button Classes="composer-row"
-                                Command="{Binding SelectCommand}"
-                                Click="OnAgentPicked"
-                                AutomationProperties.Name="{Binding Name}">
-                          <Grid ColumnDefinitions="18,*">
-                            <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
-                            <StackPanel Grid.Column="1" Spacing="1">
-                              <TextBlock Text="{Binding Name}" FontWeight="Medium" />
-                              <TextBlock Classes="caption"
-                                         Text="{Binding Description}"
-                                         MaxWidth="300"
-                                         TextWrapping="Wrap" />
-                            </StackPanel>
-                          </Grid>
-                        </Button>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </Flyout>
-              </Button.Flyout>
-            </Button>
-
-            <Button x:Name="ModelChip"
-                    Grid.Column="1"
-                    Margin="4,0,0,0"
-                    Classes="composer-chip"
-                    IsEnabled="{Binding Composer.HasModel}"
-                    AutomationProperties.AutomationId="composer-model"
-                    AutomationProperties.Name="{Binding Composer.ModelLabel}"
-                    ToolTip.Tip="{Binding [session.composer.modelTooltip], Source={x:Static loc:Loc.Instance}}">
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBlock Text="{Binding Composer.ModelLabel}"
-                           MaxWidth="220"
-                           TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center" />
-                <StackPanel Orientation="Horizontal" Spacing="1.5" VerticalAlignment="Center" Height="10">
-                  <Rectangle Classes="effort-bar" Height="4" Opacity="{Binding Composer.EffortBar1}" />
-                  <Rectangle Classes="effort-bar" Height="7" Opacity="{Binding Composer.EffortBar2}" />
-                  <Rectangle Classes="effort-bar" Height="10" Opacity="{Binding Composer.EffortBar3}" />
+        <Grid RowDefinitions="Auto,Auto">
+          <!-- The strip: counters and the workspace button on the left, the context readout on the right. The working
+               directory is not shown here any more - the project tree on the left already names the session; the full path
+               stays in the workspace button's tooltip. -->
+          <Border x:Name="InstrumentStrip"
+                  Grid.Row="0"
+                  Classes="instrument-strip"
+                  SizeChanged="OnInstrumentStripSizeChanged">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <!-- No status dot and no path here: the project tree already carries both the session and its state, and
+                     the path repeated the workspace button's own folder name. -->
+                <!-- Only the git markers: the branch is named by the workspace button and the project tree, so a chip for it
+                     repeated a value the user already sees twice. -->
+                <StackPanel x:Name="StripGit" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <TextBlock Classes="instrument-meta"
+                             Text="{Binding Instruments.AheadBehindText}"
+                             IsVisible="{Binding Instruments.HasAheadBehind}"
+                             AutomationProperties.AutomationId="strip-ahead-behind" />
+                  <TextBlock Classes="instrument-meta"
+                             Text="{Binding Instruments.ChecksText}"
+                             IsVisible="{Binding Instruments.HasChecks}"
+                             AutomationProperties.AutomationId="strip-checks" />
                 </StackPanel>
-                <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+
+                <!-- One button for the four counters: the strip stays short, and the four readings live in its menu.
+                     It sits first because it is the busiest thing in the strip; the sub-agent toggle follows it. -->
+                <Button x:Name="StripResources"
+                        Classes="instrument-chip"
+                        ToolTip.Tip="{Binding Instruments.ResourcesTooltip}"
+                        AutomationProperties.AutomationId="strip-resources"
+                        AutomationProperties.Name="{Binding Instruments.ResourcesLabel}">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <wc:LineIcon Data="{StaticResource IconLayers}" Width="13" Height="13" />
+                    <TextBlock Text="{Binding Instruments.ResourcesLabel}" VerticalAlignment="Center" />
+                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="11" Height="11" />
+                  </StackPanel>
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                      <MenuItem Header="{Binding Instruments.ApprovalMenuText}"
+                                Command="{Binding Instruments.OpenApprovalsCommand}"
+                                AutomationProperties.AutomationId="strip-resources-approvals" />
+                      <MenuItem Header="{Binding Instruments.SkillMenuText}"
+                                Command="{Binding Instruments.OpenSkillsCommand}"
+                                AutomationProperties.AutomationId="strip-resources-skills" />
+                      <MenuItem Header="{Binding Instruments.McpMenuText}"
+                                Command="{Binding Instruments.OpenMcpCommand}"
+                                AutomationProperties.AutomationId="strip-resources-mcp" />
+                      <MenuItem Header="{Binding Instruments.ToolMenuText}"
+                                Command="{Binding Instruments.OpenToolsCommand}"
+                                AutomationProperties.AutomationId="strip-resources-tools" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                </Button>
+
+                <!-- Collapsed is shown by the button reading as active, not by a word in its label. -->
+                <Button Classes="instrument-chip"
+                        Classes.active="{Binding SubAgentsCollapsed}"
+                        Command="{Binding ToggleSubAgentsCommand}"
+                        IsVisible="{Binding HasSubAgentActivity}"
+                        ToolTip.Tip="{Binding SubAgentToggleTooltip}"
+                        AutomationProperties.AutomationId="strip-subagents"
+                        AutomationProperties.Name="{Binding SubAgentToggleName}">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <wc:LineIcon Data="{StaticResource IconSparkle}" Width="13" Height="13" />
+                    <TextBlock Text="{Binding SubAgentToggleText}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+
+                <Border Classes="instrument-divider" />
+
+                <!-- The workspace button names the session's working directory; the menu offers the project and the
+                     workspace separately, because they are two different folders for a worktree session. -->
+                <Button x:Name="StripWorkspace"
+                        Classes="instrument-project"
+                        ToolTip.Tip="{Binding Instruments.WorkspaceTooltip}"
+                        AutomationProperties.AutomationId="strip-workspace"
+                        AutomationProperties.Name="{Binding Instruments.WorkspaceName}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <wc:LineIcon Data="{StaticResource IconFolder}" Width="14" Height="14" />
+                    <TextBlock Text="{Binding Instruments.WorkspaceName}"
+                               MaxWidth="160"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis" />
+                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                  </StackPanel>
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="{Binding [session.strip.project.vscode], Source={x:Static loc:Loc.Instance}}"
+                                Command="{Binding Instruments.OpenProjectInVsCodeCommand}"
+                                IsVisible="{Binding Instruments.CanOpenProjectInVsCode}"
+                                AutomationProperties.AutomationId="strip-project-vscode" />
+                      <MenuItem Header="{Binding [session.strip.workspace.vscode], Source={x:Static loc:Loc.Instance}}"
+                                Command="{Binding Instruments.OpenWorkspaceInVsCodeCommand}"
+                                IsVisible="{Binding Instruments.CanOpenWorkspaceInVsCode}"
+                                AutomationProperties.AutomationId="strip-workspace-vscode" />
+                      <MenuItem Header="{Binding [session.strip.project.explorer], Source={x:Static loc:Loc.Instance}}"
+                                Command="{Binding Instruments.OpenProjectInExplorerCommand}"
+                                IsVisible="{Binding Instruments.CanOpenProjectInExplorer}"
+                                AutomationProperties.AutomationId="strip-project-explorer" />
+                      <MenuItem Header="{Binding [session.strip.workspace.explorer], Source={x:Static loc:Loc.Instance}}"
+                                Command="{Binding Instruments.OpenWorkspaceInExplorerCommand}"
+                                IsVisible="{Binding Instruments.CanOpenWorkspaceInExplorer}"
+                                AutomationProperties.AutomationId="strip-workspace-explorer" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                </Button>
               </StackPanel>
-              <Button.Flyout>
-                <Flyout Placement="TopEdgeAlignedLeft">
-                  <StackPanel Width="300" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
-                    <TextBox x:Name="ModelSearch"
-                             Text="{Binding Composer.ModelSearch, Mode=TwoWay}"
-                             PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
-                             AutomationProperties.AutomationId="composer-model-search"
-                             AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}" />
-                    <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
-                      <ItemsControl ItemsSource="{Binding Composer.Models}"
-                                    AutomationProperties.AutomationId="composer-model-list">
+
+              <!-- Right half: the token reading — the cache-read hit rate, the five-segment gauge and "<percent>/<window>".
+                   Hovering it gives the full breakdown (input/output, window, used, cache hit ratio and the cost estimate). -->
+              <StackPanel Grid.Column="2"
+                          Orientation="Horizontal"
+                          Spacing="8"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="{Binding Instruments.UsageTooltip}"
+                          AutomationProperties.AutomationId="strip-context">
+                <TextBlock Classes="instrument-meta"
+                           VerticalAlignment="Center"
+                           Text="{Binding Instruments.CacheReadText}" />
+                <ItemsControl ItemsSource="{Binding Instruments.ContextSegments}"
+                              VerticalAlignment="Center"
+                              AutomationProperties.AutomationId="strip-context-gauge">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ContextSegment">
+                      <!-- One slanted quadrilateral, same size for every segment; filled ones are solid, the rest outline only. -->
+                      <Panel Width="13" Height="8" VerticalAlignment="Center">
+                        <Polygon Points="0,8 3,0 13,0 10,8"
+                                 Fill="{DynamicResource AccentBrush}"
+                                 IsVisible="{Binding IsFilled}" />
+                        <Polygon Points="0,8 3,0 13,0 10,8"
+                                 Stroke="{DynamicResource AccentBrush}"
+                                 StrokeThickness="1"
+                                 Fill="Transparent"
+                                 IsVisible="{Binding IsEmpty}" />
+                      </Panel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Classes="instrument-meta"
+                           VerticalAlignment="Center"
+                           Text="{Binding Instruments.ContextLabel}" />
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <Border Grid.Row="1" Classes="composer-body">
+            <Grid RowDefinitions="Auto,Auto,Auto" Margin="0,10,0,0">
+              <!-- queued and interjected messages -->
+              <StackPanel Grid.Row="0"
+                          Spacing="4"
+                          Margin="8,8,8,0"
+                          IsVisible="{Binding HasQueued}">
+                <ItemsControl ItemsSource="{Binding Queued}"
+                              AutomationProperties.AutomationId="composer-queue">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:QueuedMessageViewModel">
+                      <Border Classes="queued-chip"
+                              Classes.interjection="{Binding IsInterjection}"
+                              ToolTip.Tip="{Binding Text}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Classes="queued-label" Text="{Binding Label}" VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding Preview}"
+                                     MaxWidth="260"
+                                     TextTrimming="CharacterEllipsis"
+                                     VerticalAlignment="Center" />
+                          <Button Classes="icon composer-mini"
+                                  Command="{Binding RemoveCommand}"
+                                  IsVisible="{Binding CanRemove}"
+                                  AutomationProperties.Name="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}"
+                                  ToolTip.Tip="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}">
+                            <wc:LineIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+                          </Button>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding QueuePaused}"
+                           Text="{Binding [session.composer.queuePaused], Source={x:Static loc:Loc.Instance}}" />
+              </StackPanel>
+
+              <TextBox x:Name="Input"
+                       Grid.Row="1"
+                       Classes="composer-input"
+                       Text="{Binding Draft, Mode=TwoWay}"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       MinHeight="44"
+                       MaxHeight="180"
+                       VerticalContentAlignment="Top"
+                       PlaceholderText="{Binding [session.messagePlaceholder], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="session-input"
+                       AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}" />
+
+              <!-- toolbar: agent and model chips on the left, send / running menu on the right -->
+              <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto" Margin="6,0,6,6">
+                <Button x:Name="AgentChip"
+                        Classes="composer-chip"
+                        AutomationProperties.AutomationId="composer-agent"
+                        AutomationProperties.Name="{Binding [session.composer.agent], Source={x:Static loc:Loc.Instance}}"
+                        ToolTip.Tip="{Binding [session.composer.agentTooltip], Source={x:Static loc:Loc.Instance}}">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <wc:LineIcon Data="{StaticResource IconSparkle}" Width="13" Height="13" />
+                    <TextBlock Text="{Binding Composer.AgentLabel}" VerticalAlignment="Center" />
+                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                  </StackPanel>
+                  <Button.Flyout>
+                    <Flyout Placement="TopEdgeAlignedLeft">
+                      <ItemsControl ItemsSource="{Binding Composer.Agents}"
+                                    MinWidth="260"
+                                    AutomationProperties.AutomationId="composer-agent-list">
                         <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:ComposerModelOption">
-                            <Grid ColumnDefinitions="*,Auto">
-                              <Button Classes="composer-row"
-                                      Command="{Binding SelectCommand}"
-                                      Click="OnModelPicked"
-                                      AutomationProperties.Name="{Binding Name}">
-                                <Grid ColumnDefinitions="18,*">
-                                  <TextBlock Text="✓" IsVisible="{Binding IsSelected}" />
-                                  <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                </Grid>
-                              </Button>
-                              <Button Grid.Column="1"
-                                      Classes="icon composer-mini"
-                                      Command="{Binding TogglePinCommand}"
-                                      AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
-                                      ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
-                                <wc:LineIcon Classes="star"
-                                          Classes.pinned="{Binding IsPinned}"
-                                          Data="{StaticResource IconStar}"
-                                          Width="12"
-                                          Height="12" />
-                              </Button>
-                            </Grid>
+                          <DataTemplate x:DataType="vm:ComposerAgentOption">
+                            <Button Classes="composer-row"
+                                    Command="{Binding SelectCommand}"
+                                    Click="OnAgentPicked"
+                                    AutomationProperties.Name="{Binding Name}">
+                              <Grid ColumnDefinitions="18,*">
+                                <TextBlock Text="✓" IsVisible="{Binding IsSelected}" VerticalAlignment="Top" />
+                                <StackPanel Grid.Column="1" Spacing="1">
+                                  <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                                  <TextBlock Classes="caption"
+                                             Text="{Binding Description}"
+                                             MaxWidth="300"
+                                             TextWrapping="Wrap" />
+                                </StackPanel>
+                              </Grid>
+                            </Button>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
                       </ItemsControl>
-                    </ScrollViewer>
-                    <TextBlock Classes="caption"
-                               IsVisible="{Binding Composer.HasNoModels}"
-                               Text="{Binding [session.composer.noModels], Source={x:Static loc:Loc.Instance}}" />
-                    <Separator />
-                    <Grid ColumnDefinitions="*,Auto" Margin="2,0">
-                      <TextBlock Classes="label" Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
-                      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Composer.EffortName}" />
-                    </Grid>
-                    <Panel Margin="2,0">
-                      <Border Classes="effort-track" />
-                      <Slider Classes="effort"
-                              Minimum="0"
-                              Maximum="3"
-                              TickFrequency="1"
-                              IsSnapToTickEnabled="True"
-                              Value="{Binding Composer.EffortValue, Mode=TwoWay}"
-                              AutomationProperties.AutomationId="composer-effort"
-                              AutomationProperties.Name="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
-                    </Panel>
-                    <Separator />
-                    <Button Classes="composer-row"
-                            Command="{Binding Composer.SaveDefaultsCommand}"
-                            AutomationProperties.AutomationId="composer-save-defaults"
-                            Content="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
-                    <Button Classes="composer-row"
-                            Command="{Binding Composer.RefreshCommand}"
-                            AutomationProperties.AutomationId="composer-refresh">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <wc:LineIcon Data="{DynamicResource IconRefresh}" Width="13" Height="13" />
-                        <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
-                      </StackPanel>
-                    </Button>
-                    <TextBlock Classes="caption"
-                               Margin="8,0"
-                               IsVisible="{Binding Composer.HasStatus}"
-                               Text="{Binding Composer.Status}" />
-                  </StackPanel>
-                </Flyout>
-              </Button.Flyout>
-            </Button>
+                    </Flyout>
+                  </Button.Flyout>
+                </Button>
 
-            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">
-              <Button Classes="icon"
-                      Command="{Binding CancelCommand}"
-                      IsVisible="{Binding IsRunning}"
-                      AutomationProperties.AutomationId="session-stop-turn"
-                      AutomationProperties.Name="{Binding [session.stopTurn], Source={x:Static loc:Loc.Instance}}"
-                      ToolTip.Tip="{Binding [session.composer.stopHint], Source={x:Static loc:Loc.Instance}}">
-                <wc:LineIcon Data="{StaticResource IconStop}" Width="13" Height="13" />
-              </Button>
-              <Button Classes="composer-send"
-                      Command="{Binding SendCommand}"
-                      IsEnabled="{Binding CanSendNow}"
-                      IsVisible="{Binding IsIdle}"
-                      AutomationProperties.AutomationId="session-send"
-                      AutomationProperties.Name="{Binding [session.send], Source={x:Static loc:Loc.Instance}}"
-                      ToolTip.Tip="{Binding [session.sendTooltip], Source={x:Static loc:Loc.Instance}}">
-                <wc:LineIcon Data="{StaticResource IconArrowUp}" Width="13" Height="13" />
-              </Button>
-              <Button x:Name="RunningMenu"
-                      Classes="composer-send running"
-                      IsVisible="{Binding IsRunning}"
-                      AutomationProperties.AutomationId="composer-running-menu"
-                      AutomationProperties.Name="{Binding [session.composer.runningMenu], Source={x:Static loc:Loc.Instance}}"
-                      ToolTip.Tip="{Binding [session.composer.runningMenu], Source={x:Static loc:Loc.Instance}}">
-                <wc:LineIcon Data="{StaticResource IconEllipsis}" StrokeThickness="2.75" Width="13" Height="13" />
-                <Button.Flyout>
-                  <MenuFlyout Placement="TopEdgeAlignedRight">
-                    <MenuItem Header="{Binding [session.composer.interject], Source={x:Static loc:Loc.Instance}}"
-                              Command="{Binding InterjectCommand}"
-                              ToolTip.Tip="{Binding [session.composer.interjectHint], Source={x:Static loc:Loc.Instance}}"
-                              AutomationProperties.AutomationId="composer-interject" />
-                    <MenuItem Header="{Binding [session.composer.queue], Source={x:Static loc:Loc.Instance}}"
-                              Command="{Binding QueueCommand}"
-                              InputGesture="Ctrl+Enter"
-                              ToolTip.Tip="{Binding [session.composer.queueHint], Source={x:Static loc:Loc.Instance}}"
-                              AutomationProperties.AutomationId="composer-queue-item" />
-                    <MenuItem Header="{Binding [session.composer.redirect], Source={x:Static loc:Loc.Instance}}"
-                              Command="{Binding RedirectCommand}"
-                              ToolTip.Tip="{Binding [session.composer.redirectHint], Source={x:Static loc:Loc.Instance}}"
-                              AutomationProperties.AutomationId="composer-redirect" />
-                    <Separator />
-                    <MenuItem Header="{Binding [session.stopName], Source={x:Static loc:Loc.Instance}}"
-                              Command="{Binding CancelCommand}"
-                              ToolTip.Tip="{Binding [session.composer.stopHint], Source={x:Static loc:Loc.Instance}}"
-                              AutomationProperties.AutomationId="composer-stop" />
-                  </MenuFlyout>
-                </Button.Flyout>
-              </Button>
-            </StackPanel>
-          </Grid>
+                <Button x:Name="ModelChip"
+                        Grid.Column="1"
+                        Margin="4,0,0,0"
+                        Classes="composer-chip"
+                        IsEnabled="{Binding Composer.HasModel}"
+                        AutomationProperties.AutomationId="composer-model"
+                        AutomationProperties.Name="{Binding Composer.ModelLabel}"
+                        ToolTip.Tip="{Binding [session.composer.modelTooltip], Source={x:Static loc:Loc.Instance}}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="{Binding Composer.ModelLabel}"
+                               MaxWidth="220"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="1.5" VerticalAlignment="Center" Height="10">
+                      <Rectangle Classes="effort-bar" Height="4" Opacity="{Binding Composer.EffortBar1}" />
+                      <Rectangle Classes="effort-bar" Height="7" Opacity="{Binding Composer.EffortBar2}" />
+                      <Rectangle Classes="effort-bar" Height="10" Opacity="{Binding Composer.EffortBar3}" />
+                    </StackPanel>
+                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                  </StackPanel>
+                  <Button.Flyout>
+                    <Flyout Placement="TopEdgeAlignedLeft">
+                      <StackPanel Width="300" Spacing="6" AutomationProperties.AutomationId="composer-model-panel">
+                        <TextBox x:Name="ModelSearch"
+                                 Text="{Binding Composer.ModelSearch, Mode=TwoWay}"
+                                 PlaceholderText="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}"
+                                 AutomationProperties.AutomationId="composer-model-search"
+                                 AutomationProperties.Name="{Binding [session.composer.searchModels], Source={x:Static loc:Loc.Instance}}" />
+                        <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
+                          <ItemsControl ItemsSource="{Binding Composer.Models}"
+                                        AutomationProperties.AutomationId="composer-model-list">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:ComposerModelOption">
+                                <Grid ColumnDefinitions="*,Auto">
+                                  <Button Classes="composer-row"
+                                          Command="{Binding SelectCommand}"
+                                          Click="OnModelPicked"
+                                          AutomationProperties.Name="{Binding Name}">
+                                    <Grid ColumnDefinitions="18,*">
+                                      <TextBlock Text="✓" IsVisible="{Binding IsSelected}" />
+                                      <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                  </Button>
+                                  <Button Grid.Column="1"
+                                          Classes="icon composer-mini"
+                                          Command="{Binding TogglePinCommand}"
+                                          AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
+                                          ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
+                                    <wc:LineIcon Classes="star"
+                                              Classes.pinned="{Binding IsPinned}"
+                                              Data="{StaticResource IconStar}"
+                                              Width="12"
+                                              Height="12" />
+                                  </Button>
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                        <TextBlock Classes="caption"
+                                   IsVisible="{Binding Composer.HasNoModels}"
+                                   Text="{Binding [session.composer.noModels], Source={x:Static loc:Loc.Instance}}" />
+                        <Separator />
+                        <Grid ColumnDefinitions="*,Auto" Margin="2,0">
+                          <TextBlock Classes="label" Text="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
+                          <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Composer.EffortName}" />
+                        </Grid>
+                        <Panel Margin="2,0">
+                          <Border Classes="effort-track" />
+                          <Slider Classes="effort"
+                                  Minimum="0"
+                                  Maximum="3"
+                                  TickFrequency="1"
+                                  IsSnapToTickEnabled="True"
+                                  Value="{Binding Composer.EffortValue, Mode=TwoWay}"
+                                  AutomationProperties.AutomationId="composer-effort"
+                                  AutomationProperties.Name="{Binding [session.composer.effort], Source={x:Static loc:Loc.Instance}}" />
+                        </Panel>
+                        <Separator />
+                        <Button Classes="composer-row"
+                                Command="{Binding Composer.SaveDefaultsCommand}"
+                                AutomationProperties.AutomationId="composer-save-defaults"
+                                Content="{Binding [session.composer.saveDefaults], Source={x:Static loc:Loc.Instance}}" />
+                        <Button Classes="composer-row"
+                                Command="{Binding Composer.RefreshCommand}"
+                                AutomationProperties.AutomationId="composer-refresh">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <wc:LineIcon Data="{DynamicResource IconRefresh}" Width="13" Height="13" />
+                            <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
+                          </StackPanel>
+                        </Button>
+                        <TextBlock Classes="caption"
+                                   Margin="8,0"
+                                   IsVisible="{Binding Composer.HasStatus}"
+                                   Text="{Binding Composer.Status}" />
+                      </StackPanel>
+                    </Flyout>
+                  </Button.Flyout>
+                </Button>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">
+                  <Button Classes="icon"
+                          Command="{Binding CancelCommand}"
+                          IsVisible="{Binding IsRunning}"
+                          AutomationProperties.AutomationId="session-stop-turn"
+                          AutomationProperties.Name="{Binding [session.stopTurn], Source={x:Static loc:Loc.Instance}}"
+                          ToolTip.Tip="{Binding [session.composer.stopHint], Source={x:Static loc:Loc.Instance}}">
+                    <wc:LineIcon Data="{StaticResource IconStop}" Width="13" Height="13" />
+                  </Button>
+                  <Button Classes="composer-send"
+                          Command="{Binding SendCommand}"
+                          IsEnabled="{Binding CanSendNow}"
+                          IsVisible="{Binding IsIdle}"
+                          AutomationProperties.AutomationId="session-send"
+                          AutomationProperties.Name="{Binding [session.send], Source={x:Static loc:Loc.Instance}}"
+                          ToolTip.Tip="{Binding [session.sendTooltip], Source={x:Static loc:Loc.Instance}}">
+                    <wc:LineIcon Data="{StaticResource IconArrowUp}" Width="13" Height="13" />
+                  </Button>
+                  <Button x:Name="RunningMenu"
+                          Classes="composer-send running"
+                          IsVisible="{Binding IsRunning}"
+                          AutomationProperties.AutomationId="composer-running-menu"
+                          AutomationProperties.Name="{Binding [session.composer.runningMenu], Source={x:Static loc:Loc.Instance}}"
+                          ToolTip.Tip="{Binding [session.composer.runningMenu], Source={x:Static loc:Loc.Instance}}">
+                    <wc:LineIcon Data="{StaticResource IconEllipsis}" StrokeThickness="2.75" Width="13" Height="13" />
+                    <Button.Flyout>
+                      <MenuFlyout Placement="TopEdgeAlignedRight">
+                        <MenuItem Header="{Binding [session.composer.interject], Source={x:Static loc:Loc.Instance}}"
+                                  Command="{Binding InterjectCommand}"
+                                  ToolTip.Tip="{Binding [session.composer.interjectHint], Source={x:Static loc:Loc.Instance}}"
+                                  AutomationProperties.AutomationId="composer-interject" />
+                        <MenuItem Header="{Binding [session.composer.queue], Source={x:Static loc:Loc.Instance}}"
+                                  Command="{Binding QueueCommand}"
+                                  InputGesture="Ctrl+Enter"
+                                  ToolTip.Tip="{Binding [session.composer.queueHint], Source={x:Static loc:Loc.Instance}}"
+                                  AutomationProperties.AutomationId="composer-queue-item" />
+                        <MenuItem Header="{Binding [session.composer.redirect], Source={x:Static loc:Loc.Instance}}"
+                                  Command="{Binding RedirectCommand}"
+                                  ToolTip.Tip="{Binding [session.composer.redirectHint], Source={x:Static loc:Loc.Instance}}"
+                                  AutomationProperties.AutomationId="composer-redirect" />
+                        <Separator />
+                        <MenuItem Header="{Binding [session.stopName], Source={x:Static loc:Loc.Instance}}"
+                                  Command="{Binding CancelCommand}"
+                                  ToolTip.Tip="{Binding [session.composer.stopHint], Source={x:Static loc:Loc.Instance}}"
+                                  AutomationProperties.AutomationId="composer-stop" />
+                      </MenuFlyout>
+                    </Button.Flyout>
+                  </Button>
+                </StackPanel>
+              </Grid>
+            </Grid>
+          </Border>
         </Grid>
       </Border>
 
@@ -498,24 +776,6 @@
         </Border>
       </Popup>
 
-      <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto" Margin="4,6,0,0">
-        <Ellipse Classes="status-dot"
-                 Classes.running="{Binding IsRunning}"
-                 Margin="0,0,6,0" />
-        <TextBlock Grid.Column="1"
-                   Classes="caption"
-                   Text="{Binding WorkDirDisplay}"
-                   ToolTip.Tip="{Binding WorkDirDisplay}" />
-        <TextBlock Grid.Column="2" Classes="caption" Margin="0,0,10,0" Text="{Binding BranchText}" />
-        <Button Grid.Column="3"
-                Classes="tab"
-                Content="{Binding SubAgentToggleText}"
-                IsVisible="{Binding HasSubAgentActivity}"
-                Command="{Binding ToggleSubAgentsCommand}"
-                AutomationProperties.AutomationId="toggle-subagents"
-                AutomationProperties.Name="{Binding SubAgentToggleName}"
-                ToolTip.Tip="{Binding SubAgentToggleTooltip}" />
-      </Grid>
     </Grid>
   </Grid>
 </UserControl>

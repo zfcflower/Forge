@@ -2,6 +2,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
+using Forge.Core.Providers;
 using Xunit;
 
 namespace Forge.App.Tests;
@@ -112,6 +113,37 @@ public sealed class TranscriptReplayTests
 
         Assert.False(card.HasUsage);
         Assert.Contains(TextFormat.None, card.Header);
+    }
+
+    /// <summary>
+    /// The sum a reopened session seeds its strip with (task spec "Forge.App": <c>SeedHistory</c>) must carry the cache
+    /// tokens too, or the session would report a 0% cache hit and a wrong cost for usage it really paid for.
+    /// </summary>
+    [Fact]
+    public async Task The_replayed_usage_sum_keeps_the_cache_tokens()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var usage = await session.Dispatch(
+            () =>
+            {
+                var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+                return TranscriptReplay.Apply(
+                    transcript,
+                    [
+                        Stored(UserText("go"), null, 1),
+                        Stored(
+                            AssistantText("done"),
+                            new TokenUsage(200_000, 10_000, CacheReadTokens: 100_000, CacheWriteTokens: 20_000),
+                            2),
+                    ]);
+            },
+            CancellationToken.None);
+
+        Assert.Equal(new TokenUsage(200_000, 10_000, 100_000, 20_000), usage);
+
+        // Dropping the cache tokens would read as 0% cached and $0.35 instead of the real $0.495.
+        Assert.Equal(0.5, SessionUsageMath.CacheHitRatio(usage));
+        Assert.Equal(0.495, SessionUsageMath.Cost(usage, new ModelPricing(3.00, 15.00, 0.30, 3.75))!.Value, 9);
     }
 
     [Fact]

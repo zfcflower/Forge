@@ -24,7 +24,7 @@ public sealed class PanelScrollExtentTests
         {
             foreach (var panel in new[] { "project", "git", "main", "bottom", "files", "tools", "preview" })
             {
-                foreach (var state in new[] { "split", "resize", "splitter", "restore", "window-restore" })
+                foreach (var state in new[] { "split", "resize", "splitter", "peer-minimized", "window-restore" })
                 {
                     yield return [list, panel, state];
                 }
@@ -125,12 +125,19 @@ public sealed class PanelScrollExtentTests
                         layout.BottomHeight = 180;
                         layout.InspectorSplitRatio = 0.3;
                         break;
-                    case "restore":
-                        layout.ToggleMaximize(model);
+                    case "peer-minimized":
+                        // The region's other panels collapse to their title bars, so this one gets the whole region and
+                        // is re-measured at a larger size than the split it started in.
+                        foreach (var peer in layout.GetRegion(model.Region).Panels)
+                        {
+                            if (!ReferenceEquals(peer, model) && peer.CanMinimize)
+                            {
+                                layout.ToggleMinimize(peer);
+                            }
+                        }
+
                         WorkbenchUi.Settle(scene.Window);
-                        Assert.Same(model, layout.GetRegion(model.Region).MaximizedPanel);
                         Check();
-                        layout.ToggleMaximize(model);
                         break;
                     case "window-restore":
                         scene.Window.WindowState = WindowState.Maximized;

@@ -164,8 +164,9 @@ internal sealed class FloatingPanelWindow : Window
 
         var label = new TextBlock
         {
+            Name = "PART_Title",
             Text = Title,
-            FontWeight = FontWeight.SemiBold,
+            FontWeight = FontWeight.Bold,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap,

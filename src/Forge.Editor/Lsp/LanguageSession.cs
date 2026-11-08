@@ -129,6 +129,15 @@ public sealed class LanguageSession : IAsyncDisposable
 
     public event EventHandler<DiagnosticsChangedEventArgs>? DiagnosticsChanged;
 
+    /// <summary>
+    /// The server asked the client to re-read something it owns; <c>workspace/diagnostic/refresh</c> means "ask me for
+    /// diagnostics again" and is the signal a pull-diagnostics editor re-pulls on.
+    /// </summary>
+    public event EventHandler? DiagnosticsRefreshRequested;
+
+    /// <summary>True while the server reports its own long-running work, e.g. loading a project.</summary>
+    public event EventHandler<bool>? BusyChanged;
+
     /// <summary>Starts a unit of work that keeps the session out of the idle sweep; pair with <see cref="ReleaseLease"/>.</summary>
     public bool TryLease()
     {
@@ -309,6 +318,30 @@ public sealed class LanguageSession : IAsyncDisposable
 
     public async Task<IReadOnlyList<DocumentSymbol>?> RequestDocumentSymbolsAsync(TextDocument document, CancellationToken ct = default) =>
         await InvokeAsync(document, client => client.RequestDocumentSymbolsAsync(document, ct), ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Records a set the editor pulled itself and raises <see cref="DiagnosticsChanged"/> exactly like a server push, so
+    /// pull and push land in one pipeline (rendering, ordering, replay to a view that attaches later).
+    /// </summary>
+    public void PublishDiagnostics(string uri, int? version, IReadOnlyList<LspDiagnostic> diagnostics)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        Diagnostics.Update(uri, version, diagnostics ?? []);
+        if (Diagnostics.Get(uri) is { } snapshot)
+        {
+            DiagnosticsChanged?.Invoke(this, new DiagnosticsChangedEventArgs(snapshot));
+        }
+    }
+
+    /// <summary>
+    /// The document's diagnostics from <c>textDocument/diagnostic</c>, or null when the session is not ready. A server
+    /// without pull support reports "unchanged" with no items, so callers fall back to the push notifications.
+    /// </summary>
+    public async Task<PulledDiagnostics?> RequestDiagnosticsAsync(
+        TextDocument document,
+        string? previousResultId = null,
+        CancellationToken ct = default) =>
+        await InvokeNullableAsync(document, client => client.RequestDiagnosticsAsync(document, previousResultId, ct), ct).ConfigureAwait(false);
 
     /// <summary>Foldable ranges from the server, or null when the session is not ready or the server cannot fold.</summary>
     public async Task<IReadOnlyList<FoldingRange>?> RequestFoldingRangesAsync(TextDocument document, CancellationToken ct = default) =>
@@ -582,6 +615,8 @@ public sealed class LanguageSession : IAsyncDisposable
         _crashed = false;
         LastError = null;
         client.Diagnostics.Changed += OnClientDiagnostics;
+        client.RefreshRequested += OnClientRefreshRequested;
+        client.BusyChanged += OnClientBusyChanged;
         client.Closed += OnClientClosed;
         client.LogMessage += OnServerLog;
         _syncPump ??= Task.Run(() => SyncLoopAsync(_lifetime.Token));
@@ -888,6 +923,16 @@ public sealed class LanguageSession : IAsyncDisposable
     {
         Diagnostics.Update(e.Snapshot.Uri, e.Snapshot.Version, e.Snapshot.Diagnostics);
         DiagnosticsChanged?.Invoke(this, e);
+    }
+
+    private void OnClientBusyChanged(bool busy) => BusyChanged?.Invoke(this, busy);
+
+    private void OnClientRefreshRequested(string method)
+    {
+        if (string.Equals(method, "workspace/diagnostic/refresh", StringComparison.Ordinal))
+        {
+            DiagnosticsRefreshRequested?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void OnClientClosed(object? sender, LspClientClosedEventArgs e)

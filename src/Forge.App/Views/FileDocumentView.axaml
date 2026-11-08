@@ -41,7 +41,7 @@
   </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
     <Border Classes="toolbar">
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
         <TextBlock Classes="mono" Text="{Binding PathDisplay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
         <TextBlock Grid.Column="1" Classes="caption" Margin="6,0" Text="*" IsVisible="{Binding IsDirty}" VerticalAlignment="Center" />
         <wc:PanelIconButton Grid.Column="2" Icon="{DynamicResource IconWrap}" Classes.active="{Binding WrapLines}"
@@ -53,7 +53,10 @@
         <wc:PanelIconButton Grid.Column="4" Margin="2,0,0,0" Icon="{DynamicResource IconCopy}" Click="OnCopyClick"
                             ToolTip.Tip="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="file-copy" AutomationProperties.Name="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}" />
-        <Button x:Name="ReviewSendAll" Grid.Column="5" Margin="2,0,0,0" Classes="icon" IsVisible="False"
+        <wc:PanelIconButton x:Name="EditorMenuButton" Grid.Column="5" Margin="2,0,0,0" Icon="{DynamicResource IconEllipsis}" Click="OnEditorMenuClick"
+                            ToolTip.Tip="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="file-editor-menu" AutomationProperties.Name="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}" />
+        <Button x:Name="ReviewSendAll" Grid.Column="6" Margin="2,0,0,0" Classes="icon" IsVisible="False"
                 AutomationProperties.AutomationId="review-send-all">
           <Path Classes="reviewGlyph" Data="{DynamicResource IconSend}" Width="14" Height="14" Stretch="Uniform" />
         </Button>
@@ -71,6 +74,10 @@
                  Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-lsp-status" />
       <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasEditorNotice}" Text="{Binding EditorNotice}"
                  Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-editor-notice" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasFoldingNotice}" Text="{Binding FoldingNotice}"
+                 Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-folding-notice" />
+      <TextBlock Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasEditorActionNotice}" Text="{Binding EditorActionNotice}"
+                 Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-editor-action-notice" />
       <TextBlock x:Name="ReviewStatus" Margin="12,6" Classes="caption" TextWrapping="Wrap" IsVisible="False"
                  Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="file-review-status" />
     </StackPanel>
@@ -81,7 +88,10 @@
                      LineNumbersForeground="{DynamicResource TextMutedBrush}"
                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                      IsReadOnly="{Binding IsEditorFaulted}"
-                     IsVisible="{Binding HasDocument}" AutomationProperties.AutomationId="file-editor" />
+                     IsVisible="{Binding HasDocument}" AutomationProperties.AutomationId="file-editor">
+        <!-- The right-click menu and the toolbar ellipsis are built in code (one builder, two hosts): an
+             Avalonia ContextMenu can only be opened on the control it is attached to, so the toolbar cannot reuse it. -->
+      </ae:TextEditor>
       <Canvas x:Name="ReviewLayer" ClipToBounds="True">
         <Button x:Name="ReviewIconButton" Classes="reviewIcon" Width="26" Height="26" IsVisible="False"
                 AutomationProperties.AutomationId="review-add">

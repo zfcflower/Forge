@@ -5,8 +5,10 @@ using System.Globalization;
 using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
+using Forge.App.Approval;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Services;
 using Forge.App.Terminal;
 using Forge.App.Git;
 using Forge.App.Workbench;
@@ -54,6 +56,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly HashSet<string> openTabs = new(StringComparer.Ordinal);
     private readonly FinishedSubAgentsViewModel emptyFinishedMenu = new();
     private readonly Dictionary<string, string> projectRoots = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> projectNames = new(StringComparer.Ordinal);
+    private readonly SessionInstrumentSources instruments;
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
     private readonly TerminalWorkbench terminals;
@@ -76,6 +80,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         Status = new StatusBarViewModel(composition);
         Settings = new SettingsViewModel(composition);
+        instruments = new SessionInstrumentSources(composition, CountPendingApprovals, OpenSettingsSection);
+        composition.ActiveSessionTools = () => activeSession?.ToolNames() ?? [];
+        if (ApprovalServices.Current is { } approvalServices)
+        {
+            approvalServices.Queue.Changed += OnApprovalQueueChanged;
+        }
+
         Projects = new ProjectTreeViewModel(
             composition.Projects,
             composition.Catalog,
@@ -216,12 +227,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         get => activeSession;
         private set
         {
+            var previous = activeSession;
             if (Set(ref activeSession, value))
             {
+                previous?.Instruments.SetGit(null, null);
                 Projects.SetActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
                 ApplyPanelContext();
+                PushGitText();
                 terminals.OnActiveSessionChanged(activeSession?.SessionId, activeSession?.WorkDir);
             }
         }
@@ -266,9 +280,18 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                     Dispatcher.UIThread.Post(() =>
                     {
                         projectRoots.Clear();
+                        projectNames.Clear();
                         foreach (var project in projects)
                         {
                             projectRoots[project.Id] = project.RootPath;
+                            projectNames[project.Id] = project.Name;
+                        }
+
+                        // Restored tabs are built before this read lands, so their strips get the project here instead of
+                        // never: the project button is the only place the session's repository is named.
+                        foreach (var session in sessions.Values)
+                        {
+                            ApplyProject(session);
                         }
                     });
                 }
@@ -497,7 +520,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Checkpoints,
             composition.Sessions,
             composition.Provider,
-            OnSubAgentToolRequested);
+            OnSubAgentToolRequested,
+            instrumentSources: instruments);
+        ApplyProject(session);
         session.TurnCompleted += OnTurnCompleted;
         session.SubAgentsChanged += OnSubAgentsChanged;
         session.AgentTreeChanged += OnAgentTreeChanged;
@@ -903,12 +928,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             case nameof(GitPanelViewModel.BranchText):
                 OnPropertyChanged(nameof(ActiveBranchText));
                 OnPropertyChanged(nameof(HasActiveBranch));
+                PushGitText();
                 break;
             case nameof(GitPanelViewModel.AheadBehindText):
                 Status.SetAheadBehind(GitPanel.AheadBehindText);
+                PushGitText();
                 break;
             case nameof(GitPanelViewModel.ChecksText):
                 Status.SetChecks(GitPanel.ChecksText);
+                PushGitText();
                 break;
             case nameof(GitPanelViewModel.Title):
                 if (Workbench.GitPanel is { } panel)
@@ -1320,6 +1348,52 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private async Task<string?> PromptTextAsync(string title, string initial) =>
         dialogs is null ? null : await dialogs.PromptTextAsync(title, initial).ConfigureAwait(true);
 
+    /// <summary>
+    /// Approval cards waiting for one session. The queue belongs to the UI thread, so this is only ever read from a view model
+    /// that lives there too; a plugin approval card carries no session and counts for none.
+    /// </summary>
+    private static int CountPendingApprovals(string sessionId)
+    {
+        if (sessionId.Length == 0 || ApprovalServices.Current is not { } approvals)
+        {
+            return 0;
+        }
+
+        var pending = 0;
+        foreach (var card in approvals.Queue.Items)
+        {
+            if (string.Equals(card.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                pending++;
+            }
+        }
+
+        return pending;
+    }
+
+    /// <summary>Opens the settings page on one section: the click target of the strip's four counters.</summary>
+    private void OpenSettingsSection(string sectionId)
+    {
+        Settings.SelectSection(sectionId);
+        Settings.IsOpen = true;
+    }
+
+    /// <summary>Cards come and go on their own schedule, so the active strip re-reads its approval count on every change.</summary>
+    private void OnApprovalQueueChanged() => activeSession?.Instruments.RefreshCounters();
+
+    /// <summary>Gives one session's strip the project it belongs to, from the cache the registry read fills.</summary>
+    private void ApplyProject(SessionWorkspaceViewModel session)
+    {
+        var projectId = session.Info.ProjectId;
+        var name = projectId is { } named && projectNames.TryGetValue(named, out var foundName) ? foundName : null;
+        var root = projectId is { } rooted && projectRoots.TryGetValue(rooted, out var foundRoot) ? foundRoot : null;
+        session.Instruments.SetProject(name, root);
+    }
+
+    /// <summary>Hands the active session's strip the Git panel's live branch, ahead/behind and CI marker.</summary>
+    private void PushGitText() =>
+        activeSession?.Instruments.SetGit(GitPanel.AheadBehindText, GitPanel.ChecksText);
+
     private static Task RevealAsync(string path)
     {
         try
@@ -1429,7 +1503,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             async () =>
             {
                 var inventory = await host.ReadInventoryAsync(CancellationToken.None).ConfigureAwait(false);
-                Dispatcher.UIThread.Post(() => Status.SetInventory(inventory));
+                Dispatcher.UIThread.Post(() =>
+                {
+                    Status.SetInventory(inventory);
+                    composition.Inventory = inventory;
+                });
             });
     }
 
@@ -1465,6 +1543,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             host.StatusChanged -= OnHostStatusChanged;
             host.SurfaceChanged -= OnHostSurfaceChanged;
+        }
+
+        if (ApprovalServices.Current is { } approvalServices)
+        {
+            approvalServices.Queue.Changed -= OnApprovalQueueChanged;
         }
 
         foreach (var session in sessions.Values)

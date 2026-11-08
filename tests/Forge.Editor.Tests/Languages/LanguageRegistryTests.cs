@@ -239,4 +239,41 @@ public class LanguageRegistryTests
         Assert.Equal("dockerfile", registry.DetectLanguageId("ci/Dockerfile"));
         Assert.Null(registry.DetectLanguageId("ci/Dockerfile.bak"));
     }
+
+    [Fact]
+    public async Task Without_a_jsonc_language_a_vscode_settings_file_stays_plain_json()
+    {
+        using var dir = new TempDirectory();
+        var user = dir.WriteText("json.json", """{"json":{"extensions":[".json"]}}""");
+
+        var registry = await LanguageRegistry.LoadAsync(null, user);
+
+        Assert.Equal("json", registry.DetectLanguageId("/x/.vscode/settings.json"));
+    }
+
+    [Theory]
+    [InlineData("/x/tsconfig.json", "jsonc")]
+    [InlineData("/x/TSConfig.json", "jsonc")]
+    [InlineData("/x/jsconfig.json", "jsonc")]
+    [InlineData("/x/.devcontainer/devcontainer.json", "jsonc")]
+    [InlineData("/x/app.jsonc", "jsonc")]
+    [InlineData("/x/app.json", "json")]
+    [InlineData("/x/settings.json", "json")]
+    [InlineData("/x/.vscode/settings.json", "jsonc")]
+    [InlineData("/x/.vscode/tasks.json", "jsonc")]
+    [InlineData(@"D:\repo\.vscode\launch.json", "jsonc")]
+    [InlineData("/x/.VSCode/settings.json", "jsonc")]
+    [InlineData("/x/my.vscode/settings.json", "json")]
+    [InlineData("/x/.vscode/notes.jsonc", "jsonc")]
+    public async Task Json_with_comments_is_its_own_language_so_the_server_allows_comments(string path, string expected)
+    {
+        using var dir = new TempDirectory();
+        var user = dir.WriteText(
+            "json.json",
+            """{"json":{"extensions":[".json"]},"jsonc":{"extensions":[".jsonc"],"filenames":["tsconfig.json","jsconfig.json","devcontainer.json"]}}""");
+
+        var registry = await LanguageRegistry.LoadAsync(null, user);
+
+        Assert.Equal(expected, registry.DetectLanguageId(path));
+    }
 }

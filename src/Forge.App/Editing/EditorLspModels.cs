@@ -22,7 +22,7 @@ internal sealed record EditorLspCompletion(
     IReadOnlyList<EditorLspCompletionItem> Items,
     bool IsIncomplete);
 
-internal sealed record EditorLspCompletionMap(EditorLspCompletion Completion, int SkippedSnippets, int InvalidItems);
+internal sealed record EditorLspCompletionMap(EditorLspCompletion Completion, int ConvertedSnippets, int InvalidItems);
 
 internal sealed record EditorLspHover(int Version, int Start, int End, string Text);
 

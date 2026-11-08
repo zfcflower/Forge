@@ -124,6 +124,123 @@ public sealed class EditorLspWindowTests : IDisposable
     });
 
     [Fact]
+    public Task Arrow_keys_move_the_selection_in_the_completion_list() => Ui(async () =>
+    {
+        await using var rig = await Rig.OpenAsync(root, "foo" + ((char)10).ToString(), new()
+        {
+            ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"foobar"},{"label":"foobaz"},{"label":"fooqux"}]}""",
+        });
+        rig.Editor.CaretOffset = 3;
+        rig.Window.KeyPressQwerty(PhysicalKey.Space, RawInputModifiers.Control);
+        await rig.Server.WaitForAsync("textDocument/completion");
+        await rig.Until(() => rig.View?.CompletionPopup is not null);
+
+        var list = rig.View!.CompletionPopup!.CompletionList;
+        await rig.Until(() => list.ListBox?.ItemCount == 3);
+        var selected = list.ListBox!.SelectedIndex;
+
+        // Moving the selection is only half of it: the selected row has to look selected. The app's workbench list styles
+        // blank out ListBoxItem backgrounds globally, which used to leave the popup's selection invisible.
+        var background = SelectedItemBackground(list);
+        Assert.NotNull(background);
+        Assert.InRange(background!.Value.A, 1, 255);
+
+        rig.Window.KeyPressQwerty(PhysicalKey.ArrowDown, RawInputModifiers.None);
+        WorkbenchUi.Settle(rig.Window);
+        Assert.Equal(selected + 1, list.ListBox.SelectedIndex);
+
+        rig.Window.KeyPressQwerty(PhysicalKey.ArrowUp, RawInputModifiers.None);
+        WorkbenchUi.Settle(rig.Window);
+        Assert.Equal(selected, list.ListBox.SelectedIndex);
+    });
+
+    [Fact]
+    public Task A_discovered_server_is_named_on_the_editor_status_line() => Ui(async () =>
+    {
+        var registry = LanguageRegistry.Default.WithDiscoveredServers(
+        [
+            new DiscoveredLanguageServer(
+                "csharp",
+                [".cs", ".csx"],
+                [],
+                new LanguageServerConfig("/opt/vscode/roslyn-language-server", ["--stdio"], new Dictionary<string, string>()),
+                "VS Code"),
+        ]);
+        var newline = ((char)10).ToString();
+        await using var rig = await Rig.OpenAsync(root, "class A { }" + newline, registry: registry);
+
+        await rig.Until(() => rig.Model.HasLspStatus);
+        Assert.Contains("roslyn-language-server", rig.Model.LspStatus!, StringComparison.Ordinal);
+        Assert.Contains("VS Code", rig.Model.LspStatus!, StringComparison.Ordinal);
+    });
+
+    [Fact]
+    public Task Pulled_diagnostics_reach_the_editor_without_a_push_notification() => Ui(async () =>
+    {
+        var newline = ((char)10).ToString();
+        const string Capabilities = """
+            {"capabilities":{"textDocumentSync":{"openClose":true,"change":2,"save":true},"diagnosticProvider":{"interFileDependencies":true}}}
+            """;
+        await using var rig = await Rig.OpenAsync(
+            root,
+            "class A { }" + newline,
+            new()
+            {
+                ["textDocument/diagnostic"] = """{"kind":"full","items":[{"range":{"start":{"line":0,"character":6},"end":{"line":0,"character":7}},"severity":1,"message":"pulled","code":"CS9"}]}""",
+            },
+            capabilities: Capabilities);
+
+        var renderer = rig.Editor.TextArea.TextView.BackgroundRenderers.OfType<EditorLspDiagnosticRenderer>().Single();
+        await rig.Server.WaitForAsync("textDocument/diagnostic");
+        // The server never publishes anything here: the editor has to ask, and the answer has to reach the view.
+        await rig.Until(() => rig.Model.EditorDiagnostics.Items.Count == 1);
+        Assert.True(rig.Server.Count("textDocument/diagnostic") > 0, "the editor pulled the diagnostics");
+
+        await rig.Until(() => renderer.FindAt(6).Count == 1);
+        Assert.Equal("pulled", renderer.FindAt(6)[0].Message);
+        Assert.Equal("CS9", renderer.FindAt(6)[0].Code);
+    });
+
+    [Fact]
+    public Task A_declared_trigger_character_opens_the_completion_list() => Ui(async () =>
+    {
+        var newline = ((char)10).ToString();
+        await using var rig = await Rig.OpenAsync(root, "foo" + newline, new()
+        {
+            ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"beta"}]}""",
+        });
+        rig.Editor.CaretOffset = 3;
+        rig.Window.KeyTextInput(":");
+        await rig.Server.WaitForAsync("textDocument/completion");
+        await rig.Until(() => rig.CompletionShown);
+        rig.Window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+        await rig.Until(() => !rig.CompletionShown);
+    });
+
+    [Fact]
+    public Task Folding_ranges_from_the_server_are_used_instead_of_the_heuristic() => Ui(async () =>
+    {
+        var newline = ((char)10).ToString();
+        await using var rig = await Rig.OpenAsync(
+            root,
+            "// alpha" + newline + "// beta" + newline + "// gamma" + newline,
+            new()
+            {
+                ["textDocument/foldingRange"] = """[{"startLine":0,"endLine":2,"kind":"comment"}]""",
+            });
+        var view = rig.Window.Content as global::Forge.App.Views.FileDocumentView;
+        Assert.NotNull(view);
+        Assert.NotNull(view!.Folding);
+        await rig.Until(() => view.Folding!.HasFoldings);
+        Assert.Contains(
+            rig.Editor.TextArea.LeftMargins,
+            margin => margin is global::AvaloniaEdit.Folding.FoldingMargin);
+        view.Folding!.FoldAll();
+        Assert.True(view.Folding.AnyFolded);
+        await rig.Server.WaitForAsync("textDocument/foldingRange");
+    });
+
+    [Fact]
     public Task Published_diagnostics_are_rendered_and_cleared_on_the_real_text_view() => Ui(async () =>
     {
         await using var rig = await Rig.OpenAsync(root, "class A { }\n");
@@ -140,6 +257,25 @@ public sealed class EditorLspWindowTests : IDisposable
         await rig.Until(() => renderer.FindAt(2).Count == 0);
     });
 
+    /// <summary>The background brush of the selected completion row's content presenter, or null when it has none.</summary>
+    private static Avalonia.Media.Color? SelectedItemBackground(AvaloniaEdit.CodeCompletion.CompletionList list)
+    {
+        if (list.ListBox is not { } box || box.SelectedIndex < 0)
+        {
+            return null;
+        }
+
+        if (box.ContainerFromIndex(box.SelectedIndex) is not Control container)
+        {
+            return null;
+        }
+
+        var presenter = container.GetVisualDescendants()
+            .OfType<Avalonia.Controls.Presenters.ContentPresenter>()
+            .FirstOrDefault(static candidate => candidate.Name == "PART_ContentPresenter");
+        return (presenter?.Background as Avalonia.Media.ISolidColorBrush)?.Color;
+    }
+
     private static async Task Ui(Func<Task> body)
     {
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
@@ -152,23 +288,25 @@ public sealed class EditorLspWindowTests : IDisposable
         public required string Path { get; init; }
         public required Window Window { get; init; }
         public required TextEditor Editor { get; init; }
+        public FileDocumentView? View { get; private set; }
         public required FileDocumentViewModel Model { get; init; }
         public ScriptedServer Server { get; private set; } = null!;
         public bool CompletionShown => !Editor.TextArea.StackedInputHandlers.IsEmpty;
 
         public static async Task<Rig> OpenAsync(string root, string text,
-            Dictionary<string, string>? results = null, Dictionary<string, TaskCompletionSource>? holds = null)
+            Dictionary<string, string>? results = null, Dictionary<string, TaskCompletionSource>? holds = null,
+            LanguageRegistry? registry = null, string? capabilities = null)
         {
             var path = System.IO.Path.Combine(root, "Program.cs");
             await File.WriteAllTextAsync(path, text);
             ScriptedServer? server = null;
             var previousFactory = LanguageServerProcess.DefaultFactory;
-            var sessionPool = new LanguageSessionPool(LanguageRegistry.Default);
+            var sessionPool = new LanguageSessionPool(registry ?? LanguageRegistry.Default);
             var model = FileDocumentViewModel.Create(null, sessionPool);
             Window? window = null;
             try
             {
-                LanguageServerProcess.DefaultFactory = (_, policy) => server = new ScriptedServer(policy, results ?? [], holds ?? []);
+                LanguageServerProcess.DefaultFactory = (_, policy) => server = new ScriptedServer(policy, results ?? [], holds ?? [], capabilities);
                 model.Workspace = root;
                 await model.LoadAsync(path, CancellationToken.None);
                 await model.LspOpening;
@@ -179,7 +317,7 @@ public sealed class EditorLspWindowTests : IDisposable
                 var editor = view.GetVisualDescendants().OfType<TextEditor>().Single();
                 editor.TextArea.Focus();
                 Assert.NotNull(server);
-                return new Rig { Path = path, Window = window, Editor = editor, Model = model, pool = sessionPool, Server = server };
+                return new Rig { Path = path, Window = window, Editor = editor, Model = model, pool = sessionPool, Server = server, View = view };
             }
             catch
             {
@@ -229,7 +367,7 @@ public sealed class EditorLspWindowTests : IDisposable
 
     private sealed class ScriptedServer : LanguageServerProcess
     {
-        private const string Capabilities = """{"capabilities":{"textDocumentSync":{"openClose":true,"change":2,"save":true},"completionProvider":{"triggerCharacters":["."]},"hoverProvider":true,"definitionProvider":true}}""";
+        private const string Capabilities = """{"capabilities":{"textDocumentSync":{"openClose":true,"change":2,"save":true},"completionProvider":{"triggerCharacters":[".",":"]},"foldingRangeProvider":true,"hoverProvider":true,"definitionProvider":true}}""";
         private readonly object gate = new();
         private readonly object writeGate = new();
         private readonly List<(string Method, string Raw)> received = [];
@@ -239,12 +377,17 @@ public sealed class EditorLspWindowTests : IDisposable
         private Stream? output;
         private bool running;
 
-        public ScriptedServer(RestartPolicy policy, Dictionary<string, string> results, Dictionary<string, TaskCompletionSource> holds)
+        public ScriptedServer(RestartPolicy policy, Dictionary<string, string> results, Dictionary<string, TaskCompletionSource> holds, string? capabilities = null)
             : base(new LanguageServerLaunch("fake-language-server"), policy)
         {
             this.results = results;
             this.holds = holds;
+            this.capabilities = capabilities;
         }
+
+        private readonly string? capabilities;
+
+        private string InitializeResult => capabilities ?? Capabilities;
         public override event EventHandler<LanguageServerExitedEventArgs>? Exited;
         public override bool IsRunning { get { lock (gate) { return running; } } }
         public int Count(string method) { lock (gate) { return received.Count(m => m.Method == method); } }
@@ -323,7 +466,7 @@ public sealed class EditorLspWindowTests : IDisposable
                     if (hasMethod && message.TryGetProperty("id", out var id))
                     {
                         if (holds.TryGetValue(method, out var hold)) { hold.Task.Wait(); }
-                        var result = method == "initialize" ? Capabilities : results.GetValueOrDefault(method, "null");
+                        var result = method == "initialize" ? InitializeResult : results.GetValueOrDefault(method, "null");
                         Send(stream, "{\"jsonrpc\":\"2.0\",\"id\":" + id.GetRawText() + ",\"result\":" + result + "}");
                     }
                 }

@@ -5,9 +5,11 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Appearance;
 using Forge.App.Approval;
+using Forge.App.Editing;
 using Forge.App.Git;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
 using Forge.Core.Providers;
@@ -125,6 +127,18 @@ internal sealed class AppComposition : IAsyncDisposable
 
     public LocText EditorProblem { get; }
 
+    /// <summary>
+    /// The active session's tool names, set by the window when it opens one: the tools section's rows and the tools counter's
+    /// denominator are the same set, and that set only exists per session.
+    /// </summary>
+    public Func<IReadOnlyList<string>> ActiveSessionTools { get; set; } = static () => [];
+
+    /// <summary>
+    /// What the extension host last reported it registered (plugins, tools, commands), or null before it answered. The
+    /// window status bar used to show this; it now has a line in the tools settings section.
+    /// </summary>
+    public PluginInventory? Inventory { get; set; }
+
     /// <summary>Null when the JIT side was not found; the status bar then says so instead of the app failing to start.</summary>
     public ExtensionHostSupervisor? Host => host;
 
@@ -204,8 +218,21 @@ internal sealed class AppComposition : IAsyncDisposable
 
         var paths = AppPaths.Create();
         var preferences = new PreferencesStore(paths.SettingsPath);
+
+        // The editor options every open editor reads are a projection of the preferences, so they exist as soon as the
+        // preferences do: the first file tab binds them, and the settings section below edits the same instance.
+        EditorSettings.Current = new EditorSettings(preferences.Current);
+
         var settings = new SettingsSections();
         var appearance = AppearanceFeature.Create(preferences.Current, settings);
+
+        // The editor section edits the live editor settings, which write through to the preferences and are persisted by
+        // the store's debounce. The section's body is the settings object itself (App.axaml has its data template).
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Editor,
+            EditorStrings.SectionTitle,
+            SettingsSectionIds.EditorOrder,
+            EditorSettings.Current));
 
         // The language section edits AppPreferences.Language only: OnPreferencesChanged pushes the value into Loc and
         // PreferencesStore persists it, so it needs nothing but the preferences.
@@ -384,6 +411,31 @@ internal sealed class AppComposition : IAsyncDisposable
         composition.Approvals = approvals;
         composition.TodoStepCommitter = stepCommitter;
         composition.GitPullRequests = gitPullRequests;
+
+        // The four instrument sections: the click target of each counter in the session strip. They read the composition
+        // lazily (on the settings page opening), so they are registered here, still inside the composition root, once the
+        // instance they read exists.
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Approvals,
+            InstrumentsStrings.ApprovalsSectionTitleKey,
+            SettingsSectionIds.ApprovalsOrder,
+            new ApprovalsSettingsSectionViewModel(composition)));
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Skills,
+            InstrumentsStrings.SkillsSectionTitleKey,
+            SettingsSectionIds.SkillsOrder,
+            new SkillsSettingsSectionViewModel(composition)));
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Mcp,
+            InstrumentsStrings.McpSectionTitleKey,
+            SettingsSectionIds.McpOrder,
+            new McpSettingsSectionViewModel(composition)));
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Tools,
+            InstrumentsStrings.ToolsSectionTitleKey,
+            SettingsSectionIds.ToolsOrder,
+            new ToolsSettingsSectionViewModel(composition)));
+
         return composition;
     }
 

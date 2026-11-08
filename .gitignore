@@ -3,7 +3,9 @@ obj/
 .vs/
 *.user
 .thinkrail/context/
+.thinkrail/build/
 .pi/
 publish/
 dist/
 TestResults/
+artifacts/

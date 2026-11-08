@@ -94,6 +94,14 @@ public sealed class LspClient : IAsyncDisposable
     /// <summary>Requests the server wants the client to redo, e.g. <c>workspace/semanticTokens/refresh</c>.</summary>
     public event Action<string>? RefreshRequested;
 
+    /// <summary>
+    /// Raised when the server starts and finishes its own long-running work (<c>$/progress</c>), e.g. loading a project.
+    /// The editor shows it, because requests sent during that window are simply not answered yet.
+    /// </summary>
+    public event Action<bool>? BusyChanged;
+
+    private int busyProgress;
+
     public static async Task<LspClient> ConnectAsync(LanguageServerProcess process, LspClientOptions? options = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(process);
@@ -316,6 +324,43 @@ public sealed class LspClient : IAsyncDisposable
             writer.WriteEndObject();
         }, timeout.Token).ConfigureAwait(false);
         return ParseHover(result);
+    }
+
+    /// <summary>
+    /// Asks the server for the document's diagnostics (<c>textDocument/diagnostic</c>, LSP 3.17). Null when the session is
+    /// closed; a server without pull support answers with no diagnostics and the push notifications stay the source.
+    /// </summary>
+    public async Task<PulledDiagnostics?> RequestDiagnosticsAsync(
+        TextDocument document,
+        string? previousResultId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (IsClosed)
+        {
+            return null;
+        }
+
+        if (Capabilities is { SupportsDiagnosticPull: false })
+        {
+            return PulledDiagnostics.None;
+        }
+
+        var uri = UriFor(document);
+        using var timeout = CreateTimeout(ct);
+        var result = await _connection.SendRequestAsync("textDocument/diagnostic", writer =>
+        {
+            writer.WriteStartObject();
+            WriteTextDocumentIdentifier(writer, uri);
+            if (previousResultId is { Length: > 0 })
+            {
+                writer.WriteString("previousResultId", previousResultId);
+            }
+
+            writer.WriteEndObject();
+        }, timeout.Token).ConfigureAwait(false);
+
+        return ParsePulledDiagnostics(result);
     }
 
     public Task<IReadOnlyList<LspLocation>> RequestDefinitionAsync(TextDocument document, int offset, CancellationToken ct = default) =>
@@ -595,6 +640,14 @@ public sealed class LspClient : IAsyncDisposable
         writer.WriteBoolean("dynamicRegistration", false);
         writer.WriteEndObject();
 
+        // Pull diagnostics (LSP 3.17): Roslyn only reports diagnostics when the client can ask for them, and hides its
+        // diagnosticProvider capability otherwise — which is why C# had no squiggles at all.
+        writer.WritePropertyName("diagnostic");
+        writer.WriteStartObject();
+        writer.WriteBoolean("dynamicRegistration", false);
+        writer.WriteBoolean("relatedDocumentSupport", false);
+        writer.WriteEndObject();
+
         writer.WritePropertyName("publishDiagnostics");
         writer.WriteStartObject();
         writer.WriteBoolean("versionSupport", true);
@@ -648,7 +701,9 @@ public sealed class LspClient : IAsyncDisposable
 
         writer.WritePropertyName("window");
         writer.WriteStartObject();
-        writer.WriteBoolean("workDoneProgress", false);
+        // Roslyn creates a work-done token before it starts loading a project and waits for the answer; advertising no
+        // progress support made project loading never begin, so C# had no diagnostics, hover or navigation.
+        writer.WriteBoolean("workDoneProgress", true);
         writer.WritePropertyName("showDocument");
         writer.WriteStartObject();
         writer.WriteBoolean("support", false);
@@ -767,6 +822,38 @@ public sealed class LspClient : IAsyncDisposable
                 if (parameters.TryGetProperty("message", out var logText) && logText.ValueKind == JsonValueKind.String)
                 {
                     LogMessage?.Invoke(logText.GetString() ?? string.Empty);
+                }
+
+                break;
+            case "$/progress":
+                OnProgress(parameters);
+                break;
+        }
+    }
+
+    /// <summary>Counts open work-done tokens, so overlapping server work reports one busy window.</summary>
+    private void OnProgress(JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Object ||
+            !value.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        switch (kind.GetString())
+        {
+            case "begin":
+                if (Interlocked.Increment(ref busyProgress) == 1)
+                {
+                    BusyChanged?.Invoke(true);
+                }
+
+                break;
+            case "end":
+                if (Interlocked.Decrement(ref busyProgress) <= 0)
+                {
+                    Interlocked.Exchange(ref busyProgress, 0);
+                    BusyChanged?.Invoke(false);
                 }
 
                 break;
@@ -1124,6 +1211,38 @@ public sealed class LspClient : IAsyncDisposable
         }
 
         return kept;
+    }
+
+    /// <summary>
+    /// Reads a <c>textDocument/diagnostic</c> result: the 3.17 object (<c>kind: "full"</c> with <c>items</c>, or
+    /// <c>kind: "unchanged"</c>) as well as the older bare array of diagnostics.
+    /// </summary>
+    private static PulledDiagnostics ParsePulledDiagnostics(JsonElement result)
+    {
+        if (result.ValueKind == JsonValueKind.Array)
+        {
+            return new PulledDiagnostics(false, ParseDiagnostics(result), 0);
+        }
+
+        if (result.ValueKind != JsonValueKind.Object)
+        {
+            return PulledDiagnostics.None;
+        }
+
+        var kind = result.TryGetProperty("kind", out var kindElement) && kindElement.ValueKind == JsonValueKind.String
+            ? kindElement.GetString()
+            : null;
+        if (string.Equals(kind, "unchanged", StringComparison.Ordinal))
+        {
+            return new PulledDiagnostics(true, [], 0);
+        }
+
+        if (result.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+        {
+            return new PulledDiagnostics(false, ParseDiagnostics(items), 0);
+        }
+
+        return PulledDiagnostics.None;
     }
 
     private static IReadOnlyList<DocumentSymbol> ParseSymbols(JsonElement result)

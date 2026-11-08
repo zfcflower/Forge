@@ -195,7 +195,8 @@ internal sealed class BottomCollapsedStrip : Panel
         };
         Children.Add(scroller);
         Children.Add(separator);
-        WorkbenchResources.Link(this, BackgroundProperty, "SurfaceBackgroundBrush");
+        // The collapsed bottom group is a dock strip like the side ones, so it wears the same chrome colour.
+        WorkbenchResources.Link(this, BackgroundProperty, "DockStripBackgroundBrush");
         WorkbenchResources.Link(separator, Border.BackgroundProperty, "BorderBrush");
     }
 

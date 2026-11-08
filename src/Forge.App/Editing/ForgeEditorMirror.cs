@@ -31,6 +31,10 @@ internal sealed class ForgeEditorMirror : IDisposable
     }
 
     public EditorDocument Document { get; }
+
+    /// <summary>The mirrored Forge snapshot: what the theme folding heuristic scans, off the UI thread, without touching the editor document.</summary>
+    public TextSnapshot Snapshot => forge.Snapshot;
+
     public bool IsFaulted { get; private set; }
 
     public void Dispose()

@@ -305,16 +305,13 @@ internal static class SessionStrings
     public static string SubAgentsExpand => Loc.Instance[SubAgentExpandKey];
 
     /// <summary>
-    /// The toggle at the bottom of the session: <c>子 Agent 3 · 收起</c> while sub-agents run, <c>子 Agent · 展开</c> when
-    /// none are left.
+    /// The strip's sub-agent toggle: <c>子 Agent 3</c> while sub-agents run, <c>子 Agent</c> when none are left. Whether the
+    /// area is collapsed is not spelled out in the label — the button carries it as an active appearance instead.
     /// </summary>
-    public static string SubAgentsToggle(int running, bool collapsed)
-    {
-        var state = collapsed ? SubAgentsExpand : SubAgentsCollapse;
-        return running > 0
-            ? Loc.Instance.Format(SubAgentToggleCountKey, TextFormat.Number(running), state)
-            : Loc.Instance.Format(SubAgentToggleKey, state);
-    }
+    public static string SubAgentsToggle(int running) =>
+        running > 0
+            ? Loc.Instance.Format(SubAgentToggleCountKey, TextFormat.Number(running))
+            : Loc.Instance[SubAgentToggleKey];
 
     public static string SubAgentsToggleName => Loc.Instance[SubAgentToggleNameKey];
 
@@ -433,8 +430,8 @@ internal static class SessionStrings
         Loc.Register(SubAgentNoModelKey, "未配置模型", "No model");
         Loc.Register(SubAgentCollapseKey, "收起", "Collapse");
         Loc.Register(SubAgentExpandKey, "展开", "Expand");
-        Loc.Register(SubAgentToggleKey, "子 Agent · {0}", "Sub-agents · {0}");
-        Loc.Register(SubAgentToggleCountKey, "子 Agent {0} · {1}", "Sub-agents {0} · {1}");
+        Loc.Register(SubAgentToggleKey, "子 Agent", "Sub-agents");
+        Loc.Register(SubAgentToggleCountKey, "子 Agent {0}", "Sub-agents {0}");
         Loc.Register(SubAgentToggleNameKey, "子 Agent 区域", "Sub-agent area");
         Loc.Register(
             SubAgentToggleTooltipKey,

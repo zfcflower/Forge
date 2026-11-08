@@ -26,6 +26,8 @@ parent: forge-architecture
 
 **Agent 编写扩展的删除与回滚。** 本模块没有“删除记录”的 API:`plugin.delete`(forge-extension-host)以 `Upsert(Uninstalled)` 并清空 `ApprovedHash` 实现永久封锁——同 id+version 此后一直 `Blocked`,`SetApproved` 不能恢复,Agent 必须换版本号;跨版本 `extensions.commit` 成功后对旧版本 `Revoke`(→ `Draft`),回滚则按字段原样 `Upsert` 回旧记录。这些都只用既有状态机,不削弱任何封锁规则。
 
+**只读旁路。** 除 `CountReadOnlyAsync`(`plugin_approval` 的行数)外,`ApprovalStore.ListReadOnlyAsync` 用同一条只读、非池化连接列出全部记录(按插件 id + 版本排序),给设置页的 `approvals` 分区用:文件不存在或没有表返回空列表,其余 SQLite 失败照常上抛,由调用方显示“不可读”。App 进程仍然只持有只读审批连接。
+
 **持久化。** 每条写操作 = 一个 `BEGIN IMMEDIATE` 事务(`BeginTransaction(deferred: false)`):事务内 `SELECT` 目标行 → 现有状态机算出新值 → 单行参数化 `INSERT ... ON CONFLICT (plugin_id, version) DO UPDATE` → `COMMIT`。SQL 只用参数,不拼字符串。提交成功后才把记录发布到内存快照,因此写失败(磁盘满、只读库、busy 耗尽、取消)时内存仍等于库里已提交的内容——persist-before-publish 不变。状态机的三个 `switch`(SetApproved 保留 `Disabled`/`Uninstalled`、Revoke 不动封锁、Enable 只解 `Disabled`)以“事务内读到的行”为输入,单进程行为与逐文件实现完全一致,多进程时也不再丢更新。
 
 **为什么必须 `BEGIN IMMEDIATE`。** 裸 `BEGIN`(deferred)下,若另一连接在本次事务读之后提交,本连接升级为写会得到 `SQLITE_BUSY_SNAPSHOT`(SQLite 5 / extended 517),busy handler 不介入——这就是一次静默丢更新。IMMEDIATE 在事务开始即取写锁,冲突的写者按 `busy_timeout` 排队后成功。不额外做重试:IMMEDIATE 事务只含一行读 + 一行写(开发者机器上提交 p50 ≈ 2 ms,不是产品承诺:每次提交是一次 WAL 追加加一次 `fsync`,耗时由磁盘决定),busy 预算耗尽(默认 5 s)就把 `SqliteException` 原样上抛,不吞、不包装、不重试。`CancellationToken` 在事务开始前检查(与旧实现相同:不提供“提交中取消”),取消时库与内存都不变。

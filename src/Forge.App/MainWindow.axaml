@@ -24,59 +24,85 @@
     <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding NewTerminalCommand}" />
   </Window.KeyBindings>
 
-  <Grid RowDefinitions="Auto,*,Auto">
+  <Grid RowDefinitions="Auto,*">
 
-    <!-- Window top: the window background itself, so there is no separate title-bar fill. The caption buttons are drawn
-         here because the client area extends into the title bar; the settings button sits to their left. -->
+    <!-- Window top: the same chrome colour as every panel title bar below it, so the whole top edge of the window reads
+         as one surface. The caption buttons are drawn here because the client area extends into the title bar; the
+         settings button sits to their left. -->
     <Border x:Name="TitleBar"
             Grid.Row="0"
             Height="40"
             PointerPressed="OnTitleBarPointerPressed"
-            Background="{DynamicResource SurfaceBackgroundBrush}"
+            Background="{DynamicResource PanelTitleBarBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0,8,0">
-        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <!-- The title row carries the logo lockup only: the project tree on the left already shows the open session
+               and its branch, so repeating them here was redundant. The wordmark is the product's own name, so it is
+               not translated. -->
           <Image x:Name="AppLogo"
                  Source="avares://Forge.App/Assets/forge.png"
                  Width="18"
                  Height="18"
                  VerticalAlignment="Center"
                  AutomationProperties.Name="Forge" />
-          <TextBlock Classes="caption"
+          <TextBlock x:Name="AppWordmark"
                      VerticalAlignment="Center"
-                     MaxWidth="320"
-                     Text="{Binding ActiveSessionTitle}" />
-          <TextBlock Classes="caption"
-                     VerticalAlignment="Center"
-                     MaxWidth="200"
-                     TextTrimming="CharacterEllipsis"
-                     IsVisible="{Binding HasActiveBranch}"
-                     Text="{Binding ActiveBranchText}"
-                     ToolTip.Tip="{Binding ActiveBranchText}"
-                     Foreground="{DynamicResource TextSecondaryBrush}"
-                     AutomationProperties.AutomationId="title-branch" />
+                     FontSize="{DynamicResource FontSizeWordmark}"
+                     FontWeight="Bold"
+                     Foreground="{DynamicResource AccentTextBrush}"
+                     Text="FORGE" />
         </StackPanel>
 
-        <TextBox x:Name="SearchBox"
-                 Grid.Column="1"
-                 Width="380"
-                 Height="26"
-                 MinHeight="26"
-                 Padding="10,3"
-                 HorizontalAlignment="Center"
-                 VerticalAlignment="Center"
-                 VerticalContentAlignment="Center"
-                 CornerRadius="6"
-                 FontSize="{DynamicResource FontSizeSm}"
-                 Background="{DynamicResource SearchBoxBackgroundBrush}"
-                 BorderBrush="{DynamicResource SearchBoxBorderBrush}"
-                 BorderThickness="1"
-                 PlaceholderText="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
-                 AutomationProperties.AutomationId="shell-search"
-                 AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}" />
+        <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: search is not a
+             feature yet, so the magnifier is a plain icon, and the extension host's state is the one live readout the
+             header carries — the same state the status bar spells out in words. -->
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="18"
+                    Margin="0,0,12,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center">
+          <wc:LineIcon Data="{StaticResource IconSearch}"
+                       Width="16"
+                       Height="16"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="shell-search" />
+          <StackPanel Orientation="Horizontal"
+                      Spacing="6"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="{Binding Status.HostTooltip}"
+                      AutomationProperties.AutomationId="host-state">
+            <Ellipse Classes="status-dot"
+                     Classes.running="{Binding Status.IsHostRunning}"
+                     Classes.starting="{Binding Status.IsHostStarting}"
+                     Classes.failed="{Binding Status.IsHostFailed}" />
+            <TextBlock Classes="caption"
+                       VerticalAlignment="Center"
+                       Text="{Binding [status.host.name], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+        </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Classes="ghost icon"
+                  Width="30"
+                  Height="26"
+                  Command="{Binding NewTerminalCommand}"
+                  AutomationProperties.AutomationId="terminal-open"
+                  AutomationProperties.Name="{Binding TerminalButtonText}"
+                  ToolTip.Tip="{Binding TerminalButtonText}">
+            <Grid Width="15" Height="15">
+              <wc:LineIcon Data="{StaticResource IconTerminalFrame}" Width="15" Height="15" />
+              <wc:LineIcon Data="{StaticResource IconTerminalScreen}"
+                           Width="15"
+                           Height="15"
+                           StrokeThickness="0"
+                           Fill="{DynamicResource TextPrimaryBrush}" />
+            </Grid>
+          </Button>
           <Button Classes="ghost icon"
                   Width="30"
                   Height="26"
@@ -122,78 +148,13 @@
          its own constructor, so the root view model does not have to carry it. -->
     <ap:ApprovalQueueOverlay Grid.Row="1" />
 
-    <!-- Status bar -->
-    <Border Grid.Row="2"
-            MinHeight="26"
-            Padding="14,0"
-            Background="{DynamicResource SurfaceBrush}"
-            BorderBrush="{DynamicResource BorderBrush}"
-            BorderThickness="0,1,0,0">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
-        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-          <Ellipse Classes="status-dot"
-                   Classes.running="{Binding Status.IsHostRunning}"
-                   Classes.starting="{Binding Status.IsHostStarting}"
-                   Classes.failed="{Binding Status.IsHostFailed}" />
-          <TextBlock Classes="caption" Text="{Binding Status.HostText}" VerticalAlignment="Center" />
-        </StackPanel>
-        <TextBlock Grid.Column="1" Classes="caption" Margin="14,0,0,0" Text="{Binding Status.PluginsText}" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="2" Classes="caption" Margin="14,0,0,0" Text="{Binding Status.McpText}" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="3" Classes="caption" Margin="14,0,0,0" Text="{Binding Status.ApprovalsText}" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="4"
-                   Classes="caption"
-                   Margin="14,0,0,0"
-                   MaxWidth="260"
-                   Text="{Binding Status.ProviderText}"
-                   TextTrimming="CharacterEllipsis"
-                   VerticalAlignment="Center" />
-        <TextBlock Grid.Column="5"
-                   Classes="caption"
-                   Margin="14,0,0,0"
-                   Text="{Binding GeneralWorkspaceText}"
-                   ToolTip.Tip="{Binding GeneralWorkspaceText}"
-                   MaxWidth="280"
-                   VerticalAlignment="Center" />
-        <Button Grid.Column="6"
-                Classes="tab"
-                Margin="14,0,0,0"
-                VerticalAlignment="Center"
-                Content="{Binding TerminalButtonText}"
-                Command="{Binding NewTerminalCommand}"
-                AutomationProperties.AutomationId="terminal-open"
-                AutomationProperties.Name="{Binding TerminalButtonText}"
-                ToolTip.Tip="{Binding TerminalButtonText}" />
-        <StackPanel Grid.Column="7"
-                    Orientation="Horizontal"
-                    Spacing="10"
-                    Margin="14,0,0,0"
-                    VerticalAlignment="Center"
-                    HorizontalAlignment="Left">
-          <TextBlock Classes="caption"
-                     VerticalAlignment="Center"
-                     IsVisible="{Binding Status.HasAheadBehind}"
-                     Text="{Binding Status.AheadBehindText}"
-                     AutomationProperties.AutomationId="status-ahead-behind" />
-          <TextBlock Classes="caption"
-                     VerticalAlignment="Center"
-                     IsVisible="{Binding Status.HasChecks}"
-                     Text="{Binding Status.ChecksText}"
-                     AutomationProperties.AutomationId="status-checks" />
-        </StackPanel>
-        <TextBlock Grid.Column="7"
-                   Classes="caption"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Center"
-                   IsVisible="{Binding Status.HasHostDetail}"
-                   Text="{Binding Status.HostDetail}"
-                   TextTrimming="CharacterEllipsis"
-                   MaxWidth="420" />
-      </Grid>
-    </Border>
+    <!-- The app status bar is gone: the extension host's state lives in the title row (dot plus tooltip), ahead/behind and
+         the CI marker moved into the session composer's strip, the project path into that strip's project button, and the
+         provider's status into the provider section of the settings page. -->
 
     <!-- Settings overlay: the body is the registered section list (provider, paths and whatever a feature adds), and
          each section's view model is rendered by the app-level data template for its type. -->
-    <Border Grid.RowSpan="3"
+    <Border Grid.RowSpan="2"
             Background="{DynamicResource SurfaceBackgroundBrush}"
             Opacity="0.92"
             IsVisible="{Binding Settings.IsOpen}">

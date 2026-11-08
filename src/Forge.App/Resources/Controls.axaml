@@ -1,6 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:wc="using:Forge.App.Workbench.Controls">
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:ac="using:AvaloniaEdit.CodeCompletion">
 
   <!-- Text ramp. -->
   <Style Selector="TextBlock">
@@ -99,15 +100,23 @@
   </Style>
 
   <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.ghost:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
   </Style>
 
   <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.icon:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
   </Style>
 
   <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
   </Style>
 
   <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
@@ -298,6 +307,13 @@
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
+  <!-- The active session's row fills its bubble: the tree's own "this is the conversation you are in" mark, matching
+       the filled bubble the active tab wears. Every other conversation row stays an outline. -->
+  <Style Selector="wc|LineIcon.tree-icon.active-session">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
   <Style Selector="Button.tree-chevron-button">
     <Setter Property="Width" Value="8" />
     <Setter Property="Height" Value="28" />
@@ -473,6 +489,27 @@
 
   <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- The rules above blank the default selection chrome for the workbench's own row lists. The completion popup is a
+       list too, and there the selection must be visible: without these it can be moved with the arrow keys but nothing
+       looks selected. Scoped to the list class Forge adds in FileDocumentView. -->
+  <Style Selector="ac|CompletionList.completion ListBoxItem">
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="MinHeight" Value="20" />
+  </Style>
+
+  <Style Selector="ac|CompletionList.completion ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+  </Style>
+
+  <Style Selector="ac|CompletionList.completion ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="ac|CompletionList.completion ListBoxItem:selected:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
   </Style>
 
   <Style Selector="ComboBox">

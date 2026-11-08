@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Forge.Editor.Languages;
 using Forge.Editor.TextMate;
 
@@ -16,12 +17,14 @@ internal sealed class EditorServices : IAsyncDisposable
         LanguageRegistry languages,
         LanguageSessionPool sessions,
         GrammarRegistry grammars,
-        string? problem)
+        string? problem,
+        IReadOnlyList<DiscoveredLanguageServer> discovered)
     {
         Languages = languages;
         this.sessions = sessions;
         Grammars = grammars;
         Problem = problem;
+        DiscoveredServers = discovered;
     }
 
     public LanguageRegistry Languages { get; }
@@ -30,6 +33,9 @@ internal sealed class EditorServices : IAsyncDisposable
 
     /// <summary>Why the language table fell back to the built-in defaults, or null.</summary>
     public string? Problem { get; }
+
+    /// <summary>Servers found on this machine without being configured; the language table already includes them.</summary>
+    public IReadOnlyList<DiscoveredLanguageServer> DiscoveredServers { get; }
 
     public int LanguageCount => Languages.Languages.Count;
 
@@ -51,7 +57,21 @@ internal sealed class EditorServices : IAsyncDisposable
         // LoadAsync reads the user and workspace languages.json; a broken file lands in LoadErrors, not in an exception.
         var languages = LanguageRegistry.LoadAsync(paths.WorkspaceDirectory).AsTask().GetAwaiter().GetResult();
         var problem = languages.LoadErrors.Count == 0 ? null : languages.LoadErrors[0];
-        return new EditorServices(languages, new LanguageSessionPool(languages), grammars, problem);
+
+        // Servers already installed (PATH, VS Code/Cursor extensions and installations) are used as they are; a language
+        // the user configured in languages.json keeps its own choice. Discovery never downloads or starts anything.
+        IReadOnlyList<DiscoveredLanguageServer> discovered = [];
+        try
+        {
+            discovered = LanguageServerDiscovery.Discover();
+            languages = languages.WithDiscoveredServers(discovered);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Trace.WriteLine("[editor] language server discovery failed: " + exception.Message);
+        }
+
+        return new EditorServices(languages, new LanguageSessionPool(languages), grammars, problem, discovered);
     }
 
     public async ValueTask DisposeAsync()

@@ -38,7 +38,9 @@ public sealed class MainWindowWorkbenchIntegrationTests
     private const double WideWindowWidth = 1600;
     private const double RegionDragDelta = 40;
     private const double AdjustedBottomHeight = 300;
-    private const double AdjustedPreviewWidth = 500;
+    /// <summary>Has to stay under the docked preview's maximum (inspector width − side minimum − 1 px splitter), or the
+    /// model clamps it and the saved value never equals what the test asked for.</summary>
+    private const double AdjustedPreviewWidth = 440;
     private const double AdjustedInspectorSplit = 0.7;
     private const int Precision = 3;
 

@@ -7,6 +7,8 @@
              xmlns:loc="using:Forge.App.Localization"
              xmlns:term="using:Forge.App.Terminal"
              xmlns:git="using:Forge.App.Git"
+             xmlns:editing="using:Forge.App.Editing"
+             xmlns:set="using:Forge.App.ViewModels.Settings"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -100,6 +102,10 @@
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
     <DataTemplate DataType="vm:ProviderSettingsSectionViewModel" x:DataType="vm:ProviderSettingsSectionViewModel">
       <StackPanel Spacing="6">
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding Status}"
+                   AutomationProperties.AutomationId="settings-provider-status" />
         <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Detail}" />
         <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
       </StackPanel>
@@ -142,9 +148,117 @@
       </ItemsControl>
     </DataTemplate>
 
+    <!-- The four instrument sections the session strip's counters open: read-only views of the approvals database, the
+         discovered skills, the configured MCP servers and the active session's tool list. -->
+    <DataTemplate DataType="set:ApprovalsSettingsSectionViewModel" x:DataType="set:ApprovalsSettingsSectionViewModel">
+      <views:InstrumentSectionView />
+    </DataTemplate>
+    <DataTemplate DataType="set:SkillsSettingsSectionViewModel" x:DataType="set:SkillsSettingsSectionViewModel">
+      <views:InstrumentSectionView />
+    </DataTemplate>
+    <DataTemplate DataType="set:McpSettingsSectionViewModel" x:DataType="set:McpSettingsSectionViewModel">
+      <views:InstrumentSectionView />
+    </DataTemplate>
+    <DataTemplate DataType="set:ToolsSettingsSectionViewModel" x:DataType="set:ToolsSettingsSectionViewModel">
+      <Grid RowDefinitions="Auto,*" RowSpacing="10">
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding InventoryText}"
+                   IsVisible="{Binding HasInventory}"
+                   AutomationProperties.AutomationId="settings-tools-inventory" />
+        <views:InstrumentSectionView Grid.Row="1" />
+      </Grid>
+    </DataTemplate>
+
     <!-- The extensions section: installed extensions, staged drafts and the remembered approval rules. -->
     <DataTemplate DataType="ap:ExtensionsSettingsSectionViewModel" x:DataType="ap:ExtensionsSettingsSectionViewModel">
       <ap:ExtensionsSettingsView />
+    </DataTemplate>
+
+    <!-- The editor section: every option is a live switch on the editor settings the open editors read. -->
+    <DataTemplate DataType="editing:EditorSettings" x:DataType="editing:EditorSettings">
+      <StackPanel Spacing="2">
+        <TextBlock Classes="caption"
+                   Margin="0,0,0,6"
+                   TextWrapping="Wrap"
+                   Text="{Binding [editor.settings.hint], Source={x:Static loc:Loc.Instance}}"
+                   AutomationProperties.AutomationId="editor-settings-hint" />
+        <CheckBox Content="{Binding [editor.settings.lineNumbers], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding ShowLineNumbers, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-line-numbers" />
+        <CheckBox Content="{Binding [editor.settings.wordWrap], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding WordWrap, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-word-wrap" />
+        <CheckBox Content="{Binding [editor.settings.spaces], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding ShowSpaces, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-spaces" />
+        <CheckBox Content="{Binding [editor.settings.tabs], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding ShowTabs, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-tabs" />
+        <CheckBox Content="{Binding [editor.settings.endOfLine], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding ShowEndOfLine, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-eol" />
+        <CheckBox Content="{Binding [editor.settings.controlCharacters], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding ShowControlCharacters, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-control" />
+        <CheckBox Content="{Binding [editor.settings.currentLine], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding HighlightCurrentLine, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-current-line" />
+        <CheckBox Content="{Binding [editor.settings.scrollBelow], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding ScrollBelowDocument, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-scroll-below" />
+        <CheckBox Content="{Binding [editor.settings.hyperlinks], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding Hyperlinks, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-hyperlinks" />
+        <CheckBox Content="{Binding [editor.settings.folding], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding AutoFolding, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-folding" />
+        <CheckBox Content="{Binding [editor.settings.tabsToSpaces], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding TabsToSpaces, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="editor-settings-tabs-to-spaces" />
+        <Grid ColumnDefinitions="150,*" Margin="0,6,0,0">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [editor.settings.indentation], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="1"
+                         Maximum="8"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding IndentationSize, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="editor-settings-indentation" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [editor.settings.rulers], Source={x:Static loc:Loc.Instance}}" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBox MinWidth="170"
+                     HorizontalAlignment="Left"
+                     Text="{Binding ColumnRulers, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="editor-settings-rulers" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="{Binding [editor.settings.rulersHint], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [editor.settings.theme], Source={x:Static loc:Loc.Instance}}" />
+          <ComboBox Grid.Column="1"
+                    MinWidth="170"
+                    HorizontalAlignment="Left"
+                    SelectedIndex="{Binding ThemeIndex, Mode=TwoWay}"
+                    AutomationProperties.AutomationId="editor-settings-theme">
+            <ComboBoxItem Content="{Binding [editor.settings.theme.auto], Source={x:Static loc:Loc.Instance}}" />
+            <ComboBoxItem Content="{Binding [editor.settings.theme.light], Source={x:Static loc:Loc.Instance}}" />
+            <ComboBoxItem Content="{Binding [editor.settings.theme.dark], Source={x:Static loc:Loc.Instance}}" />
+          </ComboBox>
+        </Grid>
+      </StackPanel>
     </DataTemplate>
 
     <!-- The git section: pull strategy, network timeout, step commits, the checks wait timing, system notifications and the gh path, edited live on the preferences they belong to. -->

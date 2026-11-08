@@ -56,6 +56,8 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **提供方。** OpenAI 兼容与 Anthropic。重试只发生在首个事件之前;`HttpClient` 必须是无限超时,改由每次读取的空闲超时(默认 120 秒)判定停滞。`ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。OpenAI 兼容适配器在写 wire 消息时合并相邻的同角色 `user`/`assistant` 消息:文本按序拼接、段落间空一行,`tool_calls` 保持顺序;`tool` 角色消息不合并,`system` 保持现状(系统提示词在最前,历史中的 system 消息按原位置逐条写出)。内部历史不变,序列化结果对同一历史字节稳定。
 
+**模型元数据与用量换算(`Providers/`)。** `ModelMetadataCatalog` 是内置的模型窗口与价格表:归一化模型 id(小写、去掉 `vendor/` 前缀与 `:free`/`-latest` 后缀)后按“精确 → 最长前缀 → 包含”匹配,表里只收能核对的条目,数值只用于展示估算。`ModelMetadataResolver.Resolve` 按 **内置表 → provider 上报的元数据 → 用户 `settings.json` 的 `provider.modelMeta`** 逐字段合并(`ModelMetadata.With`),任何一半未知就保持未知,绝不补 0。`SessionUsageMath` 全是纯算术:缓存命中率以 `InputTokens` 为分母(OpenAI 兼容的 `prompt_tokens` 与 Anthropic 的 `input + cacheRead + cacheWrite` 都把缓存折进输入)、计费输入先减去缓存、每个 token 数夹到 ≥ 0 后按每百万单价计费、窗口占比夹到 0..1。展示层(百分比、`9% / 1.0M`、`$0.041`)与它无关,见 forge-app 的会话输入框一节。
+
 ## 未决
 
 - 事件通道保持无界(决定):`AgentHost.RunAsync` 的 `Channel.CreateUnbounded<AgentEvent>` 不加背压、不丢事件;UI 合并在 App 侧由 `FrameCoalescer` 实现,见 forge-app。

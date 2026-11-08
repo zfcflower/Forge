@@ -167,7 +167,7 @@ public sealed class WorkbenchControlsTests
     // ---------------------------------------------------------------- title-bar and tab typography
 
     [Fact]
-    public async Task Panel_titles_are_semibold_at_the_emphasis_size()
+    public async Task Panel_titles_are_bold_at_the_emphasis_size()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
@@ -180,7 +180,9 @@ public sealed class WorkbenchControlsTests
         });
 
         Assert.True(title.Emphasis is not null, "FontSizeMd must be in the application resources");
-        Assert.Equal(FontWeight.SemiBold, title.Weight);
+        // Bold is the only emphasis above regular that both the Latin and the CJK faces of the interface chain carry
+        // (Segoe UI has a 600 face, Microsoft YaHei does not), so the two scripts cannot drift to different weights.
+        Assert.Equal(FontWeight.Bold, title.Weight);
         // The panel title reads the emphasis token of the appearance ramp, so it follows the interface font size.
         Assert.Equal(title.Emphasis, title.Size);
     }
@@ -201,7 +203,7 @@ public sealed class WorkbenchControlsTests
     }
 
     [Fact]
-    public async Task Tab_labels_are_semibold_at_the_emphasis_size()
+    public async Task Tab_labels_are_regular_at_the_body_size()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
@@ -212,19 +214,46 @@ public sealed class WorkbenchControlsTests
             WorkbenchUi.Settle(scene.Window);
             var header = WorkbenchUi.Header(scene, FirstTabId);
             var label = LabelOf(header, "PART_Label");
-            return (Height: header.Bounds.Height, Weight: label.FontWeight, Size: label.FontSize, Emphasis: WorkbenchUi.FontSizeResource("FontSizeMd"));
+            return (Height: header.Bounds.Height, Weight: label.FontWeight, Size: label.FontSize, Body: WorkbenchUi.FontSizeResource("FontSizeBase"));
         });
 
-        Assert.True(tab.Emphasis is not null, "FontSizeMd must be in the application resources");
-        Assert.Equal(FontWeight.SemiBold, tab.Weight);
-        // The tab text shares the emphasis token with the panel title, so both grow together with the interface size.
-        Assert.Equal(tab.Emphasis, tab.Size);
+        Assert.True(tab.Body is not null, "FontSizeBase must be in the application resources");
+        // A tab keeps the body size but no weight: the title bar carries the emphasis, the tick labels read as plain
+        // text, and 400 is a weight both the Latin and the CJK faces really have.
+        Assert.Equal(FontWeight.Normal, tab.Weight);
+        // A tab label takes the body token, one step below the panel title's emphasis, so the strip reads tighter than
+        // the title it sits on.
+        Assert.Equal(tab.Body, tab.Size);
         // The theme's TabHeaderView height; the tab sits on the 28 px title bar's bottom line without being clipped.
         Assert.Equal(25, tab.Height);
     }
 
     private static TextBlock LabelOf(Visual root, string name) =>
         root.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Name == name);
+
+    [Fact]
+    public async Task A_floating_panel_title_is_bold_at_the_emphasis_size()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+
+        var title = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
+            WorkbenchUi.FloatTab(scene, FirstTabId);
+            var floating = WorkbenchUi.FloatingWindow(scene.Window, WorkbenchIds.SessionTab(FirstTabId))
+                ?? throw new InvalidOperationException("The tab did not float.");
+            WorkbenchUi.Settle(floating);
+            var block = LabelOf(floating, "PART_Title");
+            return (Weight: block.FontWeight, Size: block.FontSize, Emphasis: WorkbenchUi.FontSizeResource("FontSizeMd"));
+        });
+
+        Assert.True(title.Emphasis is not null, "FontSizeMd must be in the application resources");
+        // A floated panel draws its own title bar (FloatingPanelWindow) out of the same chrome: the same size and the
+        // same bold title, so a panel looks the same docked and floating.
+        Assert.Equal(FontWeight.Bold, title.Weight);
+        Assert.Equal(title.Emphasis, title.Size);
+    }
 
     // ---------------------------------------------------------------- title-bar buttons by capability
 

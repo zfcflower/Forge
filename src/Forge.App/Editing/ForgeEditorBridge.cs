@@ -2,6 +2,9 @@ using Avalonia.Controls;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using AvaloniaEdit;
+using AvaloniaEdit.Folding;
+using AvaloniaEdit.Indentation;
+using AvaloniaEdit.Indentation.CSharp;
 using AvaloniaEdit.TextMate;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
@@ -17,6 +20,11 @@ internal sealed class ForgeEditorBridge : IDisposable
     private readonly TextEditor editor;
     private readonly FileDocumentViewModel model;
     private readonly EditorDocument document;
+    private readonly EditorSettings settings;
+    private readonly EditorFoldingController folding;
+    private readonly EditorDiagnosticAdornments adornments;
+    private readonly EditorWhitespaceAdornments whitespace;
+    private readonly EditorLinkRouter links;
     private RegistryOptions? registry;
     private TextMateInstallation? installation;
     private string? grammarScope;
@@ -24,19 +32,69 @@ internal sealed class ForgeEditorBridge : IDisposable
     private bool recheckPosted;
     private bool disposed;
 
-    public ForgeEditorBridge(TextEditor editor, FileDocumentViewModel model, ForgeEditorMirror mirror, string path)
+    public ForgeEditorBridge(TextEditor editor, FileDocumentViewModel model, ForgeEditorMirror mirror, string path, EditorSettings settings)
     {
         this.editor = editor;
         this.model = model;
+        this.settings = settings;
         document = mirror.Document;
         editor.Document = document;
+        EditorOptionsApplier.ApplyOptions(editor, settings);
+        EditorOptionsApplier.ApplyColors(editor);
+        editor.TextArea.IndentationStrategy = FoldingSyntaxTable.IsCSharp(path)
+            ? new CSharpIndentationStrategy(editor.Options)
+            : new DefaultIndentationStrategy();
+
+        var shape = FoldingSyntaxTable.ForPath(path);
+        folding = new EditorFoldingController(
+            editor,
+            document,
+            () => mirror.Snapshot,
+            shape.Syntax,
+            shape.Xml,
+            model.RequestFoldingRangesAsync,
+            model.ReportFoldingNotice);
+        if (settings.AutoFolding)
+        {
+            folding.Enable();
+        }
+
+        // The diagnostic dots go after the folding placeholder generator the manager inserts at index 0.
+        adornments = new EditorDiagnosticAdornments(editor, document);
+        editor.TextArea.TextView.ElementGenerators.Add(adornments);
+
+        // AvaloniaEdit 12 leaves its tab and end-of-line generators unwired, so Forge draws those two glyphs itself.
+        whitespace = new EditorWhitespaceAdornments(editor, document);
+        whitespace.Configure(settings.ShowTabs, settings.ShowEndOfLine);
+        editor.TextArea.TextView.ElementGenerators.Add(whitespace);
+        links = new EditorLinkRouter(editor, model.ReportEditorActionNotice);
+
+        settings.PropertyChanged += OnSettingsChanged;
         InstallHighlighting(path);
         document.TextChanged += OnDocumentTextChanged;
     }
 
+    /// <summary>The inline diagnostic dots of this document; the view feeds the latest diagnostic set in.</summary>
+    public EditorDiagnosticAdornments Diagnostics => adornments;
+
+    /// <summary>The end-of-line and tab glyphs of this document, drawn by Forge because 12.0.0 does not wire them.</summary>
+    public EditorWhitespaceAdornments Whitespace => whitespace;
+
+    /// <summary>Folding for this document; the view model drives the menu commands through it.</summary>
+    public EditorFoldingController Folding => folding;
+
     public void ApplyTheme()
     {
-        if (installation is null || registry is null || disposed)
+        if (disposed)
+        {
+            return;
+        }
+
+        // The theme variant reaches Forge's own brushes whether or not a TextMate installation exists (plain text files
+        // have none), so the colours and the glyph brushes are refreshed first.
+        EditorOptionsApplier.ApplyColors(editor);
+        whitespace.Configure(settings.ShowTabs, settings.ShowEndOfLine);
+        if (installation is null || registry is null)
         {
             return;
         }
@@ -59,13 +117,63 @@ internal sealed class ForgeEditorBridge : IDisposable
         }
 
         disposed = true;
+        settings.PropertyChanged -= OnSettingsChanged;
         document.TextChanged -= OnDocumentTextChanged;
+        links.Dispose();
+        editor.TextArea.TextView.ElementGenerators.Remove(whitespace);
+        whitespace.Dispose();
+        editor.TextArea.TextView.ElementGenerators.Remove(adornments);
+        adornments.Dispose();
+        folding.Dispose();
         DisposeInstallation();
         editor.Document = new EditorDocument();
     }
 
+    private void OnSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        EditorOptionsApplier.ApplyOptions(editor, settings);
+        EditorOptionsApplier.ApplyColors(editor);
+        whitespace.Configure(settings.ShowTabs, settings.ShowEndOfLine);
+        if (e.PropertyName is nameof(EditorSettings.AutoFolding))
+        {
+            if (settings.AutoFolding)
+            {
+                folding.Enable();
+            }
+            else
+            {
+                folding.Disable();
+            }
+        }
+        else if (e.PropertyName is nameof(EditorSettings.ShowLineNumbers) or nameof(EditorSettings.IndentationSize) or nameof(EditorSettings.TabsToSpaces))
+        {
+            // The indentation strategy caches the options it was built with.
+            RebindIndentation();
+        }
+
+        if (e.PropertyName is nameof(EditorSettings.Theme))
+        {
+            ApplyTheme();
+        }
+
+        editor.TextArea.TextView.Redraw();
+    }
+
+    private void RebindIndentation()
+    {
+        if (editor.TextArea.IndentationStrategy is CSharpIndentationStrategy)
+        {
+            editor.TextArea.IndentationStrategy = new CSharpIndentationStrategy(editor.Options);
+        }
+    }
+
     private ThemeName CurrentThemeName() =>
-        editor.ActualThemeVariant == ThemeVariant.Dark ? ThemeName.DarkPlus : ThemeName.LightPlus;
+        EditorOptionsApplier.IsDarkTheme(editor, settings) ? ThemeName.DarkPlus : ThemeName.LightPlus;
 
     private void InstallHighlighting(string path)
     {
@@ -182,20 +290,8 @@ internal sealed class ForgeEditorBridge : IDisposable
             return;
         }
 
-        if (editor.TryFindResource("SurfaceBrush", editor.ActualThemeVariant, out var surface) && surface is Avalonia.Media.IBrush surfaceBrush)
-        {
-            editor.Background = surfaceBrush;
-        }
-
-        if (editor.TryFindResource("TextPrimaryBrush", editor.ActualThemeVariant, out var text) && text is Avalonia.Media.IBrush textBrush)
-        {
-            editor.Foreground = textBrush;
-        }
-
-        if (editor.TryFindResource("TextMutedBrush", editor.ActualThemeVariant, out var muted) && muted is Avalonia.Media.IBrush mutedBrush)
-        {
-            editor.LineNumbersForeground = mutedBrush;
-        }
+        EditorOptionsApplier.ApplyColors(editor);
+        EditorOptionsApplier.ApplyOptions(editor, settings);
     }
 
     private void OnTextMateError(Exception exception)

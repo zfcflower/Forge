@@ -349,9 +349,14 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Provider,
             SettingsSectionIds.Appearance,
             SettingsSectionIds.Language,
+            SettingsSectionIds.Editor,
             SettingsSectionIds.Terminal,
             SettingsSectionIds.Git,
             SettingsSectionIds.Extensions,
+            SettingsSectionIds.Approvals,
+            SettingsSectionIds.Skills,
+            SettingsSectionIds.Mcp,
+            SettingsSectionIds.Tools,
             SettingsSectionIds.Paths,
         ];
 

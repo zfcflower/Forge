@@ -6,6 +6,7 @@ using Avalonia.Input.Platform;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Editing;
+using AvaloniaEdit.Rendering;
 using Forge.App.Review;
 using Forge.App.Tests.Workbench;
 using Forge.App.ViewModels;
@@ -46,8 +47,11 @@ public sealed class ReviewOverlayUiTests
         var area = s.Editor.TextArea;
         Assert.True(icon.IsVisible,
             $"hit={hit} click=({x},{y}) margin={Bounds(s.Window, margin)} sel={area.Selection.IsEmpty}/{area.Selection.SurroundingSegment?.Offset} caretLine={area.Caret.Line} events=[{string.Join("; ", log)}]");
-        var expectedTop = view.TranslatePoint(new Point(0, lineTop), s.Window)!.Value.Y;
-        Assert.InRange(Bounds(s.Window, icon).Top, expectedTop - 1.5, expectedTop + 1.5);
+        // The icon hangs off the bottom right of the clicked row: below that line, just right of the text start.
+        var lineBottom = view.TranslatePoint(new Point(0, lineTop + view.DefaultLineHeight), s.Window)!.Value.Y;
+        var textLeft = view.TranslatePoint(new Point(0, lineTop), s.Window)!.Value.X;
+        Assert.InRange(Bounds(s.Window, icon).Top, lineBottom - 1.5, lineBottom + 10);
+        Assert.InRange(Bounds(s.Window, icon).Left, textLeft + 1, textLeft + 14);
         Assert.Equal(Four, s.Editor.Document.Text);
         Assert.False(s.Model.IsDirty);
     });
@@ -63,9 +67,31 @@ public sealed class ReviewOverlayUiTests
         Assert.True(icon.IsVisible);
         Assert.Equal("two\nthree", s.Editor.SelectedText);
         var view = s.Editor.TextArea.TextView;
-        var expectedTop = view.TranslatePoint(new Point(0, view.GetVisualTopByDocumentLine(3) - view.ScrollOffset.Y), s.Window)!.Value.Y;
-        Assert.InRange(Bounds(s.Window, icon).Top, expectedTop - 1.5, expectedTop + 1.5);
+        var lineTop = view.GetVisualTopByDocumentLine(3) - view.ScrollOffset.Y;
+        var lineBottom = view.TranslatePoint(new Point(0, lineTop + view.DefaultLineHeight), s.Window)!.Value.Y;
+        var end = view.GetVisualPosition(s.Editor.TextArea.Selection.EndPosition, VisualYPosition.LineBottom);
+        var endX = view.TranslatePoint(new Point(end.X, 0), s.Window)!.Value.X;
+        // Right of the selection's moving end and below its last line, not glued to the viewport edge.
+        Assert.InRange(Bounds(s.Window, icon).Top, lineBottom - 1.5, lineBottom + 10);
+        Assert.InRange(Bounds(s.Window, icon).Left, endX - 1, endX + 14);
         Assert.Equal(Four, s.Editor.Document.Text);
+    });
+
+    [Fact]
+    public Task An_anchor_beyond_the_right_edge_keeps_the_icon_inside_the_editor() => Ui(async () =>
+    {
+        var longLine = new string('x', 300) + ((char)10);
+        await using var s = await Scene.OpenAsync(longLine);
+        s.Editor.TextArea.Focus();
+        s.Editor.Select(0, 300);
+        WorkbenchUi.Settle(s.Window);
+        var icon = Find<Button>(s.Window, "review-add");
+        Assert.True(icon.IsVisible);
+
+        var editor = Bounds(s.Window, s.Editor);
+        var iconBounds = Bounds(s.Window, icon);
+        Assert.InRange(iconBounds.Right, editor.Left, editor.Right);
+        Assert.InRange(iconBounds.Bottom, editor.Top, editor.Bottom);
     });
 
     [Fact]

@@ -117,32 +117,6 @@ public sealed class WorkbenchInteractionRegressionTests
 
     [Theory]
     [InlineData("project", "projects")]
-    [InlineData("main", "bottom")]
-    [InlineData("inspector", "files")]
-    [InlineData("inspector+preview", "preview")]
-    public Task Maximize_shows_only_its_panel_and_the_same_button_restores(string scenario, string target) => Ui(() =>
-    {
-        var (scene, role) = Build(scenario);
-        var ids = IdsOf(scenario);
-        var region = WorkbenchUi.Region(scene.Window, role);
-        var before = ids.ToDictionary(id => id, id => Abs(Chrome(scene, id), scene.Window));
-        WorkbenchUi.ClickMaximize(scene, target);
-        Assert.Equal(region.Bounds.Size, Chrome(scene, target).Bounds.Size);
-        foreach (var id in ids)
-        {
-            Assert.Equal(id == target, Chrome(scene, id).IsEffectivelyVisible);
-        }
-
-        WorkbenchUi.ClickMaximize(scene, target);
-        Assert.Null(scene.Layout.GetRegion(role).MaximizedPanel);
-        foreach (var id in ids)
-        {
-            AssertRect(before[id], Abs(Chrome(scene, id), scene.Window));
-        }
-    });
-
-    [Theory]
-    [InlineData("project", "projects")]
     [InlineData("project", "git-panel")]
     [InlineData("main", "main")]
     [InlineData("main", "bottom")]
@@ -214,15 +188,29 @@ public sealed class WorkbenchInteractionRegressionTests
     });
 
     [Theory]
+    [InlineData(false, "#D4D4D8")]
+    [InlineData(true, "#3F3F46")]
+    public Task Separator_and_border_token_is_the_stronger_neutral(bool dark, string expected) => Ui(() =>
+    {
+        var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), Wide);
+        var colour = ((IResourceHost)scene.Window)
+            .TryFindResource("BorderBrush", dark ? ThemeVariant.Dark : ThemeVariant.Light, out var value) is { } found && found
+            ? Assert.IsAssignableFrom<ISolidColorBrush>(value).Color
+            : default;
+        Assert.Equal(Color.Parse(expected), colour);
+    });
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public Task Sidebar_title_bars_differ_from_content_on_both_sides_in_both_themes(bool dark, bool swapped) => Ui(() =>
+    public Task Every_panel_title_bar_uses_one_chrome_colour_that_differs_from_its_body(bool dark, bool swapped) => Ui(() =>
     {
         var o = new object();
         var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o), Wide);
         WorkbenchUi.OpenPreviewTab(scene);
+        WorkbenchUi.OpenBottomTab(scene);
         if (swapped)
         {
             scene.Layout.SwapRegions(RegionRole.Project, RegionRole.Inspector);
@@ -231,7 +219,8 @@ public sealed class WorkbenchInteractionRegressionTests
         scene.Window.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
         WorkbenchUi.Settle(scene.Window);
         var titles = new List<Color>();
-        foreach (var id in new[] { "projects", "git-panel", "files", "inspector-tools", "preview" })
+        // Side panels, the main region and its bottom group: one chrome colour, whichever region a panel lives in.
+        foreach (var id in new[] { "projects", "git-panel", "main", "bottom", "files", "inspector-tools", "preview" })
         {
             var chrome = Chrome(scene, id);
             var bar = chrome.GetVisualDescendants().OfType<Border>().First(b => b.Name == "PART_TitleBar");
@@ -241,32 +230,6 @@ public sealed class WorkbenchInteractionRegressionTests
         }
 
         Assert.Single(titles.Distinct());
-    });
-
-    [Fact]
-    public Task Maximizing_a_peer_clears_minimized_and_restore_brings_back_two_normal_panels() => Ui(() =>
-    {
-        var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), Wide);
-        var before = Abs(Chrome(scene, "files"), scene.Window);
-        ClickMinimize(scene, "files");
-        Assert.True(scene.Layout.FilesPanel.IsMinimized);
-        WorkbenchUi.ClickMaximize(scene, "inspector-tools");
-        Assert.False(scene.Layout.FilesPanel.IsMinimized);
-        Assert.False(Chrome(scene, "files").IsEffectivelyVisible);
-        WorkbenchUi.ClickMaximize(scene, "inspector-tools");
-        AssertRect(before, Abs(Chrome(scene, "files"), scene.Window));
-    });
-
-    [Fact]
-    public Task Minimizing_a_maximized_panel_leaves_maximize_and_shows_bar_plus_peer() => Ui(() =>
-    {
-        var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), Wide);
-        var region = WorkbenchUi.Region(scene.Window, RegionRole.Inspector);
-        WorkbenchUi.ClickMaximize(scene, "files");
-        ClickMinimize(scene, "files");
-        Assert.Null(scene.Layout.Inspector.MaximizedPanel);
-        Assert.Equal(Bar, Chrome(scene, "files").Bounds.Height, Precision);
-        Assert.Equal(region.Bounds.Height - Bar - Gap, Chrome(scene, "inspector-tools").Bounds.Height, Precision);
     });
 
     [Fact]
@@ -311,7 +274,8 @@ public sealed class WorkbenchInteractionRegressionTests
         var region = WorkbenchUi.Region(scene.Window, role);
         ClickMinimize(scene, "main");
         Assert.True(scene.Layout.MainTabs.IsMinimized);
-        WorkbenchUi.Click(scene.Window, WorkbenchUi.CentreOf(Find(scene, "panel-bottom-pin"), scene.Window));
+        // The bottom group has no title-bar pin any more; the state itself is still reachable from the session view.
+        scene.Layout.IsBottomCollapsed = true;
         WorkbenchUi.Settle(scene.Window);
         Assert.True(scene.Layout.IsBottomCollapsed);
         Assert.False(scene.Layout.MainTabs.IsMinimized);

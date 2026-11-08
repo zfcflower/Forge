@@ -43,8 +43,7 @@ public partial class SessionView : UserControl
         }
     }
 
-    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
-    {
+    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)    {
         base.OnAttachedToVisualTree(e);
         ScrollToEnd();
     }
@@ -138,6 +137,22 @@ public partial class SessionView : UserControl
                 }
             });
         }
+    }
+
+    /// <summary>
+    /// The strip gives up information as the card narrows: the ahead-behind/CI group goes first. The resources button, the
+    /// sub-agent toggle, the workspace button and the token readout stay — the threshold lives in
+    /// <see cref="InstrumentLayout"/>, so the priority is testable without a visual tree; this handler only applies the flags
+    /// to the named pieces of the strip.
+    /// </summary>
+    private void OnInstrumentStripSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        var layout = InstrumentLayout.For(e.NewSize.Width);
+        if (this.FindControl<StackPanel>("StripGit") is { } git)
+        {
+            git.IsVisible = layout.ShowGit;
+        }
+
     }
 
     private void OnInputLostFocus(object? sender, RoutedEventArgs e) =>

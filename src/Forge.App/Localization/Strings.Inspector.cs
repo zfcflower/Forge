@@ -54,7 +54,7 @@ internal static class InspectorStrings
     public const string EditorLspFeatureCompletion = "files.editorLsp.feature.completion";
     public const string EditorLspFeatureHover = "files.editorLsp.feature.hover";
     public const string EditorLspFeatureDefinition = "files.editorLsp.feature.definition";
-    public const string EditorLspSnippetsSkipped = "files.editorLsp.snippetsSkipped";
+    public const string EditorLspSnippetsConverted = "files.editorLsp.snippetsConverted";
     public const string EditorLspInvalidItems = "files.editorLsp.invalidItems";
     public const string EditorLspInvalidDiagnostics = "files.editorLsp.invalidDiagnostics";
     public const string EditorLspApplyFailed = "files.editorLsp.applyFailed";
@@ -67,6 +67,8 @@ internal static class InspectorStrings
     public const string EditorLspSeverityInformation = "files.editorLsp.severity.information";
     public const string EditorLspSeverityHint = "files.editorLsp.severity.hint";
     public const string FilesLspStopped = "files.lsp.stopped";
+    public const string FilesLspServer = "files.lsp.server";
+    public const string FilesLspLoading = "files.lsp.loading";
     public const string FilesEditorHighlightFailed = "files.editor.highlight.failed";
     public const string FilesEditorHighlightTooLarge = "files.editor.highlight.large";
     public const string FilesEditorDesynced = "files.editor.desynced";
@@ -165,13 +167,13 @@ internal static class InspectorStrings
         Loc.Register(FilesUnsaved, "有未保存的修改，已取消重新加载。", "Unsaved edits; reload cancelled.");
         Loc.Register(FilesSaveFailed, "保存失败：{0}", "Save failed: {0}");
         Loc.Register(FilesLspUnavailable, "语言服务不可用：{0}", "Language server unavailable: {0}");
-        Loc.Register(EditorLspNone, "此文件没有可用的语言服务器（其语言未配置服务器，或文件不在工作区内）。Forge 不会自动安装语言服务器。", "No language server is available for this file (none is configured for its language, or it is outside a workspace). Forge does not install language servers automatically.");
+        Loc.Register(EditorLspNone, "此文件没有可用的语言服务器：已检查 PATH、VS Code/Cursor 的扩展与安装目录，未找到该语言的服务器，也没有在 languages.json 里配置。Forge 不会自动下载或安装语言服务器。", "No language server is available for this file: PATH, the VS Code/Cursor extension and installation folders were checked, nothing serves this language and languages.json configures none. Forge never downloads or installs a language server.");
         Loc.Register(EditorLspNoResponse, "语言服务器没有响应。", "The language server did not respond.");
         Loc.Register(EditorLspUnsupported, "语言服务器不支持{0}。", "The language server does not support {0}.");
         Loc.Register(EditorLspFeatureCompletion, "代码补全", "code completion");
         Loc.Register(EditorLspFeatureHover, "悬停提示", "hover information");
         Loc.Register(EditorLspFeatureDefinition, "跳转定义", "go to definition");
-        Loc.Register(EditorLspSnippetsSkipped, "已跳过 {0} 个需要代码片段支持的补全项。", "Skipped {0} completion items that need snippet support.");
+        Loc.Register(EditorLspSnippetsConverted, "{0} 个代码片段补全已按纯文本插入（不提供占位符跳转）。", "{0} snippet completions were inserted as plain text (no placeholder navigation).");
         Loc.Register(EditorLspInvalidItems, "已忽略 {0} 个格式或编辑位置无效的补全项。", "Ignored {0} completion items with an invalid format or edit range.");
         Loc.Register(EditorLspInvalidDiagnostics, "已忽略 {0} 条位置或级别无效的诊断。", "Ignored {0} diagnostics with an invalid range or severity.");
         Loc.Register(EditorLspApplyFailed, "补全未应用：文档已变化，编辑位置不再对应。", "Completion not applied: the document changed and the edit no longer lines up.");
@@ -184,6 +186,8 @@ internal static class InspectorStrings
         Loc.Register(EditorLspSeverityInformation, "信息", "Info");
         Loc.Register(EditorLspSeverityHint, "提示", "Hint");
         Loc.Register(FilesLspStopped, "语言服务未能启动，编辑不受影响。", "The language server could not start; editing is unaffected.");
+        Loc.Register(FilesLspServer, "语言服务：{0}（来源：{1}）", "Language server: {0} (from {1})");
+        Loc.Register(FilesLspLoading, "语言服务正在加载项目，加载完成后才有诊断、悬停与跳转…", "The language server is still loading the project; diagnostics, hover and navigation arrive when it is done…");
         Loc.Register(FilesEditorHighlightFailed, "语法高亮已停用：{0}", "Syntax highlighting disabled: {0}");
         Loc.Register(FilesEditorHighlightTooLarge, "文件超过 1,048,576 个字符，语法高亮已停用。", "The file exceeds 1,048,576 characters; syntax highlighting is disabled.");
         Loc.Register(FilesEditorDesynced, "编辑器与文档不同步，已停用编辑和保存，本地文本仍保留。请先复制需要的内容；重新载入文件会丢弃本地修改。", "The editor is out of sync with the document. Editing and saving are disabled and the local text is kept. Copy what you need first; reloading the file discards the local changes.");

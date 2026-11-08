@@ -8,7 +8,6 @@ internal sealed class RegionModel(RegionRole role, double width) : ObservableObj
 {
     private double width = width;
     private bool isAutoHidden;
-    private PanelModel? maximizedPanel;
 
     public RegionRole Role { get; } = role;
 
@@ -25,13 +24,6 @@ internal sealed class RegionModel(RegionRole role, double width) : ObservableObj
         set => Set(ref isAutoHidden, value);
     }
 
-    /// <summary>The panel filling the region while the others are set aside; null when nothing is maximized. Not persisted.</summary>
-    public PanelModel? MaximizedPanel
-    {
-        get => maximizedPanel;
-        set => Set(ref maximizedPanel, value);
-    }
-
     /// <summary>The panels this region holds, top to bottom (Inspector: preview group first, then the files column).</summary>
     public ObservableCollection<PanelModel> Panels { get; } = [];
 }
@@ -41,7 +33,6 @@ internal class PanelModel(string id, RegionRole region, string title) : Observab
 {
     private string title = title;
     private bool isVisible = true;
-    private bool canMaximize;
     private bool canMinimize;
     private bool isMinimized;
     private bool isFloating;
@@ -70,13 +61,6 @@ internal class PanelModel(string id, RegionRole region, string title) : Observab
     {
         get => isVisible;
         set => Set(ref isVisible, value);
-    }
-
-    /// <summary>Kept by <see cref="WorkbenchLayout"/>: true while the region shows two or more panels.</summary>
-    public bool CanMaximize
-    {
-        get => canMaximize;
-        set => Set(ref canMaximize, value);
     }
 
     public bool CanMinimize

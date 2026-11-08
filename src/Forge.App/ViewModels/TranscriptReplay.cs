@@ -25,6 +25,8 @@ internal static class TranscriptReplay
     {
         var inputTokens = 0;
         var outputTokens = 0;
+        var cacheReadTokens = 0;
+        var cacheWriteTokens = 0;
         foreach (var stored in messages)
         {
             Apply(transcript, stored.Message, stored.At);
@@ -33,11 +35,16 @@ internal static class TranscriptReplay
                 transcript.Current?.AddUsage(usage, StopReason.EndTurn);
                 inputTokens += usage.InputTokens;
                 outputTokens += usage.OutputTokens;
+
+                // Cache tokens are part of the stored usage and drive both the cache-hit ratio and the cost estimate, so a
+                // reopened session has to replay them too; dropping them would report a 0% hit rate on a real number.
+                cacheReadTokens += usage.CacheReadTokens;
+                cacheWriteTokens += usage.CacheWriteTokens;
             }
         }
 
         transcript.EndTurn(null, null);
-        return new TokenUsage(inputTokens, outputTokens);
+        return new TokenUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
     }
 
     private static void Apply(TranscriptViewModel transcript, ChatMessage message, DateTimeOffset at)

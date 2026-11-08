@@ -86,10 +86,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
         mainTabs = new TabGroupModel(WorkbenchIds.MainTabs, RegionRole.Main, ShellStrings.DocumentsTitle);
 
-        bottomTabs = new TabGroupModel(WorkbenchIds.BottomTabs, RegionRole.Main, ShellStrings.SubAgentsTitle)
-        {
-            CanPin = true,
-        };
+        bottomTabs = new TabGroupModel(WorkbenchIds.BottomTabs, RegionRole.Main, ShellStrings.SubAgentsTitle);
 
         previewTabs = new TabGroupModel(WorkbenchIds.PreviewTabs, RegionRole.Inspector, ShellStrings.PreviewTitle)
         {
@@ -464,35 +461,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <summary>TODO | review | spec tree.</summary>
     public TabGroupModel InspectorTools => inspectorTools;
 
-    /// <summary>Maximizes <paramref name="panel"/> within its region, or restores when it already is. Ignored when <see cref="PanelModel.CanMaximize"/> is false.</summary>
-    public void ToggleMaximize(PanelModel panel)
-    {
-        if (panel is null)
-        {
-            return;
-        }
-
-        RegionModel region = GetRegion(panel.Region);
-        if (region.MaximizedPanel == panel)
-        {
-            region.MaximizedPanel = null;
-            return;
-        }
-
-        if (!panel.CanMaximize || !panel.IsVisible)
-        {
-            return;
-        }
-
-        for (int i = 0; i < region.Panels.Count; i++)
-        {
-            region.Panels[i].IsMinimized = false;
-        }
-
-        region.MaximizedPanel = panel;
-        UpdateCanMinimize(region);
-    }
-
     public void ToggleMinimize(PanelModel panel)
     {
         if (panel is null)
@@ -513,7 +481,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             return;
         }
 
-        region.MaximizedPanel = null;
         panel.IsMinimized = true;
         UpdateCanMinimize(region);
     }
@@ -1302,9 +1269,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             OnPropertyChanged(nameof(BottomHasContent));
         }
 
-        UpdateCanMaximize(project);
-        UpdateCanMaximize(main);
-        UpdateCanMaximize(inspector);
         UpdateCanMinimize(project);
         UpdateCanMinimize(main);
         UpdateCanMinimize(inspector);
@@ -1312,31 +1276,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         if (!previewTabs.IsVisible)
         {
             IsPreviewCoveringMain = false;
-        }
-    }
-
-    private static void UpdateCanMaximize(RegionModel region)
-    {
-        int visible = 0;
-        var panels = region.Panels;
-        for (int i = 0; i < panels.Count; i++)
-        {
-            if (panels[i].IsVisible)
-            {
-                visible++;
-            }
-        }
-
-        bool canMaximize = visible >= 2;
-        for (int i = 0; i < panels.Count; i++)
-        {
-            PanelModel panel = panels[i];
-            panel.CanMaximize = canMaximize && panel.IsVisible;
-        }
-
-        if (region.MaximizedPanel is { } maximized && (!maximized.IsVisible || !canMaximize))
-        {
-            region.MaximizedPanel = null;
         }
     }
 

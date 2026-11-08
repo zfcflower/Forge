@@ -29,11 +29,17 @@ internal sealed partial class FileDocumentViewModel
     private LocText saveError;
     private LocText lspStatus;
     private LocText editorNotice;
+    private LocText foldingNotice;
+    private LocText actionNotice;
     private LocText copyError;
     private RelayCommand? toggleWrapCommand;
     private RelayCommand? toggleEditCommand;
 
     public string? Workspace { get; set; }
+
+    /// <summary>The live editor options the view's toolbar and context menu bind to (compiled bindings need a property on the view model).</summary>
+    public EditorSettings EditorSettings => EditorSettings.Current;
+
     public Task LspOpening => lspOpening;
     public bool HasDocument => document is not null;
     internal TextDocument? EditorDocument => document;
@@ -95,6 +101,10 @@ internal sealed partial class FileDocumentViewModel
     public bool HasLspStatus => !lspStatus.IsEmpty;
     public string? EditorNotice => editorNotice.IsEmpty ? null : editorNotice.Resolve();
     public bool HasEditorNotice => !editorNotice.IsEmpty;
+    public string? FoldingNotice => foldingNotice.IsEmpty ? null : foldingNotice.Resolve();
+    public bool HasFoldingNotice => !foldingNotice.IsEmpty;
+    public string? EditorActionNotice => actionNotice.IsEmpty ? null : actionNotice.Resolve();
+    public bool HasEditorActionNotice => !actionNotice.IsEmpty;
     public string? CopyError => copyError.IsEmpty ? null : copyError.Resolve();
     public bool HasCopyError => !copyError.IsEmpty;
     public RelayCommand ToggleWrapCommand => toggleWrapCommand ??= new RelayCommand(() => WrapLines = !WrapLines);
@@ -268,6 +278,7 @@ internal sealed partial class FileDocumentViewModel
 
     private void CancelLsp()
     {
+        StopDiagnosticsPull();
         var cts = lspCts;
         lspCts = null;
         if (cts is null)
@@ -283,6 +294,9 @@ internal sealed partial class FileDocumentViewModel
         document = doc;
         editText = text;
         isEditing = true;
+        WrapLines = EditorSettings.Current.WordWrap;
+        ReportEditorActionNotice(default);
+        ReportFoldingNotice(default);
         editorMirror?.Dispose();
         editorMirror = new ForgeEditorMirror(this, doc);
         OnPropertyChanged(nameof(IsEditorFaulted));
@@ -319,7 +333,7 @@ internal sealed partial class FileDocumentViewModel
             }
 
             session = opened;
-            SetLspStatus(opened is { State: LanguageSessionState.Unavailable } ? new LocText(InspectorStrings.FilesLspStopped) : default);
+            SetLspStatus(StatusFor(opened));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -352,6 +366,46 @@ internal sealed partial class FileDocumentViewModel
 
             cts.Dispose();
         }
+    }
+
+    /// <summary>
+    /// The line under the editor: why no server runs, or which already-installed server serves this file. A server the
+    /// user configured is not announced — it is what they asked for — while a discovered one is, so a feature that
+    /// suddenly works has a visible reason.
+    /// </summary>
+    private LocText StatusFor(LanguageSession? opened)
+    {
+        if (opened is { State: LanguageSessionState.Unavailable })
+        {
+            return new LocText(InspectorStrings.FilesLspStopped);
+        }
+
+        if (opened is null ||
+            sessions?.Registry.GetById(opened.LanguageId) is not { ServerOrigin: { } origin, Server: { } server })
+        {
+            return default;
+        }
+
+        return new LocText(
+            InspectorStrings.FilesLspServer,
+            LocText.Literal(ServerName(server)),
+            LocText.Literal(origin));
+    }
+
+    /// <summary>
+    /// What to call the server: a launcher hides the real one (<c>dotnet Microsoft.CodeAnalysis.LanguageServer.dll</c> and
+    /// <c>node jsonServerMain.js</c> both read as "dotnet"/"node"), so the launched file names the server.
+    /// </summary>
+    private static string ServerName(LanguageServerConfig server)
+    {
+        var command = System.IO.Path.GetFileName(server.Command);
+        if (server.Arguments.Count == 0 || command is not ("dotnet" or "dotnet.exe" or "node" or "node.exe"))
+        {
+            return command;
+        }
+
+        var launched = System.IO.Path.GetFileName(server.Arguments[0]);
+        return launched.Length == 0 ? command : launched;
     }
 
     private void ApplyEdit(string value)
@@ -488,6 +542,22 @@ internal sealed partial class FileDocumentViewModel
         editorNotice = notice;
         OnPropertyChanged(nameof(EditorNotice));
         OnPropertyChanged(nameof(HasEditorNotice));
+    }
+
+    /// <summary>Folding's own line: a size cap here must not overwrite the syntax-highlighting notice.</summary>
+    internal void ReportFoldingNotice(LocText notice)
+    {
+        foldingNotice = notice;
+        OnPropertyChanged(nameof(FoldingNotice));
+        OnPropertyChanged(nameof(HasFoldingNotice));
+    }
+
+    /// <summary>A transient result of an editor action (a link that could not be opened).</summary>
+    internal void ReportEditorActionNotice(LocText notice)
+    {
+        actionNotice = notice;
+        OnPropertyChanged(nameof(EditorActionNotice));
+        OnPropertyChanged(nameof(HasEditorActionNotice));
     }
 
     public void ReportCopyError(string message)

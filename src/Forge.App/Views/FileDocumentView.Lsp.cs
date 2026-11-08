@@ -22,6 +22,7 @@ public partial class FileDocumentView
     private CancellationTokenSource? hoverCts;
     private CancellationTokenSource? definitionCts;
     private int lspGeneration;
+    private bool completionIncomplete;
     private int hoverPendingOffset = -1;
     private int hoverStart = -1;
     private int hoverEnd = -1;
@@ -104,6 +105,7 @@ public partial class FileDocumentView
         }
 
         renderer.SetDiagnostics(e.Set);
+        bridge?.Diagnostics.SetDiagnostics(e.Set.Items);
         Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Selection);
     }
 
@@ -148,6 +150,10 @@ public partial class FileDocumentView
             e.Handled = true;
             _ = GoToDefinitionAsync(Editor.CaretOffset);
         }
+        else if (completionWindow is { } popup && TryMoveCompletionSelection(popup.CompletionList, e))
+        {
+            e.Handled = true;
+        }
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
         {
             var hadWork = completionCts is not null || definitionCts is not null;
@@ -159,11 +165,65 @@ public partial class FileDocumentView
         }
     }
 
+    /// <summary>
+    /// Moves the completion list's selection from the editor's key handler. The library forwards arrows through a stacked
+    /// input handler, which in the real window did not move the selection (the headless tests did not catch it because the
+    /// synthetic path works there); doing it here is deterministic, and marking the event handled keeps the library from
+    /// stepping twice. Modifier-free keys only: Ctrl+Home and friends stay with the editor.
+    /// </summary>
+    private static bool TryMoveCompletionSelection(AvaloniaEdit.CodeCompletion.CompletionList list, KeyEventArgs e)
+    {
+        if (e.KeyModifiers != KeyModifiers.None || list.ListBox is not { } box || box.ItemCount == 0)
+        {
+            return false;
+        }
+
+        var index = box.SelectedIndex;
+        var target = e.Key switch
+        {
+            Key.Down => index + 1,
+            Key.Up => index - 1,
+            Key.PageDown => index + Math.Max(1, box.VisibleItemCount),
+            Key.PageUp => index - Math.Max(1, box.VisibleItemCount),
+            Key.Home => 0,
+            Key.End => box.ItemCount - 1,
+            _ => int.MinValue,
+        };
+
+        if (target == int.MinValue)
+        {
+            return false;
+        }
+
+        // Wrap around like the library does, so Up on the first item lands on the last one.
+        var count = box.ItemCount;
+        target = ((target % count) + count) % count;
+        box.SelectIndex(target);
+        return true;
+    }
+
     private void OnEditorLspTextEntered(object? sender, TextInputEventArgs e)
     {
-        if (lspModel is not null && e.Text == "." && !Editor.IsReadOnly)
+        if (lspModel is not { } viewModel || Editor.IsReadOnly || string.IsNullOrEmpty(e.Text))
+        {
+            return;
+        }
+
+        // A list the server marked incomplete is re-asked on the next character: its own filtering would show a shrinking
+        // snapshot of what it already sent, not what the document now asks for.
+        if (completionWindow is not null && completionIncomplete)
         {
             _ = ShowCompletionAsync();
+            return;
+        }
+
+        foreach (var trigger in viewModel.CompletionTriggers)
+        {
+            if (string.Equals(e.Text, trigger, StringComparison.Ordinal))
+            {
+                _ = ShowCompletionAsync();
+                return;
+            }
         }
     }
 
@@ -226,6 +286,20 @@ public partial class FileDocumentView
         try
         {
             var result = await viewModel.RequestCompletionAsync(offset, cts.Token).ConfigureAwait(true);
+            if (result is null)
+            {
+                // No session, no server completion, or a server that returned nothing: the words of the document are still
+                // something to offer, as long as this request is not a cancelled or superseded one.
+                if (cts.IsCancellationRequested || !IsLspCurrent(viewModel, generation) ||
+                    !ReferenceEquals(Editor.Document, document) || Editor.CaretOffset != offset ||
+                    document.Version.CompareAge(versionBefore) != 0)
+                {
+                    return;
+                }
+
+                result = EditorWordCompletion.Build(document, offset);
+            }
+
             if (result is null || cts.IsCancellationRequested || !IsLspCurrent(viewModel, generation) ||
                 !ReferenceEquals(Editor.Document, document) || Editor.CaretOffset != result.RequestOffset ||
                 document.Version.CompareAge(versionBefore) != 0)
@@ -270,8 +344,12 @@ public partial class FileDocumentView
         var log = new EditorLspChangeLog(document);
         try
         {
+            completionIncomplete = result.IsIncomplete;
             var window = new CompletionWindow(Editor.TextArea) { StartOffset = result.PrefixStart };
             window.CompletionList.IsFiltering = true;
+            // The workbench's row lists blank out ListBoxItem backgrounds globally; this class gives the popup back a
+            // visible selected row (see Resources/Controls.axaml).
+            window.CompletionList.Classes.Add("completion");
             void ApplyFailed() => viewModel.ReportEditorLspNotice(new LocText(InspectorStrings.EditorLspApplyFailed));
             for (var rank = 0; rank < result.Items.Count; rank++)
             {
@@ -284,6 +362,7 @@ public partial class FileDocumentView
                 if (ReferenceEquals(completionWindow, window))
                 {
                     completionWindow = null;
+                    completionIncomplete = false;
                 }
             };
             completionWindow = window;
@@ -302,6 +381,7 @@ public partial class FileDocumentView
     {
         var window = completionWindow;
         completionWindow = null;
+        completionIncomplete = false;
         window?.Hide();
     }
 
@@ -359,7 +439,15 @@ public partial class FileDocumentView
             var end = hover?.End ?? offset;
             if (diagnosticRenderer is { } renderer)
             {
-                foreach (var diagnostic in renderer.FindAt(offset))
+                // The end-of-line dot belongs to the line, not to a squiggle, so it explains its own messages.
+                var covering = renderer.FindAt(offset);
+                if (covering.Count == 0 && document.GetLineByOffset(Math.Min(offset, document.TextLength)) is { } line &&
+                    bridge?.Diagnostics.LineHasDiagnostics(line.EndOffset) == true)
+                {
+                    covering = renderer.FindOnLine(line.LineNumber);
+                }
+
+                foreach (var diagnostic in covering)
                 {
                     parts.Add(Loc.Instance[SeverityKey(diagnostic.Severity)] + ": " + diagnostic.Message +
                         (string.IsNullOrEmpty(diagnostic.Code) ? string.Empty : " [" + diagnostic.Code + "]"));

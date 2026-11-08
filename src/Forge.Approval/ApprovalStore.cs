@@ -170,6 +170,50 @@ public sealed class ApprovalStore : IDisposable
     }
 
     /// <summary>
+    /// Reads every approval record for the settings page over a read-only, unpooled connection: a missing file or a
+    /// database without the <c>plugin_approval</c> table is an empty list, and any other SQLite failure propagates so the
+    /// page can say the database is unusable instead of showing "no plugins".
+    /// </summary>
+    public static async Task<IReadOnlyList<PluginRecord>> ListReadOnlyAsync(
+        string databasePath,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        if (!File.Exists(databasePath))
+        {
+            return [];
+        }
+
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString();
+
+        try
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+            await using var probe = connection.CreateCommand();
+            probe.CommandText = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'plugin_approval'";
+            var found = await probe.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (found is not long tables || tables == 0)
+            {
+                return [];
+            }
+
+            var records = ApprovalDatabase.ReadAll(connection, null, databasePath).Values.ToList();
+            records.Sort(OrderByPlugin);
+            return records;
+        }
+        catch (FileNotFoundException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
     /// Inserts or replaces one version's record. A supplied <see cref="PluginRecord.CreatedAt"/> wins; otherwise the
     /// existing creation time, or now, is kept. A default <see cref="PluginRecord.UpdatedAt"/> becomes now.
     /// </summary>

@@ -100,19 +100,22 @@ internal static class EditorLspMapping
         var invalid = result.MalformedItems;
         foreach (var item in result.Items)
         {
+            // The client advertises no snippet support, so a snippet item would normally be dropped. It is kept instead,
+            // with its placeholders reduced to their text, because dropping it hides a completion that works elsewhere.
+            var mapped = item;
             if (item.InsertTextFormat == InsertTextFormat.Snippet)
             {
                 snippets++;
-                continue;
+                mapped = ToPlainText(item);
             }
 
-            if (!TryMapItem(item, text, offset, prefixStart, encoding, newLine, out var mapped))
+            if (!TryMapItem(mapped, text, offset, prefixStart, encoding, newLine, out var completion))
             {
                 invalid++;
                 continue;
             }
 
-            items.Add(mapped);
+            items.Add(completion);
         }
 
         items.Sort(static (a, b) =>
@@ -155,6 +158,16 @@ internal static class EditorLspMapping
 
         return builder.ToString();
     }
+
+    /// <summary>The same item with its insert text reduced to the plain text of a snippet.</summary>
+    private static CompletionItem ToPlainText(CompletionItem item) => item with
+    {
+        InsertText = item.InsertText is null ? null : EditorLspSnippets.ToPlainText(item.InsertText),
+        TextEdit = item.TextEdit is null
+            ? null
+            : item.TextEdit with { NewText = EditorLspSnippets.ToPlainText(item.TextEdit.NewText) },
+        InsertTextFormat = InsertTextFormat.PlainText,
+    };
 
     private static bool TryMapItem(
         CompletionItem item, TextSnapshot text, int offset, int prefixStart, PositionEncoding encoding,

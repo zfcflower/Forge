@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Threading;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Workbench.Controls;
@@ -14,11 +13,11 @@ namespace Forge.App.Workbench.Controls;
 internal sealed class RegionPresenter : Panel
 {
     private readonly List<PanelChrome> chromes = [];
+    private readonly List<Border> stackGaps = [];
     private readonly PanelSplitter bottomSplitter = new() { Kind = PanelSplitterKind.Bottom };
     private readonly PanelSplitter previewSplitter = new() { Kind = PanelSplitterKind.Preview };
     private readonly PanelSplitter inspectorSplitter = new() { Kind = PanelSplitterKind.Inspector };
     private readonly BottomCollapsedStrip bottomStrip = new();
-    private PanelModel? lastMaximized;
     private Rect[] childRects = [];
     private Rect regionRect;
     private Rect previewCoverRect;
@@ -94,6 +93,7 @@ internal sealed class RegionPresenter : Panel
     public void Rebuild()
     {
         chromes.Clear();
+        stackGaps.Clear();
         Children.Clear();
         var region = Layout.GetRegion(Role);
         var sidebar = Role is RegionRole.Project or RegionRole.Inspector;
@@ -102,6 +102,17 @@ internal sealed class RegionPresenter : Panel
             var chrome = new PanelChrome { Model = region.Panels[i], Layout = Layout, Sidebar = sidebar };
             chromes.Add(chrome);
             Children.Add(chrome);
+        }
+
+        // One 1 px line per gap between stacked panels. The gap alone shows the window background, so the lower panel's
+        // title bar would sit there with no top line while the inspector's column draws one above its tool group; a plain
+        // border rather than a splitter keeps the boundary non-draggable, as the stack has no ratio to drag.
+        for (var i = 1; i < region.Panels.Count; i++)
+        {
+            var line = new Border { Height = WorkbenchMetrics.PanelSplitterWidth, IsHitTestVisible = false };
+            WorkbenchResources.Link(line, Border.BackgroundProperty, "BorderBrush");
+            stackGaps.Add(line);
+            Children.Add(line);
         }
 
         Children.Add(bottomSplitter);
@@ -162,17 +173,6 @@ internal sealed class RegionPresenter : Panel
             return;
         }
 
-        var region = Layout.GetRegion(Role);
-        var maximizedChrome = region.MaximizedPanel is { IsVisible: true } maximized && ChromeOf(maximized) is { } chrome
-            ? chrome
-            : null;
-        ApplyMaximizedChrome(maximizedChrome);
-        if (maximizedChrome is not null)
-        {
-            Place(maximizedChrome, body);
-            return;
-        }
-
         switch (Role)
         {
             case RegionRole.Main:
@@ -185,62 +185,6 @@ internal sealed class RegionPresenter : Panel
                 ArrangeStack(body);
                 break;
         }
-    }
-
-    /// <summary>
-    /// While a panel is maximized its chrome is the only visible one (the others collapse, not just to empty rectangles);
-    /// restoring brings every chrome back. The change fades the affected chromes in unless reduced motion is on — the
-    /// maximized panel on engage, the whole region on restore.
-    /// </summary>
-    private void ApplyMaximizedChrome(PanelChrome? maximized)
-    {
-        if (ReferenceEquals(maximized?.Model, lastMaximized))
-        {
-            return;
-        }
-
-        lastMaximized = maximized?.Model;
-        var engage = maximized is not null;
-        for (var i = 0; i < chromes.Count; i++)
-        {
-            var chrome = chromes[i];
-            var visible = !engage || ReferenceEquals(chrome, maximized);
-            if (!visible && chrome.IsVisible)
-            {
-                // Hidden controls skip arrange, so clear only the chrome being collapsed before hiding it.
-                chrome.Measure(default);
-                chrome.Arrange(default);
-            }
-
-            chrome.IsVisible = visible;
-        }
-
-        if (!engage)
-        {
-            for (var i = 0; i < chromes.Count; i++)
-            {
-                FadeIn(chromes[i]);
-            }
-
-            return;
-        }
-
-        FadeIn(maximized!);
-    }
-
-    /// <summary>Ramps the chrome in from transparent; with reduced motion the final opacity applies immediately.</summary>
-    private static void FadeIn(PanelChrome chrome)
-    {
-        if (TreeMotion.ReducedMotion)
-        {
-            chrome.Opacity = 1;
-            return;
-        }
-
-        // Start transparent in this arrange pass; the posted restore runs after layout, so the Opacity transition
-        // animates the fade. A window that is gone by then just keeps a detached chrome at full opacity.
-        chrome.Opacity = 0;
-        Dispatcher.UIThread.Post(() => chrome.Opacity = 1);
     }
 
     private void ArrangeMain(Rect body)
@@ -331,10 +275,15 @@ internal sealed class RegionPresenter : Panel
         }
         var title = PanelChrome.TitleBarHeight;
         var expanded = visible - minimized;
-        var height = expanded > 0
-            ? (body.Height - ((visible - 1) * splitterHeight) - (minimized * title)) / expanded
-            : 0;
+        var available = Math.Max(0, body.Height - ((visible - 1) * splitterHeight) - (minimized * title));
+        // Whole pixels per expanded panel, the remainder on the last one: a fractional slot would land the split on a
+        // half pixel, and layout rounding then swallows the 1 px gap — and with it the separator above the lower panel's
+        // title bar — whenever the region height is not a multiple of the panel count.
+        var expandedSlot = expanded > 0 ? Math.Floor(available / expanded) : 0;
+        var lastExpandedSlot = expanded > 0 ? available - (expandedSlot * (expanded - 1)) : 0;
         var y = body.Y;
+        var placed = 0;
+        var expandedPlaced = 0;
         for (var i = 0; i < chromes.Count; i++)
         {
             if (chromes[i].Model is not { IsVisible: true })
@@ -342,9 +291,29 @@ internal sealed class RegionPresenter : Panel
                 continue;
             }
 
-            var slot = chromes[i].Model!.IsMinimized ? title : Math.Max(0, height);
-            Place(chromes[i], new Rect(body.X, y, body.Width, slot));
-            y += slot + splitterHeight;
+            double slot;
+            if (chromes[i].Model!.IsMinimized)
+            {
+                slot = title;
+            }
+            else
+            {
+                expandedPlaced++;
+                slot = expandedPlaced == expanded ? lastExpandedSlot : expandedSlot;
+            }
+
+            Place(chromes[i], new Rect(body.X, y, body.Width, Math.Max(0, slot)));
+            y += Math.Max(0, slot);
+            placed++;
+            if (placed < visible)
+            {
+                if (placed - 1 < stackGaps.Count)
+                {
+                    Place(stackGaps[placed - 1], new Rect(body.X, y, body.Width, splitterHeight));
+                }
+
+                y += splitterHeight;
+            }
         }
     }
 

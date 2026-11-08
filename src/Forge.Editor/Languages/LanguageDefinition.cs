@@ -22,6 +22,7 @@ public sealed record LanguageDefinition(
     IReadOnlyList<string> FileNames,
     LanguageServerConfig? Server,
     JsonNode? InitializationOptions = null,
-    string? DisplayName = null)
+    string? DisplayName = null,
+    string? ServerOrigin = null)
 {
 }

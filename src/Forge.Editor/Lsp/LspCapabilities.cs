@@ -24,6 +24,7 @@ public sealed record LspServerCapabilities(
     SemanticTokensCapability? SemanticTokens,
     JsonElement Raw,
     bool SupportsFoldingRanges = false,
+    bool SupportsDiagnosticPull = false,
     IReadOnlyList<string>? CompletionTriggerCharacters = null,
     bool SupportsCompletionResolve = false)
 {
@@ -91,6 +92,7 @@ public sealed record LspServerCapabilities(
             SemanticTokens: ParseSemanticTokens(capabilities),
             Raw: result.Clone(),
             SupportsFoldingRanges: Has(capabilities, "foldingRangeProvider"),
+            SupportsDiagnosticPull: Has(capabilities, "diagnosticProvider"),
             CompletionTriggerCharacters: ParseCompletionTriggers(capabilities),
             SupportsCompletionResolve: capabilities.ValueKind == JsonValueKind.Object &&
                 capabilities.TryGetProperty("completionProvider", out var completionProvider) &&

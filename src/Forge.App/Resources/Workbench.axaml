@@ -102,8 +102,11 @@
   </ControlTheme>
 
   <!-- One tab, Visual Studio tool-window style: an inactive tab is plain, centred, muted text on the title bar; the active
-       tab is a 1 px frame with rounded top corners, filled with the panel body's colour and standing on the title bar's
-       bottom line so it merges with the body below. Only the active tab shows its close button. -->
+       tab is a 1 px frame with rounded top corners, filled with the panel body's colour, standing on the title bar's bottom
+       line so it merges with the body below, and — where its two sides reach that line — turning outward through a 4 px
+       fillet into the body, so the bottom corners round away from the label instead of ending on a square step. The frame
+       and fill are drawn by TabHeaderView itself (a border can only round a corner inward); the template's border keeps
+       its 1 px thickness only to keep the label's box the same size. Only the active tab shows its close button. -->
   <ControlTheme x:Key="{x:Type controls:TabHeaderView}" TargetType="controls:TabHeaderView">
     <Setter Property="Height" Value="25" />
     <Setter Property="Margin" Value="0" />
@@ -116,22 +119,30 @@
         <Border Name="PART_Root"
                 Background="Transparent"
                 BorderBrush="Transparent"
-                BorderThickness="1,1,1,0"
-                CornerRadius="4,4,0,0"
+                BorderThickness="1"
                 Padding="12,0,4,0">
-          <Grid ColumnDefinitions="Auto,Auto" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Grid ColumnDefinitions="Auto,Auto,Auto" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <controls:LineIcon Name="PART_Icon"
+                               Grid.Column="0"
+                               Data="{DynamicResource IconChat}"
+                               Width="14"
+                               Height="14"
+                               Margin="0,0,5,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               IsVisible="{TemplateBinding IsIconVisible}" />
             <TextBlock Name="PART_Label"
-                       Grid.Column="0"
+                       Grid.Column="1"
                        Text="{TemplateBinding TabTitle}"
-                       FontSize="{DynamicResource FontSizeMd}"
-                       FontWeight="SemiBold"
+                       FontSize="{DynamicResource FontSizeBase}"
+                       FontWeight="Normal"
                        TextWrapping="NoWrap"
                        TextTrimming="CharacterEllipsis"
                        MaxWidth="180"
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource TextMutedBrush}" />
             <controls:PanelIconButton Name="PART_Close"
-                                      Grid.Column="1"
+                                      Grid.Column="2"
                                       Width="16"
                                       Height="16"
                                       Margin="6,0,0,0"
@@ -159,10 +170,13 @@
     </Style>
     <Style Selector="^:selected">
       <Setter Property="ZIndex" Value="1" />
-    </Style>
-    <Style Selector="^:selected /template/ Border#PART_Root">
       <Setter Property="Background" Value="{Binding $parent[controls:PanelChrome].Background}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+    <!-- The frame the render draws follows BorderBrush, so focus only has to recolour it; an inactive tab has no fill but
+         still shows the accent frame while it holds the keyboard. -->
+    <Style Selector="^:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
     <Style Selector="^:selected /template/ controls|PanelIconButton#PART_Close, ^:pointerover /template/ controls|PanelIconButton#PART_Close">
       <Setter Property="Opacity" Value="1" />
@@ -171,8 +185,14 @@
     <Style Selector="^:selected /template/ TextBlock#PART_Label">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
-    <Style Selector="^:focus-visible /template/ Border#PART_Root">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <!-- The session tab's bubble: a stroked bubble while the tab is inactive, the same outline filled while it is active,
+         so the active tab reads as a solid bubble. Colour follows the label. -->
+    <Style Selector="^:pointerover /template/ controls|LineIcon#PART_Icon">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="^:selected /template/ controls|LineIcon#PART_Icon">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
   </ControlTheme>
 
@@ -237,7 +257,7 @@
                            Margin="8,0,0,0"
                            VerticalAlignment="Center"
                            FontSize="{DynamicResource FontSizeMd}"
-                           FontWeight="SemiBold"
+                           FontWeight="Bold"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            Foreground="{DynamicResource TextSecondaryBrush}"

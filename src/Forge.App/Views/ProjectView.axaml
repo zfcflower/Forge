@@ -64,6 +64,7 @@
                 </Border>
                 <wc:LineIcon Grid.Column="1"
                              Classes="tree-icon"
+                             Classes.active-session="{Binding IsActiveSession}"
                              Data="{Binding Icon}"
                              Margin="14,0,6,0" />
                 <Grid Grid.Column="2" ColumnDefinitions="*,Auto" VerticalAlignment="Center">

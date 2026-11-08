@@ -11,6 +11,7 @@ using AvaloniaPath = Avalonia.Controls.Shapes.Path;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Views;
+using Forge.App.Workbench.Controls;
 using Forge.Workspace;
 using Xunit;
 
@@ -228,9 +229,9 @@ public sealed class TreeVisualTests : IDisposable
                     RootGuides: GuideLines(rootItem).Count(),
                     AppGuides: GuideLines(appItem).Count(),
                     ViewsGuides: GuideLines(viewsItem).Count(),
-                    RootIcon: ReferenceEquals(TreeIcons.FolderOpen, IconOf(rootItem).Data),
-                    AppIcon: ReferenceEquals(TreeIcons.FolderOpen, IconOf(appItem).Data),
-                    ViewsIcon: ReferenceEquals(TreeIcons.File, IconOf(viewsItem).Data));
+                    RootIcon: ReferenceEquals(TreeIcons.FolderOpen, IconData(IconOf(rootItem))),
+                    AppIcon: ReferenceEquals(TreeIcons.FolderOpen, IconData(IconOf(appItem))),
+                    ViewsIcon: ReferenceEquals(TreeIcons.File, IconData(IconOf(viewsItem))));
             },
             CancellationToken.None);
 
@@ -280,10 +281,10 @@ public sealed class TreeVisualTests : IDisposable
                 return (ChevronAfterTitle: mainChevron.Bounds.X >= mainTitle.Bounds.Right,
                     RunningAnimated: IconOf(runningItem).Classes.Contains("agent-running-animated"),
                     RunningRunning: IconOf(runningItem).Classes.Contains("agent-running"),
-                    RunningColour: ColourOf(IconOf(runningItem)),
+                    RunningColour: IconColour(IconOf(runningItem)),
                     CompletedAnimated: IconOf(completedItem).Classes.Contains("agent-running-animated"),
-                    CompletedColour: ColourOf(IconOf(completedItem)),
-                    FailedColour: ColourOf(IconOf(failedItem)),
+                    CompletedColour: IconColour(IconOf(completedItem)),
+                    FailedColour: IconColour(IconOf(failedItem)),
                     ExpectedRunning: ColourOf("RunningBrush"),
                     ExpectedCompleted: ColourOf("SuccessBrush"),
                     ExpectedFailed: ColourOf("DangerBrush"));
@@ -447,8 +448,27 @@ public sealed class TreeVisualTests : IDisposable
     private static Border ContentBorder(Visual item) =>
         Visible<Border>(item).First(static border => border.Classes.Contains("tree-row-content"));
 
-    private static AvaloniaPath IconOf(Visual item) =>
-        Visible<AvaloniaPath>(item).First(static path => path.Classes.Contains("tree-icon"));
+    /// <summary>
+    /// The row's kind icon. The file and spec trees stroke a <see cref="AvaloniaPath"/>; the project and agent trees
+    /// stroke a <see cref="LineIcon"/>, which carries the geometry in <see cref="LineIcon.Data"/> and the colour in its
+    /// inherited foreground instead of the path's stroke.
+    /// </summary>
+    private static Control IconOf(Visual item) =>
+        Visible<Control>(item).First(static control => control.Classes.Contains("tree-icon"));
+
+    private static Geometry? IconData(Control icon) => icon switch
+    {
+        AvaloniaPath path => path.Data,
+        LineIcon line => line.Data,
+        _ => throw new InvalidOperationException($"the icon '{icon.GetType().Name}' carries no geometry."),
+    };
+
+    private static Color IconColour(Control icon) => icon switch
+    {
+        AvaloniaPath path => ((SolidColorBrush)path.Stroke!).Color,
+        LineIcon line => ((SolidColorBrush)line.Foreground!).Color,
+        _ => throw new InvalidOperationException($"the icon '{icon.GetType().Name}' carries no stroke colour."),
+    };
 
     private static AvaloniaPath ChevronOf(Visual item) =>
         Visible<AvaloniaPath>(item).First(static path => path.Classes.Contains("tree-chevron"));
@@ -458,8 +478,6 @@ public sealed class TreeVisualTests : IDisposable
 
     private static double AbsoluteLeft(Visual visual, Visual root) =>
         visual.TranslatePoint(new Point(0, 0), root)?.X ?? double.NaN;
-
-    private static Color ColourOf(AvaloniaPath path) => ((SolidColorBrush)path.Stroke!).Color;
 
     private static Color ColourOf(string key)
     {

@@ -539,17 +539,6 @@ public sealed class WorkbenchLayoutTabsTests
     }
 
     [Fact]
-    public void Maximizing_a_panel_does_not_raise_layout_changed()
-    {
-        var layout = NewLayout();
-        var changes = RecordLayoutChanges(layout);
-
-        layout.ToggleMaximize(layout.FilesPanel);
-
-        Assert.Empty(changes);
-    }
-
-    [Fact]
     public void Covering_main_with_preview_does_not_raise_layout_changed()
     {
         var layout = NewLayout();

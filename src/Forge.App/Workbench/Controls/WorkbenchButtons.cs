@@ -13,11 +13,21 @@ internal class PanelIconButton : Button
     public static readonly StyledProperty<Geometry?> IconProperty =
         AvaloniaProperty.Register<PanelIconButton, Geometry?>(nameof(Icon));
 
+    /// <summary>True for a closed-path icon that should read solid: the theme then fills it with the stroke's brush.</summary>
+    public static readonly StyledProperty<bool> IsIconFilledProperty =
+        AvaloniaProperty.Register<PanelIconButton, bool>(nameof(IsIconFilled));
+
     /// <summary>Icon geometry, reused from the token dictionary or from <c>Workbench.axaml</c>.</summary>
     public Geometry? Icon
     {
         get => GetValue(IconProperty);
         set => SetValue(IconProperty, value);
+    }
+
+    public bool IsIconFilled
+    {
+        get => GetValue(IsIconFilledProperty);
+        set => SetValue(IsIconFilledProperty, value);
     }
 }
 

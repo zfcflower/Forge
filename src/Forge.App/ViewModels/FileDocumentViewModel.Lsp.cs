@@ -15,11 +15,19 @@ internal sealed partial class FileDocumentViewModel
     private CancellationTokenSource? editorLspCts;
     private LanguageSession? diagnosticsSession;
     private EventHandler<DiagnosticsChangedEventArgs>? diagnosticsHandler;
+    private EventHandler<bool>? busyHandler;
     private int editorLspGeneration;
     private long editorDiagnosticsSequence = -1;
     private bool unsupportedHoverReported;
     private EditorLspDiagnosticSet editorDiagnostics = EditorLspDiagnosticSet.Empty;
     private EditorLspDefinitionTarget? pendingReveal;
+    private PullLoop? pullLoop;
+
+    /// <summary>Quiet period after an edit before the editor asks for diagnostics again.</summary>
+    private const int PullDebounceMilliseconds = 500;
+
+    /// <summary>Second pull after a document opens, so a server that needed to load a project still reports.</summary>
+    private const int PullCatchUpMilliseconds = 2_500;
 
     internal event EventHandler<EditorLspDiagnosticsEventArgs>? EditorDiagnosticsChanged;
     internal event EventHandler<EditorLspDefinitionTarget>? DefinitionRequested;
@@ -43,6 +51,7 @@ internal sealed partial class FileDocumentViewModel
 
     internal void EndEditorLsp()
     {
+        StopDiagnosticsPull();
         editorLspGeneration++;
         var cts = editorLspCts;
         editorLspCts = null;
@@ -52,13 +61,22 @@ internal sealed partial class FileDocumentViewModel
             cts.Dispose();
         }
 
-        if (diagnosticsSession is { } active && diagnosticsHandler is { } handler)
+        if (diagnosticsSession is { } active)
         {
-            active.DiagnosticsChanged -= handler;
+            if (diagnosticsHandler is { } handler)
+            {
+                active.DiagnosticsChanged -= handler;
+            }
+
+            if (busyHandler is { } busy)
+            {
+                active.BusyChanged -= busy;
+            }
         }
 
         diagnosticsSession = null;
         diagnosticsHandler = null;
+        busyHandler = null;
         editorDiagnosticsSequence = -1;
         editorDiagnostics = EditorLspDiagnosticSet.Empty;
     }
@@ -162,9 +180,9 @@ internal sealed partial class FileDocumentViewModel
         {
             SetLspStatus(new LocText(InspectorStrings.EditorLspInvalidItems, TextFormat.Number(mapped.InvalidItems)));
         }
-        else if (mapped.SkippedSnippets > 0)
+        else if (mapped.ConvertedSnippets > 0)
         {
-            SetLspStatus(new LocText(InspectorStrings.EditorLspSnippetsSkipped, TextFormat.Number(mapped.SkippedSnippets)));
+            SetLspStatus(new LocText(InspectorStrings.EditorLspSnippetsConverted, TextFormat.Number(mapped.ConvertedSnippets)));
         }
         else
         {
@@ -322,6 +340,227 @@ internal sealed partial class FileDocumentViewModel
         return definition;
     }
 
+    /// <summary>
+    /// The characters that open the completion list by themselves: the server's declared
+    /// <c>triggerCharacters</c> plus <c>.</c>, which every server means even when it forgets to declare it. Empty when
+    /// there is no session, so an unserved file opens completion only with Ctrl+Space.
+    /// </summary>
+    internal IReadOnlyList<string> CompletionTriggers
+    {
+        get
+        {
+            var declared = session?.Client?.Capabilities.CompletionTriggerCharacters;
+            if (declared is null || declared.Count == 0)
+            {
+                return [];
+            }
+
+            return declared.Contains(".") ? declared : [.. declared, "."];
+        }
+    }
+
+    /// <summary>
+    /// The server is loading a project: say so, because until it finishes nothing answers — a pressed F12 or a hover looks
+    /// like a broken feature rather than a wait.
+    /// </summary>
+    private void OnServerBusy(LanguageSession active, bool busy)
+    {
+        if (!ReferenceEquals(session, active))
+        {
+            return;
+        }
+
+        if (busy)
+        {
+            SetLspStatus(new LocText(InspectorStrings.FilesLspLoading));
+        }
+        else
+        {
+            SetLspStatus(StatusFor(active));
+        }
+    }
+
+    /// <summary>
+    /// Pull diagnostics (LSP 3.17): a server that only answers <c>textDocument/diagnostic</c> — Roslyn is one; it hides its
+    /// provider capability from clients that cannot ask — never pushes anything, so the editor asks on open, after edits
+    /// and whenever the server sends <c>workspace/diagnostic/refresh</c>. Push notifications keep working for servers that
+    /// use them, and both paths end in the same mapping.
+    /// </summary>
+    private void StartDiagnosticsPull(TextDocument doc, LanguageSession? active)
+    {
+        StopDiagnosticsPull();
+        if (active?.Client?.Capabilities is not { SupportsDiagnosticPull: true } client)
+        {
+            return;
+        }
+
+        var generation = editorLspGeneration;
+        var path = doc.Path ?? Path;
+        var cts = new CancellationTokenSource();
+        var loop = new PullLoop(active, doc, cts);
+        pullLoop = loop;
+
+        void OnRefresh(object? sender, EventArgs e) => SchedulePull(loop, path, generation, immediate: false);
+        void OnChanged(object? sender, Forge.Editor.Text.TextChangedEventArgs e) => SchedulePull(loop, path, generation, immediate: false);
+        active.DiagnosticsRefreshRequested += OnRefresh;
+        doc.Changed += OnChanged;
+        loop.Subscriptions = () =>
+        {
+            active.DiagnosticsRefreshRequested -= OnRefresh;
+            doc.Changed -= OnChanged;
+        };
+
+        // Once now (a file that is already analysed answers immediately), then again shortly after: a server that had to
+        // load the project first sends workspace/diagnostic/refresh, but the second pull makes the common case reliable.
+        SchedulePull(loop, path, generation, immediate: true);
+        _ = PullLaterAsync(loop, path, generation, client);
+    }
+
+    private async Task PullLaterAsync(PullLoop loop, string path, int generation, LspServerCapabilities client)
+    {
+        try
+        {
+            await Task.Delay(PullCatchUpMilliseconds, loop.Token).ConfigureAwait(true);
+            SchedulePull(loop, path, generation, immediate: true);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void SchedulePull(PullLoop loop, string path, int generation, bool immediate)
+    {
+        if (!ReferenceEquals(pullLoop, loop) || loop.Token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        loop.CancelPending();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(loop.Token);
+        loop.Pending = cts;
+        _ = PullAfterDelayAsync(loop, path, generation, cts, immediate ? 0 : PullDebounceMilliseconds);
+    }
+
+    private async Task PullAfterDelayAsync(PullLoop loop, string path, int generation, CancellationTokenSource cts, int delay)
+    {
+        try
+        {
+            if (delay > 0)
+            {
+                await Task.Delay(delay, cts.Token).ConfigureAwait(true);
+            }
+
+            var active = loop.Session;
+            var doc = loop.Document;
+            var snapshot = doc.Snapshot;
+            var pulled = await active.RequestDiagnosticsAsync(doc, null, cts.Token).ConfigureAwait(true);
+            if (pulled is null || pulled.Unchanged || cts.IsCancellationRequested || generation != editorLspGeneration ||
+                !ReferenceEquals(pullLoop, loop) || !ReferenceEquals(document, doc) || IsEditorFaulted)
+            {
+                return;
+            }
+
+            // Landing the pulled set in the session's store means the normal diagnostics pipeline renders it: the same
+            // mapping as a server push, the same events, and a view that attaches later replays it instead of staying blank.
+            active.PublishDiagnostics(LspUri.FromPath(path), snapshot.Version, pulled.Items);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            Trace.WriteLine("[file] pulling diagnostics failed: " + exception.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(loop.Pending, cts))
+            {
+                loop.Pending = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void StopDiagnosticsPull()
+    {
+        var loop = pullLoop;
+        pullLoop = null;
+        loop?.Dispose();
+    }
+
+    /// <summary>One document's pull state: the session, the cancellation root and the debounce in flight.</summary>
+    private sealed class PullLoop(LanguageSession session, TextDocument document, CancellationTokenSource lifetime) : IDisposable
+    {
+        private bool disposed;
+
+        public LanguageSession Session { get; } = session;
+
+        public TextDocument Document { get; } = document;
+
+        public CancellationToken Token => lifetime.Token;
+
+        public Action? Subscriptions { get; set; }
+
+        public CancellationTokenSource? Pending { get; set; }
+
+        public void CancelPending()
+        {
+            var pending = Pending;
+            Pending = null;
+            pending?.Cancel();
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            CancelPending();
+            Subscriptions?.Invoke();
+            Subscriptions = null;
+            lifetime.Cancel();
+            lifetime.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Foldable ranges from the language server, or null when there is no session, the session is not ready, or the
+    /// server did not declare <c>foldingRangeProvider</c> — in every such case the editor falls back to the structural
+    /// heuristic instead of reporting a missing capability.
+    /// </summary>
+    internal async Task<IReadOnlyList<Forge.Editor.Folding.FoldingRange>?> RequestFoldingRangesAsync(CancellationToken ct)
+    {
+        if (await PrepareEditorRequestAsync(0, ct, silent: true).ConfigureAwait(true) is not { } request)
+        {
+            return null;
+        }
+
+        if (request.Session.Client?.Capabilities is not { SupportsFoldingRanges: true })
+        {
+            return null;
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token);
+        try
+        {
+            var ranges = await request.Session.RequestFoldingRangesAsync(request.Document, linked.Token).ConfigureAwait(true);
+            return linked.IsCancellationRequested || !IsEditorRequestCurrent(request) ? null : ranges;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            Trace.WriteLine("[file] folding ranges failed: " + exception.Message);
+            return null;
+        }
+    }
+
     private async Task ConnectEditorLspAsync(TextDocument doc, int generation, CancellationToken ct)
     {
         try
@@ -353,10 +592,16 @@ internal sealed partial class FileDocumentViewModel
             diagnosticsSession = active;
             diagnosticsHandler = handler;
             active.DiagnosticsChanged += handler;
+            busyHandler = (_, isBusy) => Dispatcher.UIThread.Post(() => OnServerBusy(active, isBusy));
+            active.BusyChanged += busyHandler;
             if (active.Diagnostics.GetForPath(path) is { } current)
             {
                 _ = Task.Run(() => OnEditorSessionDiagnostics(current, active, doc, path, generation), CancellationToken.None);
             }
+
+            // Pull diagnostics belong to the attached view: the server answers per request, so the editor asks here, on
+            // every edit and whenever the server says its analysis moved.
+            StartDiagnosticsPull(doc, active);
         }
         catch (OperationCanceledException)
         {

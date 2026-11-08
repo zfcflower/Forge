@@ -27,7 +27,8 @@
 - 每个 Worker 任务必须显式带上第二列“实现 Worker”所列模型;测试任务使用第二列“测试”所列模型;仅在额度受限且经用户同意时才可临时改用其它模型,恢复后回到表中模型;测试与评审必须使用彼此独立的会话,评审任务必须带第二列“Review”所列模型。不要用主 Agent 的模型派子 Agent。
 - 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),`dotnet test` 全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs /R:1 /W:1 /NFL /NDL /NJH /NJS`:`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节交给 Worker。
-- 主 Agent 复核:构建、跑全量测试、检查是否越界改动,再决定是否采纳。
+- 主 Agent 复核:构建、只跑**与本次改动相关**的测试(不跑全量 `dotnet test`)、检查是否越界改动,再决定是否采纳。全量约 5 分钟,且混着与本次改动无关的偶发失败,判不出真伪;相关范围按改动落点定——改了 `src/Forge.App/Workbench/`、`Resources/` 或视图就带 `Forge.App.Tests.Workbench`;改了 `.cs`/`.axaml` 源文件就再加 `Localization` 与 `MinorRegressionTests`(它们扫源码,是硬门槛);只改文档/spec 时无需跑测试。
+- 本地跑测试而 `Forge.App` 正开着时,`src/Forge.App/bin/Debug/net10.0/` 被进程锁住,构建以 `MSB3027`/`MSB3026` 失败(不是代码问题)。用 `dotnet test <proj> -p:BaseOutputPath=artifacts/<name>/` 重定向输出。**输出目录必须留在仓库内**:`KeyRegistryTests`、`NoHardcodedChineseTests`、`StringTableTests`、`MinorRegressionTests` 从测试程序集往上找 `Forge.slnx` 读源码,放到仓库外(如 `D:/tmp/...`)时它们会以“找不到仓库根”失败,看起来像真失败。
 - 派活文本里写明该任务适用的 `.github/skills/...` 路径。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
 
 ## 开发 Skills

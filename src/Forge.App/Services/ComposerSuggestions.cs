@@ -16,8 +16,11 @@ internal readonly record struct ComposerToken(ComposerTokenKind Kind, int Start,
     public int Length => Query.Length + 1;
 }
 
-/// <summary>One entry of a slash picker: a command or a skill.</summary>
-internal sealed record SlashEntry(string Name, string Description, bool IsSkill);
+/// <summary>
+/// One entry of a slash picker: a command or a skill. <see cref="Path"/> is the skill's <c>SKILL.md</c> (empty for a
+/// command), so the settings page can say where a skill came from without discovering it a second time.
+/// </summary>
+internal sealed record SlashEntry(string Name, string Description, bool IsSkill, string Path = "");
 
 /// <summary>
 /// The pure logic behind the composer's <c>/</c> and <c>@</c> pickers: finding the token under the caret, filtering
@@ -235,7 +238,7 @@ internal static class SkillCatalog
                 name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(folder) : name;
                 if (names.Add(name))
                 {
-                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true));
+                    found.Add(new SlashEntry(name, description ?? string.Empty, IsSkill: true, file));
                 }
             }
         }

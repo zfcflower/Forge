@@ -81,6 +81,8 @@ agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用�
 
 **编辑 UI 特例(已确认)。** 用户批准直接引用 `Avalonia.AvaloniaEdit` 及其配套额外依赖,纳入白名单,无需内化;包括 TextMate 集成的 `AvaloniaEdit.TextMate`、`TextMateSharp`、`TextMateSharp.Grammars` 及其传递依赖。此批准不扩展到与编辑控件无关的三方包。语言范围以所采用 AvaloniaEdit 着色方案实际支持的语法为准,不再限于五种语言;语法支持不等于内置 LSP 服务器,服务器安装与配置仍须明确呈现。现有 `Forge.Editor` 的无 UI 服务不能因替换控件而直接删除;须先验证 LSP、编码保存、着色、Diff 等能力迁移无损。增量渲染与 Native AOT 约束保持不变。
 
+已核对的库缺口(12.0.0,以源码为准,不以 README 为准):该版本**没有多光标**(只有单 `Caret` 与 `RectangleSelection` 列选择),行尾符生成器被注释、`ShowTabs` 无读取者,`TextEditor.Load/Save(string)` 未实现。因此多光标按用户确认改用矩形列选择,`¶`/`→` 两个字形由 `Forge.App` 自己的零长度行内元素绘制,保存仍走 `Forge.Editor.TextFileCodec`。这些补位都在上层实现,不扩大库依赖。
+
 ## 编辑器着色
 
 两层:本地 TextMate 语法立即给出关键字、字符串、注释等词法颜色;LSP 的 `semanticTokens` 返回后叠加覆盖标识符类别颜色。服务器未启动、崩溃或不支持语义 token 时只剩词法层,不影响编辑。不使用 tree-sitter(无需为三平台分发原生库)。TextMate 语法与兼容 Oniguruma 的正则引擎参考 Passenger 的做法,内化其源码(MIT,保留署名)。

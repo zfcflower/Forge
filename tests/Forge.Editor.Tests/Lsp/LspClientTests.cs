@@ -1075,6 +1075,126 @@ public class LspClientTests
     }
 
     [Fact]
+    public async Task Server_progress_brackets_one_busy_window()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, "{}");
+        var events = new List<bool>();
+        var seen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.BusyChanged += busy =>
+        {
+            lock (events)
+            {
+                events.Add(busy);
+                if (events.Count == 2)
+                {
+                    seen.TrySetResult();
+                }
+            }
+        };
+
+        await server.NotifyAsync("$/progress", """{"token":"a","value":{"kind":"begin","title":"loading","cancellable":false}}""");
+        await server.NotifyAsync("$/progress", """{"token":"b","value":{"kind":"begin","title":"nested","cancellable":false}}""");
+        await server.NotifyAsync("$/progress", """{"token":"a","value":{"kind":"end"}}""");
+        await server.NotifyAsync("$/progress", """{"token":"b","value":{"kind":"end"}}""");
+
+        await seen.Task.WaitAsync(Patience);
+        Assert.Equal([true, false], events);
+    }
+
+    [Fact]
+    public async Task Diagnostics_are_pulled_when_the_server_declares_a_diagnostic_provider()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, """{"diagnosticProvider":{"interFileDependencies":true}}""");
+        var document = new TextDocument("class A {}", dir.PathOf("a.cs"));
+
+        Assert.True(client.Capabilities.SupportsDiagnosticPull);
+        var call = client.RequestDiagnosticsAsync(document);
+        using (var request = await LspHarness.ReceiveMethodAsync(server, "textDocument/diagnostic"))
+        {
+            Assert.Equal(
+                client.UriFor(document),
+                request.RootElement.GetProperty("params").GetProperty("textDocument").GetProperty("uri").GetString());
+            await server.RespondAsync(
+                request.RootElement.GetProperty("id"),
+                """{"kind":"full","resultId":"1","items":[{"range":{"start":{"line":0,"character":6},"end":{"line":0,"character":7}},"severity":1,"message":"boom","code":"CS1"}]}""");
+        }
+
+        var pulled = await call.WaitAsync(Patience);
+        Assert.NotNull(pulled);
+        Assert.False(pulled!.Unchanged);
+        var item = Assert.Single(pulled.Items);
+        Assert.Equal("boom", item.Message);
+        Assert.Equal("CS1", item.Code);
+        Assert.Equal((6, 7), (item.Range.Start.Character, item.Range.End.Character));
+    }
+
+    [Fact]
+    public async Task An_unchanged_pull_answer_and_a_bare_array_are_understood()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, """{"diagnosticProvider":{}}""");
+        var document = new TextDocument("class A {}", dir.PathOf("a.cs"));
+
+        var unchangedCall = client.RequestDiagnosticsAsync(document, previousResultId: "7");
+        using (var request = await LspHarness.ReceiveMethodAsync(server, "textDocument/diagnostic"))
+        {
+            Assert.Equal("7", request.RootElement.GetProperty("params").GetProperty("previousResultId").GetString());
+            await server.RespondAsync(request.RootElement.GetProperty("id"), """{"kind":"unchanged"}""");
+        }
+
+        var unchanged = await unchangedCall.WaitAsync(Patience);
+        Assert.True(unchanged!.Unchanged);
+        Assert.Empty(unchanged.Items);
+
+        var arrayCall = client.RequestDiagnosticsAsync(document);
+        using (var request = await LspHarness.ReceiveMethodAsync(server, "textDocument/diagnostic"))
+        {
+            await server.RespondAsync(request.RootElement.GetProperty("id"), """[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"message":"legacy"}]""");
+        }
+
+        var legacy = await arrayCall.WaitAsync(Patience);
+        Assert.False(legacy!.Unchanged);
+        Assert.Equal("legacy", Assert.Single(legacy.Items).Message);
+    }
+
+    [Fact]
+    public async Task A_server_without_a_diagnostic_provider_is_not_asked()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, "{}");
+        var document = new TextDocument("class A {}", dir.PathOf("a.cs"));
+
+        Assert.False(client.Capabilities.SupportsDiagnosticPull);
+        var pulled = await client.RequestDiagnosticsAsync(document);
+
+        Assert.NotNull(pulled);
+        Assert.False(pulled!.Unchanged);
+        Assert.Empty(pulled.Items);
+    }
+
+    [Fact]
+    public async Task The_server_asking_for_a_diagnostics_refresh_is_surfaced()
+    {
+        using var dir = new TempDirectory();
+        await using var server = new FakeLanguageServer();
+        await using var client = await LspHarness.ConnectAsync(server, """{"diagnosticProvider":{}}""");
+        var requested = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.RefreshRequested += method => requested.TrySetResult(method);
+
+        await server.RequestAsync(91, "workspace/diagnostic/refresh", "null");
+
+        using var reply = await server.ReceiveAsync().WaitAsync(Patience);
+        Assert.Equal(91, reply.RootElement.GetProperty("id").GetInt32());
+        Assert.Equal("workspace/diagnostic/refresh", await requested.Task.WaitAsync(Patience));
+    }
+
+    [Fact]
     public async Task Completion_triggers_and_resolve_support_are_read_from_the_server_capabilities()
     {
         using var dir = new TempDirectory();

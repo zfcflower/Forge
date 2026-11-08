@@ -50,13 +50,46 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public SettingsSection? SelectedSection
     {
         get => selectedSection;
-        set => Set(ref selectedSection, value);
+        set
+        {
+            if (Set(ref selectedSection, value) && isOpen)
+            {
+                RevealSelected();
+            }
+        }
     }
 
     public bool IsOpen
     {
         get => isOpen;
-        set => Set(ref isOpen, value);
+        set
+        {
+            if (Set(ref isOpen, value) && value)
+            {
+                RevealSelected();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Selects one registered section by id: the click target of a session instrument counter. An id no feature registered
+    /// leaves the current selection alone, so a counter whose section is missing never blanks the page.
+    /// </summary>
+    public void SelectSection(string sectionId)
+    {
+        if (string.IsNullOrWhiteSpace(sectionId))
+        {
+            return;
+        }
+
+        foreach (var section in Sections.Items)
+        {
+            if (string.Equals(section.Id, sectionId, StringComparison.Ordinal))
+            {
+                SelectedSection = section;
+                return;
+            }
+        }
     }
 
     public string Title => Loc.Instance[CoreStrings.SettingsTitle];
@@ -79,6 +112,9 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         provider.Detail = providerSettings.Provider is { } snapshot
             ? ShellStrings.ProviderDetail(snapshot.Summary, snapshot.HasApiKey, snapshot.KeyFromEnvironment)
             : providerSettings.StatusText.Resolve();
+        provider.Status = providerSettings.StatusText.IsEmpty
+            ? ShellStrings.ProviderUnknown
+            : ShellStrings.ProviderText(providerSettings.StatusText);
 
         if (composition.PreferencesProblem is { Length: > 0 } preferencesProblem)
         {
@@ -111,6 +147,20 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 
     /// <summary>
+    /// Something is about to be looked at: rebuild the shell's own rows (the provider's status is live) and let a section
+    /// whose content is a read-only list go and read its source. Reloading here rather than on every counter click keeps the
+    /// database and directory reads off the page except when it is actually shown.
+    /// </summary>
+    private void RevealSelected()
+    {
+        Rebuild();
+        if (SelectedSection?.ViewModel is ViewModels.Settings.InstrumentSettingsSectionViewModel instrument)
+        {
+            instrument.Reload();
+        }
+    }
+
+    /// <summary>
     /// Text that caches a language-dependent value has to re-read it: the headings through <see cref="SettingsSection.Title"/>,
     /// the provider section's hint, and the path rows' labels (rebuilt by <see cref="Rebuild"/>).
     /// </summary>
@@ -141,6 +191,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
 internal sealed class ProviderSettingsSectionViewModel : ObservableObject
 {
     private string detail = string.Empty;
+    private string status = string.Empty;
 
     public string Detail
     {
@@ -148,10 +199,24 @@ internal sealed class ProviderSettingsSectionViewModel : ObservableObject
         set => Set(ref detail, value);
     }
 
+    /// <summary>
+    /// The provider's live status sentence. It used to live only in the window status bar; that bar is gone, so the section
+    /// that owns the provider is where the sentence belongs.
+    /// </summary>
+    public string Status
+    {
+        get => status;
+        set => Set(ref status, value);
+    }
+
     public string Hint => Loc.Instance[CoreStrings.SettingsProviderHint];
 
     /// <summary>Re-reads the strings that come from <see cref="Loc"/> after a language switch.</summary>
-    internal void RefreshText() => OnPropertyChanged(nameof(Hint));
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(Hint));
+        OnPropertyChanged(nameof(Status));
+    }
 }
 
 /// <summary>The <c>paths</c> section: the data root, the workspace and the services the shell found.</summary>

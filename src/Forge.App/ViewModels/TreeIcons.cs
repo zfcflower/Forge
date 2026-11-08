@@ -37,6 +37,8 @@ internal static class TreeIcons
 
     public static Geometry Session => Set.Session;
 
+    public static Geometry Bubble => Set.Bubble;
+
     public static Geometry MainAgent => Set.MainAgent;
 
     public static Geometry Agent => Set.Agent;
@@ -72,7 +74,7 @@ internal static class TreeIcons
         public Geometry File { get; } = Parse(
             "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z M14 2v4a2 2 0 0 0 2 2h4");
 
-        public Geometry General { get; } = Parse("M12 3 21 12 12 21 3 12Z");
+        public Geometry General => Bubble;
 
         public Geometry Project { get; } = Parse("M3 5h18v14H3Z M6 9.5h8v6H6Z");
 
@@ -82,11 +84,19 @@ internal static class TreeIcons
         public Geometry History { get; } = Parse("M12 3a9 9 0 1 0 8.4 12h-2.2A7 7 0 1 1 12 5c1.9 0 3.5.7 4.8 2H13v2h7V2h-2v2.6A8.9 8.9 0 0 0 12 3Z"
             + "M11 7v6.4l5 2.6 1-1.7-4-2.1V7Z");
 
-        public Geometry Session { get; } = Parse("M4 4h16v11H8l-4 4Z");
+        public Geometry Session => Bubble;
 
-        public Geometry MainAgent { get; } = Parse("M12 2 14.6 9.4 22 12 14.6 14.6 12 22 9.4 14.6 2 12 9.4 9.4Z");
+        /// <summary>
+        /// The one chat bubble of the tree, on the same 24 grid as the tab strip's <c>IconChat</c>: a rounded box with a
+        /// tail at its bottom left. The section row, a session row and an agent row are all conversations, so they all carry
+        /// it; only the active session's row fills it, which is why the shape is a single closed outline.
+        /// </summary>
+        public Geometry Bubble { get; } = Parse(
+            "M6.5 4h11a3.5 3.5 0 0 1 3.5 3.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-3.5 3.5V17H6.5A3.5 3.5 0 0 1 3 13.5v-6A3.5 3.5 0 0 1 6.5 4z");
 
-        public Geometry Agent { get; } = Parse("M12 4 20 12 12 20 4 12Z M12 8.5 15.5 12 12 15.5 8.5 12Z");
+        public Geometry MainAgent => Bubble;
+
+        public Geometry Agent => Bubble;
 
         public Geometry Scout { get; } = Parse(
             "M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Zm0 2.6a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8Z"

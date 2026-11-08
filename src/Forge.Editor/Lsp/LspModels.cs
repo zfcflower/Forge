@@ -233,6 +233,15 @@ public sealed record CompletionResult(IReadOnlyList<CompletionItem> Items, bool 
 
 public sealed record HoverInfo(string Markup, LspRange? Range);
 
+/// <summary>
+/// One <c>textDocument/diagnostic</c> answer: either the document's diagnostics or "unchanged since the result id the
+/// client sent".
+/// </summary>
+public sealed record PulledDiagnostics(bool Unchanged, IReadOnlyList<LspDiagnostic> Items, int Malformed = 0)
+{
+    public static PulledDiagnostics None { get; } = new(false, [], 0);
+}
+
 public readonly record struct SemanticToken(int Line, int StartChar, int Length, int Type, int ModifierBits = 0, string TypeName = "")
 {
     public int EndChar => StartChar + Length;
