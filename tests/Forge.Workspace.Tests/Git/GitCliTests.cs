@@ -428,6 +428,26 @@ public sealed class GitCliTests
     }
 
     [Fact]
+    public async Task Branch_list_marks_remote_refs_and_preserves_full_names_for_slash_branches()
+    {
+        if (!GitProbe.IsAvailable) return;
+        using var repo = new TestRepo();
+        repo.Write("f.txt", "first\n");
+        var head = repo.Commit("first");
+        repo.RunGit("branch", "feature/tooling");
+        repo.RunGit("update-ref", "refs/remotes/origin/main", head);
+        repo.RunGit("update-ref", "refs/remotes/origin/feature/tooling", head);
+
+        var branches = await new GitCli().GetBranchesAsync(repo.Root, includeRemote: true);
+
+        var local = Assert.Single(branches, static branch => branch.Name == "feature/tooling" && !branch.IsRemote);
+        Assert.Equal("refs/heads/feature/tooling", local.RefName);
+        var remote = Assert.Single(branches, static branch => branch.Name == "origin/feature/tooling" && branch.IsRemote);
+        Assert.Equal("refs/remotes/origin/feature/tooling", remote.RefName);
+        Assert.False(remote.IsCurrent);
+    }
+
+    [Fact]
     public async Task Default_branch_falls_back_to_main_then_master_then_null()
     {
         if (!GitProbe.IsAvailable) return;

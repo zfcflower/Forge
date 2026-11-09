@@ -281,7 +281,7 @@ public sealed partial class GitCli
         var arguments = Args(
             "for-each-ref",
             "--sort=-committerdate",
-            "--format=%(refname:short)%09%(objectname)%09%(HEAD)%09%(upstream:short)%09%(committerdate:iso-strict)",
+            "--format=%(refname:short)%09%(refname)%09%(objectname)%09%(HEAD)%09%(upstream:short)%09%(committerdate:iso-strict)",
             "refs/heads");
         if (includeRemote)
         {
@@ -293,23 +293,27 @@ public sealed partial class GitCli
         foreach (var line in TextLines.Split(output))
         {
             var fields = line.Split('\t');
-            if (fields.Length < 4 || fields[0].Length == 0)
+            if (fields.Length < 6 || fields[0].Length == 0 || fields[1].Length == 0)
             {
                 continue;
             }
 
             DateTimeOffset? committedAt = null;
-            if (fields.Length >= 5 && DateTimeOffset.TryParse(fields[4], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+            if (DateTimeOffset.TryParse(fields[5], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
             {
                 committedAt = parsed;
             }
 
             branches.Add(new GitBranch(
                 fields[0],
-                fields[1],
-                fields[2] == "*",
-                fields[3].Length == 0 ? null : fields[3],
-                committedAt));
+                fields[2],
+                fields[3] == "*",
+                fields[4].Length == 0 ? null : fields[4],
+                committedAt)
+            {
+                RefName = fields[1],
+                IsRemote = fields[1].StartsWith("refs/remotes/", StringComparison.Ordinal),
+            });
         }
 
         return branches;

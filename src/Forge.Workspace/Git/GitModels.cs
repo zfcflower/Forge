@@ -17,7 +17,14 @@ public sealed record GitStatusEntry(
     public bool IsUnstaged => Kind is GitStatusKind.Untracked || WorkTreeStatus is not GitEntryStatus.Unmodified;
 }
 
-public sealed record GitBranch(string Name, string CommitId, bool IsCurrent, string? Upstream, DateTimeOffset? CommittedAt);
+public sealed record GitBranch(string Name, string CommitId, bool IsCurrent, string? Upstream, DateTimeOffset? CommittedAt)
+{
+    /// <summary>The unambiguous full ref name, e.g. <c>refs/heads/main</c> or <c>refs/remotes/origin/main</c>.</summary>
+    public string RefName { get; init; } = string.Empty;
+
+    /// <summary>True for a remote-tracking ref; branch names alone are not sufficient to distinguish local from remote.</summary>
+    public bool IsRemote { get; init; }
+}
 
 public sealed record GitCommit(
     string Id,

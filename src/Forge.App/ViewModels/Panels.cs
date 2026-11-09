@@ -825,8 +825,9 @@ internal sealed partial class FileDocumentViewModel : ObservableObject
 
 internal enum ChangeScope
 {
-    ByTurn,
-    Uncommitted,
+    ByTurn = 0,
+    Uncommitted = 1,
+    All = 2,
 }
 
 /// <summary>
@@ -981,12 +982,13 @@ internal sealed class TurnChoiceViewModel : ObservableObject
 {
     private readonly LocText label;
 
-    public TurnChoiceViewModel(int turn, LocText label, string treeBefore, string? treeAfter)
+    public TurnChoiceViewModel(int turn, LocText label, string treeBefore, string? treeAfter, Action<TurnChoiceViewModel> select)
     {
         Turn = turn;
         this.label = label;
         TreeBefore = treeBefore;
         TreeAfter = treeAfter;
+        SelectCommand = new RelayCommand(() => select(this));
     }
 
     public int Turn { get; }
@@ -998,6 +1000,8 @@ internal sealed class TurnChoiceViewModel : ObservableObject
 
     public string? TreeAfter { get; }
 
+    public RelayCommand SelectCommand { get; }
+
     /// <summary>Re-reads the label after a language switch; the panel calls this for every entry.</summary>
     internal void RefreshText() => OnPropertyChanged(nameof(Label));
 }
@@ -1008,7 +1012,7 @@ internal sealed class TurnChoiceViewModel : ObservableObject
 /// against HEAD including untracked files. All files are stacked into one flat row list that the view virtualizes;
 /// selecting one scrolls the view to it.
 /// </summary>
-internal sealed class ChangesViewModel : ObservableObject, IDisposable
+internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
 {
     private readonly GitCli git;
     private readonly ITurnCheckpointStore checkpoints;
@@ -1029,8 +1033,9 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
             ct => LoadAsync(ct),
             () => true,
             exception => SetMessage(LocText.Literal(exception.Message)));
-        ByTurnCommand = new RelayCommand(() => ScopeIndex = 0);
-        UncommittedCommand = new RelayCommand(() => ScopeIndex = 1);
+        AllChangesCommand = new RelayCommand(() => SetScope(ChangeScope.All));
+        ByTurnCommand = new RelayCommand(() => SetScope(ChangeScope.ByTurn));
+        UncommittedCommand = new RelayCommand(() => SetScope(ChangeScope.Uncommitted));
         Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
@@ -1051,19 +1056,10 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
 
     public int ScopeIndex
     {
-        get => (int)scope;
+        get => scope == ChangeScope.Uncommitted ? 1 : 0;
         set
         {
-            var next = value == 1 ? ChangeScope.Uncommitted : ChangeScope.ByTurn;
-            if (scope == next)
-            {
-                return;
-            }
-
-            scope = next;
-            OnPropertyChanged(nameof(IsByTurn));
-            OnPropertyChanged(nameof(IsUncommitted));
-            _ = LoadAsync(CancellationToken.None);
+            SetScope(value == 1 ? ChangeScope.Uncommitted : ChangeScope.ByTurn);
         }
     }
 
@@ -1083,7 +1079,8 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
 
             if (Set(ref selectedTurn, value))
             {
-                _ = LoadAsync(CancellationToken.None);
+                OnPropertyChanged(nameof(ScopeLabel));
+                _ = LoadAsync(CancellationToken.None, reloadChoices: false);
             }
         }
     }
@@ -1106,7 +1103,7 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
     public bool HasMessage => !message.IsEmpty;
 
     public string Summary => context.HasSession
-        ? InspectorStrings.ChangesSummary(files.Count, IsByTurn)
+        ? InspectorStrings.ChangesSummary(files.Count, IsByTurn, IsAllChanges)
         : Loc.Instance[InspectorStrings.ChangesNoSession];
 
     public event Action<FileDiffViewModel>? FocusRequested;
@@ -1122,6 +1119,7 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
             Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
             Turns.Clear();
             selectedTurn = null;
+            ClearBranchChoices();
         }
 
         _ = LoadAsync(CancellationToken.None);
@@ -1130,9 +1128,15 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
     /// <summary>Opens (and scrolls to) one file of the current change set.</summary>
     public async Task ShowFileAsync(string path, CancellationToken ct)
     {
-        await LoadAsync(ct).ConfigureAwait(true);
         var match = files.FirstOrDefault(
             file => string.Equals(file.Path.Replace('\\', '/'), path.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            await LoadAsync(ct).ConfigureAwait(true);
+            match = files.FirstOrDefault(
+                file => string.Equals(file.Path.Replace('\\', '/'), path.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase));
+        }
+
         if (match is not null)
         {
             SelectedFile = match;
@@ -1154,28 +1158,60 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
         return -1;
     }
 
-    public async Task LoadAsync(CancellationToken ct)
-    {
-        if (!context.HasSession || !Directory.Exists(context.WorkingDirectory))
-        {
-            files.Clear();
-            Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
-            Turns.Clear();
-            OnPropertyChanged(nameof(Summary));
-            return;
-        }
+    public Task LoadAsync(CancellationToken ct) => LoadAsync(ct, reloadChoices: true);
 
+    private async Task LoadAsync(CancellationToken ct, bool reloadChoices)
+    {
         var current = Interlocked.Increment(ref generation);
-        IsLoading = true;
+        var source = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var previous = Interlocked.Exchange(ref loadSource, source);
         try
         {
-            var workingDirectory = context.WorkingDirectory;
-            await ReloadTurnsAsync(ct).ConfigureAwait(true);
+            previous?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
 
-            var byTurn = IsByTurn;
+        try
+        {
+            var panelContext = context;
+            if (!panelContext.HasSession || !Directory.Exists(panelContext.WorkingDirectory))
+            {
+                files.Clear();
+                Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
+                if (reloadChoices)
+                {
+                    Turns.Clear();
+                    selectedTurn = null;
+                    ClearBranchChoices();
+                }
+
+                SelectedFile = null;
+                SetMessage(panelContext.HasSession
+                    ? new LocText(InspectorStrings.ChangesNoChanges)
+                    : new LocText(InspectorStrings.ChangesNoSession));
+                OnPropertyChanged(nameof(Summary));
+                OnPropertyChanged(nameof(ScopeLabel));
+                return;
+            }
+
+            IsLoading = true;
+            var workingDirectory = panelContext.WorkingDirectory;
+            if (reloadChoices)
+            {
+                await ReloadTurnsAsync(source.Token).ConfigureAwait(true);
+                await ReloadBranchesAsync(workingDirectory, source.Token).ConfigureAwait(true);
+            }
+
+            var scopeSnapshot = scope;
             var turn = selectedTurn;
-            var built = await Task.Run(() => BuildRowsAsync(workingDirectory, byTurn, turn, ct), ct).ConfigureAwait(true);
-            if (current != Volatile.Read(ref generation))
+            var branch = selectedBranch;
+            var built = await Task.Run(
+                    () => BuildRowsAsync(workingDirectory, scopeSnapshot, turn, branch, source.Token),
+                    source.Token)
+                .ConfigureAwait(true);
+            if (current != Volatile.Read(ref generation) || source.IsCancellationRequested)
             {
                 return;
             }
@@ -1184,13 +1220,23 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
             files.AddRange(built.Files);
             Rows.ReplaceAll(built.Rows);
 
-            SetMessage(files.Count == 0 ? new LocText(InspectorStrings.ChangesNoChanges) : default);
+            var nextMessage = built.Message.IsEmpty
+                ? files.Count == 0 ? new LocText(InspectorStrings.ChangesNoChanges) : default
+                : built.Message;
+            SetMessage(nextMessage);
             SelectedFile = files.FirstOrDefault();
             OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(ScopeLabel));
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or GitException or UnauthorizedAccessException)
+        catch (OperationCanceledException) when (source.IsCancellationRequested)
         {
-            SetMessage(LocText.Literal(exception.Message));
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException or GitException or UnauthorizedAccessException)
+        {
+            if (current == Volatile.Read(ref generation))
+            {
+                SetMessage(LocText.Literal(exception.Message));
+            }
         }
         finally
         {
@@ -1198,28 +1244,21 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
             {
                 IsLoading = false;
             }
+
+            Interlocked.CompareExchange(ref loadSource, null, source);
+            source.Dispose();
         }
     }
 
     private async Task ReloadTurnsAsync(CancellationToken ct)
     {
-        if (!IsByTurn || !context.HasSession)
+        if (!context.HasSession)
         {
             return;
         }
 
-        IReadOnlyList<TurnCheckpoint> stored;
-        try
-        {
-            var sessionId = context.SessionId;
-            stored = await BackgroundRead.RunAsync(token => checkpoints.ListAsync(sessionId, token), ct).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
-        {
-            SetMessage(LocText.Literal(exception.Message));
-            return;
-        }
-
+        var sessionId = context.SessionId;
+        var stored = await BackgroundRead.RunAsync(token => checkpoints.ListAsync(sessionId, token), ct).ConfigureAwait(true);
         var wanted = stored.Where(static checkpoint => checkpoint.TreeAfter is not null).Reverse().ToArray();
         for (var index = Turns.Count - 1; index >= 0; index--)
         {
@@ -1241,13 +1280,15 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
                 checkpoint.Turn,
                 InspectorStrings.ChangeTurnLabel(checkpoint.Turn, checkpoint.StartedAt),
                 checkpoint.TreeBefore,
-                checkpoint.TreeAfter));
+                checkpoint.TreeAfter,
+                SelectTurn));
         }
 
         if (selectedTurn is null || Turns.All(turn => turn.Turn != selectedTurn.Turn))
         {
             selectedTurn = Turns.FirstOrDefault();
             OnPropertyChanged(nameof(SelectedTurn));
+            OnPropertyChanged(nameof(ScopeLabel));
         }
     }
 
@@ -1265,6 +1306,8 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(ScopeLabel));
+        OnPropertyChanged(nameof(CompareBranchLabel));
         OnPropertyChanged(nameof(Message));
         foreach (var turn in Turns)
         {
@@ -1277,21 +1320,36 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Drops the language subscription; a document that is gone must not be refreshed by the next language switch.</summary>
-    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
+    /// <summary>Drops the language subscription and cancels any in-flight diff; a gone document must not be refreshed later.</summary>
+    public void Dispose()
+    {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        Interlocked.Increment(ref generation);
+        try
+        {
+            Interlocked.Exchange(ref loadSource, null)?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private sealed record BuiltChanges(List<FileDiffViewModel> Files, List<DiffRowViewModel> Rows, LocText Message);
 
     /// <summary>The diff is read, mapped to view models and flattened on a pool thread; the caller applies it once.</summary>
-    private async Task<(List<FileDiffViewModel> Files, List<DiffRowViewModel> Rows)> BuildRowsAsync(
+    private async Task<BuiltChanges> BuildRowsAsync(
         string workingDirectory,
-        bool byTurn,
+        ChangeScope selectedScope,
         TurnChoiceViewModel? turn,
+        BranchChoiceViewModel? branch,
         CancellationToken ct)
     {
-        var (diffs, prefix) = await ReadDiffAsync(workingDirectory, byTurn, turn, ct).ConfigureAwait(false);
+        var (diffs, prefix, message) = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, ct).ConfigureAwait(false);
         var builtFiles = new List<FileDiffViewModel>(diffs.Count);
         var rows = new List<DiffRowViewModel>();
         foreach (var diff in diffs)
         {
+            ct.ThrowIfCancellationRequested();
             var file = new FileDiffViewModel(diff, prefix);
             builtFiles.Add(file);
             rows.Add(new DiffFileRowViewModel(file));
@@ -1301,32 +1359,59 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
             }
         }
 
-        return (builtFiles, rows);
+        return new BuiltChanges(builtFiles, rows, message);
     }
 
-    private async Task<(IReadOnlyList<FileDiff> Diffs, string Prefix)> ReadDiffAsync(
+    private async Task<(IReadOnlyList<FileDiff> Diffs, string Prefix, LocText Message)> ReadDiffAsync(
         string workingDirectory,
-        bool byTurn,
+        ChangeScope selectedScope,
         TurnChoiceViewModel? turn,
+        BranchChoiceViewModel? branch,
         CancellationToken ct)
     {
         if (!await git.IsRepositoryAsync(workingDirectory, ct).ConfigureAwait(false))
         {
-            return ([], string.Empty);
+            return ([], string.Empty, default);
         }
 
         var root = await git.GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false);
         var relative = root is null ? "." : Path.GetRelativePath(root, workingDirectory).Replace(Path.DirectorySeparatorChar, '/');
         var prefix = string.Equals(relative, ".", StringComparison.Ordinal) ? string.Empty : relative + "/";
 
-        if (byTurn)
+        if (selectedScope == ChangeScope.ByTurn)
         {
             if (turn is not { TreeAfter: { } after })
             {
-                return ([], prefix);
+                return ([], prefix, default);
             }
 
-            return (await git.GetTreeDiffAsync(workingDirectory, turn.TreeBefore, after, ct).ConfigureAwait(false), prefix);
+            return (await git.GetTreeDiffAsync(workingDirectory, turn.TreeBefore, after, ct).ConfigureAwait(false), prefix, default);
+        }
+
+        if (selectedScope == ChangeScope.All)
+        {
+            if (branch is null)
+            {
+                return ([], prefix, new LocText(InspectorStrings.ChangesNoCompareBranch));
+            }
+
+            if (await git.GetCurrentBranchAsync(workingDirectory, ct).ConfigureAwait(false) is null)
+            {
+                return ([], prefix, new LocText(InspectorStrings.ChangesNoCurrentBranch));
+            }
+
+            var mergeBase = await git.GetMergeBaseAsync(workingDirectory, branch.RefName, "HEAD", ct).ConfigureAwait(false);
+            if (mergeBase is null)
+            {
+                return ([], prefix, new LocText(InspectorStrings.ChangesNoCommonHistory));
+            }
+
+            var branchDiffs = await git.GetDiffAsync(
+                    workingDirectory,
+                    new GitDiffOptions { From = mergeBase, To = "HEAD", Paths = ["."] },
+                    ct)
+                .ConfigureAwait(false);
+            return (branchDiffs, prefix, default);
         }
 
         var head = await git.RevParseAsync(workingDirectory, "HEAD", ct).ConfigureAwait(false);
@@ -1340,7 +1425,7 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
                 },
                 ct)
             .ConfigureAwait(false);
-        return (diffs, prefix);
+        return (diffs, prefix, default);
     }
 }
 

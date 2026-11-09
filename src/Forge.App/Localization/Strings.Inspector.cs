@@ -81,6 +81,7 @@ internal static class InspectorStrings
     public const string FilesArchiveConfirm = "files.archive.confirm";
 
     // ---------------------------------------------------------------- changes document
+    public const string ChangesAll = "changes.all";
     public const string ChangesByTurn = "changes.byTurn";
     public const string ChangesUncommitted = "changes.uncommitted";
     public const string ChangesNoSession = "changes.noSession";
@@ -92,6 +93,11 @@ internal static class InspectorStrings
     public const string ChangesSummaryPattern = "changes.summary";
     public const string ChangesSummaryFilesBase = "changes.summary.files";
     public const string ChangesTurnsName = "changes.turns.name";
+    public const string ChangesCompareBranchLabelPattern = "changes.compareBranch.label";
+    public const string ChangesCompareBranchPlaceholder = "changes.compareBranch.placeholder";
+    public const string ChangesNoCompareBranch = "changes.compareBranch.none";
+    public const string ChangesNoCurrentBranch = "changes.compareBranch.noCurrentBranch";
+    public const string ChangesNoCommonHistory = "changes.compareBranch.noCommonHistory";
     public const string ChangesTurnPattern = "changes.turn";
     public const string ChangesFileHeaderPattern = "changes.fileHeader";
 
@@ -199,8 +205,9 @@ internal static class InspectorStrings
         Loc.Register(FilesArchiveMessage, "{0} 有未保存的修改。归档不会保存也不会丢弃它们，文件会继续保持打开。", "{0} has unsaved edits. Archiving neither saves nor discards them; the file stays open.");
         Loc.Register(FilesArchiveConfirm, "仍然归档", "Archive anyway");
 
+        Loc.Register(ChangesAll, "全部改动", "All changes");
         Loc.Register(ChangesByTurn, "按轮次", "By turn");
-        Loc.Register(ChangesUncommitted, "未提交改动", "Uncommitted");
+        Loc.Register(ChangesUncommitted, "未提交改动", "Uncommitted changes");
         Loc.Register(ChangesNoSession, "没有打开的会话", "No open session");
         Loc.Register(ChangesNoChanges, "没有改动。", "No changes.");
         Loc.Register(ChangesNoTextualChange, "（没有文本改动：二进制或仅权限变化）", "(No textual change: binary or permissions only)");
@@ -211,6 +218,11 @@ internal static class InspectorStrings
         Loc.Register(ChangesSummaryFilesBase + ".one", "{0} 个文件", "{0} file");
         Loc.Register(ChangesSummaryFilesBase + ".other", "{0} 个文件", "{0} files");
         Loc.Register(ChangesTurnsName, "轮次", "Turns");
+        Loc.Register(ChangesCompareBranchLabelPattern, "对比 {0}", "Compare with {0}");
+        Loc.Register(ChangesCompareBranchPlaceholder, "选择对比分支", "Choose a comparison branch");
+        Loc.Register(ChangesNoCompareBranch, "没有可比较的分支。", "No comparison branch is available.");
+        Loc.Register(ChangesNoCurrentBranch, "当前工作区不在分支上，无法比较分支。", "The current worktree is not on a branch, so it cannot be compared.");
+        Loc.Register(ChangesNoCommonHistory, "所选分支与当前分支没有共同历史。", "The selected branch and current branch have no common history.");
         Loc.Register(ChangesTurnPattern, "第 {0} 轮 · {1}", "Turn {0} · {1}");
         Loc.Register(ChangesFileHeaderPattern, "{0}  +{1} −{2}", "{0}  +{1} −{2}");
 
@@ -258,12 +270,16 @@ internal static class InspectorStrings
     public static string FilesChangedCountName(int count) =>
         Loc.Instance.Format(FilesChangedCountNamePattern, Loc.Instance[FilesChangedName], TextFormat.Id(count));
 
-    /// <summary>"12 个文件 · 按轮次" / "12 files · By turn".</summary>
-    public static string ChangesSummary(int files, bool byTurn) =>
+    /// <summary>"12 个文件 · 按轮次/未提交改动/全部改动".</summary>
+    public static string ChangesSummary(int files, bool byTurn, bool allChanges = false) =>
         Loc.Instance.Format(
             ChangesSummaryPattern,
             LocText.Plural(ChangesSummaryFilesBase, files, TextFormat.Number(files)),
-            Loc.Instance[byTurn ? ChangesByTurn : ChangesUncommitted]);
+            Loc.Instance[allChanges ? ChangesAll : byTurn ? ChangesByTurn : ChangesUncommitted]);
+
+    /// <summary>"对比 origin/main" / "Compare with origin/main".</summary>
+    public static string ChangesCompareBranchLabel(string branch) =>
+        Loc.Instance.Format(ChangesCompareBranchLabelPattern, branch);
 
     /// <summary>The preview tab's title: the file name (or the generic word before one is loaded). The tab's leading
     /// mark is the icon column (<c>TabHeaderView</c> draws the file tree's document), so the title carries no glyph.</summary>
