@@ -75,6 +75,9 @@
       <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#F2F2F2" />
       <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#F8F8F8" />
       <SolidColorBrush x:Key="SidebarBrush" Color="#F8F8F8" />
+      <!-- A count badge's fill: one neutral step below the panel body and its sidebar grey, so a number stays legible in a
+           toolbar without becoming a second button. Never the accent — the accent belongs to the selected item. -->
+      <SolidColorBrush x:Key="CountBadgeBrush" Color="#E9E9E9" />
       <!-- One chrome colour: the window header row, every panel title bar (and the tab strip drawn on it), the dock
            strips and a floated panel's own title bar. One step darker than the window body, so the chrome reads as a
            separate surface without a second grey appearing on the same row. -->
@@ -158,6 +161,7 @@
       <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#2A2A2A" />
       <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#1A1A1A" />
       <SolidColorBrush x:Key="SidebarBrush" Color="#181818" />
+      <SolidColorBrush x:Key="CountBadgeBrush" Color="#2E2E2E" />
       <SolidColorBrush x:Key="PanelTitleBarBrush" Color="#101010" />
 
       <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource DarkText}" />

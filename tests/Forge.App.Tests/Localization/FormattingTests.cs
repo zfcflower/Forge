@@ -165,13 +165,30 @@ public sealed class FormattingTests
     }
 
     [Fact]
+    public void File_tab_count_names_carry_the_badge_number()
+    {
+        using (new LanguageScope(UiLanguage.Chinese))
+        {
+            Assert.Equal("全部文件（348）", InspectorStrings.FilesAllCountName(348));
+            Assert.Equal("已改动文件（12）", InspectorStrings.FilesChangedCountName(12));
+        }
+
+        // The number reaches assistive technology ungrouped, exactly as the badge draws it.
+        using (new LanguageScope(UiLanguage.English))
+        {
+            Assert.Equal("All files (348)", InspectorStrings.FilesAllCountName(348));
+            Assert.Equal("Changed files (12345)", InspectorStrings.FilesChangedCountName(12345));
+        }
+    }
+
+    [Fact]
     public void English_plural_picks_one_for_exactly_one_and_other_otherwise()
     {
         using var _ = new LanguageScope(UiLanguage.English);
 
-        var one = LocText.Plural(InspectorStrings.FilesSummaryFilesBase, 1, TextFormat.Number(1)).Resolve();
-        var two = LocText.Plural(InspectorStrings.FilesSummaryFilesBase, 2, TextFormat.Number(2)).Resolve();
-        var zero = LocText.Plural(InspectorStrings.FilesSummaryFilesBase, 0, TextFormat.Number(0)).Resolve();
+        var one = LocText.Plural(InspectorStrings.ChangesSummaryFilesBase, 1, TextFormat.Number(1)).Resolve();
+        var two = LocText.Plural(InspectorStrings.ChangesSummaryFilesBase, 2, TextFormat.Number(2)).Resolve();
+        var zero = LocText.Plural(InspectorStrings.ChangesSummaryFilesBase, 0, TextFormat.Number(0)).Resolve();
 
         Assert.Equal("1 file", one);
         Assert.Equal("2 files", two);
@@ -183,8 +200,8 @@ public sealed class FormattingTests
     {
         using var _ = new LanguageScope(UiLanguage.Chinese);
 
-        var one = LocText.Plural(InspectorStrings.FilesSummaryFilesBase, 1, TextFormat.Number(1)).Resolve();
-        var two = LocText.Plural(InspectorStrings.FilesSummaryFilesBase, 2, TextFormat.Number(2)).Resolve();
+        var one = LocText.Plural(InspectorStrings.ChangesSummaryFilesBase, 1, TextFormat.Number(1)).Resolve();
+        var two = LocText.Plural(InspectorStrings.ChangesSummaryFilesBase, 2, TextFormat.Number(2)).Resolve();
 
         Assert.Equal("1 个文件", one);
         Assert.Equal("2 个文件", two);

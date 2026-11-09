@@ -19,8 +19,10 @@ internal static class InspectorStrings
     // ---------------------------------------------------------------- files panel
     public const string FilesAll = "files.all";
     public const string FilesAllName = "files.all.name";
+    public const string FilesAllCountNamePattern = "files.all.countName";
     public const string FilesChanged = "files.changed";
     public const string FilesChangedName = "files.changed.name";
+    public const string FilesChangedCountNamePattern = "files.changed.countName";
     public const string FilesChangedListName = "files.changedList.name";
     public const string FilesTreeName = "files.tree.name";
     public const string FilesName = "files.name";
@@ -28,10 +30,6 @@ internal static class InspectorStrings
     public const string FilesOpenInNewTab = "files.openInNewTab";
     public const string FilesRefresh = "files.refresh";
     public const string FilesRefreshName = "files.refresh.name";
-    public const string FilesNoSession = "files.noSession";
-    public const string FilesSummaryPattern = "files.summary";
-    public const string FilesSummaryChangesBase = "files.summary.changes";
-    public const string FilesSummaryFilesBase = "files.summary.files";
     public const string FilesTabTitlePattern = "files.tabTitle";
     public const string FilesMissing = "files.missing";
     public const string FilesTooLarge = "files.tooLarge";
@@ -144,18 +142,14 @@ internal static class InspectorStrings
         Loc.Register(FilesChanged, "已改动", "Changed");
         Loc.Register(FilesChangedName, "已改动文件", "Changed files");
         Loc.Register(FilesChangedListName, "已改动文件列表", "Changed files list");
+        Loc.Register(FilesAllCountNamePattern, "{0}（{1}）", "{0} ({1})");
+        Loc.Register(FilesChangedCountNamePattern, "{0}（{1}）", "{0} ({1})");
         Loc.Register(FilesTreeName, "全部文件树", "All files tree");
         Loc.Register(FilesName, "文件", "Files");
         Loc.Register(FilesLoading, "读取中…", "Loading…");
         Loc.Register(FilesOpenInNewTab, "在新标签页打开", "Open in new tab");
         Loc.Register(FilesRefresh, "刷新", "Refresh");
         Loc.Register(FilesRefreshName, "刷新文件", "Refresh files");
-        Loc.Register(FilesNoSession, "没有打开的会话", "No open session");
-        Loc.Register(FilesSummaryPattern, "{0} · {1}", "{0} · {1}");
-        Loc.Register(FilesSummaryChangesBase + ".one", "{0} 个改动", "{0} change");
-        Loc.Register(FilesSummaryChangesBase + ".other", "{0} 个改动", "{0} changes");
-        Loc.Register(FilesSummaryFilesBase + ".one", "{0} 个文件", "{0} file");
-        Loc.Register(FilesSummaryFilesBase + ".other", "{0} 个文件", "{0} files");
         Loc.Register(FilesTabTitlePattern, "{0}", "{0}");
         Loc.Register(FilesMissing, "文件不存在：{0}", "File not found: {0}");
         Loc.Register(FilesTooLarge, "文件过大，无法显示：{0} 字节", "File too large to display: {0} bytes");
@@ -255,12 +249,14 @@ internal static class InspectorStrings
         Loc.Register(SpecTreeName, "规格树", "Spec tree");
     }
 
-    /// <summary>"3 个改动 · 12 个文件" / "3 changes · 12 files".</summary>
-    public static string FileSummary(int changed, int files) =>
-        Loc.Instance.Format(
-            FilesSummaryPattern,
-            LocText.Plural(FilesSummaryChangesBase, changed, TextFormat.Number(changed)),
-            LocText.Plural(FilesSummaryFilesBase, files, TextFormat.Number(files)));
+    /// <summary>The "全部" tab's accessible name with its badge count: "全部文件（348）" / "All files (348)". The number is
+    /// an ungrouped identifier, matching the badge it stands in for.</summary>
+    public static string FilesAllCountName(int count) =>
+        Loc.Instance.Format(FilesAllCountNamePattern, Loc.Instance[FilesAllName], TextFormat.Id(count));
+
+    /// <summary>The "已改动" tab's accessible name with its badge count: "已改动文件（12）" / "Changed files (12)".</summary>
+    public static string FilesChangedCountName(int count) =>
+        Loc.Instance.Format(FilesChangedCountNamePattern, Loc.Instance[FilesChangedName], TextFormat.Id(count));
 
     /// <summary>"12 个文件 · 按轮次" / "12 files · By turn".</summary>
     public static string ChangesSummary(int files, bool byTurn) =>

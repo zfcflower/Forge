@@ -325,9 +325,31 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         private set => Set(ref isLoading, value);
     }
 
-    public string Summary => Context.HasSession
-        ? InspectorStrings.FileSummary(Changes.Count, index?.FileCount ?? 0)
-        : Loc.Instance[InspectorStrings.FilesNoSession];
+    /// <summary>
+    /// The "全部" tab's badge: every file the index holds. The tree is lazy, so this is the index's count rather than the
+    /// rows on screen — collapsing a folder must not shrink "all files".
+    /// </summary>
+    public int AllCount => index?.FileCount ?? 0;
+
+    /// <summary>The "已改动" tab's badge: one per row of <see cref="Changes"/>.</summary>
+    public int ChangedCount => Changes.Count;
+
+    /// <summary>
+    /// The tabs' accessible names. Assistive technology replaces a button's content with this name, so the badge's number has
+    /// to appear here or the count would be invisible to it.
+    /// </summary>
+    public string AllTabName => InspectorStrings.FilesAllCountName(AllCount);
+
+    public string ChangedTabName => InspectorStrings.FilesChangedCountName(ChangedCount);
+
+    /// <summary>Re-raises everything the toolbar reads off the two counts: the badges and the accessible names.</summary>
+    private void RaiseCounts()
+    {
+        OnPropertyChanged(nameof(AllCount));
+        OnPropertyChanged(nameof(ChangedCount));
+        OnPropertyChanged(nameof(AllTabName));
+        OnPropertyChanged(nameof(ChangedTabName));
+    }
 
     /// <summary>Why the last refresh failed, in the language of the moment it is read; null when it did not fail.</summary>
     public string? Error => error.IsEmpty ? null : error.Resolve();
@@ -337,7 +359,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         var changed = !string.Equals(Context.SessionId, context.SessionId, StringComparison.Ordinal);
         Context = context;
         OnPropertyChanged(nameof(Context));
-        OnPropertyChanged(nameof(Summary));
+        RaiseCounts();
         if (changed)
         {
             expandedPaths.Clear();
@@ -359,7 +381,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
             tree.Clear();
             Changes.Clear();
             index = null;
-            OnPropertyChanged(nameof(Summary));
+            RaiseCounts();
             return;
         }
 
@@ -386,7 +408,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
             }
 
             error = default;
-            OnPropertyChanged(nameof(Summary));
+            RaiseCounts();
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or GitException or UnauthorizedAccessException)
         {
@@ -709,7 +731,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        OnPropertyChanged(nameof(Summary));
+        RaiseCounts();
         OnPropertyChanged(nameof(Error));
         foreach (var change in Changes)
         {

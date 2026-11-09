@@ -1,5 +1,12 @@
+using System.Globalization;
+using Avalonia;
+using Avalonia.Automation;
+using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Forge.App.ViewModels;
+using Forge.App.Views;
 using Forge.Workspace;
 using Xunit;
 
@@ -214,6 +221,105 @@ public sealed class FilesPanelTests : IDisposable
         Assert.DoesNotContain("ignored", rows.Names);
         Assert.DoesNotContain("debug.log", rows.Names);
         Assert.Equal("kept/keep.txt", rows.Child);
+    }
+
+    [Fact]
+    public async Task Tab_badges_count_the_whole_index_and_the_change_list_and_show_zero_without_a_session()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var root = NewRoot();
+        Write(root, "sub/a.txt");
+        Write(root, "sub/b.txt");
+        Write(root, "top.txt");
+
+        var counts = await session.Dispatch(
+            async () =>
+            {
+                var panel = new FilesPanelViewModel(new GitCli(), _ => { }, _ => { }, _ => { });
+                panel.Attach(new PanelContext("s1", root, null));
+                await panel.RefreshAsync(CancellationToken.None);
+                var attached = (
+                    panel.AllCount,
+                    panel.ChangedCount,
+                    Changes: panel.Changes.Count,
+                    Rows: panel.Rows.Count,
+                    panel.AllTabName,
+                    panel.ChangedTabName);
+
+                panel.Attach(PanelContext.Empty);
+                await panel.RefreshAsync(CancellationToken.None);
+                return (Attached: attached, Empty: (panel.AllCount, panel.ChangedCount, panel.AllTabName));
+            },
+            CancellationToken.None);
+
+        // "全部" counts the index, not the visible rows: "sub" is still collapsed, so one row stands for three files.
+        Assert.Equal(3, counts.Attached.AllCount);
+        Assert.Equal(2, counts.Attached.Rows);
+        Assert.Equal(counts.Attached.Changes, counts.Attached.ChangedCount);
+
+        // The badge's number has to reach assistive technology, which reads the accessible name instead of the content.
+        Assert.Contains("3", counts.Attached.AllTabName, StringComparison.Ordinal);
+        Assert.Contains(
+            counts.Attached.ChangedCount.ToString(CultureInfo.InvariantCulture),
+            counts.Attached.ChangedTabName,
+            StringComparison.Ordinal);
+
+        // No session still shows both badges, as 0, and both names stay well formed.
+        Assert.Equal((0, 0), (counts.Empty.AllCount, counts.Empty.ChangedCount));
+        Assert.Contains("0", counts.Empty.AllTabName, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Toolbar_badges_render_the_counts_and_the_summary_line_is_gone()
+    {
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var root = NewRoot();
+        Write(root, "a.txt");
+        Write(root, "b.txt");
+
+        var toolbar = await session.Dispatch(
+            async () =>
+            {
+                var panel = new FilesPanelViewModel(new GitCli(), _ => { }, _ => { }, _ => { });
+                panel.Attach(new PanelContext("s1", root, null));
+                await panel.RefreshAsync(CancellationToken.None);
+
+                var view = new FilesToolView { DataContext = panel };
+                var window = new Window { Width = 275, Height = 320, Content = view };
+                window.Show();
+                Settle(window);
+
+                var all = Badge(window, "files-all-count");
+                var changed = Badge(window, "files-changed-count");
+                var texts = view.GetVisualDescendants().OfType<TextBlock>()
+                    .Where(static block => block.IsEffectivelyVisible)
+                    .Select(static block => block.Text ?? string.Empty)
+                    .ToList();
+                return (All: all.Text, Changed: changed.Text, Pill: all.Parent is Border border && border.Classes.Contains("count-badge"), Texts: texts);
+            },
+            CancellationToken.None);
+
+        Assert.Equal("2", toolbar.All);
+        Assert.Equal("0", toolbar.Changed);
+        Assert.True(toolbar.Pill, "the count is drawn as a count-badge pill, not as bare text.");
+
+        // The old summary after the buttons read "0 个改动 · 348 个文件"; no text on the toolbar may invent that line again.
+        Assert.DoesNotContain(toolbar.Texts, static text => text.Contains('\u00b7'));
+    }
+
+    private static TextBlock Badge(Visual root, string automationId) =>
+        root.GetVisualDescendants().OfType<TextBlock>()
+            .First(block => AutomationProperties.GetAutomationId(block) == automationId);
+
+    private static void Settle(Window window)
+    {
+        for (var pass = 0; pass < 2; pass++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        }
+
+        Dispatcher.UIThread.RunJobs();
     }
 
     private string NewRoot()

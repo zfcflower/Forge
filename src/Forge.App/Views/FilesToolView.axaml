@@ -72,26 +72,40 @@
 
   <Grid RowDefinitions="Auto,*" Background="Transparent">
     <Border Classes="toolbar">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
-        <Button Classes="tab"
-                Classes.selected="{Binding IsAllTab}"
-                Content="{Binding [files.all], Source={x:Static loc:Loc.Instance}}"
-                Command="{Binding AllTabCommand}"
-                AutomationProperties.AutomationId="files-all"
-                AutomationProperties.Name="{Binding [files.all.name], Source={x:Static loc:Loc.Instance}}" />
+      <Grid ColumnDefinitions="*,Auto">
+        <!-- Each tab carries its own count: the panel no longer spells both numbers out in a summary after the buttons. A
+             badge is never hidden, so an idle session reads "已改动 0" rather than leaving the reader to guess. -->
+        <StackPanel Orientation="Horizontal" Spacing="4">
+          <Button Classes="tab"
+                  Classes.selected="{Binding IsAllTab}"
+                  Command="{Binding AllTabCommand}"
+                  AutomationProperties.AutomationId="files-all"
+                  AutomationProperties.Name="{Binding AllTabName}">
+            <StackPanel Orientation="Horizontal" Spacing="5">
+              <TextBlock Text="{Binding [files.all], Source={x:Static loc:Loc.Instance}}"
+                         VerticalAlignment="Center" />
+              <Border Classes="count-badge">
+                <TextBlock Text="{Binding AllCount}"
+                           AutomationProperties.AutomationId="files-all-count" />
+              </Border>
+            </StackPanel>
+          </Button>
+          <Button Classes="tab"
+                  Classes.selected="{Binding IsChangedTab}"
+                  Command="{Binding ChangedTabCommand}"
+                  AutomationProperties.AutomationId="files-changed"
+                  AutomationProperties.Name="{Binding ChangedTabName}">
+            <StackPanel Orientation="Horizontal" Spacing="5">
+              <TextBlock Text="{Binding [files.changed], Source={x:Static loc:Loc.Instance}}"
+                         VerticalAlignment="Center" />
+              <Border Classes="count-badge">
+                <TextBlock Text="{Binding ChangedCount}"
+                           AutomationProperties.AutomationId="files-changed-count" />
+              </Border>
+            </StackPanel>
+          </Button>
+        </StackPanel>
         <Button Grid.Column="1"
-                Classes="tab"
-                Classes.selected="{Binding IsChangedTab}"
-                Content="{Binding [files.changed], Source={x:Static loc:Loc.Instance}}"
-                Command="{Binding ChangedTabCommand}"
-                AutomationProperties.AutomationId="files-changed"
-                AutomationProperties.Name="{Binding [files.changed.name], Source={x:Static loc:Loc.Instance}}" />
-        <TextBlock Grid.Column="2"
-                   Classes="caption"
-                   Margin="10,0"
-                   VerticalAlignment="Center"
-                   Text="{Binding Summary}" />
-        <Button Grid.Column="3"
                 Classes="ghost icon"
                 Command="{Binding ChangedCommand}"
                 ToolTip.Tip="{Binding [files.refresh], Source={x:Static loc:Loc.Instance}}"

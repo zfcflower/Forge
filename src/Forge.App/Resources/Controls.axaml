@@ -151,6 +151,36 @@
     <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
   </Style>
 
+  <!-- A count badge: the number a tab (or any chrome row) owns, as a neutral pill so the accent colour stays with the
+       selected item rather than with every count on the row. Inside a selected tab it flips to the panel surface with
+       accent digits, reading as part of the accent chip instead of a second emphasis. Geometry follows the sub-agent run
+       badge (16px pill, 10px semibold digits), which is the same "this row owns a count" reading. -->
+  <Style Selector="Border.count-badge">
+    <Setter Property="MinWidth" Value="16" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Padding" Value="4,0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="{DynamicResource CountBadgeBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Border.count-badge > TextBlock">
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LineHeight" Value="10" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.tab.selected Border.count-badge">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+  </Style>
+
+  <Style Selector="Button.tab.selected Border.count-badge > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+  </Style>
+
   <Style Selector="Button.primary:disabled, Button.ghost:disabled, Button.icon:disabled, Button.tab:disabled, Button.link:disabled">
     <Setter Property="Opacity" Value="0.45" />
     <Setter Property="Cursor" Value="Arrow" />
