@@ -34,23 +34,22 @@
           </ItemsControl>
           <Border Grid.Column="1" Classes="tree-row-content">
             <Grid ColumnDefinitions="Auto,Auto,*">
-              <Border Grid.Column="0" Width="8">
+              <Border Grid.Column="0" Width="10" Margin="6,0,0,0">
                 <Button Classes="tree-chevron-button"
                         Command="{Binding ToggleCommand}"
                         IsVisible="{Binding HasToggle}">
-                  <Path Data="{StaticResource TreeChevronGeometry}"
-                        Classes="tree-chevron"
-                        Classes.expanded="{Binding ChevronRotated}"
-                        Width="8"
-                        Height="8"
-                        HorizontalAlignment="Center"
-                        Stretch="Uniform" />
+                  <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
+                                 Classes="tree-chevron"
+                                 Classes.expanded="{Binding ChevronRotated}"
+                                 Width="12"
+                                 Height="12"
+                                 HorizontalAlignment="Center" />
                 </Button>
               </Border>
-              <Path Grid.Column="1"
-                    Classes="tree-icon"
-                    Data="{Binding Icon}"
-                    Margin="14,0,6,0" />
+              <wc:FluentIcon Grid.Column="1"
+                             Classes="tree-icon"
+                             Data="{Binding Icon}"
+                             Margin="6,0,4,0" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <Button Classes="link"
                         HorizontalAlignment="Left"
@@ -80,7 +79,7 @@
               ToolTip.Tip="{Binding [spec.refresh], Source={x:Static loc:Loc.Instance}}"
               AutomationProperties.AutomationId="refresh-specs"
               AutomationProperties.Name="{Binding [spec.refresh.name], Source={x:Static loc:Loc.Instance}}">
-        <wc:LineIcon Data="{StaticResource IconRefresh}" Width="13" Height="13" />
+        <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
       </Button>
     </Grid>
 

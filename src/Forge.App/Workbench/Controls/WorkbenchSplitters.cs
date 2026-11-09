@@ -128,6 +128,12 @@ internal enum PanelSplitterKind
     Bottom,
     Preview,
     Inspector,
+
+    /// <summary>The line between the projects panel and the general-chats panel of the left column.</summary>
+    Project,
+
+    /// <summary>Any line inside the Inspector column's stack of panels below the files panel.</summary>
+    BelowStack,
 }
 
 /// <summary>The 1 px splitter between two panels of one region; dragging writes the split back to the layout.</summary>
@@ -138,6 +144,8 @@ internal sealed class PanelSplitter : WorkbenchSplitter
 
     private PanelSplitterKind kind;
     private double startValue;
+    private double startUpperHeight;
+    private double startPairHeight;
 
     static PanelSplitter()
     {
@@ -160,6 +168,19 @@ internal sealed class PanelSplitter : WorkbenchSplitter
     /// <summary>Length of the axis the split moves along: the region height, or the column width for the preview gap.</summary>
     public double TrackLength { get; set; }
 
+    /// <summary>
+    /// The panel above this line and the one below it, for a <see cref="PanelSplitterKind.BelowStack"/> line: the drag writes
+    /// that pair's heights back to the layout under these ids.
+    /// </summary>
+    public string? UpperPanelId { get; set; }
+
+    public string? LowerPanelId { get; set; }
+
+    /// <summary>Heights the two panels around a <see cref="PanelSplitterKind.BelowStack"/> line have right now, as arranged.</summary>
+    public double UpperHeight { get; set; }
+
+    public double LowerHeight { get; set; }
+
     /// <summary>True for the line between the preview column and the files column.</summary>
     public bool IsVertical
     {
@@ -177,12 +198,20 @@ internal sealed class PanelSplitter : WorkbenchSplitter
             return;
         }
 
+        if (kind == PanelSplitterKind.BelowStack)
+        {
+            startUpperHeight = UpperHeight;
+            startPairHeight = UpperHeight + LowerHeight;
+            return;
+        }
+
         startValue = kind switch
         {
             PanelSplitterKind.Bottom => layout.BottomHeight,
             PanelSplitterKind.Preview => TrackLength > 0
                 ? RegionPresenter.PreviewColumnWidth(layout, TrackLength, true)
                 : layout.PreviewWidth,
+            PanelSplitterKind.Project => layout.ProjectSplitRatio,
             _ => layout.InspectorSplitRatio,
         };
     }
@@ -191,6 +220,22 @@ internal sealed class PanelSplitter : WorkbenchSplitter
     {
         if (Layout is not { } layout)
         {
+            return;
+        }
+
+        if (kind == PanelSplitterKind.BelowStack)
+        {
+            if (UpperPanelId is not { } upper || LowerPanelId is not { } lower || startPairHeight <= 0)
+            {
+                return;
+            }
+
+            var upperHeight = PanelStackSolver.ResizePair(
+                startUpperHeight,
+                startPairHeight - startUpperHeight,
+                delta,
+                WorkbenchMetrics.PanelMinHeight);
+            layout.SetBelowPanelHeights(upper, upperHeight, lower, startPairHeight - upperHeight);
             return;
         }
 
@@ -222,7 +267,16 @@ internal sealed class PanelSplitter : WorkbenchSplitter
                 }
 
                 var minimum = WorkbenchMetrics.PanelMinHeight / TrackLength;
-                layout.InspectorSplitRatio = Math.Clamp(startValue + (delta / TrackLength), minimum, 1 - minimum);
+                var ratio = Math.Clamp(startValue + (delta / TrackLength), minimum, 1 - minimum);
+                if (kind == PanelSplitterKind.Project)
+                {
+                    layout.ProjectSplitRatio = ratio;
+                }
+                else
+                {
+                    layout.InspectorSplitRatio = ratio;
+                }
+
                 break;
             }
         }

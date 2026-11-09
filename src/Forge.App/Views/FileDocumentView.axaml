@@ -23,12 +23,11 @@
     <Style Selector="Button.reviewMarker.lost">
       <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
     </Style>
-    <Style Selector="Path.reviewGlyph">
-      <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
-      <Setter Property="StrokeThickness" Value="1.6" />
+    <Style Selector="wc|FluentIcon.reviewGlyph">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
-    <Style Selector="Button.reviewMarker.lost Path.reviewGlyph">
-      <Setter Property="Stroke" Value="{DynamicResource DangerBrush}" />
+    <Style Selector="Button.reviewMarker.lost wc|FluentIcon.reviewGlyph">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
     </Style>
     <Style Selector="Border.reviewComposer">
       <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
@@ -58,7 +57,7 @@
                             AutomationProperties.AutomationId="file-editor-menu" AutomationProperties.Name="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}" />
         <Button x:Name="ReviewSendAll" Grid.Column="6" Margin="2,0,0,0" Classes="icon" IsVisible="False"
                 AutomationProperties.AutomationId="review-send-all">
-          <Path Classes="reviewGlyph" Data="{DynamicResource IconSend}" Width="14" Height="14" Stretch="Uniform" />
+          <wc:FluentIcon Classes="reviewGlyph" Data="{DynamicResource IconSend}" Width="14" Height="14" />
         </Button>
       </Grid>
     </Border>
@@ -95,7 +94,7 @@
       <Canvas x:Name="ReviewLayer" ClipToBounds="True">
         <Button x:Name="ReviewIconButton" Classes="reviewIcon" Width="26" Height="26" IsVisible="False"
                 AutomationProperties.AutomationId="review-add">
-          <Path Classes="reviewGlyph" Data="M4 5h16v11H9l-4 4v-4H4z" Width="14" Height="14" Stretch="Uniform" />
+          <wc:FluentIcon Classes="reviewGlyph" Data="{DynamicResource IconCommentAdd}" Width="14" Height="14" />
         </Button>
         <Border x:Name="ReviewComposer" Classes="reviewComposer" IsVisible="False"
                 AutomationProperties.AutomationId="review-composer">

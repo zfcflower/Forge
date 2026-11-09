@@ -133,6 +133,10 @@ public sealed class SqliteTodoStoreStepCommitTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = """
+                DROP INDEX IF EXISTS ix_todos_group;
+                ALTER TABLE todos DROP COLUMN group_id;
+                ALTER TABLE todos DROP COLUMN origin;
+                DROP TABLE IF EXISTS todo_groups;
                 ALTER TABLE todos DROP COLUMN commit_subject;
                 ALTER TABLE todos DROP COLUMN summary;
                 ALTER TABLE todos DROP COLUMN verification;
@@ -159,7 +163,7 @@ public sealed class SqliteTodoStoreStepCommitTests
         await check.OpenAsync();
         await using var version = check.CreateCommand();
         version.CommandText = "PRAGMA user_version";
-        Assert.Equal(3L, (long)(await version.ExecuteScalarAsync() ?? 0L));
+        Assert.Equal(4L, (long)(await version.ExecuteScalarAsync() ?? 0L));
     }
 
     [Fact]
@@ -175,7 +179,7 @@ public sealed class SqliteTodoStoreStepCommitTests
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 4";
+            command.CommandText = "PRAGMA user_version = 5";
             await command.ExecuteNonQueryAsync();
         }
 

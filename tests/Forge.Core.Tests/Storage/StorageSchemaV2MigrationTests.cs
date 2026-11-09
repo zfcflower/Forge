@@ -55,7 +55,7 @@ public sealed class StorageSchemaV2MigrationTests
             await store.AddAsync("sess-a", "T", null, null, default);
         }
 
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.Equal(["session_id", "text", "updated_at"], await TodoSchemaRaw.ColumnsAsync(directory, "plan_summaries"));
 
@@ -125,7 +125,7 @@ public sealed class StorageSchemaV2MigrationTests
             Assert.Equal(sessionBBefore, await store.ListAsync("sess-b", default));
         }
 
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "plan_summaries"));
         Assert.Equal(rawRowsBefore, await TodoSchemaRaw.V1TodoRowsAsync(directory));
@@ -183,7 +183,7 @@ public sealed class StorageSchemaV2MigrationTests
             }
         }
 
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.Equal(["session_id", "text", "updated_at"], await TodoSchemaRaw.ColumnsAsync(directory, "plan_summaries"));
         foreach (var table in new[] { "projects", "ui_state", "turn_checkpoints" })
@@ -246,7 +246,7 @@ public sealed class StorageSchemaV2MigrationTests
         await TodoSchemaRaw.ExecuteAsync(directory, cleanupSql);
         var titles = (await store.ListAsync("sess-a", default)).Select(item => item.Title).ToArray();
         Assert.Equal(["Keep", "Keep too"], titles);
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "plan_summaries"));
         Assert.Equal(
@@ -321,7 +321,7 @@ public sealed class StorageSchemaV2MigrationTests
             await sessions.DisposeAsync();
         }
 
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         var columns = await TodoSchemaRaw.ColumnsAsync(directory, "todos");
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, columns);
         Assert.Equal(columns.Length, columns.Distinct(StringComparer.Ordinal).Count());
@@ -352,7 +352,7 @@ public sealed class StorageSchemaV2MigrationTests
             Assert.DoesNotContain("fatal", result.Output, StringComparison.OrdinalIgnoreCase);
         }
 
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
         var columns = await TodoSchemaRaw.ColumnsAsync(directory, "todos");
         Assert.Equal(TodoSchemaRaw.V2TodoColumns, columns);
         Assert.Equal(rowsBefore, await TodoSchemaRaw.V1TodoRowsAsync(directory));
@@ -381,7 +381,7 @@ public sealed class StorageSchemaV2MigrationTests
             await TodoSchemaRaw.DowngradeToV1Async(directory);
         }
 
-        await TodoSchemaRaw.SetUserVersionAsync(directory, 4);
+        await TodoSchemaRaw.SetUserVersionAsync(directory, 5);
         var schemaBefore = await TodoSchemaRaw.SchemaSnapshotAsync(directory);
         var rowsBefore = await TodoSchemaRaw.V1TodoRowsAsync(directory);
 
@@ -399,11 +399,11 @@ public sealed class StorageSchemaV2MigrationTests
         {
             var refusal = await Assert.ThrowsAsync<InvalidDataException>(attempt);
             Assert.True(
-                refusal.Message.Contains("schema 4", StringComparison.Ordinal) && refusal.Message.Contains("supports 3", StringComparison.Ordinal),
+                refusal.Message.Contains("schema 5", StringComparison.Ordinal) && refusal.Message.Contains("supports 4", StringComparison.Ordinal),
                 $"{name}: unexpected refusal message '{refusal.Message}'");
         }
 
-        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(5L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(schemaBefore, await TodoSchemaRaw.SchemaSnapshotAsync(directory));
         Assert.Equal(rowsBefore, await TodoSchemaRaw.V1TodoRowsAsync(directory));
         if (!v1Shaped)

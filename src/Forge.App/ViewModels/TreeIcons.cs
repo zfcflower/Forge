@@ -5,9 +5,10 @@ using Avalonia.Media;
 namespace Forge.App.ViewModels;
 
 /// <summary>
-/// The tree icons, as geometry so the shell ships no icon package and no font dependency. Icons are stroked outlines on
-/// a 24×24 box and are scaled by the view; the view paints them with <c>Stroke</c> (no fill). Geometries are thread-affine
-/// Avalonia objects, so they are cached per thread: each UI thread (and each headless test session) gets its own set.
+/// The tree icons, as geometry so the shell ships no icon package and no font dependency. Every glyph is the 24 px
+/// regular variant of the same Fluent System Icon the chrome uses (see <c>Resources/Icons.axaml</c>); the view paints it
+/// with the built-in <c>PathIcon</c>, which fills with <c>Foreground</c>. Geometries are thread-affine Avalonia objects,
+/// so they are cached per thread: each UI thread (and each headless test session) gets its own set.
 /// </summary>
 internal static class TreeIcons
 {
@@ -27,9 +28,15 @@ internal static class TreeIcons
     /// <summary>File: a sheet outline with its top-right corner folded.</summary>
     public static Geometry File => Set.File;
 
-    public static Geometry General => Set.General;
+    public static Geometry General => Project;
 
     public static Geometry Project => Set.Project;
+
+    /// <summary>The trailing "+" of a row that starts a session: a plain plus.</summary>
+    public static Geometry Plus => Set.Plus;
+
+    /// <summary>The trailing "+" of a project row, which starts a worktree branch instead of a session.</summary>
+    public static Geometry NewBranch => Set.NewBranch;
 
     public static Geometry Worktree => Set.Worktree;
 
@@ -63,50 +70,59 @@ internal static class TreeIcons
 
     private sealed class TreeIconSet
     {
-        public Geometry Chevron { get; } = Parse("M9 4.5 17 12 9 19.5 9 16 12.5 12 9 8Z");
+        /// <summary>展开箭头:与 <c>TreeChevronGeometry</c> 同一枚 Fluent chevron_right;展开时由视图把整个图标转 90°。</summary>
+        public Geometry Chevron { get; } = Parse("M8.47 4.22c-.3.3-.3.77 0 1.06L15.19 12l-6.72 6.72a.75.75 0 1 0 1.06 1.06l7.25-7.25c.3-.3.3-.77 0-1.06L9.53 4.22a.75.75 0 0 0-1.06 0");
 
-        public Geometry Folder { get; } = Parse(
-            "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z");
+        public Geometry Folder { get; } = Parse("M3.5 6.25V8h4.63q.31 0 .53-.22l1.53-1.53-1.53-1.53a.8.8 0 0 0-.53-.22H5.25c-.97 0-1.75.78-1.75 1.75m-1.5 0C2 4.45 3.46 3 5.25 3h2.88c.6 0 1.17.24 1.59.66l1.84 1.84h7.19c1.8 0 3.25 1.46 3.25 3.25v9c0 1.8-1.46 3.25-3.25 3.25H5.25A3.25 3.25 0 0 1 2 17.75zM3.5 9.5v8.25c0 .97.78 1.75 1.75 1.75h13.5c.97 0 1.75-.78 1.75-1.75v-9c0-.97-.78-1.75-1.75-1.75h-7.19L9.72 8.84c-.42.42-1 .66-1.6.66z");
 
-        public Geometry FolderOpen { get; } = Parse(
-            "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2");
+        public Geometry FolderOpen { get; } = Parse("M3.5 6.25c0-.97.78-1.75 1.75-1.75h2.88q.31 0 .53.22l2.06 2.06q.22.22.53.22h5.5c.97 0 1.75.78 1.75 1.75q0 .13.04.25H8.72c-1.34 0-2.58.71-3.25 1.87L3.5 14.28zM2 17.79A3.25 3.25 0 0 0 5.25 21h11.04c1.33 0 2.57-.72 3.24-1.88l3.03-5.25A3.25 3.25 0 0 0 19.96 9a1 1 0 0 0 .04-.25c0-1.8-1.45-3.25-3.25-3.25h-5.19L9.72 3.66c-.42-.42-1-.66-1.6-.66H5.26A3.25 3.25 0 0 0 2 6.25v11.54m6.72-7.3h11.03a1.75 1.75 0 0 1 1.51 2.63l-3.03 5.25c-.4.7-1.14 1.13-1.95 1.13H5.25a1.75 1.75 0 0 1-1.51-2.63l3.03-5.25c.4-.7 1.14-1.12 1.95-1.12");
 
-        public Geometry File { get; } = Parse(
-            "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z M14 2v4a2 2 0 0 0 2 2h4");
+        public Geometry File { get; } = Parse("M6 2a2 2 0 0 0-2 2v16c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L13.6 2.6A2 2 0 0 0 12.17 2zm-.5 2c0-.28.22-.5.5-.5h6V8c0 1.1.9 2 2 2h4.5v10a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5zm11.88 4.5H14a.5.5 0 0 1-.5-.5V4.62z");
 
-        public Geometry General => Bubble;
+        public Geometry General => Project;
 
-        public Geometry Project { get; } = Parse("M3 5h18v14H3Z M6 9.5h8v6H6Z");
+        /// <summary>
+        /// The one container glyph of the tree, worn by both the general section and every project: an open box. It reads as
+        /// "an area that holds conversations" without repeating the file tree's folder, which in this panel would say
+        /// "a directory" instead.
+        /// </summary>
+        public Geometry Project { get; } = Parse("M6.05 7.98a.75.75 0 0 1 .97-.43L12 9.44l4.98-1.9a.75.75 0 1 1 .54 1.41l-4.77 1.8v5.5a.75.75 0 1 1-1.5 0v-5.5l-4.77-1.8a.75.75 0 0 1-.43-.97m4.54-5.47c.9-.37 1.92-.37 2.82 0l7.5 3.04c.66.27 1.09.91 1.09 1.62v9.66c0 .7-.43 1.35-1.1 1.62l-7.5 3.04c-.9.36-1.9.36-2.8 0l-7.5-3.04c-.67-.27-1.1-.91-1.1-1.62V7.17c0-.71.43-1.35 1.1-1.62zm2.26 1.4a2.3 2.3 0 0 0-1.7 0l-7.5 3.03a.3.3 0 0 0-.15.23v9.66q0 .16.16.23l7.5 3.04c.54.22 1.14.22 1.69 0l7.5-3.04q.14-.07.15-.23V7.17q0-.17-.16-.23z");
 
-        public Geometry Worktree { get; } = Parse("M6 3a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Zm12 0a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z"
-            + "M6 8v6.5a3.5 3.5 0 0 0 3.5 3.5H12v2.5l4.5-4L12 12.5V15H9.5A1.5 1.5 0 0 1 8 13.5V8Z");
+        public Geometry Plus { get; } = Parse("M12 3.25c.41 0 .75.34.75.75v7.25H20a.75.75 0 0 1 0 1.5h-7.25V20a.75.75 0 0 1-1.5 0v-7.25H4a.75.75 0 0 1 0-1.5h7.25V4c0-.41.34-.75.75-.75");
 
-        public Geometry History { get; } = Parse("M12 3a9 9 0 1 0 8.4 12h-2.2A7 7 0 1 1 12 5c1.9 0 3.5.7 4.8 2H13v2h7V2h-2v2.6A8.9 8.9 0 0 0 12 3Z"
-            + "M11 7v6.4l5 2.6 1-1.7-4-2.1V7Z");
+        /// <summary>
+        /// A branch with a plus: the project row's "+" starts a worktree on a new branch, while a session "+" (the plain
+        /// plus) only starts another conversation.
+        /// </summary>
+        public Geometry NewBranch { get; } = Parse("M4 5.5a3.5 3.5 0 1 1 4.49 3.36 5.5 5.5 0 0 0 5.26 3.89h.33a3.5 3.5 0 1 1 0 1.5h-.33a7 7 0 0 1-5.5-2.67v3.5a3.5 3.5 0 1 1-1.5 0V8.92A3.5 3.5 0 0 1 4 5.5m3.5-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m0 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4m8-3a2 2 0 1 0 4 0 2 2 0 0 0-4 0");
+
+        public Geometry Worktree { get; } = Parse("M11 5.5a3.5 3.5 0 0 1-3 3.46v2.54h6.25c1.24 0 2.25-1 2.25-2.25v-.4a3.5 3.5 0 1 1 1.5.11v.29A3.75 3.75 0 0 1 14.25 13H8v2.04a3.5 3.5 0 1 1-1.5.1V8.86A3.5 3.5 0 1 1 11 5.5m-3.5 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4m10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4m-8 11a2 2 0 1 0-4 0 2 2 0 0 0 4 0");
+
+        public Geometry History { get; } = Parse("M12 4.5a7.5 7.5 0 1 1-7.42 6.4c.07-.46-.26-.9-.72-.9-.37 0-.7.26-.76.62Q3 11.3 3 12a9 9 0 1 0 3-6.7V4.24a.75.75 0 0 0-1.5 0v3c0 .41.34.75.75.75h3a.75.75 0 0 0 0-1.5H6.9a7.5 7.5 0 0 1 5.1-2m.5 3.25a.75.75 0 0 0-1.5 0v4.5c0 .41.34.75.75.75h3a.75.75 0 0 0 0-1.5H12.5z");
 
         public Geometry Session => Bubble;
 
         /// <summary>
-        /// The one chat bubble of the tree, on the same 24 grid as the tab strip's <c>IconChat</c>: a rounded box with a
-        /// tail at its bottom left. The section row, a session row and an agent row are all conversations, so they all carry
-        /// it; only the active session's row fills it, which is why the shape is a single closed outline.
+        /// The one conversation glyph of the tree — Fluent <c>chat_sparkle</c>, the same one the tab strip's <c>IconChat</c> wears: a session row and an agent
+        /// row are both conversations. The active session's row is told apart by colour, not by a second, filled variant.
         /// </summary>
-        public Geometry Bubble { get; } = Parse(
-            "M6.5 4h11a3.5 3.5 0 0 1 3.5 3.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-3.5 3.5V17H6.5A3.5 3.5 0 0 1 3 13.5v-6A3.5 3.5 0 0 1 6.5 4z");
+        public Geometry Bubble { get; } = Parse("M16.09 6.41a3 3 0 0 0-1.35-.95L13.36 5a.54.54 0 0 1 0-1.03l1.38-.44a2.8 2.8 0 0 0 1.76-1.77l.01-.03.45-1.38a.54.54 0 0 1 1.03 0l.44 1.38a2.8 2.8 0 0 0 1.8 1.8l1.38.44.03.01a.54.54 0 0 1 0 1.03l-1.38.44a2.8 2.8 0 0 0-1.8 1.8l-.45 1.38-.01.03a.54.54 0 0 1-1.01-.03l-.45-1.38q-.15-.46-.45-.85m7.7 3.8-.77-.25a1.6 1.6 0 0 1-1-1l-.25-.76a.3.3 0 0 0-.57 0l-.25.77a1.6 1.6 0 0 1-.98 1l-.77.24a.3.3 0 0 0 0 .57l.77.25a1.6 1.6 0 0 1 1 1l.24.77a.3.3 0 0 0 .58 0l.24-.77a1.6 1.6 0 0 1 1-1l.77-.24a.3.3 0 0 0 0-.57zM12 2a10 10 0 0 1 2.76.39q-.18.1-.37.17L13.05 3q-.43.16-.72.5H12a8.5 8.5 0 0 0-7.43 12.64l.15.27-1.1 3.98 3.98-1.11.27.15a8.5 8.5 0 0 0 12.5-5.96q.14.2.34.34a1.3 1.3 0 0 0 1.09.2A10 10 0 0 1 7.4 20.88L3.6 21.96a1.25 1.25 0 0 1-1.54-1.54l1.06-3.83A10 10 0 0 1 12 2");
 
         public Geometry MainAgent => Bubble;
 
         public Geometry Agent => Bubble;
 
-        public Geometry Scout { get; } = Parse(
-            "M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Zm0 2.6a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8Z"
-            + "M15.6 16.9 21 22.3 22.3 21 16.9 15.6Z");
+        /// <summary>Scout: a magnifier — the sub-agent that only reads.</summary>
+        public Geometry Scout { get; } = Parse("M16.1 17.16a8 8 0 1 1 1.06-1.06l4.62 4.62a.75.75 0 1 1-1.06 1.06zM17.5 11a6.5 6.5 0 1 0-13 0 6.5 6.5 0 0 0 13 0");
 
-        public Geometry Worker { get; } = Parse("M3 17.6 13.6 7l3.4 3.4L6.4 21Z M15 5.6 18.4 2.2 21.8 5.6 18.4 9Z");
+        /// <summary>Worker: the angle brackets of code.</summary>
+        public Geometry Worker { get; } = Parse("M15.05 1.5a.75.75 0 0 1 1.4.5l-7.5 20.5a.75.75 0 0 1-1.4-.5zM6.2 6.22a.75.75 0 0 1 1.08 1.04L2.8 12l4.5 4.73a.75.75 0 0 1-1.08 1.04l-5-5.25a.75.75 0 0 1 0-1.04zm10.52-.02a.75.75 0 0 1 1.06.02l5 5.25c.28.3.28.75 0 1.04l-5 5.25a.75.75 0 0 1-1.08-1.04L21.2 12l-4.5-4.73a.75.75 0 0 1 .02-1.06");
 
-        public Geometry Planner { get; } = Parse("M4 5h16 M4 12h11 M4 19h16");
+        /// <summary>Planner: a bulleted list.</summary>
+        public Geometry Planner { get; } = Parse("M3.25 17.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5m3.5.5h14.5a.75.75 0 0 1 .1 1.5H6.75a.75.75 0 0 1-.1-1.5zh14.5zm-3.5-7a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5m3.5.5h14.5a.75.75 0 0 1 .1 1.5H6.75a.75.75 0 0 1-.1-1.5zh14.5zm-3.5-7a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5m3.5.5h14.5a.75.75 0 0 1 .1 1.5H6.75a.75.75 0 0 1-.1-1.5zh14.5z");
 
-        public Geometry Reviewer { get; } = Parse("M4 12.5 9.5 18 20 6.5");
+        /// <summary>Reviewer: a check mark.</summary>
+        public Geometry Reviewer { get; } = Parse("M4.53 12.97a.75.75 0 0 0-1.06 1.06l4.5 4.5c.3.3.77.3 1.06 0l11-11a.75.75 0 0 0-1.06-1.06L8.5 16.94z");
 
         private static Geometry Parse(string path) => StreamGeometry.Parse(path);
     }
@@ -128,13 +144,23 @@ internal sealed record IndentMark(int Level, bool DrawLine, int Step);
 internal static class IndentMarks
 {
     /// <summary>Width of the chevron column; the chevron box fills it, so a child chevron lines up under its parent's icon.</summary>
-    public const int ChevronSlot = 8;
+    public const int ChevronSlot = 10;
 
-    /// <summary>Gap between the chevron column and the icon, so a child icon lines up near its parent's text.</summary>
-    public const int IconGap = 14;
+    /// <summary>The panel padding every row is inset by, so a row does not start against the panel edge.</summary>
+    public const int RowInset = 6;
+
+    /// <summary>Gap between the chevron column and the icon; the row templates use the same value as the icon's left margin.</summary>
+    public const int IconGap = 6;
 
     /// <summary>One indent step for folder/file rows: the chevron slot plus the chevron-to-icon gap.</summary>
     public const int Step = ChevronSlot + IconGap;
+
+    /// <summary>
+    /// The whole leading width of a row before its icon: the panel inset, the chevron column (which an agent row leaves
+    /// empty) and the icon gap. Both row templates indent by this plus <see cref="Step"/> per level, so an agent row lands
+    /// under the row it belongs to instead of level with it.
+    /// </summary>
+    public const int IconIndent = RowInset + ChevronSlot + IconGap;
 
     /// <summary>One indent step for agent rows, which keep the previous 16 px rhythm and draw no guide lines.</summary>
     public const int SpacerStep = 16;
@@ -142,6 +168,7 @@ internal static class IndentMarks
     private const int MaxDepth = 32;
 
     private static readonly IReadOnlyList<IndentMark>[] Lines = Build(drawLine: true, Step);
+    private static readonly IReadOnlyList<IndentMark>[] PlainSteps = Build(drawLine: false, Step);
     private static readonly IReadOnlyList<IndentMark>[] Spacers = Build(drawLine: false, SpacerStep);
     private static readonly Dictionary<int, IReadOnlyList<IndentMark>> Masks = [];
 
@@ -150,6 +177,12 @@ internal static class IndentMarks
 
     /// <summary>Indent steps without a guide line, for the agent tree.</summary>
     public static IReadOnlyList<IndentMark> Spacer(int depth) => At(Spacers, depth);
+
+    /// <summary>
+    /// Indent steps of the folder width that draw no line: the project tree keeps the depth rhythm but no longer threads a
+    /// vertical line through it, since a hairline between rows read as a second, competing column.
+    /// </summary>
+    public static IReadOnlyList<IndentMark> Plain(int depth) => At(PlainSteps, depth);
 
     /// <summary>
     /// Marks for a row whose expanded ancestors occupy the levels in <paramref name="mask"/> (bit L = level L). The result

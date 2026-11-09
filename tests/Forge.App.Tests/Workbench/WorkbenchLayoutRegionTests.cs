@@ -641,14 +641,6 @@ public sealed class WorkbenchLayoutRegionTests
     }
 
     [Fact]
-    public void Bottom_group_reports_no_content_without_tabs()
-    {
-        var layout = NewLayout();
-
-        Assert.False(layout.BottomHasContent);
-    }
-
-    [Fact]
     public void Bottom_group_stays_visible_when_empty_and_KeepsVisibleWhenEmpty_is_set()
     {
         var layout = NewLayout();
@@ -659,25 +651,30 @@ public sealed class WorkbenchLayoutRegionTests
     }
 
     [Fact]
-    public void Collapsed_bottom_group_is_hidden()
+    public void Minimized_bottom_group_keeps_its_title_bar()
     {
         var layout = NewLayout();
         OpenBottomTab(layout);
 
-        layout.IsBottomCollapsed = true;
+        layout.IsBottomMinimized = true;
 
-        Assert.False(layout.BottomTabs.IsVisible);
+        // The tabs and the title-bar tools are the way back, so minimizing must not hide the group the way the retired
+        // collapsed strip did.
+        Assert.True(layout.BottomTabs.IsVisible);
+        Assert.True(layout.BottomTabs.IsMinimized);
     }
 
     [Fact]
-    public void Collapsed_bottom_group_still_reports_content()
+    public void The_groups_own_restore_button_moves_the_intent_back()
     {
         var layout = NewLayout();
         OpenBottomTab(layout);
+        layout.IsBottomMinimized = true;
 
-        layout.IsBottomCollapsed = true;
+        layout.ToggleMinimize(layout.BottomTabs);
 
-        Assert.True(layout.BottomHasContent);
+        Assert.False(layout.BottomTabs.IsMinimized);
+        Assert.False(layout.IsBottomMinimized);
     }
 
     [Fact]
@@ -693,13 +690,14 @@ public sealed class WorkbenchLayoutRegionTests
     }
 
     [Fact]
-    public void IsBottomCollapsed_setter_raises_LayoutChanged()
+    public void IsBottomMinimized_setter_raises_LayoutChanged()
     {
         var layout = NewLayout();
+        OpenBottomTab(layout);
         int raised = 0;
         layout.LayoutChanged += (_, _) => raised++;
 
-        layout.IsBottomCollapsed = true;
+        layout.IsBottomMinimized = true;
 
         Assert.Equal(1, raised);
     }

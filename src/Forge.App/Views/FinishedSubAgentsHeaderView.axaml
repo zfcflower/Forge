@@ -37,10 +37,10 @@
     <Button.Content>
       <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
         <TextBlock Classes="label" Text="{Binding Title}" VerticalAlignment="Center" />
-        <wc:LineIcon Data="{DynamicResource IconChevronDown}"
-                  Width="12"
-                  Height="12"
-                  VerticalAlignment="Center" />
+        <wc:FluentIcon Data="{DynamicResource IconChevronDown}"
+                       Width="12"
+                       Height="12"
+                       VerticalAlignment="Center" />
       </StackPanel>
     </Button.Content>
     <Button.Flyout>

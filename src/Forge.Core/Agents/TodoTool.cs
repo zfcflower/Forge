@@ -5,9 +5,9 @@ using Forge.Abstractions;
 namespace Forge.Core.Agents;
 
 /// <summary>
-/// The session's checklist and plan summary. Reading them is a read-only call; adding, updating, removing and writing
-/// the plan summary change state, so the approval policy sees the side effect of the call instead of the tool's worst
-/// case. When a step committer is configured, marking an item done also commits that step; the commit is a local,
+/// The session's checklist and plan summary. Reading them is a read-only call; adding, promoting, updating, removing and
+/// writing the plan summary change state, so the approval policy sees the side effect of the call instead of the tool's
+/// worst case. When a step committer is configured, marking an item done also commits that step; the commit is a local,
 /// undoable write to the session's own worktree and so rides along with the <c>todo</c> call instead of asking again.
 /// </summary>
 public sealed class TodoTool : ITool, IToolSideEffectResolver
@@ -19,10 +19,13 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
     private const int ListErrorLimit = 200;
 
     private const string SchemaJson =
-        """{"type":"object","properties":{"operation":{"type":"string","enum":["list","add","update","remove","plan_summary_get","plan_summary_set"],"description":"list reads the checklist; add, update and remove change it; plan_summary_get reads the session's plan summary and plan_summary_set replaces it."},"id":{"type":"string","description":"Item id from a previous list; required by update and remove."},"title":{"type":"string","description":"Item title for add, or the new title for update."},"status":{"type":"string","enum":["pending","in_progress","done"],"description":"New status for update. done commits every uncommitted change in the worktree as this step."},"note":{"type":"string","description":"Short note for add or update."},"commit_subject":{"type":"string","description":"Commit subject line of the step, written in the repo's commit style (read git_log first); the item title is used when absent. Update only; an empty string clears it."},"summary":{"type":"string","description":"What the step changed; becomes the commit body and the step's entry in the PR plan. Update only; an empty string clears it."},"verification":{"type":"string","description":"How the step was verified (tests run, checks made); kept on the item and in the PR plan, not part of the commit message. Update only; an empty string clears it."},"text":{"type":"string","description":"Plan summary for plan_summary_set, with Summary, Changes and Testing sections; it becomes the PR description."},"after_id":{"type":"string","description":"Insert a new item right after this item; default appends."}},"required":["operation"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"operation":{"type":"string","enum":["list","add","update","remove","promote","plan_summary_get","plan_summary_set"],"description":"list reads the checklist; add, update, remove and promote change it; plan_summary_get reads the session's plan summary and plan_summary_set replaces it."},"id":{"type":"string","description":"Item id from a previous list; required by update, remove and promote."},"title":{"type":"string","description":"Item title for add, or the new title for update; for promote the group title when it should differ from the item title."},"status":{"type":"string","enum":["pending","in_progress","paused","done"],"description":"New status for update. in_progress returns the session's previous in-progress step to pending; paused waits for something outside the agent and never commits; done commits every uncommitted change in the worktree as this step."},"note":{"type":"string","description":"Short note for add or update."},"group":{"type":"string","description":"Title of the plan group an added step belongs to: an existing group with that title is reused, a missing one is created. Without group the item joins the loose queue."},"commit_subject":{"type":"string","description":"Commit subject line of the step, written in the repo's commit style (read git_log first); the item title is used when absent. Update only; an empty string clears it."},"summary":{"type":"string","description":"What the step changed; becomes the commit body and the step's entry in the PR plan. Update only; an empty string clears it."},"verification":{"type":"string","description":"How the step was verified (tests run, checks made); kept on the item and in the PR plan, not part of the commit message. Update only; an empty string clears it."},"text":{"type":"string","description":"Plan summary for plan_summary_set, with Summary, Changes and Testing sections; it becomes the PR description."},"after_id":{"type":"string","description":"Insert a new item right after this item of the same layer (the same group, or the loose queue); default appends."}},"required":["operation"],"additionalProperties":false}""";
 
     private const string Description =
-        "Read and edit the checklist of this session, which the user sees and edits too. Operations: list, add, update (title, status, note, commit_subject, summary, verification), remove, plan_summary_get, plan_summary_set. "
+        "Read and edit the checklist of this session, which the user sees and edits too. Operations: list, add, update (title, status, note, commit_subject, summary, verification), remove, promote, plan_summary_get, plan_summary_set. "
+        + "The checklist is a plan of groups plus a loose queue: add with group puts a step into that group (an existing group with the same title is reused, otherwise it is created), while add without group puts the item into the loose queue, where the tasks the user queued for you land too. "
+        + "When you take over a loose item, promote it first: promote with its id turns the item into a group of its own and takes it out of the queue, then add its steps with group set to the group's title. "
+        + "At most one step is in_progress: update with status in_progress returns the session's previous in-progress step to pending, so keep the step you are working on in that state. Use paused for a step that waits for something outside the agent (an answer, a review, a dependency); a paused step never commits. "
         + "Marking an item done commits every uncommitted change in the worktree as that step, so mark it done only when the step is finished and verified. "
         + "Before you write a commit_subject, call git_log to read the last ~20 commits and follow the repo's style (Conventional Commits if it uses them); without a commit_subject the item title is the commit subject. "
         + "The summary becomes the commit body and the step's entry in the PR plan; verification records how the step was verified and is not part of the commit message. "
@@ -61,6 +64,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
         string? status;
         string? note;
         string? afterId;
+        string? group;
         string? commitSubject;
         string? summary;
         string? verification;
@@ -85,6 +89,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             status = JsonArguments.OptionalString(root, "status");
             note = JsonArguments.OptionalString(root, "note");
             afterId = JsonArguments.OptionalString(root, "after_id");
+            group = JsonArguments.OptionalString(root, "group");
             commitSubject = JsonArguments.OptionalString(root, "commit_subject");
             summary = JsonArguments.OptionalString(root, "summary");
             verification = JsonArguments.OptionalString(root, "verification");
@@ -100,12 +105,13 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             return operation switch
             {
                 "list" => await ListAsync(context.SessionId, ct).ConfigureAwait(false),
-                "add" => await AddAsync(context.SessionId, title, note, afterId, ct).ConfigureAwait(false),
+                "add" => await AddAsync(context.SessionId, title, note, afterId, group, ct).ConfigureAwait(false),
                 "update" => await UpdateAsync(context.SessionId, id, title, status, note, commitSubject, summary, verification, ct).ConfigureAwait(false),
                 "remove" => await RemoveAsync(context.SessionId, id, ct).ConfigureAwait(false),
+                "promote" => await PromoteAsync(context.SessionId, id, title, ct).ConfigureAwait(false),
                 "plan_summary_get" => await PlanSummaryGetAsync(context.SessionId, ct).ConfigureAwait(false),
                 "plan_summary_set" => await PlanSummarySetAsync(context.SessionId, text, ct).ConfigureAwait(false),
-                _ => new ToolResult($"{Name} operation must be one of list, add, update, remove, plan_summary_get, plan_summary_set.", IsError: true),
+                _ => new ToolResult($"{Name} operation must be one of list, add, update, remove, promote, plan_summary_get, plan_summary_set.", IsError: true),
             };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -141,32 +147,137 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
 
     private async ValueTask<ToolResult> ListAsync(string sessionId, CancellationToken ct)
     {
+        var groups = await store.ListGroupsAsync(sessionId, ct).ConfigureAwait(false);
         var items = await store.ListAsync(sessionId, ct).ConfigureAwait(false);
-        if (items.Count == 0)
+        if (items.Count == 0 && groups.Count == 0)
         {
             return new ToolResult("The checklist is empty.");
         }
 
-        var builder = new StringBuilder(items.Count * 48);
-        builder.Append(items.Count).Append(items.Count == 1 ? " item" : " items").Append(":\n");
+        // The store returns the items of every layer mixed together (the order is dense inside a layer only), so split
+        // them by group first and order each layer by its own Order afterwards.
+        var byGroup = new Dictionary<string, List<TodoItem>>(StringComparer.Ordinal);
+        var loose = new List<TodoItem>();
         for (var index = 0; index < items.Count; index++)
         {
-            AppendItem(builder, index + 1, items[index], details: true);
-            builder.Append('\n');
+            var item = items[index];
+            if (string.IsNullOrEmpty(item.GroupId))
+            {
+                loose.Add(item);
+                continue;
+            }
+
+            if (!byGroup.TryGetValue(item.GroupId, out var steps))
+            {
+                steps = [];
+                byGroup[item.GroupId] = steps;
+            }
+
+            steps.Add(item);
+        }
+
+        var builder = new StringBuilder((items.Count + groups.Count) * 64);
+        builder.Append(groups.Count)
+            .Append(groups.Count == 1 ? " group, " : " groups, ")
+            .Append(items.Count)
+            .Append(items.Count == 1 ? " item:\n" : " items:\n");
+
+        // Groups in the store's own order, their steps in the group's order, the loose queue last (and only when it has
+        // something: it is the queue the agent may promote from).
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            byGroup.Remove(group.Id, out var steps);
+            var done = 0;
+            if (steps is not null)
+            {
+                steps.Sort(static (left, right) => left.Order.CompareTo(right.Order));
+                for (var step = 0; step < steps.Count; step++)
+                {
+                    if (steps[step].Status == TodoStatus.Done)
+                    {
+                        done++;
+                    }
+                }
+            }
+
+            builder.Append("Group ").Append(group.Id).Append(" \"").Append(group.Title).Append("\" ")
+                .Append(done).Append('/').Append(steps is null ? 0 : steps.Count).Append('\n');
+            for (var step = 0; steps is not null && step < steps.Count; step++)
+            {
+                AppendStep(builder, step + 1, steps[step]);
+            }
+        }
+
+        // An item whose group is missing from ListGroupsAsync (a store read mid-write, or a double without groups) still
+        // has to show up somewhere: it falls into the loose section.
+        foreach (var orphaned in byGroup.Values)
+        {
+            loose.AddRange(orphaned);
+        }
+
+        if (loose.Count > 0)
+        {
+            loose.Sort(static (left, right) => left.Order.CompareTo(right.Order));
+            builder.Append("Loose (the queue you may promote):\n");
+            for (var index = 0; index < loose.Count; index++)
+            {
+                AppendStep(builder, index + 1, loose[index]);
+            }
         }
 
         return new ToolResult(builder.ToString().TrimEnd('\n'));
     }
 
-    private async ValueTask<ToolResult> AddAsync(string sessionId, string? title, string? note, string? afterId, CancellationToken ct)
+    private async ValueTask<ToolResult> AddAsync(string sessionId, string? title, string? note, string? afterId, string? group, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
             return new ToolResult($"{Name} add requires a non-empty 'title'.", IsError: true);
         }
 
-        var item = await store.AddAsync(sessionId, title, note, afterId, ct).ConfigureAwait(false);
-        return new ToolResult($"Added #{item.Id}: {item.Title}");
+        // The item's layer: a group found or created by title, or the session's loose queue when no group is given.
+        TodoGroup? target = null;
+        if (!string.IsNullOrWhiteSpace(group))
+        {
+            target = await store.FindOrCreateGroupAsync(sessionId, group, ct).ConfigureAwait(false);
+        }
+
+        // The store owns the layer rules (the group belongs to the session, after_id sits in the same layer); a mismatch
+        // surfaces as an ArgumentException and comes back as the tool's "failed" result.
+        var item = await store.AddAsync(new TodoAddRequest(sessionId, title, note, afterId, target?.Id, TodoOrigin.Agent), ct)
+            .ConfigureAwait(false);
+        return target is null
+            ? new ToolResult($"Added #{item.Id}: {item.Title}")
+            : new ToolResult($"Added #{item.Id} to group \"{target.Title}\": {item.Title}");
+    }
+
+    private async ValueTask<ToolResult> PromoteAsync(string sessionId, string? id, string? title, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return new ToolResult($"{Name} promote requires the 'id' of a loose item.", IsError: true);
+        }
+
+        // PromoteAsync takes no session, so the item is looked up here before anything is written.
+        var before = await FindAsync(sessionId, id, ct).ConfigureAwait(false);
+        if (before is null)
+        {
+            return NotInSession(id);
+        }
+
+        if (before.GroupId is not null)
+        {
+            return new ToolResult($"#{id} already is a step of a group; only a loose item of the queue can become a group.", IsError: true);
+        }
+
+        var group = await store.PromoteAsync(id, title, ct).ConfigureAwait(false);
+        if (group is null)
+        {
+            return new ToolResult($"No loose checklist item '#{id}' exists.", IsError: true);
+        }
+
+        return new ToolResult($"Promoted #{id} into group \"{group.Title}\"; add its steps with add and group \"{group.Title}\".");
     }
 
     private async ValueTask<ToolResult> UpdateAsync(
@@ -197,7 +308,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
         {
             if (!TryParseStatus(status, out var value))
             {
-                return new ToolResult($"{Name} status must be pending, in_progress or done.", IsError: true);
+                return new ToolResult($"{Name} status must be pending, in_progress, paused or done.", IsError: true);
             }
 
             parsed = value;
@@ -221,7 +332,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
 
         var builder = new StringBuilder(96);
         builder.Append("Updated #").Append(item.Id).Append(": ");
-        AppendItem(builder, 0, item, details: false);
+        AppendItemLine(builder, item);
 
         // A step commits when it becomes done; an already-done step with a failed commit is retried by saying done again.
         if (committer is not null
@@ -350,30 +461,11 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
     private static ToolResult NotInSession(string id) =>
         new($"No todo item '{id}' in this session.", IsError: true);
 
-    private static void AppendItem(StringBuilder builder, int position, TodoItem item, bool details)
+    /// <summary>One list line: <c>  2. [in_progress] t_bbb title [commit abcdef0]</c>, its note and step fields below.</summary>
+    private static void AppendStep(StringBuilder builder, int position, TodoItem item)
     {
-        if (position > 0)
-        {
-            builder.Append(position).Append(". ");
-        }
-
-        builder.Append(item.Status switch
-        {
-            TodoStatus.Done => "[x] ",
-            TodoStatus.InProgress => "[~] ",
-            _ => "[ ] ",
-        });
-        builder.Append('#').Append(item.Id).Append(' ').Append(item.Title);
-        if (!string.IsNullOrWhiteSpace(item.Note))
-        {
-            builder.Append(" — ").Append(item.Note);
-        }
-
-        if (!details)
-        {
-            return;
-        }
-
+        builder.Append("  ").Append(position).Append(". [").Append(StatusName(item.Status)).Append("] ")
+            .Append(item.Id).Append(' ').Append(item.Title);
         if (!string.IsNullOrWhiteSpace(item.CommitId))
         {
             builder.Append(" [commit ").Append(item.CommitId.AsSpan(0, Math.Min(ShortCommitLength, item.CommitId.Length))).Append(']');
@@ -385,10 +477,37 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             builder.Append(']');
         }
 
+        AppendField(builder, "note", item.Note);
         AppendField(builder, "commit_subject", item.CommitSubject);
         AppendField(builder, "summary", item.Summary);
         AppendField(builder, "verification", item.Verification);
+        builder.Append('\n');
     }
+
+    /// <summary>The one-line echo of an update: <c>[x] #id title — note</c>, with neither step fields nor commit details.</summary>
+    private static void AppendItemLine(StringBuilder builder, TodoItem item)
+    {
+        builder.Append(item.Status switch
+        {
+            TodoStatus.Done => "[x] ",
+            TodoStatus.InProgress => "[~] ",
+            TodoStatus.Paused => "[-] ",
+            _ => "[ ] ",
+        });
+        builder.Append('#').Append(item.Id).Append(' ').Append(item.Title);
+        if (!string.IsNullOrWhiteSpace(item.Note))
+        {
+            builder.Append(" — ").Append(item.Note);
+        }
+    }
+
+    private static string StatusName(TodoStatus status) => status switch
+    {
+        TodoStatus.Done => "done",
+        TodoStatus.InProgress => "in_progress",
+        TodoStatus.Paused => "paused",
+        _ => "pending",
+    };
 
     private static void AppendField(StringBuilder builder, string label, string? value)
     {
@@ -397,7 +516,7 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             return;
         }
 
-        builder.Append("\n   ").Append(label).Append(": ");
+        builder.Append("\n     ").Append(label).Append(": ");
         AppendCompact(builder, value, ListFieldLimit);
     }
 
@@ -453,6 +572,11 @@ public sealed class TodoTool : ITool, IToolSideEffectResolver
             case "doing":
             case "running":
                 status = TodoStatus.InProgress;
+                return true;
+            case "paused":
+            case "pause":
+            case "waiting":
+                status = TodoStatus.Paused;
                 return true;
             case "done":
             case "completed":

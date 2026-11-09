@@ -25,7 +25,7 @@ public sealed class TerminalMovedTabTests
             {
                 var layout = new WorkbenchLayout(new object(), new object(), new object(), new object(), new object());
                 var host = new FakeTerminalHost();
-                var coordinator = new TerminalWorkbench(layout, new AppPreferences(), host);
+                var coordinator = new TerminalWorkbench(layout, new AppPreferences(), host, static () => { });
                 var window = new Window { Width = 100, Height = 100 };
                 TerminalUi.Show(window);
                 try

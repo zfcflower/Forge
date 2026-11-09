@@ -150,7 +150,7 @@ public sealed class TerminalPreferenceTests
                 };
                     var host = new FakeTerminalHost();
                     var layout = new Forge.App.Workbench.WorkbenchLayout(new object(), new object(), new object(), new object(), new object());
-                    var coordinator = new TerminalWorkbench(layout, preferences, host);
+                    var coordinator = new TerminalWorkbench(layout, preferences, host, static () => { });
                     try
                     {
                         coordinator.OnActiveSessionChanged("s1", "C:\\work");

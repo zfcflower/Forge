@@ -110,7 +110,7 @@ internal static class SessionStrings
     public const string SubAgentCollapseKey = "subagent.collapse";
     public const string SubAgentExpandKey = "subagent.expand";
     public const string SubAgentToggleKey = "subagent.toggle";
-    public const string SubAgentToggleCountKey = "subagent.toggle.count";
+    public const string SubAgentRunningNameBase = "subagent.runningName";
     public const string SubAgentToggleNameKey = "subagent.toggleName";
     public const string SubAgentToggleTooltipKey = "subagent.toggleTooltip";
     public const string SubAgentReplayFailedKey = "subagent.replayFailed";
@@ -305,13 +305,14 @@ internal static class SessionStrings
     public static string SubAgentsExpand => Loc.Instance[SubAgentExpandKey];
 
     /// <summary>
-    /// The strip's sub-agent toggle: <c>子 Agent 3</c> while sub-agents run, <c>子 Agent</c> when none are left. Whether the
-    /// area is collapsed is not spelled out in the label — the button carries it as an active appearance instead.
+    /// The strip's sub-agent chip label. It is only the noun: the number of running sub-agents is the round badge beside
+    /// it, and whether the area is collapsed is the button's active appearance instead of a word.
     /// </summary>
-    public static string SubAgentsToggle(int running) =>
-        running > 0
-            ? Loc.Instance.Format(SubAgentToggleCountKey, TextFormat.Number(running))
-            : Loc.Instance[SubAgentToggleKey];
+    public static string SubAgentsLabel => Loc.Instance[SubAgentToggleKey];
+
+    /// <summary>The chip's name while sub-agents run: assistive technology replaces the button's content with it.</summary>
+    public static string SubAgentsRunningName(int running) =>
+        Loc.Instance.Format(LocText.PluralKey(SubAgentRunningNameBase, running), TextFormat.Number(running));
 
     public static string SubAgentsToggleName => Loc.Instance[SubAgentToggleNameKey];
 
@@ -431,7 +432,14 @@ internal static class SessionStrings
         Loc.Register(SubAgentCollapseKey, "收起", "Collapse");
         Loc.Register(SubAgentExpandKey, "展开", "Expand");
         Loc.Register(SubAgentToggleKey, "子 Agent", "Sub-agents");
-        Loc.Register(SubAgentToggleCountKey, "子 Agent {0}", "Sub-agents {0}");
+        Loc.Register(
+            LocText.PluralKey(SubAgentRunningNameBase, 1),
+            "{0} 个子 Agent 正在运行",
+            "{0} sub-agent running");
+        Loc.Register(
+            LocText.PluralKey(SubAgentRunningNameBase, 2),
+            "{0} 个子 Agent 正在运行",
+            "{0} sub-agents running");
         Loc.Register(SubAgentToggleNameKey, "子 Agent 区域", "Sub-agent area");
         Loc.Register(
             SubAgentToggleTooltipKey,

@@ -18,8 +18,8 @@ public sealed class PrBodyRendererSmokeTests
     [Fact]
     public void Render_without_summary_and_steps_is_empty()
     {
-        Assert.Equal(string.Empty, PrBodyRenderer.Render(null, []));
-        Assert.Equal(string.Empty, PrBodyRenderer.Render(new PlanSummary("s", "   \n", DateTimeOffset.UnixEpoch), []));
+        Assert.Equal(string.Empty, PrBodyRenderer.Render(null, [], []));
+        Assert.Equal(string.Empty, PrBodyRenderer.Render(new PlanSummary("s", "   \n", DateTimeOffset.UnixEpoch), [], []));
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public sealed class PrBodyRendererSmokeTests
     {
         var summary = new PlanSummary("s", "\n## Summary\r\nDoes a thing.\r\n\r\n## Testing\r\nRan it.\r\n\r\n", DateTimeOffset.UnixEpoch);
 
-        var body = PrBodyRenderer.Render(summary, []);
+        var body = PrBodyRenderer.Render(summary, [], []);
 
         Assert.Equal("## Summary\nDoes a thing.\n\n## Testing\nRan it.\n", body);
         Assert.Null(PrBodyRenderer.TryGetSection(body, "Plan"));
@@ -45,12 +45,14 @@ public sealed class PrBodyRendererSmokeTests
             Step("Later step", 4, TodoStatus.Pending),
         };
 
-        var body = PrBodyRenderer.Render(summary, steps);
+        var body = PrBodyRenderer.Render(summary, steps, []);
 
         var plan = PrBodyRenderer.TryGetSection(body, "Plan")!;
         var lines = plan.Split('\n');
         Assert.Equal(
             [
+                "### Other steps",
+                string.Empty,
                 "1. **First step** (`abc`)",
                 "   - Adds the model.",
                 string.Empty,
@@ -75,13 +77,13 @@ public sealed class PrBodyRendererSmokeTests
         var summary = new PlanSummary("s", "## Plan\nstale\n\n## Testing\nRan it.", DateTimeOffset.UnixEpoch);
         var steps = new[] { Step("Only step", 1, commitId: "1234567890") };
 
-        var replaced = PrBodyRenderer.Render(summary, steps);
-        var planOnly = PrBodyRenderer.Render(null, steps);
+        var replaced = PrBodyRenderer.Render(summary, steps, []);
+        var planOnly = PrBodyRenderer.Render(null, steps, []);
 
-        Assert.Equal("1. **Only step** (`1234567`)", PrBodyRenderer.TryGetSection(replaced, "Plan"));
+        Assert.Equal("### Other steps\n\n1. **Only step** (`1234567`)", PrBodyRenderer.TryGetSection(replaced, "Plan"));
         Assert.DoesNotContain("stale", replaced, StringComparison.Ordinal);
         Assert.Equal("Ran it.", PrBodyRenderer.TryGetSection(replaced, "Testing"));
-        Assert.Equal("## Plan\n\n1. **Only step** (`1234567`)\n", planOnly);
+        Assert.Equal("## Plan\n\n### Other steps\n\n1. **Only step** (`1234567`)\n", planOnly);
     }
 
     [Fact]

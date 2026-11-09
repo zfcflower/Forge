@@ -44,20 +44,19 @@
                     AutomationProperties.AutomationId="file-row"
                     AutomationProperties.Name="{Binding Name}">
               <Grid ColumnDefinitions="Auto,Auto,*">
-                <Border Grid.Column="0" Width="8">
-                  <Path Data="{StaticResource TreeChevronGeometry}"
-                        Classes="tree-chevron"
-                        Classes.expanded="{Binding ChevronRotated}"
-                        IsVisible="{Binding IsDirectory}"
-                        Width="8"
-                        Height="8"
-                        HorizontalAlignment="Center"
-                        Stretch="Uniform" />
+                <Border Grid.Column="0" Width="10" Margin="6,0,0,0">
+                  <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
+                                 Classes="tree-chevron"
+                                 Classes.expanded="{Binding ChevronRotated}"
+                                 IsVisible="{Binding IsDirectory}"
+                                 Width="12"
+                                 Height="12"
+                                 HorizontalAlignment="Center" />
                 </Border>
-                <Path Grid.Column="1"
-                      Classes="tree-icon"
-                      Data="{Binding Icon}"
-                      Margin="14,0,6,0" />
+                <wc:FluentIcon Grid.Column="1"
+                               Classes="tree-icon"
+                               Data="{Binding Icon}"
+                               Margin="6,0,4,0" />
                 <TextBlock Grid.Column="2"
                            Text="{Binding Name}"
                            TextWrapping="NoWrap"
@@ -98,7 +97,7 @@
                 ToolTip.Tip="{Binding [files.refresh], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="refresh-files"
                 AutomationProperties.Name="{Binding [files.refresh.name], Source={x:Static loc:Loc.Instance}}">
-          <wc:LineIcon Data="{StaticResource IconRefresh}" Width="13" Height="13" />
+          <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
         </Button>
       </Grid>
     </Border>

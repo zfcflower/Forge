@@ -44,6 +44,7 @@ internal readonly record struct FloatGeometry(double X, double Y, double Width, 
 internal static class WorkbenchIds
 {
     public const string ProjectPanel = "projects";
+    public const string GeneralPanel = "general-chats";
     public const string FilesPanel = "files";
     public const string GitPanel = "git-panel";
     public const string MainTabs = "main";
@@ -108,6 +109,9 @@ internal static class WorkbenchMetrics
     public const double DefaultPreviewWidth = 420;
     public const double DefaultBottomHeight = 220;
     public const double DefaultInspectorSplitRatio = 0.5;
+
+    /// <summary>Default share of the projects panel in the left column, above the general chats.</summary>
+    public const double DefaultProjectSplitRatio = 0.5;
 
     /// <summary>Pointer travel along the strip before a dragged tab reorders, and off the strip before it floats out.</summary>
     public const double TabDragThreshold = 6;

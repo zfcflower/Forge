@@ -4,27 +4,18 @@
                     xmlns:vm="using:Forge.App.ViewModels"
                     xmlns:loc="using:Forge.App.Localization">
 
-  <!-- Workbench chrome icons (same line family as the token geometries: strokes on a 24x24 grid). -->
-  <!-- A pushpin, two states of one button. The outline version means "this panel is auto-hidden" (clicking docks it
-       back); the solid silhouette below means "this panel is docked" (clicking auto-hides it). The tooltip is the
-       same word in both states — the button is named after the thing it does to the region, not after its state. -->
-  <StreamGeometry x:Key="IconPin">M9 4h6M10 4v5l-3 3v2h10v-2l-3-3V4M12 14v6</StreamGeometry>
-  <!-- The same pushpin as a closed silhouette, drawn to be filled: head bar, body with its plate, and the needle. -->
-  <StreamGeometry x:Key="IconPinSolid">M9 3.5h6v1.5H9zM10 5h4v6h3v3H7v-3h3zM11.4 14h1.2v6.5h-1.2z</StreamGeometry>
-  <!-- Four corner brackets: spread the preview group over the whole Main region. -->
-  <StreamGeometry x:Key="IconCoverMain">M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5</StreamGeometry>
-  <!-- A frame with an arrow pointing into it: dock the floating window back. -->
-  <StreamGeometry x:Key="IconDockBack">M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 12H8M11 9l-3 3 3 3</StreamGeometry>
+  <!-- 图标(图钉、撑满主区、停靠回来)都在 Resources/Icons.axaml,这里不再有几何定义。 -->
 
   <!-- Title-bar tools of the model: a PanelToolButton renders as an icon button, every other item keeps its own template. -->
   <controls:HeaderToolTemplate x:Key="WorkbenchHeaderToolTemplate" />
 
-  <!-- A 20x20 transparent icon button; the icon is a 12 px geometry. A closed-path icon renders solid when
-       IsIconFilled is set: the fill follows the same brush as the stroke, including on hover. -->
+  <!-- A transparent icon button that sizes itself to its icon: a 14 px icon inside 2 px of padding is the 20x20 minimum
+       title-bar button, and a 24 px icon makes a 28 px one, exactly the height of the panel title bar. Icons are filled
+       Fluent System Icons, so a solid state is the `_filled` variant of the same glyph rather than a fill switch. -->
   <ControlTheme x:Key="{x:Type controls:PanelIconButton}" TargetType="controls:PanelIconButton">
-    <Setter Property="Width" Value="20" />
-    <Setter Property="Height" Value="20" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="2" />
+    <Setter Property="MinWidth" Value="20" />
+    <Setter Property="MinHeight" Value="20" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="4" />
@@ -35,29 +26,29 @@
                 Background="{TemplateBinding Background}"
                 BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="{TemplateBinding BorderThickness}"
-                CornerRadius="{TemplateBinding CornerRadius}">
-          <controls:LineIcon Width="14"
-                    Height="14"
-                    Data="{TemplateBinding Icon}"
-                    Foreground="{DynamicResource TextSecondaryBrush}"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center" />
+                CornerRadius="{TemplateBinding CornerRadius}"
+                Padding="{TemplateBinding Padding}">
+          <controls:FluentIcon Name="PART_Icon"
+                               Data="{TemplateBinding Icon}"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
         </Border>
       </ControlTemplate>
     </Setter>
     <Style Selector="^:pointerover /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
     </Style>
-    <Style Selector="^:pointerover /template/ controls|LineIcon">
+    <Style Selector="^:pointerover /template/ controls|FluentIcon">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
-    <Style Selector="^[IsIconFilled=True] /template/ controls|LineIcon">
-      <Setter Property="Fill" Value="{DynamicResource TextSecondaryBrush}" />
-      <!-- No stroke: a solid icon is its silhouette, and the fixed 1.25 px stroke would fatten small shapes into blobs. -->
-      <Setter Property="StrokeThickness" Value="0" />
+    <!-- The accent tool: green at rest, deeper on hover, so the title bar's one primary action reads as a button and not as an
+         outlined icon. Declared after the plain hover rule, which would otherwise win on an equal selector. -->
+    <Style Selector="^[IsAccent=True] /template/ controls|FluentIcon">
+      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style Selector="^[IsIconFilled=True]:pointerover /template/ controls|LineIcon">
-      <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
+    <Style Selector="^[IsAccent=True]:pointerover /template/ controls|FluentIcon">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
     </Style>
     <Style Selector="^:pressed /template/ Border#PART_Background">
       <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
@@ -103,11 +94,18 @@
 
   <!-- One tab, Visual Studio tool-window style: an inactive tab is plain, centred, muted text on the title bar; the active
        tab is a 1 px frame with rounded top corners, filled with the panel body's colour, standing on the title bar's bottom
-       line so it merges with the body below, and — where its two sides reach that line — turning outward through a 4 px
-       fillet into the body, so the bottom corners round away from the label instead of ending on a square step. The frame
-       and fill are drawn by TabHeaderView itself (a border can only round a corner inward); the template's border keeps
-       its 1 px thickness only to keep the label's box the same size. Only the active tab shows its close button. -->
+       line so it merges with the body below, and — where its two sides reach that line — turning outward through a 5 px
+       fillet into the body, so the bottom corners round away from the label instead of ending on a square step. The
+       fillet's inner edge stays concentric with its outer edge, so the frame is a true 1 px through the whole curve, and
+       near each tip a short tangent-matched curve blends the divider row into the inner arc just outside the tab bounds.
+       This keeps the visible straight run short, avoids a sharp join, and draws no horizontal border back into the tab.
+       The body fill covers the divider beneath the tab; the frame meets the exposed divider at the outside foot. The frame
+       and fill are drawn by TabHeaderView itself (a border can only round a corner inward); the template's
+       border keeps its 1 px thickness only to keep the label's box the same size. Only the active tab shows its close
+       button. -->
   <ControlTheme x:Key="{x:Type controls:TabHeaderView}" TargetType="controls:TabHeaderView">
+    <!-- The foot is intentionally drawn 5 px outside this tab's rectangular slot; TemplatedControl clips its own render by default. -->
+    <Setter Property="ClipToBounds" Value="False" />
     <Setter Property="Height" Value="25" />
     <Setter Property="Margin" Value="0" />
     <Setter Property="VerticalAlignment" Value="Bottom" />
@@ -122,15 +120,17 @@
                 BorderThickness="1"
                 Padding="12,0,4,0">
           <Grid ColumnDefinitions="Auto,Auto,Auto" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <controls:LineIcon Name="PART_Icon"
-                               Grid.Column="0"
-                               Data="{DynamicResource IconChat}"
-                               Width="14"
-                               Height="14"
-                               Margin="0,0,5,0"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextMutedBrush}"
-                               IsVisible="{TemplateBinding IsIconVisible}" />
+            <!-- One leading glyph, chosen per kind by the header itself: the conversation's chat bubble (filled while the
+                 tab is active), the file tree's document for a file preview. -->
+            <controls:FluentIcon Name="PART_Icon"
+                                 Grid.Column="0"
+                                 Data="{TemplateBinding Icon}"
+                                 Width="14"
+                                 Height="14"
+                                 Margin="0,0,5,0"
+                                 VerticalAlignment="Center"
+                                 Foreground="{DynamicResource TextMutedBrush}"
+                                 IsVisible="{TemplateBinding IsIconVisible}" />
             <TextBlock Name="PART_Label"
                        Grid.Column="1"
                        Text="{TemplateBinding TabTitle}"
@@ -185,14 +185,13 @@
     <Style Selector="^:selected /template/ TextBlock#PART_Label">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
-    <!-- The session tab's bubble: a stroked bubble while the tab is inactive, the same outline filled while it is active,
-         so the active tab reads as a solid bubble. Colour follows the label. -->
-    <Style Selector="^:pointerover /template/ controls|LineIcon#PART_Icon">
+    <!-- The tab's leading glyph follows the label's colour; which glyph it is (and whether it turns filled) is the
+         header's business, so nothing here touches IsVisible or Data. -->
+    <Style Selector="^:pointerover /template/ controls|FluentIcon#PART_Icon">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
-    <Style Selector="^:selected /template/ controls|LineIcon#PART_Icon">
+    <Style Selector="^:selected /template/ controls|FluentIcon#PART_Icon">
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-      <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
   </ControlTheme>
 
@@ -211,7 +210,8 @@
                         VerticalScrollBarVisibility="Disabled"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch">
-            <StackPanel Name="PART_Tabs" Orientation="Horizontal" VerticalAlignment="Stretch" Margin="4,0,0,0" />
+            <!-- Let an active tab's outward feet paint into its neighbours' slots; ScrollViewer remains the viewport clip. -->
+            <StackPanel Name="PART_Tabs" Orientation="Horizontal" VerticalAlignment="Stretch" Margin="5,0,5,0" ClipToBounds="False" />
           </ScrollViewer>
           <Border Name="PART_OverflowHost"
                   Grid.Column="1"
@@ -225,7 +225,6 @@
                                       HorizontalAlignment="Right"
                                       VerticalAlignment="Center"
                                       Icon="{DynamicResource IconEllipsisSolid}"
-                                      IsIconFilled="True"
                                       ToolTip.Tip="{Binding [workbench.moreTabs], Source={x:Static loc:Loc.Instance}}"
                                       AutomationProperties.Name="{Binding [workbench.moreTabs], Source={x:Static loc:Loc.Instance}}" />
           </Border>
@@ -293,7 +292,6 @@
                   <controls:PanelIconButton Name="PART_Pin"
                                             IsVisible="{TemplateBinding PinVisible}"
                                             Icon="{TemplateBinding PinIcon}"
-                                            IsIconFilled="{TemplateBinding PinFilled}"
                                             ToolTip.Tip="{TemplateBinding PinTooltip}"
                                             AutomationProperties.Name="{TemplateBinding PinTooltip}"
                                             AutomationProperties.AutomationId="{TemplateBinding PinAutomationId}" />

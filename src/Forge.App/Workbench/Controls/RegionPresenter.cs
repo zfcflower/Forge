@@ -14,10 +14,18 @@ internal sealed class RegionPresenter : Panel
 {
     private readonly List<PanelChrome> chromes = [];
     private readonly List<Border> stackGaps = [];
+    private readonly List<PanelChrome> below = [];
+    private readonly List<PanelChrome> columnSlots = [];
+    private readonly List<PanelSplitter> belowSplitters = [];
+    private readonly double[] columnHeights = new double[PanelStackSolver.MaxSlots];
+    private readonly double[] columnWeights = new double[PanelStackSolver.MaxSlots];
+    private readonly double[] columnFlexibleWeights = new double[PanelStackSolver.MaxSlots];
+    private readonly double[] columnOut = new double[PanelStackSolver.MaxSlots];
+    private readonly int[] columnFlexible = new int[PanelStackSolver.MaxSlots];
     private readonly PanelSplitter bottomSplitter = new() { Kind = PanelSplitterKind.Bottom };
     private readonly PanelSplitter previewSplitter = new() { Kind = PanelSplitterKind.Preview };
     private readonly PanelSplitter inspectorSplitter = new() { Kind = PanelSplitterKind.Inspector };
-    private readonly BottomCollapsedStrip bottomStrip = new();
+    private readonly PanelSplitter projectSplitter = new() { Kind = PanelSplitterKind.Project };
     private Rect[] childRects = [];
     private Rect regionRect;
     private Rect previewCoverRect;
@@ -31,11 +39,11 @@ internal sealed class RegionPresenter : Panel
         AutomationProperties.SetAutomationId(bottomSplitter, role == RegionRole.Main ? "panel-splitter-bottom" : null);
         AutomationProperties.SetAutomationId(previewSplitter, role == RegionRole.Inspector ? "panel-splitter-preview" : null);
         AutomationProperties.SetAutomationId(inspectorSplitter, role == RegionRole.Inspector ? "panel-splitter-inspector" : null);
-        AutomationProperties.SetAutomationId(bottomStrip, role == RegionRole.Main ? "autohide-bottom" : null);
+        AutomationProperties.SetAutomationId(projectSplitter, role == RegionRole.Project ? "panel-splitter-project" : null);
         bottomSplitter.Layout = layout;
         previewSplitter.Layout = layout;
         inspectorSplitter.Layout = layout;
-        bottomStrip.Layout = layout;
+        projectSplitter.Layout = layout;
         Rebuild();
     }
 
@@ -94,6 +102,7 @@ internal sealed class RegionPresenter : Panel
     {
         chromes.Clear();
         stackGaps.Clear();
+        belowSplitters.Clear();
         Children.Clear();
         var region = Layout.GetRegion(Role);
         var sidebar = Role is RegionRole.Project or RegionRole.Inspector;
@@ -104,9 +113,8 @@ internal sealed class RegionPresenter : Panel
             Children.Add(chrome);
         }
 
-        // One 1 px line per gap between stacked panels. The gap alone shows the window background, so the lower panel's
-        // title bar would sit there with no top line while the inspector's column draws one above its tool group; a plain
-        // border rather than a splitter keeps the boundary non-draggable, as the stack has no ratio to drag.
+        // One 1 px line per gap between stacked panels, for the gaps that get no splitter (a minimized panel's own edge): the
+        // gap alone is the lower panel's title bar sitting on the window background.
         for (var i = 1; i < region.Panels.Count; i++)
         {
             var line = new Border { Height = WorkbenchMetrics.PanelSplitterWidth, IsHitTestVisible = false };
@@ -115,17 +123,25 @@ internal sealed class RegionPresenter : Panel
             Children.Add(line);
         }
 
+        // One splittable line per gap of the Inspector column, created with the chromes so a layout pass never mutates the
+        // child list; a gap that cannot be dragged is simply arranged to nothing.
+        if (Role == RegionRole.Inspector)
+        {
+            for (var i = 1; i < region.Panels.Count; i++)
+            {
+                var splitter = new PanelSplitter { Layout = Layout, Kind = PanelSplitterKind.BelowStack };
+                belowSplitters.Add(splitter);
+                Children.Add(splitter);
+            }
+        }
+
         Children.Add(bottomSplitter);
         Children.Add(previewSplitter);
         Children.Add(inspectorSplitter);
-        Children.Add(bottomStrip);
+        Children.Add(projectSplitter);
         childRects = new Rect[Children.Count];
-        bottomStrip.Rebuild();
         InvalidateMeasure();
     }
-
-    /// <summary>Rebuilds the buttons of the collapsed bottom strip (its tabs changed or their titles did).</summary>
-    public void RefreshBottomStrip() => bottomStrip.Rebuild();
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -166,6 +182,11 @@ internal sealed class RegionPresenter : Panel
 
     private void UpdateChildRects()
     {
+        if (childRects.Length < Children.Count)
+        {
+            Array.Resize(ref childRects, Children.Count);
+        }
+
         Array.Clear(childRects);
         var body = RegionRect;
         if (body.Width <= 0 || body.Height <= 0)
@@ -192,15 +213,7 @@ internal sealed class RegionPresenter : Panel
         var mainChrome = ChromeOf(Layout.MainTabs);
         var group = Layout.BottomTabs;
         var bottomChrome = ChromeOf(group);
-        var collapsed = Layout.IsBottomCollapsed;
         var bottomVisible = bottomChrome is not null && group.IsVisible;
-        if (collapsed && bottomChrome is not null && Layout.BottomHasContent)
-        {
-            var stripHeight = Math.Min(WorkbenchMetrics.AutoHideStripWidth, body.Height);
-            Place(mainChrome, new Rect(body.X, body.Y, body.Width, Math.Max(0, body.Height - stripHeight)));
-            Place(bottomStrip, new Rect(body.X, body.Y + body.Height - stripHeight, body.Width, stripHeight));
-            return;
-        }
 
         if (!bottomVisible)
         {
@@ -210,6 +223,7 @@ internal sealed class RegionPresenter : Panel
 
         var splitterHeight = WorkbenchMetrics.PanelSplitterWidth;
         var space = Math.Max(0, body.Height - splitterHeight);
+        // A minimized group keeps its title bar - that is where its tabs and its restore button live.
         if (Layout.MainTabs.IsMinimized || group.IsMinimized)
         {
             var title = Math.Min(PanelChrome.TitleBarHeight, space);
@@ -276,6 +290,17 @@ internal sealed class RegionPresenter : Panel
         var title = PanelChrome.TitleBarHeight;
         var expanded = visible - minimized;
         var available = Math.Max(0, body.Height - ((visible - 1) * splitterHeight) - (minimized * title));
+
+        // The left column's two panels (projects above, general chats below) are not equal halves: the first one keeps the
+        // persisted share and the line under it drags that share. Every other stacked region keeps equal slots.
+        double firstSlot = -1;
+        if (Role == RegionRole.Project && expanded > 1 && !AnyMinimized())
+        {
+            firstSlot = Math.Clamp(
+                Layout.ProjectSplitRatio * available,
+                WorkbenchMetrics.PanelMinHeight,
+                Math.Max(WorkbenchMetrics.PanelMinHeight, available - ((expanded - 1) * WorkbenchMetrics.PanelMinHeight)));
+        }
         // Whole pixels per expanded panel, the remainder on the last one: a fractional slot would land the split on a
         // half pixel, and layout rounding then swallows the 1 px gap — and with it the separator above the lower panel's
         // title bar — whenever the region height is not a multiple of the panel count.
@@ -299,7 +324,14 @@ internal sealed class RegionPresenter : Panel
             else
             {
                 expandedPlaced++;
-                slot = expandedPlaced == expanded ? lastExpandedSlot : expandedSlot;
+                if (firstSlot >= 0)
+                {
+                    slot = expandedPlaced == 1 ? firstSlot : (available - firstSlot) / (expanded - 1);
+                }
+                else
+                {
+                    slot = expandedPlaced == expanded ? lastExpandedSlot : expandedSlot;
+                }
             }
 
             Place(chromes[i], new Rect(body.X, y, body.Width, Math.Max(0, slot)));
@@ -312,20 +344,59 @@ internal sealed class RegionPresenter : Panel
                     Place(stackGaps[placed - 1], new Rect(body.X, y, body.Width, splitterHeight));
                 }
 
+                // The first gap of the left column is draggable: it moves the projects/general-chats split.
+                if (placed == 1 && Role == RegionRole.Project && firstSlot >= 0)
+                {
+                    projectSplitter.TrackLength = body.Height;
+                    Place(projectSplitter, new Rect(
+                        body.X,
+                        y + ((splitterHeight - WorkbenchMetrics.SplitterHitWidth) / 2),
+                        body.Width,
+                        WorkbenchMetrics.SplitterHitWidth));
+                }
+
                 y += splitterHeight;
             }
         }
+    }
+
+    private bool AnyMinimized()
+    {
+        for (var i = 0; i < chromes.Count; i++)
+        {
+            if (chromes[i].Model is { IsVisible: true, IsMinimized: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void ArrangeInspector(Rect body)
     {
         var previewChrome = ChromeOf(Layout.PreviewTabs);
         var filesChrome = ChromeOf(Layout.FilesPanel);
-        var toolsChrome = ChromeOf(Layout.InspectorTools);
         var previewVisible = previewChrome is not null && Layout.PreviewTabs.IsVisible;
         var filesVisible = filesChrome is not null && Layout.FilesPanel.IsVisible;
-        var toolsVisible = toolsChrome is not null && Layout.InspectorTools.IsVisible;
-        var filesColumnVisible = filesVisible || toolsVisible;
+
+        // Everything docked below the files panel (Git, then the tool group), in panel order; the column is one stack whose
+        // top slot is the files panel and whose lines all drag.
+        below.Clear();
+        foreach (var panel in Layout.GetRegion(RegionRole.Inspector).Panels)
+        {
+            if (ReferenceEquals(panel, Layout.PreviewTabs) || ReferenceEquals(panel, Layout.FilesPanel))
+            {
+                continue;
+            }
+
+            if (ChromeOf(panel) is { Model: { IsVisible: true } } chrome)
+            {
+                below.Add(chrome);
+            }
+        }
+
+        var filesColumnVisible = filesVisible || below.Count > 0;
         var splitterWidth = WorkbenchMetrics.PanelSplitterWidth;
 
         var previewColumn = default(Rect);
@@ -380,44 +451,200 @@ internal sealed class RegionPresenter : Panel
             return;
         }
 
-        if (filesVisible && toolsVisible)
+        ArrangeFilesColumn(filesColumn, filesVisible ? filesChrome : null, splitterWidth);
+    }
+
+    /// <summary>
+    /// The inspector's right column: the files panel on top, then every docked panel below it (Git, the tool group), one
+    /// draggable 1 px line between each. The files slot keeps the persisted ratio against the rest of the column and the
+    /// panels below share what is left in the proportions they were last dragged to, so every line behaves the same; a
+    /// minimized panel takes only its title bar and its own edge is not draggable.
+    /// </summary>
+    private void ArrangeFilesColumn(Rect column, PanelChrome? filesChrome, double splitterWidth)
+    {
+        columnSlots.Clear();
+        if (filesChrome is not null)
         {
-            var space = Math.Max(0, filesColumn.Height - splitterWidth);
-            var filesHeight = Math.Clamp(
-                Layout.InspectorSplitRatio * filesColumn.Height,
-                WorkbenchMetrics.PanelMinHeight,
-                Math.Max(WorkbenchMetrics.PanelMinHeight, space - WorkbenchMetrics.PanelMinHeight));
-            filesHeight = Math.Min(filesHeight, space);
-            if (Layout.FilesPanel.IsMinimized || Layout.InspectorTools.IsMinimized)
+            columnSlots.Add(filesChrome);
+        }
+
+        for (var i = 0; i < below.Count; i++)
+        {
+            columnSlots.Add(below[i]);
+        }
+
+        var count = columnSlots.Count;
+        if (count == 0)
+        {
+            return;
+        }
+
+        var title = PanelChrome.TitleBarHeight;
+        var space = Math.Max(0, column.Height - ((count - 1) * splitterWidth));
+        var titleRows = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (columnSlots[i].Model is { IsMinimized: true })
             {
-                var title = Math.Min(PanelChrome.TitleBarHeight, space);
-                filesHeight = Layout.FilesPanel.IsMinimized ? title : Math.Max(0, space - title);
-                Place(filesChrome!, new Rect(filesColumn.X, filesColumn.Y, filesColumn.Width, filesHeight));
-                Place(toolsChrome!, new Rect(filesColumn.X, filesColumn.Y + filesHeight + splitterWidth, filesColumn.Width, Math.Max(0, space - filesHeight)));
-                return;
+                titleRows++;
             }
-            Place(filesChrome!, new Rect(filesColumn.X, filesColumn.Y, filesColumn.Width, filesHeight));
-            Place(toolsChrome!, new Rect(
-                filesColumn.X,
-                filesColumn.Y + filesHeight + splitterWidth,
-                filesColumn.Width,
-                Math.Max(0, space - filesHeight)));
-            inspectorSplitter.TrackLength = filesColumn.Height;
-            Place(inspectorSplitter, new Rect(
-                filesColumn.X,
-                filesColumn.Y + filesHeight + ((splitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2),
-                filesColumn.Width,
-                WorkbenchMetrics.SplitterHitWidth));
-            return;
         }
 
-        if (filesVisible)
+        var available = Math.Max(0, space - (titleRows * title));
+        DistributeColumnHeights(count, filesChrome is not null, available, title);
+
+        var y = column.Y;
+        for (var i = 0; i < count; i++)
         {
-            Place(filesChrome!, filesColumn);
+            var height = Math.Max(0, columnHeights[i]);
+            Place(columnSlots[i], new Rect(column.X, y, column.Width, height));
+            y += height;
+            if (i == count - 1)
+            {
+                break;
+            }
+
+            y = PlaceColumnGap(column, i, y, filesChrome is not null, splitterWidth);
+        }
+    }
+
+    /// <summary>
+    /// Fills <see cref="columnHeights"/> for the column's slots. The files slot takes the persisted ratio of the column, the
+    /// panels below it divide the rest by the heights they were last dragged to (a panel never dragged takes the mean of the
+    /// dragged ones), and a minimized slot keeps just its title bar, so the space it gives up flows to the others.
+    /// </summary>
+    private void DistributeColumnHeights(int count, bool hasFiles, double available, double title)
+    {
+        if (count > PanelStackSolver.MaxSlots)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                columnHeights[i] = available / count;
+            }
+
             return;
         }
 
-        Place(toolsChrome!, filesColumn);
+        var ratio = Layout.InspectorSplitRatio;
+        if (!double.IsFinite(ratio) || ratio <= 0 || ratio >= 1)
+        {
+            ratio = WorkbenchMetrics.DefaultInspectorSplitRatio;
+        }
+
+        var firstBelow = hasFiles ? 1 : 0;
+        var baseline = 1.0;
+        var storedSum = 0.0;
+        var storedCount = 0;
+        for (var i = firstBelow; i < count; i++)
+        {
+            var stored = columnSlots[i].Model is { } storedModel ? Layout.BelowPanelHeight(storedModel.Id) : 0;
+            if (stored > 0)
+            {
+                storedSum += stored;
+                storedCount++;
+            }
+        }
+
+        if (storedCount > 0)
+        {
+            baseline = storedSum / storedCount;
+        }
+
+        var belowSum = 0.0;
+        for (var i = firstBelow; i < count; i++)
+        {
+            var stored = columnSlots[i].Model is { } storedModel ? Layout.BelowPanelHeight(storedModel.Id) : 0;
+            var weight = stored > 0 ? stored : baseline;
+            columnWeights[i] = weight;
+            belowSum += weight;
+        }
+
+        // The files weight is the ratio itself, so the below weights are scaled to fill what the ratio leaves: that keeps every
+        // flexible slot on one scale, whether it was dragged or not.
+        var flexible = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (columnSlots[i].Model is { IsMinimized: true })
+            {
+                columnHeights[i] = Math.Min(title, available);
+                continue;
+            }
+
+            columnFlexibleWeights[flexible] = i == 0 && hasFiles
+                ? ratio
+                : belowSum > 0 ? (1 - ratio) * (columnWeights[i] / belowSum) : 0;
+            columnFlexible[flexible] = i;
+            flexible++;
+        }
+
+        if (flexible == 0)
+        {
+            return;
+        }
+
+        PanelStackSolver.Distribute(
+            available,
+            columnFlexibleWeights.AsSpan(0, flexible),
+            WorkbenchMetrics.PanelMinHeight,
+            columnOut.AsSpan(0, flexible));
+        for (var k = 0; k < flexible; k++)
+        {
+            columnHeights[columnFlexible[k]] = columnOut[k];
+        }
+    }
+
+    /// <summary>
+    /// Places the 1 px line under slot <paramref name="index"/> and returns the y the next slot starts at. The line under the
+    /// files slot moves the persisted ratio; a line further down moves the pair of panels around it, which is what puts the
+    /// tool group's own height in the user's hands.
+    /// </summary>
+    private double PlaceColumnGap(Rect column, int index, double y, bool hasFiles, double splitterWidth)
+    {
+        var hitTop = y + ((splitterWidth - WorkbenchMetrics.SplitterHitWidth) / 2);
+        if (index == 0 && hasFiles)
+        {
+            // A minimized slot has no height to trade, so its own edge is not draggable either.
+            if (columnSlots[0].Model is { IsMinimized: true })
+            {
+                return y + splitterWidth;
+            }
+
+            inspectorSplitter.TrackLength = column.Height;
+            Place(inspectorSplitter, new Rect(column.X, hitTop, column.Width, WorkbenchMetrics.SplitterHitWidth));
+            return y + splitterWidth;
+        }
+
+        var upper = index - (hasFiles ? 1 : 0);
+        if (upper < 0 || upper + 1 >= below.Count || upper >= belowSplitters.Count)
+        {
+            return y + splitterWidth;
+        }
+
+        var upperChrome = below[upper];
+        var lowerChrome = below[upper + 1];
+        if (upperChrome.Model is not { } upperModel || lowerChrome.Model is not { } lowerModel)
+        {
+            return y + splitterWidth;
+        }
+
+        var splitter = belowSplitters[upper];
+        if (upperModel.IsMinimized || lowerModel.IsMinimized)
+        {
+            return y + splitterWidth;
+        }
+
+        splitter.LowerPanelId = lowerModel.Id;
+        splitter.UpperHeight = columnHeights[index];
+        splitter.LowerHeight = columnHeights[index + 1];
+        if (splitter.UpperPanelId != upperModel.Id)
+        {
+            // The id only follows the pair, so arranging never allocates a fresh automation id for an unchanged line.
+            splitter.UpperPanelId = upperModel.Id;
+            AutomationProperties.SetAutomationId(splitter, "panel-splitter-" + upperModel.Id);
+        }
+
+        Place(splitter, new Rect(column.X, hitTop, column.Width, WorkbenchMetrics.SplitterHitWidth));
+        return y + splitterWidth;
     }
 
     private PanelChrome? ChromeOf(PanelModel? panel)

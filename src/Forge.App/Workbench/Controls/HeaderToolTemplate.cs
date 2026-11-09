@@ -40,6 +40,8 @@ internal sealed class HeaderToolTemplate : IDataTemplate
         {
             Icon = WorkbenchIcons.Find(tool.IconKey),
             Command = tool.Command,
+            IconSize = tool.IconSize,
+            IsAccent = tool.IsAccent,
         };
         ToolTip.SetTip(button, tool.Tooltip);
         Avalonia.Automation.AutomationProperties.SetAutomationId(button, tool.Id);

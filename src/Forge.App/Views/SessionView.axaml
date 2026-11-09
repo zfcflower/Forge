@@ -88,14 +88,16 @@
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <Style Selector="Button.instrument-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <!-- Toggled on: the chip itself is the state readout, so it takes the accent wash instead of a word. -->
+    <!-- The pointer wash is defined last on purpose: Avalonia applies the later of two matching styles, not the more
+         specific one, so hovering always wins over the resting state - including the active chip's accent wash, which stays
+         the resting reading for "the area is open". -->
     <Style Selector="Button.instrument-chip.active /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+    <Style Selector="Button.instrument-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
 
     <Style Selector="Button.instrument-project">
@@ -118,6 +120,25 @@
     </Style>
     <Style Selector="TextBlock.instrument-count">
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <!-- The sub-agent chip's run count: a round accent badge, one digit wide, that widens to a pill at two. It shares the
+         accent-on-accent language of the composer's round send button, so both read as "this is live" at a glance. -->
+    <Style Selector="Border.instrument-badge">
+      <Setter Property="MinWidth" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Padding" Value="4,0" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.instrument-badge > TextBlock">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LineHeight" Value="10" />
+      <Setter Property="Foreground" Value="{DynamicResource TextOnAccentBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="Border.instrument-divider">
       <Setter Property="Width" Value="1" />
@@ -203,13 +224,14 @@
       <Setter Property="Padding" Value="4" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <Style Selector="wc|LineIcon.star">
+    <!-- The pin lives in the composer's model list: a hollow star while the model is not pinned, the filled one while it is.
+         Colour alone (muted vs warning) tells the two apart besides the shape. -->
+    <Style Selector="wc|FluentIcon.star">
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="Opacity" Value="0.45" />
     </Style>
-    <Style Selector="wc|LineIcon.star.pinned">
+    <Style Selector="wc|FluentIcon.star.pinned">
       <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
-      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
       <Setter Property="Opacity" Value="1" />
     </Style>
 
@@ -368,9 +390,9 @@
                         AutomationProperties.AutomationId="strip-resources"
                         AutomationProperties.Name="{Binding Instruments.ResourcesLabel}">
                   <StackPanel Orientation="Horizontal" Spacing="5">
-                    <wc:LineIcon Data="{StaticResource IconLayers}" Width="13" Height="13" />
+                    <wc:FluentIcon Data="{StaticResource IconLayers}" Width="14" Height="14" />
                     <TextBlock Text="{Binding Instruments.ResourcesLabel}" VerticalAlignment="Center" />
-                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="11" Height="11" />
+                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
                   </StackPanel>
                   <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedLeft">
@@ -390,17 +412,24 @@
                   </Button.Flyout>
                 </Button>
 
-                <!-- Collapsed is shown by the button reading as active, not by a word in its label. -->
+                <!-- The accent marks the open area, not the collapsed one: green on this strip elsewhere means "live", so an
+                     accented chip while the region is hidden read as its opposite. Collapsed is the plain resting state. -->
                 <Button Classes="instrument-chip"
-                        Classes.active="{Binding SubAgentsCollapsed}"
+                        Classes.active="{Binding !SubAgentsCollapsed}"
                         Command="{Binding ToggleSubAgentsCommand}"
                         IsVisible="{Binding HasSubAgentActivity}"
                         ToolTip.Tip="{Binding SubAgentToggleTooltip}"
                         AutomationProperties.AutomationId="strip-subagents"
                         AutomationProperties.Name="{Binding SubAgentToggleName}">
                   <StackPanel Orientation="Horizontal" Spacing="5">
-                    <wc:LineIcon Data="{StaticResource IconSparkle}" Width="13" Height="13" />
-                    <TextBlock Text="{Binding SubAgentToggleText}" VerticalAlignment="Center" />
+                    <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="14" Height="14" />
+                    <!-- The label never carries a number: the badge beside it is the only reading, and only while a child
+                         actually holds a run slot (a queued one or a finished one draws no badge). -->
+                    <TextBlock Text="{Binding SubAgentLabel}" VerticalAlignment="Center" />
+                    <Border Classes="instrument-badge" IsVisible="{Binding HasRunningSubAgents}">
+                      <TextBlock Text="{Binding RunningSubAgentCount}"
+                                 AutomationProperties.AutomationId="strip-subagents-count" />
+                    </Border>
                   </StackPanel>
                 </Button>
 
@@ -414,12 +443,12 @@
                         AutomationProperties.AutomationId="strip-workspace"
                         AutomationProperties.Name="{Binding Instruments.WorkspaceName}">
                   <StackPanel Orientation="Horizontal" Spacing="6">
-                    <wc:LineIcon Data="{StaticResource IconFolder}" Width="14" Height="14" />
+                    <wc:FluentIcon Data="{StaticResource IconFolder}" Width="14" Height="14" />
                     <TextBlock Text="{Binding Instruments.WorkspaceName}"
                                MaxWidth="160"
                                TextWrapping="NoWrap"
                                TextTrimming="CharacterEllipsis" />
-                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
                   </StackPanel>
                   <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
@@ -516,7 +545,7 @@
                                   IsVisible="{Binding CanRemove}"
                                   AutomationProperties.Name="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}"
                                   ToolTip.Tip="{Binding [session.composer.removeQueued], Source={x:Static loc:Loc.Instance}}">
-                            <wc:LineIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+                            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
                           </Button>
                         </StackPanel>
                       </Border>
@@ -549,9 +578,9 @@
                         AutomationProperties.Name="{Binding [session.composer.agent], Source={x:Static loc:Loc.Instance}}"
                         ToolTip.Tip="{Binding [session.composer.agentTooltip], Source={x:Static loc:Loc.Instance}}">
                   <StackPanel Orientation="Horizontal" Spacing="5">
-                    <wc:LineIcon Data="{StaticResource IconSparkle}" Width="13" Height="13" />
+                    <wc:FluentIcon Data="{StaticResource IconSparkle}" Width="14" Height="14" />
                     <TextBlock Text="{Binding Composer.AgentLabel}" VerticalAlignment="Center" />
-                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
                   </StackPanel>
                   <Button.Flyout>
                     <Flyout Placement="TopEdgeAlignedLeft">
@@ -600,7 +629,7 @@
                       <Rectangle Classes="effort-bar" Height="7" Opacity="{Binding Composer.EffortBar2}" />
                       <Rectangle Classes="effort-bar" Height="10" Opacity="{Binding Composer.EffortBar3}" />
                     </StackPanel>
-                    <wc:LineIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+                    <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
                   </StackPanel>
                   <Button.Flyout>
                     <Flyout Placement="TopEdgeAlignedLeft">
@@ -630,11 +659,18 @@
                                           Command="{Binding TogglePinCommand}"
                                           AutomationProperties.Name="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}"
                                           ToolTip.Tip="{Binding [session.composer.pin], Source={x:Static loc:Loc.Instance}}">
-                                    <wc:LineIcon Classes="star"
-                                              Classes.pinned="{Binding IsPinned}"
-                                              Data="{StaticResource IconStar}"
-                                              Width="12"
-                                              Height="12" />
+                                    <Panel Width="12" Height="12">
+                                      <wc:FluentIcon Classes="star"
+                                                     Data="{StaticResource IconStar}"
+                                                     Width="12"
+                                                     Height="12"
+                                                     IsVisible="{Binding !IsPinned}" />
+                                      <wc:FluentIcon Classes="star pinned"
+                                                     Data="{StaticResource IconStarFilled}"
+                                                     Width="12"
+                                                     Height="12"
+                                                     IsVisible="{Binding IsPinned}" />
+                                    </Panel>
                                   </Button>
                                 </Grid>
                               </DataTemplate>
@@ -669,7 +705,7 @@
                                 Command="{Binding Composer.RefreshCommand}"
                                 AutomationProperties.AutomationId="composer-refresh">
                           <StackPanel Orientation="Horizontal" Spacing="6">
-                            <wc:LineIcon Data="{DynamicResource IconRefresh}" Width="13" Height="13" />
+                            <wc:FluentIcon Data="{DynamicResource IconRefresh}" Width="14" Height="14" />
                             <TextBlock Text="{Binding [session.composer.refresh], Source={x:Static loc:Loc.Instance}}" />
                           </StackPanel>
                         </Button>
@@ -689,7 +725,7 @@
                           AutomationProperties.AutomationId="session-stop-turn"
                           AutomationProperties.Name="{Binding [session.stopTurn], Source={x:Static loc:Loc.Instance}}"
                           ToolTip.Tip="{Binding [session.composer.stopHint], Source={x:Static loc:Loc.Instance}}">
-                    <wc:LineIcon Data="{StaticResource IconStop}" Width="13" Height="13" />
+                    <wc:FluentIcon Data="{StaticResource IconStop}" Width="14" Height="14" />
                   </Button>
                   <Button Classes="composer-send"
                           Command="{Binding SendCommand}"
@@ -698,7 +734,7 @@
                           AutomationProperties.AutomationId="session-send"
                           AutomationProperties.Name="{Binding [session.send], Source={x:Static loc:Loc.Instance}}"
                           ToolTip.Tip="{Binding [session.sendTooltip], Source={x:Static loc:Loc.Instance}}">
-                    <wc:LineIcon Data="{StaticResource IconArrowUp}" Width="13" Height="13" />
+                    <wc:FluentIcon Data="{StaticResource IconArrowUp}" Width="14" Height="14" />
                   </Button>
                   <Button x:Name="RunningMenu"
                           Classes="composer-send running"
@@ -706,7 +742,7 @@
                           AutomationProperties.AutomationId="composer-running-menu"
                           AutomationProperties.Name="{Binding [session.composer.runningMenu], Source={x:Static loc:Loc.Instance}}"
                           ToolTip.Tip="{Binding [session.composer.runningMenu], Source={x:Static loc:Loc.Instance}}">
-                    <wc:LineIcon Data="{StaticResource IconEllipsis}" StrokeThickness="2.75" Width="13" Height="13" />
+                    <wc:FluentIcon Data="{StaticResource IconEllipsis}" Width="14" Height="14" />
                     <Button.Flyout>
                       <MenuFlyout Placement="TopEdgeAlignedRight">
                         <MenuItem Header="{Binding [session.composer.interject], Source={x:Static loc:Loc.Instance}}"

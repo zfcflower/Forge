@@ -207,23 +207,46 @@ public sealed class MainWindowWorkbenchIntegrationTests
     }
 
     [Fact]
-    public async Task Collapsed_bottom_group_state_follows_the_active_session()
+    public async Task Minimized_bottom_group_state_follows_the_active_session()
     {
         await RunAsync(
             sessionCount: 2,
             body: harness =>
             {
                 var first = Assert.IsType<SessionWorkspaceViewModel>(harness.ViewModel.ActiveSession);
-                harness.ViewModel.Workbench.IsBottomCollapsed = true;
+                harness.ViewModel.Workbench.IsBottomMinimized = true;
                 Assert.True(first.SubAgentsCollapsed);
 
                 harness.ViewModel.Workbench.ActivateTab(
                     Assert.IsType<TabModel>(harness.ViewModel.Workbench.FindTab(WorkbenchIds.SessionTab(harness.OtherSessionId))));
-                Assert.False(harness.ViewModel.Workbench.IsBottomCollapsed);
+                Assert.False(harness.ViewModel.Workbench.IsBottomMinimized);
 
                 harness.ViewModel.Workbench.ActivateTab(
                     Assert.IsType<TabModel>(harness.ViewModel.Workbench.FindTab(WorkbenchIds.SessionTab(first.SessionId))));
-                Assert.True(harness.ViewModel.Workbench.IsBottomCollapsed);
+                Assert.True(harness.ViewModel.Workbench.IsBottomMinimized);
+                return Task.CompletedTask;
+            });
+    }
+
+    /// <summary>
+    /// The restored layout decides the first attach: a session stores no collapse of its own, so without that adoption the
+    /// saved "minimized" would be undone the moment the first session becomes active.
+    /// </summary>
+    [Fact]
+    public async Task A_restored_minimized_bottom_group_is_adopted_by_the_first_session()
+    {
+        await RunAsync(
+            scenario: new Scenario
+            {
+                SessionCount = 1,
+                Layout = new LayoutSnapshot { BottomMinimized = true },
+            },
+            harness =>
+            {
+                var session = Assert.IsType<SessionWorkspaceViewModel>(harness.ViewModel.ActiveSession);
+
+                Assert.True(harness.ViewModel.Workbench.IsBottomMinimized);
+                Assert.True(session.SubAgentsCollapsed);
                 return Task.CompletedTask;
             });
     }

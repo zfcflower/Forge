@@ -21,14 +21,26 @@ public sealed class TerminalCoordinatorTests
 
     private sealed class Fixture
     {
-        public Fixture(Window window, WorkbenchLayout layout, AppPreferences preferences, FakeTerminalHost host, TerminalWorkbench coordinator)
+        public Fixture(
+            Window window,
+            WorkbenchLayout layout,
+            AppPreferences preferences,
+            FakeTerminalHost host,
+            TerminalWorkbench coordinator,
+            Func<int> reveals)
         {
             Window = window;
             Layout = layout;
             Preferences = preferences;
             Host = host;
             Coordinator = coordinator;
+            this.reveals = reveals;
         }
+
+        private readonly Func<int> reveals;
+
+        /// <summary>How many times the terminal asked the session to reveal the bottom group.</summary>
+        public int Reveals => reveals();
 
         public Window Window { get; }
 
@@ -45,12 +57,13 @@ public sealed class TerminalCoordinatorTests
             var layout = new WorkbenchLayout(new object(), new object(), new object(), new object(), new object());
             var preferences = new AppPreferences();
             var host = new FakeTerminalHost();
-            var coordinator = new TerminalWorkbench(layout, preferences, host);
+            var reveals = 0;
+            var coordinator = new TerminalWorkbench(layout, preferences, host, () => reveals++);
             // The terminals report state through UI-thread callbacks, which a headless session only
             // drains for a shown window (see TerminalLifecycleTests).
             var window = new Window { Width = 100, Height = 100 };
             TerminalUi.Show(window);
-            return new Fixture(window, layout, preferences, host, coordinator);
+            return new Fixture(window, layout, preferences, host, coordinator, () => reveals);
         }
 
         public async ValueTask DisposeAsync()
@@ -99,7 +112,7 @@ public sealed class TerminalCoordinatorTests
     }
 
     [Fact]
-    public async Task Open_docks_a_terminal_tab_into_the_bottom_group()
+    public async Task Open_docks_a_terminal_tab_into_the_bottom_group_and_reveals_it_through_the_session()
     {
         var observed = await RunAsync(async fixture =>
         {
@@ -113,7 +126,9 @@ public sealed class TerminalCoordinatorTests
                 tab,
                 terminal,
                 Active: fixture.Layout.BottomTabs.ActiveTab,
-                Collapsed: fixture.Layout.IsBottomCollapsed);
+                Reveals: fixture.Reveals,
+                // The coordinator asks the session; the layout must not be written behind its back.
+                Minimized: fixture.Layout.IsBottomMinimized);
         });
 
         Assert.True(observed.running, "the terminal never reached Running");
@@ -121,7 +136,8 @@ public sealed class TerminalCoordinatorTests
         Assert.Equal(TabKind.Terminal, observed.tab!.Kind);
         Assert.Same(observed.terminal, observed.tab.Content);
         Assert.Same(observed.tab, observed.Active);
-        Assert.False(observed.Collapsed);
+        Assert.Equal(1, observed.Reveals);
+        Assert.False(observed.Minimized);
     }
 
     [Fact]
@@ -286,7 +302,7 @@ public sealed class TerminalCloseVetoTests
             var host = new FakeTerminalHost();
             host.Session.HasForeground = busy;
             var layout = new WorkbenchLayout(new object(), new object(), new object(), new object(), new object());
-            var coordinator = new TerminalWorkbench(layout, preferences, host);
+            var coordinator = new TerminalWorkbench(layout, preferences, host, static () => { });
             coordinator.OnActiveSessionChanged("s1", "C:\\work");
             var viewModel = coordinator.OpenTerminal();
             Assert.NotNull(viewModel);

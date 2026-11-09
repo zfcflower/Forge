@@ -961,14 +961,16 @@ public sealed class TodoToolStepCommitEdgeTests
 
         Assert.False(list.IsError);
         Assert.Equal(
-            "3 items:\n"
-            + $"1. [x] #{done} Done step — a note [commit abcdef0]\n"
-            + "   commit_subject: feat: done\n"
-            + "   summary: what changed\n"
-            + "   verification: ran the tests\n"
-            + $"2. [~] #{running} Running step\n"
-            + "   summary: partial\n"
-            + $"3. [ ] #{pending} Pending step",
+            "0 groups, 3 items:\n"
+            + "Loose (the queue you may promote):\n"
+            + $"  1. [done] {done} Done step [commit abcdef0]\n"
+            + "     note: a note\n"
+            + "     commit_subject: feat: done\n"
+            + "     summary: what changed\n"
+            + "     verification: ran the tests\n"
+            + $"  2. [in_progress] {running} Running step\n"
+            + "     summary: partial\n"
+            + $"  3. [pending] {pending} Pending step",
             list.Content);
     }
 
@@ -981,7 +983,7 @@ public sealed class TodoToolStepCommitEdgeTests
         var one = await rig.InvokeAsync("""{"operation":"list"}""");
 
         Assert.Equal("The checklist is empty.", empty.Content);
-        Assert.Equal($"1 item:\n1. [ ] #{id} Only", one.Content);
+        Assert.Equal($"0 groups, 1 item:\nLoose (the queue you may promote):\n  1. [pending] {id} Only", one.Content);
     }
 
     [Theory]
@@ -997,7 +999,7 @@ public sealed class TodoToolStepCommitEdgeTests
 
         var list = await rig.InvokeAsync("""{"operation":"list"}""");
 
-        Assert.Equal($"1 item:\n1. [x] #{id} Step {expected}", list.Content);
+        Assert.Equal($"0 groups, 1 item:\nLoose (the queue you may promote):\n  1. [done] {id} Step {expected}", list.Content);
     }
 
     [Theory]
@@ -1013,7 +1015,7 @@ public sealed class TodoToolStepCommitEdgeTests
 
         var list = await rig.InvokeAsync("""{"operation":"list"}""");
 
-        Assert.Equal("   summary: " + new string('x', Math.Min(length, 120)) + (cut ? "…" : string.Empty), LineStartingWith(list.Content, "   summary: "));
+        Assert.Equal("     summary: " + new string('x', Math.Min(length, 120)) + (cut ? "…" : string.Empty), LineStartingWith(list.Content, "     summary: "));
     }
 
     [Theory]
@@ -1026,7 +1028,7 @@ public sealed class TodoToolStepCommitEdgeTests
 
         var list = await rig.InvokeAsync("""{"operation":"list"}""");
 
-        Assert.Equal("   verification: " + expectedLine, LineStartingWith(list.Content, "   verification: "));
+        Assert.Equal("     verification: " + expectedLine, LineStartingWith(list.Content, "     verification: "));
     }
 
     public static TheoryData<string, string> CompactionCases() => new()
@@ -1052,7 +1054,7 @@ public sealed class TodoToolStepCommitEdgeTests
 
         Assert.DoesNotContain("commit_subject:", list.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("summary:", list.Content, StringComparison.Ordinal);
-        Assert.Contains("   verification: real", list.Content, StringComparison.Ordinal);
+        Assert.Contains("     verification: real", list.Content, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1067,7 +1069,7 @@ public sealed class TodoToolStepCommitEdgeTests
 
         var list = await rig.InvokeAsync("""{"operation":"list"}""");
 
-        Assert.Equal($"1 item:\n1. [x] #{id} Step [commit failed: {new string('e', 200)}{(cut ? "…" : string.Empty)}]", list.Content);
+        Assert.Equal($"0 groups, 1 item:\nLoose (the queue you may promote):\n  1. [done] {id} Step [commit failed: {new string('e', 200)}{(cut ? "…" : string.Empty)}]", list.Content);
     }
 
     [Fact]
@@ -1080,7 +1082,7 @@ public sealed class TodoToolStepCommitEdgeTests
 
         var list = await rig.InvokeAsync("""{"operation":"list"}""");
 
-        Assert.Equal($"1 item:\n1. [x] #{id} Step — note [commit failed: hook failed: lint error see log]", list.Content);
+        Assert.Equal($"0 groups, 1 item:\nLoose (the queue you may promote):\n  1. [done] {id} Step [commit failed: hook failed: lint error see log]\n     note: note", list.Content);
     }
 
     [Fact]
@@ -1108,18 +1110,18 @@ public sealed class TodoToolStepCommitEdgeTests
         Assert.False(root.GetProperty("additionalProperties").GetBoolean());
         Assert.Equal(["operation"], root.GetProperty("required").EnumerateArray().Select(element => element.GetString()!).ToArray());
         Assert.Equal(
-            ["list", "add", "update", "remove", "plan_summary_get", "plan_summary_set"],
+            ["list", "add", "update", "remove", "promote", "plan_summary_get", "plan_summary_set"],
             properties.GetProperty("operation").GetProperty("enum").EnumerateArray().Select(element => element.GetString()!).ToArray());
         Assert.Equal(
-            ["pending", "in_progress", "done"],
+            ["pending", "in_progress", "paused", "done"],
             properties.GetProperty("status").GetProperty("enum").EnumerateArray().Select(element => element.GetString()!).ToArray());
-        foreach (var name in new[] { "id", "title", "status", "note", "commit_subject", "summary", "verification", "text", "after_id" })
+        foreach (var name in new[] { "id", "title", "status", "note", "group", "commit_subject", "summary", "verification", "text", "after_id" })
         {
             Assert.Equal("string", properties.GetProperty(name).GetProperty("type").GetString());
             Assert.False(string.IsNullOrWhiteSpace(properties.GetProperty(name).GetProperty("description").GetString()));
         }
 
-        foreach (var operation in new[] { "list", "add", "update", "remove", "plan_summary_get", "plan_summary_set" })
+        foreach (var operation in new[] { "list", "add", "update", "remove", "promote", "plan_summary_get", "plan_summary_set" })
         {
             Assert.Contains(operation, tool.Definition.Description, StringComparison.Ordinal);
         }

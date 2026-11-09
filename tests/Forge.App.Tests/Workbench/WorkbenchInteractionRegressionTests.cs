@@ -268,18 +268,22 @@ public sealed class WorkbenchInteractionRegressionTests
     });
 
     [Fact]
-    public Task Collapsing_bottom_while_main_is_minimized_restores_main_above_the_strip() => Ui(() =>
+    public Task The_bottom_group_cannot_shrink_while_main_is_minimized() => Ui(() =>
     {
         var (scene, role) = Build("main");
         var region = WorkbenchUi.Region(scene.Window, role);
         ClickMinimize(scene, "main");
         Assert.True(scene.Layout.MainTabs.IsMinimized);
-        // The bottom group has no title-bar pin any more; the state itself is still reachable from the session view.
-        scene.Layout.IsBottomCollapsed = true;
+
+        // Nothing is left to give the space back, so the bottom group keeps its body instead of shrinking to a title bar -
+        // and it must not steal Main's title bar either.
+        scene.Layout.IsBottomMinimized = true;
         WorkbenchUi.Settle(scene.Window);
-        Assert.True(scene.Layout.IsBottomCollapsed);
-        Assert.False(scene.Layout.MainTabs.IsMinimized);
-        Assert.Equal(region.Bounds.Height - WorkbenchMetrics.AutoHideStripWidth, Chrome(scene, "main").Bounds.Height, Precision);
+
+        Assert.False(scene.Layout.BottomTabs.IsMinimized);
+        Assert.True(scene.Layout.MainTabs.IsMinimized);
+        Assert.Equal(PanelChrome.TitleBarHeight, Chrome(scene, "main").Bounds.Height, Precision);
+        Assert.True(region.Bounds.Height > Chrome(scene, "main").Bounds.Height);
     });
 
     private static async Task Ui(Action body)

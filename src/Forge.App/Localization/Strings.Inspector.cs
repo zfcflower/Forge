@@ -16,9 +16,6 @@ namespace Forge.App.Localization;
 /// </summary>
 internal static class InspectorStrings
 {
-    /// <summary>The preview tab title's leading mark; a symbol, so it is never translated.</summary>
-    public const string FileTabGlyph = "▤";
-
     // ---------------------------------------------------------------- files panel
     public const string FilesAll = "files.all";
     public const string FilesAllName = "files.all.name";
@@ -103,15 +100,19 @@ internal static class InspectorStrings
     // ---------------------------------------------------------------- todo
     public const string TodoNoSession = "todo.noSession";
     public const string TodoEmpty = "todo.empty";
-    public const string TodoSummaryPattern = "todo.summary";
-    public const string TodoNewTaskPlaceholder = "todo.newTaskPlaceholder";
+    public const string TodoAddPlaceholder = "todo.addPlaceholder";
     public const string TodoNewTaskName = "todo.newTask.name";
-    public const string TodoAdd = "todo.add";
-    public const string TodoDone = "todo.done";
-    public const string TodoMoveUp = "todo.moveUp";
-    public const string TodoMoveDown = "todo.moveDown";
+    public const string TodoDoneSection = "todo.doneSection";
+    public const string TodoGroupStepsPattern = "todo.groupSteps";
+    public const string TodoGroupProgressPattern = "todo.groupProgress";
+    public const string TodoSourceUser = "todo.source.user";
+    public const string TodoExpand = "todo.expand";
+    public const string TodoCollapse = "todo.collapse";
+    public const string TodoStatusPending = "todo.status.pending";
+    public const string TodoStatusInProgress = "todo.status.inProgress";
+    public const string TodoStatusPaused = "todo.status.paused";
+    public const string TodoStatusDone = "todo.status.done";
     public const string TodoDelete = "todo.delete";
-    public const string TodoClearDone = "todo.clearDone";
 
     // ---------------------------------------------------------------- review
     public const string ReviewNoSession = "review.noSession";
@@ -155,7 +156,7 @@ internal static class InspectorStrings
         Loc.Register(FilesSummaryChangesBase + ".other", "{0} 个改动", "{0} changes");
         Loc.Register(FilesSummaryFilesBase + ".one", "{0} 个文件", "{0} file");
         Loc.Register(FilesSummaryFilesBase + ".other", "{0} 个文件", "{0} files");
-        Loc.Register(FilesTabTitlePattern, "{0} {1}", "{0} {1}");
+        Loc.Register(FilesTabTitlePattern, "{0}", "{0}");
         Loc.Register(FilesMissing, "文件不存在：{0}", "File not found: {0}");
         Loc.Register(FilesTooLarge, "文件过大，无法显示：{0} 字节", "File too large to display: {0} bytes");
         Loc.Register(FilesTruncated, "只显示前 {0} 行。", "Only the first {0} lines are shown.");
@@ -221,15 +222,19 @@ internal static class InspectorStrings
 
         Loc.Register(TodoNoSession, "没有打开的会话", "No open session");
         Loc.Register(TodoEmpty, "还没有任务", "No tasks yet");
-        Loc.Register(TodoSummaryPattern, "{0}/{1} 完成", "{0}/{1} done");
-        Loc.Register(TodoNewTaskPlaceholder, "添加任务…", "Add a task…");
+        Loc.Register(TodoAddPlaceholder, "为 agent 排队一项任务", "Queue a task for the agent");
         Loc.Register(TodoNewTaskName, "新任务", "New task");
-        Loc.Register(TodoAdd, "添加任务", "Add task");
-        Loc.Register(TodoDone, "完成", "Done");
-        Loc.Register(TodoMoveUp, "上移", "Move up");
-        Loc.Register(TodoMoveDown, "下移", "Move down");
+        Loc.Register(TodoDoneSection, "完成", "Done");
+        Loc.Register(TodoGroupStepsPattern, "{0} 个步骤", "{0} steps");
+        Loc.Register(TodoGroupProgressPattern, "{0}/{1}", "{0}/{1}");
+        Loc.Register(TodoSourceUser, "手动添加", "Added by hand");
+        Loc.Register(TodoExpand, "展开", "Expand");
+        Loc.Register(TodoCollapse, "收起", "Collapse");
+        Loc.Register(TodoStatusPending, "未开始", "Not started");
+        Loc.Register(TodoStatusInProgress, "进行中", "In progress");
+        Loc.Register(TodoStatusPaused, "已暂停", "Paused");
+        Loc.Register(TodoStatusDone, "已完成", "Done");
         Loc.Register(TodoDelete, "删除", "Delete");
-        Loc.Register(TodoClearDone, "清除已完成", "Clear done");
 
         Loc.Register(ReviewNoSession, "没有打开的会话", "No open session");
         Loc.Register(ReviewSummaryBase + ".one", "{0} 条意见", "{0} comment");
@@ -264,8 +269,9 @@ internal static class InspectorStrings
             LocText.Plural(ChangesSummaryFilesBase, files, TextFormat.Number(files)),
             Loc.Instance[byTurn ? ChangesByTurn : ChangesUncommitted]);
 
-    /// <summary>The preview tab's title: the mark followed by the file name (or the generic word before one is loaded).</summary>
-    public static string FileTabTitle(string name) => Loc.Instance.Format(FilesTabTitlePattern, FileTabGlyph, name);
+    /// <summary>The preview tab's title: the file name (or the generic word before one is loaded). The tab's leading
+    /// mark is the icon column (<c>TabHeaderView</c> draws the file tree's document), so the title carries no glyph.</summary>
+    public static string FileTabTitle(string name) => Loc.Instance.Format(FilesTabTitlePattern, name);
 
     /// <summary>"第 3 轮 · 12:30:45" for one entry of the by-turn picker.</summary>
     public static LocText ChangeTurnLabel(int turn, DateTimeOffset startedAt) =>
@@ -275,9 +281,13 @@ internal static class InspectorStrings
     public static string FileDiffHeader(string path, int added, int removed) =>
         Loc.Instance.Format(ChangesFileHeaderPattern, path, TextFormat.Number(added), TextFormat.Number(removed));
 
-    /// <summary>"3/8 完成" / "3/8 done".</summary>
-    public static LocText TodoSummary(int done, int total) =>
-        new(TodoSummaryPattern, TextFormat.Number(done), TextFormat.Number(total));
+    /// <summary>"1/3": how many of a group's steps are done, out of all of them (grouped counts).</summary>
+    public static string TodoProgress(int done, int total) =>
+        Loc.Instance.Format(TodoGroupProgressPattern, TextFormat.Id(done), TextFormat.Id(total));
+
+    /// <summary>"4 个步骤" / "4 steps": the step count of a folded group in the done section.</summary>
+    public static LocText TodoGroupSteps(int count) =>
+        new(TodoGroupStepsPattern, TextFormat.Number(count));
 
     /// <summary>"1 条意见" / "1 comment", "3 条意见" / "3 comments".</summary>
     public static LocText ReviewSummary(int comments) =>

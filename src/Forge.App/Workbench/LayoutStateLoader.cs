@@ -27,7 +27,36 @@ internal sealed class LayoutStateLoader
     public async Task<LayoutSnapshot?> ReadLayoutAsync(CancellationToken ct)
     {
         var snapshot = await ReadAsync(LayoutKey, WorkbenchJsonContext.Default.LayoutSnapshot, ct).ConfigureAwait(false);
-        return snapshot is { Version: LayoutSnapshot.CurrentVersion } ? snapshot : null;
+        return snapshot switch
+        {
+            { Version: LayoutSnapshot.CurrentVersion } => snapshot,
+            { Version: 4 } => MigrateFromV4(snapshot),
+            { Version: 3 } => MigrateFromV3(snapshot),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// A v3 snapshot is still valid apart from the left column's split, which existed in that version only as a trial default:
+    /// it goes back to the default share so the two panels start evenly divided, everything else carries over.
+    /// </summary>
+    private static LayoutSnapshot MigrateFromV3(LayoutSnapshot snapshot)
+    {
+        snapshot.ProjectSplitRatio = WorkbenchMetrics.DefaultProjectSplitRatio;
+        return MigrateFromV4(snapshot);
+    }
+
+    /// <summary>
+    /// A v4 snapshot could only describe the bottom group as "collapsed to a strip on Main's bottom edge". That strip is gone —
+    /// the group shrinks to its title bar like any other panel — so the flag becomes the minimized state and the old field is
+    /// retired with it.
+    /// </summary>
+    private static LayoutSnapshot MigrateFromV4(LayoutSnapshot snapshot)
+    {
+        snapshot.BottomMinimized = snapshot.BottomCollapsed;
+        snapshot.BottomCollapsed = false;
+        snapshot.Version = LayoutSnapshot.CurrentVersion;
+        return snapshot;
     }
 
     public async Task<OpenTabsSnapshot?> ReadOpenTabsAsync(CancellationToken ct)

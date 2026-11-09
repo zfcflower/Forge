@@ -135,10 +135,9 @@ public sealed class PanelTabStripOverflowTests
 
             WorkbenchUi.Settle(scene.Window);
             PanelIconButton button = OverflowButton(Strip(scene));
-            return (button.IsIconFilled, Icon: button.Icon, Solid: WorkbenchIcons.Find(scene.Window, "IconEllipsisSolid"));
+            return (Icon: button.Icon, Solid: WorkbenchIcons.Find(scene.Window, "IconEllipsisSolid"));
         });
 
-        Assert.True(state.IsIconFilled);
         Assert.Same(state.Solid, state.Icon);
     }
 

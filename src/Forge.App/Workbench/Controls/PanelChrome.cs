@@ -65,9 +65,6 @@ internal sealed class PanelChrome : TemplatedControl
     public static readonly StyledProperty<Geometry?> PinIconProperty =
         AvaloniaProperty.Register<PanelChrome, Geometry?>(nameof(PinIcon));
 
-    public static readonly StyledProperty<bool> PinFilledProperty =
-        AvaloniaProperty.Register<PanelChrome, bool>(nameof(PinFilled));
-
     public static readonly StyledProperty<string?> PinTooltipProperty =
         AvaloniaProperty.Register<PanelChrome, string?>(nameof(PinTooltip));
 
@@ -243,12 +240,6 @@ internal sealed class PanelChrome : TemplatedControl
     }
 
     /// <summary>True while the pin is the solid one: the region is docked, so the click auto-hides it.</summary>
-    public bool PinFilled
-    {
-        get => GetValue(PinFilledProperty);
-        set => SetValue(PinFilledProperty, value);
-    }
-
     public string? PinTooltip
     {
         get => GetValue(PinTooltipProperty);
@@ -703,11 +694,10 @@ internal sealed class PanelChrome : TemplatedControl
         // action the region takes.
         var autoHidden = layout?.GetRegion(model.Region).IsAutoHidden == true;
         PinIcon = WorkbenchIcons.Find(this, autoHidden ? "IconPin" : "IconPinSolid");
-        PinFilled = !autoHidden;
         PinTooltip = ShellStrings.AutoHide;
 
         var minimized = model.IsMinimized;
-        MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconRestore" : "IconMinimize");
+        MinimizeIcon = WorkbenchIcons.Find(this, minimized ? "IconPanelRestore" : "IconMinimize");
         MinimizeTooltip = minimized ? ShellStrings.RestorePanel : ShellStrings.MinimizePanel;
         PseudoClasses.Set(":minimized", minimized);
     }

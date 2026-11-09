@@ -270,48 +270,33 @@
     <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
   </Style>
 
-  <Style Selector="Border.tree-row-content.active-session">
+  <!-- The row the shell is showing: the active session in the main region, or the sub-agent whose tab the bottom group has. -->
+  <Style Selector="Border.tree-row-content.active-row">
     <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
   </Style>
 
-  <Style Selector="Path.tree-chevron">
-    <Setter Property="Stroke" Value="{DynamicResource TextMutedBrush}" />
-    <Setter Property="StrokeThickness" Value="1.25" />
-    <Setter Property="StrokeLineCap" Value="Round" />
-    <Setter Property="StrokeJoin" Value="Round" />
-    <Setter Property="Fill" Value="Transparent" />
+  <!-- 树行箭头:一枚 Fluent chevron_right,展开时整个图标转 90°。 -->
+  <Style Selector="wc|FluentIcon.tree-chevron">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="RenderTransform" Value="rotate(0deg)" />
   </Style>
 
-  <Style Selector="Path.tree-chevron.expanded">
+  <Style Selector="wc|FluentIcon.tree-chevron.expanded">
     <Setter Property="RenderTransform" Value="rotate(90deg)" />
   </Style>
 
-  <Style Selector="Path.tree-icon">
-    <Setter Property="Width" Value="16" />
-    <Setter Property="Height" Value="16" />
-    <Setter Property="Stretch" Value="Uniform" />
-    <Setter Property="Stroke" Value="{DynamicResource TextMutedBrush}" />
-    <Setter Property="StrokeThickness" Value="1.25" />
-    <Setter Property="StrokeLineCap" Value="Round" />
-    <Setter Property="StrokeJoin" Value="Round" />
-    <Setter Property="Fill" Value="Transparent" />
-    <Setter Property="VerticalAlignment" Value="Center" />
-  </Style>
-
-  <Style Selector="wc|LineIcon.tree-icon">
+  <Style Selector="wc|FluentIcon.tree-icon">
     <Setter Property="Width" Value="14" />
     <Setter Property="Height" Value="14" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
-  <!-- The active session's row fills its bubble: the tree's own "this is the conversation you are in" mark, matching
-       the filled bubble the active tab wears. Every other conversation row stays an outline. -->
-  <Style Selector="wc|LineIcon.tree-icon.active-session">
+  <!-- The active session's row takes the primary colour: the tree's own "this is the conversation you are in" mark. Every
+       other conversation row stays muted. -->
+  <Style Selector="wc|FluentIcon.tree-icon.active-session">
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    <Setter Property="Fill" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
 
   <Style Selector="Button.tree-chevron-button">
@@ -356,27 +341,27 @@
   </Style>
 
   <!-- Agent kind icons are coloured by run state; ended/unknown falls back to the muted stroke above. -->
-  <Style Selector="wc|LineIcon.tree-icon.agent-running">
+  <Style Selector="wc|FluentIcon.tree-icon.agent-running">
     <Setter Property="Foreground" Value="{DynamicResource RunningBrush}" />
   </Style>
 
-  <Style Selector="wc|LineIcon.tree-icon.agent-queued">
+  <Style Selector="wc|FluentIcon.tree-icon.agent-queued">
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
-  <Style Selector="wc|LineIcon.tree-icon.agent-completed">
+  <Style Selector="wc|FluentIcon.tree-icon.agent-completed">
     <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
   </Style>
 
-  <Style Selector="wc|LineIcon.tree-icon.agent-failed">
+  <Style Selector="wc|FluentIcon.tree-icon.agent-failed">
     <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
   </Style>
 
-  <Style Selector="wc|LineIcon.tree-icon.agent-stopped">
+  <Style Selector="wc|FluentIcon.tree-icon.agent-stopped">
     <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
   </Style>
 
-  <Style Selector="wc|LineIcon.tree-icon.agent-running-animated">
+  <Style Selector="wc|FluentIcon.tree-icon.agent-running-animated">
     <Style.Animations>
       <Animation Duration="0:0:1.6" IterationCount="INFINITE">
         <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
@@ -439,6 +424,35 @@
 
   <Style Selector="Ellipse.status-dot.failed">
     <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <!-- The project tree spells a sub-agent's state with a dot or a check instead of a caption; the colours match the icon
+       the same row shows, so one glance reads the state twice. -->
+  <Style Selector="Ellipse.status-dot.agent-running">
+    <Setter Property="Fill" Value="{DynamicResource RunningBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-queued">
+    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-failed">
+    <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-stopped">
+    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+  </Style>
+
+  <Style Selector="Ellipse.status-dot.agent-ended">
+    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.status-check">
+    <Setter Property="Width" Value="11" />
+    <Setter Property="Height" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
   <!-- Diff. -->

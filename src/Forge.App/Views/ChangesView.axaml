@@ -90,7 +90,7 @@
                 ToolTip.Tip="{Binding [changes.refresh], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="refresh-changes"
                 AutomationProperties.Name="{Binding [changes.refresh.name], Source={x:Static loc:Loc.Instance}}">
-          <wc:LineIcon Data="{StaticResource IconRefresh}" Width="13" Height="13" />
+          <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
         </Button>
       </Grid>
     </Border>

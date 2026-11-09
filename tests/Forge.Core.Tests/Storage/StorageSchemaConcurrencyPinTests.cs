@@ -6,7 +6,7 @@ namespace Forge.Core.Tests.Storage;
 
 /// <summary>
 /// Pins the cross-process first-open of <c>forge.db</c>: two OS processes opening the same
-/// fresh database concurrently must both succeed, <c>PRAGMA user_version</c> must read the current version (3),
+/// fresh database concurrently must both succeed, <c>PRAGMA user_version</c> must read the current version (4),
 /// and the schema must be created exactly once (no <c>duplicate column</c> failures from a
 /// migration applied twice). Uses a child-process seam (same pattern as
 /// <c>ApprovalChildProcess</c>) so the test-process environment is never mutated and the
@@ -94,7 +94,7 @@ public sealed class StorageSchemaConcurrencyPinTests
         Assert.DoesNotContain("fatal", secondResult.Stdout + secondResult.Stderr, StringComparison.OrdinalIgnoreCase);
 
         // Exactly one schema at the current version, with the v1 columns present a single time.
-        Assert.Equal(3, await ReadUserVersionAsync(databasePath));
+        Assert.Equal(4, await ReadUserVersionAsync(databasePath));
         var columns = await ReadSessionColumnsAsync(databasePath);
         foreach (var expected in new[]
                  {

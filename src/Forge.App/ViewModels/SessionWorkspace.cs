@@ -216,7 +216,6 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             if (Set(ref subAgentsCollapsed, value))
             {
                 OnPropertyChanged(nameof(SubAgentsVisible));
-                OnPropertyChanged(nameof(SubAgentToggleText));
                 SubAgentsChanged?.Invoke();
             }
         }
@@ -276,12 +275,53 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     private void OnAgentStateChanged() => AgentTreeChanged?.Invoke();
 
-    /// <summary>The toggle that collapses the region (and, collapsed, shows how many sub-agents are still running).</summary>
-    public string SubAgentToggleText => SessionStrings.SubAgentsToggle(subAgents.Count);
+    /// <summary>The chip's label: just the noun. The count is the badge's job, so the label never repeats a number.</summary>
+    public string SubAgentLabel => SessionStrings.SubAgentsLabel;
 
-    public string SubAgentToggleName => SessionStrings.SubAgentsToggleName;
+    /// <summary>
+    /// Sub-agents that hold a run slot right now. A queued child is waiting for one and a finished one has left the live
+    /// list, so neither is counted: the badge answers "how many are working", not "how many exist".
+    /// </summary>
+    public int RunningSubAgentCount
+    {
+        get
+        {
+            var running = 0;
+            foreach (var agent in subAgents)
+            {
+                if (agent.Status == SubAgentStatus.Running)
+                {
+                    running++;
+                }
+            }
+
+            return running;
+        }
+    }
+
+    /// <summary>The badge is drawn only while something runs; an idle session shows the bare label.</summary>
+    public bool HasRunningSubAgents => RunningSubAgentCount > 0;
+
+    /// <summary>
+    /// The chip's accessible name. Assistive technology replaces the button's content with this name, so the badge's number
+    /// has to appear here or the count would be invisible to it.
+    /// </summary>
+    public string SubAgentToggleName => RunningSubAgentCount > 0
+        ? SessionStrings.SubAgentsRunningName(RunningSubAgentCount)
+        : SessionStrings.SubAgentsToggleName;
 
     public string SubAgentToggleTooltip => SessionStrings.SubAgentsToggleTooltip;
+
+    /// <summary>
+    /// Re-raises the chip's badge reading. A status change is not a layout change, so this deliberately does not touch
+    /// <see cref="SubAgentsChanged"/>: a queued child acquiring a slot must not rebuild the bottom group.
+    /// </summary>
+    private void RaiseSubAgentCounters()
+    {
+        OnPropertyChanged(nameof(RunningSubAgentCount));
+        OnPropertyChanged(nameof(HasRunningSubAgents));
+        OnPropertyChanged(nameof(SubAgentToggleName));
+    }
 
     public void Rename(string title)
     {
@@ -311,7 +351,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(HasSubAgents));
             OnPropertyChanged(nameof(SubAgentsVisible));
             OnPropertyChanged(nameof(HasSubAgentActivity));
-            OnPropertyChanged(nameof(SubAgentToggleText));
+            RaiseSubAgentCounters();
+
+            // The replayed roster is what the project tree draws its agent rows (and the session's chevron) from, so the
+            // owners have to hear about it: without this a restored session kept no agent rows until something else
+            // refreshed the whole tree.
+            SubAgentsChanged?.Invoke();
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
         {
@@ -900,10 +945,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 break;
             case AgentSubAgentQueued queued:
                 Find(queued.AgentId)?.MarkQueued();
+                RaiseSubAgentCounters();
                 OnAgentStateChanged();
                 break;
             case AgentSubAgentRunning running:
                 Find(running.AgentId)?.MarkRunning(running.At);
+                RaiseSubAgentCounters();
                 OnAgentStateChanged();
                 break;
             case AgentSubAgentSteered steered:
@@ -1025,7 +1072,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasSubAgents));
         OnPropertyChanged(nameof(SubAgentsVisible));
         OnPropertyChanged(nameof(HasSubAgentActivity));
-        OnPropertyChanged(nameof(SubAgentToggleText));
+        RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();
         OpenSubAgent(agent);
@@ -1069,7 +1116,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasSubAgents));
         OnPropertyChanged(nameof(SubAgentsVisible));
         OnPropertyChanged(nameof(HasSubAgentActivity));
-        OnPropertyChanged(nameof(SubAgentToggleText));
+        RaiseSubAgentCounters();
         SubAgentsChanged?.Invoke();
         OnAgentStateChanged();
     }
@@ -1103,7 +1150,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        OnPropertyChanged(nameof(SubAgentToggleText));
+        OnPropertyChanged(nameof(SubAgentLabel));
         OnPropertyChanged(nameof(SubAgentToggleName));
         OnPropertyChanged(nameof(SubAgentToggleTooltip));
         Transcript.RefreshText();

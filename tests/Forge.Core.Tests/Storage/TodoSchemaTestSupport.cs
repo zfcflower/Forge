@@ -15,7 +15,7 @@ internal static class TodoSchemaRaw
     public static readonly string[] V1TodoColumns =
         ["id", "session_id", "title", "status", "note", "order_index", "updated_at"];
 
-    /// <summary>The twelve columns of <c>todos</c> at schema version 2, in on-disk order.</summary>
+    /// <summary>The fourteen columns of <c>todos</c> at the current schema (v4), in on-disk order.</summary>
     public static readonly string[] V2TodoColumns =
     [
         .. V1TodoColumns,
@@ -24,6 +24,8 @@ internal static class TodoSchemaRaw
         "verification",
         "commit_id",
         "commit_error",
+        "group_id",
+        "origin",
     ];
 
     public static async Task<long> UserVersionAsync(TempDirectory directory) =>
@@ -123,8 +125,9 @@ internal static class TodoSchemaRaw
     }
 
     /// <summary>
-    /// Turns a database written by this build back into the shape schema version 1 had: the five step columns and the
-    /// plan summary table are removed and <c>user_version</c> is 1. Callers must have disposed their stores first.
+    /// Turns a database written by this build back into the shape schema version 1 had: the v4 groups objects, the five
+    /// step columns and the plan summary table are removed and <c>user_version</c> is 1. Callers must have disposed their
+    /// stores first.
     /// </summary>
     public static async Task DowngradeToV1Async(TempDirectory directory)
     {
@@ -132,6 +135,10 @@ internal static class TodoSchemaRaw
         await ExecuteAsync(
             directory,
             """
+            DROP INDEX IF EXISTS ix_todos_group;
+            ALTER TABLE todos DROP COLUMN group_id;
+            ALTER TABLE todos DROP COLUMN origin;
+            DROP TABLE IF EXISTS todo_groups;
             ALTER TABLE todos DROP COLUMN commit_subject;
             ALTER TABLE todos DROP COLUMN summary;
             ALTER TABLE todos DROP COLUMN verification;
@@ -146,5 +153,6 @@ internal static class TodoSchemaRaw
         Assert.Equal(1L, await UserVersionAsync(directory));
         Assert.Equal(V1TodoColumns, await ColumnsAsync(directory, "todos"));
         Assert.False(await TableExistsAsync(directory, "plan_summaries"));
+        Assert.False(await TableExistsAsync(directory, "todo_groups"));
     }
 }

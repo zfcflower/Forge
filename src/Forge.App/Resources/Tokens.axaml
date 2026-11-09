@@ -217,64 +217,6 @@
   <FontFamily x:Key="FontUi">Segoe UI, PingFang SC, Microsoft YaHei, sans-serif</FontFamily>
   <FontFamily x:Key="FontMono">Consolas, Cascadia Mono, Menlo, monospace</FontFamily>
 
-  <!-- Icon geometry: one line (outline) family on a 24 grid, drawn by LineIcon with a fixed ~1.25 px stroke so every
-       icon has the weight of the text next to it. Paths are strokes, not filled shapes. -->
-  <StreamGeometry x:Key="IconPlus">M12 5v14M5 12h14</StreamGeometry>
-  <StreamGeometry x:Key="IconClose">M6 6l12 12M18 6 6 18</StreamGeometry>
-  <StreamGeometry x:Key="IconPlusSmall">M12 6v12M6 12h12</StreamGeometry>
-  <StreamGeometry x:Key="IconSend">M4 12 20 4 13 20 11 13zM11 13l9-9</StreamGeometry>
-  <!-- A six-tooth gear outline around a hub circle. -->
-  <StreamGeometry x:Key="IconGear">M8.4 5.76A7.2 7.2 0 0 1 9.89 5.11L10.13 2.38A9.8 9.8 0 0 1 13.87 2.38L14.11 5.11A7.2 7.2 0 0 1 16.91 6.73L19.4 5.57A9.8 9.8 0 0 1 21.27 8.81L19.02 10.38A7.2 7.2 0 0 1 19.02 13.62L21.27 15.19A9.8 9.8 0 0 1 19.4 18.43L16.91 17.27A7.2 7.2 0 0 1 14.11 18.89L13.87 21.62A9.8 9.8 0 0 1 10.13 21.62L9.89 18.89A7.2 7.2 0 0 1 7.09 17.27L4.6 18.43A9.8 9.8 0 0 1 2.73 15.19L4.98 13.62A7.2 7.2 0 0 1 4.98 10.38L2.73 8.81A9.8 9.8 0 0 1 4.6 5.57L7.09 6.73ZM9 12A3 3 0 1 0 15 12A3 3 0 1 0 9 12Z</StreamGeometry>
-  <StreamGeometry x:Key="IconStop">M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z</StreamGeometry>
-  <StreamGeometry x:Key="IconRefresh">M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4v4h-4</StreamGeometry>
-  <StreamGeometry x:Key="IconWrap">M4 6h16M4 12h12a3 3 0 0 1 0 6h-4M14 15l-2 3 2 3M4 18h4</StreamGeometry>
-  <StreamGeometry x:Key="IconEdit">M4 20h4L19 9l-4-4L4 16zM13 7l4 4</StreamGeometry>
-  <StreamGeometry x:Key="IconSave">M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6</StreamGeometry>
-  <StreamGeometry x:Key="IconCopy">M9 9h10v11H9zM5 15V4h10</StreamGeometry>
-  <StreamGeometry x:Key="IconChevronDown">M6 9l6 6 6-6</StreamGeometry>
-  <StreamGeometry x:Key="IconMinimize">M5 12h14</StreamGeometry>
-  <!-- A window with an arrow leaving it: "move to a window of its own". -->
-  <StreamGeometry x:Key="IconWindowExternal">M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5M14 4h6v6M20 4l-9 9</StreamGeometry>
-  <StreamGeometry x:Key="IconMaximize">M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z</StreamGeometry>
-  <!-- Two overlapping windows: the window's own maximize button and a panel's minimize button both turn into "restore"
-       while they are active. Panels have no maximize of their own. -->
-  <StreamGeometry x:Key="IconRestore">M8 8V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3M5 8h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z</StreamGeometry>
-  <StreamGeometry x:Key="TreeChevronGeometry">M9 5 15 12 9 19</StreamGeometry>
-  <StreamGeometry x:Key="IconChevronUp">M6 15l6-6 6 6</StreamGeometry>
-  <StreamGeometry x:Key="IconTrash">M4 7h16M10 3h4M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M10 11v6M14 11v6</StreamGeometry>
-  <!-- Git remote operations: fetch (cloud with arrow in), pull (arrow down to a bar), push (arrow up from a bar). -->
-  <StreamGeometry x:Key="IconGitFetch">M7 17a4 4 0 0 1-.5-8A6 6 0 0 1 18 8.5a4.25 4.25 0 0 1-1 8.5M12 11v9M9 17l3 3 3-3</StreamGeometry>
-  <StreamGeometry x:Key="IconGitPull">M12 4v12M7 11l5 5 5-5M5 20h14</StreamGeometry>
-  <StreamGeometry x:Key="IconGitPush">M12 20V8M7 13l5-5 5 5M5 4h14</StreamGeometry>
-  <!-- Magnifier: the window header's search affordance, which is not a working feature yet. -->
-  <StreamGeometry x:Key="IconSearch">M4 10.5A7 7 0 1 0 18 10.5A7 7 0 1 0 4 10.5ZM16.2 15.7 21 20.5</StreamGeometry>
-  <!-- Terminal: a rounded window with its screen filled in — the header's "open a terminal" button, drawn as two shapes
-       because only the screen is filled while the frame stays a line. -->
-  <StreamGeometry x:Key="IconTerminalFrame">M6.5 3.5h11a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3v-11a3 3 0 0 1 3-3z</StreamGeometry>
-  <StreamGeometry x:Key="IconTerminalScreen">M3.5 13.5h17v4a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3z</StreamGeometry>
-  <!-- Composer icons. -->
-  <StreamGeometry x:Key="IconArrowUp">M12 19V5M6 11l6-6 6 6</StreamGeometry>
-  <StreamGeometry x:Key="IconEllipsis">M5.5 12h.01M12 12h.01M18.5 12h.01</StreamGeometry>
-  <!-- Solid dots: three closed circles, drawn to be filled and left unstroked — the tab strip's "more tabs than fit" button. -->
-  <StreamGeometry x:Key="IconEllipsisSolid">M4.8 12A1.7 1.7 0 1 0 8.2 12A1.7 1.7 0 1 0 4.8 12ZM10.3 12A1.7 1.7 0 1 0 13.7 12A1.7 1.7 0 1 0 10.3 12ZM15.8 12A1.7 1.7 0 1 0 19.2 12A1.7 1.7 0 1 0 15.8 12Z</StreamGeometry>
-  <StreamGeometry x:Key="IconStar">M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z</StreamGeometry>
-  <StreamGeometry x:Key="IconSparkle">M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8zM18 15l.8 2.2 2.2.8-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z</StreamGeometry>
-  <!-- Composer strip icons: one per counter, same line family and weight as the text next to them. -->
-  <!-- Three stacked layers: the one button that carries all four counters. -->
-  <StreamGeometry x:Key="IconLayers">M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5</StreamGeometry>
-  <!-- A shield with a check inside: the approval counter. -->
-  <StreamGeometry x:Key="IconShieldCheck">M12 3.5 5 6v6c0 4.2 3 7.6 7 8.5 4-.9 7-4.3 7-8.5V6zM9 12l2 2 4-4</StreamGeometry>
-  <!-- An open book: the skills counter. -->
-  <StreamGeometry x:Key="IconBook">M4 5.5C6.5 4.5 9 4.5 12 5.5v13C9 17.5 6.5 17.5 4 18.5zM12 5.5c3-1 5.5-1 8 0v13c-2.5-1-5-1-8 0z</StreamGeometry>
-  <!-- A plug with two prongs: the MCP counter. -->
-  <StreamGeometry x:Key="IconPlug">M9 3v4M15 3v4M6 7h12v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4zM12 15v5</StreamGeometry>
-  <!-- A wrench: the tools counter. -->
-  <StreamGeometry x:Key="IconWrench">M14.7 3.3a4.6 4.6 0 0 0-5.9 5.9L3 15v3h3l5.8-5.8a4.6 4.6 0 0 0 5.9-5.9l-2.6 2.6-3-3z</StreamGeometry>
-  <!-- Folder: the composer strip's project button, drawn as an outline so it sits at the weight of the text beside it. -->
-  <StreamGeometry x:Key="IconFolder">M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2.2h8.8A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z</StreamGeometry>
-  <!-- A chat bubble with a tail at its bottom left: the session tab's prefix. It is one closed outline, so the tab can
-       fill it while it is active (solid bubble) and leave it stroked while it is not (line bubble) without a second
-       geometry. -->
-  <StreamGeometry x:Key="IconChat">M6.5 4h11a3.5 3.5 0 0 1 3.5 3.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-3.5 3.5V17H6.5A3.5 3.5 0 0 1 3 13.5v-6A3.5 3.5 0 0 1 6.5 4z</StreamGeometry>
+  <!-- 图标不在这里:全部在 Resources/Icons.axaml(唯一来源 = Fluent System Icons,唯一渲染 = 内置 PathIcon)。 -->
 
 </ResourceDictionary>

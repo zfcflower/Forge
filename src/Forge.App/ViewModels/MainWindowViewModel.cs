@@ -38,8 +38,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// <summary>Automation id (and header tool id) of the bottom group's "new terminal" button.</summary>
     private const string NewTerminalToolId = "terminal-new";
 
-    /// <summary>Automation id (and header tool id) of the project panel's "new general chat" button.</summary>
+    /// <summary>Automation id (and header tool id) of the project panel's "add project" button.</summary>
+    private const string AddProjectToolId = "add-project";
+
+    /// <summary>Automation id (and header tool id) of the general-chats panel's "new chat" button.</summary>
     private const string NewGeneralSessionToolId = "new-general-session";
+
+    /// <summary>Automation id (and header tool id) of the general-chats panel's refresh button.</summary>
+    private const string RefreshGeneralChatsToolId = "refresh-general-chats";
 
     /// <summary>Automation id (and header tool id) of the project panel's refresh button.</summary>
     private const string RefreshProjectsToolId = "refresh-projects";
@@ -64,11 +70,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private PanelToolButton newTerminalButton;
     private ReviewStore reviews;
     private PanelToolButton? openChangesTool;
-    private PanelToolButton? newGeneralSessionTool;
+    private PanelToolButton? addProjectTool;
     private PanelToolButton? refreshProjectsTool;
+    private PanelToolButton? newGeneralSessionTool;
+    private PanelToolButton? refreshGeneralChatsTool;
     private SessionWorkspaceViewModel? activeSession;
     private FinishedSubAgentsViewModel? watchedFinishedMenu;
     private IDialogService? dialogs;
+
+    /// <summary>Set once the restored layout's bottom-group state has been handed to the first attached session.</summary>
+    private bool bottomMinimizeAdopted;
     private bool disposed;
     private bool closing;
 
@@ -95,7 +106,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ConfirmAndCreateAsync,
             PromptTextAsync,
             RevealAsync,
-            AddProjectAsync)
+            AddProjectAsync,
+            TreeScope.Projects)
         {
             RunningSessions = () => new HashSet<string>(
                 sessions.Values.Where(static session => session.IsRunning).Select(static session => session.SessionId),
@@ -105,6 +117,27 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Projects.ArchiveGuard = ConfirmArchiveAsync;
         Projects.AgentTrees = sessionId =>
             sessions.TryGetValue(sessionId, out var session) ? session.AgentSnapshots() : [];
+        Projects.OpenSubAgent = OpenSubAgentTabAsync;
+
+        // The general chats are their own panel above the projects; it is a second tree over the same registry, scoped to
+        // the general workspace so neither panel has to hide the other's rows.
+        GeneralChats = new ProjectTreeViewModel(
+            composition.Projects,
+            composition.Catalog,
+            composition.Worktrees,
+            OpenSessionByIdAsync,
+            ConfirmAndCreateAsync,
+            PromptTextAsync,
+            RevealAsync,
+            AddProjectAsync,
+            TreeScope.General)
+        {
+            RunningSessions = Projects.RunningSessions,
+            AgentTrees = Projects.AgentTrees,
+            OpenSubAgent = OpenSubAgentTabAsync,
+            SessionArchived = OnSessionArchived,
+            ArchiveGuard = ConfirmArchiveAsync,
+        };
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -121,25 +154,36 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.GitPullRequests);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         NewTerminalCommand = new RelayCommand(OpenTerminal);
-        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GitPanel);
-        terminals = new TerminalWorkbench(Workbench, composition.Preferences, composition.Host?.Client);
+        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GitPanel, GeneralChats);
+        terminals = new TerminalWorkbench(
+            Workbench,
+            composition.Preferences,
+            composition.Host?.Client,
+            () => RevealBottomGroup(activeSession));
         newTerminalButton = CreateNewTerminalButton();
 
-        // Git is its own panel, stacked under the project panel on the left; its title follows the view model.
+        // Git is its own panel, stacked under the files panel in the inspector column; its title follows the view model.
         Workbench.GitPanel!.Title = GitPanel.Title;
         GitPanel.PropertyChanged += OnGitPanelPropertyChanged;
         openChangesTool = new PanelToolButton(
             OpenChangesToolId,
             ShellStrings.OpenChangesTooltip,
-            "IconRestore",
+            "IconChangesDocument",
             ShowChangesCommand);
         Workbench.FilesPanel.HeaderTools.Add(openChangesTool);
-        // The project panel's two tools live in its title bar: the panel chrome owns the bar, so a toolbar of its own
-        // inside the body would read as a second, broken title row.
-        newGeneralSessionTool = CreateNewGeneralSessionTool();
+        // Each left-column panel keeps its own tools in its title bar: the panel chrome owns the bar, so a toolbar inside the
+        // body would read as a second, broken title row. General chats add a chat, projects add a project.
+        addProjectTool = CreateAddProjectTool();
         refreshProjectsTool = CreateRefreshProjectsTool();
-        Workbench.ProjectPanel.HeaderTools.Add(newGeneralSessionTool);
+        newGeneralSessionTool = CreateNewGeneralSessionTool();
+        Workbench.ProjectPanel.HeaderTools.Add(addProjectTool);
         Workbench.ProjectPanel.HeaderTools.Add(refreshProjectsTool);
+        refreshGeneralChatsTool = CreateRefreshGeneralChatsTool();
+        if (Workbench.GeneralPanel is { } generalPanel)
+        {
+            generalPanel.HeaderTools.Add(newGeneralSessionTool);
+            generalPanel.HeaderTools.Add(refreshGeneralChatsTool);
+        }
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
         Workbench.BottomTabs.HeaderTools.Add(newTerminalButton);
         // The Git panel's remote operations are icons in its title bar, like the project panel's tools.
@@ -184,6 +228,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public SettingsViewModel Settings { get; }
 
     public ProjectTreeViewModel Projects { get; }
+
+    /// <summary>The general-chats tree of the panel above the projects.</summary>
+    public ProjectTreeViewModel GeneralChats { get; }
 
     public FilesPanelViewModel Files { get; }
 
@@ -231,7 +278,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             if (Set(ref activeSession, value))
             {
                 previous?.Instruments.SetGit(null, null);
-                Projects.SetActiveSession(activeSession?.SessionId);
+                SetTreesActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
                 ApplyPanelContext();
@@ -267,7 +314,120 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         RefreshProjectCacheAsync();
         await Projects.InitializeAsync(composition.Paths.GeneralWorkspaceDirectory, CancellationToken.None).ConfigureAwait(true);
+        await GeneralChats.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
         await RestoreAsync().ConfigureAwait(true);
+
+        // The sessions (and with them the agent trees of each session) only exist after the tabs are restored, while the
+        // tree was built before that: without this second pass a session row shows no chevron until the first click
+        // refreshes the whole tree.
+        RefreshTreeAgents();
+    }
+
+    /// <summary>
+    /// The two trees of the left column answer the same questions about the same sessions; every "refresh", "mark running"
+    /// or "active session" notification has to reach both, or one panel shows stale rows.
+    /// </summary>
+    private async Task RefreshTreesAsync(CancellationToken ct)
+    {
+        await GeneralChats.RefreshAsync(ct).ConfigureAwait(true);
+        await Projects.RefreshAsync(ct).ConfigureAwait(true);
+    }
+
+    private void RefreshTreeAgents()
+    {
+        GeneralChats.RefreshAgentTrees();
+        Projects.RefreshAgentTrees();
+    }
+
+    private void SetTreeRunning(string sessionId, bool isRunning)
+    {
+        GeneralChats.MarkRunning(sessionId, isRunning);
+        Projects.MarkRunning(sessionId, isRunning);
+    }
+
+    private void SetTreesActiveSession(string? sessionId)
+    {
+        GeneralChats.SetActiveSession(sessionId);
+        Projects.SetActiveSession(sessionId);
+    }
+
+    private void SetTreesActiveAgent(string? agentId)
+    {
+        GeneralChats.SetActiveAgent(agentId);
+        Projects.SetActiveAgent(agentId);
+    }
+
+    /// <summary>
+    /// An agent row of the project tree was clicked: bring its session to the front of the main region (opening it when it is
+    /// not loaded), reopen the bottom group if the user had collapsed it, and select that agent's tab there. Finished agents
+    /// live only in the bottom group's dropdown, so the lookup falls back to the finished list.
+    /// </summary>
+    private async Task OpenSubAgentTabAsync(string sessionId, string agentId, CancellationToken ct)
+    {
+        if (!sessions.ContainsKey(sessionId))
+        {
+            await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
+        }
+        else
+        {
+            ActivateSessionTab(sessionId);
+        }
+
+        if (!sessions.TryGetValue(sessionId, out var session))
+        {
+            return;
+        }
+
+        // The row is what opened the group, so the session's own "never pop up" choice does not apply to this click.
+        RevealBottomGroup(session);
+
+        var agent = FindSubAgent(session, agentId);
+        if (agent is null)
+        {
+            return;
+        }
+
+        // Exactly what choosing it in the bottom group's dropdown does: a finished agent opens read-only and its transcript
+        // is replayed from the store, so the tab has content even after a restart.
+        if (session.Finished.Contains(agent))
+        {
+            session.OpenFinished(agent);
+        }
+        else
+        {
+            OpenSubAgentTab(agent);
+        }
+
+        SetTreesActiveAgent(agent.AgentId);
+    }
+
+    /// <summary>
+    /// Matches by the agent's own id or by the child session it ran in: an agent row drawn from the store before this session
+    /// was loaded only knows the child session id.
+    /// </summary>
+    private static SubAgentViewModel? FindSubAgent(SessionWorkspaceViewModel session, string agentId)
+    {
+        foreach (var agent in session.SubAgents)
+        {
+            if (MatchesAgent(agent, agentId))
+            {
+                return agent;
+            }
+        }
+
+        foreach (var agent in session.Finished)
+        {
+            if (MatchesAgent(agent, agentId))
+            {
+                return agent;
+            }
+        }
+
+        return null;
+
+        static bool MatchesAgent(SubAgentViewModel agent, string id) =>
+            string.Equals(agent.AgentId, id, StringComparison.Ordinal)
+            || string.Equals(agent.ChildSessionId, id, StringComparison.Ordinal);
     }
 
     private void RefreshProjectCacheAsync() =>
@@ -594,7 +754,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private void OnTurnCompleted(SessionWorkspaceViewModel session)
     {
-        Projects.MarkRunning(session.SessionId, false);
+        SetTreeRunning(session.SessionId, false);
         if (!openTabs.Contains(session.SessionId))
         {
             ReleaseClosedSession(session);
@@ -647,7 +807,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 await Reviews.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
             }
 
-            await Projects.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
+            await RefreshTreesAsync(CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {
@@ -658,10 +818,24 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private void OnSubAgentsChanged()
     {
         SyncSubAgentRegion();
-        Projects.RefreshAgentTrees();
+        RefreshTreeAgents();
     }
 
-    private void OnAgentTreeChanged() => Dispatcher.UIThread.Post(() => Projects.RefreshAgentTrees());
+    /// <summary>
+    /// Reveals the bottom group for <paramref name="session"/> - the one door every "show me this" entry uses (a sub-agent
+    /// row in the tree, the new-terminal tool). It writes the session's flag and lets <see cref="SyncSubAgentRegion"/> push
+    /// it onto the layout, so the panel never has a second writer; only the title bar's own restore button reports back the
+    /// other way, because that button lives in the panel.
+    /// </summary>
+    private static void RevealBottomGroup(SessionWorkspaceViewModel? session)
+    {
+        if (session is { SubAgentsCollapsed: true })
+        {
+            session.SubAgentsCollapsed = false;
+        }
+    }
+
+    private void OnAgentTreeChanged() => Dispatcher.UIThread.Post(RefreshTreeAgents);
 
     private void OnSubAgentToolRequested(SubAgentViewModel agent) => OpenSubAgentTab(agent);
 
@@ -680,7 +854,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// Brings the bottom group in line with the active session: the finished dropdown, the manual collapse state (which
     /// belongs to the session, so it survives a switch), and one tab per live sub-agent. Tabs of another session and tabs
     /// whose sub-agent is gone leave the group; a read-only tab chosen from the dropdown stays until it is closed. A
-    /// collapsed group keeps its tabs: it is then the strip on Main's bottom edge that lists them.
+    /// minimized group keeps its whole title bar - tabs, the finished menu and the new-terminal tool included.
     /// </summary>
     private void SyncSubAgentRegion()
     {
@@ -692,7 +866,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        Workbench.IsBottomCollapsed = session.SubAgentsCollapsed;
+        // The restored layout owns the first attach: a session stores no collapse of its own, so without this the bottom group
+        // would pop open on every start no matter what the snapshot said. After that the session's own choice wins, which is
+        // what keeps a hand-minimized area minimized when the user switches back to it.
+        if (!bottomMinimizeAdopted)
+        {
+            bottomMinimizeAdopted = true;
+            session.SubAgentsCollapsed = Workbench.IsBottomMinimized;
+        }
+
+        Workbench.IsBottomMinimized = session.SubAgentsCollapsed;
 
         var live = new HashSet<string>(StringComparer.Ordinal);
         foreach (var agent in session.SubAgents)
@@ -746,28 +929,72 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private PanelToolButton CreateNewTerminalButton() =>
         new(NewTerminalToolId, Loc.Instance[TerminalStrings.NewTerminal], "IconPlus", NewTerminalCommand);
 
-    /// <summary>The project panel's "new general chat" tool; rebuilt on a language switch so its tooltip follows.</summary>
-    private PanelToolButton CreateNewGeneralSessionTool() =>
-        new(NewGeneralSessionToolId, ProjectStrings.NewGeneralSessionTooltip, "IconPlus", Projects.GeneralSessionCommand);
+    /// <summary>
+    /// The project panel's primary tool: adding a project. It is the only way to add one - the green button that used to sit
+    /// at the top of the panel body repeated this action a few pixels below it - so it is drawn green and at 24 px, larger
+    /// than the outlined tools beside it.
+    /// </summary>
+    private PanelToolButton CreateAddProjectTool() =>
+        new(AddProjectToolId, ProjectStrings.AddProjectTooltip, "IconProjectNew", Projects.AddProjectCommand)
+        {
+            IconSize = 20,
+            IsAccent = true,
+        };
 
     /// <summary>The project panel's refresh tool; rebuilt on a language switch so its tooltip follows.</summary>
     private PanelToolButton CreateRefreshProjectsTool() =>
         new(RefreshProjectsToolId, ProjectStrings.RefreshProjectsName, "IconRefresh", Projects.RefreshCommand);
 
-    /// <summary>Replaces the project panel's two header tools in place, keeping their position in the title bar.</summary>
+    /// <summary>
+    /// The general-chats panel's "new chat" tool. It is the panel's primary action, so it wears the same accent green and the
+    /// same 24 px icon as the projects panel's add-project tool; rebuilt on a language switch so its tooltip follows.
+    /// </summary>
+    private PanelToolButton CreateNewGeneralSessionTool() =>
+        new(NewGeneralSessionToolId, ProjectStrings.NewGeneralSessionTooltip, "IconPlus", GeneralChats.GeneralSessionCommand)
+        {
+            IconSize = 20,
+            IsAccent = true,
+        };
+
+    /// <summary>The general-chats panel's refresh tool.</summary>
+    private PanelToolButton CreateRefreshGeneralChatsTool() =>
+        new(RefreshGeneralChatsToolId, ProjectStrings.RefreshProjectsName, "IconRefresh", GeneralChats.RefreshCommand);
+
+    /// <summary>
+    /// Replaces the left column's header tools in place, keeping their positions in the two title bars: a language switch
+    /// rebuilds each tool because its tooltip is a resolved string.
+    /// </summary>
     private void RefreshProjectTools()
     {
         var tools = Workbench.ProjectPanel.HeaderTools;
-        if (newGeneralSessionTool is { } sessionTool && tools.IndexOf(sessionTool) is var sessionIndex && sessionIndex >= 0)
+        if (addProjectTool is { } projectTool && tools.IndexOf(projectTool) is var projectIndex && projectIndex >= 0)
         {
-            newGeneralSessionTool = CreateNewGeneralSessionTool();
-            tools[sessionIndex] = newGeneralSessionTool;
+            addProjectTool = CreateAddProjectTool();
+            tools[projectIndex] = addProjectTool;
         }
 
         if (refreshProjectsTool is { } refreshTool && tools.IndexOf(refreshTool) is var refreshIndex && refreshIndex >= 0)
         {
             refreshProjectsTool = CreateRefreshProjectsTool();
             tools[refreshIndex] = refreshProjectsTool;
+        }
+
+        if (Workbench.GeneralPanel is not { } generalPanel)
+        {
+            return;
+        }
+
+        var generalTools = generalPanel.HeaderTools;
+        if (newGeneralSessionTool is { } sessionTool && generalTools.IndexOf(sessionTool) is var sessionIndex && sessionIndex >= 0)
+        {
+            newGeneralSessionTool = CreateNewGeneralSessionTool();
+            generalTools[sessionIndex] = newGeneralSessionTool;
+        }
+
+        if (refreshGeneralChatsTool is { } chatsTool && generalTools.IndexOf(chatsTool) is var chatsIndex && chatsIndex >= 0)
+        {
+            refreshGeneralChatsTool = CreateRefreshGeneralChatsTool();
+            generalTools[chatsIndex] = refreshGeneralChatsTool;
         }
     }
 
@@ -830,17 +1057,22 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private void UpdateBottomGroupContent(FinishedSubAgentsViewModel menu) =>
         Workbench.BottomTabs.KeepsVisibleWhenEmpty = menu.Items.Count > 0;
 
-    /// <summary>The bottom group's pin button collapses it; the session keeps that state so it is not popped up again.</summary>
+    /// <summary>
+    /// The bottom group's own restore button minimizes it; the session keeps that state so it is not popped up again.
+    /// </summary>
     private void OnWorkbenchPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(WorkbenchLayout.IsBottomCollapsed))
+        if (e.PropertyName != nameof(WorkbenchLayout.IsBottomMinimized) || activeSession is not { } session)
         {
+            // The restored layout announces its own state before any session is attached; that announcement is what the
+            // first attach adopts, so it must not count as the session having chosen.
             return;
         }
 
-        if (activeSession is { } session && session.SubAgentsCollapsed != Workbench.IsBottomCollapsed)
+        bottomMinimizeAdopted = true;
+        if (session.SubAgentsCollapsed != Workbench.IsBottomMinimized)
         {
-            session.SubAgentsCollapsed = Workbench.IsBottomCollapsed;
+            session.SubAgentsCollapsed = Workbench.IsBottomMinimized;
         }
     }
 
@@ -875,6 +1107,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private void OnActiveTabChanged(object? sender, TabModel tab)
     {
         ScheduleLayoutSave();
+
+        // The tree mirrors what is on screen: a sub-agent tab marks its row, anything else clears the mark.
+        SetTreesActiveAgent(tab.Content is SubAgentViewModel agent ? agent.AgentId : null);
+
         if (tab.Content is not SessionWorkspaceViewModel session)
         {
             return;
@@ -1315,7 +1551,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         await BackgroundRead.RunAsync(token => registry.AddAsync(folder, name, ProjectKind.Repository, token), ct)
             .ConfigureAwait(true);
         RefreshProjectCacheAsync();
-        await Projects.RefreshAsync(ct).ConfigureAwait(true);
+        await RefreshTreesAsync(ct).ConfigureAwait(true);
     }
 
     private async Task<bool> ConfirmAndCreateAsync(Func<CancellationToken, Task<SessionInfo>> factory)
@@ -1425,7 +1661,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         foreach (var session in sessions.Values)
         {
-            Projects.MarkRunning(session.SessionId, session.IsRunning);
+            SetTreeRunning(session.SessionId, session.IsRunning);
         }
     }
 
@@ -1487,7 +1723,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         openChangesTool = new PanelToolButton(
             OpenChangesToolId,
             ShellStrings.OpenChangesTooltip,
-            "IconRestore",
+            "IconChangesDocument",
             ShowChangesCommand);
         tools[index] = openChangesTool;
     }
@@ -1580,6 +1816,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Status.Dispose();
         Settings.Dispose();
         Projects.Dispose();
+        GeneralChats.Dispose();
         Files.Dispose();
         Changes.Dispose();
         Todos.Dispose();

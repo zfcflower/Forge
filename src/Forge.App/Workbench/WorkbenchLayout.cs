@@ -21,6 +21,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     private readonly RegionModel inspector;
 
     private readonly PanelModel projectPanel;
+    private readonly PanelModel? generalPanel;
     private readonly PanelModel filesPanel;
     private readonly PanelModel? gitPanel;
     private readonly TabGroupModel mainTabs;
@@ -44,9 +45,18 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     private bool inspectorHasPreviewColumn;
 
     private double inspectorSplitRatio = WorkbenchMetrics.DefaultInspectorSplitRatio;
+    private double projectSplitRatio = WorkbenchMetrics.DefaultProjectSplitRatio;
+
+    /// <summary>
+    /// Last height (px) of each panel below the files panel in the Inspector column, keyed by panel id. A missing entry is a
+    /// slot the user never dragged: it takes its share of the mean of the stored ones, so the lines between the panels of that
+    /// column all behave alike instead of one of them being fixed.
+    /// </summary>
+    private readonly Dictionary<string, double> belowHeights = new(StringComparer.Ordinal);
     private double bottomHeight = WorkbenchMetrics.DefaultBottomHeight;
-    private bool isBottomCollapsed;
-    private bool bottomHasContent;
+
+    /// <summary>The bottom group's intent to sit at title-bar height; held while the group has nothing to show.</summary>
+    private bool bottomMinimized;
     private bool isDragging;
     private RegionRole? openDrawer;
     private bool isPreviewCoveringMain;
@@ -64,8 +74,9 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <param name="todo">View model of the TODO tab of the inspector tools group.</param>
     /// <param name="review">View model of the review tab.</param>
     /// <param name="specs">View model of the spec tree tab.</param>
-    /// <param name="gitContent">View model of the Git panel, stacked under the project panel; null leaves the panel out.</param>
-    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs, object? gitContent = null)
+    /// <param name="gitContent">View model of the Git panel, stacked under the files panel in the inspector column; null leaves the panel out.</param>
+    /// <param name="generalContent">View model of the general-chats panel, stacked above the projects panel; null leaves the panel out.</param>
+    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs, object? gitContent = null, object? generalContent = null)
     {
         project = new RegionModel(RegionRole.Project, WorkbenchMetrics.DefaultProjectWidth);
         main = new RegionModel(RegionRole.Main, 0);
@@ -104,20 +115,32 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         inspectorTools.ActiveTab = inspectorTools.Tabs[0];
 
         project.Panels.Add(projectPanel);
-        if (gitContent is not null)
+        if (generalContent is not null)
         {
-            gitPanel = new PanelModel(WorkbenchIds.GitPanel, RegionRole.Project, "Git")
+            // General chats are their own panel above the projects: one title, one toolbar and one scope per area, instead of
+            // one list that a hairline had to split.
+            generalPanel = new PanelModel(WorkbenchIds.GeneralPanel, RegionRole.Project, ShellStrings.GeneralChatsTitle)
             {
-                Content = gitContent,
+                Content = generalContent,
                 CanPin = true,
             };
-            project.Panels.Add(gitPanel);
+            project.Panels.Add(generalPanel);
         }
 
         main.Panels.Add(mainTabs);
         main.Panels.Add(bottomTabs);
         inspector.Panels.Add(previewTabs);
         inspector.Panels.Add(filesPanel);
+        if (gitContent is not null)
+        {
+            gitPanel = new PanelModel(WorkbenchIds.GitPanel, RegionRole.Inspector, "Git")
+            {
+                Content = gitContent,
+                CanPin = true,
+            };
+            inspector.Panels.Add(gitPanel);
+        }
+
         inspector.Panels.Add(inspectorTools);
 
         Order.Add(project);
@@ -145,6 +168,10 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     private void RefreshTitles()
     {
         projectPanel.Title = ShellStrings.ProjectsTitle;
+        if (generalPanel is not null)
+        {
+            generalPanel.Title = ShellStrings.GeneralChatsTitle;
+        }
         filesPanel.Title = ShellStrings.FilesTitle;
         mainTabs.Title = ShellStrings.DocumentsTitle;
         bottomTabs.Title = ShellStrings.SubAgentsTitle;
@@ -438,6 +465,9 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     public PanelModel ProjectPanel => projectPanel;
 
+    /// <summary>The general-chats panel above the projects; null when the layout was built without one.</summary>
+    public PanelModel? GeneralPanel => generalPanel;
+
     public PanelModel FilesPanel => filesPanel;
 
     /// <summary>The Git panel under the project panel; null when the layout was built without Git content.</summary>
@@ -448,12 +478,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
     /// <summary>Sub-agent tabs (later also terminals); hidden while it has neither a docked tab nor a kept-visible tool.</summary>
     public TabGroupModel BottomTabs => bottomTabs;
-
-    /// <summary>
-    /// True while the bottom group has something to show: a docked tab, or a title-bar tool that keeps it alive (the
-    /// finished sub-agent menu). It stays true while the group is collapsed, because the collapsed strip shows its tabs.
-    /// </summary>
-    public bool BottomHasContent => bottomHasContent;
 
     /// <summary>File previews and the fixed changes tab; open only while it has a tab.</summary>
     public TabGroupModel PreviewTabs => previewTabs;
@@ -565,6 +589,58 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Share of the Project region's first panel (the projects) above the general chats; the line between them is draggable.</summary>
+    public double ProjectSplitRatio
+    {
+        get => projectSplitRatio;
+        set
+        {
+            if (!double.IsFinite(value) || value <= 0 || value >= 1)
+            {
+                return;
+            }
+
+            if (Set(ref projectSplitRatio, value))
+            {
+                OnLayoutChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Height the Inspector column last gave one of the panels below the files panel, or 0 for a panel the user never dragged;
+    /// the presenter turns these into weights (<see cref="PanelStackSolver"/>), so they only have to keep their proportions.
+    /// </summary>
+    public double BelowPanelHeight(string panelId) =>
+        belowHeights.TryGetValue(panelId, out var height) ? height : 0;
+
+    /// <summary>
+    /// Writes back the pair either side of a dragged line in the Inspector column's stack. The two heights keep the sum they
+    /// had before the drag (the splitter already clamped them), and the change raises <see cref="LayoutChanged"/> so the
+    /// snapshot debounce picks it up like any other panel splitter drag.
+    /// </summary>
+    public void SetBelowPanelHeights(string upperId, double upperHeight, string lowerId, double lowerHeight)
+    {
+        if (!IsLength(upperHeight) || !IsLength(lowerHeight) || upperHeight <= 0 || lowerHeight <= 0)
+        {
+            return;
+        }
+
+        if (belowHeights.TryGetValue(upperId, out var currentUpper)
+            && belowHeights.TryGetValue(lowerId, out var currentLower)
+            && Math.Abs(currentUpper - upperHeight) < 0.01
+            && Math.Abs(currentLower - lowerHeight) < 0.01)
+        {
+            return;
+        }
+
+        belowHeights[upperId] = upperHeight;
+        belowHeights[lowerId] = lowerHeight;
+        // The PropertyChanged is what re-arranges the column while the pointer is down; LayoutChanged is the snapshot trigger.
+        OnPropertyChanged();
+        OnLayoutChanged();
+    }
+
     /// <summary>"铺满主区": the preview group spreads over the whole Main region. Not persisted.</summary>
     public bool IsPreviewCoveringMain
     {
@@ -602,20 +678,43 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Collapsed by its pin button to a strip on Main's bottom edge.</summary>
-    public bool IsBottomCollapsed
+    /// <summary>
+    /// The bottom group sits at title-bar height: its title bar, tab strip and tools stay, its body gives the space back to
+    /// Main. This is the same shrink the panel's own restore button drives (<see cref="ToggleMinimize"/>) - there is no
+    /// second, strip-shaped collapsed form, so the composer's sub-agent toggle and that button are two entries to one state.
+    /// </summary>
+    public bool IsBottomMinimized
     {
-        get => isBottomCollapsed;
+        get => bottomMinimized;
         set
         {
-            if (!Set(ref isBottomCollapsed, value))
+            if (!Set(ref bottomMinimized, value))
             {
                 return;
             }
 
-            RecomposeVisibility();
+            ApplyBottomMinimize();
             OnLayoutChanged();
         }
+    }
+
+    /// <summary>
+    /// Pushes the intent onto the group. Only a visible group with an expanded peer can be minimized, so the intent is held
+    /// until that is true: the group keeps its tabs while nothing shows it.
+    /// </summary>
+    private void ApplyBottomMinimize()
+    {
+        if (bottomMinimized)
+        {
+            if (bottomTabs.IsVisible && bottomTabs.CanMinimize)
+            {
+                bottomTabs.IsMinimized = true;
+            }
+
+            return;
+        }
+
+        bottomTabs.IsMinimized = false;
     }
 
     // ---------------------------------------------------------------- tabs
@@ -920,8 +1019,13 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
 
         snapshot.PreviewWidth = previewWidth;
         snapshot.InspectorSplitRatio = inspectorSplitRatio;
+        snapshot.ProjectSplitRatio = projectSplitRatio;
+        foreach (var pair in belowHeights)
+        {
+            snapshot.BelowHeights[pair.Key] = pair.Value;
+        }
         snapshot.BottomHeight = bottomHeight;
-        snapshot.BottomCollapsed = isBottomCollapsed;
+        snapshot.BottomMinimized = bottomMinimized;
 
         var tools = inspectorTools.Tabs;
         for (int i = 0; i < tools.Count; i++)
@@ -966,20 +1070,38 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             inspectorSplitRatio = snapshot.InspectorSplitRatio;
         }
 
+        if (IsLength(snapshot.ProjectSplitRatio) && snapshot.ProjectSplitRatio < 1)
+        {
+            projectSplitRatio = snapshot.ProjectSplitRatio;
+        }
+
+        // Ids are the panels' own, so a stored height only applies while that panel still exists in that column; anything else
+        // is dropped and the panel takes a default share.
+        belowHeights.Clear();
+        var inspectorPanels = GetRegion(RegionRole.Inspector).Panels;
+        for (var i = 0; i < inspectorPanels.Count; i++)
+        {
+            if (snapshot.BelowHeights.TryGetValue(inspectorPanels[i].Id, out var height) && IsLength(height) && height > 0)
+            {
+                belowHeights[inspectorPanels[i].Id] = height;
+            }
+        }
+
         if (IsLength(snapshot.BottomHeight))
         {
             bottomHeight = snapshot.BottomHeight;
         }
 
-        isBottomCollapsed = snapshot.BottomCollapsed;
+        bottomMinimized = snapshot.BottomMinimized;
 
         ApplyRegions(snapshot.Regions);
         ApplyTools(snapshot.ToolsOrder, snapshot.ToolsActive);
 
         OnPropertyChanged(nameof(PreviewWidth));
         OnPropertyChanged(nameof(InspectorSplitRatio));
+        OnPropertyChanged(nameof(ProjectSplitRatio));
         OnPropertyChanged(nameof(BottomHeight));
-        OnPropertyChanged(nameof(IsBottomCollapsed));
+        OnPropertyChanged(nameof(IsBottomMinimized));
         OnPropertyChanged(nameof(IsPreviewLeftOfFiles));
 
         RecomposeVisibility();
@@ -1262,16 +1384,12 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         }
 
         bool hasContent = bottomTabs.HasDockedTab || bottomTabs.KeepsVisibleWhenEmpty;
-        bottomTabs.IsVisible = hasContent && !isBottomCollapsed;
-        if (hasContent != bottomHasContent)
-        {
-            bottomHasContent = hasContent;
-            OnPropertyChanged(nameof(BottomHasContent));
-        }
+        bottomTabs.IsVisible = hasContent;
 
         UpdateCanMinimize(project);
         UpdateCanMinimize(main);
         UpdateCanMinimize(inspector);
+        ApplyBottomMinimize();
 
         if (!previewTabs.IsVisible)
         {
@@ -1469,6 +1587,16 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         {
             RecomposeVisibility();
             return;
+        }
+
+        // The group's own restore button (or the layout clearing a stale minimize) moves the intent with it, so the
+        // composer toggle and the title bar never disagree.
+        if (e.PropertyName == nameof(TabGroupModel.IsMinimized) && ReferenceEquals(group, bottomTabs) &&
+            bottomMinimized != bottomTabs.IsMinimized)
+        {
+            bottomMinimized = bottomTabs.IsMinimized;
+            OnPropertyChanged(nameof(IsBottomMinimized));
+            OnLayoutChanged();
         }
 
         if (e.PropertyName != nameof(TabGroupModel.ActiveTab))

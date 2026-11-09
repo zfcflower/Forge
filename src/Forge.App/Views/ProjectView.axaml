@@ -5,6 +5,14 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.ProjectView"
              x:DataType="vm:ProjectTreeViewModel">
+  <UserControl.Styles>
+    <!-- A project's own name heads its subtree, so it reads one weight above the rows under it. Declared here rather than in
+         the shared dictionary: the tree's own view is the only place that spells this. -->
+    <Style Selector="TextBlock.project-name">
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+  </UserControl.Styles>
+
   <UserControl.Resources>
     <!-- One indent step, sized by the mark (folder rows and agent rows use different steps); the guide line is
          centred in the chevron slot so it lines up under the ancestor's chevron. -->
@@ -21,145 +29,155 @@
 
     <DataTemplate x:Key="TreeNodeTemplate" x:DataType="vm:TreeNodeViewModel">
       <Border Classes="tree-row">
-        <Border.ContextMenu>
-          <ContextMenu>
-            <MenuItem Header="{Binding [project.newSession], Source={x:Static loc:Loc.Instance}}" Command="{Binding NewSessionCommand}" />
-            <MenuItem Header="{Binding [project.rename], Source={x:Static loc:Loc.Instance}}" Command="{Binding RenameCommand}" />
-            <MenuItem Header="{Binding [project.archive], Source={x:Static loc:Loc.Instance}}" Command="{Binding ArchiveCommand}" />
-            <MenuItem Header="{Binding [project.reveal], Source={x:Static loc:Loc.Instance}}" Command="{Binding RevealCommand}" />
-            <Separator />
-            <MenuItem Header="{Binding [project.remove], Source={x:Static loc:Loc.Instance}}" Command="{Binding RemoveCommand}" />
-          </ContextMenu>
-        </Border.ContextMenu>
-        <Grid ColumnDefinitions="Auto,*">
-          <ItemsControl Grid.Column="0"
-                        VerticalAlignment="Stretch"
-                        ItemsSource="{Binding Guides}"
-                        ItemTemplate="{StaticResource IndentGuideTemplate}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" />
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-          </ItemsControl>
-          <Border Grid.Column="1"
-                  Classes="tree-row-content"
-                  Classes.active-session="{Binding IsActiveSession}">
-            <Grid>
-              <!-- Project / worktree / session rows: the chevron leads, then icon, title and trailing tools. -->
-              <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto"
-                    IsVisible="{Binding !IsAgent}">
-                <Border Grid.Column="0" Width="8">
-                  <Button Classes="tree-chevron-button"
-                          Command="{Binding ToggleCommand}"
-                          IsVisible="{Binding HasToggle}">
-                    <Path Data="{StaticResource TreeChevronGeometry}"
-                          Classes="tree-chevron"
-                          Classes.expanded="{Binding ChevronRotated}"
-                          Width="8"
-                          Height="8"
-                          HorizontalAlignment="Center"
-                          Stretch="Uniform" />
+        <Panel>
+          <Grid ColumnDefinitions="Auto,*">
+            <ItemsControl Grid.Column="0"
+                          VerticalAlignment="Stretch"
+                          ItemsSource="{Binding Guides}"
+                          ItemTemplate="{StaticResource IndentGuideTemplate}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+            <Border Grid.Column="1"
+                    Classes="tree-row-content"
+                    Classes.active-row="{Binding IsActiveRow}">
+              <Border.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="{Binding [project.newSession], Source={x:Static loc:Loc.Instance}}" Command="{Binding NewSessionCommand}" />
+                  <MenuItem Header="{Binding [project.rename], Source={x:Static loc:Loc.Instance}}" Command="{Binding RenameCommand}" />
+                  <MenuItem Header="{Binding [project.archive], Source={x:Static loc:Loc.Instance}}" Command="{Binding ArchiveCommand}" />
+                  <MenuItem Header="{Binding [project.reveal], Source={x:Static loc:Loc.Instance}}" Command="{Binding RevealCommand}" />
+                  <Separator />
+                  <MenuItem Header="{Binding [project.remove], Source={x:Static loc:Loc.Instance}}" Command="{Binding RemoveCommand}" />
+                </ContextMenu>
+              </Border.ContextMenu>
+              <Grid>
+                <!-- Project / worktree / session rows: the chevron leads, then icon, title and the row's one tool. The row
+                     itself is the hit target - a tap anywhere on it activates the row - so a session row needs no separate
+                     "open" button next to its title. -->
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                      IsVisible="{Binding !IsAgent}">
+                  <!-- The chevron sits one panel padding inside the row, so the deepest level of the tree still keeps the same
+                       gutter from the panel edge as the panel's own padding. -->
+                  <Border Grid.Column="0" Width="10" Margin="6,0,0,0">
+                    <Button Classes="tree-chevron-button"
+                            Command="{Binding ToggleCommand}"
+                            IsVisible="{Binding HasToggle}">
+                      <!-- The Fluent chevron is a filled outline whose stroke is ~1.5 grid units: at 8 px it lands under a pixel
+                           and disappears, so it is drawn at 12 px and overhangs its 10 px slot by a pixel on each side. -->
+                      <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
+                                     Classes="tree-chevron"
+                                     Classes.expanded="{Binding ChevronRotated}"
+                                     Width="12"
+                                     Height="12"
+                                     HorizontalAlignment="Center" />
+                    </Button>
+                  </Border>
+                  <wc:FluentIcon Grid.Column="1"
+                                 Classes="tree-icon"
+                                 Classes.active-session="{Binding IsActiveSession}"
+                                 Data="{Binding Icon}"
+                                 Width="12"
+                                 Height="12"
+                                 Margin="6,0,4,0" />
+                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                    <!-- A project's own name is the heading of its subtree, so it reads one weight above the rows under it. -->
+                    <TextBlock Text="{Binding Title}"
+                               Classes.project-name="{Binding IsProject}"
+                               TextWrapping="NoWrap"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,6,0" />
+                    <Ellipse Grid.Column="1" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+                  </Grid>
+                  <!-- The section's own "new conversation" tool, or the project's "new branch": same button, two actions,
+                       so the glyph and the tooltip tell them apart instead of sharing one plus. -->
+                  <Button Grid.Column="3"
+                          Classes="ghost icon"
+                          Width="22"
+                          Height="22"
+                          Command="{Binding NewSessionCommand}"
+                          IsVisible="{Binding HasNewSession}"
+                          ToolTip.Tip="{Binding NewSessionTooltip}"
+                          AutomationProperties.AutomationId="project-new-session"
+                          AutomationProperties.Name="{Binding NewSessionTooltip}">
+                    <wc:FluentIcon Data="{Binding NewSessionGlyph}" Width="12" Height="12" />
                   </Button>
-                </Border>
-                <wc:LineIcon Grid.Column="1"
-                             Classes="tree-icon"
-                             Classes.active-session="{Binding IsActiveSession}"
-                             Data="{Binding Icon}"
-                             Margin="14,0,6,0" />
-                <Grid Grid.Column="2" ColumnDefinitions="*,Auto" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding Title}"
-                             TextWrapping="NoWrap"
-                             VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis"
-                             Margin="0,0,6,0" />
-                  <Ellipse Grid.Column="1" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
                 </Grid>
-                <Button Grid.Column="3"
-                        Classes="ghost icon"
-                        Width="20"
-                        Height="20"
-                        Command="{Binding NewSessionCommand}"
-                        IsVisible="{Binding HasNewSession}"
-                        ToolTip.Tip="{Binding [project.newSessionTooltip], Source={x:Static loc:Loc.Instance}}"
-                        AutomationProperties.AutomationId="project-new-session"
-                        AutomationProperties.Name="{Binding [project.newSessionTooltip], Source={x:Static loc:Loc.Instance}}">
-                  <wc:LineIcon Data="{StaticResource IconPlusSmall}" Width="12" Height="12" />
-                </Button>
-                <Button Grid.Column="4"
-                        Classes="ghost icon"
-                        Width="20"
-                        Height="20"
-                        Command="{Binding OpenCommand}"
-                        IsVisible="{Binding HasOpen}"
-                        ToolTip.Tip="{Binding [project.open], Source={x:Static loc:Loc.Instance}}"
-                        AutomationProperties.AutomationId="project-open-session"
-                        AutomationProperties.Name="{Binding [project.openSessionName], Source={x:Static loc:Loc.Instance}}">
-                  <TextBlock Classes="glyph" Text="›" />
-                </Button>
-              </Grid>
-              <!-- Agent rows: icon first, then title, the chevron and the grey status text. No guide lines. -->
-              <Grid ColumnDefinitions="Auto,*"
-                    IsVisible="{Binding IsAgent}">
-                <wc:LineIcon Grid.Column="0"
-                             Classes="tree-icon"
-                             Classes.agent-running="{Binding IsAgentRunning}"
-                             Classes.agent-running-animated="{Binding IsAgentRunningAnimated}"
-                             Classes.agent-queued="{Binding IsAgentQueued}"
-                             Classes.agent-completed="{Binding IsAgentCompleted}"
-                             Classes.agent-failed="{Binding IsAgentFailed}"
-                             Classes.agent-stopped="{Binding IsAgentStopped}"
-                             Data="{Binding Icon}"
-                             Margin="0,0,6,0" />
-                <Grid Grid.Column="1" ColumnDefinitions="*,Auto,Auto" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding Title}"
-                             TextWrapping="NoWrap"
-                             VerticalAlignment="Center"
-                             TextTrimming="CharacterEllipsis"
-                             Margin="0,0,6,0" />
-                  <Path Data="{StaticResource TreeChevronGeometry}"
-                        Classes="tree-chevron"
-                        Classes.expanded="{Binding ChevronRotated}"
-                        IsVisible="{Binding HasToggle}"
-                        Width="8"
-                        Height="8"
-                        Grid.Column="1"
-                        HorizontalAlignment="Center"
-                        Stretch="Uniform" />
-                  <TextBlock Grid.Column="2"
-                             Classes="caption"
-                             Text="{Binding StatusText}"
-                             VerticalAlignment="Center"
-                             IsVisible="{Binding HasStatusText}" />
+                <!-- Agent rows: icon first, then title, the chevron and the grey status text. No guide lines. The icon's left
+                     margin is IndentMarks.IconIndent (6 inset + the 8 px chevron slot this row leaves empty + 8 gap), so an
+                     agent row indents exactly one step under the row it belongs to. -->
+                <Grid ColumnDefinitions="Auto,*"
+                      IsVisible="{Binding IsAgent}">
+                  <wc:FluentIcon Grid.Column="0"
+                                 Classes="tree-icon"
+                                 Classes.agent-running="{Binding IsAgentRunning}"
+                                 Classes.agent-running-animated="{Binding IsAgentRunningAnimated}"
+                                 Classes.agent-queued="{Binding IsAgentQueued}"
+                                 Classes.agent-completed="{Binding IsAgentCompleted}"
+                                 Classes.agent-failed="{Binding IsAgentFailed}"
+                                 Classes.agent-stopped="{Binding IsAgentStopped}"
+                                 Data="{Binding Icon}"
+                                 Margin="22,0,4,0" />
+                  <Grid Grid.Column="1" ColumnDefinitions="*,Auto,Auto" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}"
+                               TextWrapping="NoWrap"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,8,0" />
+                    <wc:FluentIcon Data="{StaticResource TreeChevronGeometry}"
+                                   Classes="tree-chevron"
+                                   Classes.expanded="{Binding ChevronRotated}"
+                                   IsVisible="{Binding HasToggle}"
+                                   Width="12"
+                                   Height="12"
+                                   Grid.Column="1"
+                                   HorizontalAlignment="Center" />
+                    <!-- A sub-agent's state is a mark, not a caption: a coloured dot while it is queued, running or ended
+                         badly, a green check once it finished fine. The words stay in the tooltip. -->
+                    <!-- The mark stops short of the row's right edge, so it reads as part of the title rather than as a
+                         column pinned to the panel edge, and keeps a fixed gap from the text before it. -->
+                    <Panel Grid.Column="2"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0"
+                           IsVisible="{Binding HasStatusGlyph}"
+                           ToolTip.Tip="{Binding StatusText}">
+                      <Ellipse Classes="status-dot"
+                               Classes.agent-running="{Binding IsAgentRunning}"
+                               Classes.agent-queued="{Binding IsAgentQueued}"
+                               Classes.agent-failed="{Binding IsAgentFailed}"
+                               Classes.agent-stopped="{Binding IsAgentStopped}"
+                               Classes.agent-ended="{Binding IsAgentEndedGlyph}"
+                               IsVisible="{Binding ShowsStatusDot}" />
+                      <wc:FluentIcon Classes="status-check"
+                                     Data="{StaticResource IconCheck}"
+                                     IsVisible="{Binding ShowsStatusCheck}" />
+                    </Panel>
+                  </Grid>
                 </Grid>
               </Grid>
-            </Grid>
-          </Border>
-        </Grid>
+            </Border>
+          </Grid>
+        </Panel>
       </Border>
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,Auto,*" Background="Transparent">
-    <Button Grid.Row="0"
-            Classes="primary"
-            Margin="8,6"
-            HorizontalAlignment="Stretch"
-            Content="{Binding [project.addProject], Source={x:Static loc:Loc.Instance}}"
-            Command="{Binding AddProjectCommand}"
-            AutomationProperties.AutomationId="add-project"
-            AutomationProperties.Name="{Binding [project.addProjectName], Source={x:Static loc:Loc.Instance}}" />
-
-    <TextBlock Grid.Row="1"
+  <Grid RowDefinitions="Auto,*" Background="Transparent">
+    <TextBlock Grid.Row="0"
                Classes="caption"
                Margin="6,4"
                TextWrapping="Wrap"
                IsVisible="{Binding HasStatusText}"
                Text="{Binding StatusText}" />
 
-    <!-- One flat, virtualized row list: expanding or collapsing a row splices only its subtree. -->
+    <!-- One flat, virtualized row list: expanding or collapsing a row splices only its subtree. Projects are added from
+         the panel's title bar, so the body holds nothing but the tree. -->
     <ListBox x:Name="TreeList"
-             Grid.Row="2"
+             Grid.Row="1"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource TreeNodeTemplate}"
              Padding="6,4"

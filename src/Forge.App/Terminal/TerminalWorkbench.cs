@@ -28,6 +28,7 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
     private readonly WorkbenchLayout layout;
     private readonly AppPreferences preferences;
     private readonly ITerminalHost? host;
+    private readonly Action revealBottomGroup;
     private readonly Dictionary<string, List<TerminalViewModel>> bySession = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TerminalViewModel> byId = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
@@ -37,11 +38,18 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
     private int nextIndex;
     private int disposed;
 
-    public TerminalWorkbench(WorkbenchLayout layout, AppPreferences preferences, ITerminalHost? host)
+    /// <summary>
+    /// <paramref name="revealBottomGroup"/> restores the bottom group before a new tab is docked into it. It is the same
+    /// door the tree's sub-agent rows use, not a second write to the layout: the panel only ever follows the active
+    /// session's own state.
+    /// </summary>
+    public TerminalWorkbench(WorkbenchLayout layout, AppPreferences preferences, ITerminalHost? host, Action revealBottomGroup)
     {
+        ArgumentNullException.ThrowIfNull(revealBottomGroup);
         this.layout = layout;
         this.preferences = preferences;
         this.host = host;
+        this.revealBottomGroup = revealBottomGroup;
         layout.TabCloseRequested = RequestCloseAsync;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
@@ -89,8 +97,8 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
             list.Add(terminal);
         }
 
-        // A collapsed bottom group would hide the new tab on the strip; opening a terminal expands the group.
-        layout.IsBottomCollapsed = false;
+        // A minimized bottom group would only show the new tab as a title-bar chip; opening a terminal restores its body.
+        revealBottomGroup();
         Dock(terminal, activate: true);
         terminal.Start();
         return terminal;

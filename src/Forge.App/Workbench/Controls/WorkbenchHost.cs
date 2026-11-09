@@ -42,7 +42,6 @@ internal sealed class WorkbenchHost : Panel
     private bool zOrderPending;
     private Rect drawerRect;
     private WorkbenchLayout? subscribedLayout;
-    private readonly List<TabModel> subscribedBottomTabs = [];
 
     static WorkbenchHost()
     {
@@ -407,8 +406,7 @@ internal sealed class WorkbenchHost : Panel
         }
 
         if (e.Source is Visual source
-            && (source is AutoHideStrip || source is BottomCollapsedStrip
-                || source.FindAncestorOfType<AutoHideStrip>() is not null))
+            && (source is AutoHideStrip || source.FindAncestorOfType<AutoHideStrip>() is not null))
         {
             return;
         }
@@ -541,9 +539,6 @@ internal sealed class WorkbenchHost : Panel
             AttachRegion(layout.Order[i]);
         }
 
-        layout.BottomTabs.Tabs.CollectionChanged += OnBottomTabsChanged;
-        ForEachTab(layout.BottomTabs.Tabs, AttachBottomTab);
-
         SyncFloatingWindows();
     }
 
@@ -564,8 +559,6 @@ internal sealed class WorkbenchHost : Panel
             DetachRegion(layout.Order[i]);
         }
 
-        layout.BottomTabs.Tabs.CollectionChanged -= OnBottomTabsChanged;
-        DetachAllBottomTabs();
     }
 
     private void AttachRegion(RegionModel region)
@@ -592,10 +585,6 @@ internal sealed class WorkbenchHost : Panel
     {
         InvalidateAll();
         UpdateZOrder();
-        if (e.PropertyName == nameof(WorkbenchLayout.BottomHasContent))
-        {
-            RefreshBottomStrips();
-        }
     }
 
     private void OnOrderChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -649,84 +638,6 @@ internal sealed class WorkbenchHost : Panel
         }
     }
 
-    private void OnBottomTabsChanged(object? sender, NotifyCollectionChangedEventArgs e)
-    {
-        switch (e.Action)
-        {
-            case NotifyCollectionChangedAction.Add:
-                ForEachTab(e.NewItems, AttachBottomTab);
-                break;
-            case NotifyCollectionChangedAction.Remove:
-                ForEachTab(e.OldItems, DetachBottomTab);
-                break;
-            case NotifyCollectionChangedAction.Replace:
-                ForEachTab(e.OldItems, DetachBottomTab);
-                ForEachTab(e.NewItems, AttachBottomTab);
-                break;
-            case NotifyCollectionChangedAction.Reset:
-                DetachAllBottomTabs();
-                if (Layout is { } layout)
-                {
-                    ForEachTab(layout.BottomTabs.Tabs, AttachBottomTab);
-                }
-
-                break;
-        }
-
-        RefreshBottomStrips();
-    }
-
-    private void OnBottomTabChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(TabModel.Title) or nameof(TabModel.IsFloating))
-        {
-            RefreshBottomStrips();
-        }
-    }
-
-    private static void ForEachTab(IList? items, Action<TabModel> action)
-    {
-        if (items is null)
-        {
-            return;
-        }
-
-        for (var i = 0; i < items.Count; i++)
-        {
-            if (items[i] is TabModel tab)
-            {
-                action(tab);
-            }
-        }
-    }
-
-    private void AttachBottomTab(TabModel tab)
-    {
-        if (subscribedBottomTabs.Contains(tab))
-        {
-            return;
-        }
-
-        tab.PropertyChanged += OnBottomTabChanged;
-        subscribedBottomTabs.Add(tab);
-    }
-
-    private void DetachBottomTab(TabModel tab)
-    {
-        tab.PropertyChanged -= OnBottomTabChanged;
-        subscribedBottomTabs.Remove(tab);
-    }
-
-    private void DetachAllBottomTabs()
-    {
-        for (var i = 0; i < subscribedBottomTabs.Count; i++)
-        {
-            subscribedBottomTabs[i].PropertyChanged -= OnBottomTabChanged;
-        }
-
-        subscribedBottomTabs.Clear();
-    }
-
     private void OnFloatingChanged(object? sender, NotifyCollectionChangedEventArgs e) => SyncFloatingWindows();
 
     private void RebuildPresenters()
@@ -735,8 +646,6 @@ internal sealed class WorkbenchHost : Panel
         {
             presenters[i]?.Rebuild();
         }
-
-        RefreshBottomStrips();
     }
 
     private void RefreshStrips()
@@ -744,16 +653,6 @@ internal sealed class WorkbenchHost : Panel
         for (var i = 0; i < strips.Length; i++)
         {
             strips[i]?.Rebuild();
-        }
-
-        RefreshBottomStrips();
-    }
-
-    private void RefreshBottomStrips()
-    {
-        for (var i = 0; i < presenters.Length; i++)
-        {
-            presenters[i]?.RefreshBottomStrip();
         }
     }
 

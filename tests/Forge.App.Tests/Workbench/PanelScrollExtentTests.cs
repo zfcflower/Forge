@@ -36,7 +36,7 @@ public sealed class PanelScrollExtentTests
             }
 
             yield return [list, "preview", "cover"];
-            yield return [list, "bottom", "bottom-strip"];
+            yield return [list, "bottom", "bottom-minimized"];
         }
     }
 
@@ -161,10 +161,10 @@ public sealed class PanelScrollExtentTests
                     case "cover":
                         layout.TogglePreviewCoverMain();
                         break;
-                    case "bottom-strip":
-                        layout.IsBottomCollapsed = true;
+                    case "bottom-minimized":
+                        layout.IsBottomMinimized = true;
                         WorkbenchUi.Settle(scene.Window);
-                        layout.IsBottomCollapsed = false;
+                        layout.IsBottomMinimized = false;
                         break;
                 }
 

@@ -99,6 +99,15 @@ internal sealed class PanelToolButton(string id, string tooltip, string iconKey,
     public string IconKey { get; } = iconKey;
 
     public System.Windows.Input.ICommand Command { get; } = command;
+
+    /// <summary>
+    /// The icon's box in device-independent pixels; the button pads around it, so a larger icon makes a larger button. 14 is
+    /// the title bar's default and matches the neighbouring tools; the add-project tool asks for 24.
+    /// </summary>
+    public double IconSize { get; init; } = 14;
+
+    /// <summary>Draws the icon in the accent colour: reserved for the one tool that is a panel's primary action.</summary>
+    public bool IsAccent { get; init; }
 }
 
 /// <summary>A panel whose title bar is a tab strip. Floating tabs stay in <see cref="Tabs"/> (so they return to their slot) but are not shown.</summary>

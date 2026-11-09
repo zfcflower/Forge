@@ -11,10 +11,11 @@ using Xunit;
 namespace Forge.App.Tests.ViewModels;
 
 /// <summary>
-/// Pins five small rules that a refactor can silently drop: the running state of a sub-agent clears its waiting note, a
+/// Pins six small rules that a refactor can silently drop: the running state of a sub-agent clears its waiting note, a
 /// refresh requested during a project-tree refresh is coalesced instead of dropped, the finished menu opens the same entry
-/// again when it is chosen twice, a closed streaming segment is never rewritten, and the primary button keeps WCAG AA
-/// contrast in both themes.
+/// again when it is chosen twice, a closed streaming segment is never rewritten, the primary button keeps WCAG AA
+/// contrast in both themes, and StackPanel orientation stays declared locally on the five horizontal rows instead of a
+/// window-wide StackPanel style.
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class MinorRegressionTests
@@ -182,6 +183,94 @@ public sealed class MinorRegressionTests
     [Fact]
     public void Primary_button_text_keeps_wcag_aa_contrast_in_the_dark_theme() =>
         AssertPrimaryButtonContrast("Dark");
+
+    // ---------------------------------------------------------------- orientation
+
+    /// <summary>
+    /// Orientation responsibility split: no window-wide <c>Selector="StackPanel"</c> style may set Orientation (the
+    /// generic StackPanel keeps its vertical default), and each of the five rows that must run horizontally declares
+    /// <c>Orientation="Horizontal"</c> locally: the title-bar logo/wordmark lockup, the search-plus-host outer row, the
+    /// host-state inner row, the title-bar button group, and the settings-page bottom action row. Each row is located
+    /// by the children it already owns (names, automation ids, command bindings), not by counting StackPanels.
+    /// </summary>
+    [Fact]
+    public void StackPanel_orientation_is_declared_locally_on_the_five_horizontal_rows()
+    {
+        var document = LoadMainWindow();
+
+        var globalOrientation = document.Descendants()
+            .Where(static element => element.Name.LocalName == "Style")
+            .Where(static style => (style.Attribute("Selector")?.Value ?? string.Empty).Contains("StackPanel", StringComparison.Ordinal))
+            .SelectMany(static style => style.Descendants().Where(static element => element.Name.LocalName == "Setter"))
+            .Where(static setter => string.Equals(setter.Attribute("Property")?.Value, "Orientation", StringComparison.Ordinal))
+            .ToList();
+        Assert.True(
+            globalOrientation.Count == 0,
+            "MainWindow.axaml must not set Orientation from a Selector targeting StackPanel; " +
+            "the generic StackPanel keeps its vertical default and each horizontal row declares Orientation=\"Horizontal\" locally.");
+
+        var panels = document.Descendants().Where(static element => element.Name.LocalName == "StackPanel").ToList();
+
+        // Title-bar logo/wordmark lockup: owns the AppLogo image and the AppWordmark label.
+        AssertHorizontalRow(panels, "the title-bar logo/wordmark lockup", static panel => HasDescendantXName(panel, "AppLogo"));
+        // Search-plus-host outer row: owns the search affordance next to the host-state readout.
+        AssertHorizontalRow(panels, "the search-plus-host outer row", static panel => HasDescendantAutomationId(panel, "shell-search"));
+        // Host-state inner row: the readout itself.
+        AssertHorizontalRow(
+            panels,
+            "the host-state inner row",
+            static panel => string.Equals(panel.Attribute("AutomationProperties.AutomationId")?.Value, "host-state", StringComparison.Ordinal));
+        // Title-bar button group: owns the terminal/settings/minimize/maximize/close buttons.
+        AssertHorizontalRow(
+            panels,
+            "the title-bar button group",
+            static panel => HasDescendantAutomationId(panel, "terminal-open") && HasDescendantAutomationId(panel, "window-close"));
+        // Settings-page bottom action row: owns the reload/close actions.
+        AssertHorizontalRow(panels, "the settings-page bottom action row", static panel => HasDescendantCommand(panel, "ReloadSettingsCommand"));
+    }
+
+    private static void AssertHorizontalRow(IReadOnlyList<XElement> panels, string row, Func<XElement, bool> match)
+    {
+        var found = panels.Where(match).ToList();
+        Assert.True(found.Count == 1, "expected exactly one StackPanel for " + row + ", found " + found.Count + ".");
+        Assert.True(
+            string.Equals(found[0].Attribute("Orientation")?.Value, "Horizontal", StringComparison.Ordinal),
+            row + " must declare Orientation=\"Horizontal\" locally.");
+    }
+
+    private static bool HasDescendantXName(XElement element, string name) =>
+        element.Descendants().Any(descendant => string.Equals(
+            descendant.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value,
+            name,
+            StringComparison.Ordinal));
+
+    private static bool HasDescendantAutomationId(XElement element, string automationId) =>
+        element.Descendants().Any(descendant => string.Equals(
+            descendant.Attribute("AutomationProperties.AutomationId")?.Value,
+            automationId,
+            StringComparison.Ordinal));
+
+    private static bool HasDescendantCommand(XElement element, string commandFragment) =>
+        element.Descendants().Any(descendant =>
+            (descendant.Attribute("Command")?.Value ?? string.Empty).Contains(commandFragment, StringComparison.Ordinal));
+
+    /// <summary>The app window markup, found from the test binaries upwards.</summary>
+    private static XDocument LoadMainWindow()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "src", "Forge.App", "MainWindow.axaml");
+            if (File.Exists(candidate))
+            {
+                return XDocument.Load(candidate);
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("src/Forge.App/MainWindow.axaml was not found above " + AppContext.BaseDirectory);
+    }
 
     private static void AssertPrimaryButtonContrast(string theme)
     {

@@ -7,7 +7,6 @@ using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using AvaloniaPath = Avalonia.Controls.Shapes.Path;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.App.Views;
@@ -275,8 +274,8 @@ public sealed class TreeVisualTests : IDisposable
 
                 var mainTitle = Visible<TextBlock>(mainItem)
                     .First(static block => block.Text == "Ran 3 subagents");
-                var mainChevron = Visible<AvaloniaPath>(mainItem)
-                    .First(static path => path.Classes.Contains("tree-chevron"));
+                var mainChevron = Visible<FluentIcon>(mainItem)
+                    .First(static icon => icon.Classes.Contains("tree-chevron"));
 
                 return (ChevronAfterTitle: mainChevron.Bounds.X >= mainTitle.Bounds.Right,
                     RunningAnimated: IconOf(runningItem).Classes.Contains("agent-running-animated"),
@@ -449,29 +448,22 @@ public sealed class TreeVisualTests : IDisposable
         Visible<Border>(item).First(static border => border.Classes.Contains("tree-row-content"));
 
     /// <summary>
-    /// The row's kind icon. The file and spec trees stroke a <see cref="AvaloniaPath"/>; the project and agent trees
-    /// stroke a <see cref="LineIcon"/>, which carries the geometry in <see cref="LineIcon.Data"/> and the colour in its
-    /// inherited foreground instead of the path's stroke.
+    /// The row's kind icon. Every tree paints it with the built-in <see cref="FluentIcon"/>, which carries the geometry in
+    /// its <see cref="FluentIcon.Data"/> and the colour it fills with in the inherited foreground.
     /// </summary>
     private static Control IconOf(Visual item) =>
         Visible<Control>(item).First(static control => control.Classes.Contains("tree-icon"));
 
-    private static Geometry? IconData(Control icon) => icon switch
-    {
-        AvaloniaPath path => path.Data,
-        LineIcon line => line.Data,
-        _ => throw new InvalidOperationException($"the icon '{icon.GetType().Name}' carries no geometry."),
-    };
+    private static Geometry? IconData(Control icon) => icon is FluentIcon path
+        ? path.Data
+        : throw new InvalidOperationException($"the icon '{icon.GetType().Name}' carries no geometry.");
 
-    private static Color IconColour(Control icon) => icon switch
-    {
-        AvaloniaPath path => ((SolidColorBrush)path.Stroke!).Color,
-        LineIcon line => ((SolidColorBrush)line.Foreground!).Color,
-        _ => throw new InvalidOperationException($"the icon '{icon.GetType().Name}' carries no stroke colour."),
-    };
+    private static Color IconColour(Control icon) => icon is FluentIcon path
+        ? ((SolidColorBrush)path.Foreground!).Color
+        : throw new InvalidOperationException($"the icon '{icon.GetType().Name}' carries no colour.");
 
-    private static AvaloniaPath ChevronOf(Visual item) =>
-        Visible<AvaloniaPath>(item).First(static path => path.Classes.Contains("tree-chevron"));
+    private static FluentIcon ChevronOf(Visual item) =>
+        Visible<FluentIcon>(item).First(static icon => icon.Classes.Contains("tree-chevron"));
 
     private static IEnumerable<Border> GuideLines(Visual item) =>
         Visible<Border>(item).Where(static border => border.Width == 1);

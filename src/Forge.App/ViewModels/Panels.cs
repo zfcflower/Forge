@@ -776,7 +776,7 @@ internal sealed partial class FileDocumentViewModel : ObservableObject
 
     public string PathDisplay => path;
 
-    /// <summary>The mark followed by the file name, or the generic word until a file is loaded.</summary>
+    /// <summary>The file name, or the generic word until a file is loaded; the tab's leading mark is its icon, not a glyph.</summary>
     public string TabTitle => InspectorStrings.FileTabTitle((fileName ?? Loc.Instance[InspectorStrings.FilesName]) + (IsDirty ? " *" : string.Empty));
 
     public bool IsLoading
@@ -1325,34 +1325,74 @@ internal sealed class ChangesViewModel : ObservableObject, IDisposable
 // ---------------------------------------------------------------- todo
 
 /// <summary>
-/// One TODO row. Besides the title and the done box it shows the outcome of the step commit: the short commit id once the
-/// step was committed, or the failure reason with a "Retry commit" button. The commit fields come from the stored item and
-/// are never edited here; only a user action in this row (ticking the box, retrying) asks the panel to commit.
+/// One row of the TODO panel: a loose item of the session queue, or a step of a group. The row shows the outcome of its
+/// step commit below the title (the short sha once committed, or the failure reason with a "Retry commit" button), marks an
+/// item the user queued with an outline user icon, and offers a delete button that only appears while the row is hovered or
+/// keyboard focused. Nothing here writes the status: the agent's <c>todo</c> tool is the only writer, so the panel cannot
+/// tick a row done and a tick never commits a step (the agent's own done does, inside Core).
 /// </summary>
-internal sealed class TodoEntryViewModel : ObservableObject
+internal sealed class TodoRowViewModel : ObservableObject
 {
     /// <summary>Length of the commit id shown on the row.</summary>
     internal const int ShortCommitLength = 7;
 
     private readonly TodoListViewModel owner;
-    private bool isDone;
-    private string title;
 
-    public TodoEntryViewModel(TodoListViewModel owner, TodoItem item)
+    /// <param name="owner">The panel the row acts on (delete, retry).</param>
+    /// <param name="item">The stored item the row mirrors; a refresh rebuilds the row from the store.</param>
+    /// <param name="readOnly">True for a row of the panel's done section, which is a record and not an editor.</param>
+    public TodoRowViewModel(TodoListViewModel owner, TodoItem item, bool readOnly = false)
     {
         this.owner = owner;
         Id = item.Id;
-        title = item.Title;
-        isDone = item.Status == TodoStatus.Done;
-        Note = item.Note;
+        GroupId = item.GroupId;
         Order = item.Order;
+        Title = item.Title;
+        Status = item.Status;
+        Origin = item.Origin;
+        IsReadOnly = readOnly;
         CommitId = string.IsNullOrEmpty(item.CommitId) ? null : item.CommitId;
         CommitError = string.IsNullOrWhiteSpace(item.CommitError) ? null : item.CommitError;
         RetryCommitCommand = new AsyncRelayCommand(
             ct => owner.RetryCommitAsync(Id, ct),
             () => HasCommitError,
             owner.ReportFailure);
+        RemoveCommand = new RelayCommand(() => owner.Remove(Id));
     }
+
+    public string Id { get; }
+
+    /// <summary>The group this row is a step of, or null for a loose item of the session queue (both are a layer of their own).</summary>
+    public string? GroupId { get; }
+
+    /// <summary>Dense, zero-based position inside the row's own layer (the loose queue, or one group).</summary>
+    public int Order { get; }
+
+    public string Title { get; }
+
+    public TodoStatus Status { get; }
+
+    public TodoOrigin Origin { get; }
+
+    public bool IsDone => Status == TodoStatus.Done;
+
+    public bool IsPaused => Status == TodoStatus.Paused;
+
+    public bool IsInProgress => Status == TodoStatus.InProgress;
+
+    public bool IsPending => Status == TodoStatus.Pending;
+
+    /// <summary>Only a not-started row may be dragged, and a drag only ever reorders it inside its own layer.</summary>
+    public bool CanDrag => IsPending;
+
+    /// <summary>True for an item the user queued in the panel, which shows the outline user mark at its right end.</summary>
+    public bool IsUserAdded => Origin == TodoOrigin.User;
+
+    /// <summary>True for a row of the done section: it has no delete button, the section is a record of what happened.</summary>
+    public bool IsReadOnly { get; }
+
+    /// <summary>The accessible name of the row's status icon ("not started", "in progress", "paused", "done").</summary>
+    public string StatusName => Loc.Instance[StatusKey(Status)];
 
     /// <summary>The full commit id of the step, or null when the step has no commit.</summary>
     public string? CommitId { get; }
@@ -1365,57 +1405,151 @@ internal sealed class TodoEntryViewModel : ObservableObject
     /// <summary>Why the step commit failed (git's message, English), or null.</summary>
     public string? CommitError { get; }
 
-    /// <summary>A failed commit only matters while the item is done: unticking it hides the marker and the retry button.</summary>
-    public bool HasCommitError => isDone && CommitError is not null;
+    public bool HasCommitError => CommitError is not null;
+
+    /// <summary>The row's second line: the short sha of the step's commit, or the failure that has to be dealt with.</summary>
+    public bool HasDetailLine => HasCommitId || HasCommitError;
 
     /// <summary>Commits the step again (the failure was a hook, a rebase in progress, a detached HEAD, ...).</summary>
     public AsyncRelayCommand RetryCommitCommand { get; }
 
-    public string Id { get; }
+    /// <summary>Deletes the row (a loose item or a step); the done section never shows it.</summary>
+    public RelayCommand RemoveCommand { get; }
 
-    public int Order { get; }
-
-    public string Title
+    /// <summary>The table key of one status, shared by a row and the group it belongs to.</summary>
+    internal static string StatusKey(TodoStatus status) => status switch
     {
-        get => title;
-        set
-        {
-            if (Set(ref title, value))
-            {
-                owner.Update(Id, value, null);
-            }
-        }
-    }
+        TodoStatus.InProgress => InspectorStrings.TodoStatusInProgress,
+        TodoStatus.Paused => InspectorStrings.TodoStatusPaused,
+        TodoStatus.Done => InspectorStrings.TodoStatusDone,
+        _ => InspectorStrings.TodoStatusPending,
+    };
 
-    public string? Note { get; }
-
-    public bool IsDone
-    {
-        get => isDone;
-        set
-        {
-            if (Set(ref isDone, value))
-            {
-                OnPropertyChanged(nameof(HasCommitError));
-                RetryCommitCommand.NotifyCanExecuteChanged();
-
-                // Only the not-done to done edge made in this row commits a step. Rows rebuilt from the store (the agent's
-                // update arrives that way) set the field directly and never come through here.
-                owner.Update(Id, null, value ? TodoStatus.Done : TodoStatus.Pending, commitStep: value);
-            }
-        }
-    }
-
-    public RelayCommand RemoveCommand => new(() => owner.Remove(Id));
-
-    public RelayCommand MoveUpCommand => new(() => owner.Move(Id, Order - 1));
-
-    public RelayCommand MoveDownCommand => new(() => owner.Move(Id, Order + 1));
+    /// <summary>Re-reads the texts that follow the interface language (the panel calls this on a language switch).</summary>
+    internal void RefreshTexts() => OnPropertyChanged(nameof(StatusName));
 }
 
 /// <summary>
-/// The TODO panel of the active session; the agent's <c>todo</c> tool writes the same rows. The summary is kept as a
-/// <see cref="LocText"/> and resolved when it is read, so a language switch only has to re-raise it.
+/// One group of the session's plan: a title, its steps and the progress the steps add up to. The status is derived from the
+/// steps and never stored - all done, one in progress, one paused, else pending (an empty group is pending). A group carries
+/// no actions of its own: no delete button and no chevron while it is unfinished, because an unfinished plan stays open. A
+/// finished group folds to a single row in the done section and opens again from there.
+/// </summary>
+internal sealed class TodoGroupViewModel : ObservableObject
+{
+    private bool isExpanded;
+
+    /// <param name="owner">The panel its step rows act on.</param>
+    /// <param name="group">The stored group the row mirrors.</param>
+    /// <param name="steps">The group's steps, already in their own layer order.</param>
+    /// <param name="readOnly">True when the group is finished and sits in the done section.</param>
+    public TodoGroupViewModel(TodoListViewModel owner, TodoGroup group, IReadOnlyList<TodoItem> steps, bool readOnly)
+    {
+        Id = group.Id;
+        Order = group.Order;
+        Title = group.Title;
+        foreach (var step in steps)
+        {
+            Entries.Add(new TodoRowViewModel(owner, step, readOnly));
+        }
+
+        Status = DeriveStatus(Entries);
+        ToggleCommand = new RelayCommand(() => IsExpanded = !IsExpanded);
+    }
+
+    public string Id { get; }
+
+    /// <summary>Dense, zero-based position across the session's groups.</summary>
+    public int Order { get; }
+
+    public string Title { get; }
+
+    /// <summary>The group's steps, in their own layer order.</summary>
+    public ObservableCollection<TodoRowViewModel> Entries { get; } = [];
+
+    /// <summary>What the steps add up to when the group was built (a panel row never changes status on its own).</summary>
+    public TodoStatus Status { get; }
+
+    public bool IsDone => Status == TodoStatus.Done;
+
+    public bool IsPaused => Status == TodoStatus.Paused;
+
+    public bool IsInProgress => Status == TodoStatus.InProgress;
+
+    public bool IsPending => Status == TodoStatus.Pending;
+
+    public int TotalCount => Entries.Count;
+
+    public int DoneCount => Entries.Count(static entry => entry.IsDone);
+
+    /// <summary>"1/3": how many of the group's steps are done, out of all of them.</summary>
+    public string Progress => InspectorStrings.TodoProgress(DoneCount, TotalCount);
+
+    /// <summary>"4 个步骤" / "4 steps": the count a folded group shows in the done section.</summary>
+    public string StepsText => InspectorStrings.TodoGroupSteps(TotalCount).Resolve();
+
+    /// <summary>The accessible name of the group's status icon (its derived status).</summary>
+    public string StatusName => Loc.Instance[TodoRowViewModel.StatusKey(Status)];
+
+    /// <summary>"展开" / "收起": what the done section's fold row does next.</summary>
+    public string ToggleName => Loc.Instance[IsExpanded ? InspectorStrings.TodoCollapse : InspectorStrings.TodoExpand];
+
+    /// <summary>Open in the done section (a finished group is folded by default); an unfinished group is always open.</summary>
+    public bool IsExpanded
+    {
+        get => isExpanded;
+        set
+        {
+            if (Set(ref isExpanded, value))
+            {
+                OnPropertyChanged(nameof(ToggleName));
+            }
+        }
+    }
+
+    public RelayCommand ToggleCommand { get; }
+
+    /// <summary>All done, else one in progress, else one paused, else pending; an empty group is pending.</summary>
+    internal static TodoStatus DeriveStatus(IReadOnlyList<TodoRowViewModel> steps)
+    {
+        if (steps.Count == 0)
+        {
+            return TodoStatus.Pending;
+        }
+
+        if (steps.All(static step => step.IsDone))
+        {
+            return TodoStatus.Done;
+        }
+
+        if (steps.Any(static step => step.IsInProgress))
+        {
+            return TodoStatus.InProgress;
+        }
+
+        return steps.Any(static step => step.IsPaused) ? TodoStatus.Paused : TodoStatus.Pending;
+    }
+
+    /// <summary>Re-reads the texts that follow the interface language (the panel calls this on a language switch).</summary>
+    internal void RefreshTexts()
+    {
+        OnPropertyChanged(nameof(Progress));
+        OnPropertyChanged(nameof(StepsText));
+        OnPropertyChanged(nameof(StatusName));
+        OnPropertyChanged(nameof(ToggleName));
+        foreach (var entry in Entries)
+        {
+            entry.RefreshTexts();
+        }
+    }
+}
+
+/// <summary>
+/// The TODO panel of the active session: the pinned queue row on top, then the unfinished groups with their steps, the loose
+/// queue, and last the done section (finished groups folded, then finished loose items). The agent's <c>todo</c> tool is the
+/// only writer of the status; the panel queues an item, deletes a row, reorders a row inside its own layer and retries a
+/// failed step commit. The status line is kept as a <see cref="LocText"/> and resolved when it is read, so a language switch
+/// only has to re-raise it.
 /// </summary>
 internal sealed class TodoListViewModel : ObservableObject, IDisposable
 {
@@ -1423,12 +1557,12 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
     private readonly IStepCommitter? committer;
     private string sessionId = string.Empty;
     private string newTitle = string.Empty;
-    private LocText summary = new(InspectorStrings.TodoNoSession);
+    private LocText statusText = new(InspectorStrings.TodoNoSession);
     private int generation;
 
-    /// <param name="store">The checklist the panel edits and refreshes from.</param>
+    /// <param name="store">The checklist the panel reads and edits.</param>
     /// <param name="committer">
-    /// Commits a step when the user ticks an item done or retries a failed commit; null (a unit test) means the panel only
+    /// Commits a step again when its row's "Retry commit" button runs; null (a unit test) means the panel only reads and
     /// edits the checklist. The agent's own updates commit inside Core, never through here.
     /// </param>
     public TodoListViewModel(ITodoStore store, IStepCommitter? committer = null)
@@ -1438,26 +1572,24 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
         AddCommand = new AsyncRelayCommand(
             ct => AddAsync(ct),
             () => sessionId.Length > 0 && !string.IsNullOrWhiteSpace(newTitle),
-            exception => SetSummary(LocText.Literal(exception.Message)));
-        RefreshCommand = new AsyncRelayCommand(
-            ct => RefreshAsync(ct),
-            () => sessionId.Length > 0,
-            exception => SetSummary(LocText.Literal(exception.Message)));
-        ClearDoneCommand = new AsyncRelayCommand(
-            ct => ClearDoneAsync(ct),
-            () => Items.Any(static item => item.IsDone),
-            exception => SetSummary(LocText.Literal(exception.Message)));
+            exception => SetStatus(LocText.Literal(exception.Message)));
         store.Changed += OnStoreChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
-    public ObservableCollection<TodoEntryViewModel> Items { get; } = [];
+    /// <summary>The unfinished groups, in group order; each one carries its steps.</summary>
+    public ObservableCollection<TodoGroupViewModel> Groups { get; } = [];
+
+    /// <summary>The unfinished loose items of the session queue, in queue order.</summary>
+    public ObservableCollection<TodoRowViewModel> Loose { get; } = [];
+
+    /// <summary>The finished groups, in group order; each is folded to one row and opens on demand.</summary>
+    public ObservableCollection<TodoGroupViewModel> DoneGroups { get; } = [];
+
+    /// <summary>The finished loose items, in queue order.</summary>
+    public ObservableCollection<TodoRowViewModel> DoneLoose { get; } = [];
 
     public AsyncRelayCommand AddCommand { get; }
-
-    public AsyncRelayCommand RefreshCommand { get; }
-
-    public AsyncRelayCommand ClearDoneCommand { get; }
 
     public string SessionId => sessionId;
 
@@ -1473,10 +1605,17 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>"3/8 完成" for the attached session, or why there is nothing to show, in the language of the moment it is read.</summary>
-    public string Summary => summary.Resolve();
+    /// <summary>Why there is nothing to show (no session, an empty checklist, a store failure); empty while the panel has rows.</summary>
+    public string StatusText => statusText.Resolve();
 
-    public bool IsEmpty => Items.Count == 0;
+    /// <summary>Only "nothing to show" and failures get a line of their own; a panel with rows shows no summary at all.</summary>
+    public bool HasStatus => StatusText.Length > 0;
+
+    /// <summary>True when the done section has anything in it.</summary>
+    public bool HasDone => DoneGroups.Count > 0 || DoneLoose.Count > 0;
+
+    /// <summary>True when the session has no group, no loose item and nothing done.</summary>
+    public bool IsEmpty => Groups.Count == 0 && Loose.Count == 0 && !HasDone;
 
     public void Attach(string? newSessionId)
     {
@@ -1487,20 +1626,18 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
         }
 
         sessionId = next;
-        Items.Clear();
-        OnPropertyChanged(nameof(IsEmpty));
+        ClearLists();
         AddCommand.NotifyCanExecuteChanged();
-        RefreshCommand.NotifyCanExecuteChanged();
         _ = RefreshAsync(CancellationToken.None);
     }
 
+    /// <summary>Reads the session's items and groups (one read each) and rebuilds the panel's four lists from them.</summary>
     public async Task RefreshAsync(CancellationToken ct)
     {
         if (sessionId.Length == 0)
         {
-            SetSummary(new LocText(InspectorStrings.TodoNoSession));
-            Items.Clear();
-            OnPropertyChanged(nameof(IsEmpty));
+            SetStatus(new LocText(InspectorStrings.TodoNoSession));
+            ClearLists();
             return;
         }
 
@@ -1509,57 +1646,18 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
         {
             var id = sessionId;
             var items = await BackgroundRead.RunAsync(token => store.ListAsync(id, token), ct).ConfigureAwait(true);
+            var groups = await BackgroundRead.RunAsync(token => store.ListGroupsAsync(id, token), ct).ConfigureAwait(true);
             if (current != Volatile.Read(ref generation))
             {
                 return;
             }
 
-            Items.Clear();
-            foreach (var item in items)
-            {
-                Items.Add(new TodoEntryViewModel(this, item));
-            }
-
-            SetSummary(Items.Count == 0
-                ? new LocText(InspectorStrings.TodoEmpty)
-                : InspectorStrings.TodoSummary(Items.Count(static item => item.IsDone), Items.Count));
-            OnPropertyChanged(nameof(IsEmpty));
-            ClearDoneCommand.NotifyCanExecuteChanged();
+            Rebuild(items, groups);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {
-            SetSummary(LocText.Literal(exception.Message));
+            SetStatus(LocText.Literal(exception.Message));
         }
-    }
-
-    /// <summary>
-    /// Writes a title or status change on the thread pool. With <paramref name="commitStep"/> (the user just ticked the item
-    /// done) the step is committed after the status write, with the item exactly as the store returned it, still off the UI
-    /// thread. The commit result reaches the row through the store's <c>Changed</c> refresh, like every other edit.
-    /// </summary>
-    internal void Update(string id, string? title, TodoStatus? status, bool commitStep = false)
-    {
-        _ = Task.Run(
-            async () =>
-            {
-                try
-                {
-                    var updated = await store.UpdateAsync(id, title, status, null, CancellationToken.None).ConfigureAwait(false);
-                    if (commitStep && committer is not null && updated is { Status: TodoStatus.Done })
-                    {
-                        await committer.CommitStepAsync(updated, CancellationToken.None).ConfigureAwait(false);
-                    }
-                }
-                catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
-                {
-                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
-                }
-                catch (Exception exception) when (commitStep && exception is not OperationCanceledException)
-                {
-                    // The committer reports its expected failures as results; anything thrown is a bug or a dead store.
-                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
-                }
-            });
     }
 
     /// <summary>
@@ -1587,9 +1685,10 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
             ct);
     }
 
-    /// <summary>Shows an unexpected failure of a row command in the panel summary line.</summary>
-    internal void ReportFailure(Exception exception) => SetSummary(LocText.Literal(exception.Message));
+    /// <summary>Shows an unexpected failure of a row command in the panel's status line.</summary>
+    internal void ReportFailure(Exception exception) => SetStatus(LocText.Literal(exception.Message));
 
+    /// <summary>Deletes a row (a loose item or a step) on the thread pool; a failure lands in the status line.</summary>
     internal void Remove(string id) =>
         _ = Task.Run(
             async () =>
@@ -1600,24 +1699,30 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
+                    await Dispatcher.UIThread.InvokeAsync(() => SetStatus(LocText.Literal(exception.Message)));
                 }
             });
 
-    internal void Move(string id, int order) =>
-        _ = Task.Run(
-            async () =>
+    /// <summary>
+    /// Reorders a row inside its own layer (a drag inside the loose queue or inside one group); the store clamps the order to
+    /// the layer. Runs on the thread pool; a failure lands in the status line.
+    /// </summary>
+    internal Task MoveAsync(string id, int order, CancellationToken ct) =>
+        BackgroundRead.RunAsync(
+            async token =>
             {
                 try
                 {
-                    await store.MoveAsync(id, order, CancellationToken.None).ConfigureAwait(false);
+                    await store.MoveAsync(id, order, token).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() => SetSummary(LocText.Literal(exception.Message)));
+                    await Dispatcher.UIThread.InvokeAsync(() => SetStatus(LocText.Literal(exception.Message)));
                 }
-            });
+            },
+            ct);
 
+    /// <summary>Queues a loose item for the agent; the agent promotes it into a group when it takes the work on.</summary>
     private async Task AddAsync(CancellationToken ct)
     {
         var title = newTitle.Trim();
@@ -1628,22 +1733,52 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
 
         NewTitle = string.Empty;
         var id = sessionId;
-        await BackgroundRead.RunAsync(token => store.AddAsync(id, title, null, null, token), ct).ConfigureAwait(true);
+        await BackgroundRead
+            .RunAsync(token => store.AddAsync(new TodoAddRequest(id, title, Origin: TodoOrigin.User), token), ct)
+            .ConfigureAwait(true);
     }
 
-    private async Task ClearDoneAsync(CancellationToken ct)
+    /// <summary>
+    /// Splits what the store returned into the panel's four lists. A step belongs to the group named by its
+    /// <see cref="TodoItem.GroupId"/>; a loose item (no group) stands in the session queue. Finished groups (folded, in group
+    /// order) come last, before the finished loose items.
+    /// </summary>
+    private void Rebuild(IReadOnlyList<TodoItem> items, IReadOnlyList<TodoGroup> groups)
     {
-        var done = Items.Where(static item => item.IsDone).Select(static item => item.Id).ToArray();
-        await BackgroundRead.RunAsync(
-                async token =>
-                {
-                    foreach (var id in done)
-                    {
-                        await store.RemoveAsync(id, token).ConfigureAwait(false);
-                    }
-                },
-                ct)
-            .ConfigureAwait(true);
+        ClearLists();
+
+        foreach (var group in groups.OrderBy(static group => group.Order).ThenBy(static group => group.Id, StringComparer.Ordinal))
+        {
+            var steps = items
+                .Where(item => string.Equals(item.GroupId, group.Id, StringComparison.Ordinal))
+                .OrderBy(static item => item.Order)
+                .ThenBy(static item => item.Id, StringComparer.Ordinal)
+                .ToList();
+            var finished = steps.Count > 0 && steps.All(static step => step.Status == TodoStatus.Done);
+            var model = new TodoGroupViewModel(this, group, steps, readOnly: finished);
+            (finished ? DoneGroups : Groups).Add(model);
+        }
+
+        foreach (var item in items
+                     .Where(static item => item.GroupId is null)
+                     .OrderBy(static item => item.Order)
+                     .ThenBy(static item => item.Id, StringComparer.Ordinal))
+        {
+            var done = item.Status == TodoStatus.Done;
+            (done ? DoneLoose : Loose).Add(new TodoRowViewModel(this, item, readOnly: done));
+        }
+
+        SetStatus(IsEmpty ? new LocText(InspectorStrings.TodoEmpty) : default);
+    }
+
+    private void ClearLists()
+    {
+        Groups.Clear();
+        Loose.Clear();
+        DoneGroups.Clear();
+        DoneLoose.Clear();
+        OnPropertyChanged(nameof(HasDone));
+        OnPropertyChanged(nameof(IsEmpty));
     }
 
     private void OnStoreChanged(string changedSessionId)
@@ -1654,14 +1789,28 @@ internal sealed class TodoListViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void SetSummary(LocText value)
+    private void SetStatus(LocText value)
     {
-        summary = value;
-        OnPropertyChanged(nameof(Summary));
+        statusText = value;
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(HasStatus));
     }
 
-    /// <summary>The summary is a <see cref="LocText"/>; a language switch only has to re-read it.</summary>
-    private void OnLanguageChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(Summary));
+    /// <summary>The status line and the rows' derived texts are resolved when they are read; a language switch re-reads them.</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(HasStatus));
+        foreach (var group in Groups.Concat(DoneGroups))
+        {
+            group.RefreshTexts();
+        }
+
+        foreach (var row in Loose.Concat(DoneLoose))
+        {
+            row.RefreshTexts();
+        }
+    }
 
     /// <summary>Drops the language subscription; a panel that is gone must not be refreshed by the next language switch.</summary>
     public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;

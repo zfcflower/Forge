@@ -118,10 +118,79 @@ public sealed class SessionEventRoutingTests
         Assert.Contains(RootText, main);
     }
 
+    /// <summary>
+    /// The strip badge answers "how many sub-agents are working": one that is still waiting for a run slot is live but not
+    /// running, a finished one has left the live list, and neither may be counted.
+    /// </summary>
+    [Fact]
+    public async Task The_strip_badge_counts_only_sub_agents_that_hold_a_run_slot()
+    {
+        const string SecondAgentId = "child-agent-two";
+        const string SecondSessionId = "child-session-two";
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var reading = await session.Dispatch(
+            async () =>
+            {
+                var workspace = CreateWorkspace();
+                var notifications = 0;
+                workspace.PropertyChanged += (_, e) =>
+                {
+                    if (string.Equals(e.PropertyName, nameof(SessionWorkspaceViewModel.RunningSubAgentCount), StringComparison.Ordinal))
+                    {
+                        notifications++;
+                    }
+                };
+
+                var readings = new List<(string Step, int Running, bool Badge)>
+                {
+                    ("nothing started", workspace.RunningSubAgentCount, workspace.HasRunningSubAgents),
+                };
+
+                Emit(workspace, Started());
+                Assert.True(await PumpUntilAsync(() => workspace.SubAgents.Count == 1), "the child was never opened");
+                readings.Add(("started", workspace.RunningSubAgentCount, workspace.HasRunningSubAgents));
+
+                // A second child joins while the first is still queued: two live children, none of them running.
+                Emit(workspace, Started(SecondAgentId, SecondSessionId));
+                Emit(workspace, new AgentSubAgentQueued(ChildAgentId, At));
+                Assert.True(await PumpUntilAsync(() => workspace.SubAgents.Count == 2), "the second child was never opened");
+                readings.Add(("queued", workspace.RunningSubAgentCount, workspace.HasRunningSubAgents));
+
+                Emit(workspace, new AgentSubAgentRunning(ChildAgentId, At));
+                Assert.True(
+                    await PumpUntilAsync(() => workspace.RunningSubAgentCount == 1),
+                    "the child that acquired a slot never reached the badge");
+                readings.Add(("one running", workspace.RunningSubAgentCount, workspace.HasRunningSubAgents));
+                var name = workspace.SubAgentToggleName;
+
+                Emit(workspace, Finished(ChildAgentId));
+                Assert.True(
+                    await PumpUntilAsync(() => workspace.RunningSubAgentCount == 0),
+                    "a finished child kept its slot on the badge");
+                readings.Add(("finished", workspace.RunningSubAgentCount, workspace.HasRunningSubAgents));
+
+                return (readings, notifications, name, label: workspace.SubAgentLabel);
+            },
+            CancellationToken.None);
+
+        Assert.Equal([0, 0, 0, 1, 0], reading.readings.Select(static entry => entry.Running));
+        Assert.Equal([false, false, false, true, false], reading.readings.Select(static entry => entry.Badge));
+        Assert.True(reading.notifications > 0, "the badge was never told to re-read the count");
+        // The label is the noun only, so the count can never appear twice; the button's accessible name carries it instead.
+        Assert.False(reading.label.Any(char.IsAsciiDigit), "the chip label still spells out a count: " + reading.label);
+        Assert.Contains("1", reading.name);
+    }
+
     private static void Emit(SessionWorkspaceViewModel workspace, AgentEvent value) => Sink.Invoke(workspace, [value]);
 
     private static AgentSubAgentStarted Started() =>
         new("root", ChildAgentId, ChildKind, ChildTask, "model", ChildSessionId, At);
+
+    private static AgentSubAgentStarted Started(string childAgentId, string childSessionId) =>
+        new("root", childAgentId, ChildKind, ChildTask, "model", childSessionId, At);
+
+    private static AgentSubAgentFinished Finished(string childAgentId) =>
+        new(childAgentId, SubAgentStatus.Completed, new TokenUsage(0, 0), TimeSpan.Zero, null, At);
 
     private static SessionWorkspaceViewModel CreateWorkspace()
     {

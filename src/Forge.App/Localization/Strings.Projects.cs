@@ -50,6 +50,7 @@ internal static class ProjectStrings
     public const string AddProjectKey = "project.addProject";
     public const string AddProjectNameKey = "project.addProjectName";
     public const string AddProjectTooltipKey = "project.addProjectTooltip";
+    public const string NewBranchTooltipKey = "project.newBranchTooltip";
     public const string NewGeneralSessionTooltipKey = "project.newGeneralSession";
 
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
@@ -92,6 +93,7 @@ internal static class ProjectStrings
         Loc.Register(AddProjectKey, "+ 添加项目", "+ Add project");
         Loc.Register(AddProjectNameKey, "添加项目", "Add project");
         Loc.Register(AddProjectTooltipKey, "添加一个 git 仓库作为项目", "Add a git repository as a project");
+        Loc.Register(NewBranchTooltipKey, "在该项目中新建分支", "New branch in this project");
         Loc.Register(NewGeneralSessionTooltipKey, "新建常规对话", "New general chat");
     }
 
@@ -177,6 +179,8 @@ internal static class ProjectStrings
     public static string AddProjectName => Loc.Instance[AddProjectNameKey];
 
     public static string AddProjectTooltip => Loc.Instance[AddProjectTooltipKey];
+
+    public static string NewBranchTooltip => Loc.Instance[NewBranchTooltipKey];
 
     public static string NewGeneralSessionTooltip => Loc.Instance[NewGeneralSessionTooltipKey];
 }

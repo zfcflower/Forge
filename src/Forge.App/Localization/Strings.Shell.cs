@@ -33,6 +33,7 @@ internal static class ShellStrings
     // ---------------------------------------------------------------- workbench titles
 
     public const string ProjectsTitleKey = "workbench.projects";
+    public const string GeneralChatsTitleKey = "workbench.generalChats";
     public const string FilesTitleKey = "workbench.files";
     public const string DocumentsTitleKey = "workbench.documents";
     public const string SubAgentsTitleKey = "workbench.subAgents";
@@ -152,6 +153,9 @@ internal static class ShellStrings
     // ---------------------------------------------------------------- workbench accessors
 
     public static string ProjectsTitle => Loc.Instance[ProjectsTitleKey];
+
+    /// <summary>The general-chats panel above the projects; the same words as the row it used to head inside one tree.</summary>
+    public static string GeneralChatsTitle => Loc.Instance[GeneralChatsTitleKey];
 
     public static string FilesTitle => Loc.Instance[FilesTitleKey];
 
@@ -327,6 +331,7 @@ internal static class ShellStrings
         Loc.Register(CloseWindowKey, "关闭窗口", "Close window");
 
         Loc.Register(ProjectsTitleKey, "项目", "Projects");
+        Loc.Register(GeneralChatsTitleKey, "常规对话", "General chats");
         Loc.Register(FilesTitleKey, "文件", "Files");
         Loc.Register(DocumentsTitleKey, "会话", "Sessions");
         Loc.Register(SubAgentsTitleKey, "子 Agent", "Sub-agents");

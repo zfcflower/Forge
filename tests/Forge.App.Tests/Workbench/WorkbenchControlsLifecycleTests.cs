@@ -80,7 +80,7 @@ public sealed class WorkbenchControlsLifecycleTests
 
             // The old model is no longer the host's model: mutating it must not move, open or close anything.
             oldTab.Title = "renamed";
-            oldLayout.IsBottomCollapsed = true;
+            oldLayout.IsBottomMinimized = true;
             oldLayout.Project.Width = 999;
             WorkbenchLifecycle.Settle(scene.Window);
             var noReaction = scene.Window.OwnedWindows.Count == 0;
@@ -98,44 +98,6 @@ public sealed class WorkbenchControlsLifecycleTests
         Assert.True(result.oldNotVisible);
         Assert.True(result.noReaction);
         Assert.True(result.newWindowOpened);
-    }
-
-    [Fact]
-    public async Task Runtime_bottom_tabs_update_the_collapsed_strip_and_unsubscribe_after_removal()
-    {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
-
-        var result = await session.Dispatch(() =>
-        {
-            var scene = WorkbenchLifecycle.Open(WorkbenchLifecycle.NewLayout());
-            var layout = scene.Layout;
-
-            var tab = layout.OpenTab(layout.BottomTabs, WorkbenchIds.SubAgentTab("agent-1"), TabKind.SubAgent, new object(), "one");
-            layout.IsBottomCollapsed = true;
-            WorkbenchLifecycle.Settle(scene.Window);
-
-            var buttonId = "autohide-bottom-" + tab.Id;
-            var first = WorkbenchLifecycle.BottomStripText(scene.Window, buttonId);
-
-            tab.Title = "renamed";
-            WorkbenchLifecycle.Settle(scene.Window);
-            var renamed = WorkbenchLifecycle.BottomStripText(scene.Window, buttonId);
-
-            layout.CloseTab(tab);
-            WorkbenchLifecycle.Settle(scene.Window);
-            var removed = WorkbenchLifecycle.BottomStripText(scene.Window, buttonId) is null;
-
-            tab.Title = "after-close";
-            WorkbenchLifecycle.Settle(scene.Window);
-            var stillGone = WorkbenchLifecycle.BottomStripText(scene.Window, buttonId) is null;
-
-            return (first, renamed, removed, stillGone);
-        }, WorkbenchLifecycle.Budget());
-
-        Assert.Equal("one", result.first);
-        Assert.Equal("renamed", result.renamed);
-        Assert.True(result.removed);
-        Assert.True(result.stillGone);
     }
 
     [Fact]
@@ -237,8 +199,6 @@ internal static class WorkbenchLifecycle
     public static Window? FloatingWindow(Window owner, string itemId) =>
         owner.OwnedWindows.FirstOrDefault(window => AutomationProperties.GetAutomationId(window) == "floating-" + itemId);
 
-    public static string? BottomStripText(Window window, string automationId) =>
-        TryFind<AutoHideButton>(window, automationId)?.Content is TextBlock label ? label.Text : null;
 }
 
 internal sealed record LifecycleScene(Window Window, WorkbenchHost Host, WorkbenchLayout Layout);

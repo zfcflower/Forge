@@ -13,7 +13,7 @@ public sealed class LayoutSnapshotTests
 {
     // Wide enough that Main never reaches its minimum, so restored widths are exactly the stored ones.
     private const double WideWindowWidth = 2000;
-    private const int LayoutVersion = 3;
+    private const int LayoutVersion = 5;
     private const int DockEraVersion = 2;
     private const int OpenTabsVersion = 2;
     private const string InspectorRole = "Inspector";
@@ -64,17 +64,17 @@ public sealed class LayoutSnapshotTests
     }
 
     [Fact]
-    public void Round_trip_restores_bottom_height_and_collapsed_state()
+    public void Round_trip_restores_bottom_height_and_minimized_state()
     {
         const double bottomHeight = 300;
         var source = EditedLayout();
         source.BottomHeight = bottomHeight;
-        source.IsBottomCollapsed = true;
+        source.IsBottomMinimized = true;
 
         var restored = RestoreFrom(source);
 
         Assert.Equal(bottomHeight, restored.BottomHeight);
-        Assert.True(restored.IsBottomCollapsed);
+        Assert.True(restored.IsBottomMinimized);
     }
 
     [Fact]
@@ -269,7 +269,7 @@ public sealed class LayoutSnapshotTests
     }
 
     [Fact]
-    public void Current_layout_version_is_3()
+    public void Current_layout_version_is_5()
     {
         Assert.Equal(LayoutVersion, LayoutSnapshot.CurrentVersion);
     }

@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -20,7 +20,10 @@ internal static class StorageSchema
     public const string KindGeneral = "General";
     public const string TodoPending = "Pending";
     public const string TodoInProgress = "InProgress";
+    public const string TodoPaused = "Paused";
     public const string TodoDone = "Done";
+    public const string TodoOriginAgent = "agent";
+    public const string TodoOriginUser = "user";
 
     private const string BaseSchemaSql = """
         CREATE TABLE IF NOT EXISTS sessions (
@@ -129,6 +132,21 @@ internal static class StorageSchema
         );
         """;
 
+    private const string V4SchemaSql = """
+        CREATE TABLE IF NOT EXISTS todo_groups (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            title       TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_todo_groups_session ON todo_groups (session_id, order_index);
+
+        ALTER TABLE todos ADD COLUMN group_id TEXT NULL;
+        ALTER TABLE todos ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent';
+        CREATE INDEX IF NOT EXISTS ix_todos_group ON todos (session_id, group_id, order_index);
+        """;
+
     /// <summary>
     /// Every timestamp column of <c>forge.db</c>, with the columns that identify its row. The v3 step repairs stored
     /// values against this list and builds the write guards from it, so a column added to the schema later has one
@@ -144,6 +162,7 @@ internal static class StorageSchema
         ("ui_state", ["key"], ["updated_at"]),
         ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
         ("plan_summaries", ["session_id"], ["updated_at"]),
+        ("todo_groups", ["id"], ["updated_at"]),
     ];
 
     private const string FtsSchemaSql =
@@ -229,6 +248,9 @@ internal static class StorageSchema
             case 2:
                 await MigrateToV3Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
+            case 3:
+                await MigrateToV4Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
         }
@@ -289,22 +311,45 @@ internal static class StorageSchema
     /// The v3 step: repair timestamps a writer outside Forge stored in another legal spelling, then make the database
     /// itself refuse that spelling. The repair runs first, because the guards it installs afterwards would reject the
     /// very history being repaired; both halves share the step's transaction, so an interrupted upgrade leaves the
-    /// data and the trigger set exactly as they were.
+    /// data and the trigger set exactly as they were. Only the tables that exist at this point are touched: a table a
+    /// later step adds (the v4 <c>todo_groups</c>) is normalized and guarded by the step that creates it.
     /// </summary>
     private static async Task MigrateToV3Async(
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken ct)
     {
+        var tables = await ExistingTablesAsync(connection, transaction, ct).ConfigureAwait(false);
         foreach (var (table, key, columns) in TimestampColumns)
         {
+            if (!tables.Contains(table))
+            {
+                continue;
+            }
+
             foreach (var column in columns)
             {
                 await NormalizeTimestampColumnAsync(connection, transaction, table, key, column, ct).ConfigureAwait(false);
             }
         }
 
-        await ExecuteAsync(connection, transaction, TimestampGuardSql(), ct).ConfigureAwait(false);
+        await ExecuteAsync(connection, transaction, TimestampGuardSql(tables), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The v4 step: named plans (<c>todo_groups</c>) and the two columns that place a todo item in one - <c>group_id</c>
+    /// (null for a loose item of the session's queue) and its <c>origin</c>. Existing rows need no rewrite: their
+    /// <c>group_id</c> stays null, which is exactly the loose queue, and their <c>order_index</c> already is the queue
+    /// order. The new timestamp column is registered in <see cref="TimestampColumns"/>, so the guards are installed once
+    /// more - every pair is dropped and recreated from that list, which is why the step is idempotent for v3's triggers.
+    /// </summary>
+    private static async Task MigrateToV4Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await ExecuteAsync(connection, transaction, V4SchemaSql, ct).ConfigureAwait(false);
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -363,16 +408,58 @@ internal static class StorageSchema
     }
 
     /// <summary>
-    /// One <c>BEFORE INSERT</c> and one <c>BEFORE UPDATE</c> trigger per timestamp column, each aborting any write whose
-    /// text does not match <see cref="StorageDb.TimestampGlobPattern"/>. The database enforces the shape the readers
-    /// require, so neither a newer build nor a script that opens <c>forge.db</c> on its own can store a value every
-    /// later read would refuse; a nullable column still accepts NULL.
+    /// Installs the guards of every table that exists at this point in the ladder. A table registered in
+    /// <see cref="TimestampColumns"/> is only guarded once the step that creates it has run: the v3 step precedes the
+    /// <c>todo_groups</c> table, the v4 step follows it and installs the whole set again (dropping a trigger and creating
+    /// it again is idempotent).
     /// </summary>
-    private static string TimestampGuardSql()
+    private static async Task InstallTimestampGuardsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        var tables = await ExistingTablesAsync(connection, transaction, ct).ConfigureAwait(false);
+        var sql = TimestampGuardSql(tables);
+        if (sql.Length > 0)
+        {
+            await ExecuteAsync(connection, transaction, sql, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<HashSet<string>> ExistingTablesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        var tables = new HashSet<string>(StringComparer.Ordinal);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table'";
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            tables.Add(reader.GetString(0));
+        }
+
+        return tables;
+    }
+
+    /// <summary>
+    /// One <c>BEFORE INSERT</c> and one <c>BEFORE UPDATE</c> trigger per timestamp column of <paramref name="tables"/>,
+    /// each aborting any write whose text does not match <see cref="StorageDb.TimestampGlobPattern"/>. The database
+    /// enforces the shape the readers require, so neither a newer build nor a script that opens <c>forge.db</c> on its
+    /// own can store a value every later read would refuse; a nullable column still accepts NULL.
+    /// </summary>
+    private static string TimestampGuardSql(IReadOnlySet<string> tables)
     {
         var sql = new System.Text.StringBuilder();
         foreach (var (table, _, columns) in TimestampColumns)
         {
+            if (!tables.Contains(table))
+            {
+                continue;
+            }
+
             foreach (var column in columns)
             {
                 var condition =

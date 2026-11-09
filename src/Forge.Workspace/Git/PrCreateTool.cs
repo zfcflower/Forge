@@ -290,8 +290,9 @@ internal sealed class PrCreateTool(
 
         var summary = await todos.GetPlanSummaryAsync(sessionId, ct).ConfigureAwait(false);
         var steps = await todos.ListAsync(sessionId, ct).ConfigureAwait(false);
+        var groups = await todos.ListGroupsAsync(sessionId, ct).ConfigureAwait(false);
         return (
-            PrBodyRenderer.Render(summary, steps),
+            PrBodyRenderer.Render(summary, steps, groups),
             $"the plan summary and {steps.Count.ToString(CultureInfo.InvariantCulture)} step(s)");
     }
 }

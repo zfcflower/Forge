@@ -5,8 +5,8 @@ using Forge.Abstractions;
 namespace Forge.Workspace;
 
 /// <summary>
-/// Pure functions over the pull request body. <see cref="Render"/> turns the session's plan summary plus its steps into the
-/// body text; <see cref="TryGetSection"/> and <see cref="ReplaceSection"/> read and rewrite one <c>## Heading</c>
+/// Pure functions over the pull request body. <see cref="Render"/> turns the session's plan summary plus its groups and steps
+/// into the body text; <see cref="TryGetSection"/> and <see cref="ReplaceSection"/> read and rewrite one <c>## Heading</c>
 /// section, which is how the Testing gate looks at a body and how <c>pr_edit</c> (and the screenshot step) change one part
 /// without touching the rest. Level-2 headings only match at column 0 and never inside a fenced code block; a section
 /// ends at the next level-1 or level-2 heading, so <c>###</c> sub-headings stay inside it.
@@ -16,21 +16,31 @@ public static class PrBodyRenderer
     /// <summary>The generated section that lists the steps.</summary>
     public const string PlanHeading = "Plan";
 
+    /// <summary>The sub-heading of the steps that belong to no group (the session's queue); it comes after every group.</summary>
+    private const string OtherStepsHeading = "Other steps";
+
+    /// <summary>Heading of a group whose title <em>and</em> id are blank, so a section never opens with a bare <c>###</c>.</summary>
+    private const string UnnamedGroupHeading = "Group";
+
     private const int ShortShaLength = 7;
 
     /// <summary>
     /// The plan summary text (Summary / Changes / Testing, as the agent wrote it) followed by a generated
-    /// <c>## Plan</c> section: one numbered entry per step in plan order with the title, the 7-character commit sha when the
-    /// step was committed, its summary and its verification. A <c>## Plan</c> the summary text already contains is replaced
-    /// by the generated one. Without steps there is no Plan section; without a summary and without steps the result is
-    /// empty. Output uses <c>\n</c> line endings.
+    /// <c>## Plan</c> section: one <c>### &lt;group title&gt;</c> sub-section per group that has steps, in group order, each
+    /// with its steps numbered from 1 in step order, then an <c>### Other steps</c> sub-section with the steps that belong
+    /// to no group (also numbered from 1). A group without steps gets no sub-section at all. Every step shows its title,
+    /// the 7-character commit sha when it was committed, its summary and its verification, plus <c>_(in progress)_</c> /
+    /// <c>_(paused)_</c> / <c>_(pending)_</c> until it is done. A <c>## Plan</c> the summary text already contains is
+    /// replaced by the generated one. Without steps there is no Plan section; without a summary and without steps the result
+    /// is empty. Output uses <c>\n</c> line endings.
     /// </summary>
-    public static string Render(PlanSummary? summary, IReadOnlyList<TodoItem> steps)
+    public static string Render(PlanSummary? summary, IReadOnlyList<TodoItem> steps, IReadOnlyList<TodoGroup> groups)
     {
         ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(groups);
 
         var body = (summary?.Text ?? string.Empty).ReplaceLineEndings("\n").Trim();
-        var plan = RenderPlan(steps);
+        var plan = RenderPlan(steps, groups);
         if (plan.Length == 0)
         {
             return body.Length == 0 ? string.Empty : body + "\n";
@@ -119,43 +129,119 @@ public static class PrBodyRenderer
         return appended.ToString();
     }
 
-    private static string RenderPlan(IReadOnlyList<TodoItem> steps)
+    private static string RenderPlan(IReadOnlyList<TodoItem> steps, IReadOnlyList<TodoGroup> groups)
     {
         if (steps.Count == 0)
         {
             return string.Empty;
         }
 
-        var ordered = new List<TodoItem>(steps);
-        ordered.Sort(static (left, right) => left.Order.CompareTo(right.Order));
+        // Group order is the group's own Order; a step follows its group through GroupId, so a step whose group is missing
+        // (a store that lists items but not their group) falls back to the queue instead of disappearing.
+        var orderedGroups = new List<TodoGroup>(groups.Count);
+        var stepsByGroup = new Dictionary<string, List<TodoItem>>(StringComparer.Ordinal);
+        for (var i = 0; i < groups.Count; i++)
+        {
+            var group = groups[i];
+            if (group is null || !stepsByGroup.TryAdd(group.Id, []))
+            {
+                continue;
+            }
+
+            orderedGroups.Add(group);
+        }
+
+        orderedGroups.Sort(static (left, right) => left.Order.CompareTo(right.Order));
+
+        var loose = new List<TodoItem>();
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            if (step.GroupId is { } groupId && stepsByGroup.TryGetValue(groupId, out var groupSteps))
+            {
+                groupSteps.Add(step);
+            }
+            else
+            {
+                loose.Add(step);
+            }
+        }
 
         var plan = new StringBuilder(256);
-        for (var i = 0; i < ordered.Count; i++)
+        for (var i = 0; i < orderedGroups.Count; i++)
         {
-            var step = ordered[i];
+            var group = orderedGroups[i];
+            var groupSteps = stepsByGroup[group.Id];
+
+            // A group that has no steps (freshly promoted ones often don't) gets no heading: a bare `###` is noise.
+            if (groupSteps.Count == 0)
+            {
+                continue;
+            }
+
+            AppendSection(plan, GroupHeading(group), groupSteps);
+        }
+
+        if (loose.Count > 0)
+        {
+            AppendSection(plan, OtherStepsHeading, loose);
+        }
+
+        return plan.ToString().TrimEnd('\n');
+    }
+
+    /// <summary>The heading of a group: its single-line title, its id when the title is blank.</summary>
+    private static string GroupHeading(TodoGroup group)
+    {
+        var title = string.IsNullOrWhiteSpace(group.Title) ? OneLine(group.Id) : OneLine(group.Title);
+        return title.Length > 0 ? title : UnnamedGroupHeading;
+    }
+
+    /// <summary>
+    /// One <c>### <paramref name="heading"/></c> block followed by its steps, numbered from 1 in step order, separated from
+    /// the previous block by a blank line. The caller only passes non-empty step lists.
+    /// </summary>
+    private static void AppendSection(StringBuilder plan, string heading, List<TodoItem> steps)
+    {
+        if (plan.Length > 0)
+        {
+            plan.Append('\n');
+        }
+
+        plan.Append("### ").Append(heading).Append('\n').Append('\n');
+        steps.Sort(static (left, right) => left.Order.CompareTo(right.Order));
+        for (var i = 0; i < steps.Count; i++)
+        {
             if (i > 0)
             {
                 plan.Append('\n');
             }
 
-            plan.Append((i + 1).ToString(CultureInfo.InvariantCulture)).Append(". **").Append(OneLine(step.Title)).Append("**");
-            if (!string.IsNullOrWhiteSpace(step.CommitId))
-            {
-                var sha = step.CommitId.Trim();
-                plan.Append(" (`").Append(sha.Length <= ShortShaLength ? sha : sha[..ShortShaLength]).Append("`)");
-            }
+            AppendStep(plan, steps[i], i + 1);
+        }
+    }
 
-            if (step.Status != TodoStatus.Done)
-            {
-                plan.Append(step.Status == TodoStatus.InProgress ? " _(in progress)_" : " _(pending)_");
-            }
-
-            plan.Append('\n');
-            AppendBullet(plan, null, step.Summary);
-            AppendBullet(plan, "Verification: ", step.Verification);
+    private static void AppendStep(StringBuilder plan, TodoItem step, int number)
+    {
+        plan.Append(number.ToString(CultureInfo.InvariantCulture)).Append(". **").Append(OneLine(step.Title)).Append("**");
+        if (!string.IsNullOrWhiteSpace(step.CommitId))
+        {
+            var sha = step.CommitId.Trim();
+            plan.Append(" (`").Append(sha.Length <= ShortShaLength ? sha : sha[..ShortShaLength]).Append("`)");
         }
 
-        return plan.ToString().TrimEnd('\n');
+        // A done step carries no marker; the other three states say what they are.
+        plan.Append(step.Status switch
+        {
+            TodoStatus.InProgress => " _(in progress)_",
+            TodoStatus.Paused => " _(paused)_",
+            TodoStatus.Done => string.Empty,
+            _ => " _(pending)_",
+        });
+
+        plan.Append('\n');
+        AppendBullet(plan, null, step.Summary);
+        AppendBullet(plan, "Verification: ", step.Verification);
     }
 
     private static void AppendBullet(StringBuilder plan, string? label, string? text)

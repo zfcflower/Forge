@@ -3,12 +3,15 @@ using System.Text.Json.Serialization;
 namespace Forge.App.Workbench;
 
 /// <summary>
-/// The persisted workbench layout (v3), stored under the <c>layout</c> key of <c>ui_state</c>. Any other version —
-/// including the Dock-era v2 — or a failed deserialize falls back to the default layout; there is no migration.
+/// The persisted workbench layout (v5), stored under the <c>layout</c> key of <c>ui_state</c>. A v3 snapshot is migrated (only
+/// the left column's split restarts at the default) and a v4 one carries its "collapsed to a strip" flag over as the v5
+/// minimized state; any other version — including the Dock-era v2 — or a failed deserialize falls back to the default layout.
+/// Fields added to v5 afterwards are optional and additive (a missing <see cref="BelowHeights"/> keeps the even split), so they
+/// need neither a version bump nor a migration.
 /// </summary>
 internal sealed class LayoutSnapshot : IJsonOnSerializing
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 5;
 
     /// <summary>
     /// Defaults to 0, not <see cref="CurrentVersion"/>, so JSON that omits <c>version</c> deserializes as a foreign
@@ -33,10 +36,29 @@ internal sealed class LayoutSnapshot : IJsonOnSerializing
     [JsonPropertyName("inspectorSplit")]
     public double InspectorSplitRatio { get; set; } = WorkbenchMetrics.DefaultInspectorSplitRatio;
 
+    /// <summary>Share of the projects panel above the general chats in the left column; missing keeps the default.</summary>
+    [JsonPropertyName("projectSplit")]
+    public double ProjectSplitRatio { get; set; } = WorkbenchMetrics.DefaultProjectSplitRatio;
+
+    /// <summary>
+    /// Height (px) each panel below the files panel last had in the Inspector column, keyed by panel id, so the lines between
+    /// them come back where the user left them. Optional and additive: a snapshot without it (or without an entry for a panel)
+    /// splits that column evenly, which is what every version before it did, so no migration is needed.
+    /// </summary>
+    [JsonPropertyName("belowHeights")]
+    public Dictionary<string, double> BelowHeights { get; set; } = [];
+
     [JsonPropertyName("bottomHeight")]
     public double BottomHeight { get; set; } = WorkbenchMetrics.DefaultBottomHeight;
 
+    /// <summary>True while the bottom group sits at title-bar height; the composer's sub-agent toggle and the group's own
+    /// restore button drive this one state.</summary>
+    [JsonPropertyName("bottomMinimized")]
+    public bool BottomMinimized { get; set; }
+
+    /// <summary>Retired v4 field: only the v4 migration reads it, and a v5 snapshot never writes it.</summary>
     [JsonPropertyName("bottomCollapsed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool BottomCollapsed { get; set; }
 
     /// <summary>Order of the fixed inspector tool tabs and the active one.</summary>

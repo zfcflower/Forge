@@ -820,21 +820,23 @@ public sealed class WorkbenchControlsTests
     }
 
     [Fact]
-    public async Task Collapsing_the_bottom_group_leaves_a_strip_on_the_bottom_edge_of_main()
+    public async Task Minimizing_the_bottom_group_leaves_its_title_bar_on_the_bottom_edge_of_main()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
-        var strip = await WorkbenchUi.QueryAsync(session, () =>
+        var titleBar = await WorkbenchUi.QueryAsync(session, () =>
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
             WorkbenchUi.OpenBottomTab(scene);
-            // No title-bar button collapses the group any more: the session's own sub-agent toggle is the entry.
-            scene.Layout.IsBottomCollapsed = true;
+            // The session's sub-agent toggle and the title bar's own restore button drive this one state; what shrinks is
+            // the body, so the tabs and tools that get it back stay on screen.
+            scene.Layout.IsBottomMinimized = true;
             WorkbenchUi.Settle(scene.Window);
-            return WorkbenchUi.Find<BottomCollapsedStrip>(scene.Window, "autohide-bottom").Bounds;
+            return WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(WorkbenchIds.BottomTabs)).Bounds;
         });
 
-        Assert.Equal((WorkbenchMetrics.AutoHideStripWidth, WorkbenchUi.WindowHeight), (strip.Height, strip.Bottom));
+        Assert.Equal(PanelChrome.TitleBarHeight, titleBar.Height, 0.5);
+        Assert.Equal(WorkbenchUi.WindowHeight, titleBar.Bottom, 0.5);
     }
 
     [Fact]
@@ -891,17 +893,17 @@ public sealed class WorkbenchControlsTests
         {
             var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
             var pin = WorkbenchUi.Find<PanelIconButton>(scene.Window, WorkbenchUi.PinId(ProjectPanelId));
-            var docked = (pin.IsIconFilled, pin.Icon, Tip: ToolTip.GetTip(pin) as string);
+            var docked = (pin.Icon, Tip: ToolTip.GetTip(pin) as string);
             WorkbenchUi.ClickPin(scene, ProjectPanelId);
-            var autoHidden = (pin.IsIconFilled, pin.Icon, Tip: ToolTip.GetTip(pin) as string);
+            var autoHidden = (pin.Icon, Tip: ToolTip.GetTip(pin) as string);
             return (Docked: docked, AutoHidden: autoHidden,
                 SolidIcon: WorkbenchIcons.Find(scene.Window, "IconPinSolid"),
                 OutlineIcon: WorkbenchIcons.Find(scene.Window, "IconPin"));
         });
 
-        Assert.True(state.Docked.IsIconFilled);
+        // Two states of one button, told apart by the glyph itself: the filled pin while docked, the regular one while
+        // the region is auto-hidden.
         Assert.Same(state.SolidIcon, state.Docked.Icon);
-        Assert.False(state.AutoHidden.IsIconFilled);
         Assert.Same(state.OutlineIcon, state.AutoHidden.Icon);
         Assert.Equal(ShellStrings.AutoHide, state.Docked.Tip);
         Assert.Equal(ShellStrings.AutoHide, state.AutoHidden.Tip);
@@ -1525,7 +1527,7 @@ public sealed class MainWindowSmokeTests
                 TerminalLeftOfSettings: terminal.Bounds.X < settings.Bounds.X,
                 SameRow: ReferenceEquals(terminal.Parent, settings.Parent) && titleRow.IsVisualAncestorOf(terminal),
                 SearchBox: WorkbenchUi.TryFind<TextBox>(shell.Window, "shell-search") is not null,
-                Magnifier: WorkbenchUi.TryFind<LineIcon>(shell.Window, "shell-search") is not null,
+                Magnifier: WorkbenchUi.TryFind<FluentIcon>(shell.Window, "shell-search") is not null,
                 HostLabel: host.IsEffectivelyVisible ? TextOf(host) : null,
                 RightAligned: (host.TranslatePoint(default, titleRow) is { } origin)
                     && origin.X + host.Bounds.Width > titleRow.Bounds.Width / 2,

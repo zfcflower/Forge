@@ -48,6 +48,8 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 
 **自动截图:项目命令 + before/after + 孤儿提交。** 截图命令由仓库 `.forge/screenshots.json` 声明(`command`/`output`/`timeoutSeconds`),没有声明时可传一次性命令。`pr_screenshots`(副作用 Execute)在会话 worktree 跑 after、在 `origin/<base>` 的临时分离 worktree 跑 before,按文件名配对,仅一侧有的图保留并标注;任一侧失败返回退出码 + 输出尾部,不附图;临时 worktree 在 `finally` 移除。图片经孤儿提交(`hash-object -w`/`mktree`/`commit-tree`)push 到 `refs/heads/assets/<分支 slug>`,再用 `pr_edit` 的读-改-核对更新正文 `## Screenshots` 段,图片不进 PR 文件树;采集脚本若被提交过,删除它的提交也一并推送。`ScreenshotCapture`/`ScreenshotRunner` 与 App 的 Git panel 按钮共用同一编排。
 
+**PR 正文的计划按分组渲染。** `PrBodyRenderer.Render(planSummary, steps, groups)` 是纯函数:用户(Agent)写的 `## Summary/Changes/Testing` 正文照原样保留,其后追一个生成的 `## Plan`。计划按分组组织:每个**有步骤**的分组一个小节 `### <分组标题>`(组内步骤按 `TodoItem.Order` 从 1 编号),不属于任何分组(或 `GroupId` 指向已不存在的分组)的散项收进末尾的 `### Other steps`(重新从 1 编号,无散项时不出现);**空分组不出小节**——刚 promote 出来的分组本来就可能一条步骤都没有,裸 `###` 是噪音。每步仍展示标题、7 位提交 sha、summary 与 `Verification:`;未完成的状态标记为 `_(pending)_`/`_(in progress)_`/`_(paused)_`,done 不带标记。分组标题与步骤标题走 `OneLine` 压平换行(正文是 markdown,不许注入标题层级);标题与 id 都空时用 `Group` 兜底。`PrCreateTool` 因此要两读:`ListAsync` 与 `ListGroupsAsync`(不合并成新接口,契约不动);没分组支持的存储(`ListGroupsAsync` 默认空表)退化成全部步骤进 `### Other steps`。
+
 ## 未决
 
 - 索引刷新默认信任长度+mtime;外部工具保留时间戳的同长度修改需 `force` 刷新才可见(已提供强制刷新路径)。

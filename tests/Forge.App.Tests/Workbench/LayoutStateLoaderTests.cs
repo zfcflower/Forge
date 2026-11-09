@@ -24,10 +24,22 @@ public sealed class LayoutStateLoaderTests
     private const double PreviewWindowY = 80;
 
     private const string ValidLayoutJson = """
-        {"version":3,"order":["Main","Project","Inspector"],"regions":[{"role":"Main","width":0}],
-         "previewWidth":345,"inspectorSplit":0.4,"bottomHeight":180,"bottomCollapsed":true,
+        {"version":5,"order":["Main","Project","Inspector"],"regions":[{"role":"Main","width":0}],
+         "previewWidth":345,"inspectorSplit":0.4,"bottomHeight":180,"bottomMinimized":true,
          "tools":["todo","review"],"toolsActive":"review",
          "floating":[{"id":"preview-file","x":120,"y":80,"width":700,"height":500,"maximized":false}]}
+        """;
+
+    /// <summary>A pre-v4 snapshot: no left-column split, and the bottom group's state stored as "collapsed to a strip".</summary>
+    private const string V3LayoutJson = """
+        {"version":3,"order":["Main","Project","Inspector"],"regions":[{"role":"Main","width":0}],
+         "previewWidth":345,"inspectorSplit":0.4,"bottomHeight":180,"bottomCollapsed":true}
+        """;
+
+    /// <summary>A v4 snapshot: the left-column split exists, the bottom group's flag is still the strip one.</summary>
+    private const string V4LayoutJson = """
+        {"version":4,"order":["Main","Project","Inspector"],"regions":[{"role":"Main","width":0}],
+         "previewWidth":345,"inspectorSplit":0.4,"projectSplit":0.35,"bottomHeight":180,"bottomCollapsed":true}
         """;
 
     private const string DockEraLayoutJson = """
@@ -172,6 +184,52 @@ public sealed class LayoutStateLoaderTests
     }
 
     [Fact]
+    public async Task ReadLayout_migrates_a_v3_snapshot_by_resetting_the_left_column_split()
+    {
+        var store = new FakeUiStateStore();
+        store.Seed("layout", 3, V3LayoutJson);
+        var loader = new LayoutStateLoader(store);
+
+        var layout = await loader.ReadLayoutAsync(CancellationToken.None);
+
+        Assert.NotNull(layout);
+        Assert.Equal(LayoutSnapshot.CurrentVersion, layout.Version);
+        Assert.Equal(WorkbenchMetrics.DefaultProjectSplitRatio, layout.ProjectSplitRatio);
+        // The strip is gone, so its "collapsed" flag survives as the group's minimized state.
+        Assert.True(layout.BottomMinimized);
+        Assert.False(layout.BottomCollapsed);
+    }
+
+    [Fact]
+    public async Task ReadLayout_migrates_a_v4_snapshot_and_keeps_the_left_column_split()
+    {
+        var store = new FakeUiStateStore();
+        store.Seed("layout", 4, V4LayoutJson);
+        var loader = new LayoutStateLoader(store);
+
+        var layout = await loader.ReadLayoutAsync(CancellationToken.None);
+
+        Assert.NotNull(layout);
+        Assert.Equal(LayoutSnapshot.CurrentVersion, layout.Version);
+        Assert.Equal(0.35, layout.ProjectSplitRatio);
+        Assert.True(layout.BottomMinimized);
+        Assert.False(layout.BottomCollapsed);
+    }
+
+    [Fact]
+    public async Task A_written_layout_carries_the_minimized_state_and_no_retired_collapsed_field()
+    {
+        var store = new FakeUiStateStore();
+        var loader = new LayoutStateLoader(store);
+
+        await loader.WriteLayoutAsync(new LayoutSnapshot { BottomMinimized = true }, CancellationToken.None);
+
+        var json = Assert.Single(store.Writes).Json;
+        Assert.Contains("\"bottomMinimized\":true", json);
+        Assert.DoesNotContain("bottomCollapsed", json);
+    }
+
+    [Fact]
     public async Task ReadLayout_reads_a_current_version_snapshot()
     {
         var store = new FakeUiStateStore();
@@ -183,7 +241,7 @@ public sealed class LayoutStateLoaderTests
         Assert.NotNull(layout);
         Assert.Equal(LayoutSnapshot.CurrentVersion, layout.Version);
         Assert.Equal([RegionRole.Main, RegionRole.Project, RegionRole.Inspector], RolesOf(layout));
-        Assert.True(layout.BottomCollapsed);
+        Assert.True(layout.BottomMinimized);
         Assert.Equal(["todo", "review"], layout.ToolsOrder);
         var floating = Assert.Single(layout.Floating);
         Assert.Equal(WorkbenchIds.PreviewTab, floating.Id);
@@ -274,7 +332,7 @@ public sealed class LayoutStateLoaderTests
             PreviewWidth = previewWidth,
             InspectorSplitRatio = inspectorSplit,
             BottomHeight = bottomHeight,
-            BottomCollapsed = true,
+            BottomMinimized = true,
             ToolsOrder = [WorkbenchIds.ReviewTab, WorkbenchIds.TodoTab],
             ToolsActive = WorkbenchIds.ReviewTab,
             Floating = [new FloatingSnapshot { Id = WorkbenchIds.FilesPanel, X = 40, Y = 60, Width = 300, Height = 400 }],
@@ -293,7 +351,7 @@ public sealed class LayoutStateLoaderTests
         Assert.Equal(previewWidth, read.PreviewWidth);
         Assert.Equal(inspectorSplit, read.InspectorSplitRatio);
         Assert.Equal(bottomHeight, read.BottomHeight);
-        Assert.True(read.BottomCollapsed);
+        Assert.True(read.BottomMinimized);
         Assert.Equal(written.ToolsOrder, read.ToolsOrder);
         Assert.Equal(WorkbenchIds.ReviewTab, read.ToolsActive);
         var floating = Assert.Single(read.Floating);

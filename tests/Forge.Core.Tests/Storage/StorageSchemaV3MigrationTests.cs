@@ -40,7 +40,7 @@ public sealed class StorageSchemaV3MigrationTests
 
         // The step rewrote the stored text itself; the read that used to fail works without any repair on the read path.
         Assert.Equal(CanonicalTimestamp, await TextAsync(directory, "SELECT added_at FROM projects"));
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class StorageSchemaV3MigrationTests
 
         // Repairing it would have to invent an instant, so the value stays exactly as the other tool wrote it.
         Assert.Equal("2026-11-04 07:44:28", await TextAsync(directory, "SELECT added_at FROM projects"));
-        Assert.Equal(3L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
     }
 
     [Fact]
@@ -96,6 +96,7 @@ public sealed class StorageSchemaV3MigrationTests
                 "trg_sessions_created_at_insert", "trg_sessions_created_at_update",
                 "trg_sessions_last_active_at_insert", "trg_sessions_last_active_at_update",
                 "trg_summaries_at_insert", "trg_summaries_at_update",
+                "trg_todo_groups_updated_at_insert", "trg_todo_groups_updated_at_update",
                 "trg_todos_updated_at_insert", "trg_todos_updated_at_update",
                 "trg_turn_checkpoints_ended_at_insert", "trg_turn_checkpoints_ended_at_update",
                 "trg_turn_checkpoints_started_at_insert", "trg_turn_checkpoints_started_at_update",
@@ -234,13 +235,18 @@ public sealed class StorageSchemaV3MigrationTests
             """);
 
     /// <summary>
-    /// Turns a current file back into the shape a v2 build left: no triggers (v3 introduces them) and user_version 2,
-    /// so the next open runs the real v3 step over it.
+    /// Turns a current file back into the shape a v2 build left: no v4 groups objects, no triggers (v3 introduces them)
+    /// and user_version 2, so the next open runs the real v3+v4 steps over it.
     /// </summary>
     private static async Task ReopenAsVersion2Async(TempDirectory directory)
     {
         var names = await TriggerNamesAsync(directory);
-        var sql = string.Concat(names.Select(static name => $"DROP TRIGGER {name};\n")) + "PRAGMA user_version = 2;";
+        var sql = string.Concat(names.Select(static name => $"DROP TRIGGER {name};\n"))
+            + "DROP INDEX IF EXISTS ix_todos_group;\n"
+            + "ALTER TABLE todos DROP COLUMN group_id;\n"
+            + "ALTER TABLE todos DROP COLUMN origin;\n"
+            + "DROP TABLE IF EXISTS todo_groups;\n"
+            + "PRAGMA user_version = 2;";
         await TodoSchemaRaw.ExecuteAsync(directory, sql);
         SqliteConnection.ClearAllPools();
     }

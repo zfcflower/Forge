@@ -5,105 +5,358 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.TodoToolView"
              x:DataType="vm:TodoListViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="Transparent" Margin="8,6">
-    <TextBlock Classes="caption" Text="{Binding Summary}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+  <UserControl.Resources>
+    <!-- 待办的状态标记、排条目的用户标记与折叠箭头都是 Resources/Icons.axaml 里的图标,本视图不再有几何定义。 -->
 
-    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,8,0,6">
-      <TextBox Text="{Binding NewTitle, Mode=TwoWay}"
-               PlaceholderText="{Binding [todo.newTaskPlaceholder], Source={x:Static loc:Loc.Instance}}"
+    <!-- A row: a loose item of the queue or a step of a group, both drawn by this one template. The leading 30 px slot is
+         the status icon's room - 8 px pad, the 14 px icon, 8 px gap - so the title starts at 30 and a group's guide line,
+         centred in a column of the same width, runs exactly through the icon's centre. -->
+    <DataTemplate x:Key="TodoRowTemplate" x:DataType="vm:TodoRowViewModel">
+      <Border Classes="todo-row"
+              Classes.readonly="{Binding IsReadOnly}"
+              AutomationProperties.AutomationId="todo-row"
+              DragDrop.AllowDrop="True"
+              DragDrop.DragOver="OnRowDragOver"
+              DragDrop.Drop="OnRowDrop"
+              PointerPressed="OnRowPointerPressed">
+        <!-- The content block is centred in the row's 28 px band. A row with a detail line is taller than that band, so
+             centring is a no-op there and the title stays one caption-height above the sha. -->
+        <Grid ColumnDefinitions="30,*,Auto,Auto" RowDefinitions="Auto,Auto" VerticalAlignment="Center">
+          <Panel Grid.Row="0" Width="14" Height="14"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 AutomationProperties.Name="{Binding StatusName}">
+            <!-- 一个状态一枚 Fluent 状态圈:空圈 / 半心圈 / 暂停 / 勾选。 -->
+            <wc:FluentIcon Data="{StaticResource IconTodoPending}" IsVisible="{Binding IsPending}"
+                           Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+            <wc:FluentIcon Data="{StaticResource IconTodoInProgress}" IsVisible="{Binding IsInProgress}"
+                           Width="14" Height="14" Foreground="{DynamicResource AccentBrush}" />
+            <wc:FluentIcon Data="{StaticResource IconTodoPaused}" IsVisible="{Binding IsPaused}"
+                           Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+            <wc:FluentIcon Data="{StaticResource IconTodoDone}" IsVisible="{Binding IsDone}"
+                           Width="14" Height="14" Foreground="{DynamicResource SuccessBrush}" />
+          </Panel>
+
+          <TextBlock Grid.Row="0" Grid.Column="1"
+                     Margin="0,0,6,0"
+                     VerticalAlignment="Center"
+                     FontSize="{DynamicResource FontSizeBase}"
+                     TextWrapping="NoWrap"
+                     Text="{Binding Title}"
+                     TextTrimming="CharacterEllipsis" />
+
+          <!-- An item the user queued shows the line user mark at its right end. -->
+          <wc:FluentIcon Grid.Row="0" Grid.Column="2"
+                         Data="{StaticResource IconTodoUser}"
+                         Width="14" Height="14"
+                         Margin="0,0,4,0"
+                         VerticalAlignment="Center"
+                         IsVisible="{Binding IsUserAdded}"
+                         Foreground="{DynamicResource TextMutedBrush}"
+                         ToolTip.Tip="{Binding [todo.source.user], Source={x:Static loc:Loc.Instance}}"
+                         AutomationProperties.AutomationId="todo-source-user"
+                         AutomationProperties.Name="{Binding [todo.source.user], Source={x:Static loc:Loc.Instance}}" />
+
+          <!-- The delete button, hidden until the row is hovered or keyboard focused (the styles below toggle it), and
+               hidden for good in the done section, which is a record and not an editor. -->
+          <Panel Grid.Row="0" Grid.Column="3" Classes="todo-actions" Margin="0,0,6,0" VerticalAlignment="Center">
+            <Button Classes="todo-x"
+                    Command="{Binding RemoveCommand}"
+                    ToolTip.Tip="{Binding [todo.delete], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="todo-delete"
+                    AutomationProperties.Name="{Binding [todo.delete], Source={x:Static loc:Loc.Instance}}">
+              <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            </Button>
+          </Panel>
+
+          <!-- The second line: the short sha of the step's commit, or the failure with its retry. One line only - a long
+               reason is trimmed, the retry always stays reachable. -->
+          <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
+                ColumnDefinitions="Auto,*,Auto"
+                Margin="0,0,6,4"
+                IsVisible="{Binding HasDetailLine}">
+            <TextBlock Grid.Column="0"
+                       Classes="caption mono"
+                       VerticalAlignment="Center"
+                       IsVisible="{Binding HasCommitId}"
+                       Text="{Binding CommitShort}"
+                       ToolTip.Tip="{Binding CommitId}"
+                       AutomationProperties.AutomationId="todo-commit-id" />
+            <TextBlock Grid.Column="0"
+                       Classes="caption"
+                       Margin="0,0,4,0"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource DangerBrush}"
+                       IsVisible="{Binding HasCommitError}"
+                       Text="{Binding [git.todo.commitFailed], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       VerticalAlignment="Center"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"
+                       Foreground="{DynamicResource DangerBrush}"
+                       IsVisible="{Binding HasCommitError}"
+                       Text="{Binding CommitError}"
+                       ToolTip.Tip="{Binding CommitError}"
+                       AutomationProperties.AutomationId="todo-commit-error" />
+            <Button Grid.Column="2"
+                    Classes="todo-retry"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center"
+                    Command="{Binding RetryCommitCommand}"
+                    Content="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}"
+                    IsVisible="{Binding HasCommitError}"
+                    AutomationProperties.AutomationId="todo-retry-commit"
+                    AutomationProperties.Name="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}" />
+          </Grid>
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <!-- An unfinished group: its row, then its steps under a 1 px guide line. No delete button and no chevron - a plan
+         that is still running stays open. -->
+    <DataTemplate x:Key="TodoGroupTemplate" x:DataType="vm:TodoGroupViewModel">
+      <StackPanel>
+        <Border Classes="todo-group-row" AutomationProperties.AutomationId="todo-group-row">
+          <Grid ColumnDefinitions="30,*,Auto" VerticalAlignment="Center">
+            <Panel Width="14" Height="14"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   AutomationProperties.Name="{Binding StatusName}">
+              <!-- 一个状态一枚 Fluent 状态圈:空圈 / 半心圈 / 暂停 / 勾选。 -->
+              <wc:FluentIcon Data="{StaticResource IconTodoPending}" IsVisible="{Binding IsPending}"
+                             Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+              <wc:FluentIcon Data="{StaticResource IconTodoInProgress}" IsVisible="{Binding IsInProgress}"
+                             Width="14" Height="14" Foreground="{DynamicResource AccentBrush}" />
+              <wc:FluentIcon Data="{StaticResource IconTodoPaused}" IsVisible="{Binding IsPaused}"
+                             Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+              <wc:FluentIcon Data="{StaticResource IconTodoDone}" IsVisible="{Binding IsDone}"
+                             Width="14" Height="14" Foreground="{DynamicResource SuccessBrush}" />
+            </Panel>
+            <TextBlock Grid.Column="1"
+                       Margin="0,0,6,0"
+                       VerticalAlignment="Center"
+                       FontSize="{DynamicResource FontSizeBase}"
+                       FontWeight="Bold"
+                       TextWrapping="NoWrap"
+                       Text="{Binding Title}"
+                       TextTrimming="CharacterEllipsis"
+                       AutomationProperties.AutomationId="todo-group-title" />
+            <TextBlock Grid.Column="2"
+                       Classes="caption"
+                       Margin="0,0,8,0"
+                       VerticalAlignment="Center"
+                       Text="{Binding Progress}"
+                       AutomationProperties.AutomationId="todo-group-progress" />
+          </Grid>
+        </Border>
+        <Grid ColumnDefinitions="30,*" Margin="0,0,0,6">
+          <Border Grid.Column="0"
+                  Width="1"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Stretch"
+                  Background="{DynamicResource BorderBrush}" />
+          <ItemsControl Grid.Column="1" ItemsSource="{Binding Entries}" ItemTemplate="{StaticResource TodoRowTemplate}" />
+        </Grid>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- A finished group: one row - chevron, check, title, step count - that opens its own steps again; folded by
+         default and read-only in both states. -->
+    <DataTemplate x:Key="TodoDoneGroupTemplate" x:DataType="vm:TodoGroupViewModel">
+      <StackPanel>
+        <Button Classes="todo-done-group"
+                Command="{Binding ToggleCommand}"
+                AutomationProperties.AutomationId="todo-done-group"
+                AutomationProperties.Name="{Binding Title}"
+                AutomationProperties.HelpText="{Binding ToggleName}">
+          <Grid ColumnDefinitions="Auto,30,*,Auto" VerticalAlignment="Center">
+            <wc:FluentIcon Grid.Column="0"
+                           Classes="todo-chevron"
+                           Classes.expanded="{Binding IsExpanded}"
+                           Data="{StaticResource TreeChevronGeometry}"
+                           Width="8" Height="8"
+                           Margin="8,0,6,0" />
+            <wc:FluentIcon Grid.Column="1"
+                           Data="{StaticResource IconTodoDone}"
+                           Width="14" Height="14"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource SuccessBrush}"
+                           AutomationProperties.Name="{Binding StatusName}" />
+            <TextBlock Grid.Column="2"
+                       Margin="0,0,6,0"
+                       VerticalAlignment="Center"
+                       FontSize="{DynamicResource FontSizeBase}"
+                       TextWrapping="NoWrap"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       Text="{Binding Title}"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="3"
+                       Classes="caption"
+                       Margin="0,0,8,0"
+                       VerticalAlignment="Center"
+                       Text="{Binding StepsText}" />
+          </Grid>
+        </Button>
+        <Grid ColumnDefinitions="30,*" Margin="0,0,0,4" IsVisible="{Binding IsExpanded}">
+          <ItemsControl Grid.Column="1" ItemsSource="{Binding Entries}" ItemTemplate="{StaticResource TodoRowTemplate}" />
+        </Grid>
+      </StackPanel>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <!-- The pinned queue field is drawn as one of the rows: flat, with no Fluent TextBox chrome on hover or focus. -->
+    <Style Selector="TextBox.todo-input">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="MinHeight" Value="22" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBox.todo-input:pointerover /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.todo-input:focus /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- Rows and group rows share their surface geometry; only a row is interactive (hover, focus, drag, delete). -->
+    <Style Selector="Border.todo-row, Border.todo-group-row">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Border.todo-row">
+      <Setter Property="Focusable" Value="True" />
+    </Style>
+    <Style Selector="Border.todo-row:pointerover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Border.todo-row:focus-visible">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+
+    <!-- The row's × appears on hover or on keyboard focus (the row itself is the tab stop, so the button stays reachable
+         and is not removed from the tab order). -->
+    <Style Selector="Border.todo-row Button.todo-x">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Border.todo-row:pointerover Button.todo-x">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector="Border.todo-row:focus Button.todo-x">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector="Border.todo-row:focus-within Button.todo-x">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector="Border.todo-row.readonly Panel.todo-actions">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="Button.todo-x">
+      <Setter Property="MinWidth" Value="18" />
+      <Setter Property="MinHeight" Value="18" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.todo-x:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+
+    <Style Selector="Button.todo-retry">
+      <Setter Property="MinHeight" Value="18" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.todo-retry:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+
+    <!-- The fold row of a finished group: the whole row is the hit target. -->
+    <Style Selector="Button.todo-done-group">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.todo-done-group:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+
+    <!-- › while folded, pointing down once the group is open. -->
+    <Style Selector="wc|FluentIcon.todo-chevron">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    </Style>
+    <Style Selector="wc|FluentIcon.todo-chevron.expanded">
+      <Setter Property="RenderTransform" Value="rotate(90deg)" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,Auto,Auto,*" Background="Transparent" Margin="4,4,4,0">
+    <!-- The queue row is pinned: adding a task never scrolls away with the list below it. -->
+    <Grid Grid.Row="0" ColumnDefinitions="30,*" Margin="0,0,0,3">
+      <wc:FluentIcon Grid.Column="0"
+                     Data="{StaticResource IconPlus}"
+                     Width="14" Height="14"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Foreground="{DynamicResource TextMutedBrush}" />
+      <TextBox Grid.Column="1"
+               Classes="todo-input"
+               Margin="0,0,8,0"
+               Text="{Binding NewTitle, Mode=TwoWay}"
+               PlaceholderText="{Binding [todo.addPlaceholder], Source={x:Static loc:Loc.Instance}}"
                AutomationProperties.AutomationId="new-task"
                AutomationProperties.Name="{Binding [todo.newTask.name], Source={x:Static loc:Loc.Instance}}"
                KeyDown="OnNewTaskKeyDown" />
-      <Button Grid.Column="1"
-              Classes="ghost icon"
-              Margin="6,0,0,0"
-              Command="{Binding AddCommand}"
-              AutomationProperties.AutomationId="add-task"
-              AutomationProperties.Name="{Binding [todo.add], Source={x:Static loc:Loc.Instance}}">
-        <wc:LineIcon Data="{StaticResource IconPlus}" Width="13" Height="13" />
-      </Button>
     </Grid>
+    <Border Grid.Row="1" Height="1" Background="{DynamicResource SurfaceMutedBrush}" />
 
-    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-      <ItemsControl ItemsSource="{Binding Items}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:TodoEntryViewModel">
-            <Border Classes="tree-row">
-              <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto">
-                <CheckBox IsChecked="{Binding IsDone, Mode=TwoWay}"
-                          VerticalAlignment="Center"
-                          AutomationProperties.AutomationId="todo-done"
-                          AutomationProperties.Name="{Binding [todo.done], Source={x:Static loc:Loc.Instance}}" />
-                <TextBlock Grid.Column="1"
-                           Margin="6,0"
-                           VerticalAlignment="Center"
-                           Text="{Binding Title}"
-                           TextTrimming="CharacterEllipsis" />
+    <!-- One line of small text only when there is nothing to list or the store failed; a panel with rows has no summary. -->
+    <TextBlock Grid.Row="2"
+               Classes="caption"
+               Margin="8,6,8,0"
+               IsVisible="{Binding HasStatus}"
+               Text="{Binding StatusText}"
+               AutomationProperties.AutomationId="todo-status" />
 
-                <!-- The step commit: the short id once committed (full id on hover); a failure shows below with a retry. -->
-                <TextBlock Grid.Column="2"
-                           Classes="caption mono"
-                           Margin="0,0,6,0"
-                           VerticalAlignment="Center"
-                           IsVisible="{Binding HasCommitId}"
-                           Text="{Binding CommitShort}"
-                           ToolTip.Tip="{Binding CommitId}"
-                           AutomationProperties.AutomationId="todo-commit-id" />
-                <Button Grid.Column="3"
-                        Classes="ghost"
-                        MinHeight="22"
-                        Padding="6,0"
-                        Margin="0,0,4,0"
-                        FontSize="{DynamicResource FontSizeXs}"
-                        VerticalAlignment="Center"
-                        IsVisible="{Binding HasCommitError}"
-                        Command="{Binding RetryCommitCommand}"
-                        Content="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}"
-                        AutomationProperties.AutomationId="todo-retry-commit"
-                        AutomationProperties.Name="{Binding [git.todo.commitRetry], Source={x:Static loc:Loc.Instance}}" />
-                <Button Grid.Column="4" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveUpCommand}"
-                        ToolTip.Tip="{Binding [todo.moveUp], Source={x:Static loc:Loc.Instance}}">
-                  <wc:LineIcon Data="{StaticResource IconChevronUp}" Width="12" Height="12" />
-                </Button>
-                <Button Grid.Column="5" Classes="ghost icon" Width="20" Height="20" Command="{Binding MoveDownCommand}"
-                        ToolTip.Tip="{Binding [todo.moveDown], Source={x:Static loc:Loc.Instance}}">
-                  <wc:LineIcon Data="{StaticResource IconChevronDown}" Width="12" Height="12" />
-                </Button>
-                <Button Grid.Column="6" Classes="ghost icon" Width="20" Height="20" Command="{Binding RemoveCommand}"
-                        ToolTip.Tip="{Binding [todo.delete], Source={x:Static loc:Loc.Instance}}">
-                  <wc:LineIcon Data="{StaticResource IconTrash}" Width="12" Height="12" />
-                </Button>
+    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,2,0,8">
+      <StackPanel>
+        <ItemsControl ItemsSource="{Binding Groups}" ItemTemplate="{StaticResource TodoGroupTemplate}" />
+        <ItemsControl ItemsSource="{Binding Loose}" ItemTemplate="{StaticResource TodoRowTemplate}" />
 
-                <Grid Grid.Row="1"
-                      Grid.Column="1"
-                      Grid.ColumnSpan="6"
-                      ColumnDefinitions="Auto,*"
-                      Margin="6,0,0,4"
-                      IsVisible="{Binding HasCommitError}"
-                      ToolTip.Tip="{Binding CommitError}">
-                  <TextBlock Classes="caption"
-                             Margin="0,0,6,0"
-                             Foreground="{DynamicResource DangerBrush}"
-                             Text="{Binding [git.todo.commitFailed], Source={x:Static loc:Loc.Instance}}" />
-                  <TextBlock Grid.Column="1"
-                             Classes="caption"
-                             TextWrapping="Wrap"
-                             MaxLines="2"
-                             Text="{Binding CommitError}"
-                             AutomationProperties.AutomationId="todo-commit-error" />
-                </Grid>
-              </Grid>
-            </Border>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+        <StackPanel IsVisible="{Binding HasDone}">
+          <TextBlock Classes="caption"
+                     Margin="8,10,8,2"
+                     Text="{Binding [todo.doneSection], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="todo-done-section" />
+          <ItemsControl ItemsSource="{Binding DoneGroups}" ItemTemplate="{StaticResource TodoDoneGroupTemplate}" />
+          <ItemsControl ItemsSource="{Binding DoneLoose}" ItemTemplate="{StaticResource TodoRowTemplate}" />
+        </StackPanel>
+      </StackPanel>
     </ScrollViewer>
-
-    <Button Grid.Row="3"
-            Classes="ghost"
-            Margin="0,6,0,0"
-            HorizontalAlignment="Left"
-            Content="{Binding [todo.clearDone], Source={x:Static loc:Loc.Instance}}"
-            Command="{Binding ClearDoneCommand}" />
   </Grid>
 </UserControl>

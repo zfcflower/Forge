@@ -18,6 +18,11 @@
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
         Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Window.Styles>
+    <Style Selector="TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+  </Window.Styles>
 
   <Window.KeyBindings>
     <!-- Ctrl+` opens a terminal in the active session; a focused terminal leaves this gesture to the window. -->
@@ -27,8 +32,8 @@
   <Grid RowDefinitions="Auto,*">
 
     <!-- Window top: the same chrome colour as every panel title bar below it, so the whole top edge of the window reads
-         as one surface. The caption buttons are drawn here because the client area extends into the title bar; the
-         settings button sits to their left. -->
+    as one surface. The caption buttons are drawn here because the client area extends into the title bar; the
+    settings button sits to their left. -->
     <Border x:Name="TitleBar"
             Grid.Row="0"
             Height="40"
@@ -39,8 +44,8 @@
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0,8,0">
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
           <!-- The title row carries the logo lockup only: the project tree on the left already shows the open session
-               and its branch, so repeating them here was redundant. The wordmark is the product's own name, so it is
-               not translated. -->
+          and its branch, so repeating them here was redundant. The wordmark is the product's own name, so it is
+          not translated. -->
           <Image x:Name="AppLogo"
                  Source="avares://Forge.App/Assets/forge.png"
                  Width="18"
@@ -48,29 +53,28 @@
                  VerticalAlignment="Center"
                  AutomationProperties.Name="Forge" />
           <TextBlock x:Name="AppWordmark"
-                     VerticalAlignment="Center"
                      FontSize="{DynamicResource FontSizeWordmark}"
-                     FontWeight="Bold"
+                     FontWeight="Medium"
                      Foreground="{DynamicResource AccentTextBrush}"
                      Text="FORGE" />
         </StackPanel>
 
         <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: search is not a
-             feature yet, so the magnifier is a plain icon, and the extension host's state is the one live readout the
-             header carries — the same state the status bar spells out in words. -->
+        feature yet, so the magnifier is a plain icon, and the extension host's state is the one live readout the
+        header carries — the same state the status bar spells out in words. -->
         <StackPanel Grid.Column="1"
                     Orientation="Horizontal"
                     Spacing="18"
                     Margin="0,0,12,0"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center">
-          <wc:LineIcon Data="{StaticResource IconSearch}"
-                       Width="16"
-                       Height="16"
-                       Foreground="{DynamicResource TextMutedBrush}"
-                       ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
-                       AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
-                       AutomationProperties.AutomationId="shell-search" />
+          <wc:FluentIcon Data="{StaticResource IconSearch}"
+                         Width="16"
+                         Height="16"
+                         Foreground="{DynamicResource TextMutedBrush}"
+                         ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                         AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
+                         AutomationProperties.AutomationId="shell-search" />
           <StackPanel Orientation="Horizontal"
                       Spacing="6"
                       VerticalAlignment="Center"
@@ -80,9 +84,7 @@
                      Classes.running="{Binding Status.IsHostRunning}"
                      Classes.starting="{Binding Status.IsHostStarting}"
                      Classes.failed="{Binding Status.IsHostFailed}" />
-            <TextBlock Classes="caption"
-                       VerticalAlignment="Center"
-                       Text="{Binding [status.host.name], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption" Text="{Binding [status.host.name], Source={x:Static loc:Loc.Instance}}" />
           </StackPanel>
         </StackPanel>
 
@@ -94,14 +96,7 @@
                   AutomationProperties.AutomationId="terminal-open"
                   AutomationProperties.Name="{Binding TerminalButtonText}"
                   ToolTip.Tip="{Binding TerminalButtonText}">
-            <Grid Width="15" Height="15">
-              <wc:LineIcon Data="{StaticResource IconTerminalFrame}" Width="15" Height="15" />
-              <wc:LineIcon Data="{StaticResource IconTerminalScreen}"
-                           Width="15"
-                           Height="15"
-                           StrokeThickness="0"
-                           Fill="{DynamicResource TextPrimaryBrush}" />
-            </Grid>
+            <wc:FluentIcon Data="{StaticResource IconTerminal}" Width="15" Height="15" />
           </Button>
           <Button Classes="ghost icon"
                   Width="30"
@@ -109,7 +104,7 @@
                   Command="{Binding ToggleSettingsCommand}"
                   AutomationProperties.AutomationId="open-settings" AutomationProperties.Name="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [shell.settings], Source={x:Static loc:Loc.Instance}}">
-            <wc:LineIcon Data="{StaticResource IconGear}" Width="15" Height="15" />
+            <wc:FluentIcon Data="{StaticResource IconGear}" Width="15" Height="15" />
           </Button>
           <Button x:Name="MinimizeButton"
                   Classes="ghost icon"
@@ -118,7 +113,7 @@
                   Click="OnMinimizeClick"
                   AutomationProperties.AutomationId="window-minimize" AutomationProperties.Name="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [window.minimize], Source={x:Static loc:Loc.Instance}}">
-            <wc:LineIcon Data="{StaticResource IconMinimize}" Width="13" Height="13" />
+            <wc:FluentIcon Data="{StaticResource IconMinimize}" Width="13" Height="13" />
           </Button>
           <Button x:Name="MaximizeButton"
                   Classes="ghost icon"
@@ -126,7 +121,7 @@
                   Height="26"
                   Click="OnMaximizeClick"
                   AutomationProperties.AutomationId="window-maximize">
-            <wc:LineIcon x:Name="MaximizeIcon" Data="{StaticResource IconMaximize}" Width="13" Height="13" />
+            <wc:FluentIcon x:Name="MaximizeIcon" Data="{StaticResource IconMaximize}" Width="13" Height="13" />
           </Button>
           <Button x:Name="CloseButton"
                   Classes="ghost icon"
@@ -135,7 +130,7 @@
                   Click="OnCloseClick"
                   AutomationProperties.AutomationId="window-close" AutomationProperties.Name="{Binding [window.closeWindow], Source={x:Static loc:Loc.Instance}}"
                   ToolTip.Tip="{Binding [window.close], Source={x:Static loc:Loc.Instance}}">
-            <wc:LineIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
           </Button>
         </StackPanel>
       </Grid>
@@ -145,15 +140,15 @@
     <wb:WorkbenchHost Grid.Row="1" Layout="{Binding Workbench}" />
 
     <!-- Approval queue: the non-modal panel in the bottom-right corner. It resolves the shell's approval services from
-         its own constructor, so the root view model does not have to carry it. -->
+    its own constructor, so the root view model does not have to carry it. -->
     <ap:ApprovalQueueOverlay Grid.Row="1" />
 
     <!-- The app status bar is gone: the extension host's state lives in the title row (dot plus tooltip), ahead/behind and
-         the CI marker moved into the session composer's strip, the project path into that strip's project button, and the
-         provider's status into the provider section of the settings page. -->
+    the CI marker moved into the session composer's strip, the project path into that strip's project button, and the
+    provider's status into the provider section of the settings page. -->
 
     <!-- Settings overlay: the body is the registered section list (provider, paths and whatever a feature adds), and
-         each section's view model is rendered by the app-level data template for its type. -->
+    each section's view model is rendered by the app-level data template for its type. -->
     <Border Grid.RowSpan="2"
             Background="{DynamicResource SurfaceBackgroundBrush}"
             Opacity="0.92"
@@ -168,14 +163,13 @@
         <Grid RowDefinitions="Auto,*,Auto">
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Classes="h2"
-                       VerticalAlignment="Center"
                        Text="{Binding Settings.Title}"
                        AutomationProperties.AutomationId="settings-title" />
             <Button Grid.Column="1"
                     Classes="ghost icon"
                     Command="{Binding ToggleSettingsCommand}"
                     AutomationProperties.AutomationId="close-settings" AutomationProperties.Name="{Binding [shell.closeSettings], Source={x:Static loc:Loc.Instance}}">
-              <wc:LineIcon Data="{StaticResource IconClose}" Width="13" Height="13" />
+              <wc:FluentIcon Data="{StaticResource IconClose}" Width="13" Height="13" />
             </Button>
           </Grid>
 
@@ -192,7 +186,6 @@
                   <TextBlock Text="{Binding Title}"
                              FontSize="{DynamicResource FontSizeSm}"
                              Padding="10,7"
-                             VerticalAlignment="Center"
                              AutomationProperties.AutomationId="{Binding Id}" />
                 </DataTemplate>
               </ListBox.ItemTemplate>

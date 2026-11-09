@@ -21,6 +21,22 @@ internal enum TreeNodeKind
     SubAgent,
 }
 
+/// <summary>
+/// What one project-tree panel shows. General chats and registered projects are two docked panels of the left column, so
+/// each owns its own tree (and its own refresh, commands and header tools) over the same registry and session catalog.
+/// </summary>
+internal enum TreeScope
+{
+    /// <summary>Both areas in one tree, as a single panel shows them.</summary>
+    Both,
+
+    /// <summary>Only the general workspace and its sessions.</summary>
+    General,
+
+    /// <summary>Only the registered projects, with their worktrees, sessions and history.</summary>
+    Projects,
+}
+
 /// <summary>The state of an agent row, classified from its stored status text.</summary>
 internal enum AgentState
 {
@@ -78,11 +94,14 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     private bool isExpanded = true;
     private bool isRunning;
     private bool isActiveSession;
+    private bool isActiveAgent;
     private string title = string.Empty;
     private string subtitle = string.Empty;
     private string statusText = string.Empty;
     private AgentState agentState = AgentState.Ended;
     private Geometry icon = TreeIcons.Session;
+    private Geometry newSessionGlyph = TreeIcons.Plus;
+    private string newSessionTipKey = ProjectStrings.NewSessionTooltipKey;
     private int historyCount;
     private bool archived;
 
@@ -115,11 +134,16 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     /// <summary>Indent step count; agent rows indent by level only and get no guide lines.</summary>
     public int Depth { get; private set; }
 
-    public IReadOnlyList<IndentMark> Guides => Kind is TreeNodeKind.MainAgent or TreeNodeKind.SubAgent
-        ? IndentMarks.Spacer(Depth)
-        : IndentMarks.For(Depth);
+    /// <summary>
+    /// One step per level for every row, agents included: a sub-agent row draws no chevron of its own, so a separate smaller
+    /// step for it left its icon level with the parent's instead of under it.
+    /// </summary>
+    public IReadOnlyList<IndentMark> Guides => IndentMarks.Plain(Depth);
 
     public bool IsAgent => Kind is TreeNodeKind.MainAgent or TreeNodeKind.SubAgent;
+
+    /// <summary>True for a project row: the heading of one registered project's subtree.</summary>
+    public bool IsProject => Kind == TreeNodeKind.Project;
 
     public void SetDepth(int depth)
     {
@@ -211,7 +235,31 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
 
     public bool HasToggle => Children.Count > 0;
 
-    public bool HasOpen => OpenCommand is not null;
+    /// <summary>
+    /// The glyph on the row's trailing "+": the plain plus where the button starts a conversation, the branch glyph on a
+    /// project row where it starts a worktree. Two different actions, so one shared plus would hide the difference.
+    /// </summary>
+    public Geometry NewSessionGlyph
+    {
+        get => newSessionGlyph;
+        set => Set(ref newSessionGlyph, value);
+    }
+
+    /// <summary>The trailing "+" tooltip, resolved from its key on read so it follows a language switch like every row label.</summary>
+    public string NewSessionTooltip => Loc.Instance[newSessionTipKey];
+
+    /// <summary>The key the trailing "+" tooltip is resolved from; the project row names a branch, every other row a session.</summary>
+    public string NewSessionTipKey
+    {
+        get => newSessionTipKey;
+        set
+        {
+            if (Set(ref newSessionTipKey, value))
+            {
+                OnPropertyChanged(nameof(NewSessionTooltip));
+            }
+        }
+    }
 
     public bool HasNewSession => NewSessionCommand is not null;
 
@@ -230,8 +278,33 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     public bool IsActiveSession
     {
         get => isActiveSession;
-        set => Set(ref isActiveSession, value);
+        set
+        {
+            if (Set(ref isActiveSession, value))
+            {
+                OnPropertyChanged(nameof(IsActiveRow));
+            }
+        }
     }
+
+    /// <summary>True for the agent row whose tab the bottom group is showing, so the tree and that group agree.</summary>
+    public bool IsActiveAgent
+    {
+        get => isActiveAgent;
+        set
+        {
+            if (Set(ref isActiveAgent, value))
+            {
+                OnPropertyChanged(nameof(IsActiveRow));
+            }
+        }
+    }
+
+    /// <summary>The row the main region (a session) or the bottom group (a sub-agent) is currently showing.</summary>
+    public bool IsActiveRow => isActiveSession || isActiveAgent;
+
+    /// <summary>Agent id of an agent row, empty for every other row; the shell matches it against the open tabs.</summary>
+    public string AgentId { get; init; } = string.Empty;
 
     public string RunningText => isRunning ? ProjectStrings.RunningLabel : string.Empty;
 
@@ -244,6 +317,7 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(RunningText));
+        OnPropertyChanged(nameof(NewSessionTooltip));
     }
 
     /// <summary>The state line of the row: an agent's run state, or empty when the row has none.</summary>
@@ -260,11 +334,27 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
                 }
 
                 OnPropertyChanged(nameof(HasStatusText));
+                OnPropertyChanged(nameof(HasStatusGlyph));
+                OnPropertyChanged(nameof(ShowsStatusDot));
+                OnPropertyChanged(nameof(ShowsStatusCheck));
             }
         }
     }
 
     public bool HasStatusText => statusText.Length > 0;
+
+    /// <summary>
+    /// An agent row's state is drawn, not spelled: a dot while it is queued, running or ended badly, a check once it finished
+    /// fine. The text stays as the row's tooltip, so nothing is lost for a reader who needs the words.
+    /// </summary>
+    public bool HasStatusGlyph => IsAgent && HasStatusText;
+
+    public bool ShowsStatusDot => HasStatusGlyph && agentState != AgentState.Completed;
+
+    public bool ShowsStatusCheck => HasStatusGlyph && agentState == AgentState.Completed;
+
+    /// <summary>The neutral dot: an agent whose state the transcript did not state, drawn like a queued one but muted.</summary>
+    public bool IsAgentEndedGlyph => agentState == AgentState.Ended;
 
     /// <summary>The classified state of an agent row, derived from <see cref="StatusText"/>; neutral for other rows.</summary>
     public AgentState AgentState
@@ -285,6 +375,9 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
             OnPropertyChanged(nameof(IsAgentFailed));
             OnPropertyChanged(nameof(IsAgentStopped));
             OnPropertyChanged(nameof(IsAgentRunningAnimated));
+            OnPropertyChanged(nameof(IsAgentEndedGlyph));
+            OnPropertyChanged(nameof(ShowsStatusDot));
+            OnPropertyChanged(nameof(ShowsStatusCheck));
         }
     }
 
@@ -342,7 +435,6 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         RenameCommand = rename;
         RevealCommand = reveal;
         RemoveCommand = remove;
-        OnPropertyChanged(nameof(HasOpen));
         OnPropertyChanged(nameof(HasNewSession));
     }
 
@@ -386,6 +478,11 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     }
 }
 
+/// <summary>The result of one tree plan: its rows, plus the child-session lookup later incremental refreshes reuse.</summary>
+internal sealed record PlannedTree(
+    List<TreeNodePlan> Plans,
+    ILookup<string, SessionInfo> StoredChildren);
+
 /// <summary>One planned node of a rebuild; plain data, so the tree can be planned on a pool thread.</summary>
 internal sealed record TreeNodePlan(
     TreeNodeKind Kind,
@@ -408,6 +505,12 @@ internal sealed record TreeNodePlan(
 
     /// <summary>Archived sessions of a history row; the row formats its title from it in the current language.</summary>
     public int HistoryCount { get; init; }
+
+    /// <summary>Agent id of an agent row, empty for every other row; a click on the row opens that agent's tab.</summary>
+    public string AgentId { get; init; } = string.Empty;
+
+    /// <summary>Session an agent row belongs to, empty for every other row; the row needs it to find its agent again.</summary>
+    public string AgentSessionId { get; init; } = string.Empty;
 
     /// <summary>True for an archived session row, whose subtitle is the archived label instead of the last-active stamp.</summary>
     public bool IsArchived { get; init; }
@@ -438,11 +541,14 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     private readonly Func<string, string, Task<string?>> promptText;
     private readonly Func<string, Task> reveal;
     private readonly Func<CancellationToken, Task> addProject;
+    private readonly TreeScope scope;
     private readonly FlatTree<TreeNodeViewModel> tree = new();
     private bool busy;
     private bool refreshPending;
     private LocText status;
     private string activeSessionId = string.Empty;
+    private ILookup<string, SessionInfo> storedChildren = Array.Empty<SessionInfo>().ToLookup(static session => session.ParentSessionId ?? string.Empty);
+    private string activeAgentId = string.Empty;
 
     public ProjectTreeViewModel(
         IProjectRegistry projects,
@@ -452,7 +558,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         Func<Func<CancellationToken, Task<SessionInfo>>, Task<bool>> createConfirmed,
         Func<string, string, Task<string?>> promptText,
         Func<string, Task> reveal,
-        Func<CancellationToken, Task> addProject)
+        Func<CancellationToken, Task> addProject,
+        TreeScope scope = TreeScope.Both)
     {
         this.projects = projects;
         this.catalog = catalog;
@@ -462,6 +569,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         this.promptText = promptText;
         this.reveal = reveal;
         this.addProject = addProject;
+        this.scope = scope;
         AddProjectCommand = new AsyncRelayCommand(ct => addProject(ct), () => true, OnFailed);
         GeneralSessionCommand = new AsyncRelayCommand(ct => CreateGeneralSessionAsync(ct), () => true, OnFailed);
         RefreshCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
@@ -492,6 +600,13 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
 
     /// <summary>The agents of one session, as a flat list with parent links; called before a rebuild leaves the dispatcher.</summary>
     public Func<string, IReadOnlyList<AgentNodeSnapshot>>? AgentTrees { get; set; }
+
+    /// <summary>
+    /// Opens the session of an agent row and its tab in the main region's bottom group, by (session id, agent id). Set by the
+    /// shell, which owns the session runtimes; a click on an agent row is the only way in from the tree, so without it the
+    /// row does nothing.
+    /// </summary>
+    public Func<string, string, CancellationToken, Task>? OpenSubAgent { get; set; }
 
     /// <summary>Called after a session was archived, so the shell can drop its runtime when nothing else uses it.</summary>
     public Action<string>? SessionArchived { get; set; }
@@ -575,7 +690,13 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
                 continue;
             }
 
-            Merge(node.Children, PlanAgents(provider(node.SessionId)), node.Depth + 1);
+            var snapshot = provider(node.SessionId);
+            Merge(
+                node.Children,
+                snapshot.Count > 0
+                    ? PlanSessionAgents(snapshot, node.SessionId)
+                    : PlanStoredAgents(storedChildren, node.SessionId, node.SessionId, RunningSessionIds()),
+                node.Depth + 1);
             node.NotifyChildrenChanged();
         }
 
@@ -601,7 +722,28 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             node.IsActiveSession = node.Kind == TreeNodeKind.Session
                 && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
         }
+
+        ActiveRowChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>Marks the agent row whose tab the bottom group shows; null clears the mark.</summary>
+    public void SetActiveAgent(string? agentId)
+    {
+        activeAgentId = agentId ?? string.Empty;
+        foreach (var node in Enumerate(Sections))
+        {
+            node.IsActiveAgent = node.IsAgent
+                && string.Equals(node.AgentId, activeAgentId, StringComparison.Ordinal);
+        }
+
+        ActiveRowChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Raised when the row the shell is showing changes (another session tab, another sub-agent tab). The view drops the
+    /// mouse selection then: the highlight follows what is on screen, and a row picked earlier must not keep it too.
+    /// </summary>
+    public event EventHandler? ActiveRowChanged;
 
     /// <summary>Archives a session: it leaves the worktree list and shows up under "历史".</summary>
     public async Task ArchiveAsync(string sessionId, CancellationToken ct)
@@ -636,16 +778,19 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         {
             var all = await BackgroundRead.RunAsync(token => projects.ListAsync(token), ct).ConfigureAwait(true);
             var sessions = await BackgroundRead.RunAsync(QueryAllSessionsAsync, ct).ConfigureAwait(true);
+            var roots = sessions.Where(static session => string.IsNullOrEmpty(session.ParentSessionId)).ToArray();
 
             // The session rows of the tree come from collections the dispatcher owns, so both the running set and the
             // agent trees are snapshotted here, before the planning leaves the UI thread.
             var running = RunningSessionIds();
-            var agents = SnapshotAgentTrees(sessions);
-            var plans = await Task.Run(() => Plan(all, sessions, running, agents), ct).ConfigureAwait(true);
+            var agents = SnapshotAgentTrees(roots);
+            var planned = await Task.Run(() => Plan(all, roots, sessions, running, agents), ct).ConfigureAwait(true);
+            var plans = planned.Plans;
+            storedChildren = planned.StoredChildren;
             Merge(Sections, plans);
             RebuildRows();
             GeneralSection = Sections.FirstOrDefault(static node => node.Kind == TreeNodeKind.General);
-            SetStatus(all.Count <= 1 ? ProjectStrings.EmptyProjects : default);
+            SetStatus(scope != TreeScope.General && all.Count <= 1 ? ProjectStrings.EmptyProjects : default);
             OnPropertyChanged(nameof(SectionCount));
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException)
@@ -676,44 +821,69 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         return snapshot;
     }
 
-    /// <summary>Builds the whole tree as plain data, so the queries and the mapping stay off the dispatcher.</summary>
-    private static List<TreeNodePlan> Plan(
+    /// <summary>
+    /// Builds the whole tree as plain data, so the queries and the mapping stay off the dispatcher.
+    /// <paramref name="sessions"/> is every session, roots and children: the rows come from the roots, the agent rows of each
+    /// session from its child links (or from <paramref name="agents"/> when that session is loaded in this run).
+    /// </summary>
+    private PlannedTree Plan(
         IReadOnlyList<ProjectInfo> all,
         IReadOnlyList<SessionInfo> sessions,
+        IReadOnlyList<SessionInfo> every,
         HashSet<string> running,
         IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
     {
+        var storedChildren = every
+            .Where(static session => !string.IsNullOrEmpty(session.ParentSessionId))
+            .ToLookup(static session => session.ParentSessionId!, StringComparer.Ordinal);
         var plans = new List<TreeNodePlan>(all.Count);
         foreach (var project in all.OrderBy(static p => p.Kind == ProjectKind.General ? 0 : 1).ThenBy(static p => p.SortOrder))
         {
+            // A panel shows one of the two areas: the general workspace, or the registered projects.
+            if (scope != TreeScope.Both && (project.Kind == ProjectKind.General) != (scope == TreeScope.General))
+            {
+                continue;
+            }
+
             var projectSessions = sessions
                 .Where(session => string.Equals(session.ProjectId, project.Id, StringComparison.Ordinal))
                 .ToArray();
 
-            plans.Add(project.Kind == ProjectKind.General
-                ? PlanGeneral(project, projectSessions, running, agents)
-                : PlanProject(project, projectSessions, running, agents));
+            var plan = project.Kind == ProjectKind.General
+                ? PlanGeneral(project, projectSessions, storedChildren, running, agents)
+                : PlanProject(project, projectSessions, storedChildren, running, agents);
+
+            // In its own panel the general area needs no heading row: the panel title already says "常规对话", so its
+            // sessions and history are the panel's rows, not a group that repeats the title.
+            if (scope == TreeScope.General && plan.Kind == TreeNodeKind.General)
+            {
+                plans.AddRange(plan.Children);
+                continue;
+            }
+
+            plans.Add(plan);
         }
 
-        return plans;
+        return new PlannedTree(plans, storedChildren);
     }
 
     private static TreeNodePlan PlanGeneral(
         ProjectInfo project,
         IReadOnlyList<SessionInfo> sessions,
+        ILookup<string, SessionInfo> storedChildren,
         HashSet<string> running,
         IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
     {
         var children = new List<TreeNodePlan>();
         foreach (var session in sessions.Where(static s => s.Status == SessionStatus.Active))
         {
-            children.Add(PlanSession(session, running, agents));
+            children.Add(PlanSession(session, storedChildren, running, agents));
         }
 
         var archived = sessions.Where(static s => s.Status == SessionStatus.Archived).ToArray();
         if (archived.Length > 0)
         {
-            children.Add(PlanHistory(project, project.RootPath, archived, running, agents));
+            children.Add(PlanHistory(project, project.RootPath, archived, storedChildren, running, agents));
         }
 
         return new TreeNodePlan(
@@ -733,6 +903,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     private static TreeNodePlan PlanProject(
         ProjectInfo project,
         IReadOnlyList<SessionInfo> sessions,
+        ILookup<string, SessionInfo> storedChildren,
         HashSet<string> running,
         IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
     {
@@ -748,13 +919,13 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             var worktreeChildren = new List<TreeNodePlan>();
             foreach (var session in group.Where(static s => s.Status == SessionStatus.Active))
             {
-                worktreeChildren.Add(PlanSession(session, running, agents));
+                worktreeChildren.Add(PlanSession(session, storedChildren, running, agents));
             }
 
             var archived = group.Where(static s => s.Status == SessionStatus.Archived).ToArray();
             if (archived.Length > 0)
             {
-                worktreeChildren.Add(PlanHistory(project, group.Key, archived, running, agents));
+                worktreeChildren.Add(PlanHistory(project, group.Key, archived, storedChildren, running, agents));
             }
 
             children.Add(new TreeNodePlan(
@@ -789,6 +960,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         ProjectInfo project,
         string worktreePath,
         IReadOnlyList<SessionInfo> sessions,
+        ILookup<string, SessionInfo> storedChildren,
         HashSet<string> running,
         IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents) =>
         new(
@@ -802,13 +974,14 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             worktreePath,
             null,
             true,
-            sessions.Select(session => PlanSession(session, running, agents)).ToArray())
+            sessions.Select(session => PlanSession(session, storedChildren, running, agents)).ToArray())
         {
             HistoryCount = sessions.Count,
         };
 
     private static TreeNodePlan PlanSession(
         SessionInfo session,
+        ILookup<string, SessionInfo> storedChildren,
         HashSet<string> running,
         IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents) =>
         new(
@@ -822,13 +995,80 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             session.WorktreePath ?? session.WorkspacePath,
             session.Branch,
             false,
-            agents.TryGetValue(session.Id, out var snapshot) && snapshot.Count > 0 ? PlanAgents(snapshot) : [])
+            agents.TryGetValue(session.Id, out var snapshot) && snapshot.Count > 0
+                ? PlanSessionAgents(snapshot, session.Id)
+                : PlanStoredAgents(storedChildren, session.Id, session.Id, running))
         {
             IsArchived = session.Status == SessionStatus.Archived,
         };
 
-    /// <summary>Nests a session's agents by the parent link into 主 Agent → 子 Agent → 孙 Agent rows.</summary>
-    internal static List<TreeNodePlan> PlanAgents(IReadOnlyList<AgentNodeSnapshot> snapshot)
+    /// <summary>
+    /// The rows under a session that is not loaded in this run: its sub-agent sessions come straight from the store, by the
+    /// parent link, so a restarted window still shows the agent rows (and the chevron that expands them). Their kind picks the
+    /// icon; the run state lives in the transcript, which is not read here, so these rows carry no state mark until the session
+    /// is opened and the live roster replaces them.
+    /// </summary>
+    private static List<TreeNodePlan> PlanStoredAgents(
+        ILookup<string, SessionInfo> children,
+        string parentSessionId,
+        string rootSessionId,
+        HashSet<string> running)
+    {
+        var plans = new List<TreeNodePlan>();
+        foreach (var child in children[parentSessionId])
+        {
+            plans.Add(new TreeNodePlan(
+                TreeNodeKind.SubAgent,
+                "agent:" + child.Id,
+                string.IsNullOrWhiteSpace(child.Task) ? child.Title : child.Task!,
+                string.Empty,
+                running.Contains(child.Id),
+                null,
+                null,
+                child.WorktreePath ?? child.WorkspacePath,
+                child.Branch,
+                false,
+                PlanStoredAgents(children, child.Id, rootSessionId, running))
+            {
+                AgentKind = child.AgentKind ?? string.Empty,
+                AgentId = child.Id,
+                AgentSessionId = rootSessionId,
+            });
+        }
+
+        return plans;
+    }
+
+    /// <summary>
+    /// The rows under a session: the main agent is the session itself, so its sub-agents are lifted into the session row
+    /// instead of hanging under a second row that repeated the same conversation and needed a second chevron to open.
+    /// </summary>
+    internal static List<TreeNodePlan> PlanSessionAgents(IReadOnlyList<AgentNodeSnapshot> snapshot, string sessionId)
+    {
+        var plans = PlanAgents(snapshot, sessionId);
+        if (plans.Count == 0)
+        {
+            return plans;
+        }
+
+        var lifted = new List<TreeNodePlan>(plans.Count);
+        foreach (var plan in plans)
+        {
+            if (plan.Kind == TreeNodeKind.MainAgent)
+            {
+                lifted.AddRange(plan.Children);
+            }
+            else
+            {
+                lifted.Add(plan);
+            }
+        }
+
+        return lifted;
+    }
+
+    /// <summary>Nests a session's agents by the parent link into 子 Agent → 孙 Agent rows.</summary>
+    internal static List<TreeNodePlan> PlanAgents(IReadOnlyList<AgentNodeSnapshot> snapshot, string sessionId)
     {
         if (snapshot.Count == 0)
         {
@@ -853,28 +1093,31 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         var plans = new List<TreeNodePlan>();
         foreach (var agent in snapshot.Where(static a => a.IsMain))
         {
-            plans.Add(PlanAgent(agent, byParent));
+            plans.Add(PlanAgent(agent, byParent, sessionId));
         }
 
         foreach (var agent in snapshot)
         {
             if (!agent.IsMain && (agent.ParentAgentId is not { Length: > 0 } parent || snapshot.All(a => !string.Equals(a.AgentId, parent, StringComparison.Ordinal))))
             {
-                plans.Add(PlanAgent(agent, byParent));
+                plans.Add(PlanAgent(agent, byParent, sessionId));
             }
         }
 
         return plans;
     }
 
-    private static TreeNodePlan PlanAgent(AgentNodeSnapshot agent, Dictionary<string, List<AgentNodeSnapshot>> byParent)
+    private static TreeNodePlan PlanAgent(
+        AgentNodeSnapshot agent,
+        Dictionary<string, List<AgentNodeSnapshot>> byParent,
+        string sessionId)
     {
         var children = new List<TreeNodePlan>();
         if (byParent.TryGetValue(agent.AgentId, out var nested))
         {
             foreach (var child in nested)
             {
-                children.Add(PlanAgent(child, byParent));
+                children.Add(PlanAgent(child, byParent, sessionId));
             }
         }
 
@@ -893,6 +1136,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         {
             AgentKind = agent.Kind,
             StatusText = agent.StatusText,
+            AgentId = agent.AgentId,
+            AgentSessionId = sessionId,
         };
     }
 
@@ -939,6 +1184,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         var node = new TreeNodeViewModel(plan.Kind)
         {
             Key = plan.Key,
+            AgentId = plan.AgentId,
             SessionId = plan.Session?.Id ?? string.Empty,
             SessionStatus = plan.Session?.Status.ToString() ?? string.Empty,
             IsExpanded = !plan.StartCollapsed,
@@ -972,13 +1218,20 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         node.StatusText = plan.StatusText;
         node.IsActiveSession = plan.Kind == TreeNodeKind.Session
             && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
+        node.IsActiveAgent = node.IsAgent && string.Equals(plan.AgentId, activeAgentId, StringComparison.Ordinal);
         node.Icon = IconOf(plan);
+        // A project's "+" starts a worktree on a new branch; every other row's "+" only starts a conversation. The glyph and
+        // the tooltip name that difference, so the two buttons are not read as the same action.
+        node.NewSessionGlyph = plan.Kind == TreeNodeKind.Project ? TreeIcons.NewBranch : TreeIcons.Plus;
+        node.NewSessionTipKey = plan.Kind == TreeNodeKind.Project
+            ? ProjectStrings.NewBranchTooltipKey
+            : ProjectStrings.NewSessionTooltipKey;
         switch (plan.Kind)
         {
             case TreeNodeKind.General:
                 node.SetCommands(
                     open: null,
-                    newSession: new AsyncRelayCommand(ct => CreateGeneralSessionAsync(ct), () => true, OnFailed),
+                    newSession: GeneralSessionCommand,
                     archive: null,
                     rename: null,
                     reveal: new AsyncRelayCommand(ct => reveal(plan.WorktreePath), () => true, OnFailed),
@@ -1012,6 +1265,20 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
                     archive: new AsyncRelayCommand(ct => ArchiveAsync(session.Id, ct), () => session.Status == SessionStatus.Active, OnFailed),
                     rename: new AsyncRelayCommand(ct => RenameSessionAsync(session, ct), () => true, OnFailed),
                     reveal: new AsyncRelayCommand(ct => reveal(session.WorkspacePath), () => true, OnFailed),
+                    remove: null);
+                break;
+            case TreeNodeKind.MainAgent or TreeNodeKind.SubAgent when plan.AgentId.Length > 0:
+                var agentId = plan.AgentId;
+                var agentSessionId = plan.AgentSessionId;
+                node.SetCommands(
+                    open: new AsyncRelayCommand(
+                        ct => OpenSubAgent?.Invoke(agentSessionId, agentId, ct) ?? Task.CompletedTask,
+                        () => true,
+                        OnFailed),
+                    newSession: null,
+                    archive: null,
+                    rename: null,
+                    reveal: null,
                     remove: null);
                 break;
             default:
@@ -1213,8 +1480,12 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Every session, roots and sub-agent children alike: the child links are what draws a session's agent rows (and so its
+    /// chevron) even when that session was never opened in this run.
+    /// </summary>
     private Task<IReadOnlyList<SessionInfo>> QueryAllSessionsAsync(CancellationToken ct) =>
-        catalog.QueryAsync(new SessionQuery { ParentSessionId = string.Empty }, ct);
+        catalog.QueryAsync(new SessionQuery(), ct);
 
     private void OnFailed(Exception exception) => SetStatus(LocText.Literal(exception.Message));
 
