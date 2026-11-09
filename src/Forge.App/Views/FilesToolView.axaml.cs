@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Selection;
+using Avalonia.Interactivity;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
@@ -10,6 +11,10 @@ public partial class FilesToolView : UserControl
     {
         InitializeComponent();
     }
+
+    private void OnScopePicked(object? sender, RoutedEventArgs e) => ScopePicker.Flyout?.Hide();
+
+    private void OnBranchPicked(object? sender, RoutedEventArgs e) => CompareBranchPicker.Flyout?.Hide();
 
     private void OnChangedSelection(object? sender, SelectionChangedEventArgs e)
     {

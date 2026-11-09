@@ -99,7 +99,10 @@ internal static class InspectorStrings
     public const string ChangesTurnsName = "changes.turns.name";
     public const string ChangesCompareBranchLabelPattern = "changes.compareBranch.label";
     public const string ChangesCompareBranchPlaceholder = "changes.compareBranch.placeholder";
-    public const string ChangesNoCompareBranch = "changes.compareBranch.none";
+    public const string ChangesLocalBranches = "changes.compareBranch.local";
+    public const string ChangesRemoteBranches = "changes.compareBranch.remote";
+    public const string ChangesNoBranches = "changes.compareBranch.none";
+    public const string ChangesNoTurns = "changes.turns.none";
     public const string ChangesNoCurrentBranch = "changes.compareBranch.noCurrentBranch";
     public const string ChangesNoCommonHistory = "changes.compareBranch.noCommonHistory";
     public const string ChangesTurnPattern = "changes.turn";
@@ -228,7 +231,10 @@ internal static class InspectorStrings
         Loc.Register(ChangesTurnsName, "轮次", "Turns");
         Loc.Register(ChangesCompareBranchLabelPattern, "对比 {0}", "Compare with {0}");
         Loc.Register(ChangesCompareBranchPlaceholder, "选择对比分支", "Choose a comparison branch");
-        Loc.Register(ChangesNoCompareBranch, "没有可比较的分支。", "No comparison branch is available.");
+        Loc.Register(ChangesLocalBranches, "本地分支", "Local branches");
+        Loc.Register(ChangesRemoteBranches, "远端分支", "Remote branches");
+        Loc.Register(ChangesNoBranches, "没有可比较的分支。", "No comparison branch is available.");
+        Loc.Register(ChangesNoTurns, "没有已完成的轮次。", "No completed turns.");
         Loc.Register(ChangesNoCurrentBranch, "当前工作区不在分支上，无法比较分支。", "The current worktree is not on a branch, so it cannot be compared.");
         Loc.Register(ChangesNoCommonHistory, "所选分支与当前分支没有共同历史。", "The selected branch and current branch have no common history.");
         Loc.Register(ChangesTurnPattern, "第 {0} 轮 · {1}", "Turn {0} · {1}");

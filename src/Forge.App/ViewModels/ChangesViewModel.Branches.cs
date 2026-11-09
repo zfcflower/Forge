@@ -25,6 +25,8 @@ internal sealed class BranchChoiceViewModel : ObservableObject
 
     public string RefName { get; }
 
+    public string AutomationId => "changes-branch-" + RefName;
+
     public bool IsRemote { get; }
 
     public bool IsSelected
@@ -47,6 +49,18 @@ internal sealed partial class ChangesViewModel
     public ObservableCollection<BranchChoiceViewModel> LocalBranches { get; } = [];
 
     public ObservableCollection<BranchChoiceViewModel> RemoteBranches { get; } = [];
+
+    public bool HasLocalBranches => LocalBranches.Count > 0;
+
+    public bool HasRemoteBranches => RemoteBranches.Count > 0;
+
+    public bool HasBranches => HasLocalBranches || HasRemoteBranches;
+
+    public bool HasLocalAndRemoteBranches => HasLocalBranches && HasRemoteBranches;
+
+    public bool HasNoBranches => !HasBranches;
+
+    public bool HasNoTurns => Turns.Count == 0;
 
     public RelayCommand AllChangesCommand { get; }
 
@@ -86,7 +100,6 @@ internal sealed partial class ChangesViewModel
             OnPropertyChanged(nameof(IsByTurn));
             OnPropertyChanged(nameof(IsUncommitted));
             OnPropertyChanged(nameof(IsAllChanges));
-            OnPropertyChanged(nameof(ScopeIndex));
             OnPropertyChanged(nameof(ScopeLabel));
             OnPropertyChanged(nameof(Summary));
         }
@@ -94,16 +107,24 @@ internal sealed partial class ChangesViewModel
         _ = LoadAsync(CancellationToken.None, reloadChoices: false);
     }
 
-    private void SelectTurn(TurnChoiceViewModel turn)
+    private bool SetSelectedTurn(TurnChoiceViewModel? value)
     {
-        var changed = !ReferenceEquals(selectedTurn, turn);
-        if (changed)
+        if (ReferenceEquals(selectedTurn, value))
         {
-            selectedTurn = turn;
-            OnPropertyChanged(nameof(SelectedTurn));
-            OnPropertyChanged(nameof(ScopeLabel));
+            return false;
         }
 
+        selectedTurn?.SetSelected(false);
+        selectedTurn = value;
+        selectedTurn?.SetSelected(true);
+        OnPropertyChanged(nameof(SelectedTurn));
+        OnPropertyChanged(nameof(ScopeLabel));
+        return true;
+    }
+
+    private void SelectTurn(TurnChoiceViewModel turn)
+    {
+        var changed = SetSelectedTurn(turn);
         SetScope(ChangeScope.ByTurn, forceRefresh: changed);
     }
 
@@ -183,6 +204,7 @@ internal sealed partial class ChangesViewModel
 
         LocalBranches.Clear();
         RemoteBranches.Clear();
+        RaiseBranchGroupProperties();
         var choices = new List<BranchChoiceViewModel>(snapshot.Branches.Count);
         foreach (var branch in snapshot.Branches)
         {
@@ -197,6 +219,7 @@ internal sealed partial class ChangesViewModel
             (branch.IsRemote ? RemoteBranches : LocalBranches).Add(choice);
         }
 
+        RaiseBranchGroupProperties();
         var next = choices.FirstOrDefault(choice => string.Equals(choice.RefName, previousRef, StringComparison.Ordinal))
             ?? DefaultChoice(choices, snapshot.DefaultBranch);
         SetSelectedBranch(next, reloadDiff: false);
@@ -223,7 +246,17 @@ internal sealed partial class ChangesViewModel
     {
         LocalBranches.Clear();
         RemoteBranches.Clear();
+        RaiseBranchGroupProperties();
         SetSelectedBranch(null, reloadDiff: false);
+    }
+
+    private void RaiseBranchGroupProperties()
+    {
+        OnPropertyChanged(nameof(HasLocalBranches));
+        OnPropertyChanged(nameof(HasRemoteBranches));
+        OnPropertyChanged(nameof(HasBranches));
+        OnPropertyChanged(nameof(HasLocalAndRemoteBranches));
+        OnPropertyChanged(nameof(HasNoBranches));
     }
 
     public async Task RefreshFromFileSystemChangeAsync(CancellationToken ct)

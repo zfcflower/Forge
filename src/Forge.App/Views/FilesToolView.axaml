@@ -89,7 +89,52 @@
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,*" Background="Transparent">
+  <UserControl.Styles>
+    <Style Selector="Button.change-picker">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="6,3" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.change-picker:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Border.change-menu">
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="BoxShadow" Value="{StaticResource ShadowSm}" />
+    </Style>
+    <Style Selector="Button.change-menu-row">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="6,4" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    </Style>
+    <Style Selector="Button.change-menu-row.selected">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+    <Style Selector="Button.change-menu-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="TextBlock.change-menu-group">
+      <Setter Property="Margin" Value="6,4,6,2" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,Auto,*" Background="Transparent">
     <Border Classes="toolbar">
       <Grid ColumnDefinitions="*,Auto">
         <!-- Each tab carries its own count: the panel no longer spells both numbers out in a summary after the buttons. A
@@ -135,8 +180,165 @@
       </Grid>
     </Border>
 
+    <Border Grid.Row="1"
+            Classes="toolbar"
+            Padding="6,4"
+            IsVisible="{Binding ShowSharedChanges}">
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+        <Button x:Name="ScopePicker"
+                Classes="change-picker"
+                AutomationProperties.AutomationId="changes-scope-picker"
+                AutomationProperties.Name="{Binding ChangeReview.ScopeLabel}"
+                ToolTip.Tip="{Binding ChangeReview.ScopeLabel}">
+          <StackPanel Orientation="Horizontal" Spacing="5">
+            <TextBlock Text="{Binding ChangeReview.ScopeLabel}"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+            <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+          </StackPanel>
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedLeft">
+              <Border Classes="change-menu">
+                <StackPanel MinWidth="220" Spacing="2">
+                  <Button Classes="change-menu-row"
+                          Classes.selected="{Binding ChangeReview.IsAllChanges}"
+                          Command="{Binding ChangeReview.AllChangesCommand}"
+                          Click="OnScopePicked"
+                          AutomationProperties.AutomationId="changes-scope-all"
+                          AutomationProperties.Name="{Binding [changes.all], Source={x:Static loc:Loc.Instance}}">
+                    <Grid ColumnDefinitions="16,*">
+                      <TextBlock Text="✓"
+                                 Foreground="{DynamicResource AccentTextBrush}"
+                                 IsVisible="{Binding ChangeReview.IsAllChanges}"
+                                 AutomationProperties.AccessibilityView="Raw" />
+                      <TextBlock Grid.Column="1" Text="{Binding [changes.all], Source={x:Static loc:Loc.Instance}}" />
+                    </Grid>
+                  </Button>
+                  <Button Classes="change-menu-row"
+                          Classes.selected="{Binding ChangeReview.IsUncommitted}"
+                          Command="{Binding ChangeReview.UncommittedCommand}"
+                          Click="OnScopePicked"
+                          AutomationProperties.AutomationId="changes-scope-uncommitted"
+                          AutomationProperties.Name="{Binding [changes.uncommitted], Source={x:Static loc:Loc.Instance}}">
+                    <Grid ColumnDefinitions="16,*">
+                      <TextBlock Text="✓"
+                                 Foreground="{DynamicResource AccentTextBrush}"
+                                 IsVisible="{Binding ChangeReview.IsUncommitted}"
+                                 AutomationProperties.AccessibilityView="Raw" />
+                      <TextBlock Grid.Column="1" Text="{Binding [changes.uncommitted], Source={x:Static loc:Loc.Instance}}" />
+                    </Grid>
+                  </Button>
+                  <Border Classes="divider" Margin="5,3" />
+                  <ItemsControl ItemsSource="{Binding ChangeReview.Turns}"
+                                AutomationProperties.AutomationId="changes-turn-list">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:TurnChoiceViewModel">
+                        <Button Classes="change-menu-row"
+                                Classes.selected="{Binding IsSelected}"
+                                Command="{Binding SelectCommand}"
+                                Click="OnScopePicked"
+                                AutomationProperties.AutomationId="{Binding AutomationId}"
+                                AutomationProperties.Name="{Binding Label}">
+                          <Grid ColumnDefinitions="16,*">
+                            <TextBlock Text="✓"
+                                       Foreground="{DynamicResource AccentTextBrush}"
+                                       IsVisible="{Binding IsSelected}"
+                                       AutomationProperties.AccessibilityView="Raw" />
+                            <TextBlock Grid.Column="1" Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Classes="caption"
+                             Margin="8,4"
+                             IsVisible="{Binding ChangeReview.HasNoTurns}"
+                             Text="{Binding [changes.turns.none], Source={x:Static loc:Loc.Instance}}" />
+                </StackPanel>
+              </Border>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+
+        <Button x:Name="CompareBranchPicker"
+                Grid.Column="1"
+                Classes="change-picker"
+                AutomationProperties.AutomationId="changes-branch-picker"
+                AutomationProperties.Name="{Binding ChangeReview.CompareBranchLabel}"
+                ToolTip.Tip="{Binding ChangeReview.CompareBranchLabel}">
+          <StackPanel Orientation="Horizontal" Spacing="5">
+            <TextBlock Text="{Binding ChangeReview.CompareBranchLabel}"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+            <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+          </StackPanel>
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <Border Classes="change-menu">
+                <StackPanel MinWidth="220" Spacing="2">
+                  <TextBlock Classes="change-menu-group"
+                             IsVisible="{Binding ChangeReview.HasLocalBranches}"
+                             Text="{Binding [changes.compareBranch.local], Source={x:Static loc:Loc.Instance}}" />
+                  <ItemsControl ItemsSource="{Binding ChangeReview.LocalBranches}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:BranchChoiceViewModel">
+                        <Button Classes="change-menu-row"
+                                Classes.selected="{Binding IsSelected}"
+                                Command="{Binding SelectCommand}"
+                                Click="OnBranchPicked"
+                                AutomationProperties.AutomationId="{Binding AutomationId}"
+                                AutomationProperties.Name="{Binding Name}">
+                          <Grid ColumnDefinitions="16,*">
+                            <TextBlock Text="✓"
+                                       Foreground="{DynamicResource AccentTextBrush}"
+                                       IsVisible="{Binding IsSelected}"
+                                       AutomationProperties.AccessibilityView="Raw" />
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Border Classes="divider"
+                          Margin="5,3"
+                          IsVisible="{Binding ChangeReview.HasLocalAndRemoteBranches}" />
+                  <TextBlock Classes="change-menu-group"
+                             IsVisible="{Binding ChangeReview.HasRemoteBranches}"
+                             Text="{Binding [changes.compareBranch.remote], Source={x:Static loc:Loc.Instance}}" />
+                  <ItemsControl ItemsSource="{Binding ChangeReview.RemoteBranches}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:BranchChoiceViewModel">
+                        <Button Classes="change-menu-row"
+                                Classes.selected="{Binding IsSelected}"
+                                Command="{Binding SelectCommand}"
+                                Click="OnBranchPicked"
+                                AutomationProperties.AutomationId="{Binding AutomationId}"
+                                AutomationProperties.Name="{Binding Name}">
+                          <Grid ColumnDefinitions="16,*">
+                            <TextBlock Text="✓"
+                                       Foreground="{DynamicResource AccentTextBrush}"
+                                       IsVisible="{Binding IsSelected}"
+                                       AutomationProperties.AccessibilityView="Raw" />
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Classes="caption"
+                             Margin="8,4"
+                             IsVisible="{Binding ChangeReview.HasNoBranches}"
+                             Text="{Binding [changes.compareBranch.none], Source={x:Static loc:Loc.Instance}}" />
+                </StackPanel>
+              </Border>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+      </Grid>
+    </Border>
+
     <ListBox x:Name="TreeList"
-             Grid.Row="1"
+             Grid.Row="2"
              IsVisible="{Binding IsAllTab}"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource FileNodeTemplate}"
@@ -152,7 +354,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedDiffList"
-             Grid.Row="1"
+             Grid.Row="2"
              IsVisible="{Binding ShowSharedChanges}"
              ItemsSource="{Binding ChangeReview.Files}"
              SelectionChanged="OnChangedSelection"
@@ -168,7 +370,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedList"
-             Grid.Row="1"
+             Grid.Row="2"
              IsVisible="{Binding ShowFallbackChanges}"
              ItemsSource="{Binding Changes}"
              SelectionChanged="OnChangedSelection"

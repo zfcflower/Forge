@@ -1039,6 +1039,7 @@ internal sealed class FileDiffViewModel
 internal sealed class TurnChoiceViewModel : ObservableObject
 {
     private readonly LocText label;
+    private bool isSelected;
 
     public TurnChoiceViewModel(int turn, LocText label, string treeBefore, string? treeAfter, Action<TurnChoiceViewModel> select)
     {
@@ -1051,14 +1052,24 @@ internal sealed class TurnChoiceViewModel : ObservableObject
 
     public int Turn { get; }
 
+    public string AutomationId => "changes-turn-" + TextFormat.Id(Turn);
+
     /// <summary>The turn number and its start time, in the language of the moment the entry is read.</summary>
     public string Label => label.Resolve();
+
+    public bool IsSelected
+    {
+        get => isSelected;
+        private set => Set(ref isSelected, value);
+    }
 
     public string TreeBefore { get; }
 
     public string? TreeAfter { get; }
 
     public RelayCommand SelectCommand { get; }
+
+    internal void SetSelected(bool value) => IsSelected = value;
 
     /// <summary>Re-reads the label after a language switch; the panel calls this for every entry.</summary>
     internal void RefreshText() => OnPropertyChanged(nameof(Label));
@@ -1094,7 +1105,6 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
             () => true,
             exception => SetMessage(LocText.Literal(exception.Message)));
         AllChangesCommand = new RelayCommand(() => SetScope(ChangeScope.All));
-        ByTurnCommand = new RelayCommand(() => SetScope(ChangeScope.ByTurn));
         UncommittedCommand = new RelayCommand(() => SetScope(ChangeScope.Uncommitted));
         PreviousFileCommand = new RelayCommand(() => SelectAdjacentFile(-1), CanGoPreviousFile);
         NextFileCommand = new RelayCommand(() => SelectAdjacentFile(1), CanGoNextFile);
@@ -1111,8 +1121,6 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
 
     public AsyncRelayCommand RefreshCommand { get; }
 
-    public RelayCommand ByTurnCommand { get; }
-
     public RelayCommand UncommittedCommand { get; }
 
     public RelayCommand PreviousFileCommand { get; }
@@ -1124,15 +1132,6 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
     public bool HasSelectedFile => selectedFile is not null;
 
     public PanelContext Context => context;
-
-    public int ScopeIndex
-    {
-        get => scope == ChangeScope.Uncommitted ? 1 : 0;
-        set
-        {
-            SetScope(value == 1 ? ChangeScope.Uncommitted : ChangeScope.ByTurn);
-        }
-    }
 
     public bool IsByTurn => scope == ChangeScope.ByTurn;
 
@@ -1148,9 +1147,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (Set(ref selectedTurn, value))
+            if (SetSelectedTurn(value))
             {
-                OnPropertyChanged(nameof(ScopeLabel));
                 _ = LoadAsync(CancellationToken.None, reloadChoices: false);
             }
         }
@@ -1198,7 +1196,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
             files.ReplaceAll(Array.Empty<FileDiffViewModel>());
             Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
             Turns.Clear();
-            selectedTurn = null;
+            SetSelectedTurn(null);
+            OnPropertyChanged(nameof(HasNoTurns));
             ClearBranchChoices();
             Volatile.Write(ref uncommittedFingerprint, null);
         }
@@ -1264,7 +1263,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 if (reloadChoices)
                 {
                     Turns.Clear();
-                    selectedTurn = null;
+                    SetSelectedTurn(null);
+                    OnPropertyChanged(nameof(HasNoTurns));
                     ClearBranchChoices();
                     Volatile.Write(ref uncommittedFingerprint, null);
                 }
@@ -1372,11 +1372,10 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 SelectTurn));
         }
 
+        OnPropertyChanged(nameof(HasNoTurns));
         if (selectedTurn is null || Turns.All(turn => turn.Turn != selectedTurn.Turn))
         {
-            selectedTurn = Turns.FirstOrDefault();
-            OnPropertyChanged(nameof(SelectedTurn));
-            OnPropertyChanged(nameof(ScopeLabel));
+            SetSelectedTurn(Turns.FirstOrDefault());
         }
     }
 
@@ -1480,7 +1479,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         {
             if (branch is null)
             {
-                return ([], prefix, new LocText(InspectorStrings.ChangesNoCompareBranch));
+                return ([], prefix, new LocText(InspectorStrings.ChangesNoBranches));
             }
 
             if (await git.GetCurrentBranchAsync(workingDirectory, ct).ConfigureAwait(false) is null)
