@@ -22,6 +22,8 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 
 **Git 走系统 `git` 命令行。** 用 `ProcessStartInfo.ArgumentList`(不 shell 拼接);所有接受引用/范围的类型化接口拒绝以 `-` 开头的参数并加 `--end-of-options`,防止选项注入。底层 `RunAsync` 保持不受限。所有 git 子进程先移除继承的仓库定位/发现变量(`GIT_DIR`、`GIT_WORK_TREE`、`GIT_COMMON_DIR`、`GIT_INDEX_FILE`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES`、`GIT_NAMESPACE`、`GIT_PREFIX`、`GIT_CEILING_DIRECTORIES`、`GIT_DISCOVERY_ACROSS_FILESYSTEM`),再应用调用方显式覆盖,仓库发现只取决于工作目录;代价是用户外层设置的发现边界对 Forge 的 git 调用不生效。
 
+**分支列表保留引用身份。** `GitBranch.Name` 是给界面显示的短名称，`RefName` 保留 `refs/heads/...` 或 `refs/remotes/...` 完整引用，`IsRemote` 标识远端跟踪分支；调用方不得按名称中的 `/` 猜测分支类型，比较时使用完整引用以区分同名本地/远端分支。
+
 **远程操作失败不抛、推送永不裸 `--force`。** 远程/分支操作的预期失败(非快进、远端不存在、落后/冲突、认证、超时)以结构化 `GitRemoteResult` 返回而非抛异常,仅取消抛 `OperationCanceledException`。推送只允许 `--force-with-lease`,lease 对着推送前刚读的 `ls-remote` tip;git 在“Everything up-to-date”时不校验 lease 直接退 0,故该短语触发 lease 的二次核对,空或过期的 lease 升级为非快进失败。merge/rebase/pull/continue 的冲突报告打印在 stdout 而非 stderr,分类器只扫 stderr,故这些操作失败时再查 `GetConflictStateAsync` 把结果升级为冲突。git 2.56 把落后推送的提示从 `(non-fast-forward)` 改为 `(fetch first)`,两者都识别。`GitReviewLedger` 记录代理最后一次完整读 diff 的 HEAD,后续批次的 PR 门禁以此判定发 PR 前是否审过自己的改动。
 
 **捕获字节级且诚实。** 输出按原始字节流读取(不按行重拼),保留 CRLF 与末尾无换行;超过上限时结构化接口抛 `GitOutputTruncatedException`,不把截断数据当完整结果。统一 Diff 解析器校验 hunk 声明的行数与内容一致,损坏块标记而非猜测。stdout 与 stderr 截断方向不同:stdout 保留**前缀**(diff 的开头最有用),stderr 保留**末尾**——诊断的决定性一行最后打印,超 64 KiB 上限也不丢(hook 的最终裁决);逐行回调 `OnStandardOutputLine`/`OnStandardErrorLine` 在两种方向下都照常逐行触发。
