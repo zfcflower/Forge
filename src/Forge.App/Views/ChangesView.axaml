@@ -48,9 +48,9 @@
     </DataTemplate>
   </UserControl.DataTemplates>
 
-  <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
+  <Grid RowDefinitions="Auto,Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
     <Border Classes="toolbar">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
         <Button Classes="tab"
                 Classes.selected="{Binding IsByTurn}"
                 Content="{Binding [changes.byTurn], Source={x:Static loc:Loc.Instance}}"
@@ -84,8 +84,52 @@
                    Margin="0,0,10,0"
                    VerticalAlignment="Center"
                    Text="{Binding Summary}" />
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="1" Classes="toolbar">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+        <Button Classes="ghost"
+                Command="{Binding PreviousFileCommand}"
+                ToolTip.Tip="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="changes-previous-file"
+                AutomationProperties.Name="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}"
+                Content="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="1"
+                Classes="ghost"
+                Margin="4,0,0,0"
+                Command="{Binding NextFileCommand}"
+                ToolTip.Tip="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="changes-next-file"
+                AutomationProperties.Name="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}"
+                Content="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Grid.Column="2"
+                   Classes="mono caption"
+                   Margin="10,0"
+                   VerticalAlignment="Center"
+                   Text="{Binding SelectedFile.Path}"
+                   TextTrimming="CharacterEllipsis"
+                   IsVisible="{Binding HasSelectedFile}"
+                   ToolTip.Tip="{Binding SelectedFile.Path}" />
+        <Button Grid.Column="3"
+                Classes="ghost"
+                Command="{Binding OpenInEditorCommand}"
+                ToolTip.Tip="{Binding [changes.openInEditor], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="changes-open-in-editor"
+                AutomationProperties.Name="{Binding [changes.openInEditor], Source={x:Static loc:Loc.Instance}}"
+                Content="{Binding [changes.openInEditor], Source={x:Static loc:Loc.Instance}}" />
         <Button Grid.Column="4"
+                Classes="ghost"
+                Margin="4,0,0,0"
+                Click="OnCopyPathClick"
+                IsEnabled="{Binding HasSelectedFile}"
+                ToolTip.Tip="{Binding [changes.copyPath], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="changes-copy-path"
+                AutomationProperties.Name="{Binding [changes.copyPath], Source={x:Static loc:Loc.Instance}}"
+                Content="{Binding [changes.copyPath], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="5"
                 Classes="ghost icon"
+                Margin="4,0,0,0"
                 Command="{Binding RefreshCommand}"
                 ToolTip.Tip="{Binding [changes.refresh], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="refresh-changes"
@@ -95,14 +139,14 @@
       </Grid>
     </Border>
 
-    <TextBlock Grid.Row="1"
+    <TextBlock Grid.Row="2"
                Classes="caption"
                Margin="12,6"
                IsVisible="{Binding HasMessage}"
                Text="{Binding Message}" />
 
     <ListBox x:Name="RowList"
-             Grid.Row="2"
+             Grid.Row="3"
              ItemsSource="{Binding Rows}"
              Padding="0,0,0,8"
              ScrollViewer.HorizontalScrollBarVisibility="Auto"

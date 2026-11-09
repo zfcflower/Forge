@@ -238,6 +238,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     private readonly Action<string> openFile;
     private readonly Action<string> openFileInNewTab;
     private readonly Action<string> openChanges;
+    private readonly ChangesViewModel? changeReview;
     private readonly FlatTree<FileNodeViewModel> tree = new();
     private readonly HashSet<string> expandedPaths = new(StringComparer.OrdinalIgnoreCase);
     private FileIndex? index;
@@ -251,7 +252,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     private int refreshGeneration;
 
     public FilesPanelViewModel(GitCli git, Action<string> openFile, Action<string> openFileInNewTab, Action<string> openChanges)
-        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory: null)
+        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory: null, changeReview: null)
     {
     }
 
@@ -260,13 +261,19 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         Action<string> openFile,
         Action<string> openFileInNewTab,
         Action<string> openChanges,
-        Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory)
+        Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory,
+        ChangesViewModel? changeReview = null)
     {
         this.git = git;
         this.openFile = openFile;
         this.openFileInNewTab = openFileInNewTab;
         this.openChanges = openChanges;
         this.lineCountsFactory = lineCountsFactory;
+        this.changeReview = changeReview;
+        if (changeReview is not null)
+        {
+            changeReview.Files.CollectionChanged += OnChangeReviewFilesChanged;
+        }
         ChangedCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
         AllTabCommand = new RelayCommand(() => SelectedTab = 0);
         ChangedTabCommand = new RelayCommand(() => SelectedTab = 1);
@@ -281,7 +288,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         Action<string> openChanges,
         Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory,
         PanelContext context)
-        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory)
+        : this(git, openFile, openFileInNewTab, openChanges, lineCountsFactory, changeReview: null)
     {
         Context = context;
     }
@@ -292,7 +299,12 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     /// <summary>The visible rows of the "全部" tree, in display order; the view virtualizes this one list.</summary>
     public RangeObservableCollection<FileNodeViewModel> Rows => tree.Rows;
 
+    /// <summary>The legacy status rows are used only by standalone panel tests; the app binds to the shared diff view model.</summary>
     public ObservableCollection<ChangedFileViewModel> Changes { get; } = [];
+
+    public ChangesViewModel? ChangeReview => changeReview;
+
+    public bool HasSharedChanges => changeReview is not null;
 
     public AsyncRelayCommand ChangedCommand { get; }
 
@@ -311,6 +323,8 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(IsAllTab));
                 OnPropertyChanged(nameof(IsChangedTab));
+                OnPropertyChanged(nameof(ShowSharedChanges));
+                OnPropertyChanged(nameof(ShowFallbackChanges));
             }
         }
     }
@@ -318,6 +332,10 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     public bool IsAllTab => selectedTab == 0;
 
     public bool IsChangedTab => selectedTab == 1;
+
+    public bool ShowSharedChanges => IsChangedTab && changeReview is not null;
+
+    public bool ShowFallbackChanges => IsChangedTab && changeReview is null;
 
     public bool IsLoading
     {
@@ -332,7 +350,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     public int AllCount => index?.FileCount ?? 0;
 
     /// <summary>The "已改动" tab's badge: one per row of <see cref="Changes"/>.</summary>
-    public int ChangedCount => Changes.Count;
+    public int ChangedCount => changeReview?.Files.Count ?? Changes.Count;
 
     /// <summary>
     /// The tabs' accessible names. Assistive technology replaces a button's content with this name, so the badge's number has
@@ -350,6 +368,8 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AllTabName));
         OnPropertyChanged(nameof(ChangedTabName));
     }
+
+    private void OnChangeReviewFilesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => RaiseCounts();
 
     /// <summary>Why the last refresh failed, in the language of the moment it is read; null when it did not fail.</summary>
     public string? Error => error.IsEmpty ? null : error.Resolve();
@@ -370,17 +390,28 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         }
 
         RestartWatcher();
-        _ = RefreshAsync(CancellationToken.None);
+        _ = RefreshAsync(CancellationToken.None, refreshChangeReview: false, fromWatcher: false);
     }
 
-    public async Task RefreshAsync(CancellationToken ct)
+    public Task RefreshAsync(CancellationToken ct) => RefreshAsync(ct, refreshChangeReview: true, fromWatcher: false);
+
+    private async Task RefreshAsync(CancellationToken ct, bool refreshChangeReview, bool fromWatcher)
     {
         var context = Context;
         if (!context.HasSession || !Directory.Exists(context.WorkingDirectory))
         {
             tree.Clear();
-            Changes.Clear();
+            if (changeReview is null)
+            {
+                Changes.Clear();
+            }
+
             index = null;
+            if (changeReview is not null && refreshChangeReview)
+            {
+                await changeReview.LoadAsync(ct).ConfigureAwait(true);
+            }
+
             RaiseCounts();
             return;
         }
@@ -392,7 +423,9 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
             var workingDirectory = context.WorkingDirectory;
             var expanded = new HashSet<string>(expandedPaths, StringComparer.OrdinalIgnoreCase);
             var built = await Task.Run(() => BuildTreeAsync(workingDirectory, expanded, ct), ct).ConfigureAwait(true);
-            var status = await Task.Run(() => ReadStatusAsync(workingDirectory, ct), ct).ConfigureAwait(true);
+            var status = changeReview is null
+                ? await Task.Run(() => ReadStatusAsync(workingDirectory, ct), ct).ConfigureAwait(true)
+                : null;
             if (generation != Volatile.Read(ref refreshGeneration))
             {
                 return;
@@ -401,10 +434,21 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
             index = built.Index;
             tree.Replace(built.Rows);
 
-            Changes.Clear();
-            foreach (var change in status)
+            if (status is not null)
             {
-                Changes.Add(change);
+                Changes.Clear();
+                foreach (var change in status)
+                {
+                    Changes.Add(change);
+                }
+            }
+            else if (refreshChangeReview)
+            {
+                await changeReview!.LoadAsync(ct).ConfigureAwait(true);
+            }
+            else if (fromWatcher)
+            {
+                await changeReview!.RefreshFromFileSystemChangeAsync(ct).ConfigureAwait(true);
             }
 
             error = default;
@@ -471,6 +515,8 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
 
     /// <summary>Opens the changes document scoped to one changed file.</summary>
     public void OpenChanged(ChangedFileViewModel change) => openChanges(change.Path);
+
+    public void OpenChanged(FileDiffViewModel change) => openChanges(change.Path);
 
     private async Task<IReadOnlyList<ChangedFileViewModel>> ReadStatusAsync(string workingDirectory, CancellationToken ct)
     {
@@ -720,7 +766,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _ = RefreshAsync(CancellationToken.None);
+        _ = RefreshAsync(CancellationToken.None, refreshChangeReview: false, fromWatcher: true);
     }
 
     private void OnFailed(Exception exception) => error = LocText.Literal(exception.Message);
@@ -747,6 +793,11 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        if (changeReview is not null)
+        {
+            changeReview.Files.CollectionChanged -= OnChangeReviewFilesChanged;
+        }
+
         watcher?.Dispose();
         watcher = null;
         if (watcherTimer is not null)
@@ -913,12 +964,14 @@ internal sealed class FileDiffViewModel
 {
     private readonly int added;
     private readonly int removed;
+    private readonly bool isBinary;
 
     public FileDiffViewModel(FileDiff diff, string prefix = "")
     {
         Path = Strip(diff, prefix);
         added = diff.AddedLineCount;
         removed = diff.RemovedLineCount;
+        isBinary = diff.IsBinary;
         Badge = diff.Status switch
         {
             FileDiffStatus.Added => "A",
@@ -968,6 +1021,11 @@ internal sealed class FileDiffViewModel
 
     public string Badge { get; }
 
+    /// <summary>The added/removed counts and status shown in the file panel; binary patches do not invent zero counts.</summary>
+    public string Meta => ChangeBadge.Format(Badge, added, removed, isBinary);
+
+    public string Description => Header;
+
     public IReadOnlyList<DiffLineViewModel> Lines { get; }
 
     /// <summary>Diff paths are repository-relative; the panel shows them relative to the session directory.</summary>
@@ -1016,7 +1074,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
 {
     private readonly GitCli git;
     private readonly ITurnCheckpointStore checkpoints;
-    private readonly List<FileDiffViewModel> files = [];
+    private readonly Action<string>? openFile;
+    private readonly RangeObservableCollection<FileDiffViewModel> files = [];
     private PanelContext context = PanelContext.Empty;
     private ChangeScope scope = ChangeScope.Uncommitted;
     private TurnChoiceViewModel? selectedTurn;
@@ -1025,10 +1084,11 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
     private LocText message;
     private int generation;
 
-    public ChangesViewModel(GitCli git, ITurnCheckpointStore checkpoints)
+    public ChangesViewModel(GitCli git, ITurnCheckpointStore checkpoints, Action<string>? openFile = null)
     {
         this.git = git;
         this.checkpoints = checkpoints;
+        this.openFile = openFile;
         RefreshCommand = new AsyncRelayCommand(
             ct => LoadAsync(ct),
             () => true,
@@ -1036,6 +1096,9 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         AllChangesCommand = new RelayCommand(() => SetScope(ChangeScope.All));
         ByTurnCommand = new RelayCommand(() => SetScope(ChangeScope.ByTurn));
         UncommittedCommand = new RelayCommand(() => SetScope(ChangeScope.Uncommitted));
+        PreviousFileCommand = new RelayCommand(() => SelectAdjacentFile(-1), CanGoPreviousFile);
+        NextFileCommand = new RelayCommand(() => SelectAdjacentFile(1), CanGoNextFile);
+        OpenInEditorCommand = new RelayCommand(OpenSelectedFile, () => openFile is not null && selectedFile is not null);
         Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
@@ -1044,13 +1107,21 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
     /// <summary>Every header and diff line of the current scope, in display order; the view virtualizes this one list.</summary>
     public RangeObservableCollection<DiffRowViewModel> Rows { get; } = [];
 
-    public IReadOnlyList<FileDiffViewModel> Files => files;
+    public RangeObservableCollection<FileDiffViewModel> Files => files;
 
     public AsyncRelayCommand RefreshCommand { get; }
 
     public RelayCommand ByTurnCommand { get; }
 
     public RelayCommand UncommittedCommand { get; }
+
+    public RelayCommand PreviousFileCommand { get; }
+
+    public RelayCommand NextFileCommand { get; }
+
+    public RelayCommand OpenInEditorCommand { get; }
+
+    public bool HasSelectedFile => selectedFile is not null;
 
     public PanelContext Context => context;
 
@@ -1088,7 +1159,16 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
     public FileDiffViewModel? SelectedFile
     {
         get => selectedFile;
-        set => Set(ref selectedFile, value);
+        set
+        {
+            if (Set(ref selectedFile, value))
+            {
+                OnPropertyChanged(nameof(HasSelectedFile));
+                PreviousFileCommand.NotifyCanExecuteChanged();
+                NextFileCommand.NotifyCanExecuteChanged();
+                OpenInEditorCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public bool IsLoading
@@ -1115,11 +1195,12 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Context));
         if (changed)
         {
-            files.Clear();
+            files.ReplaceAll(Array.Empty<FileDiffViewModel>());
             Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
             Turns.Clear();
             selectedTurn = null;
             ClearBranchChoices();
+            Volatile.Write(ref uncommittedFingerprint, null);
         }
 
         _ = LoadAsync(CancellationToken.None);
@@ -1160,7 +1241,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
 
     public Task LoadAsync(CancellationToken ct) => LoadAsync(ct, reloadChoices: true);
 
-    private async Task LoadAsync(CancellationToken ct, bool reloadChoices)
+    private async Task LoadAsync(CancellationToken ct, bool reloadChoices, string? precomputedFingerprint = null)
     {
         var current = Interlocked.Increment(ref generation);
         var source = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -1178,13 +1259,14 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
             var panelContext = context;
             if (!panelContext.HasSession || !Directory.Exists(panelContext.WorkingDirectory))
             {
-                files.Clear();
+                files.ReplaceAll(Array.Empty<FileDiffViewModel>());
                 Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
                 if (reloadChoices)
                 {
                     Turns.Clear();
                     selectedTurn = null;
                     ClearBranchChoices();
+                    Volatile.Write(ref uncommittedFingerprint, null);
                 }
 
                 SelectedFile = null;
@@ -1207,6 +1289,9 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
             var scopeSnapshot = scope;
             var turn = selectedTurn;
             var branch = selectedBranch;
+            var fingerprint = scopeSnapshot == ChangeScope.Uncommitted
+                ? precomputedFingerprint ?? await ReadUncommittedFingerprintAsync(workingDirectory, source.Token).ConfigureAwait(true)
+                : null;
             var built = await Task.Run(
                     () => BuildRowsAsync(workingDirectory, scopeSnapshot, turn, branch, source.Token),
                     source.Token)
@@ -1216,9 +1301,12 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            files.Clear();
-            files.AddRange(built.Files);
+            files.ReplaceAll(built.Files);
             Rows.ReplaceAll(built.Rows);
+            if (scopeSnapshot == ChangeScope.Uncommitted)
+            {
+                Volatile.Write(ref uncommittedFingerprint, fingerprint);
+            }
 
             var nextMessage = built.Message.IsEmpty
                 ? files.Count == 0 ? new LocText(InspectorStrings.ChangesNoChanges) : default

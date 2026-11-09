@@ -138,15 +138,20 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             SessionArchived = OnSessionArchived,
             ArchiveGuard = ConfirmArchiveAsync,
         };
+        Changes = new ChangesViewModel(
+            composition.Git,
+            composition.TurnCheckpoints,
+            path => OpenFile(path, newTab: false));
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
             path => OpenFile(path, newTab: true),
-            path => ShowChangesAsync(path));
+            path => ShowChangesAsync(path),
+            lineCountsFactory: null,
+            changeReview: Changes);
         Todos = new TodoListViewModel(composition.Todos, composition.TodoStepCommitter);
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
-        Changes = new ChangesViewModel(composition.Git, composition.TurnCheckpoints);
         GitPanel = new GitPanelViewModel(
             composition.Git,
             composition.GitPanelSettings,
@@ -803,7 +808,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             await Files.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
             if (ReferenceEquals(session, activeSession))
             {
-                await Changes.LoadAsync(CancellationToken.None).ConfigureAwait(true);
                 await Reviews.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
             }
 
@@ -1129,11 +1133,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         var session = activeSession;
         if (session is null)
         {
+            Changes.Attach(PanelContext.Empty);
             Files.Attach(PanelContext.Empty);
             Todos.Attach(null);
             Reviews.Attach(PanelContext.Empty);
             Specs.Attach(PanelContext.Empty);
-            Changes.Attach(PanelContext.Empty);
             GitPanel.Attach(PanelContext.Empty);
             SyncFinishedMenu(null);
             PruneSubAgentTabs(null, []);
@@ -1144,11 +1148,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ? root
             : null;
         var context = new PanelContext(session.SessionId, session.WorkDir, projectRoot);
+        Changes.Attach(context);
         Files.Attach(context);
         Todos.Attach(session.SessionId);
         Reviews.Attach(context);
         Specs.Attach(context);
-        Changes.Attach(context);
         GitPanel.Attach(context);
         SyncSubAgentRegion();
     }

@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Forge.App.ViewModels;
 
@@ -45,4 +47,28 @@ public partial class ChangesView : UserControl
                 }
             },
             DispatcherPriority.Background);
+
+    private async void OnCopyPathClick(object? sender, RoutedEventArgs e)
+    {
+        if (viewModel?.SelectedFile is not { } file)
+        {
+            return;
+        }
+
+        if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+        {
+            viewModel.ReportCopyPathFailure("clipboard unavailable");
+            return;
+        }
+
+        try
+        {
+            await clipboard.SetTextAsync(file.Path).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.Runtime.InteropServices.ExternalException)
+        {
+            System.Diagnostics.Trace.WriteLine("[changes] copy path failed: " + exception.Message);
+            viewModel.ReportCopyPathFailure(exception.Message);
+        }
+    }
 }

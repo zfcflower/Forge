@@ -68,6 +68,25 @@
         </Grid>
       </Border>
     </DataTemplate>
+
+    <DataTemplate x:Key="ChangedFileDiffTemplate" x:DataType="vm:FileDiffViewModel">
+      <Grid ColumnDefinitions="*,Auto" Margin="4,2">
+        <TextBlock Classes="mono"
+                   VerticalAlignment="Center"
+                   Text="{Binding Path}"
+                   TextTrimming="CharacterEllipsis"
+                   ToolTip.Tip="{Binding Description}" />
+        <TextBlock Grid.Column="1"
+                   Classes="mono"
+                   Margin="10,0,0,0"
+                   VerticalAlignment="Center"
+                   HorizontalAlignment="Right"
+                   Text="{Binding Meta}"
+                   Foreground="{DynamicResource AccentTextBrush}"
+                   AutomationProperties.AutomationId="changed-meta"
+                   AutomationProperties.Name="{Binding Meta}" />
+      </Grid>
+    </DataTemplate>
   </UserControl.Resources>
 
   <Grid RowDefinitions="Auto,*" Background="Transparent">
@@ -132,13 +151,29 @@
       </ListBox.ItemsPanel>
     </ListBox>
 
-    <ListBox x:Name="ChangedList"
+    <ListBox x:Name="ChangedDiffList"
              Grid.Row="1"
-             IsVisible="{Binding IsChangedTab}"
-             ItemsSource="{Binding Changes}"
+             IsVisible="{Binding ShowSharedChanges}"
+             ItemsSource="{Binding ChangeReview.Files}"
              SelectionChanged="OnChangedSelection"
              Padding="2,2"
              AutomationProperties.AutomationId="changed-files"
+             AutomationProperties.Name="{Binding [files.changedList.name], Source={x:Static loc:Loc.Instance}}"
+             ItemTemplate="{StaticResource ChangedFileDiffTemplate}">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
+
+    <ListBox x:Name="ChangedList"
+             Grid.Row="1"
+             IsVisible="{Binding ShowFallbackChanges}"
+             ItemsSource="{Binding Changes}"
+             SelectionChanged="OnChangedSelection"
+             Padding="2,2"
+             AutomationProperties.AutomationId="changed-files-fallback"
              AutomationProperties.Name="{Binding [files.changedList.name], Source={x:Static loc:Loc.Instance}}">
       <ListBox.ItemTemplate>
         <DataTemplate x:DataType="vm:ChangedFileViewModel">
@@ -155,7 +190,8 @@
                        HorizontalAlignment="Right"
                        Text="{Binding Meta}"
                        Foreground="{DynamicResource AccentTextBrush}"
-                       AutomationProperties.AutomationId="changed-meta" AutomationProperties.Name="{Binding Meta}" />
+                       AutomationProperties.AutomationId="changed-meta-fallback"
+                       AutomationProperties.Name="{Binding Meta}" />
           </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>

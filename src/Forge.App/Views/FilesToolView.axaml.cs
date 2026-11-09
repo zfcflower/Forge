@@ -13,9 +13,19 @@ public partial class FilesToolView : UserControl
 
     private void OnChangedSelection(object? sender, SelectionChangedEventArgs e)
     {
-        if (sender is ListBox { SelectedItem: ChangedFileViewModel change } && DataContext is FilesPanelViewModel viewModel)
+        if (DataContext is not FilesPanelViewModel viewModel || sender is not ListBox list)
         {
-            viewModel.OpenChanged(change);
+            return;
+        }
+
+        switch (list.SelectedItem)
+        {
+            case FileDiffViewModel diff:
+                viewModel.OpenChanged(diff);
+                break;
+            case ChangedFileViewModel change:
+                viewModel.OpenChanged(change);
+                break;
         }
     }
 }

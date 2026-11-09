@@ -89,6 +89,10 @@ internal static class InspectorStrings
     public const string ChangesNoTextualChange = "changes.noTextualChange";
     public const string ChangesRefresh = "changes.refresh";
     public const string ChangesRefreshName = "changes.refresh.name";
+    public const string ChangesPreviousFile = "changes.previousFile";
+    public const string ChangesNextFile = "changes.nextFile";
+    public const string ChangesOpenInEditor = "changes.openInEditor";
+    public const string ChangesCopyPath = "changes.copyPath";
     public const string ChangesRowsName = "changes.rows.name";
     public const string ChangesSummaryPattern = "changes.summary";
     public const string ChangesSummaryFilesBase = "changes.summary.files";
@@ -213,6 +217,10 @@ internal static class InspectorStrings
         Loc.Register(ChangesNoTextualChange, "（没有文本改动：二进制或仅权限变化）", "(No textual change: binary or permissions only)");
         Loc.Register(ChangesRefresh, "刷新", "Refresh");
         Loc.Register(ChangesRefreshName, "刷新改动", "Refresh changes");
+        Loc.Register(ChangesPreviousFile, "上一个文件", "Previous file");
+        Loc.Register(ChangesNextFile, "下一个文件", "Next file");
+        Loc.Register(ChangesOpenInEditor, "在编辑器中打开", "Open in editor");
+        Loc.Register(ChangesCopyPath, "复制路径", "Copy path");
         Loc.Register(ChangesRowsName, "改动内容", "Change contents");
         Loc.Register(ChangesSummaryPattern, "{0} · {1}", "{0} · {1}");
         Loc.Register(ChangesSummaryFilesBase + ".one", "{0} 个文件", "{0} file");
@@ -339,4 +347,5 @@ internal static class InspectorStrings
     public static LocText FileBinary(string path) => new(FilesBinary, LocText.Literal(path));
     public static string FileDiscardMessage(string name) => Loc.Instance.Format(FilesDiscardMessage, name);
     public static string FileArchiveMessage(string name) => Loc.Instance.Format(FilesArchiveMessage, name);
+    public static LocText FileCopyFailed(string message) => new(FilesCopyFailed, LocText.Literal(message));
 }

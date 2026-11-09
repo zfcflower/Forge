@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text;
 using Forge.App.Localization;
 using Forge.Workspace;
 
@@ -40,6 +42,7 @@ internal sealed partial class ChangesViewModel
 {
     private BranchChoiceViewModel? selectedBranch;
     private CancellationTokenSource? loadSource;
+    private string? uncommittedFingerprint;
 
     public ObservableCollection<BranchChoiceViewModel> LocalBranches { get; } = [];
 
@@ -105,6 +108,42 @@ internal sealed partial class ChangesViewModel
     }
 
     private void SelectBranch(BranchChoiceViewModel branch) => SelectedBranch = branch;
+
+    private bool CanGoPreviousFile()
+    {
+        var index = selectedFile is null ? -1 : files.IndexOf(selectedFile);
+        return index > 0;
+    }
+
+    private bool CanGoNextFile()
+    {
+        var index = selectedFile is null ? -1 : files.IndexOf(selectedFile);
+        return index >= 0 && index < files.Count - 1;
+    }
+
+    private void SelectAdjacentFile(int offset)
+    {
+        var index = selectedFile is null ? -1 : files.IndexOf(selectedFile);
+        var next = index + offset;
+        if (next < 0 || next >= files.Count)
+        {
+            return;
+        }
+
+        var file = files[next];
+        SelectedFile = file;
+        FocusRequested?.Invoke(file);
+    }
+
+    private void OpenSelectedFile()
+    {
+        if (selectedFile is not null)
+        {
+            openFile?.Invoke(selectedFile.Path);
+        }
+    }
+
+    public void ReportCopyPathFailure(string message) => SetMessage(InspectorStrings.FileCopyFailed(message));
 
     private void SetSelectedBranch(BranchChoiceViewModel? value, bool reloadDiff)
     {
@@ -186,6 +225,67 @@ internal sealed partial class ChangesViewModel
         RemoteBranches.Clear();
         SetSelectedBranch(null, reloadDiff: false);
     }
+
+    public async Task RefreshFromFileSystemChangeAsync(CancellationToken ct)
+    {
+        if (!IsUncommitted || !context.HasSession)
+        {
+            return;
+        }
+
+        var currentGeneration = Volatile.Read(ref generation);
+        var fingerprint = await ReadUncommittedFingerprintAsync(context.WorkingDirectory, ct).ConfigureAwait(true);
+        if (currentGeneration != Volatile.Read(ref generation)
+            || string.Equals(fingerprint, Volatile.Read(ref uncommittedFingerprint), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await LoadAsync(ct, reloadChoices: false, precomputedFingerprint: fingerprint).ConfigureAwait(true);
+    }
+
+    private async Task<string?> ReadUncommittedFingerprintAsync(string workingDirectory, CancellationToken ct) =>
+        await Task.Run(
+                async () =>
+                {
+                    if (!await git.IsRepositoryAsync(workingDirectory, ct).ConfigureAwait(false))
+                    {
+                        return null;
+                    }
+
+                    var root = await git.GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false) ?? workingDirectory;
+                    var entries = await git.GetStatusAsync(workingDirectory, ct).ConfigureAwait(false);
+                    var head = await git.RevParseAsync(root, "HEAD", ct).ConfigureAwait(false);
+                    var builder = new StringBuilder(workingDirectory);
+                    builder.Append('\n').Append(head ?? "<unborn>");
+                    foreach (var entry in entries)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        builder.Append('\n').Append(entry.Path)
+                            .Append(':').Append((int)entry.Kind)
+                            .Append(':').Append((int)entry.IndexStatus)
+                            .Append(':').Append((int)entry.WorkTreeStatus)
+                            .Append(':').Append(entry.OriginalPath);
+                        try
+                        {
+                            var path = entry.Path.Replace('/', Path.DirectorySeparatorChar);
+                            var info = new FileInfo(Path.Combine(root, path));
+                            if (info.Exists)
+                            {
+                                builder.Append(':').Append(info.Length.ToString(CultureInfo.InvariantCulture))
+                                    .Append(':').Append(info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture));
+                            }
+                        }
+                        catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException)
+                        {
+                            builder.Append(":?");
+                        }
+                    }
+
+                    return builder.ToString();
+                },
+                ct)
+            .ConfigureAwait(true);
 
     private sealed record BranchReadSnapshot(IReadOnlyList<GitBranch> Branches, string? DefaultBranch);
 }
