@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:ch="using:Forge.App.Changes"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Changes.DiffBlockBar"
+             x:DataType="ch:IDiffBlockItem">
+  <!-- The bar above one change block: "✓ 保留  ↶". Shared by the diff editor overlay and the Markdown preview. -->
+  <Border Classes="diff-block-bar" Classes.kept="{Binding IsKept}">
+    <StackPanel Orientation="Horizontal" Spacing="4">
+      <Button Classes="ghost diff-block-action"
+              Command="{Binding KeepCommand}"
+              AutomationProperties.AutomationId="diff-block-keep"
+              AutomationProperties.Name="{Binding [changes.block.keep], Source={x:Static loc:Loc.Instance}}"
+              ToolTip.Tip="{Binding [changes.block.keep.tip], Source={x:Static loc:Loc.Instance}}">
+        <StackPanel Orientation="Horizontal" Spacing="4">
+          <wc:FluentIcon Data="{StaticResource IconCheck}" Width="12" Height="12" />
+          <TextBlock Text="{Binding [changes.block.keep], Source={x:Static loc:Loc.Instance}}"
+                     IsVisible="{Binding !IsKept}" VerticalAlignment="Center" />
+          <TextBlock Text="{Binding [changes.block.kept], Source={x:Static loc:Loc.Instance}}"
+                     IsVisible="{Binding IsKept}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+      <Button Classes="ghost icon diff-block-action"
+              Command="{Binding RevertCommand}"
+              AutomationProperties.AutomationId="diff-block-revert"
+              AutomationProperties.Name="{Binding [changes.block.revert], Source={x:Static loc:Loc.Instance}}"
+              ToolTip.Tip="{Binding [changes.block.revert], Source={x:Static loc:Loc.Instance}}">
+        <wc:FluentIcon Data="{DynamicResource IconUndo}" Width="14" Height="14" />
+      </Button>
+    </StackPanel>
+  </Border>
+</UserControl>

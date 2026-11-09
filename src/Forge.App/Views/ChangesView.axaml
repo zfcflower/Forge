@@ -1,141 +1,193 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-        xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:ch="using:Forge.App.Changes"
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.ChangesView"
-             x:DataType="vm:ChangesViewModel">
+             x:DataType="vm:ChangesViewModel"
+             Focusable="True">
 
-  <UserControl.DataTemplates>
-    <DataTemplate DataType="vm:DiffFileRowViewModel" x:DataType="vm:DiffFileRowViewModel">
-      <Border Background="{DynamicResource SurfaceMutedBrush}"
-              BorderBrush="{DynamicResource BorderBrush}"
-              BorderThickness="0,1,0,1"
-              Padding="8,4">
-        <Grid ColumnDefinitions="Auto,*">
-          <Border Background="{DynamicResource AccentSubtleBrush}"
-                  CornerRadius="{StaticResource RadiusSm}"
-                  Padding="4,0"
-                  MinWidth="20">
-            <TextBlock Classes="label"
-                       Text="{Binding Badge}"
-                       HorizontalAlignment="Center"
-                       Foreground="{DynamicResource AccentTextBrush}" />
-          </Border>
-          <TextBlock Grid.Column="1" Classes="mono" Margin="6,0,0,0" Text="{Binding Header}" />
-        </Grid>
-      </Border>
-    </DataTemplate>
+  <UserControl.KeyBindings>
+    <KeyBinding Gesture="J" Command="{Binding NextUnviewedCommand}" />
+  </UserControl.KeyBindings>
 
-    <DataTemplate DataType="vm:DiffLineRowViewModel" x:DataType="vm:DiffLineRowViewModel">
-      <Border Classes="diff-line" Classes.add="{Binding IsAdd}" Classes.del="{Binding IsRemove}" Classes.hunk="{Binding IsHunk}">
-        <Grid ColumnDefinitions="46,46,Auto,*" Height="17">
-          <TextBlock Classes="mono"
-                     Text="{Binding OldNumber}"
-                     TextAlignment="Right"
-                     Margin="0,0,6,0"
-                     Foreground="{DynamicResource TextMutedBrush}" />
-          <TextBlock Grid.Column="1"
-                     Classes="mono"
-                     Text="{Binding NewNumber}"
-                     TextAlignment="Right"
-                     Margin="0,0,6,0"
-                     Foreground="{DynamicResource TextMutedBrush}" />
-          <TextBlock Grid.Column="2" Classes="mono" Text="{Binding Prefix}" Foreground="{DynamicResource TextMutedBrush}" />
-          <TextBlock Grid.Column="3" Classes="mono" Text="{Binding Text}" Foreground="{DynamicResource TextPrimaryBrush}" />
-        </Grid>
-      </Border>
-    </DataTemplate>
-  </UserControl.DataTemplates>
+  <UserControl.Styles>
+    <Style Selector="Border.changes-bar">
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="MinHeight" Value="34" />
+    </Style>
+    <Style Selector="TextBlock.changes-added">
+      <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="TextBlock.changes-removed">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Border.key-hint">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="5,0" />
+      <Setter Property="Margin" Value="6,0,0,0" />
+    </Style>
+    <Style Selector="ProgressBar.review-progress">
+      <Setter Property="MinHeight" Value="4" />
+      <Setter Property="Height" Value="4" />
+      <Setter Property="MinWidth" Value="120" />
+      <Setter Property="Width" Value="200" />
+      <Setter Property="CornerRadius" Value="2" />
+    </Style>
+  </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
-    <Border Classes="toolbar">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+    <!-- Top bar: scope · base · files · +/− · viewed | ↑ ↓ | wrap | split|inline | stacked|single -->
+    <Border Classes="changes-bar" BorderThickness="0,0,0,1">
       <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Classes="caption"
-                   Margin="0,0,10,0"
-                   VerticalAlignment="Center"
-                   Text="{Binding Summary}"
-                   AutomationProperties.AutomationId="changes-scope-summary" />
-        <TextBlock Grid.Column="1"
-                   Classes="caption"
-                   Margin="0,0,10,0"
-                   VerticalAlignment="Center"
-                   Text="{Binding CompareBranchLabel}"
-                   IsVisible="{Binding IsAllChanges}"
-                   AutomationProperties.AutomationId="changes-compare-branch" />
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" ClipToBounds="True">
+          <TextBlock Text="{Binding ScopeLabel}"
+                     FontWeight="SemiBold"
+                     VerticalAlignment="Center"
+                     AutomationProperties.AutomationId="changes-scope-summary" />
+          <TextBlock Text="{Binding CompareBranchLabel}"
+                     IsVisible="{Binding IsAllChanges}"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     VerticalAlignment="Center"
+                     AutomationProperties.AutomationId="changes-compare-branch" />
+          <TextBlock Text="{Binding FileCountText}"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     VerticalAlignment="Center"
+                     AutomationProperties.AutomationId="changes-file-count" />
+          <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <TextBlock Classes="changes-added mono"
+                       Text="{Binding TotalAddedText}"
+                       AutomationProperties.AutomationId="changes-total-added" />
+            <TextBlock Classes="changes-removed mono"
+                       Text="{Binding TotalRemovedText}"
+                       AutomationProperties.AutomationId="changes-total-removed" />
+          </StackPanel>
+          <TextBlock Text="{Binding ViewedText}"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     VerticalAlignment="Center"
+                     AutomationProperties.AutomationId="changes-viewed" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <Button Classes="ghost icon"
+                  Command="{Binding PreviousFileCommand}"
+                  ToolTip.Tip="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="changes-previous-file"
+                  AutomationProperties.Name="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconChevronUp}" Width="14" Height="14" />
+          </Button>
+          <Button Classes="ghost icon"
+                  Command="{Binding NextFileCommand}"
+                  ToolTip.Tip="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="changes-next-file"
+                  AutomationProperties.Name="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconChevronDown}" Width="14" Height="14" />
+          </Button>
+          <ToggleButton Classes="ghost icon"
+                        IsChecked="{Binding WordWrap, Mode=OneWay}"
+                        Command="{Binding ToggleWrapCommand}"
+                        ToolTip.Tip="{Binding [changes.review.wrap], Source={x:Static loc:Loc.Instance}}"
+                        AutomationProperties.AutomationId="changes-wrap"
+                        AutomationProperties.Name="{Binding [changes.review.wrap], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconWrap}" Width="14" Height="14" />
+          </ToggleButton>
+          <Border Classes="segmented"
+                  Margin="6,0,0,0"
+                  AutomationProperties.Name="{Binding [changes.review.viewMode.name], Source={x:Static loc:Loc.Instance}}">
+            <StackPanel Orientation="Horizontal">
+              <Button Classes="segment"
+                      Classes.selected="{Binding IsSplit}"
+                      Command="{Binding SplitModeCommand}"
+                      AutomationProperties.AutomationId="changes-mode-split"
+                      Content="{Binding [changes.review.split], Source={x:Static loc:Loc.Instance}}" />
+              <Button Classes="segment"
+                      Classes.selected="{Binding IsInline}"
+                      Command="{Binding InlineModeCommand}"
+                      AutomationProperties.AutomationId="changes-mode-inline"
+                      Content="{Binding [changes.review.inline], Source={x:Static loc:Loc.Instance}}" />
+            </StackPanel>
+          </Border>
+          <Border Width="1" Height="16" Margin="4,0" Background="{DynamicResource BorderBrush}" />
+          <Border Classes="segmented"
+                  AutomationProperties.Name="{Binding [changes.review.layout.name], Source={x:Static loc:Loc.Instance}}">
+            <StackPanel Orientation="Horizontal">
+              <Button Classes="segment"
+                      Classes.selected="{Binding IsStacked}"
+                      Command="{Binding StackedLayoutCommand}"
+                      AutomationProperties.AutomationId="changes-layout-stacked"
+                      Content="{Binding [changes.review.stacked], Source={x:Static loc:Loc.Instance}}" />
+              <Button Classes="segment"
+                      Classes.selected="{Binding IsSingle}"
+                      Command="{Binding SingleLayoutCommand}"
+                      AutomationProperties.AutomationId="changes-layout-single"
+                      Content="{Binding [changes.review.single], Source={x:Static loc:Loc.Instance}}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
       </Grid>
     </Border>
 
-    <Border Grid.Row="1" Classes="toolbar">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
-        <Button Classes="ghost"
-                Command="{Binding PreviousFileCommand}"
-                ToolTip.Tip="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="changes-previous-file"
-                AutomationProperties.Name="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}"
-                Content="{Binding [changes.previousFile], Source={x:Static loc:Loc.Instance}}" />
-        <Button Grid.Column="1"
-                Classes="ghost"
-                Margin="4,0,0,0"
-                Command="{Binding NextFileCommand}"
-                ToolTip.Tip="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="changes-next-file"
-                AutomationProperties.Name="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}"
-                Content="{Binding [changes.nextFile], Source={x:Static loc:Loc.Instance}}" />
-        <TextBlock Grid.Column="2"
-                   Classes="mono caption"
-                   Margin="10,0"
-                   VerticalAlignment="Center"
-                   Text="{Binding SelectedFile.Path}"
-                   TextTrimming="CharacterEllipsis"
-                   IsVisible="{Binding HasSelectedFile}"
-                   ToolTip.Tip="{Binding SelectedFile.Path}" />
-        <Button Grid.Column="3"
-                Classes="ghost"
-                Command="{Binding OpenInEditorCommand}"
-                ToolTip.Tip="{Binding [changes.openInEditor], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="changes-open-in-editor"
-                AutomationProperties.Name="{Binding [changes.openInEditor], Source={x:Static loc:Loc.Instance}}"
-                Content="{Binding [changes.openInEditor], Source={x:Static loc:Loc.Instance}}" />
-        <Button Grid.Column="4"
-                Classes="ghost"
-                Margin="4,0,0,0"
-                Click="OnCopyPathClick"
-                IsEnabled="{Binding HasSelectedFile}"
-                ToolTip.Tip="{Binding [changes.copyPath], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="changes-copy-path"
-                AutomationProperties.Name="{Binding [changes.copyPath], Source={x:Static loc:Loc.Instance}}"
-                Content="{Binding [changes.copyPath], Source={x:Static loc:Loc.Instance}}" />
-        <Button Grid.Column="5"
-                Classes="ghost icon"
-                Margin="4,0,0,0"
-                Command="{Binding RefreshCommand}"
-                ToolTip.Tip="{Binding [changes.refresh], Source={x:Static loc:Loc.Instance}}"
-                AutomationProperties.AutomationId="refresh-changes"
-                AutomationProperties.Name="{Binding [changes.refresh.name], Source={x:Static loc:Loc.Instance}}">
-          <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
-        </Button>
-      </Grid>
-    </Border>
-
-    <TextBlock Grid.Row="2"
+    <TextBlock Grid.Row="1"
                Classes="caption"
                Margin="12,6"
                IsVisible="{Binding HasMessage}"
-               Text="{Binding Message}" />
+               Text="{Binding Message}"
+               AutomationProperties.AutomationId="changes-message" />
 
-    <ListBox x:Name="RowList"
-             Grid.Row="3"
-             ItemsSource="{Binding Rows}"
-             Padding="0,0,0,8"
-             ScrollViewer.HorizontalScrollBarVisibility="Auto"
-             AutomationProperties.AutomationId="changes-rows"
-             AutomationProperties.Name="{Binding [changes.rows.name], Source={x:Static loc:Loc.Instance}}">
-      <ListBox.ItemsPanel>
-        <ItemsPanelTemplate>
-          <VirtualizingStackPanel />
-        </ItemsPanelTemplate>
-      </ListBox.ItemsPanel>
-    </ListBox>
+    <ch:DiffEditorView x:Name="DiffEditor"
+                       Grid.Row="2"
+                       Files="{Binding VisibleFiles}"
+                       Mode="{Binding ViewMode}"
+                       WordWrap="{Binding WordWrap}"
+                       Review="{Binding ReviewContext}"
+                       AutomationProperties.AutomationId="changes-rows"
+                       AutomationProperties.Name="{Binding [changes.rows.name], Source={x:Static loc:Loc.Instance}}" />
+
+    <!-- Footer: reviewed x/N progress | next unreviewed (J) | mark all viewed -->
+    <Border Grid.Row="3" Classes="changes-bar" BorderThickness="0,1,0,0" IsVisible="{Binding HasFiles}">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+        <TextBlock Text="{Binding ReviewedText}"
+                   Foreground="{DynamicResource TextMutedBrush}"
+                   VerticalAlignment="Center"
+                   AutomationProperties.AutomationId="changes-reviewed" />
+        <ProgressBar Grid.Column="1"
+                     Classes="review-progress"
+                     Margin="10,0,0,0"
+                     Minimum="0"
+                     Maximum="100"
+                     Value="{Binding ReviewedPercent}"
+                     VerticalAlignment="Center"
+                     AutomationProperties.AutomationId="changes-reviewed-progress"
+                     AutomationProperties.Name="{Binding [changes.review.progress.name], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="3"
+                Classes="ghost"
+                Command="{Binding NextUnviewedCommand}"
+                AutomationProperties.AutomationId="changes-next-unviewed"
+                AutomationProperties.Name="{Binding [changes.review.nextUnviewed], Source={x:Static loc:Loc.Instance}}">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="{Binding [changes.review.nextUnviewed], Source={x:Static loc:Loc.Instance}}" VerticalAlignment="Center" />
+            <Border Classes="key-hint">
+              <TextBlock Classes="mono" Text="J" Foreground="{DynamicResource TextMutedBrush}" />
+            </Border>
+          </StackPanel>
+        </Button>
+        <Button Grid.Column="4"
+                Classes="ghost"
+                Margin="6,0,0,0"
+                Command="{Binding MarkAllViewedCommand}"
+                AutomationProperties.AutomationId="changes-mark-all-viewed"
+                AutomationProperties.Name="{Binding [changes.review.markAllViewed], Source={x:Static loc:Loc.Instance}}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <wc:FluentIcon Data="{StaticResource IconCheck}" Width="14" Height="14" />
+            <TextBlock Text="{Binding [changes.review.markAllViewed], Source={x:Static loc:Loc.Instance}}" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>

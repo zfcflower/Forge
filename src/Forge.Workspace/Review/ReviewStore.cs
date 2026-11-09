@@ -8,7 +8,7 @@ namespace Forge.Workspace;
 /// Review comments for every workspace in one SQLite database (WAL, outside the repository). Writes are short
 /// transactions on pooled connections, so concurrent sessions do not serialize on a shared writer.
 /// </summary>
-public sealed class ReviewStore
+public sealed partial class ReviewStore
 {
     public const string DatabaseFileName = "reviews.db";
     private const int CommandTimeoutSeconds = 30;
@@ -36,6 +36,15 @@ public sealed class ReviewStore
         );
         CREATE INDEX IF NOT EXISTS ix_review_comments_scope ON review_comments (workspace_path, session_id, status);
         CREATE INDEX IF NOT EXISTS ix_review_comments_file ON review_comments (workspace_path, session_id, file_path);
+        CREATE TABLE IF NOT EXISTS review_marks (
+            workspace_path TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            kind INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            item_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_path, session_id, kind, file_path, item_hash)
+        );
         """;
 
     private readonly string dataDirectory;

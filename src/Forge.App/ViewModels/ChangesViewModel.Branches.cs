@@ -11,17 +11,27 @@ internal sealed class BranchChoiceViewModel : ObservableObject
 {
     private readonly Action<BranchChoiceViewModel> select;
     private bool isSelected;
+    private bool isDefault;
 
     public BranchChoiceViewModel(GitBranch branch, Action<BranchChoiceViewModel> select)
     {
         Name = branch.Name;
         RefName = branch.RefName;
         IsRemote = branch.IsRemote;
+        var slash = IsRemote ? Name.IndexOf('/', StringComparison.Ordinal) : -1;
+        RemoteName = slash > 0 ? Name[..slash] : string.Empty;
+        ShortName = slash > 0 ? Name[(slash + 1)..] : Name;
         this.select = select;
         SelectCommand = new RelayCommand(() => this.select(this));
     }
 
     public string Name { get; }
+
+    /// <summary>The name without its remote prefix (<c>main</c> for <c>origin/main</c>); a local branch keeps its name.</summary>
+    public string ShortName { get; }
+
+    /// <summary>The remote of a remote-tracking branch (<c>origin</c>); empty for a local branch.</summary>
+    public string RemoteName { get; }
 
     public string RefName { get; }
 
@@ -35,9 +45,24 @@ internal sealed class BranchChoiceViewModel : ObservableObject
         private set => Set(ref isSelected, value);
     }
 
+    /// <summary>True for the default branch of the repository, which the picker tags.</summary>
+    public bool IsDefault
+    {
+        get => isDefault;
+        internal set => Set(ref isDefault, value);
+    }
+
     public RelayCommand SelectCommand { get; }
 
     internal void SetSelected(bool value) => IsSelected = value;
+}
+
+/// <summary>The branches of one remote (<c>origin</c>), as a sub-group of the picker.</summary>
+internal sealed class BranchGroupViewModel(string name, IReadOnlyList<BranchChoiceViewModel> branches)
+{
+    public string Name { get; } = name;
+
+    public IReadOnlyList<BranchChoiceViewModel> Branches { get; } = branches;
 }
 
 internal sealed partial class ChangesViewModel
@@ -45,10 +70,50 @@ internal sealed partial class ChangesViewModel
     private BranchChoiceViewModel? selectedBranch;
     private CancellationTokenSource? loadSource;
     private string? uncommittedFingerprint;
+    private string branchSearch = string.Empty;
+    private string? defaultBranch;
+    private AsyncRelayCommand? reloadBranchesCommand;
 
     public ObservableCollection<BranchChoiceViewModel> LocalBranches { get; } = [];
 
     public ObservableCollection<BranchChoiceViewModel> RemoteBranches { get; } = [];
+
+    /// <summary>The local branches that match <see cref="BranchSearch"/>, in picker order.</summary>
+    public ObservableCollection<BranchChoiceViewModel> VisibleLocalBranches { get; } = [];
+
+    /// <summary>The remote-tracking branches that match <see cref="BranchSearch"/>, one group per remote.</summary>
+    public ObservableCollection<BranchGroupViewModel> VisibleRemoteGroups { get; } = [];
+
+    public bool HasVisibleLocalBranches => VisibleLocalBranches.Count > 0;
+
+    public bool HasVisibleRemoteBranches => VisibleRemoteGroups.Count > 0;
+
+    /// <summary>Branches exist but the search filtered all of them out.</summary>
+    public bool HasNoBranchMatch => HasBranches && VisibleLocalBranches.Count == 0 && VisibleRemoteGroups.Count == 0;
+
+    /// <summary>The default branch of the repository (as resolved on the last branch load); null when none is known.</summary>
+    public string? DefaultBranch => defaultBranch;
+
+    /// <summary>The live, case-insensitive "contains" filter of the picker on the branch names.</summary>
+    public string BranchSearch
+    {
+        get => branchSearch;
+        set
+        {
+            if (Set(ref branchSearch, value ?? string.Empty))
+            {
+                RebuildVisibleBranches();
+            }
+        }
+    }
+
+    /// <summary>Reloads the branch list (the refresh icon of the picker).</summary>
+    public AsyncRelayCommand ReloadBranchesCommand => reloadBranchesCommand ??= new AsyncRelayCommand(
+        ct => context.HasSession && Directory.Exists(context.WorkingDirectory)
+            ? ReloadBranchesAsync(context.WorkingDirectory, ct)
+            : Task.CompletedTask,
+        () => true,
+        exception => SetMessage(LocText.Literal(exception.Message)));
 
     public bool HasLocalBranches => LocalBranches.Count > 0;
 
@@ -71,7 +136,8 @@ internal sealed partial class ChangesViewModel
     public string ScopeLabel => scope switch
     {
         ChangeScope.All => Loc.Instance[InspectorStrings.ChangesAll],
-        ChangeScope.ByTurn => selectedTurn?.Label ?? Loc.Instance[InspectorStrings.ChangesByTurn],
+        ChangeScope.ByTurn => selectedTurn?.Title ?? Loc.Instance[InspectorStrings.ChangesByTurn],
+        ChangeScope.Commit => selectedCommit?.Subject ?? Loc.Instance[ChangesPickerStrings.CommitsGroup],
         _ => Loc.Instance[InspectorStrings.ChangesUncommitted],
     };
 
@@ -100,8 +166,10 @@ internal sealed partial class ChangesViewModel
             OnPropertyChanged(nameof(IsByTurn));
             OnPropertyChanged(nameof(IsUncommitted));
             OnPropertyChanged(nameof(IsAllChanges));
+            OnPropertyChanged(nameof(IsCommitScope));
             OnPropertyChanged(nameof(ScopeLabel));
             OnPropertyChanged(nameof(Summary));
+            RefreshPickerChecks();
         }
 
         _ = LoadAsync(CancellationToken.None, reloadChoices: false);
@@ -119,6 +187,7 @@ internal sealed partial class ChangesViewModel
         selectedTurn?.SetSelected(true);
         OnPropertyChanged(nameof(SelectedTurn));
         OnPropertyChanged(nameof(ScopeLabel));
+        RefreshPickerChecks();
         return true;
     }
 
@@ -202,6 +271,8 @@ internal sealed partial class ChangesViewModel
                 ct)
             .ConfigureAwait(true);
 
+        defaultBranch = snapshot.DefaultBranch;
+        OnPropertyChanged(nameof(DefaultBranch));
         LocalBranches.Clear();
         RemoteBranches.Clear();
         RaiseBranchGroupProperties();
@@ -214,7 +285,10 @@ internal sealed partial class ChangesViewModel
                 continue;
             }
 
-            var choice = new BranchChoiceViewModel(branch, SelectBranch);
+            var choice = new BranchChoiceViewModel(branch, SelectBranch)
+            {
+                IsDefault = snapshot.DefaultBranch is { Length: > 0 } name && string.Equals(branch.Name, name, StringComparison.Ordinal),
+            };
             choices.Add(choice);
             (branch.IsRemote ? RemoteBranches : LocalBranches).Add(choice);
         }
@@ -250,8 +324,58 @@ internal sealed partial class ChangesViewModel
         SetSelectedBranch(null, reloadDiff: false);
     }
 
+    /// <summary>Re-derives the visible rows of the picker from the branch lists and the search text.</summary>
+    private void RebuildVisibleBranches()
+    {
+        VisibleLocalBranches.Clear();
+        VisibleRemoteGroups.Clear();
+        foreach (var branch in LocalBranches)
+        {
+            if (MatchesSearch(branch))
+            {
+                VisibleLocalBranches.Add(branch);
+            }
+        }
+
+        List<BranchChoiceViewModel>? group = null;
+        string? groupName = null;
+        foreach (var branch in RemoteBranches.OrderBy(static branch => branch.RemoteName, StringComparer.Ordinal))
+        {
+            if (!MatchesSearch(branch))
+            {
+                continue;
+            }
+
+            if (group is null || !string.Equals(groupName, branch.RemoteName, StringComparison.Ordinal))
+            {
+                if (group is not null)
+                {
+                    VisibleRemoteGroups.Add(new BranchGroupViewModel(groupName!, group));
+                }
+
+                group = [];
+                groupName = branch.RemoteName;
+            }
+
+            group.Add(branch);
+        }
+
+        if (group is not null)
+        {
+            VisibleRemoteGroups.Add(new BranchGroupViewModel(groupName!, group));
+        }
+
+        OnPropertyChanged(nameof(HasVisibleLocalBranches));
+        OnPropertyChanged(nameof(HasVisibleRemoteBranches));
+        OnPropertyChanged(nameof(HasNoBranchMatch));
+    }
+
+    private bool MatchesSearch(BranchChoiceViewModel branch) =>
+        branchSearch.Length == 0 || branch.Name.Contains(branchSearch.Trim(), StringComparison.OrdinalIgnoreCase);
+
     private void RaiseBranchGroupProperties()
     {
+        RebuildVisibleBranches();
         OnPropertyChanged(nameof(HasLocalBranches));
         OnPropertyChanged(nameof(HasRemoteBranches));
         OnPropertyChanged(nameof(HasBranches));

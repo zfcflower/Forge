@@ -13,7 +13,7 @@ internal sealed record ReviewOwner(string WorkspacePath, string SessionId);
 internal sealed record ReviewServices(ReviewStore Store, Func<string, string, Action, bool> Send, Action Changed);
 
 /// <summary>Drafts pinned to the file's owning session. Sending saves and validates before queueing.</summary>
-internal sealed class FileReviewController : IDisposable
+internal sealed class FileReviewController : IReviewSurface, IDisposable
 {
     private static readonly ConditionalWeakTable<ReviewStore, HashSet<long>> UnmarkedByStore = new();
     private static readonly ConditionalWeakTable<ReviewStore, HashSet<long>> RestorePendingByStore = new();
@@ -66,6 +66,8 @@ internal sealed class FileReviewController : IDisposable
         owner = newOwner;
         _ = Fire(ReloadAsync);
     }
+
+    public bool CanCommentOn(int startLine, int endLine) => true;
 
     public ReviewDraft? BeginDraft(int startLine, int endLine)
     {
@@ -654,13 +656,13 @@ internal sealed class FileReviewController : IDisposable
         }
     }
 
-    private static HashSet<long> UnmarkedOf(ReviewStore store) => UnmarkedByStore.GetOrCreateValue(store);
+    internal static HashSet<long> UnmarkedOf(ReviewStore store) => UnmarkedByStore.GetOrCreateValue(store);
 
-    private static HashSet<long> RestorePendingOf(ReviewStore store) => RestorePendingByStore.GetOrCreateValue(store);
+    internal static HashSet<long> RestorePendingOf(ReviewStore store) => RestorePendingByStore.GetOrCreateValue(store);
 
-    private static SemaphoreSlim GateOf(ReviewStore store) => GateByStore.GetValue(store, static _ => new SemaphoreSlim(1, 1));
+    internal static SemaphoreSlim GateOf(ReviewStore store) => GateByStore.GetValue(store, static _ => new SemaphoreSlim(1, 1));
 
-    private static bool IsBlocked(ReviewStore store, ReviewDraft draft) =>
+    internal static bool IsBlocked(ReviewStore store, ReviewDraft draft) =>
         draft.IsSent || UnmarkedOf(store).Contains(draft.Id) || RestorePendingOf(store).Contains(draft.Id);
 
     private async Task<bool> TryRestoreAsync(ReviewServices svc, long[] ids)
@@ -737,6 +739,6 @@ internal sealed class FileReviewController : IDisposable
         }
     }
 
-    private static bool IsStoreFailure(Exception exception) =>
+    internal static bool IsStoreFailure(Exception exception) =>
         exception is DbException or IOException or InvalidOperationException or ArgumentException;
 }

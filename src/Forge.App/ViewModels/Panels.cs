@@ -239,6 +239,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     private readonly Action<string> openFileInNewTab;
     private readonly Action<string> openChanges;
     private readonly ChangesViewModel? changeReview;
+    private readonly ChangedFileTree changedTree;
     private readonly FlatTree<FileNodeViewModel> tree = new();
     private readonly HashSet<string> expandedPaths = new(StringComparer.OrdinalIgnoreCase);
     private FileIndex? index;
@@ -270,9 +271,15 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         this.openChanges = openChanges;
         this.lineCountsFactory = lineCountsFactory;
         this.changeReview = changeReview;
+        changedTree = new ChangedFileTree(OpenChanged);
+        changedTree.FoldingChanged += OnChangedFoldingChanged;
+        ToggleChangedFoldingCommand = new RelayCommand(() => changedTree.SetAllExpanded(changedTree.IsAllCollapsed));
         if (changeReview is not null)
         {
             changeReview.Files.CollectionChanged += OnChangeReviewFilesChanged;
+            changeReview.PropertyChanged += OnChangeReviewPropertyChanged;
+            changedTree.Replace(changeReview.Files);
+            changedTree.SetSelected(changeReview.SelectedFile);
         }
         ChangedCommand = new AsyncRelayCommand(ct => RefreshAsync(ct), () => true, OnFailed);
         AllTabCommand = new RelayCommand(() => SelectedTab = 0);
@@ -304,6 +311,26 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
 
     public ChangesViewModel? ChangeReview => changeReview;
 
+    /// <summary>The 已改动 tab's rows: the shared change set as a folder tree (virtualized flat list).</summary>
+    public RangeObservableCollection<ChangedTreeNodeViewModel> ChangedRows => changedTree.Rows;
+
+    internal ChangedFileTree ChangedTree => changedTree;
+
+    /// <summary>Folds or unfolds every folder of the changed tree.</summary>
+    public RelayCommand ToggleChangedFoldingCommand { get; }
+
+    /// <summary>The refresh button belongs to the 全部 tab (and the legacy list); the changed tree has the fold toggle instead.</summary>
+    public bool ShowRefreshButton => !ShowSharedChanges;
+
+    public bool ShowFoldingButton => ShowSharedChanges;
+
+    public bool IsChangedFolded => changedTree.IsAllCollapsed;
+
+    public bool IsChangedUnfolded => !IsChangedFolded;
+
+    /// <summary>Tooltip/name of the fold toggle: what pressing it does now.</summary>
+    public string FoldingToggleText => Loc.Instance[IsChangedFolded ? ChangesPickerStrings.ExpandAll : ChangesPickerStrings.CollapseAll];
+
     public bool HasSharedChanges => changeReview is not null;
 
     public AsyncRelayCommand ChangedCommand { get; }
@@ -325,6 +352,8 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsChangedTab));
                 OnPropertyChanged(nameof(ShowSharedChanges));
                 OnPropertyChanged(nameof(ShowFallbackChanges));
+                OnPropertyChanged(nameof(ShowRefreshButton));
+                OnPropertyChanged(nameof(ShowFoldingButton));
             }
         }
     }
@@ -369,7 +398,29 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ChangedTabName));
     }
 
-    private void OnChangeReviewFilesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => RaiseCounts();
+    private void OnChangeReviewFilesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        RaiseCounts();
+        if (changeReview is not null)
+        {
+            changedTree.Replace(changeReview.Files);
+        }
+    }
+
+    private void OnChangeReviewPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (string.Equals(e.PropertyName, nameof(ChangesViewModel.SelectedFile), StringComparison.Ordinal))
+        {
+            changedTree.SetSelected(changeReview?.SelectedFile);
+        }
+    }
+
+    private void OnChangedFoldingChanged()
+    {
+        OnPropertyChanged(nameof(IsChangedFolded));
+        OnPropertyChanged(nameof(IsChangedUnfolded));
+        OnPropertyChanged(nameof(FoldingToggleText));
+    }
 
     /// <summary>Why the last refresh failed, in the language of the moment it is read; null when it did not fail.</summary>
     public string? Error => error.IsEmpty ? null : error.Resolve();
@@ -779,6 +830,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     {
         RaiseCounts();
         OnPropertyChanged(nameof(Error));
+        OnPropertyChanged(nameof(FoldingToggleText));
         foreach (var change in Changes)
         {
             change.RefreshText();
@@ -796,8 +848,10 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         if (changeReview is not null)
         {
             changeReview.Files.CollectionChanged -= OnChangeReviewFilesChanged;
+            changeReview.PropertyChanged -= OnChangeReviewPropertyChanged;
         }
 
+        changedTree.FoldingChanged -= OnChangedFoldingChanged;
         watcher?.Dispose();
         watcher = null;
         if (watcherTimer is not null)
@@ -879,94 +933,30 @@ internal enum ChangeScope
     ByTurn = 0,
     Uncommitted = 1,
     All = 2,
+
+    /// <summary>One commit of the current branch since the comparison base (<c>commit^..commit</c>).</summary>
+    Commit = 3,
 }
 
 /// <summary>
-/// One line of a file diff. A real line's text is content and stays a literal; the placeholder that stands in for a change
-/// with no text is a <see cref="Loc"/> key, so it is resolved when it is shown.
+/// One file of the changes document. The review half (blocks, viewed/kept marks, commands, <see cref="IDiffFileItem"/>)
+/// lives in <c>FileDiffViewModel.Review.cs</c>.
 /// </summary>
-internal sealed class DiffLineViewModel
-{
-    private readonly LocText text;
-
-    public DiffLineViewModel(string prefix, LocText text, string kind, string oldNumber, string newNumber)
-    {
-        Prefix = prefix;
-        this.text = text;
-        Kind = kind;
-        OldNumber = oldNumber;
-        NewNumber = newNumber;
-    }
-
-    public string Prefix { get; }
-
-    public string Text => text.Resolve();
-
-    public string Kind { get; }
-
-    public string OldNumber { get; }
-
-    public string NewNumber { get; }
-
-    public bool IsAdd => Kind == "add";
-
-    public bool IsRemove => Kind == "del";
-
-    public bool IsHunk => Kind == "hunk";
-}
-
-/// <summary>One row of the changes document: a file header or one diff line, in the order they are stacked.</summary>
-internal abstract class DiffRowViewModel(FileDiffViewModel file) : ObservableObject
-{
-    public FileDiffViewModel File { get; } = file;
-
-    /// <summary>Re-reads the row's language-dependent text after a language switch; the panel calls this for every row.</summary>
-    public virtual void RefreshText()
-    {
-    }
-}
-
-internal sealed class DiffFileRowViewModel(FileDiffViewModel file) : DiffRowViewModel(file)
-{
-    public string Header => File.Header;
-
-    public string Badge => File.Badge;
-
-    public bool IsHeader => true;
-
-    public override void RefreshText() => OnPropertyChanged(nameof(Header));
-}
-
-internal sealed class DiffLineRowViewModel(FileDiffViewModel file, DiffLineViewModel line) : DiffRowViewModel(file)
-{
-    public DiffLineViewModel Line { get; } = line;
-
-    public string Prefix => Line.Prefix;
-
-    public string Text => Line.Text;
-
-    public string OldNumber => Line.OldNumber;
-
-    public string NewNumber => Line.NewNumber;
-
-    public bool IsAdd => Line.IsAdd;
-
-    public bool IsRemove => Line.IsRemove;
-
-    public bool IsHunk => Line.IsHunk;
-
-    public bool IsHeader => false;
-
-    public override void RefreshText() => OnPropertyChanged(nameof(Text));
-}
-
-internal sealed class FileDiffViewModel
+internal sealed partial class FileDiffViewModel
 {
     private readonly int added;
     private readonly int removed;
     private readonly bool isBinary;
 
-    public FileDiffViewModel(FileDiff diff, string prefix = "")
+    /// <summary>Added line count (for the changed-file tree).</summary>
+    public int Added => added;
+
+    /// <summary>Removed line count (for the changed-file tree).</summary>
+    public int Removed => removed;
+
+    public bool IsBinary => isBinary;
+
+    public FileDiffViewModel(FileDiff diff, string prefix = "", bool fullContext = false)
     {
         Path = Strip(diff, prefix);
         added = diff.AddedLineCount;
@@ -980,39 +970,8 @@ internal sealed class FileDiffViewModel
             FileDiffStatus.Copied => "C",
             _ => "M",
         };
-        var lines = new List<DiffLineViewModel>();
-        foreach (var hunk in diff.Hunks)
-        {
-            lines.Add(new DiffLineViewModel(string.Empty, LocText.Literal(hunk.Header), "hunk", string.Empty, string.Empty));
-            foreach (var line in hunk.Lines)
-            {
-                var kind = line.Kind switch
-                {
-                    DiffLineKind.Added => "add",
-                    DiffLineKind.Removed => "del",
-                    _ => "ctx",
-                };
-                var mark = line.Kind switch
-                {
-                    DiffLineKind.Added => "+",
-                    DiffLineKind.Removed => "−",
-                    _ => " ",
-                };
-                lines.Add(new DiffLineViewModel(
-                    mark,
-                    LocText.Literal(line.Text.Replace("\t", "    ", StringComparison.Ordinal)),
-                    kind,
-                    line.OldLineNumber > 0 ? TextFormat.Id(line.OldLineNumber) : string.Empty,
-                    line.NewLineNumber > 0 ? TextFormat.Id(line.NewLineNumber) : string.Empty));
-            }
-        }
-
-        if (lines.Count == 0)
-        {
-            lines.Add(new DiffLineViewModel(" ", new LocText(InspectorStrings.ChangesNoTextualChange), "ctx", string.Empty, string.Empty));
-        }
-
-        Lines = lines;
+        Diff = diff;
+        InitializeReview(diff, fullContext);
     }
 
     public string Path { get; }
@@ -1025,8 +984,6 @@ internal sealed class FileDiffViewModel
     public string Meta => ChangeBadge.Format(Badge, added, removed, isBinary);
 
     public string Description => Header;
-
-    public IReadOnlyList<DiffLineViewModel> Lines { get; }
 
     /// <summary>Diff paths are repository-relative; the panel shows them relative to the session directory.</summary>
     private static string Strip(FileDiff diff, string prefix)
@@ -1041,9 +998,20 @@ internal sealed class TurnChoiceViewModel : ObservableObject
     private readonly LocText label;
     private bool isSelected;
 
-    public TurnChoiceViewModel(int turn, LocText label, string treeBefore, string? treeAfter, Action<TurnChoiceViewModel> select)
+    private int? fileCount;
+    private bool isLatest;
+    private bool isChecked;
+
+    public TurnChoiceViewModel(
+        int turn,
+        LocText label,
+        string treeBefore,
+        string? treeAfter,
+        Action<TurnChoiceViewModel> select,
+        DateTimeOffset startedAt = default)
     {
         Turn = turn;
+        StartedAt = startedAt;
         this.label = label;
         TreeBefore = treeBefore;
         TreeAfter = treeAfter;
@@ -1067,12 +1035,58 @@ internal sealed class TurnChoiceViewModel : ObservableObject
 
     public string? TreeAfter { get; }
 
+    public DateTimeOffset StartedAt { get; }
+
     public RelayCommand SelectCommand { get; }
+
+    /// <summary>How many files the turn changed; null until the picker has counted them in the background.</summary>
+    public int? FileCount
+    {
+        get => fileCount;
+        internal set
+        {
+            if (Set(ref fileCount, value))
+            {
+                OnPropertyChanged(nameof(Subtitle));
+            }
+        }
+    }
+
+    /// <summary>The newest turn: shown as "上一轮".</summary>
+    public bool IsLatest
+    {
+        get => isLatest;
+        internal set
+        {
+            if (Set(ref isLatest, value))
+            {
+                OnPropertyChanged(nameof(Title));
+            }
+        }
+    }
+
+    /// <summary>True when this turn is the scope in use (the ✓ of the picker row); <see cref="IsSelected"/> only remembers the choice.</summary>
+    public bool IsChecked
+    {
+        get => isChecked;
+        internal set => Set(ref isChecked, value);
+    }
+
+    /// <summary>"上一轮" for the newest turn, otherwise "第 14:05 轮".</summary>
+    public string Title => IsLatest ? Loc.Instance[ChangesPickerStrings.LatestTurn] : ChangesPickerStrings.TurnTitle(StartedAt);
+
+    /// <summary>"3 个文件 · 3 天前".</summary>
+    public string Subtitle => ChangesPickerStrings.TurnSubtitle(fileCount, StartedAt, DateTimeOffset.Now);
 
     internal void SetSelected(bool value) => IsSelected = value;
 
     /// <summary>Re-reads the label after a language switch; the panel calls this for every entry.</summary>
-    internal void RefreshText() => OnPropertyChanged(nameof(Label));
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(Label));
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Subtitle));
+    }
 }
 
 /// <summary>
@@ -1109,13 +1123,11 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         PreviousFileCommand = new RelayCommand(() => SelectAdjacentFile(-1), CanGoPreviousFile);
         NextFileCommand = new RelayCommand(() => SelectAdjacentFile(1), CanGoNextFile);
         OpenInEditorCommand = new RelayCommand(OpenSelectedFile, () => openFile is not null && selectedFile is not null);
+        EnsureReviewCommands();
         Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
 
     public ObservableCollection<TurnChoiceViewModel> Turns { get; } = [];
-
-    /// <summary>Every header and diff line of the current scope, in display order; the view virtualizes this one list.</summary>
-    public RangeObservableCollection<DiffRowViewModel> Rows { get; } = [];
 
     public RangeObservableCollection<FileDiffViewModel> Files => files;
 
@@ -1165,6 +1177,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 PreviousFileCommand.NotifyCanExecuteChanged();
                 NextFileCommand.NotifyCanExecuteChanged();
                 OpenInEditorCommand.NotifyCanExecuteChanged();
+                OnSelectedFileChanged();
             }
         }
     }
@@ -1194,11 +1207,12 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         if (changed)
         {
             files.ReplaceAll(Array.Empty<FileDiffViewModel>());
-            Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
+            OnFilesReplaced(string.Empty);
             Turns.Clear();
             SetSelectedTurn(null);
             OnPropertyChanged(nameof(HasNoTurns));
             ClearBranchChoices();
+            ClearCommitChoices();
             Volatile.Write(ref uncommittedFingerprint, null);
         }
 
@@ -1224,20 +1238,6 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Row index of a file header, for scrolling the virtualized list to that file.</summary>
-    public int IndexOfFile(FileDiffViewModel file)
-    {
-        for (var index = 0; index < Rows.Count; index++)
-        {
-            if (ReferenceEquals(Rows[index].File, file))
-            {
-                return index;
-            }
-        }
-
-        return -1;
-    }
-
     public Task LoadAsync(CancellationToken ct) => LoadAsync(ct, reloadChoices: true);
 
     private async Task LoadAsync(CancellationToken ct, bool reloadChoices, string? precomputedFingerprint = null)
@@ -1259,7 +1259,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
             if (!panelContext.HasSession || !Directory.Exists(panelContext.WorkingDirectory))
             {
                 files.ReplaceAll(Array.Empty<FileDiffViewModel>());
-                Rows.ReplaceAll(Array.Empty<DiffRowViewModel>());
+                OnFilesReplaced(string.Empty);
                 if (reloadChoices)
                 {
                     Turns.Clear();
@@ -1301,8 +1301,10 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            var previousSelection = selectedFile?.Path;
+            Volatile.Write(ref diffBaseCommit, built.BaseCommit);
             files.ReplaceAll(built.Files);
-            Rows.ReplaceAll(built.Rows);
+            OnFilesReplaced(built.RepositoryRoot, scopeSnapshot is ChangeScope.Uncommitted or ChangeScope.All);
             if (scopeSnapshot == ChangeScope.Uncommitted)
             {
                 Volatile.Write(ref uncommittedFingerprint, fingerprint);
@@ -1312,7 +1314,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 ? files.Count == 0 ? new LocText(InspectorStrings.ChangesNoChanges) : default
                 : built.Message;
             SetMessage(nextMessage);
-            SelectedFile = files.FirstOrDefault();
+            SelectedFile = files.FirstOrDefault(file => string.Equals(file.Path, previousSelection, StringComparison.Ordinal))
+                ?? files.FirstOrDefault();
             OnPropertyChanged(nameof(Summary));
             OnPropertyChanged(nameof(ScopeLabel));
         }
@@ -1369,7 +1372,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 InspectorStrings.ChangeTurnLabel(checkpoint.Turn, checkpoint.StartedAt),
                 checkpoint.TreeBefore,
                 checkpoint.TreeAfter,
-                SelectTurn));
+                SelectTurn,
+                checkpoint.StartedAt));
         }
 
         OnPropertyChanged(nameof(HasNoTurns));
@@ -1401,10 +1405,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
             turn.RefreshText();
         }
 
-        foreach (var row in Rows)
-        {
-            row.RefreshText();
-        }
+        RefreshReviewTexts();
     }
 
     /// <summary>Drops the language subscription and cancels any in-flight diff; a gone document must not be refreshed later.</summary>
@@ -1421,9 +1422,14 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         }
     }
 
-    private sealed record BuiltChanges(List<FileDiffViewModel> Files, List<DiffRowViewModel> Rows, LocText Message);
+    private sealed record BuiltChanges(List<FileDiffViewModel> Files, string RepositoryRoot, LocText Message, string? BaseCommit);
 
-    /// <summary>The diff is read, mapped to view models and flattened on a pool thread; the caller applies it once.</summary>
+    /// <summary>Hunk context used when a whole-file read would overflow git's output cap (the view then cannot unfold).</summary>
+    private const int FallbackContextLines = 3;
+
+    private sealed record DiffRead(IReadOnlyList<FileDiff> Diffs, string Prefix, LocText Message, string? BaseCommit);
+
+    /// <summary>The diff is read and mapped to view models on a pool thread; the caller applies it once.</summary>
     private async Task<BuiltChanges> BuildRowsAsync(
         string workingDirectory,
         ChangeScope selectedScope,
@@ -1431,34 +1437,42 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         BranchChoiceViewModel? branch,
         CancellationToken ct)
     {
-        var (diffs, prefix, message) = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, ct).ConfigureAwait(false);
-        var builtFiles = new List<FileDiffViewModel>(diffs.Count);
-        var rows = new List<DiffRowViewModel>();
-        foreach (var diff in diffs)
+        // Whole files make unfolding and the Markdown preview free, but a large change set can overflow git's output cap;
+        // then the set is read again with ordinary hunks rather than failing the whole view.
+        var fullContext = true;
+        DiffRead read;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var file = new FileDiffViewModel(diff, prefix);
-            builtFiles.Add(file);
-            rows.Add(new DiffFileRowViewModel(file));
-            foreach (var line in file.Lines)
-            {
-                rows.Add(new DiffLineRowViewModel(file, line));
-            }
+            read = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, GitCli.FullContextLines, ct).ConfigureAwait(false);
+        }
+        catch (GitOutputTruncatedException)
+        {
+            fullContext = false;
+            read = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, FallbackContextLines, ct).ConfigureAwait(false);
         }
 
-        return new BuiltChanges(builtFiles, rows, message);
+        var root = await git.GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false) ?? workingDirectory;
+        var builtFiles = new List<FileDiffViewModel>(read.Diffs.Count);
+        foreach (var diff in read.Diffs)
+        {
+            ct.ThrowIfCancellationRequested();
+            builtFiles.Add(new FileDiffViewModel(diff, read.Prefix, fullContext));
+        }
+
+        return new BuiltChanges(builtFiles, root, read.Message, read.BaseCommit);
     }
 
-    private async Task<(IReadOnlyList<FileDiff> Diffs, string Prefix, LocText Message)> ReadDiffAsync(
+    private async Task<DiffRead> ReadDiffAsync(
         string workingDirectory,
         ChangeScope selectedScope,
         TurnChoiceViewModel? turn,
         BranchChoiceViewModel? branch,
+        int contextLines,
         CancellationToken ct)
     {
         if (!await git.IsRepositoryAsync(workingDirectory, ct).ConfigureAwait(false))
         {
-            return ([], string.Empty, default);
+            return new DiffRead([], string.Empty, default, null);
         }
 
         var root = await git.GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false);
@@ -1469,36 +1483,42 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         {
             if (turn is not { TreeAfter: { } after })
             {
-                return ([], prefix, default);
+                return new DiffRead([], prefix, default, null);
             }
 
-            return (await git.GetTreeDiffAsync(workingDirectory, turn.TreeBefore, after, ct).ConfigureAwait(false), prefix, default);
+            return new DiffRead(
+                await git.GetTreeDiffAsync(workingDirectory, turn.TreeBefore, after, contextLines, ct).ConfigureAwait(false), prefix, default, null);
+        }
+
+        if (selectedScope == ChangeScope.Commit)
+        {
+            return new DiffRead(await ReadCommitDiffAsync(workingDirectory, contextLines, ct).ConfigureAwait(false), prefix, default, null);
         }
 
         if (selectedScope == ChangeScope.All)
         {
             if (branch is null)
             {
-                return ([], prefix, new LocText(InspectorStrings.ChangesNoBranches));
+                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoBranches), null);
             }
 
             if (await git.GetCurrentBranchAsync(workingDirectory, ct).ConfigureAwait(false) is null)
             {
-                return ([], prefix, new LocText(InspectorStrings.ChangesNoCurrentBranch));
+                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoCurrentBranch), null);
             }
 
             var mergeBase = await git.GetMergeBaseAsync(workingDirectory, branch.RefName, "HEAD", ct).ConfigureAwait(false);
             if (mergeBase is null)
             {
-                return ([], prefix, new LocText(InspectorStrings.ChangesNoCommonHistory));
+                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoCommonHistory), null);
             }
 
             var branchDiffs = await git.GetDiffAsync(
                     workingDirectory,
-                    new GitDiffOptions { From = mergeBase, To = "HEAD", Paths = ["."] },
+                    new GitDiffOptions { From = mergeBase, To = "HEAD", Paths = ["."], ContextLines = contextLines },
                     ct)
                 .ConfigureAwait(false);
-            return (branchDiffs, prefix, default);
+            return new DiffRead(branchDiffs, prefix, default, mergeBase);
         }
 
         var head = await git.RevParseAsync(workingDirectory, "HEAD", ct).ConfigureAwait(false);
@@ -1509,10 +1529,11 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                     From = head is null ? null : "HEAD",
                     IncludeUntracked = true,
                     Paths = ["."],
+                    ContextLines = contextLines,
                 },
                 ct)
             .ConfigureAwait(false);
-        return (diffs, prefix, default);
+        return new DiffRead(diffs, prefix, default, head);
     }
 }
 

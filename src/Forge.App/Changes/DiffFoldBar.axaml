@@ -1,0 +1,15 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             x:Class="Forge.App.Changes.DiffFoldBar">
+  <!-- "N unmodified lines": clicking expands the folded run when the diff carries the lines. -->
+  <Button x:Name="Bar" Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Height="28" Padding="12,0"
+          CornerRadius="0" BorderThickness="0,1" BorderBrush="{DynamicResource BorderBrush}"
+          Background="{DynamicResource DiffHunkBrush}" Click="OnClick" AutomationProperties.AutomationId="diff-fold">
+    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+      <wc:FluentIcon x:Name="Chevron" Data="{StaticResource IconChevronDown}" Width="12" Height="12"
+                     Foreground="{DynamicResource TextMutedBrush}" />
+      <TextBlock x:Name="Label" Classes="caption" Foreground="{DynamicResource TextMutedBrush}" />
+    </StackPanel>
+  </Button>
+</UserControl>

@@ -566,6 +566,156 @@
     <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
   </Style>
 
+  <!-- ============================ 改动范围 / 基准分支选择器 ============================
+       picker 按钮:无边框、透明底,只在悬停/按下时出灰色圆角底;内容是 图标 + 文字 + 箭头。 -->
+  <Style Selector="Button.change-picker">
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.change-picker:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+  </Style>
+  <Style Selector="Button.change-picker:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
+  </Style>
+  <Style Selector="Button.change-picker:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Opacity" Value="0.5" />
+  </Style>
+
+  <!-- 弹层:去掉 FlyoutPresenter 自带的边框与底,由 change-menu 自己画白色 8px 圆角卡片和柔和阴影。 -->
+  <Style Selector="FlyoutPresenter.change-flyout">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="MinWidth" Value="0" />
+  </Style>
+  <Style Selector="Border.change-menu">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="4" />
+    <Setter Property="BoxShadow" Value="{StaticResource ShadowMd}" />
+  </Style>
+  <Style Selector="Button.change-menu-row">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="6,3" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <!-- 选中行只有一层很淡的灰底(勾号才是主提示);悬停盖在它上面。 -->
+  <Style Selector="Button.change-menu-row.selected">
+    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+  </Style>
+  <Style Selector="Button.change-menu-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+  </Style>
+  <Style Selector="Button.change-menu-row:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
+  </Style>
+  <Style Selector="Button.change-menu-row:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+  <Style Selector="Button.change-menu-row:disabled">
+    <Setter Property="Cursor" Value="Arrow" />
+  </Style>
+  <Style Selector="TextBlock.change-menu-group">
+    <Setter Property="Margin" Value="8,6,8,2" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.4" />
+  </Style>
+  <Style Selector="TextBlock.change-menu-subgroup">
+    <Setter Property="Margin" Value="8,4,8,0" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+  </Style>
+  <Style Selector="TextBlock.change-menu-check">
+    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+  </Style>
+  <Style Selector="wc|FluentIcon.change-menu-check">
+    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Width" Value="12" />
+    <Setter Property="Height" Value="12" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.change-menu-hint">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+  </Style>
+
+  <!-- 分段开关:Border.segmented 里放 Button.segment,选中的那段是抬起的浅色药丸(拆分|内联、堆叠|单文件、预览|Source)。 -->
+  <Style Selector="Border.segmented">
+    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="2" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment">
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Padding" Value="10,2" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment.selected">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment.selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BoxShadow" Value="{StaticResource ShadowSm}" />
+  </Style>
+  <Style Selector="Border.segmented Button.segment.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+  </Style>
+
+  <!-- 改动块上方的操作条:整宽、浅灰圆角;保留之后换成淡绿。 -->
+  <Style Selector="Border.diff-block-bar">
+    <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+  </Style>
+  <Style Selector="Border.diff-block-bar.kept">
+    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+  </Style>
+
+  <!-- 已改动树:文件行右侧的 +x −y 计数。 -->
+  <Style Selector="TextBlock.change-added">
+    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+  </Style>
+  <Style Selector="TextBlock.change-removed">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
   <!-- Side panels follow their column: a text keeps to one line and is cut to an ellipsis instead of wrapping, and
        TrimmedTextToolTip shows the whole of a cut text on hover. A text that sets its own wrapping keeps it. -->
   <Style Selector="wc|PanelChrome:sidebar TextBlock">

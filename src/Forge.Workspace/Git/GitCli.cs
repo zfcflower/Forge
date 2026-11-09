@@ -580,17 +580,25 @@ public sealed partial class GitCli
     }
 
     /// <summary>The unified diff between two tree hashes, as git prints it.</summary>
-    public async Task<string> GetTreeDiffTextAsync(
+    public Task<string> GetTreeDiffTextAsync(
         string workingDirectory,
         string fromTree,
         string toTree,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        GetTreeDiffTextCoreAsync(workingDirectory, fromTree, toTree, 3, ct);
+
+    private async Task<string> GetTreeDiffTextCoreAsync(
+        string workingDirectory,
+        string fromTree,
+        string toTree,
+        int contextLines,
+        CancellationToken ct)
     {
         var arguments = Args(
             "diff",
             "--no-color",
             "--no-ext-diff",
-            "--unified=3",
+            "--unified=" + contextLines.ToString(CultureInfo.InvariantCulture),
             "--find-renames",
             "--end-of-options",
             Reference(fromTree, nameof(fromTree)),

@@ -1,0 +1,72 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:ch="using:Forge.App.Changes"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Changes.DiffFileHeader"
+             x:DataType="ch:IDiffFileItem">
+  <!-- The bar above one file of the diff editor. Its pieces left to right: collapse chevron, badge, path (middle-ellipsised),
+       +N / -N, kept summary, then the right cluster. FlexRowPanel gives the path whatever the others leave. -->
+  <UserControl.Styles>
+    <Style Selector="wc|FluentIcon.chevron">
+      <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    </Style>
+    <Style Selector="Border.expanded wc|FluentIcon.chevron">
+      <Setter Property="RenderTransform" Value="rotate(90deg)" />
+    </Style>
+  </UserControl.Styles>
+  <Border Height="36" Background="{DynamicResource SurfaceMutedBrush}" BorderBrush="{DynamicResource BorderBrush}"
+          BorderThickness="0,1" Classes.expanded="{Binding !IsCollapsed}">
+    <ch:FlexRowPanel Margin="6,0" Spacing="8">
+      <Button Classes="ghost icon" Command="{Binding ToggleCollapsedCommand}" VerticalAlignment="Center"
+              AutomationProperties.AutomationId="diff-file-collapse"
+              AutomationProperties.Name="{Binding [changes.diff.toggleCollapsed], Source={x:Static loc:Loc.Instance}}"
+              ToolTip.Tip="{Binding [changes.diff.toggleCollapsed], Source={x:Static loc:Loc.Instance}}">
+        <wc:FluentIcon Classes="chevron" Data="{StaticResource TreeChevronGeometry}" Width="14" Height="14" />
+      </Button>
+      <TextBlock Text="{Binding Badge}" Classes="mono" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+      <ch:MiddleEllipsisText x:Name="PathText" Text="{Binding Path}" ch:FlexRowPanel.IsFlexible="True"
+                             FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeSm}"
+                             Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"
+                             ToolTip.Tip="{Binding Path}" AutomationProperties.AutomationId="diff-file-path" />
+      <TextBlock x:Name="AddedText" Classes="mono" Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
+      <TextBlock x:Name="RemovedText" Classes="mono" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" />
+      <TextBlock Text="{Binding KeptSummary}" Classes="caption" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"
+                 AutomationProperties.AutomationId="diff-file-kept" />
+      <StackPanel ch:FlexRowPanel.IsTrailing="True" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+        <Border x:Name="MarkdownToggle" Classes="segmented" IsVisible="{Binding IsMarkdown}" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <Button x:Name="PreviewButton" Classes="segment" Classes.active="{Binding IsMarkdownPreview}" Click="OnPreviewClick"
+                    Content="{Binding [changes.diff.preview], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="diff-file-preview" />
+            <Button x:Name="SourceButton" Classes="segment" Classes.active="{Binding !IsMarkdownPreview}" Click="OnSourceClick"
+                    Content="{Binding [changes.diff.source], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="diff-file-source" />
+          </StackPanel>
+        </Border>
+        <Button Classes="ghost icon" Command="{Binding RevertFileCommand}"
+                AutomationProperties.AutomationId="diff-file-revert"
+                AutomationProperties.Name="{Binding [changes.diff.revertFile], Source={x:Static loc:Loc.Instance}}"
+                ToolTip.Tip="{Binding [changes.diff.revertFile], Source={x:Static loc:Loc.Instance}}">
+          <wc:FluentIcon Data="{DynamicResource IconUndo}" Width="14" Height="14" />
+        </Button>
+        <Button Classes="ghost icon" Command="{Binding OpenInEditorCommand}"
+                AutomationProperties.AutomationId="diff-file-open"
+                AutomationProperties.Name="{Binding [changes.diff.openInEditor], Source={x:Static loc:Loc.Instance}}"
+                ToolTip.Tip="{Binding [changes.diff.openInEditor], Source={x:Static loc:Loc.Instance}}">
+          <wc:FluentIcon Data="{DynamicResource IconOpen}" Width="14" Height="14" />
+        </Button>
+        <Button x:Name="MoreButton" Classes="ghost icon" Click="OnMoreClick"
+                AutomationProperties.AutomationId="diff-file-more"
+                AutomationProperties.Name="{Binding [changes.diff.more], Source={x:Static loc:Loc.Instance}}"
+                ToolTip.Tip="{Binding [changes.diff.more], Source={x:Static loc:Loc.Instance}}">
+          <wc:FluentIcon Data="{StaticResource IconEllipsis}" Width="14" Height="14" />
+        </Button>
+        <CheckBox IsChecked="{Binding IsViewed, Mode=TwoWay}" VerticalAlignment="Center" MinHeight="0" Margin="4,0,0,0"
+                  Content="{Binding [changes.diff.viewed], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="diff-file-viewed"
+                  AutomationProperties.Name="{Binding [changes.diff.viewed], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+    </ch:FlexRowPanel>
+  </Border>
+</UserControl>

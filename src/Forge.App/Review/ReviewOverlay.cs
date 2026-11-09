@@ -44,7 +44,7 @@ internal sealed class ReviewOverlay : IDisposable
     private readonly TextView textView;
     private readonly ReviewOverlayParts ui;
     private readonly List<Button> markers = [];
-    private FileReviewController? controller;
+    private IReviewSurface? controller;
     private PendingRange? pending;
     private bool pendingFromGutter;
     private IPointer? gutterPointer;
@@ -79,7 +79,7 @@ internal sealed class ReviewOverlay : IDisposable
         ui.Composer.PropertyChanged += OnComposerPropertyChanged;
     }
 
-    public void Bind(FileReviewController? value)
+    public void Bind(IReviewSurface? value)
     {
         if (ReferenceEquals(controller, value))
         {
@@ -255,7 +255,7 @@ internal sealed class ReviewOverlay : IDisposable
         var point = e.GetPosition(area);
         foreach (var margin in area.LeftMargins)
         {
-            if (margin is LineNumberMargin && margin.IsVisible
+            if (margin is (LineNumberMargin or IReviewGutterMargin) && margin.IsVisible
                 && margin.TranslatePoint(default, area) is { } origin
                 && new Rect(origin, margin.Bounds.Size).Contains(point))
             {
@@ -302,6 +302,12 @@ internal sealed class ReviewOverlay : IDisposable
     /// <param name="anchorOffset">Document offset the floating icon hangs off; the icon sits at its bottom right.</param>
     private void SetPending(int start, int end, bool fromGutter, int anchorOffset)
     {
+        if (controller is { } surface && !surface.CanCommentOn(start, end))
+        {
+            ClearPending();
+            return;
+        }
+
         pending = new PendingRange(start, end, anchorOffset);
         pendingFromGutter = fromGutter;
         Layout();

@@ -15,7 +15,7 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   above). Only the `d` attribute of each icon's `<path>` is copied; the SVG wrapper, the `fill` colour, the `viewBox` and
   any `stroke-*` attributes are dropped.
 - What was adapted, in `src/Forge.App/Resources/Icons.axaml` (one `StreamGeometry` per icon, on Fluent's 24×24 grid):
-  `add`, `arrow_autofit_width`, `arrow_clockwise`, `arrow_download`, `arrow_expand`, `arrow_up`, `arrow_upload`, `book`,
+  `add`, `arrow_autofit_width`, `arrow_clockwise`, `arrow_download`, `arrow_expand`, `arrow_maximize_vertical`, `arrow_minimize_vertical`, `arrow_undo`, `bot`, `branch`, `branch_compare`, `arrow_up`, `arrow_upload`, `book`,
   `chat_sparkle` (regular + filled), `checkmark`, `checkmark_circle`, `chevron_down`, `chevron_right`, `chevron_up`,
   `circle`,
   `circle_half_fill`, `cloud_arrow_down`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,

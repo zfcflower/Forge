@@ -320,28 +320,30 @@ public sealed class ChangedFilesScopeTests
                 scopeFlyout.ShowAt(scopePicker);
                 Settle(window);
                 var scopeMenu = Assert.IsType<Border>(scopeFlyout.Content);
-                var scopeStack = Assert.IsType<StackPanel>(scopeMenu.Child);
+                var scopeScroll = Assert.IsType<ScrollViewer>(scopeMenu.Child);
+                var scopeStack = Assert.IsType<StackPanel>(scopeScroll.Content);
                 var scopeButtons = scopeStack.Children.OfType<Button>().ToArray();
                 Assert.Equal("changes-scope-all", AutomationProperties.GetAutomationId(scopeButtons[0]));
                 Assert.Equal("changes-scope-uncommitted", AutomationProperties.GetAutomationId(scopeButtons[1]));
-                Assert.Single(scopeStack.Children.OfType<Border>(), static item => item.Classes.Contains("divider"));
-                Assert.Equal(changes.Turns.Count, Assert.Single(scopeStack.Children.OfType<ItemsControl>()).Items.Count);
+                Assert.Equal(2, scopeStack.Children.OfType<Border>().Count(static item => item.Classes.Contains("divider")));
+                var scopeLists = scopeStack.Children.OfType<ItemsControl>().ToArray();
+                Assert.Equal(2, scopeLists.Length);
+                Assert.Equal(changes.Turns.Count, scopeLists[0].Items.Count);
+                Assert.Equal("changes-turn-list", AutomationProperties.GetAutomationId(scopeLists[0]));
 
                 var branchFlyout = Assert.IsType<Flyout>(branchPicker.Flyout);
                 branchFlyout.ShowAt(branchPicker);
                 Settle(window);
                 var branchMenu = Assert.IsType<Border>(branchFlyout.Content);
                 var branchStack = Assert.IsType<StackPanel>(branchMenu.Child);
-                var branchGroupLabels = branchStack.Children.OfType<Avalonia.Controls.TextBlock>()
+                var branchTexts = branchStack.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>()
                     .Select(static block => block.Text ?? string.Empty)
                     .ToArray();
-                Assert.Contains(Loc.Instance[InspectorStrings.ChangesLocalBranches], branchGroupLabels);
-                Assert.Contains(Loc.Instance[InspectorStrings.ChangesRemoteBranches], branchGroupLabels);
-                Assert.Single(branchStack.Children.OfType<Border>(), static item => item.Classes.Contains("divider"));
-                var branchLists = branchStack.Children.OfType<ItemsControl>().ToArray();
-                Assert.Equal(2, branchLists.Length);
-                Assert.Equal(changes.LocalBranches.Count, branchLists[0].Items.Count);
-                Assert.Equal(changes.RemoteBranches.Count, branchLists[1].Items.Count);
+                Assert.Contains(Loc.Instance[ChangesPickerStrings.LocalGroup], branchTexts);
+                Assert.Contains(Loc.Instance[ChangesPickerStrings.RemoteGroup], branchTexts);
+                Assert.Single(branchStack.GetVisualDescendants().OfType<TextBox>());
+                Assert.Equal(changes.LocalBranches.Count, changes.VisibleLocalBranches.Count);
+                Assert.Equal(changes.RemoteBranches.Count, changes.VisibleRemoteGroups.Sum(static group => group.Branches.Count));
                 Assert.Contains(branchStack.GetVisualDescendants().OfType<Button>(), button =>
                     AutomationProperties.GetAutomationId(button) == changes.RemoteBranches[0].AutomationId);
 
@@ -367,11 +369,13 @@ public sealed class ChangedFilesScopeTests
 
                 var rowList = filesView.FindControl<ListBox>("ChangedDiffList");
                 Assert.NotNull(rowList);
-                Assert.Equal(changes.Files.Count, rowList!.Items.Count);
-                Assert.True(rowList.Items.Count >= 2);
-                rowList.SelectedIndex = 0;
+                var nodes = rowList!.Items.OfType<ChangedTreeNodeViewModel>().ToArray();
+                Assert.Equal(changes.Files.Count, nodes.Count(static node => !node.IsDirectory));
+                Assert.True(nodes.Count(static node => !node.IsDirectory) >= 2);
+                var firstFile = nodes.First(static node => !node.IsDirectory);
+                firstFile.ToggleCommand.Execute(null);
                 Settle(window);
-                var selectedPath = changes.Files[0].Path;
+                var selectedPath = firstFile.File!.Path;
                 Assert.Contains(selectedPath, requestedChanges);
                 await changes.ShowFileAsync(selectedPath, CancellationToken.None);
 
@@ -388,14 +392,18 @@ public sealed class ChangedFilesScopeTests
                     .ToHashSet(StringComparer.Ordinal);
                 Assert.Contains("changes-previous-file", actionIds);
                 Assert.Contains("changes-next-file", actionIds);
-                Assert.Contains("changes-open-in-editor", actionIds);
-                Assert.Contains("changes-copy-path", actionIds);
                 Assert.Contains("changes-compare-branch", actionIds);
-                Assert.Contains("refresh-changes", actionIds);
+                Assert.Contains("changes-file-count", actionIds);
+                Assert.Contains("changes-viewed", actionIds);
+                Assert.Contains("changes-mode-split", actionIds);
+                Assert.Contains("changes-mode-inline", actionIds);
+                Assert.Contains("changes-layout-stacked", actionIds);
+                Assert.Contains("changes-layout-single", actionIds);
+                Assert.Contains("changes-next-unviewed", actionIds);
+                Assert.Contains("changes-mark-all-viewed", actionIds);
 
-                var copyButton = changesView.GetVisualDescendants().OfType<Button>().Single(button =>
-                    AutomationProperties.GetAutomationId(button) == "changes-copy-path");
-                copyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                // Open-in-editor and copy-path moved into each file header's menu; copying still lands in the clipboard.
+                changes.SelectedFile!.CopyPathCommand.Execute(null);
                 Settle(window);
                 if (window.Clipboard is { } clipboard)
                 {
@@ -403,6 +411,71 @@ public sealed class ChangedFilesScopeTests
                 }
 
                 window.Close();
+                return 0;
+            },
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Branch_search_filters_case_insensitively_and_groups_remotes()
+    {
+        using var workspace = await CreateWorkspaceAsync();
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        await session.Dispatch(
+            async () =>
+            {
+                using var changes = new ChangesViewModel(workspace.Git, workspace.Checkpoints, static _ => { });
+                changes.Attach(new PanelContext(SessionId, workspace.WorkingDirectory, null));
+                await changes.LoadAsync(CancellationToken.None);
+
+                Assert.True(changes.HasVisibleLocalBranches);
+                var group = Assert.Single(changes.VisibleRemoteGroups);
+                Assert.Equal("origin", group.Name);
+                Assert.Contains(group.Branches, static branch => branch.ShortName == "main");
+
+                changes.BranchSearch = "MAIN";
+                Assert.All(changes.VisibleLocalBranches, static branch => Assert.Contains("main", branch.Name, StringComparison.OrdinalIgnoreCase));
+                Assert.NotEmpty(changes.VisibleLocalBranches);
+
+                changes.BranchSearch = "no-such-branch-zzz";
+                Assert.Empty(changes.VisibleLocalBranches);
+                Assert.Empty(changes.VisibleRemoteGroups);
+                Assert.True(changes.HasNoBranchMatch);
+
+                changes.BranchSearch = string.Empty;
+                Assert.False(changes.HasNoBranchMatch);
+                return 0;
+            },
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Scope_picker_reports_uncommitted_turn_counts_and_checks_only_the_active_scope()
+    {
+        using var workspace = await CreateWorkspaceAsync();
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        await session.Dispatch(
+            async () =>
+            {
+                using var changes = new ChangesViewModel(workspace.Git, workspace.Checkpoints, static _ => { });
+                changes.Attach(new PanelContext(SessionId, workspace.WorkingDirectory, null));
+                await changes.LoadAsync(CancellationToken.None);
+                await changes.RefreshScopePickerAsync();
+
+                Assert.True(changes.HasUncommitted);
+                var turn = Assert.Single(changes.Turns);
+                Assert.True(turn.IsLatest);
+                Assert.Equal(1, turn.FileCount);
+                Assert.Equal(Loc.Instance[ChangesPickerStrings.LatestTurn], turn.Title);
+                Assert.Contains("1", changes.LatestTurnShortcutText);
+                Assert.False(turn.IsChecked);
+
+                changes.LatestTurnCommand.Execute(null);
+                Assert.True(turn.IsChecked);
+                Assert.True(changes.IsLatestTurnChecked);
+                changes.AllChangesCommand.Execute(null);
+                Assert.False(turn.IsChecked);
+                Assert.False(changes.IsLatestTurnChecked);
                 return 0;
             },
             CancellationToken.None);

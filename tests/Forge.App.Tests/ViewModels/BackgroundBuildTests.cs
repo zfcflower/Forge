@@ -113,7 +113,7 @@ public sealed class BackgroundBuildTests
     }
 
     [Fact]
-    public async Task A_large_working_tree_diff_replaces_its_rows_with_a_single_reset()
+    public async Task A_large_working_tree_diff_replaces_its_files_with_a_single_reset()
     {
         var root = await NewDiffRepositoryAsync();
         try
@@ -124,10 +124,10 @@ public sealed class BackgroundBuildTests
                 {
                     var changes = new ChangesViewModel(new GitCli(), new EmptyCheckpointStore());
                     changes.Attach(new PanelContext(SessionId, root, root));
-                    Assert.True(await PumpUntilAsync(() => changes.Rows.Count > 0), "the diff never finished its first load");
+                    Assert.True(await PumpUntilAsync(() => changes.Files.Count > 0), "the diff never finished its first load");
 
                     var resets = 0;
-                    changes.Rows.CollectionChanged += (_, args) =>
+                    changes.Files.CollectionChanged += (_, args) =>
                     {
                         if (args.Action == NotifyCollectionChangedAction.Reset)
                         {
@@ -136,13 +136,13 @@ public sealed class BackgroundBuildTests
                     };
 
                     await changes.LoadAsync(CancellationToken.None);
-                    return (Resets: resets, Rows: changes.Rows.Count, Files: changes.Files.Count);
+                    return (Resets: resets, Files: changes.Files.Count, Blocks: changes.Files.Sum(static file => file.Blocks.Count));
                 },
                 CancellationToken.None);
 
             Assert.Equal(1, outcome.Resets);
             Assert.Equal(DiffFileCount, outcome.Files);
-            Assert.True(outcome.Rows > DiffFileCount, "the diff must hold more rows than its file headers");
+            Assert.True(outcome.Blocks >= DiffFileCount, "every changed file must carry at least one change block");
         }
         finally
         {

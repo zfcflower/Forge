@@ -142,6 +142,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Git,
             composition.TurnCheckpoints,
             path => OpenFile(path, newTab: false));
+        Changes.ConfigureReview(
+            CreateReviewServices(),
+            (title, message, confirm, cancel) => dialogs is null
+                ? Task.FromResult(false)
+                : dialogs.ConfirmAsync(title, message, confirm, cancel));
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -1270,13 +1275,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             : session is { WorkDir.Length: > 0 }
                 ? new Review.ReviewOwner(session.WorkDir, session.SessionId)
                 : null;
-        document.ConfigureReview(
-            new Review.ReviewServices(
-                reviews,
-                (sessionId, text, withdrawn) => sessions.TryGetValue(sessionId, out var target) && target.TryQueueReview(text, withdrawn),
-                () => _ = RefreshReviewsAsync()),
-            owner);
+        document.ConfigureReview(CreateReviewServices(), owner);
     }
+
+    /// <summary>File previews and the changes view share one review store, delivery path and panel refresh.</summary>
+    private Review.ReviewServices CreateReviewServices() =>
+        new(
+            reviews,
+            (sessionId, text, withdrawn) => sessions.TryGetValue(sessionId, out var target) && target.TryQueueReview(text, withdrawn),
+            () => _ = RefreshReviewsAsync());
 
     private async Task RefreshReviewsAsync()
     {

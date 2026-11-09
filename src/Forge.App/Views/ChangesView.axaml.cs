@@ -1,7 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
-using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Forge.App.Changes;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Views;
@@ -9,10 +9,13 @@ namespace Forge.App.Views;
 public partial class ChangesView : UserControl
 {
     private ChangesViewModel? viewModel;
+    private bool syncingFromScroll;
 
     public ChangesView()
     {
         InitializeComponent();
+        DiffEditor.TopFileChanged += OnTopFileChanged;
+        DiffEditor.MarkdownPreviewFactory = static file => new Changes.Markdown.MarkdownDiffView(file);
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -21,12 +24,14 @@ public partial class ChangesView : UserControl
         if (viewModel is not null)
         {
             viewModel.FocusRequested -= OnFocusRequested;
+            viewModel.CopyPathRequested -= OnCopyPathRequested;
         }
 
         viewModel = DataContext as ChangesViewModel;
         if (viewModel is not null)
         {
             viewModel.FocusRequested += OnFocusRequested;
+            viewModel.CopyPathRequested += OnCopyPathRequested;
         }
     }
 
@@ -34,23 +39,35 @@ public partial class ChangesView : UserControl
         Dispatcher.UIThread.Post(
             () =>
             {
-                var list = this.FindControl<ListBox>("RowList");
-                if (list is null || viewModel is null)
+                if (!syncingFromScroll)
                 {
-                    return;
-                }
-
-                var index = viewModel.IndexOfFile(file);
-                if (index >= 0)
-                {
-                    list.ScrollIntoView(index);
+                    DiffEditor.ScrollToFile(file);
                 }
             },
             DispatcherPriority.Background);
 
-    private async void OnCopyPathClick(object? sender, RoutedEventArgs e)
+    private void OnTopFileChanged(IDiffFileItem file)
     {
-        if (viewModel?.SelectedFile is not { } file)
+        if (viewModel is null)
+        {
+            return;
+        }
+
+        // Scrolling moves the selection; the selection change must not scroll back.
+        syncingFromScroll = true;
+        try
+        {
+            viewModel.SyncSelectionFromScroll(file);
+        }
+        finally
+        {
+            syncingFromScroll = false;
+        }
+    }
+
+    private async void OnCopyPathRequested(string path)
+    {
+        if (viewModel is null)
         {
             return;
         }
@@ -63,7 +80,7 @@ public partial class ChangesView : UserControl
 
         try
         {
-            await clipboard.SetTextAsync(file.Path).ConfigureAwait(true);
+            await clipboard.SetTextAsync(path).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {

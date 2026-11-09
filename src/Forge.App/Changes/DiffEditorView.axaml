@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:ae="using:AvaloniaEdit"
+             x:Class="Forge.App.Changes.DiffEditorView">
+  <UserControl.Styles>
+    <Style Selector="Button.reviewIcon, Button.reviewMarker">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Button.reviewMarker.lost">
+      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="wc|FluentIcon.reviewGlyph">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Button.reviewMarker.lost wc|FluentIcon.reviewGlyph">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Border.reviewComposer">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
+    </Style>
+  </UserControl.Styles>
+  <!-- Two editors side by side (the second only in split mode). Placeholder lines reserve the height of the file header, block
+       bar, fold bar and Markdown preview rows; the real controls live in OverlayLayer and are placed over the visible rows. -->
+  <Grid x:Name="Root" Background="{DynamicResource SurfaceBrush}" ClipToBounds="True">
+    <Grid x:Name="EditorsGrid" ColumnDefinitions="*,Auto,*">
+      <ae:TextEditor x:Name="PrimaryEditor" Grid.Column="0" IsReadOnly="True" ShowLineNumbers="False"
+                     FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+                     Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
+                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                     AutomationProperties.AutomationId="diff-editor" AutomationProperties.Name="diff-editor" />
+      <Border x:Name="SplitDivider" Grid.Column="1" Width="1" IsVisible="False" Background="{DynamicResource BorderBrush}" />
+      <ae:TextEditor x:Name="SecondaryEditor" Grid.Column="2" IsReadOnly="True" ShowLineNumbers="False" IsVisible="False"
+                     FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+                     Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
+                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                     AutomationProperties.AutomationId="diff-editor-new" AutomationProperties.Name="diff-editor-new" />
+    </Grid>
+    <Canvas x:Name="OverlayLayer" ClipToBounds="True" />
+    <Canvas x:Name="ReviewLayer" ClipToBounds="True">
+      <Button x:Name="ReviewIconButton" Classes="reviewIcon" Width="26" Height="26" IsVisible="False"
+              AutomationProperties.AutomationId="review-add" AutomationProperties.Name="review-add">
+        <wc:FluentIcon Classes="reviewGlyph" Data="{DynamicResource IconCommentAdd}" Width="14" Height="14" />
+      </Button>
+      <Border x:Name="ReviewComposer" Classes="reviewComposer" IsVisible="False"
+              AutomationProperties.AutomationId="review-composer">
+        <StackPanel Spacing="6">
+          <TextBlock x:Name="ReviewRangeText" Classes="mono" />
+          <TextBox x:Name="ReviewBodyBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" MaxHeight="160"
+                   AutomationProperties.AutomationId="review-body" AutomationProperties.Name="review-body" />
+          <TextBlock x:Name="ReviewComposerStatus" Classes="caption" TextWrapping="Wrap" IsVisible="False"
+                     Foreground="{DynamicResource TextMutedBrush}" />
+          <WrapPanel Orientation="Horizontal" ItemSpacing="6" LineSpacing="6" HorizontalAlignment="Right">
+            <Button x:Name="ReviewDeleteButton" AutomationProperties.AutomationId="review-delete" AutomationProperties.Name="review-delete" />
+            <Button x:Name="ReviewCancelButton" AutomationProperties.AutomationId="review-cancel" AutomationProperties.Name="review-cancel" />
+            <Button x:Name="ReviewSaveButton" AutomationProperties.AutomationId="review-save" AutomationProperties.Name="review-save" />
+            <Button x:Name="ReviewSendButton" Classes="primary" AutomationProperties.AutomationId="review-send" AutomationProperties.Name="review-send" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+    </Canvas>
+    <!-- Not a layout participant: the "send all" button and status text of the review overlay, bottom right, so they never sit
+         on the buttons of the file header at the top edge. -->
+    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,18,6" Orientation="Horizontal" Spacing="6">
+      <TextBlock x:Name="ReviewStatus" Classes="caption" IsVisible="False" VerticalAlignment="Center"
+                 Foreground="{DynamicResource TextMutedBrush}" AutomationProperties.AutomationId="diff-review-status" />
+      <Button x:Name="ReviewSendAll" Classes="icon" IsVisible="False"
+              AutomationProperties.AutomationId="review-send-all" AutomationProperties.Name="review-send-all">
+        <wc:FluentIcon Classes="reviewGlyph" Data="{DynamicResource IconSend}" Width="14" Height="14" />
+      </Button>
+    </StackPanel>
+  </Grid>
+</UserControl>
