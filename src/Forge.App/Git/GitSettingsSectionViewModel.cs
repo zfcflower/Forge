@@ -14,8 +14,9 @@ namespace Forge.App.Git;
 /// default <c>true</c> (a TODO item marked done commits that step; missing means the default);
 /// <c>gitChecksPollSeconds</c> = integer clamped to [10, 300], default 30 (wait mode: time between two polls);
 /// <c>gitChecksMaxWaitMinutes</c> = integer clamped to [1, 180], default 30 (wait mode: longest wait);
-/// <c>gitNotifications</c> = boolean, default <c>true</c> (one system notification when a wait ends);
-/// <c>gitGhPath</c> = string, default empty meaning <c>gh</c> from PATH, trimmed.</para>
+/// <c>gitGhPath</c> = string, default empty meaning <c>gh</c> from PATH, trimmed. The end of a wait is one notification
+/// through <see cref="INotifications"/>; whether notifications are wanted at all is the <c>notifications</c> switch of the
+/// notification section, not a git preference.</para>
 /// </summary>
 internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposable
 {
@@ -111,17 +112,6 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         set
         {
             preferences.GitChecksMaxWaitMinutes = value;
-            OnPropertyChanged();
-        }
-    }
-
-    /// <summary>Whether the end of a wait raises one system notification.</summary>
-    public bool Notifications
-    {
-        get => preferences.GitNotifications;
-        set
-        {
-            preferences.GitNotifications = value;
             OnPropertyChanged();
         }
     }

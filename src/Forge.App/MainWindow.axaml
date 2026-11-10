@@ -6,6 +6,7 @@
         xmlns:wb="using:Forge.App.Workbench.Controls"
         xmlns:prefs="using:Forge.App.Preferences"
         xmlns:loc="using:Forge.App.Localization"
+        xmlns:views="using:Forge.App.Views"
         x:Class="Forge.App.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Forge"
@@ -210,5 +211,11 @@
         </Grid>
       </Border>
     </Border>
+
+    <!-- In-window toasts: the last child of the root grid, so they draw above the workbench and above the settings
+    overlay. It sits in the workbench row (below the 40 px title bar) so a toast never covers the title; the row span of the
+    settings overlay is what puts it on top of the settings page. The overlay resolves the shell's NotificationCenter from
+    its own constructor, and it takes no pointer: the cards are display only. -->
+    <views:NotificationOverlay Grid.Row="1" />
   </Grid>
 </Window>

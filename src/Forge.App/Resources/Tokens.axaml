@@ -135,6 +135,7 @@
       <SolidColorBrush x:Key="DangerBrush" Color="#B3261E" />
       <SolidColorBrush x:Key="SuccessBrush" Color="#2F7449" />
       <SolidColorBrush x:Key="WarningBrush" Color="#8A5A00" />
+      <SolidColorBrush x:Key="InfoBrush" Color="#1F6FEB" />
       <SolidColorBrush x:Key="SyntaxKeywordBrush" Color="#0000FF" />
       <SolidColorBrush x:Key="SyntaxStringBrush" Color="#A31515" />
       <SolidColorBrush x:Key="SyntaxCommentBrush" Color="#008000" />
@@ -214,6 +215,7 @@
       <SolidColorBrush x:Key="DangerBrush" Color="#F2857C" />
       <SolidColorBrush x:Key="SuccessBrush" Color="#79CC9A" />
       <SolidColorBrush x:Key="WarningBrush" Color="#E0B15A" />
+      <SolidColorBrush x:Key="InfoBrush" Color="#6BA7FF" />
       <SolidColorBrush x:Key="SyntaxKeywordBrush" Color="#569CD6" />
       <SolidColorBrush x:Key="SyntaxStringBrush" Color="#CE9178" />
       <SolidColorBrush x:Key="SyntaxCommentBrush" Color="#6A9955" />

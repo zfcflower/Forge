@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using AvaloniaEdit.Document;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.ViewModels;
 using Forge.Workspace;
 
@@ -479,7 +480,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         catch (Exception exception) when (IsStoreFailure(exception))
         {
             Trace.WriteLine("[review] operation failed: " + exception.Message);
-            SetMessage(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
+            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
             return false;
         }
         finally
@@ -568,7 +569,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         catch (Exception exception) when (IsStoreFailure(exception))
         {
             Trace.WriteLine("[review] loading drafts failed: " + exception.Message);
-            SetMessage(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
+            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
         }
         finally
         {
@@ -640,6 +641,18 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         }
 
         return relative.Replace('\\', '/');
+    }
+
+
+    /// <summary>Shows the failure in the panel and announces it: a review that could not be saved is missed otherwise.</summary>
+    private void SetFailure(LocText value)
+    {
+        SetMessage(value);
+        NotificationCenter.Current?.Notify(
+            NotificationLevel.Error,
+            NotificationsStrings.EditorFailedTitle,
+            value,
+            "review-file");
     }
 
     private void SetMessage(LocText value)
@@ -735,7 +748,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         catch (Exception exception)
         {
             Trace.WriteLine("[review] background work failed: " + exception);
-            SetMessage(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
+            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
         }
     }
 

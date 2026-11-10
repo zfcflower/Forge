@@ -4,6 +4,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.Terminal.Vt;
 using Forge.App.ViewModels;
@@ -453,6 +454,15 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
             }
 
             PostStatus(TerminalStatus.Exited, code);
+            if (code != 0)
+            {
+                // A non-zero exit is the one terminal event worth interrupting for; a clean exit is what the user asked for.
+                NotificationCenter.Current?.Notify(
+                    NotificationLevel.Warning,
+                    NotificationsStrings.TerminalExitedTitle,
+                    NotificationsStrings.TerminalExited(TabTitle, code),
+                    "terminal:" + SessionId + ":" + displayIndex);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.HostClient;
 
 namespace Forge.App.Approval;
@@ -39,12 +40,13 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
     private bool disposed;
     private int restoring;
 
-    private ApprovalServices(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem)
+    private ApprovalServices(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem, INotifications? notifications)
     {
         ArgumentNullException.ThrowIfNull(paths);
         Rules = new ApprovalRules(Path.Combine(paths.UserDataDirectory, ApprovalRules.FileName));
         Queue = new ApprovalQueue();
         Sessions = new ApprovalSessionDirectory();
+        Notifications = notifications;
         this.host = host;
         this.hostProblem = hostProblem;
 
@@ -56,7 +58,8 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
                 ToolNamesOf,
                 Queue,
                 Rules,
-                Sessions);
+                Sessions,
+                notifications);
             host.StatusChanged += OnHostStatusChanged;
         }
 
@@ -85,6 +88,9 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
     /// </summary>
     public static ApprovalServices? Current { get; private set; }
 
+    /// <summary>The shell's notification entry: a card that starts waiting is announced even when the panel is out of sight.</summary>
+    public INotifications? Notifications { get; }
+
     public ApprovalRules Rules { get; }
 
     public ApprovalQueue Queue { get; }
@@ -110,15 +116,19 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
     /// <summary>Raised on the host's thread when the connection status changed.</summary>
     public event Action? Changed;
 
-    public static ApprovalServices Create(AppPaths paths, ExtensionHostSupervisor? host, LocText hostProblem) =>
-        new(paths, host, hostProblem);
+    public static ApprovalServices Create(
+        AppPaths paths,
+        ExtensionHostSupervisor? host,
+        LocText hostProblem,
+        INotifications? notifications = null) =>
+        new(paths, host, hostProblem, notifications);
 
     /// <summary>Registers the session title and returns the handler the session's host injects.</summary>
     public SessionApprovalHandler CreateHandler(SessionInfo session)
     {
         ArgumentNullException.ThrowIfNull(session);
         Sessions.Register(session.Id, session.Title);
-        return new SessionApprovalHandler(Queue, Rules, session);
+        return new SessionApprovalHandler(Queue, Rules, session, Notifications);
     }
 
     /// <summary>

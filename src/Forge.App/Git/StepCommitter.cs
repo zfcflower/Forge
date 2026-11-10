@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.Workspace;
 
 namespace Forge.App.Git;
@@ -53,6 +55,7 @@ internal sealed class StepCommitter : IStepCommitter
     private readonly ITodoStore store;
     private readonly Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree;
     private readonly Func<bool> isEnabled;
+    private readonly INotifications? notifications;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> gates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="git">The git wrapper every command goes through.</param>
@@ -63,7 +66,8 @@ internal sealed class StepCommitter : IStepCommitter
         GitCli git,
         ITodoStore store,
         Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree,
-        Func<bool> isEnabled)
+        Func<bool> isEnabled,
+        INotifications? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(store);
@@ -73,6 +77,7 @@ internal sealed class StepCommitter : IStepCommitter
         this.store = store;
         this.resolveWorktree = resolveWorktree;
         this.isEnabled = isEnabled;
+        this.notifications = notifications;
     }
 
     /// <summary>
@@ -451,6 +456,13 @@ internal sealed class StepCommitter : IStepCommitter
     private async Task<StepCommitResult> FailAsync(TodoItem item, string reason)
     {
         await PersistAsync(item.Id, null, reason, CancellationToken.None).ConfigureAwait(false);
+        // The TODO row carries the reason, but a refused commit is exactly the kind of thing the user misses while
+        // looking at another session, so it is announced too.
+        notifications.Notify(
+            NotificationLevel.Error,
+            NotificationsStrings.StepCommitFailedTitle,
+            LocText.Literal(reason),
+            "step-commit:" + item.Id);
         return new StepCommitResult(StepCommitOutcome.Failed, null, reason);
     }
 

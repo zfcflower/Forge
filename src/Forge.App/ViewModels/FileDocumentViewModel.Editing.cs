@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Forge.App.Editing;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
@@ -572,6 +573,16 @@ internal sealed partial class FileDocumentViewModel
         saveError = value;
         OnPropertyChanged(nameof(SaveError));
         OnPropertyChanged(nameof(HasSaveError));
+
+        // The editor's own banner is the record; the toast is what reaches a user whose focus is on another panel or window.
+        if (!value.IsEmpty)
+        {
+            NotificationCenter.Current?.Notify(
+                NotificationLevel.Error,
+                NotificationsStrings.SaveFailedTitle,
+                value,
+                "save-failed:" + path);
+        }
     }
 
     private void SetLspStatus(LocText value)

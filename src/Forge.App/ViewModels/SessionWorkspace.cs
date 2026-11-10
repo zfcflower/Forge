@@ -9,6 +9,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Services;
 using Forge.Core.Agents;
 using Forge.Workspace;
@@ -79,6 +80,9 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private DateTimeOffset turnStartedAt;
     private bool disposed;
 
+    /// <summary>The shell's notification entry; null (a test, a standalone session) means the session says nothing outside its own transcript.</summary>
+    private readonly INotifications? notifications;
+
     /// <summary>Set while the turn-start check reads the store, so a second send cannot slip in before the turn starts.</summary>
     private bool gating;
     private bool isReadOnlyView;
@@ -99,13 +103,15 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         ComposerPreferences? composerPreferences = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
-        ISessionInstrumentSources? instrumentSources = null)
+        ISessionInstrumentSources? instrumentSources = null,
+        INotifications? notifications = null)
     {
         Info = session;
         this.runtime = runtime;
         isReadOnlyView = runtime is null;
         this.checkpoints = checkpoints;
         this.store = store;
+        this.notifications = notifications;
         this.subAgentOpened = subAgentOpened;
         providerModel = provider.Provider?.Model ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
@@ -135,6 +141,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         if (!provider.IsConfigured)
         {
             Transcript.AddNotice(SessionStrings.ProviderMissing(provider.Status), isError: true);
+            notifications.Notify(
+                NotificationLevel.Error,
+                NotificationsStrings.ProviderMissingTitle,
+                SessionStrings.ProviderMissing(provider.Status),
+                "provider-missing:" + Info.Id);
         }
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -1063,6 +1074,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 catch (Exception exception) when (IsCheckpointFailure(exception))
                 {
                     Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
+                    notifications.Notify(
+                        NotificationLevel.Warning,
+                        NotificationsStrings.TurnFailedTitle,
+                        SessionStrings.CheckpointFailed(exception.Message),
+                        "checkpoint:" + SessionId);
                 }
             }
 
@@ -1080,6 +1096,13 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         {
             try
             {
+                // A turn that ended by itself is worth interrupting the user for; the transcript line alone is missed
+                // as soon as another session (or another window) has the focus. A cancellation is the user's own doing.
+                if (error is { IsEmpty: false } failure && !failure.Equals(SessionStrings.Stopped))
+                {
+                    notifications.Notify(NotificationLevel.Error, NotificationsStrings.TurnFailedTitle, failure, "turn-failed:" + SessionId);
+                }
+
                 Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
                 if (checkpoints is not null)
                 {
@@ -1091,6 +1114,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                     catch (Exception exception) when (IsCheckpointFailure(exception))
                     {
                         Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
+                        notifications.Notify(
+                            NotificationLevel.Warning,
+                            NotificationsStrings.TurnFailedTitle,
+                            SessionStrings.CheckpointFailed(exception.Message),
+                            "checkpoint:" + SessionId);
+                    notifications.Notify(
+                        NotificationLevel.Warning,
+                        NotificationsStrings.TurnFailedTitle,
+                        SessionStrings.CheckpointFailed(exception.Message),
+                        "checkpoint:" + SessionId);
                     }
                 }
             }
@@ -1184,8 +1217,15 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         exception is GitException or InvalidOperationException or IOException or InvalidDataException or ArgumentException or
         DbException or UnauthorizedAccessException;
 
-    private void OnSendFailed(Exception exception) =>
+    private void OnSendFailed(Exception exception)
+    {
         Transcript.AddNotice(SessionStrings.TurnFailed(exception.Message), isError: true);
+        notifications.Notify(
+            NotificationLevel.Error,
+            NotificationsStrings.TurnFailedTitle,
+            SessionStrings.TurnFailed(exception.Message),
+            "turn-failed:" + SessionId);
+    }
 
     /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
     private void OnAgentEvent(AgentEvent value)
@@ -1434,6 +1474,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
         agent.ApplyUsageIfMissing(finishedEvent.Usage);
         agent.Finish(finishedEvent.Status, finishedEvent.Usage, finishedEvent.Elapsed, finishedEvent.Error);
+
+        // A clean finish is already visible in the sub-agent tab; a failure or a stop is what the user has to hear about.
+        if (finishedEvent.Status is SubAgentStatus.Failed or SubAgentStatus.Stopped)
+        {
+            notifications.Notify(
+                finishedEvent.Status == SubAgentStatus.Failed ? NotificationLevel.Error : NotificationLevel.Warning,
+                NotificationsStrings.SubAgentFinishedTitle,
+                NotificationsStrings.SubAgentFinished(agent.Kind, agent.StatusText),
+                "subagent:" + finishedEvent.AgentId);
+        }
         subAgentById.TryRemove(finishedEvent.AgentId, out _);
         agentUsage.Remove(finishedEvent.AgentId);
         subAgents.Remove(agent);
