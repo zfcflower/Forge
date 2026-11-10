@@ -30,7 +30,9 @@ public partial class App : Application
         {
             composition = AppComposition.Create();
             viewModel = new MainWindowViewModel(composition);
-            desktop.MainWindow = new MainWindow { DataContext = viewModel };
+            var window = new MainWindow { DataContext = viewModel };
+            viewModel.SettingsOwner = () => window;
+            desktop.MainWindow = window;
             desktop.ShutdownRequested += OnShutdownRequested;
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         }

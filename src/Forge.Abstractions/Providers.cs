@@ -3,7 +3,14 @@ namespace Forge.Abstractions;
 public enum ThinkingEffort { Off, Low, Medium, High }
 
 /// <summary>Which model to use and how hard it should think; set per agent kind.</summary>
-public sealed record ModelSettings(string Model, ThinkingEffort Thinking = ThinkingEffort.Off, int? MaxOutputTokens = null);
+/// <param name="ProviderId">Which connected provider serves <paramref name="Model"/>; <c>null</c> means the default one.
+/// Two providers can serve a model with the same id, so the choice is part of the settings rather than looked up.
+/// </param>
+public sealed record ModelSettings(
+    string Model,
+    ThinkingEffort Thinking = ThinkingEffort.Off,
+    int? MaxOutputTokens = null,
+    string? ProviderId = null);
 
 /// <summary>Tells the provider where the stable, cacheable prefix ends.</summary>
 public sealed record CacheHint(bool CacheSystemAndTools, int? CacheThroughMessageIndex = null);
@@ -40,4 +47,19 @@ public interface IChatProvider
     IAsyncEnumerable<ChatStreamEvent> StreamAsync(ChatRequest request, CancellationToken ct);
 }
 
-public sealed record ProviderConfig(string Id, string Kind, string BaseUrl, string? ApiKey, IReadOnlyDictionary<string, string>? Headers = null);
+public sealed record ProviderConfig(
+    string Id,
+    string Kind,
+    string BaseUrl,
+    string? ApiKey,
+    IReadOnlyDictionary<string, string>? Headers = null,
+    ProviderAuthStyle AuthStyle = ProviderAuthStyle.Default,
+    string? SystemPromptPreamble = null);
+
+/// <summary>
+/// How the credential travels on the wire. <see cref="Default"/> is each protocol's own convention (Anthropic's
+/// <c>x-api-key</c>, OpenAI-compatible's bearer token); <see cref="BearerOnly"/> is what an OAuth or Copilot credential
+/// needs even on a protocol that would otherwise use a key header; <see cref="None"/> means the caller put everything it
+/// wants into <see cref="ProviderConfig.Headers"/>, which is how a gateway with its own auth scheme is reached.
+/// </summary>
+public enum ProviderAuthStyle { Default, BearerOnly, None }

@@ -1,0 +1,152 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:settings="using:Forge.App.Settings"
+        xmlns:loc="using:Forge.App.Localization"
+        x:Class="Forge.App.Settings.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="Forge"
+        Width="1040"
+        Height="760"
+        MinWidth="720"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        WindowDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Window.Styles>
+    <!-- The section column: one flat button per section, green-tinted while selected. -->
+    <Style Selector="Button.settings-nav">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="Button.settings-nav.rail">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Height" Value="34" />
+    </Style>
+    <Style Selector="Button.settings-nav /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.settings-nav:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Button.settings-nav.selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Button.settings-nav.selected TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="40,*">
+    <!-- Self-drawn title row: the window has no system chrome, so this bar moves it and carries the close affordance. -->
+    <Border x:Name="TitleBar"
+            Grid.Row="0"
+            Background="{DynamicResource PanelTitleBarBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="0,0,0,1"
+            PointerPressed="OnTitleBarPointerPressed">
+      <Grid ColumnDefinitions="*,Auto" Margin="14,0,8,0">
+        <TextBlock Classes="h2"
+                   VerticalAlignment="Center"
+                   Text="{Binding Title}"
+                   AutomationProperties.AutomationId="settings-title" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Classes="ghost icon"
+                  Width="30" Height="26"
+                  Click="OnToggleNavClick"
+                  ToolTip.Tip="{Binding NavToggleTip}"
+                  AutomationProperties.AutomationId="settings-nav-toggle"
+                  AutomationProperties.Name="{Binding NavToggleTip}">
+            <wc:FluentIcon Data="{StaticResource IconChevronLeft}" Width="13" Height="13" />
+          </Button>
+          <Button Classes="ghost icon"
+                  Width="30" Height="26"
+                  Click="OnReloadClick"
+                  ToolTip.Tip="{Binding ReloadText}"
+                  AutomationProperties.AutomationId="settings-reload"
+                  AutomationProperties.Name="{Binding ReloadText}">
+            <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
+          </Button>
+          <Button Classes="ghost icon"
+                  Width="34" Height="26"
+                  Click="OnCloseClick"
+                  ToolTip.Tip="{Binding CloseText}"
+                  AutomationProperties.AutomationId="settings-close"
+                  AutomationProperties.Name="{Binding CloseText}">
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="{Binding NavWidth}" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <!-- Section column. Below AutoCollapseWidth the window folds it into an icon rail; the rail keeps every section
+      reachable, which a hidden column would not. -->
+      <Border Grid.Column="0"
+              Background="{DynamicResource SidebarBrush}"
+              BorderBrush="{DynamicResource BorderBrush}"
+              BorderThickness="0,0,1,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding NavGroups}"
+                        Margin="8,10"
+                        AutomationProperties.AutomationId="settings-nav">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="settings:SettingsNavGroupViewModel">
+                <StackPanel Margin="0,0,0,10">
+                  <TextBlock Classes="caption"
+                             Margin="10,4,0,4"
+                             Text="{Binding Title}"
+                             IsVisible="{Binding ShowTitle}" />
+                  <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="settings:SettingsNavItemViewModel">
+                        <Button Classes="settings-nav"
+                                Margin="0,1"
+                                Classes.selected="{Binding IsSelected}"
+                                Classes.rail="{Binding !ShowTitle}"
+                                Click="OnSectionClick"
+                                ToolTip.Tip="{Binding Title}"
+                                AutomationProperties.AutomationId="{Binding Id}"
+                                AutomationProperties.Name="{Binding Title}">
+                          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <wc:FluentIcon Data="{Binding Icon}" Width="15" Height="15" IsVisible="{Binding HasIcon}" />
+                            <TextBlock Text="{Binding Title}"
+                                       IsVisible="{Binding ShowTitle}"
+                                       FontSize="{DynamicResource FontSizeSm}"
+                                       TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+
+      <ScrollViewer Grid.Column="1"
+                    Padding="24,18,24,24"
+                    VerticalScrollBarVisibility="Auto"
+                    AutomationProperties.AutomationId="settings-body">
+        <ContentControl Content="{Binding SelectedSection.ViewModel}" />
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>

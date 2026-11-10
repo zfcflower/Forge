@@ -1,0 +1,86 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:settings="using:Forge.App.Settings"
+        x:Class="Forge.App.Settings.ModelMetadataWindow"
+        x:DataType="settings:ModelMetadataViewModel"
+        Title="{Binding Title}"
+        Width="820"
+        Height="560"
+        MinWidth="640"
+        MinHeight="360"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Window.Styles>
+    <Style Selector="TextBlock.meta-header">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBox.meta-cell">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Padding" Value="6,3" />
+      <Setter Property="MinHeight" Value="26" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="18,16">
+    <StackPanel Grid.Row="0" Spacing="4">
+      <TextBlock Classes="h2" Text="{Binding Title}" />
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Intro}" />
+    </StackPanel>
+
+    <!-- Column headers; the same column widths the rows use, so the table reads as a table. -->
+    <Grid Grid.Row="1" ColumnDefinitions="*,100,90,90,90,90" ColumnSpacing="6" Margin="0,14,0,6">
+      <TextBlock Grid.Column="0" Classes="meta-header" Text="{Binding ModelHeader}" />
+      <TextBlock Grid.Column="1" Classes="meta-header" Text="{Binding ContextHeader}" />
+      <TextBlock Grid.Column="2" Classes="meta-header" Text="{Binding InputHeader}" />
+      <TextBlock Grid.Column="3" Classes="meta-header" Text="{Binding OutputHeader}" />
+      <TextBlock Grid.Column="4" Classes="meta-header" Text="{Binding CacheReadHeader}" />
+      <TextBlock Grid.Column="5" Classes="meta-header" Text="{Binding CacheWriteHeader}" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="4">
+        <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="model-metadata-rows">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="settings:ModelMetadataRowViewModel">
+              <Grid ColumnDefinitions="*,100,90,90,90,90" ColumnSpacing="6">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding Model}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           FontSize="{DynamicResource FontSizeSm}" />
+                <TextBox Grid.Column="1" Classes="meta-cell" Text="{Binding ContextWindow, Mode=TwoWay}" />
+                <TextBox Grid.Column="2" Classes="meta-cell" Text="{Binding Input, Mode=TwoWay}" />
+                <TextBox Grid.Column="3" Classes="meta-cell" Text="{Binding Output, Mode=TwoWay}" />
+                <TextBox Grid.Column="4" Classes="meta-cell" Text="{Binding CacheRead, Mode=TwoWay}" />
+                <TextBox Grid.Column="5" Classes="meta-cell" Text="{Binding CacheWrite, Mode=TwoWay}" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Classes="caption"
+                   IsVisible="{Binding !HasRows}"
+                   TextWrapping="Wrap"
+                   Text="{Binding EmptyText}" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,14,0,0">
+      <TextBlock Grid.Column="0"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Text="{Binding PerMillion}" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Foreground="{DynamicResource SuccessBrush}"
+                 IsVisible="{Binding HasStatus}"
+                 Text="{Binding Status}" />
+      <Button Grid.Column="3" Classes="ghost" Command="{Binding RefreshCommand}" Content="{Binding RefreshText}" />
+      <Button Grid.Column="4" Classes="ghost" Command="{Binding ResetCommand}" Content="{Binding ResetText}" />
+      <Button Grid.Column="5" Classes="primary" Command="{Binding SaveCommand}" Content="{Binding SaveText}" AutomationProperties.AutomationId="model-metadata-save" />
+    </Grid>
+  </Grid>
+</Window>

@@ -6,10 +6,17 @@ namespace Forge.App.Preferences;
 /// <summary>
 /// One section of the settings page. Each feature contributes its own section (view model rendered by an app-level
 /// DataTemplate keyed on its type) through <see cref="SettingsSections.Add"/> from the composition root, so features do
-/// not edit the settings page itself. Sections are shown in ascending <see cref="Order"/>; the title is a
-/// <see cref="Localization.Loc"/> key.
+/// not edit the settings page itself. Sections are shown in ascending <see cref="Order"/> inside their
+/// <see cref="Group"/>; the title is a <see cref="Localization.Loc"/> key and the icon is a key of
+/// <c>Resources/Icons.axaml</c>.
 /// </summary>
-internal sealed record SettingsSection(string Id, string TitleKey, int Order, object ViewModel) : INotifyPropertyChanged
+internal sealed record SettingsSection(
+    string Id,
+    string TitleKey,
+    int Order,
+    object ViewModel,
+    string Group = SettingsGroups.Agent,
+    string? IconKey = null) : INotifyPropertyChanged
 {
     private static readonly PropertyChangedEventArgs TitleChanged = new(nameof(Title));
 
@@ -54,6 +61,38 @@ internal sealed class SettingsSections
 
         items.Insert(index, section);
     }
+}
+
+/// <summary>
+/// A section whose body reads something when it is shown (a database, a directory, the live provider catalogue). The page
+/// calls <see cref="Reload"/> when the section is selected, never on a timer, so the read happens exactly when it is seen.
+/// </summary>
+internal interface IReloadableSettingsSection
+{
+    void Reload();
+}
+
+/// <summary>Well-known section ids and orders, so features agree on placement without coordinating.</summary>
+internal static class SettingsGroups
+{
+    /// <summary>What the agent runs on: providers, the tools and servers it may call, and the approvals in between.</summary>
+    public const string Agent = "agent";
+
+    /// <summary>How the workbench looks and behaves.</summary>
+    public const string Interface = "interface";
+
+    /// <summary>Host-level behaviour: extensions and the paths/services the shell found.</summary>
+    public const string System = "system";
+
+    /// <summary>The three group headings in page order.</summary>
+    public static IReadOnlyList<string> All { get; } = [Agent, Interface, System];
+
+    public static string TitleKey(string group) => group switch
+    {
+        Interface => Localization.CoreStrings.SettingsGroupInterfaceKey,
+        System => Localization.CoreStrings.SettingsGroupSystemKey,
+        _ => Localization.CoreStrings.SettingsGroupAgentKey,
+    };
 }
 
 /// <summary>Well-known section ids and orders, so features agree on placement without coordinating.</summary>

@@ -649,9 +649,15 @@
                                           Command="{Binding SelectCommand}"
                                           Click="OnModelPicked"
                                           AutomationProperties.Name="{Binding Name}">
-                                    <Grid ColumnDefinitions="18,*">
+                                    <Grid ColumnDefinitions="18,*,Auto">
                                       <TextBlock Text="✓" IsVisible="{Binding IsSelected}" />
                                       <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                      <TextBlock Grid.Column="2"
+                                                 Margin="8,0,0,0"
+                                                 Classes="caption"
+                                                 IsVisible="{Binding ShowProviderCaption}"
+                                                 Text="{Binding Caption}"
+                                                 VerticalAlignment="Center" />
                                     </Grid>
                                   </Button>
                                   <Button Grid.Column="1"

@@ -9,6 +9,7 @@
              xmlns:git="using:Forge.App.Git"
              xmlns:editing="using:Forge.App.Editing"
              xmlns:set="using:Forge.App.ViewModels.Settings"
+             xmlns:settings="using:Forge.App.Settings"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -101,15 +102,8 @@
     </DataTemplate>
 
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
-    <DataTemplate DataType="vm:ProviderSettingsSectionViewModel" x:DataType="vm:ProviderSettingsSectionViewModel">
-      <StackPanel Spacing="6">
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding Status}"
-                   AutomationProperties.AutomationId="settings-provider-status" />
-        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Detail}" />
-        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
-      </StackPanel>
+    <DataTemplate DataType="settings:ProvidersSettingsViewModel" x:DataType="settings:ProvidersSettingsViewModel">
+      <settings:ProvidersSettingsView />
     </DataTemplate>
 
     <DataTemplate DataType="loc:LanguageSettingsViewModel" x:DataType="loc:LanguageSettingsViewModel">

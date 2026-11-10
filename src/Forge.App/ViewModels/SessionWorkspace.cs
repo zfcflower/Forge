@@ -9,6 +9,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.Core.Agents;
 using Forge.Workspace;
@@ -65,7 +66,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         SessionRuntime runtime,
         TurnCheckpointService? checkpoints,
         ISessionStore? store,
-        ProviderSettings provider,
+        ProviderServices providers,
         Action<SubAgentViewModel>? subAgentOpened = null,
         ComposerPreferences? composerPreferences = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
@@ -77,7 +78,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         this.checkpoints = checkpoints;
         this.store = store;
         this.subAgentOpened = subAgentOpened;
-        providerModel = provider.Provider?.Model ?? string.Empty;
+        providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
         coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
         SubAgents = new ReadOnlyObservableCollection<SubAgentViewModel>(subAgents);
@@ -89,11 +90,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         RedirectCommand = new RelayCommand(Redirect, CanSendWhileRunning);
         Queued = new ReadOnlyObservableCollection<QueuedMessageViewModel>(queued);
         Composer = new ComposerViewModel(
-            provider,
+            providers,
             ApplyRootDefinition,
             composerPreferences ?? ComposerPreferences.Shared,
             session.WorkspacePath,
-            () => ProviderSettings.Load(AppPaths.Create().SettingsPath),
             fileSource,
             skillSource);
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
@@ -102,9 +102,9 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             instrumentSources ?? EmptySessionInstrumentSources.Instance,
             runtime.ToolNames,
             () => Composer.Model);
-        if (!provider.IsConfigured)
+        if (!providers.IsConfigured)
         {
-            Transcript.AddNotice(SessionStrings.ProviderMissing(provider.Status), isError: true);
+            Transcript.AddNotice(SessionStrings.ProviderMissing(providers.StatusText.Resolve()), isError: true);
         }
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;

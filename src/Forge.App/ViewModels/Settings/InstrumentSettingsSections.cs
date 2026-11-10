@@ -21,7 +21,7 @@ internal sealed record InstrumentRow(string Title, string Detail, string Trailin
 /// anything editable. Reads go to the thread pool through <see cref="BackgroundRead"/> and land back on the UI thread, so
 /// opening the settings page never stalls on a database or a directory scan.
 /// </summary>
-internal abstract class InstrumentSettingsSectionViewModel : ObservableObject, IDisposable
+internal abstract class InstrumentSettingsSectionViewModel : ObservableObject, IDisposable, Preferences.IReloadableSettingsSection
 {
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private string emptyText = string.Empty;

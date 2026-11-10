@@ -1,0 +1,183 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:settings="using:Forge.App.Settings"
+        xmlns:providers="using:Forge.Core.Providers"
+        x:Class="Forge.App.Settings.ProviderEditorWindow"
+        x:DataType="settings:ProviderEditorViewModel"
+        Title="{Binding Title}"
+        Width="660"
+        Height="640"
+        MinWidth="560"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Window.Styles>
+    <Style Selector="TextBlock.field-label">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Margin" Value="0,0,0,3" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="*,Auto" Margin="18,16">
+    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+          <StackPanel Grid.Column="0" Spacing="3">
+            <TextBlock Classes="field-label" Text="{Binding PresetLabel}" />
+            <ComboBox ItemsSource="{Binding Presets}"
+                      SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
+                      IsEnabled="{Binding IsNew}"
+                      AutomationProperties.AutomationId="provider-editor-preset">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="providers:ProviderPreset">
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="3">
+            <TextBlock Classes="field-label" Text="{Binding NameLabel}" />
+            <TextBox Text="{Binding Name, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="provider-editor-name" />
+          </StackPanel>
+        </Grid>
+
+        <StackPanel Spacing="3">
+          <TextBlock Classes="field-label" Text="{Binding BaseUrlLabel}" />
+          <TextBox Text="{Binding BaseUrl, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="provider-editor-baseurl" />
+        </StackPanel>
+
+        <StackPanel Spacing="3">
+          <TextBlock Classes="field-label" Text="{Binding AuthLabel}" />
+          <ComboBox ItemsSource="{Binding AuthOptions}"
+                    SelectedItem="{Binding SelectedAuth, Mode=TwoWay}"
+                    AutomationProperties.AutomationId="provider-editor-auth">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="settings:ProviderAuthOption">
+                <TextBlock Text="{Binding Label}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+
+        <StackPanel Spacing="3" IsVisible="{Binding ShowsEnvironmentVariable}">
+          <TextBlock Classes="field-label" Text="{Binding EnvironmentVariableLabel}" />
+          <TextBox Text="{Binding EnvironmentVariable, Mode=TwoWay}"
+                   PlaceholderText="DEEPSEEK_API_KEY"
+                   AutomationProperties.AutomationId="provider-editor-envvar" />
+        </StackPanel>
+
+        <StackPanel Spacing="3" IsVisible="{Binding ShowsSecret}">
+          <TextBlock Classes="field-label" Text="{Binding SecretLabel}" />
+          <TextBox Text="{Binding Secret, Mode=TwoWay}"
+                   PasswordChar="•"
+                   PlaceholderText="{Binding SecretHint}"
+                   AutomationProperties.AutomationId="provider-editor-secret" />
+          <CheckBox Content="{Binding ClearSecretText}"
+                    IsChecked="{Binding ClearSecret, Mode=TwoWay}"
+                    IsVisible="{Binding HasStoredSecret}"
+                    AutomationProperties.AutomationId="provider-editor-clear-secret" />
+        </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding ShowsSignIn}">
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Status}" IsVisible="{Binding HasStatus}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding ClaudeHint}" IsVisible="{Binding ShowsClaudeHint}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding CopilotHint}" IsVisible="{Binding ShowsCopilotHint}" />
+          <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowsCopilotHint}">
+            <Button Classes="primary"
+                    Command="{Binding SignInCommand}"
+                    Content="{Binding SignInText}"
+                    AutomationProperties.AutomationId="provider-editor-signin" />
+            <Button Classes="ghost"
+                    Command="{Binding SignOutCommand}"
+                    Content="{Binding SignOutText}" />
+          </StackPanel>
+          <StackPanel Spacing="4" IsVisible="{Binding HasLoginState}">
+            <TextBlock Classes="h2" Text="{Binding DeviceCodeText}" />
+            <TextBlock Classes="caption" Text="{Binding LoginState}" />
+            <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DeviceCodeHint}" />
+          </StackPanel>
+        </StackPanel>
+
+        <Border Classes="divider" />
+
+        <StackPanel Spacing="6">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Classes="field-label" Text="{Binding ModelsLabel}" VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    Classes="link"
+                    Command="{Binding RefreshModelsCommand}"
+                    Content="{Binding RefreshModelsText}"
+                    AutomationProperties.AutomationId="provider-editor-refresh-models" />
+          </Grid>
+          <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding Models}" AutomationProperties.AutomationId="provider-editor-models">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                    <TextBlock Text="{Binding}" VerticalAlignment="Center" FontSize="{DynamicResource FontSizeSm}" />
+                    <Button Grid.Column="1"
+                            Classes="ghost icon"
+                            Width="24" Height="22"
+                            Click="OnRemoveModelClick"
+                            ToolTip.Tip="Remove">
+                      <wc:FluentIcon Data="{StaticResource IconClose}" Width="11" Height="11" />
+                    </Button>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <TextBox x:Name="NewModelBox"
+                     Grid.Column="0"
+                     PlaceholderText="model-id"
+                     AutomationProperties.AutomationId="provider-editor-new-model" />
+            <Button Grid.Column="1" Classes="ghost icon" Width="30" Click="OnAddModelClick" ToolTip.Tip="Add">
+              <wc:FluentIcon Data="{StaticResource IconPlus}" Width="14" Height="14" />
+            </Button>
+          </Grid>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+            <StackPanel Grid.Column="0" Spacing="3">
+              <TextBlock Classes="field-label" Text="{Binding DefaultModelLabel}" />
+              <ComboBox ItemsSource="{Binding Models}"
+                        SelectedItem="{Binding DefaultModel, Mode=TwoWay}"
+                        AutomationProperties.AutomationId="provider-editor-default-model" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="3">
+              <TextBlock Classes="field-label" Text="{Binding ThinkingLabel}" />
+              <ComboBox ItemsSource="{x:Static settings:ProviderEditorViewModel.ThinkingNames}"
+                        SelectedItem="{Binding SelectedThinking, Mode=TwoWay}"
+                        AutomationProperties.AutomationId="provider-editor-thinking" />
+            </StackPanel>
+          </Grid>
+          <StackPanel Spacing="3">
+            <TextBlock Classes="field-label" Text="{Binding MaxTokensLabel}" />
+            <TextBox Text="{Binding MaxTokens, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="provider-editor-max-tokens" />
+          </StackPanel>
+        </StackPanel>
+
+        <TextBlock Classes="caption"
+                   Foreground="{DynamicResource DangerBrush}"
+                   IsVisible="{Binding HasError}"
+                   TextWrapping="Wrap"
+                   Text="{Binding Error}"
+                   AutomationProperties.AutomationId="provider-editor-error" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,14,0,0">
+      <Button Classes="ghost"
+              Click="OnDeleteClick"
+              Content="{Binding DeleteText}"
+              IsVisible="{Binding CanDelete}" />
+      <Button Classes="ghost" Click="OnCancelClick" Content="{Binding CancelText}" />
+      <Button Classes="primary" Command="{Binding SaveCommand}" Content="{Binding SaveText}" AutomationProperties.AutomationId="provider-editor-save" />
+    </StackPanel>
+  </Grid>
+</Window>

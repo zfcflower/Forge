@@ -73,7 +73,7 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
     public IReadOnlyList<SlashEntry> Skills(string workspacePath) =>
         SkillCatalog.Discover(workspacePath, AgentRuntimeServices.UserDirectory());
 
-    public ModelMetadata ModelMetadata(string modelId) => composition.Provider.MetadataFor(modelId);
+    public ModelMetadata ModelMetadata(string modelId) => composition.Providers.Catalog.MetadataFor(modelId);
 
     public void OpenInVsCode(string path)
     {

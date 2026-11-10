@@ -16,12 +16,12 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   any `stroke-*` attributes are dropped.
 - What was adapted, in `src/Forge.App/Resources/Icons.axaml` (one `StreamGeometry` per icon, on Fluent's 24×24 grid):
   `add`, `arrow_autofit_width`, `arrow_clockwise`, `arrow_download`, `arrow_expand`, `arrow_maximize_vertical`, `arrow_minimize_vertical`, `arrow_undo`, `bot`, `branch`, `branch_compare`, `arrow_up`, `arrow_upload`, `book`,
-  `chat_sparkle` (regular + filled), `checkmark`, `checkmark_circle`, `chevron_down`, `chevron_right`, `chevron_up`,
+  `chat_sparkle` (regular + filled), `checkmark`, `checkmark_circle`, `chevron_down`, `chevron_left`, `chevron_right`, `chevron_up`,
   `circle`,
-  `circle_half_fill`, `cloud_arrow_down`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,
-  `edit`, `folder`,
+  `circle_half_fill`, `cloud_arrow_down`, `color`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,
+  `edit`, `eye`, `folder`,
   `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
-  filled), `plug_connected`, `save`, `search`, `send`, `settings`, `shield_checkmark`, `sparkle`, `square`,
+  filled), `plug_connected`, `local_language`, `save`, `search`, `send`, `server`, `settings`, `shield_checkmark`, `sparkle`, `square`,
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`.
 - One icon comes from the 20 px set: `panel_bottom` exists only at 20 px, so its path was scaled by 24/20 about the grid
   centre into the 24 grid the app renders on (`IconTerminal`, the terminal button).

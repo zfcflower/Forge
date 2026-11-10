@@ -1,0 +1,154 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:settings="using:Forge.App.Settings"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Settings.ProvidersSettingsView"
+             x:DataType="settings:ProvidersSettingsViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.provider-row">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="0,10" />
+    </Style>
+    <Style Selector="Ellipse.provider-state">
+      <Setter Property="Width" Value="8" />
+      <Setter Property="Height" Value="8" />
+      <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="Ellipse.provider-state.ready">
+      <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="Ellipse.provider-state.warning">
+      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Ellipse.provider-state.signin">
+      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Ellipse.provider-state.error">
+      <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Button.provider-action">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    </Style>
+    <Style Selector="Button.provider-action /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.provider-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="14">
+    <!-- Intro line and the refresh affordance, mirroring the reference layout. -->
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Text="{Binding Intro}"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource TextSecondaryBrush}"
+                 VerticalAlignment="Center" />
+      <Button Grid.Column="1"
+              Classes="provider-action"
+              Command="{Binding RefreshCommand}"
+              AutomationProperties.AutomationId="providers-refresh">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
+          <TextBlock Text="{Binding RefreshText}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+    </Grid>
+
+    <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" Margin="0,6,0,0" />
+
+    <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="providers-connected">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="settings:ProviderRowViewModel">
+          <Border Classes="provider-row">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
+                <Border IsVisible="{Binding IsDefault}"
+                        Background="{DynamicResource AccentSubtleBrush}"
+                        CornerRadius="4"
+                        Padding="6,1">
+                  <TextBlock Text="{Binding DefaultText}"
+                             FontSize="{DynamicResource FontSizeXs}"
+                             Foreground="{DynamicResource AccentTextBrush}" />
+                </Border>
+              </StackPanel>
+
+              <TextBlock Grid.Column="1"
+                         Text="{Binding CredentialText}"
+                         Foreground="{DynamicResource TextMutedBrush}"
+                         FontSize="{DynamicResource FontSizeSm}"
+                         VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+
+              <Ellipse Grid.Column="2"
+                       Classes="provider-state"
+                       Classes.ready="{Binding IsReady}"
+                       Classes.warning="{Binding NeedsKey}"
+                       Classes.signin="{Binding NeedsSignIn}"
+                       Classes.error="{Binding HasError}"
+                       ToolTip.Tip="{Binding StatusTooltip}"
+                       VerticalAlignment="Center" />
+
+              <Button Grid.Column="3"
+                      Classes="provider-action"
+                      Click="OnEditClick"
+                      ToolTip.Tip="{Binding EditText}"
+                      AutomationProperties.Name="{Binding EditText}"
+                      AutomationProperties.AutomationId="{Binding Id}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <wc:FluentIcon Data="{StaticResource IconEdit}" Width="14" Height="14" />
+                  <TextBlock Text="{Binding EditText}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+
+              <Button Grid.Column="4"
+                      Classes="provider-action"
+                      Click="OnModelsClick"
+                      ToolTip.Tip="{Binding StatusText}"
+                      AutomationProperties.Name="{Binding ModelsLabel}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <wc:FluentIcon Data="{StaticResource IconEye}" Width="14" Height="14" />
+                  <TextBlock Text="{Binding ModelsLabel}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <TextBlock Classes="caption"
+               IsVisible="{Binding HasProblem}"
+               TextWrapping="Wrap"
+               Text="{Binding Problem}" />
+
+    <!-- Custom servers: the free-form entry of the same list. -->
+    <Border Classes="divider" Margin="0,6" />
+
+    <StackPanel Spacing="4">
+      <TextBlock Classes="section-title" Text="{Binding CustomTitle}" />
+      <TextBlock Text="{Binding CustomHint}"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource TextSecondaryBrush}"
+                 FontSize="{DynamicResource FontSizeSm}" />
+    </StackPanel>
+
+    <Button Classes="primary"
+            Click="OnAddClick"
+            HorizontalAlignment="Left"
+            AutomationProperties.AutomationId="providers-add">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <wc:FluentIcon Data="{StaticResource IconPlus}" Width="14" Height="14" />
+        <TextBlock Text="{Binding AddServerText}" VerticalAlignment="Center" />
+      </StackPanel>
+    </Button>
+  </StackPanel>
+</UserControl>
