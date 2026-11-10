@@ -25,6 +25,9 @@ internal interface IDialogService
     Task<bool> ConfirmAsync(string title, string message, string confirmText, string cancelText);
 
     Task<string?> PromptTextAsync(string title, string initial);
+
+    /// <summary>Asks for the start point and the name of a new worktree branch; null means the user cancelled.</summary>
+    Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct);
 }
 
 /// <summary>
@@ -102,9 +105,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Projects,
             composition.Catalog,
             composition.Worktrees,
+            composition.Worktrees.GetHeadAsync,
             OpenSessionByIdAsync,
             ConfirmAndCreateAsync,
             PromptTextAsync,
+            PickNewBranchAsync,
             RevealAsync,
             AddProjectAsync,
             TreeScope.Projects)
@@ -125,9 +130,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Projects,
             composition.Catalog,
             composition.Worktrees,
+            composition.Worktrees.GetHeadAsync,
             OpenSessionByIdAsync,
             ConfirmAndCreateAsync,
             PromptTextAsync,
+            PickNewBranchAsync,
             RevealAsync,
             AddProjectAsync,
             TreeScope.General)
@@ -308,6 +315,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public bool HasActiveBranch => ActiveBranchText.Length > 0;
 
     public void AttachDialogs(IDialogService dialogService) => dialogs = dialogService;
+
+    /// <summary>The git reader the shell's dialogs use: the new-branch dialog lists that repository's branches.</summary>
+    internal GitCli GitClient => composition.Git;
 
     /// <summary>Awaits the schema migration, registers the general workspace, restores the layout and the open tabs.</summary>
     public async Task InitializeAsync()
@@ -1594,6 +1604,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private async Task<string?> PromptTextAsync(string title, string initial) =>
         dialogs is null ? null : await dialogs.PromptTextAsync(title, initial).ConfigureAwait(true);
+
+    /// <summary>Opens the new-branch dialog; a shell without dialogs (a headless host) creates nothing.</summary>
+    private async Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct) =>
+        dialogs is null ? null : await dialogs.PickNewBranchAsync(request, ct).ConfigureAwait(true);
 
     /// <summary>
     /// Approval cards waiting for one session. The queue belongs to the UI thread, so this is only ever read from a view model

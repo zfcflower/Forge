@@ -183,6 +183,10 @@ internal sealed class FakeFile : IDiffFileItem
 
     public bool HasFullContext { get; }
 
+    public bool CanLoadContext => false;
+
+    public Task<bool> LoadFullContextAsync() => Task.FromResult(HasFullContext);
+
     public bool CanRevert => true;
 
     public ICommand RevertFileCommand { get; } = new NoopCommand();

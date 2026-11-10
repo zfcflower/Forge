@@ -16,6 +16,7 @@ internal sealed partial class ChangesViewModel
     private Func<string, string, string, string, Task<bool>>? confirm;
     private string repositoryRoot = string.Empty;
     private string? diffBaseCommit;
+    private DiffSource? diffSource;
     private DiffViewMode viewMode = DiffViewMode.Inline;
     private DiffLayout layout = DiffLayout.Stacked;
     private bool wordWrap;
@@ -337,6 +338,42 @@ internal sealed partial class ChangesViewModel
     /// <summary>Completes when every mark write queued so far has reached the store (tests, shutdown).</summary>
     internal Task FlushMarksAsync() => persistTail;
 
+    /// <summary>True when the loaded set can be re-read per file with whole-file context (its refs are known).</summary>
+    internal bool CanLoadContext => diffSource is not null;
+
+    /// <summary>
+    /// Reads <paramref name="file"/> again with whole-file context under the refs of the loaded set and hands it the result,
+    /// so its "N unmodified lines" bars can open. False when the set was replaced meanwhile, the read failed or overflowed,
+    /// or the file's changes are no longer the ones shown (a reload follows from the watcher then).
+    /// </summary>
+    internal async Task<bool> LoadFullContextAsync(FileDiffViewModel file)
+    {
+        if (diffSource is not { } source)
+        {
+            return false;
+        }
+
+        IReadOnlyList<FileDiff> diffs;
+        try
+        {
+            diffs = await Task.Run(() => ReadWholeAsync(source, [file.Diff], CancellationToken.None)).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is GitException or IOException or InvalidOperationException)
+        {
+            // GitOutputTruncatedException is a GitException: a file too large to read whole keeps its folded stretches.
+            Trace.WriteLine("[changes] loading whole-file context failed: " + exception.Message);
+            return false;
+        }
+
+        if (!ReferenceEquals(source, diffSource) || !files.Contains(file))
+        {
+            return false;
+        }
+
+        var full = diffs.FirstOrDefault(diff => string.Equals(diff.Path, file.Diff.Path, StringComparison.Ordinal));
+        return full is not null && file.ApplyFullContext(full);
+    }
+
     internal void OnViewedToggled(FileDiffViewModel file)
     {
         var viewed = file.IsViewed;
@@ -478,3 +515,9 @@ internal sealed partial class ChangesViewModel
         }
     }
 }
+
+/// <summary>
+/// The refs a loaded change set was read under, so one file can be read again with more context: <see cref="From"/> null is
+/// the empty side of an unborn repository, <see cref="To"/> null is the working tree.
+/// </summary>
+internal sealed record DiffSource(string WorkingDirectory, string? From, string? To);

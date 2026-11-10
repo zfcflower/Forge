@@ -171,6 +171,41 @@ public sealed class ChangesReviewFlowTests
         });
     }
 
+    [Fact]
+    public async Task Only_hunks_are_read_up_front_and_loading_context_keeps_the_kept_marks()
+    {
+        await RunAsync(async () =>
+        {
+            using var rig = await Rig.CreateAsync();
+            using var vm = await rig.OpenAsync();
+            var a = vm.File("a.txt");
+
+            // Edits at lines 3 and 25 of 30: two 3-line-context hunks, the stretch between them is not loaded.
+            Assert.Equal(2, a.Diff.Hunks.Count);
+            Assert.False(a.HasFullContext);
+            Assert.True(a.CanLoadContext);
+            var fingerprint = a.Fingerprint;
+            a.Blocks[1].KeepCommand.Execute(null);
+
+            Assert.True(await a.LoadFullContextAsync());
+            Assert.True(a.HasFullContext);
+            Assert.False(a.CanLoadContext);
+            var hunk = Assert.Single(a.Diff.Hunks);
+            Assert.Equal(30, hunk.NewCount);
+            Assert.Equal(fingerprint, a.Fingerprint);
+            Assert.Equal(2, a.Blocks.Count);
+            Assert.False(a.Blocks[0].IsKept);
+            Assert.True(a.Blocks[1].IsKept);
+            Assert.Equal(1, a.KeptCount);
+
+            // A file whose changes moved on since the set was read does not take the reread diff.
+            using var stale = await rig.OpenAsync();
+            rig.WriteLines("b.txt", (2, "EDITED-B2"), (4, "EDITED-B4"));
+            Assert.False(await stale.File("b.txt").LoadFullContextAsync());
+            Assert.False(stale.File("b.txt").HasFullContext);
+        });
+    }
+
     // ---------------------------------------------------------------- 3. mark all viewed
 
     [Fact]

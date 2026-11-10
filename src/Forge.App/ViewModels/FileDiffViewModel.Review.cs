@@ -31,6 +31,9 @@ internal sealed class ChangeBlockItemViewModel : ObservableObject, IDiffBlockIte
 
     ICommand IDiffBlockItem.RevertCommand => RevertCommand;
 
+    /// <summary>Carries the kept state to a replacement block item before anyone observes it.</summary>
+    internal void SetKeptSilently(bool value) => isKept = value;
+
     internal void SetKept(bool value)
     {
         if (isKept == value)
@@ -61,8 +64,15 @@ internal sealed partial class FileDiffViewModel : ObservableObject, IDiffFileIte
     private bool isCollapsed;
     private bool isMarkdownPreview = true;
     private bool hasFullContext;
+    private Task<bool>? contextLoad;
 
-    public FileDiff Diff { get; }
+    public FileDiff Diff { get; private set; }
+
+    internal static bool IsMarkdownPath(string path)
+    {
+        var extension = System.IO.Path.GetExtension(path);
+        return MarkdownExtensions.Any(candidate => string.Equals(candidate, extension, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>Content fingerprint the "viewed" mark is stored against (<see cref="DiffBlocks.Fingerprint"/>).</summary>
     public string Fingerprint { get; private set; } = string.Empty;
@@ -113,6 +123,54 @@ internal sealed partial class FileDiffViewModel : ObservableObject, IDiffFileIte
 
     public bool HasFullContext => hasFullContext;
 
+    /// <summary>The unmodified stretches are not loaded yet but can be: opening one reads the whole file once.</summary>
+    public bool CanLoadContext => !hasFullContext && owner is { CanLoadContext: true } && !Diff.IsBinary && !Diff.IsTruncated;
+
+    /// <summary>Loads the whole-file diff once (concurrent callers share the read); true once <see cref="Diff"/> carries it.</summary>
+    public Task<bool> LoadFullContextAsync()
+    {
+        if (hasFullContext)
+        {
+            return Task.FromResult(true);
+        }
+
+        if (contextLoad is { IsCompleted: false } running)
+        {
+            return running;
+        }
+
+        return contextLoad = owner is { CanLoadContext: true } document ? document.LoadFullContextAsync(this) : Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// Swaps in the whole-file diff of the same changes (UI thread). Blocks keep their kept state; nothing else changes
+    /// because blocks, fingerprint and counts depend on the changed lines only. False when the changes differ (file edited).
+    /// </summary>
+    internal bool ApplyFullContext(FileDiff full)
+    {
+        var split = DiffBlocks.Split(full);
+        if (!string.Equals(DiffBlocks.Fingerprint(full, split), Fingerprint, StringComparison.Ordinal) || split.Count != blocks.Count)
+        {
+            return false;
+        }
+
+        var items = new ChangeBlockItemViewModel[split.Count];
+        for (var index = 0; index < split.Count; index++)
+        {
+            items[index] = new ChangeBlockItemViewModel(this, split[index]);
+            items[index].SetKeptSilently(blocks[index].IsKept);
+        }
+
+        Diff = full;
+        blocks = items;
+        hasFullContext = !full.IsBinary && !full.IsTruncated && full.Hunks.Count <= 1;
+        OnPropertyChanged(nameof(HasFullContext));
+        OnPropertyChanged(nameof(CanLoadContext));
+        OnPropertyChanged(nameof(Blocks));
+        OnPropertyChanged(nameof(Diff));
+        return true;
+    }
+
     /// <summary>Revert edits the working file, so it needs a diff whose new side is the working tree (see <see cref="ChangesViewModel.FilesRevertable"/>).</summary>
     public bool CanRevert => owner is { FilesRevertable: true } && !Diff.IsBinary && !Diff.IsTruncated && !Diff.IsRenameOrCopy;
 
@@ -149,8 +207,7 @@ internal sealed partial class FileDiffViewModel : ObservableObject, IDiffFileIte
 
         blocks = items;
         Fingerprint = DiffBlocks.Fingerprint(diff, split);
-        var extension = System.IO.Path.GetExtension(diff.Path);
-        IsMarkdown = MarkdownExtensions.Any(candidate => string.Equals(candidate, extension, StringComparison.OrdinalIgnoreCase));
+        IsMarkdown = IsMarkdownPath(diff.Path);
 
         // A full-context read puts the whole file into one hunk (git never splits it); added/deleted files are whole anyway.
         hasFullContext = !diff.IsBinary && !diff.IsTruncated &&

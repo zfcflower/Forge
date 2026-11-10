@@ -244,7 +244,7 @@ internal sealed partial class ChangesViewModel
 
     private async Task RefreshCommitsAsync(string workingDirectory, CancellationToken ct)
     {
-        var baseRef = selectedBranch?.RefName;
+        var baseRef = picker.SelectedBranch?.RefName;
         IReadOnlyList<GitCommitInfo> found;
         if (baseRef is null)
         {

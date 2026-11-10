@@ -29,6 +29,9 @@ internal sealed class WorktreeService
 
     public Task<bool> IsRepositoryAsync(string path, CancellationToken ct) => git.IsRepositoryAsync(path, ct);
 
+    /// <summary>Which branch a checkout directory has checked out; never throws for a non-repository or a detached HEAD.</summary>
+    public Task<GitHead> GetHeadAsync(string path, CancellationToken ct) => git.GetHeadAsync(path, ct);
+
     /// <summary>Creates an unused worktree and its <c>forge/&lt;slug&gt;</c> branch; the branch starts at HEAD.</summary>
     public Task<WorktreeSession> CreateAsync(string repositoryRoot, string title, CancellationToken ct) =>
         worktrees.CreateAsync(repositoryRoot, title, ct);
@@ -42,6 +45,19 @@ internal sealed class WorktreeService
         string.IsNullOrWhiteSpace(branchName)
             ? worktrees.CreateAsync(repositoryRoot, title, ct)
             : worktrees.CreateAsync(repositoryRoot, title, branchName, ct);
+
+    /// <summary>
+    /// Creates a worktree on the caller's branch name with the branch starting at <paramref name="startPoint"/> (a local
+    /// branch, a remote-tracking ref such as <c>origin/main</c>, or any revision) instead of at HEAD. The new branch never
+    /// tracks the ref it started at; a start point that does not resolve throws <see cref="GitException"/>.
+    /// </summary>
+    public Task<WorktreeSession> CreateAsync(
+        string repositoryRoot,
+        string title,
+        string? branchName,
+        string startPoint,
+        CancellationToken ct) =>
+        worktrees.CreateAsync(repositoryRoot, title, branchName, startPoint, ct);
 
     /// <summary>
     /// Best-effort cleanup of a worktree this app created a moment ago for a session whose row could not be written: the

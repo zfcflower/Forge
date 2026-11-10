@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
              xmlns:loc="using:Forge.App.Localization"
+             xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.FilesToolView"
              x:DataType="vm:FilesPanelViewModel">
   <UserControl.Resources>
@@ -137,39 +138,6 @@
           </Border>
         </Grid>
       </Border>
-    </DataTemplate>
-
-    <!-- One branch of the base-branch picker: check, branch icon, name, and the default tag at the right. -->
-    <DataTemplate x:Key="BranchRowTemplate" x:DataType="vm:BranchChoiceViewModel">
-      <Button Classes="change-menu-row"
-              Classes.selected="{Binding IsSelected}"
-              Command="{Binding SelectCommand}"
-              Click="OnBranchPicked"
-              AutomationProperties.AutomationId="{Binding AutomationId}"
-              AutomationProperties.Name="{Binding Name}">
-        <Grid ColumnDefinitions="16,18,*,Auto">
-          <wc:FluentIcon Classes="change-menu-check"
-                         Data="{StaticResource IconCheck}"
-                         IsVisible="{Binding IsSelected}"
-                         AutomationProperties.AccessibilityView="Raw" />
-          <wc:FluentIcon Grid.Column="1"
-                         Classes="tree-icon"
-                         Data="{StaticResource IconBranch}"
-                         Width="12"
-                         Height="12"
-                         HorizontalAlignment="Left" />
-          <TextBlock Grid.Column="2"
-                     Text="{Binding ShortName}"
-                     VerticalAlignment="Center"
-                     TextTrimming="CharacterEllipsis" />
-          <TextBlock Grid.Column="3"
-                     Classes="change-menu-hint"
-                     Margin="10,0,2,0"
-                     VerticalAlignment="Center"
-                     IsVisible="{Binding IsDefault}"
-                     Text="{Binding [changes.picker.default], Source={x:Static loc:Loc.Instance}}" />
-        </Grid>
-      </Button>
     </DataTemplate>
   </UserControl.Resources>
 
@@ -420,73 +388,7 @@
           </StackPanel>
           <Button.Flyout>
             <Flyout Placement="BottomEdgeAlignedRight" FlyoutPresenterClasses="change-flyout">
-              <Border Classes="change-menu">
-                <StackPanel MinWidth="260" MaxWidth="340" Spacing="2">
-                  <Grid ColumnDefinitions="*,Auto" Margin="8,2,0,0">
-                    <TextBlock Classes="change-menu-group"
-                               Margin="0"
-                               VerticalAlignment="Center"
-                               Text="{Binding [changes.compareBranch.placeholder], Source={x:Static loc:Loc.Instance}}" />
-                    <Button Grid.Column="1"
-                            Classes="ghost icon"
-                            Command="{Binding ChangeReview.ReloadBranchesCommand}"
-                            ToolTip.Tip="{Binding [changes.picker.reload], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="changes-branch-reload"
-                            AutomationProperties.Name="{Binding [changes.picker.reload], Source={x:Static loc:Loc.Instance}}">
-                      <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
-                    </Button>
-                  </Grid>
-                  <TextBox Margin="4,0,4,4"
-                           Text="{Binding ChangeReview.BranchSearch, Mode=TwoWay}"
-                           PlaceholderText="{Binding [changes.picker.search], Source={x:Static loc:Loc.Instance}}"
-                           AutomationProperties.AutomationId="changes-branch-search"
-                           AutomationProperties.Name="{Binding [changes.picker.search.name], Source={x:Static loc:Loc.Instance}}">
-                    <TextBox.InnerLeftContent>
-                      <wc:FluentIcon Data="{StaticResource IconSearch}"
-                                     Width="12"
-                                     Height="12"
-                                     Margin="8,0,0,0"
-                                     Foreground="{DynamicResource TextMutedBrush}" />
-                    </TextBox.InnerLeftContent>
-                  </TextBox>
-                  <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel Spacing="0">
-                      <TextBlock Classes="change-menu-group"
-                                 IsVisible="{Binding ChangeReview.HasVisibleRemoteBranches}"
-                                 Text="{Binding [changes.picker.remote], Source={x:Static loc:Loc.Instance}}" />
-                      <ItemsControl ItemsSource="{Binding ChangeReview.VisibleRemoteGroups}"
-                                    AutomationProperties.AutomationId="changes-branch-remote-list">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:BranchGroupViewModel">
-                            <StackPanel>
-                              <TextBlock Classes="change-menu-subgroup" Text="{Binding Name}" />
-                              <ItemsControl ItemsSource="{Binding Branches}"
-                                            ItemTemplate="{StaticResource BranchRowTemplate}" />
-                            </StackPanel>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                      <Border Classes="divider"
-                              Margin="4,4"
-                              IsVisible="{Binding ChangeReview.HasVisibleRemoteBranches}" />
-                      <TextBlock Classes="change-menu-group"
-                                 IsVisible="{Binding ChangeReview.HasVisibleLocalBranches}"
-                                 Text="{Binding [changes.picker.local], Source={x:Static loc:Loc.Instance}}" />
-                      <ItemsControl ItemsSource="{Binding ChangeReview.VisibleLocalBranches}"
-                                    ItemTemplate="{StaticResource BranchRowTemplate}"
-                                    AutomationProperties.AutomationId="changes-branch-local-list" />
-                      <TextBlock Classes="change-menu-hint"
-                                 Margin="8,4"
-                                 IsVisible="{Binding ChangeReview.HasNoBranchMatch}"
-                                 Text="{Binding [changes.picker.noMatch], Source={x:Static loc:Loc.Instance}}" />
-                      <TextBlock Classes="change-menu-hint"
-                                 Margin="8,4"
-                                 IsVisible="{Binding ChangeReview.HasNoBranches}"
-                                 Text="{Binding [changes.compareBranch.none], Source={x:Static loc:Loc.Instance}}" />
-                    </StackPanel>
-                  </ScrollViewer>
-                </StackPanel>
-              </Border>
+              <views:BranchPickerView DataContext="{Binding ChangeReview.Picker}" BranchSelected="OnBranchPicked" />
             </Flyout>
           </Button.Flyout>
         </Button>

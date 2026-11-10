@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows.Input;
@@ -104,6 +105,7 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
     private string newSessionTipKey = ProjectStrings.NewSessionTooltipKey;
     private int historyCount;
     private bool archived;
+    private bool isMainCheckout;
 
     public TreeNodeViewModel(TreeNodeKind kind)
     {
@@ -167,9 +169,28 @@ internal sealed class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNo
         {
             TreeNodeKind.General => ProjectStrings.GeneralSection,
             TreeNodeKind.History => ProjectStrings.HistoryTitle(historyCount),
+            // The repository root checkout has no branch name while HEAD is detached, so the plan leaves its stored title
+            // empty and the label is resolved from the string table on every read, like the general and history rows.
+            TreeNodeKind.Worktree when isMainCheckout && title.Length == 0 => ProjectStrings.MainCheckoutDetached,
             _ => title,
         };
         set => Set(ref title, value);
+    }
+
+    /// <summary>
+    /// True for the repository root checkout row, the first child of a project row. It is a worktree row in every other
+    /// way (same expansion, row action, context menu and trailing "+"), so only the icon and the detached label differ.
+    /// </summary>
+    public bool IsMainCheckout
+    {
+        get => isMainCheckout;
+        set
+        {
+            if (Set(ref isMainCheckout, value))
+            {
+                OnPropertyChanged(nameof(Title));
+            }
+        }
     }
 
     /// <summary>Archived sessions of a history row; the row title is formatted from it, so it follows the language too.</summary>
@@ -514,6 +535,12 @@ internal sealed record TreeNodePlan(
 
     /// <summary>True for an archived session row, whose subtitle is the archived label instead of the last-active stamp.</summary>
     public bool IsArchived { get; init; }
+
+    /// <summary>
+    /// True for the repository root checkout row: it reuses <see cref="TreeNodeKind.Worktree"/> so expansion, activation
+    /// and the row's tools behave like any worktree, and only the icon and the detached label name the difference.
+    /// </summary>
+    public bool IsMainCheckout { get; init; }
 }
 
 /// <summary>One agent of a session as the left panel shows it: the main agent, or a sub-agent and its parent link.</summary>
@@ -536,9 +563,11 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     private readonly IProjectRegistry projects;
     private readonly ISessionCatalog catalog;
     private readonly WorktreeService worktrees;
+    private readonly Func<string, CancellationToken, Task<GitHead>> readHead;
     private readonly Func<string, CancellationToken, Task> openSession;
     private readonly Func<Func<CancellationToken, Task<SessionInfo>>, Task<bool>> createConfirmed;
     private readonly Func<string, string, Task<string?>> promptText;
+    private readonly Func<NewBranchRequest, CancellationToken, Task<NewBranchChoice?>> pickNewBranch;
     private readonly Func<string, Task> reveal;
     private readonly Func<CancellationToken, Task> addProject;
     private readonly TreeScope scope;
@@ -550,13 +579,22 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     private ILookup<string, SessionInfo> storedChildren = Array.Empty<SessionInfo>().ToLookup(static session => session.ParentSessionId ?? string.Empty);
     private string activeAgentId = string.Empty;
 
+    /// <summary>Upper bound of the concurrent HEAD reads of one refresh: a refresh must not fan out over every project at once.</summary>
+    private const int MaxConcurrentHeadReads = 4;
+
+    /// <summary>The HEAD reads of a refresh that has none to do: no projects, or a panel that plans no project rows.</summary>
+    private static readonly IReadOnlyDictionary<string, GitHead> EmptyHeads =
+        new Dictionary<string, GitHead>(StringComparer.OrdinalIgnoreCase);
+
     public ProjectTreeViewModel(
         IProjectRegistry projects,
         ISessionCatalog catalog,
         WorktreeService worktrees,
+        Func<string, CancellationToken, Task<GitHead>> readHead,
         Func<string, CancellationToken, Task> openSession,
         Func<Func<CancellationToken, Task<SessionInfo>>, Task<bool>> createConfirmed,
         Func<string, string, Task<string?>> promptText,
+        Func<NewBranchRequest, CancellationToken, Task<NewBranchChoice?>> pickNewBranch,
         Func<string, Task> reveal,
         Func<CancellationToken, Task> addProject,
         TreeScope scope = TreeScope.Both)
@@ -564,9 +602,11 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         this.projects = projects;
         this.catalog = catalog;
         this.worktrees = worktrees;
+        this.readHead = readHead;
         this.openSession = openSession;
         this.createConfirmed = createConfirmed;
         this.promptText = promptText;
+        this.pickNewBranch = pickNewBranch;
         this.reveal = reveal;
         this.addProject = addProject;
         this.scope = scope;
@@ -784,7 +824,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             // agent trees are snapshotted here, before the planning leaves the UI thread.
             var running = RunningSessionIds();
             var agents = SnapshotAgentTrees(roots);
-            var planned = await Task.Run(() => Plan(all, roots, sessions, running, agents), ct).ConfigureAwait(true);
+            var heads = await ReadProjectHeadsAsync(all, ct).ConfigureAwait(true);
+            var planned = await Task.Run(() => Plan(all, roots, sessions, running, agents, heads), ct).ConfigureAwait(true);
             var plans = planned.Plans;
             storedChildren = planned.StoredChildren;
             Merge(Sections, plans);
@@ -822,6 +863,60 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// The HEAD of every registered repository, read once per refresh so no row (and no render) starts a git process. The
+    /// reads run on the thread pool, at most <see cref="MaxConcurrentHeadReads"/> at a time; a repository whose read fails
+    /// is planned as "not a repository" and simply gets no main-checkout row. The general-chats panel plans no project rows,
+    /// so it reads nothing.
+    /// </summary>
+    private Task<IReadOnlyDictionary<string, GitHead>> ReadProjectHeadsAsync(IReadOnlyList<ProjectInfo> all, CancellationToken ct)
+    {
+        if (scope == TreeScope.General)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, GitHead>>(EmptyHeads);
+        }
+
+        var roots = new List<string>(all.Count);
+        foreach (var project in all)
+        {
+            if (project.Kind == ProjectKind.Repository && project.RootPath.Length > 0)
+            {
+                roots.Add(project.RootPath);
+            }
+        }
+
+        return roots.Count == 0
+            ? Task.FromResult<IReadOnlyDictionary<string, GitHead>>(EmptyHeads)
+            : BackgroundRead.RunAsync(token => ReadHeadsAsync(roots, token), ct);
+    }
+
+    private async Task<IReadOnlyDictionary<string, GitHead>> ReadHeadsAsync(IReadOnlyList<string> roots, CancellationToken ct)
+    {
+        var heads = new ConcurrentDictionary<string, GitHead>(StringComparer.OrdinalIgnoreCase);
+        await Parallel.ForEachAsync(
+                roots,
+                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentHeadReads, CancellationToken = ct },
+                async (root, token) =>
+                {
+                    GitHead head;
+                    try
+                    {
+                        head = await readHead(root, token).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+                    {
+                        // One unreadable repository must not fail the whole refresh: it plans as "not a repository",
+                        // which is exactly "no main-checkout row for this project".
+                        Trace.WriteLine($"[tree] could not read the HEAD of '{root}': {exception.Message}");
+                        head = GitHead.NotRepository;
+                    }
+
+                    heads[root] = head;
+                })
+            .ConfigureAwait(false);
+        return heads;
+    }
+
+    /// <summary>
     /// Builds the whole tree as plain data, so the queries and the mapping stay off the dispatcher.
     /// <paramref name="sessions"/> is every session, roots and children: the rows come from the roots, the agent rows of each
     /// session from its child links (or from <paramref name="agents"/> when that session is loaded in this run).
@@ -831,7 +926,8 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         IReadOnlyList<SessionInfo> sessions,
         IReadOnlyList<SessionInfo> every,
         HashSet<string> running,
-        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
+        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents,
+        IReadOnlyDictionary<string, GitHead> heads)
     {
         var storedChildren = every
             .Where(static session => !string.IsNullOrEmpty(session.ParentSessionId))
@@ -851,7 +947,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
 
             var plan = project.Kind == ProjectKind.General
                 ? PlanGeneral(project, projectSessions, storedChildren, running, agents)
-                : PlanProject(project, projectSessions, storedChildren, running, agents);
+                : PlanProject(project, projectSessions, storedChildren, running, agents, heads);
 
             // In its own panel the general area needs no heading row: the panel title already says "常规对话", so its
             // sessions and history are the panel's rows, not a group that repeats the title.
@@ -905,16 +1001,44 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         IReadOnlyList<SessionInfo> sessions,
         ILookup<string, SessionInfo> storedChildren,
         HashSet<string> running,
-        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
+        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents,
+        IReadOnlyDictionary<string, GitHead> heads)
     {
         var groups = sessions
             .Where(session => !string.IsNullOrEmpty(session.WorktreePath) || session.ParentSessionId is null)
             .GroupBy(session => session.WorktreePath ?? project.RootPath, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(group => group.Max(static s => s.LastActiveAt));
+            .OrderByDescending(group => group.Max(static s => s.LastActiveAt))
+            .ToArray();
 
-        var children = new List<TreeNodePlan>();
+        // The repository root checkout leads the children and is always there, even with no session in it. Its sessions
+        // are the ones the grouping keyed on the root path, so they belong to this row instead of a second row for the
+        // same directory; without a readable HEAD (not a repository) there is no such row and the grouping stays as it was.
+        GitHead? mainHead = heads.TryGetValue(project.RootPath, out var found) && found.Kind != GitHeadKind.NotRepository
+            ? found
+            : null;
+        var children = new List<TreeNodePlan>(groups.Length + 1);
+        if (mainHead is not null)
+        {
+            SessionInfo[] rootSessions = [];
+            foreach (var group in groups)
+            {
+                if (string.Equals(group.Key, project.RootPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    rootSessions = group.ToArray();
+                    break;
+                }
+            }
+
+            children.Add(PlanMainCheckout(project, mainHead, rootSessions, storedChildren, running, agents));
+        }
+
         foreach (var group in groups)
         {
+            if (mainHead is not null && string.Equals(group.Key, project.RootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var branch = group.First().Branch;
             var worktreeChildren = new List<TreeNodePlan>();
             foreach (var session in group.Where(static s => s.Status == SessionStatus.Active))
@@ -954,6 +1078,47 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             null,
             false,
             children);
+    }
+
+    /// <summary>
+    /// The repository root checkout row: a worktree row whose label is the real HEAD branch of the root directory, or the
+    /// detached label (resolved in the current language by the row) when HEAD points at a commit instead of a branch.
+    /// </summary>
+    private static TreeNodePlan PlanMainCheckout(
+        ProjectInfo project,
+        GitHead head,
+        IReadOnlyList<SessionInfo> sessions,
+        ILookup<string, SessionInfo> storedChildren,
+        HashSet<string> running,
+        IReadOnlyDictionary<string, IReadOnlyList<AgentNodeSnapshot>> agents)
+    {
+        var children = new List<TreeNodePlan>();
+        foreach (var session in sessions.Where(static s => s.Status == SessionStatus.Active))
+        {
+            children.Add(PlanSession(session, storedChildren, running, agents));
+        }
+
+        var archived = sessions.Where(static s => s.Status == SessionStatus.Archived).ToArray();
+        if (archived.Length > 0)
+        {
+            children.Add(PlanHistory(project, project.RootPath, archived, storedChildren, running, agents));
+        }
+
+        return new TreeNodePlan(
+            TreeNodeKind.Worktree,
+            "main:" + project.Id,
+            head.Kind == GitHeadKind.Detached ? string.Empty : head.Branch ?? string.Empty,
+            project.RootPath,
+            false,
+            project,
+            null,
+            project.RootPath,
+            head.Branch,
+            false,
+            children)
+        {
+            IsMainCheckout = true,
+        };
     }
 
     private static TreeNodePlan PlanHistory(
@@ -1203,6 +1368,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
     {
         TreeNodeKind.General => TreeIcons.General,
         TreeNodeKind.Project => TreeIcons.Project,
+        TreeNodeKind.Worktree when plan.IsMainCheckout => TreeIcons.MainCheckout,
         TreeNodeKind.Worktree => TreeIcons.Worktree,
         TreeNodeKind.History => TreeIcons.History,
         TreeNodeKind.MainAgent => TreeIcons.MainAgent,
@@ -1215,6 +1381,7 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
         node.Update(plan.Title, plan.Subtitle, plan.IsRunning);
         node.HistoryCount = plan.HistoryCount;
         node.IsArchived = plan.IsArchived;
+        node.IsMainCheckout = plan.IsMainCheckout;
         node.StatusText = plan.StatusText;
         node.IsActiveSession = plan.Kind == TreeNodeKind.Session
             && string.Equals(node.SessionId, activeSessionId, StringComparison.Ordinal);
@@ -1321,10 +1488,11 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// A new session on a project gets its own worktree. The repository probe runs first on the thread pool, so a folder
-    /// that is not a git repository is reported without ever asking for a branch name; only a repository then puts the
-    /// branch-name prompt on the UI thread. A blank answer cancels silently, and an unusable name stops the creation and
-    /// reports why through the same failure path as the rest of the flow. Everything after the prompt (the worktree and
-    /// the session row) runs on the thread pool like the other tree operations.
+    /// that is not a git repository is reported without ever opening the new-branch dialog; only a repository then asks
+    /// for the start point and the branch name in that dialog, which validates the name itself. A cancelled dialog creates
+    /// nothing, and an unusable name that slipped through stops the creation and reports why through the same failure path
+    /// as the rest of the flow. Everything after the dialog (the worktree and the session row) runs on the thread pool
+    /// like the other tree operations.
     /// </summary>
     private async Task CreateWorktreeSessionAsync(ProjectInfo project, CancellationToken ct)
     {
@@ -1336,19 +1504,18 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
             throw new InvalidOperationException(ProjectStrings.NotAGitRepository);
         }
 
-        var branch = await promptText(
-                Loc.Instance[GitStrings.WorktreeBranchPromptTitle],
-                DefaultBranchName())
+        var choice = await pickNewBranch(new NewBranchRequest(project.RootPath, DefaultBranchName()), ct)
             .ConfigureAwait(true);
-        if (string.IsNullOrWhiteSpace(branch))
+        if (choice is null)
         {
             return;
         }
 
-        // The prompt can outlive the command (the window closing, the flow being cancelled): nothing is created then.
+        // The dialog can outlive the command (the window closing, the flow being cancelled): nothing is created then.
         ct.ThrowIfCancellationRequested();
 
-        var branchName = branch.Trim();
+        var branchName = choice.BranchName;
+        var startPoint = choice.StartPoint;
         await CreateAsync(
                 token => BackgroundRead.RunAsync(
                     async backgroundToken =>
@@ -1357,7 +1524,12 @@ internal sealed class ProjectTreeViewModel : ObservableObject, IDisposable
                         WorktreeSession worktree;
                         try
                         {
-                            worktree = await worktrees.CreateAsync(project.RootPath, title, branchName, backgroundToken)
+                            worktree = await worktrees.CreateAsync(
+                                    project.RootPath,
+                                    title,
+                                    branchName,
+                                    startPoint,
+                                    backgroundToken)
                                 .ConfigureAwait(false);
                         }
                         catch (ArgumentException exception)

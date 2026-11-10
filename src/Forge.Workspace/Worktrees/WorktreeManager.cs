@@ -169,7 +169,41 @@ public sealed class WorktreeManager
     }
 
     /// <summary>
-    /// The gate-protected part both overloads share: serialize the check-then-act per repository, allocate the directory
+    /// Creates a worktree on a caller-chosen branch name that starts at <paramref name="startPoint"/> - a local branch,
+    /// a remote-tracking ref such as <c>origin/main</c>, or any revision - instead of at HEAD. The start point is resolved
+    /// to its commit and the worktree is added from that commit, so the new branch never picks up an upstream from the
+    /// remote-tracking ref it started at; a start point that does not resolve throws <see cref="GitException"/>. Name
+    /// handling matches the HEAD-starting overload: an invalid name throws <see cref="ArgumentException"/> and an existing
+    /// branch throws <see cref="GitException"/> naming it.
+    /// </summary>
+    public async Task<WorktreeSession> CreateAsync(
+        string repositoryPath,
+        string title,
+        string? branchName,
+        string startPoint,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+        {
+            return await CreateAsync(repositoryPath, title, ct).ConfigureAwait(false);
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(startPoint);
+        var repositoryRoot = await ResolveRepositoryRootAsync(repositoryPath, ct).ConfigureAwait(false);
+        if (!await git.IsValidBranchNameAsync(repositoryRoot, branchName, ct).ConfigureAwait(false))
+        {
+            throw new ArgumentException($"'{branchName}' is not a valid branch name; see git check-ref-format.", nameof(branchName));
+        }
+
+        var baseCommit = await ResolveBaseCommitAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false);
+        var segment = branchName[(branchName.LastIndexOf('/') + 1)..];
+        var baseSlug = Slugify(segment, Options.MaxSlugLength);
+        return await CreateInRepositoryAsync(repositoryRoot, baseSlug, branchName, baseCommit, baseCommit, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The gate-protected part every overload shares: serialize the check-then-act per repository, allocate the directory
     /// slug, then let one <c>git worktree add -b</c> create the branch and the worktree together.
     /// </summary>
     /// <param name="branchName">
@@ -268,8 +302,13 @@ public sealed class WorktreeManager
         await git.GetRepositoryRootAsync(repositoryPath, ct).ConfigureAwait(false)
         ?? throw new GitException($"'{repositoryPath}' is not inside a git repository.", [], -1, string.Empty);
 
-    private async Task<string?> ResolveBaseCommitAsync(string repositoryRoot, string startPoint, CancellationToken ct) =>
-        await git.RevParseAsync(repositoryRoot, startPoint, ct).ConfigureAwait(false)
+    /// <summary>
+    /// The commit a start point names. The <c>^{commit}</c> suffix is what makes the answer a commit id: an annotated tag
+    /// resolves to its tag object otherwise, which would be reported as the session's base commit while the worktree
+    /// itself landed on the tagged commit.
+    /// </summary>
+    private async Task<string> ResolveBaseCommitAsync(string repositoryRoot, string startPoint, CancellationToken ct) =>
+        await git.RevParseAsync(repositoryRoot, startPoint + "^{commit}", ct).ConfigureAwait(false)
         ?? throw new GitException($"Start point '{startPoint}' does not resolve to a commit.", [], -1, string.Empty);
 
     /// <summary>

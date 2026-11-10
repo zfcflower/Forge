@@ -80,6 +80,95 @@ public sealed class ChangeBlockReverterTests
         Assert.Equal(RevertOutcome.FileChanged, (await ChangeBlockReverter.RevertBlockAsync(repo.Root, diff, block)).Outcome);
     }
 
+    private static string Top(int count) => string.Concat(Enumerable.Range(1, count).Select(i => "top" + i + "\n"));
+
+    [Fact]
+    public async Task RevertBlock_finds_a_short_block_shifted_far_beyond_any_small_window()
+    {
+        if (!GitProbe.IsAvailable) return;
+        using var repo = new TestRepo();
+        var original = Numbered(30);
+        repo.Write("f.txt", original);
+        repo.Commit("base");
+        var changed = original.Replace("line20\n", "CHANGED\n", StringComparison.Ordinal);
+        repo.Write("f.txt", changed);
+        var diff = await DiffOf(repo, "f.txt");
+        var block = Assert.Single(DiffBlocks.Split(diff));
+
+        repo.Write("f.txt", Top(300) + changed);
+
+        Assert.Equal(RevertOutcome.Reverted, (await ChangeBlockReverter.RevertBlockAsync(repo.Root, diff, block)).Outcome);
+        Assert.Equal(Top(300) + original, Read(repo, "f.txt"));
+    }
+
+    [Fact]
+    public async Task RevertBlock_uses_context_to_pick_the_right_occurrence_of_repeated_content()
+    {
+        if (!GitProbe.IsAvailable) return;
+        using var repo = new TestRepo();
+        var original = Numbered(30);
+        repo.Write("f.txt", original);
+        repo.Commit("base");
+        var changed = original.Replace("line20\n", "dup\n", StringComparison.Ordinal);
+        repo.Write("f.txt", changed);
+        var diff = await DiffOf(repo, "f.txt");
+        var block = Assert.Single(DiffBlocks.Split(diff));
+
+        // Shift far away and add other "dup" lines with different surroundings, before and after.
+        var working = "dup\nzz\n" + Top(300) + "yy\ndup\nww\n" + changed + "dup\nend\n";
+        repo.Write("f.txt", working);
+
+        Assert.Equal(RevertOutcome.Reverted, (await ChangeBlockReverter.RevertBlockAsync(repo.Root, diff, block)).Outcome);
+        Assert.Equal(working.Replace("line19\ndup\nline21\n", "line19\nline20\nline21\n", StringComparison.Ordinal), Read(repo, "f.txt"));
+    }
+
+    [Fact]
+    public async Task RevertBlock_fails_without_writing_when_block_and_context_occur_twice()
+    {
+        if (!GitProbe.IsAvailable) return;
+        using var repo = new TestRepo();
+        var original = Numbered(30);
+        repo.Write("f.txt", original);
+        repo.Commit("base");
+        var changed = original.Replace("line20\n", "dup\n", StringComparison.Ordinal);
+        repo.Write("f.txt", changed);
+        var diff = await DiffOf(repo, "f.txt");
+        var block = Assert.Single(DiffBlocks.Split(diff));
+
+        // The same block with identical context now appears twice, neither at the expected position.
+        var twin = "line17\nline18\nline19\ndup\nline21\nline22\nline23\n";
+        var working = Top(300) + twin + Top(50) + twin + Top(10);
+        repo.Write("f.txt", working);
+
+        Assert.Equal(RevertOutcome.FileChanged, (await ChangeBlockReverter.RevertBlockAsync(repo.Root, diff, block)).Outcome);
+        Assert.Equal(working, Read(repo, "f.txt"));
+    }
+
+    [Fact]
+    public async Task RevertBlock_reinserts_a_pure_deletion_shifted_far_and_refuses_when_ambiguous()
+    {
+        if (!GitProbe.IsAvailable) return;
+        using var repo = new TestRepo();
+        var original = Numbered(30);
+        repo.Write("f.txt", original);
+        repo.Commit("base");
+        var deleted = original.Replace("line10\n", string.Empty, StringComparison.Ordinal);
+        repo.Write("f.txt", deleted);
+        var diff = await DiffOf(repo, "f.txt");
+        var block = Assert.Single(DiffBlocks.Split(diff));
+        Assert.Empty(block.NewLines);
+
+        // Same gap context appears twice: refuse.
+        var ambiguous = Top(300) + deleted + Top(5) + deleted;
+        repo.Write("f.txt", ambiguous);
+        Assert.Equal(RevertOutcome.FileChanged, (await ChangeBlockReverter.RevertBlockAsync(repo.Root, diff, block)).Outcome);
+        Assert.Equal(ambiguous, Read(repo, "f.txt"));
+
+        repo.Write("f.txt", Top(300) + deleted);
+        Assert.Equal(RevertOutcome.Reverted, (await ChangeBlockReverter.RevertBlockAsync(repo.Root, diff, block)).Outcome);
+        Assert.Equal(Top(300) + original, Read(repo, "f.txt"));
+    }
+
     [Fact]
     public async Task Revert_preserves_CRLF_line_endings()
     {

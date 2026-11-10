@@ -295,6 +295,21 @@ public sealed class FilesPanelTests : IDisposable
                     .Where(static block => block.IsEffectivelyVisible)
                     .Select(static block => block.Text ?? string.Empty)
                     .ToList();
+                // The digits sit wholly inside the pill and centred on it (a fixed line height once clipped and shifted them).
+                foreach (var badge in new[] { all, changed })
+                {
+                    var pill = Assert.IsType<Border>(badge.Parent);
+                    var glyphs = badge.TextLayout.Height;
+                    var inner = pill.Bounds.Height - pill.Padding.Top - pill.Padding.Bottom;
+                    Assert.True(glyphs <= inner + 0.5, $"badge text height {glyphs} exceeds the pill's content height {inner}");
+                    Assert.True(badge.TextLayout.WidthIncludingTrailingWhitespace <= badge.Bounds.Width + 0.5, "badge text is clipped horizontally");
+                    var origin = badge.TranslatePoint(default, pill)!.Value;
+                    var centreX = origin.X + badge.Bounds.Width / 2;
+                    var centreY = origin.Y + badge.Bounds.Height / 2;
+                    Assert.InRange(centreX, pill.Bounds.Width / 2 - 0.75, pill.Bounds.Width / 2 + 0.75);
+                    Assert.InRange(centreY, pill.Bounds.Height / 2 - 0.75, pill.Bounds.Height / 2 + 0.75);
+                }
+
                 return (All: all.Text, Changed: changed.Text, Pill: all.Parent is Border border && border.Classes.Contains("count-badge"), Texts: texts);
             },
             CancellationToken.None);

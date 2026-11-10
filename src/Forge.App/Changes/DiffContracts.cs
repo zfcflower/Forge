@@ -65,10 +65,19 @@ internal interface IDiffFileItem : INotifyPropertyChanged
     bool IsMarkdownPreview { get; set; }
 
     /// <summary>
-    /// The diff carries whole files (full-context read), so the unchanged regions can be expanded. When false only git's
-    /// 3-line hunk context exists and the "N unmodified lines" bars are not expandable.
+    /// The diff carries the whole file (one full-context hunk), so the folds inside it open in place. When false only git's
+    /// 3-line hunk context is loaded and the stretches between hunks are "N unmodified lines" bars.
     /// </summary>
     bool HasFullContext { get; }
+
+    /// <summary>The stretches between hunks are not loaded yet but can be (<see cref="LoadFullContextAsync"/>).</summary>
+    bool CanLoadContext { get; }
+
+    /// <summary>
+    /// Reads the whole file once; on success <see cref="Diff"/> is replaced (a property change) and
+    /// <see cref="HasFullContext"/> turns true.
+    /// </summary>
+    Task<bool> LoadFullContextAsync();
 
     bool CanRevert { get; }
 

@@ -373,9 +373,11 @@ public sealed class MinorRegressionTests
             registry,
             catalog,
             new WorktreeService(new GitCli()),
+            (_, _) => Task.FromResult(new GitHead(GitHeadKind.Branch, "main")),
             (_, _) => Task.CompletedTask,
             _ => Task.FromResult(true),
             (_, _) => Task.FromResult<string?>(null),
+            (_, _) => Task.FromResult<NewBranchChoice?>(null),
             _ => Task.CompletedTask,
             _ => Task.CompletedTask);
 

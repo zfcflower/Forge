@@ -300,13 +300,15 @@ public sealed class WorktreeOrphanCleanupTests
             new SingleProjectRegistry(new ProjectInfo("proj-1", "repo", repositoryRoot, ProjectKind.Repository, 0, DateTimeOffset.UtcNow)),
             catalog,
             new WorktreeService(StepCommitRepo.Cli),
+            (_, _) => Task.FromResult(new GitHead(GitHeadKind.Branch, "main")),
             (_, _) => Task.CompletedTask,
             async factory =>
             {
                 await factory(CancellationToken.None);
                 return true;
             },
-            (_, _) => Task.FromResult<string?>(typedBranch),
+            (_, _) => Task.FromResult<string?>(null),
+            (_, _) => Task.FromResult<NewBranchChoice?>(new NewBranchChoice("main", typedBranch)),
             _ => Task.CompletedTask,
             _ => Task.CompletedTask);
         return new World(tree, catalog);

@@ -151,6 +151,67 @@ public sealed class DiffBlocksTests
         Assert.NotEqual(DiffBlocks.Split(Parse(Plain))[0].Hash, DiffBlocks.Split(otherText)[0].Hash);
     }
 
+    private static string TwinDiff(string extraBlock = "") => $"""
+        diff --git a/a.txt b/a.txt
+        --- a/a.txt
+        +++ b/a.txt
+        @@ -1,17 +1,17 @@
+         c1
+        -old
+        +new
+         c2
+         c3
+         c4
+         c5
+         c6
+         c7
+         c8
+        {extraBlock}
+         c9
+         c10
+         c11
+         c12
+         c13
+        -old
+        +new
+         c14
+
+        """;
+
+    [Fact]
+    public void Identical_blocks_in_one_file_get_distinct_deterministic_hashes()
+    {
+        var twins = DiffBlocks.Split(Parse(TwinDiff(" c8b")));
+        Assert.Equal(2, twins.Count);
+        Assert.NotEqual(twins[0].Hash, twins[1].Hash);
+        Assert.Equal(twins.Select(static b => b.Hash), DiffBlocks.Split(Parse(TwinDiff(" c8b"))).Select(static b => b.Hash));
+
+        // The first occurrence keeps the plain content hash it would have without a twin.
+        var alone = Parse("""
+            diff --git a/a.txt b/a.txt
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1,3 +1,3 @@
+             c1
+            -old
+            +new
+             c2
+
+            """);
+        Assert.Equal(DiffBlocks.Split(alone)[0].Hash, twins[0].Hash);
+    }
+
+    [Fact]
+    public void Twin_hashes_ignore_edits_to_unrelated_blocks()
+    {
+        var before = DiffBlocks.Split(Parse(TwinDiff(" c8b")));
+        var withUnrelated = DiffBlocks.Split(Parse(TwinDiff("-gone" + '\n' + "+here")));
+        Assert.Equal(3, withUnrelated.Count);
+
+        Assert.Equal(before[0].Hash, withUnrelated[0].Hash);
+        Assert.Equal(before[1].Hash, withUnrelated[2].Hash);
+    }
+
     [Fact]
     public void Fingerprint_changes_when_any_block_changes()
     {

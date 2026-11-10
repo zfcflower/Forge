@@ -1,0 +1,79 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:loc="using:Forge.App.Localization"
+        xmlns:views="using:Forge.App.Views"
+        x:Class="Forge.App.Views.NewBranchDialog"
+        x:DataType="vm:NewBranchDialogViewModel"
+        Title="{Binding [project.newBranch.title], Source={x:Static loc:Loc.Instance}}"
+        Width="520"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}"
+        AutomationProperties.AutomationId="new-branch-dialog">
+  <StackPanel Margin="18,16" Spacing="12">
+    <!-- Start point: the branch the new one begins at, opened in the same searchable picker the changes panel uses. -->
+    <Grid ColumnDefinitions="Auto,*">
+      <TextBlock Grid.Column="0"
+                 Classes="label"
+                 VerticalAlignment="Center"
+                 Margin="0,0,12,0"
+                 Text="{Binding [project.newBranch.baseLabel], Source={x:Static loc:Loc.Instance}}" />
+      <Button x:Name="BasePicker"
+              Grid.Column="1"
+              Classes="change-picker"
+              HorizontalAlignment="Left"
+              AutomationProperties.AutomationId="new-branch-base"
+              AutomationProperties.Name="{Binding BaseBranchLabel}"
+              ToolTip.Tip="{Binding BaseBranchLabel}">
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <wc:FluentIcon Data="{StaticResource IconBranch}" Width="14" Height="14" />
+          <TextBlock Text="{Binding BaseBranchLabel}"
+                     TextTrimming="CharacterEllipsis"
+                     VerticalAlignment="Center" />
+          <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
+        </StackPanel>
+        <Button.Flyout>
+          <Flyout Placement="BottomEdgeAlignedLeft" FlyoutPresenterClasses="change-flyout">
+            <views:BranchPickerView DataContext="{Binding Picker}" BranchSelected="OnBranchPicked" />
+          </Flyout>
+        </Button.Flyout>
+      </Button>
+    </Grid>
+
+    <!-- Name: prefilled with the flow's suggestion, fully selected when the dialog opens. -->
+    <StackPanel Spacing="4">
+      <TextBlock Classes="label"
+                 Text="{Binding [project.newBranch.nameLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBox x:Name="BranchNameBox"
+               Text="{Binding BranchName, Mode=TwoWay}"
+               PlaceholderText="{Binding [project.newBranch.namePlaceholder], Source={x:Static loc:Loc.Instance}}"
+               AutomationProperties.AutomationId="new-branch-name"
+               AutomationProperties.Name="{Binding [project.newBranch.nameLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Classes="caption"
+                 Foreground="{DynamicResource DangerBrush}"
+                 IsVisible="{Binding HasHint}"
+                 Text="{Binding Hint}"
+                 AutomationProperties.AutomationId="new-branch-hint" />
+    </StackPanel>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
+      <Button x:Name="CancelButton"
+              Classes="ghost"
+              Content="{Binding [project.newBranch.cancel], Source={x:Static loc:Loc.Instance}}"
+              IsCancel="True"
+              Click="OnCancelClick"
+              AutomationProperties.AutomationId="new-branch-cancel" />
+      <Button x:Name="CreateButton"
+              Classes="primary"
+              Content="{Binding [project.newBranch.create], Source={x:Static loc:Loc.Instance}}"
+              IsDefault="True"
+              IsEnabled="{Binding CanCreate}"
+              Click="OnCreateClick"
+              AutomationProperties.AutomationId="new-branch-create" />
+    </StackPanel>
+  </StackPanel>
+</Window>

@@ -1114,6 +1114,13 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         this.git = git;
         this.checkpoints = checkpoints;
         this.openFile = openFile;
+        // One picker instance hosts both the compare-base flyout and (through the dialog service) the new-branch dialog;
+        // picking another base reloads the diff only where the scope compares against a branch.
+        picker = new BranchPickerViewModel(
+            git,
+            OnBranchPicked,
+            exception => SetMessage(LocText.Literal(exception.Message)));
+        picker.PropertyChanged += OnPickerPropertyChanged;
         RefreshCommand = new AsyncRelayCommand(
             ct => LoadAsync(ct),
             () => true,
@@ -1280,15 +1287,25 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
 
             IsLoading = true;
             var workingDirectory = panelContext.WorkingDirectory;
+            picker.SetWorkingDirectory(workingDirectory);
             if (reloadChoices)
             {
                 await ReloadTurnsAsync(source.Token).ConfigureAwait(true);
-                await ReloadBranchesAsync(workingDirectory, source.Token).ConfigureAwait(true);
+
+                // A load that a newer one has already replaced must not touch the shared picker: its read would bump the
+                // picker's generation and then be cancelled, so the newer load's answer would be discarded and the picker
+                // would stay empty (attaching a context fires a load of its own, so two loads overlapping is normal).
+                if (current != Volatile.Read(ref generation))
+                {
+                    return;
+                }
+
+                await picker.LoadAsync(workingDirectory, skipCurrentBranch: true, source.Token).ConfigureAwait(true);
             }
 
             var scopeSnapshot = scope;
             var turn = selectedTurn;
-            var branch = selectedBranch;
+            var branch = picker.SelectedBranch;
             var fingerprint = scopeSnapshot == ChangeScope.Uncommitted
                 ? precomputedFingerprint ?? await ReadUncommittedFingerprintAsync(workingDirectory, source.Token).ConfigureAwait(true)
                 : null;
@@ -1303,6 +1320,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
 
             var previousSelection = selectedFile?.Path;
             Volatile.Write(ref diffBaseCommit, built.BaseCommit);
+            diffSource = built.Source;
             files.ReplaceAll(built.Files);
             OnFilesReplaced(built.RepositoryRoot, scopeSnapshot is ChangeScope.Uncommitted or ChangeScope.All);
             if (scopeSnapshot == ChangeScope.Uncommitted)
@@ -1412,6 +1430,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        picker.PropertyChanged -= OnPickerPropertyChanged;
         Interlocked.Increment(ref generation);
         try
         {
@@ -1422,12 +1441,16 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         }
     }
 
-    private sealed record BuiltChanges(List<FileDiffViewModel> Files, string RepositoryRoot, LocText Message, string? BaseCommit);
+    private sealed record BuiltChanges(
+        List<FileDiffViewModel> Files, string RepositoryRoot, LocText Message, string? BaseCommit, DiffSource? Source);
 
-    /// <summary>Hunk context used when a whole-file read would overflow git's output cap (the view then cannot unfold).</summary>
-    private const int FallbackContextLines = 3;
+    /// <summary>
+    /// Hunk context of the changes view: only the changes and three lines around them are read. The unmodified stretches
+    /// between hunks are "N unmodified lines" bars, loaded per file on demand (<see cref="LoadFullContextAsync"/>).
+    /// </summary>
+    private const int SummaryContextLines = 3;
 
-    private sealed record DiffRead(IReadOnlyList<FileDiff> Diffs, string Prefix, LocText Message, string? BaseCommit);
+    private sealed record DiffRead(IReadOnlyList<FileDiff> Diffs, string Prefix, LocText Message, string? BaseCommit, DiffSource? Source);
 
     /// <summary>The diff is read and mapped to view models on a pool thread; the caller applies it once.</summary>
     private async Task<BuiltChanges> BuildRowsAsync(
@@ -1437,29 +1460,87 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         BranchChoiceViewModel? branch,
         CancellationToken ct)
     {
-        // Whole files make unfolding and the Markdown preview free, but a large change set can overflow git's output cap;
-        // then the set is read again with ordinary hunks rather than failing the whole view.
-        var fullContext = true;
-        DiffRead read;
-        try
-        {
-            read = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, GitCli.FullContextLines, ct).ConfigureAwait(false);
-        }
-        catch (GitOutputTruncatedException)
-        {
-            fullContext = false;
-            read = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, FallbackContextLines, ct).ConfigureAwait(false);
-        }
+        // Only the changes are read up front; unmodified stretches stay unloaded until the user opens one.
+        var read = await ReadDiffAsync(workingDirectory, selectedScope, turn, branch, SummaryContextLines, ct).ConfigureAwait(false);
+
+        // The Markdown preview renders the whole new document, so modified Markdown files are read whole right away (one
+        // git call for all of them). A whole read that overflows git's output cap leaves them as hunks (Source diff only).
+        var whole = await ReadMarkdownWholeAsync(workingDirectory, read, ct).ConfigureAwait(false);
 
         var root = await git.GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false) ?? workingDirectory;
         var builtFiles = new List<FileDiffViewModel>(read.Diffs.Count);
         foreach (var diff in read.Diffs)
         {
             ct.ThrowIfCancellationRequested();
-            builtFiles.Add(new FileDiffViewModel(diff, read.Prefix, fullContext));
+            builtFiles.Add(whole is not null && whole.TryGetValue(diff.Path, out var full)
+                ? new FileDiffViewModel(full, read.Prefix, fullContext: true)
+                : new FileDiffViewModel(diff, read.Prefix));
         }
 
-        return new BuiltChanges(builtFiles, root, read.Message, read.BaseCommit);
+        return new BuiltChanges(builtFiles, root, read.Message, read.BaseCommit, read.Source);
+    }
+
+    private async Task<Dictionary<string, FileDiff>?> ReadMarkdownWholeAsync(string workingDirectory, DiffRead read, CancellationToken ct)
+    {
+        if (read.Source is not { } source)
+        {
+            return null;
+        }
+
+        List<FileDiff>? wanted = null;
+        foreach (var diff in read.Diffs)
+        {
+            if (diff.Status is FileDiffStatus.Modified or FileDiffStatus.Renamed or FileDiffStatus.Copied
+                && !diff.IsBinary && diff.Hunks.Count > 0 && FileDiffViewModel.IsMarkdownPath(diff.Path))
+            {
+                (wanted ??= []).Add(diff);
+            }
+        }
+
+        if (wanted is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var diffs = await ReadWholeAsync(source, wanted, ct).ConfigureAwait(false);
+            var byPath = new Dictionary<string, FileDiff>(diffs.Count, StringComparer.Ordinal);
+            foreach (var diff in diffs)
+            {
+                byPath[diff.Path] = diff;
+            }
+
+            return byPath;
+        }
+        catch (GitOutputTruncatedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The whole-file diffs of <paramref name="files"/> under the same refs as the loaded set.</summary>
+    private Task<IReadOnlyList<FileDiff>> ReadWholeAsync(DiffSource source, IReadOnlyList<FileDiff> files, CancellationToken ct)
+    {
+        var paths = new List<string>(files.Count * 2);
+        foreach (var file in files)
+        {
+            // ":(top)" anchors at the repository root (diff paths are root-relative); a rename needs both sides for git to pair them.
+            if (file.NewPath is { Length: > 0 } newPath)
+            {
+                paths.Add(":(top)" + newPath);
+            }
+
+            if (file.OldPath is { Length: > 0 } oldPath && !string.Equals(oldPath, file.NewPath, StringComparison.Ordinal))
+            {
+                paths.Add(":(top)" + oldPath);
+            }
+        }
+
+        return git.GetDiffAsync(
+            source.WorkingDirectory,
+            new GitDiffOptions { From = source.From, To = source.To, Paths = paths, ContextLines = GitCli.FullContextLines },
+            ct);
     }
 
     private async Task<DiffRead> ReadDiffAsync(
@@ -1472,7 +1553,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
     {
         if (!await git.IsRepositoryAsync(workingDirectory, ct).ConfigureAwait(false))
         {
-            return new DiffRead([], string.Empty, default, null);
+            return new DiffRead([], string.Empty, default, null, null);
         }
 
         var root = await git.GetRepositoryRootAsync(workingDirectory, ct).ConfigureAwait(false);
@@ -1483,34 +1564,44 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         {
             if (turn is not { TreeAfter: { } after })
             {
-                return new DiffRead([], prefix, default, null);
+                return new DiffRead([], prefix, default, null, null);
             }
 
             return new DiffRead(
-                await git.GetTreeDiffAsync(workingDirectory, turn.TreeBefore, after, contextLines, ct).ConfigureAwait(false), prefix, default, null);
+                await git.GetTreeDiffAsync(workingDirectory, turn.TreeBefore, after, contextLines, ct).ConfigureAwait(false),
+                prefix,
+                default,
+                null,
+                new DiffSource(workingDirectory, turn.TreeBefore, after));
         }
 
         if (selectedScope == ChangeScope.Commit)
         {
-            return new DiffRead(await ReadCommitDiffAsync(workingDirectory, contextLines, ct).ConfigureAwait(false), prefix, default, null);
+            var commit = Volatile.Read(ref selectedCommit);
+            return new DiffRead(
+                await ReadCommitDiffAsync(workingDirectory, contextLines, ct).ConfigureAwait(false),
+                prefix,
+                default,
+                null,
+                commit is { ParentSha: { } parent } ? new DiffSource(workingDirectory, parent, commit.Sha) : null);
         }
 
         if (selectedScope == ChangeScope.All)
         {
             if (branch is null)
             {
-                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoBranches), null);
+                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoBranches), null, null);
             }
 
             if (await git.GetCurrentBranchAsync(workingDirectory, ct).ConfigureAwait(false) is null)
             {
-                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoCurrentBranch), null);
+                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoCurrentBranch), null, null);
             }
 
             var mergeBase = await git.GetMergeBaseAsync(workingDirectory, branch.RefName, "HEAD", ct).ConfigureAwait(false);
             if (mergeBase is null)
             {
-                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoCommonHistory), null);
+                return new DiffRead([], prefix, new LocText(InspectorStrings.ChangesNoCommonHistory), null, null);
             }
 
             var branchDiffs = await git.GetDiffAsync(
@@ -1518,7 +1609,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                     new GitDiffOptions { From = mergeBase, To = "HEAD", Paths = ["."], ContextLines = contextLines },
                     ct)
                 .ConfigureAwait(false);
-            return new DiffRead(branchDiffs, prefix, default, mergeBase);
+            return new DiffRead(branchDiffs, prefix, default, mergeBase, new DiffSource(workingDirectory, mergeBase, "HEAD"));
         }
 
         var head = await git.RevParseAsync(workingDirectory, "HEAD", ct).ConfigureAwait(false);
@@ -1533,7 +1624,7 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
                 },
                 ct)
             .ConfigureAwait(false);
-        return new DiffRead(diffs, prefix, default, head);
+        return new DiffRead(diffs, prefix, default, head, new DiffSource(workingDirectory, head is null ? null : "HEAD", null));
     }
 }
 

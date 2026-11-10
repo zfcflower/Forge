@@ -149,7 +149,7 @@ public sealed class TreeVisualTests : IDisposable
     }
 
     [Fact]
-    public async Task Child_chevron_left_aligns_with_parent_icon_left()
+    public async Task Child_chevron_slot_aligns_with_parent_icon_left()
     {
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
         var root = NewRoot();
@@ -178,7 +178,10 @@ public sealed class TreeVisualTests : IDisposable
             },
             CancellationToken.None);
 
-        Assert.Equal(edges.ParentIconLeft, edges.ChildChevronLeft, 0.5);
+        // The 12 px chevron overhangs its 10 px slot by a pixel on each side (its stroke would vanish at a smaller
+        // size, see ProjectView.axaml), so the glyph's left edge sits exactly one pixel left of the slot: the slot
+        // itself is what lines up under the parent icon (IndentMarks.Step = ChevronSlot + IconGap).
+        Assert.Equal(edges.ParentIconLeft, edges.ChildChevronLeft + 1, 0.5);
     }
 
     [Fact]
@@ -405,9 +408,11 @@ public sealed class TreeVisualTests : IDisposable
             projects: null!,
             catalog: null!,
             worktrees: null!,
+            readHead: (_, _) => Task.FromResult(new GitHead(GitHeadKind.Branch, "main")),
             openSession: (_, _) => Task.CompletedTask,
             createConfirmed: _ => Task.FromResult(false),
             promptText: (_, _) => Task.FromResult<string?>(null),
+            pickNewBranch: (_, _) => Task.FromResult<NewBranchChoice?>(null),
             reveal: _ => Task.CompletedTask,
             addProject: _ => Task.CompletedTask);
         viewModel.Rows.ReplaceAll([main, running, completed, failed]);

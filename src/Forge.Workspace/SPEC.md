@@ -32,6 +32,10 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 
 **Worktree 安全。** 每会话一个 worktree:分支默认 `forge/<slug>`,也可显式命名(显式名不加后缀、不重名复用;目录 slug 取名字最后一段,目录冲突才加 `-2` 起的后缀;显式分支已存在抛 `GitException`、非法名抛 `ArgumentException`,失败不创建任何分支或目录);非强制删除在有未提交改动、未合入提交、游离 HEAD 独有提交、或无法确定基线分支时拒绝。会话结束后 worktree 保留,由用户手动清理。`WorktreeOptions.Layout` 默认 `NestedByRepository`;App 使用 `SiblingOfRepository`(`<repoParent>/<repoName>.worktrees/<slug>`),兄弟目录不会被误提交,也不混用多个仓库的命名空间。
 
+**起点可选,新分支永不带上游。** `CreateAsync` 除默认从 HEAD 分叉外,还有带 `startPoint` 的重载:起点可以是本地分支、远程跟踪引用(如 `origin/main`)或任意 revision,先解析成它的提交再交给 `git worktree add -b`,因此从 `origin/main` 分叉也不会让新分支跟踪 `origin/main`(否则推送会指向主线);起点解析不出来抛 `GitException`。
+
+**检出状态可读且不抛。** `GetHeadAsync` 回答“这个目录检出在哪”:`Branch`(有提交)、`UnbornBranch`(刚 `git init`、HEAD 指向的名字)、`Detached`、`NotRepository`。裸仓库按 `NotRepository` 回报——它没有工作树,把它当成 checkout 会让会话把文件写进仓库自己的数据目录。这条读取是给界面标签用的,所以除取消除外一律返回枚举而不抛异常;实现上先问 `rev-parse --show-toplevel`(一次调用同时排除非仓库与裸仓库),再 `symbolic-ref`/`rev-parse HEAD`。
+
 **Worktree 并发创建。** slug/分支/路径分配是检查后动作:进程内按规范化仓库根(OS 比较器)取引用计数门串行“列分支 → 挑后缀 → `worktree add -b`”,最后一个持有者/等待者释放时移除;跨进程冲突(`already exists`/`cannot lock ref` 或目标路径已存在)重读分支取下一后缀重试,上限 20,耗尽时抛带最后一次 git 失败详情的 `GitException`。从不删除已存在的分支、目录或 worktree。
 
 **按轮次改动。** `SnapshotTreeAsync` 把本 worktree 真实索引复制到 `<系统临时目录>/forge-snapshot-<pid>-<guid>.index`,以 `GIT_INDEX_FILE` + `GIT_OPTIONAL_LOCKS=0` 执行 `add --all` + `write-tree`,`finally` 删除副本:用户索引、HEAD、分支、refs、stash 不变,唯一副作用是未引用对象(gc 回收);同内容同哈希。文件名带进程号,因为 `dotnet test` 会并行跑多个测试程序集并共用同一个系统临时目录,按进程归属才能断言本进程没有残留,而不会把别的进程(例如 App 测试里 `TurnCheckpointService` 的在途快照)算成泄漏。本仓约 70 ms,一万文件约 80–120 ms。轮次改动 = 相邻两棵树的 diff(`GetTreeDiffAsync`/`GetTreeDiffTextAsync`/`GetTreeChangesAsync`)。

@@ -295,6 +295,10 @@ public sealed class MarkdownDiffViewTests
 
         public bool HasFullContext => HasFullContextValue;
 
+        public bool CanLoadContext => false;
+
+        public Task<bool> LoadFullContextAsync() => Task.FromResult(HasFullContextValue);
+
         public bool CanRevert => true;
 
         public ICommand RevertFileCommand { get; } = new Noop();

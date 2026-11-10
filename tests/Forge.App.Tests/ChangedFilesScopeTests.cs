@@ -267,6 +267,8 @@ public sealed class ChangedFilesScopeTests
     public async Task Changed_file_panel_uses_self_drawn_scope_and_grouped_branch_flyouts()
     {
         using var workspace = await CreateWorkspaceAsync();
+        // refs/remotes/origin/HEAD lists with the short name "origin"; it is an alias, never a selectable branch.
+        GitTestShell.RunChecked(workspace.WorkingDirectory, "remote", "set-head", "origin", "main");
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
 
         await session.Dispatch(
@@ -334,7 +336,11 @@ public sealed class ChangedFilesScopeTests
                 var branchFlyout = Assert.IsType<Flyout>(branchPicker.Flyout);
                 branchFlyout.ShowAt(branchPicker);
                 Settle(window);
-                var branchMenu = Assert.IsType<Border>(branchFlyout.Content);
+                // The compare-base picker and the new-branch dialog share one menu card: the flyout hosts a
+                // BranchPickerView bound to the picker's view model, with the menu Border/StackPanel inside it.
+                var branchView = Assert.IsType<BranchPickerView>(branchFlyout.Content);
+                Assert.Same(changes.Picker, branchView.DataContext);
+                var branchMenu = Assert.IsType<Border>(branchView.Content);
                 var branchStack = Assert.IsType<StackPanel>(branchMenu.Child);
                 var branchTexts = branchStack.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>()
                     .Select(static block => block.Text ?? string.Empty)
@@ -344,15 +350,22 @@ public sealed class ChangedFilesScopeTests
                 Assert.Single(branchStack.GetVisualDescendants().OfType<TextBox>());
                 Assert.Equal(changes.LocalBranches.Count, changes.VisibleLocalBranches.Count);
                 Assert.Equal(changes.RemoteBranches.Count, changes.VisibleRemoteGroups.Sum(static group => group.Branches.Count));
+                Assert.NotEmpty(changes.RemoteBranches);
+                Assert.All(changes.RemoteBranches, static choice => Assert.Contains('/', choice.Name));
+                Assert.All(changes.VisibleRemoteGroups, static group =>
+                    Assert.DoesNotContain(group.Branches, choice => choice.ShortName == group.Name));
                 Assert.Contains(branchStack.GetVisualDescendants().OfType<Button>(), button =>
                     AutomationProperties.GetAutomationId(button) == changes.RemoteBranches[0].AutomationId);
 
-                var remoteChoice = changes.RemoteBranches[0];
+                // Pick a branch other than the current base, so the assertion below proves the click changed something.
+                var remoteChoice = changes.RemoteBranches.Concat(changes.LocalBranches)
+                    .First(choice => choice.RefName != changes.SelectedBranch?.RefName);
                 var remoteButton = branchStack.GetVisualDescendants().OfType<Button>().Single(button =>
                     AutomationProperties.GetAutomationId(button) == remoteChoice.AutomationId);
                 Assert.Same(remoteChoice.SelectCommand, remoteButton.Command);
-                remoteButton.Command!.Execute(remoteButton.CommandParameter);
-                remoteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.NotEqual(remoteChoice.RefName, changes.SelectedBranch?.RefName);
+                // A real click: Click (which closes the flyout) is raised before the command runs, so the pick must survive it.
+                UserClick(remoteButton);
                 Settle(window);
                 Assert.False(branchFlyout.IsOpen);
                 Assert.Equal(remoteChoice.RefName, changes.SelectedBranch?.RefName);
@@ -360,8 +373,9 @@ public sealed class ChangedFilesScopeTests
                 scopeFlyout.ShowAt(scopePicker);
                 Settle(window);
                 var allButton = scopeStack.Children.OfType<Button>().First();
-                allButton.Command!.Execute(allButton.CommandParameter);
-                allButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.False(changes.IsAllChanges);
+                UserClick(allButton);
+                Settle(window);
                 await changes.LoadAsync(CancellationToken.None);
                 Settle(window);
                 Assert.True(changes.IsAllChanges);
@@ -508,6 +522,11 @@ public sealed class ChangedFilesScopeTests
             throw;
         }
     }
+
+    /// <summary>Clicks like a pointer or keyboard does (Click event, then Command), not by calling the command directly.</summary>
+    private static void UserClick(Button button) =>
+        Assert.IsAssignableFrom<Avalonia.Automation.Provider.IInvokeProvider>(
+            Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(button)).Invoke();
 
     private static void Settle(Window window)
     {

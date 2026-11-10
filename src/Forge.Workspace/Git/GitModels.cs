@@ -17,6 +17,21 @@ public sealed record GitStatusEntry(
     public bool IsUnstaged => Kind is GitStatusKind.Untracked || WorkTreeStatus is not GitEntryStatus.Unmodified;
 }
 
+/// <summary>What a checkout directory's HEAD points at; <see cref="NotRepository"/> also covers a directory git cannot read at all.</summary>
+public enum GitHeadKind { NotRepository, Branch, UnbornBranch, Detached }
+
+/// <summary>
+/// The branch a checkout directory has checked out. <see cref="Branch"/> is null only for
+/// <see cref="GitHeadKind.NotRepository"/> and <see cref="GitHeadKind.Detached"/>; an unborn branch (a fresh
+/// <c>git init</c> with no commit yet) still reports the name HEAD points at.
+/// </summary>
+public sealed record GitHead(GitHeadKind Kind, string? Branch)
+{
+    public static readonly GitHead NotRepository = new(GitHeadKind.NotRepository, null);
+
+    public static readonly GitHead Detached = new(GitHeadKind.Detached, null);
+}
+
 public sealed record GitBranch(string Name, string CommitId, bool IsCurrent, string? Upstream, DateTimeOffset? CommittedAt)
 {
     /// <summary>The unambiguous full ref name, e.g. <c>refs/heads/main</c> or <c>refs/remotes/origin/main</c>.</summary>

@@ -216,7 +216,8 @@ internal sealed record DiffFileSpec(
     bool Collapsed,
     bool MarkdownPreview,
     bool FullContext,
-    IReadOnlySet<int>? ExpandedFolds = null);
+    IReadOnlySet<int>? ExpandedFolds = null,
+    bool CanLoadContext = false);
 
 /// <summary>Turns file diffs into the placeholder-laden documents the diff editor shows. Pure; no UI types.</summary>
 internal static class DiffDocumentBuilder
@@ -253,12 +254,25 @@ internal static class DiffDocumentBuilder
         return (left.Chunk(), right?.Chunk());
     }
 
-    /// <summary>Keys of every fold the diff could show (folded or not), so expanded-fold state can be carried to a new diff.</summary>
+    /// <summary>
+    /// Keys of every fold the diff could show (folded or not), so expanded-fold state can be carried to a new diff. A fold's
+    /// key is the new-side number of its first hidden line, so the bar for the unloaded stretch between two 3-line-context
+    /// hunks and the fold of the same stretch in the whole-file diff share a key.
+    /// </summary>
     public static HashSet<int> FoldKeys(FileDiff diff)
     {
         var keys = new HashSet<int>();
+        var prevLast = 0;
         foreach (var hunk in diff.Hunks)
         {
+            var first = hunk.NewCount == 0 ? hunk.NewStart + 1 : hunk.NewStart;
+            if (first - prevLast - 1 > 0)
+            {
+                keys.Add(prevLast + 1);
+            }
+
+            prevLast = hunk.NewCount == 0 ? hunk.NewStart : hunk.NewEnd;
+
             var lines = hunk.Lines;
             var seenChange = false;
             var i = 0;
@@ -347,7 +361,12 @@ internal static class DiffDocumentBuilder
             var gap = first - prevLast - 1;
             if (gap > 0)
             {
-                AddBoth(left, right, new DiffRow(DiffRowKind.Fold, file, Hunk: h, Count: gap), PlaceholderText);
+                // Lines git did not send: the bar opens by loading the whole file (same key as that stretch's fold there).
+                AddBoth(
+                    left,
+                    right,
+                    new DiffRow(DiffRowKind.Fold, file, Hunk: h, Count: gap, Key: prevLast + 1, Expandable: spec.CanLoadContext),
+                    PlaceholderText);
             }
 
             prevLast = hunk.NewCount == 0 ? hunk.NewStart : hunk.NewEnd;

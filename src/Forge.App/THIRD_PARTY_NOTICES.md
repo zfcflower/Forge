@@ -20,7 +20,7 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `circle`,
   `circle_half_fill`, `cloud_arrow_down`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,
   `edit`, `folder`,
-  `folder_add`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
+  `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
   filled), `plug_connected`, `save`, `search`, `send`, `settings`, `shield_checkmark`, `sparkle`, `square`,
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`.
 - One icon comes from the 20 px set: `panel_bottom` exists only at 20 px, so its path was scaled by 24/20 about the grid

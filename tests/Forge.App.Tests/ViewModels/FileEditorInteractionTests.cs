@@ -245,6 +245,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         public Task<string?> PickFolderAsync(string title) => Task.FromResult<string?>(null);
         public Task<bool> ConfirmAsync(string title, string message, string confirmText, string cancelText) => Task.FromResult(Answer(++Calls));
         public Task<string?> PromptTextAsync(string title, string initial) => Task.FromResult<string?>(null);
+        public Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct) => Task.FromResult<NewBranchChoice?>(null);
     }
 
     private string NewRoot()

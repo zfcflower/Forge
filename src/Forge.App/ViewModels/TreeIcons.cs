@@ -40,6 +40,12 @@ internal static class TreeIcons
 
     public static Geometry Worktree => Set.Worktree;
 
+    /// <summary>
+    /// The repository root checkout: Fluent <c>home_garage</c>, a house with a garage door. A worktree row wears the branch
+    /// glyph, so the project's own checkout needs a shape of its own rather than a second worktree branch.
+    /// </summary>
+    public static Geometry MainCheckout => Set.MainCheckout;
+
     public static Geometry History => Set.History;
 
     public static Geometry Session => Set.Session;
@@ -97,6 +103,9 @@ internal static class TreeIcons
         public Geometry NewBranch { get; } = Parse("M4 5.5a3.5 3.5 0 1 1 4.49 3.36 5.5 5.5 0 0 0 5.26 3.89h.33a3.5 3.5 0 1 1 0 1.5h-.33a7 7 0 0 1-5.5-2.67v3.5a3.5 3.5 0 1 1-1.5 0V8.92A3.5 3.5 0 0 1 4 5.5m3.5-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m0 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4m8-3a2 2 0 1 0 4 0 2 2 0 0 0-4 0");
 
         public Geometry Worktree { get; } = Parse("M11 5.5a3.5 3.5 0 0 1-3 3.46v2.54h6.25c1.24 0 2.25-1 2.25-2.25v-.4a3.5 3.5 0 1 1 1.5.11v.29A3.75 3.75 0 0 1 14.25 13H8v2.04a3.5 3.5 0 1 1-1.5.1V8.86A3.5 3.5 0 1 1 11 5.5m-3.5 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4m10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4m-8 11a2 2 0 1 0-4 0 2 2 0 0 0 4 0");
+
+        /// <summary>The repository root checkout: the same Fluent <c>home_garage</c> shape the icon table carries.</summary>
+        public Geometry MainCheckout { get; } = Parse("M11.51 3.68 4.76 9.4a.8.8 0 0 0-.26.57v9.27c0 .14.11.25.25.25H7v-5.25c0-.97.78-1.75 1.75-1.75h6.5c.97 0 1.75.78 1.75 1.75v5.25h2.25q.23-.02.25-.25V9.98q-.01-.35-.26-.57l-6.75-5.73a.75.75 0 0 0-.98 0M8.5 17.5v2h7v-2zm7-1.5v-1.75a.25.25 0 0 0-.25-.25h-6.5a.25.25 0 0 0-.25.25V16zM4.75 21C3.78 21 3 20.22 3 19.25V9.98c0-.66.29-1.3.8-1.72l6.74-5.73a2.25 2.25 0 0 1 2.92 0l6.75 5.73c.5.43.79 1.06.79 1.72v9.27c0 .97-.78 1.75-1.75 1.75z");
 
         public Geometry History { get; } = Parse("M12 4.5a7.5 7.5 0 1 1-7.42 6.4c.07-.46-.26-.9-.72-.9-.37 0-.7.26-.76.62Q3 11.3 3 12a9 9 0 1 0 3-6.7V4.24a.75.75 0 0 0-1.5 0v3c0 .41.34.75.75.75h3a.75.75 0 0 0 0-1.5H6.9a7.5 7.5 0 0 1 5.1-2m.5 3.25a.75.75 0 0 0-1.5 0v4.5c0 .41.34.75.75.75h3a.75.75 0 0 0 0-1.5H12.5z");
 

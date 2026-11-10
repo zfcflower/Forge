@@ -20,13 +20,14 @@ public sealed record RevertResult(RevertOutcome Outcome, string? Detail = null)
 
 /// <summary>
 /// Reverts change blocks in the working tree by plain file edits (no git apply): the block's new-side lines are located
-/// in the current file (expected position first, else a unique match within ±200 lines) and replaced with its old-side
+/// in the current file (expected position first, else the unique match anywhere in the file, using the diff's surrounding context lines as an
+/// anchor to disambiguate short blocks; zero or several candidates fail) and replaced with its old-side
 /// lines. Line endings (dominant LF/CRLF) and the trailing-newline state of the file are preserved; writes go through
 /// <c>Forge.IO.AtomicFile</c>. Paths are relative to <paramref name="repositoryRoot"/> (git diff paths).
 /// </summary>
 public static class ChangeBlockReverter
 {
-    private const int DriftWindow = 200;
+    private const int ContextLimit = 3;
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
@@ -268,48 +269,91 @@ public static class ChangeBlockReverter
             replacement[i] = TrimCr(block.OldLines[i]);
         }
 
-        if (block.NewLines.Count > 0)
-        {
-            var start = FindUnique(block.NewStart - 1, position => MatchesBlock(file, position, block.NewLines));
-            return start < 0 ? null : new Edit(start, start + block.NewLines.Count, replacement, FinalNoEol(diff, block));
-        }
-
-        // Pure deletion: re-insert the old lines between the context lines that surrounded the gap in the diff.
-        string? before = null;
-        string? after = null;
+        // Context lines the diff shows directly around the block (new-file numbering), used to anchor short blocks.
+        var context = new Dictionary<int, string>();
         foreach (var hunk in diff.Hunks)
         {
             foreach (var line in hunk.Lines)
             {
-                if (line.Kind != DiffLineKind.Context)
+                if (line.Kind == DiffLineKind.Context)
                 {
-                    continue;
-                }
-
-                if (block.NewStart >= 1 && line.NewLineNumber == block.NewStart)
-                {
-                    before = line.Text;
-                }
-                else if (line.NewLineNumber == block.NewStart + 1)
-                {
-                    after = line.Text;
+                    context[line.NewLineNumber] = line.Text;
                 }
             }
         }
 
-        if (before is null && after is null)
+        if (block.NewLines.Count > 0)
+        {
+            var before = Surrounding(context, block.NewStart - 1, -1);
+            var after = Surrounding(context, block.NewEnd + 1, 1);
+            var expected = block.NewLines;
+            var start = Locate(
+                block.NewStart - 1,
+                position => MatchesBlock(file, position, expected) && MatchesAround(file, position, expected.Count, before, after),
+                position => MatchesBlock(file, position, expected),
+                file.Lines.Count - expected.Count);
+            return start < 0 ? null : new Edit(start, start + expected.Count, replacement, FinalNoEol(diff, block));
+        }
+
+        // Pure deletion: re-insert the old lines between the context lines that surrounded the gap in the diff.
+        var beforeLines = Surrounding(context, block.NewStart, -1);
+        var afterLines = Surrounding(context, block.NewStart + 1, 1);
+        if (beforeLines.Length == 0 && afterLines.Length == 0)
         {
             return null;
         }
 
-        var point = FindUnique(
+        var point = Locate(
             block.NewStart,
-            position =>
-                position >= 0 &&
-                position <= file.Lines.Count &&
-                (before is null || (position >= 1 && Same(file.Lines[position - 1], before))) &&
-                (after is null || (position < file.Lines.Count && Same(file.Lines[position], after))));
+            position => position >= 0 && position <= file.Lines.Count && MatchesAround(file, position, 0, beforeLines, afterLines),
+            null,
+            file.Lines.Count);
         return point < 0 ? null : new Edit(point, point, replacement, FinalNoEol(diff, block));
+    }
+
+    /// <summary>Up to <see cref="ContextLimit"/> contiguous context lines from <paramref name="first"/> walking in <paramref name="step"/> direction, returned in file order.</summary>
+    private static string[] Surrounding(Dictionary<int, string> context, int first, int step)
+    {
+        var found = new List<string>(ContextLimit);
+        for (var number = first; found.Count < ContextLimit && context.TryGetValue(number, out var text); number += step)
+        {
+            found.Add(text);
+        }
+
+        if (step < 0)
+        {
+            found.Reverse();
+        }
+
+        return [.. found];
+    }
+
+    /// <summary>The context before / after a block that starts at <paramref name="position"/> and spans <paramref name="count"/> lines also matches.</summary>
+    private static bool MatchesAround(TextFile file, int position, int count, string[] before, string[] after)
+    {
+        var from = position - before.Length;
+        if (from < 0 || position + count + after.Length > file.Lines.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < before.Length; i++)
+        {
+            if (!Same(file.Lines[from + i], before[i]))
+            {
+                return false;
+            }
+        }
+
+        for (var i = 0; i < after.Length; i++)
+        {
+            if (!Same(file.Lines[position + count + i], after[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool MatchesBlock(TextFile file, int position, IReadOnlyList<string> expected)
@@ -330,29 +374,52 @@ public static class ChangeBlockReverter
         return true;
     }
 
-    /// <summary>The expected position if it matches, else the only matching position within the drift window, else -1.</summary>
-    private static int FindUnique(int expected, Func<int, bool> matches)
+    /// <summary>
+    /// Finds where to edit. 1) the expected position if block and context match there; 2) otherwise the only position in the
+    /// whole file where block and context match (several = ambiguous = fail); 3) with no anchored match, the expected position
+    /// if the block text alone matches (context edited nearby), else the only block-text match in the whole file. Never guesses.
+    /// </summary>
+    private static int Locate(int expected, Func<int, bool> anchored, Func<int, bool>? blockOnly, int last)
     {
-        if (matches(expected))
+        if (anchored(expected))
         {
             return expected;
         }
 
         var found = -1;
-        for (var distance = 1; distance <= DriftWindow; distance++)
+        for (var candidate = 0; candidate <= last; candidate++)
         {
-            for (var side = 0; side < 2; side++)
+            if (anchored(candidate))
             {
-                var candidate = side == 0 ? expected - distance : expected + distance;
-                if (candidate >= 0 && matches(candidate))
+                if (found >= 0)
                 {
-                    if (found >= 0)
-                    {
-                        return -1;
-                    }
-
-                    found = candidate;
+                    return -1;
                 }
+
+                found = candidate;
+            }
+        }
+
+        if (found >= 0 || blockOnly is null)
+        {
+            return found;
+        }
+
+        if (blockOnly(expected))
+        {
+            return expected;
+        }
+
+        for (var candidate = 0; candidate <= last; candidate++)
+        {
+            if (blockOnly(candidate))
+            {
+                if (found >= 0)
+                {
+                    return -1;
+                }
+
+                found = candidate;
             }
         }
 

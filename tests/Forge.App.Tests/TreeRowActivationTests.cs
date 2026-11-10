@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.ViewModels;
 using Forge.App.Views;
+using Forge.Workspace;
 using Xunit;
 
 namespace Forge.App.Tests;
@@ -74,9 +75,11 @@ public sealed class TreeRowActivationTests
             projects: null!,
             catalog: null!,
             worktrees: null!,
+            readHead: (_, _) => Task.FromResult(new GitHead(GitHeadKind.Branch, "main")),
             openSession: (_, _) => Task.CompletedTask,
             createConfirmed: _ => Task.FromResult(false),
             promptText: (_, _) => Task.FromResult<string?>(null),
+            pickNewBranch: (_, _) => Task.FromResult<NewBranchChoice?>(null),
             reveal: _ => Task.CompletedTask,
             addProject: _ => Task.CompletedTask);
         tree.Rows.ReplaceAll([parent, child]);
@@ -105,9 +108,11 @@ public sealed class TreeRowActivationTests
             projects: null!,
             catalog: null!,
             worktrees: null!,
+            readHead: (_, _) => Task.FromResult(new GitHead(GitHeadKind.Branch, "main")),
             openSession: (_, _) => Task.CompletedTask,
             createConfirmed: _ => Task.FromResult(false),
             promptText: (_, _) => Task.FromResult<string?>(null),
+            pickNewBranch: (_, _) => Task.FromResult<NewBranchChoice?>(null),
             reveal: _ => Task.CompletedTask,
             addProject: _ => Task.CompletedTask);
         tree.Rows.ReplaceAll([node]);

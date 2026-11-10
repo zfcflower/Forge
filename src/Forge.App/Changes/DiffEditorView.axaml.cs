@@ -277,6 +277,13 @@ internal sealed partial class DiffEditorView : UserControl
                 if (folds.Count > 0)
                 {
                     expanded[item] = folds;
+
+                    // Stretches the user had opened are not loaded in the reread diff: load them again (the Diff change
+                    // rebuilds just this file).
+                    if (!item.HasFullContext && item.CanLoadContext)
+                    {
+                        _ = item.LoadFullContextAsync();
+                    }
                 }
             }
         }
@@ -390,7 +397,7 @@ internal sealed partial class DiffEditorView : UserControl
             var item = items[i];
             expanded.TryGetValue(item, out var folds);
             var preview = factory is not null && item.IsMarkdown && item.IsMarkdownPreview;
-            specs.Add(new DiffFileSpec(item.Diff, item.IsCollapsed, preview, item.HasFullContext, folds));
+            specs.Add(new DiffFileSpec(item.Diff, item.IsCollapsed, preview, item.HasFullContext, folds, item.CanLoadContext));
             embedHeights[i] = preview && !item.IsCollapsed ? MeasureEmbed(item, factory!, widths) : 0;
         }
 
@@ -436,12 +443,52 @@ internal sealed partial class DiffEditorView : UserControl
 
     private bool IsDark() => EditorSettings.Current.IsDarkTheme(ActualThemeVariant == Avalonia.Styling.ThemeVariant.Dark);
 
-    private double MeasureEmbed(IDiffFileItem item, Func<IDiffFileItem, Control> factory, double width)
+    /// <summary>
+    /// The height the preview row must reserve. Measured the way the overlay will place it: inside the overlay layer (so the
+    /// view's md-* styles, fonts and resources apply; a detached control measures unstyled and too short, which showed as a
+    /// clipped preview on the first frame) and at the overlay's width (the text area span, not the whole view).
+    /// </summary>
+    private double MeasureEmbed(IDiffFileItem item, Func<IDiffFileItem, Control> factory, double fallbackWidth)
     {
         var embed = EmbedFor(item, factory);
-        embed.Width = width;
-        embed.Measure(new Size(width, double.PositiveInfinity));
-        return embed.DesiredSize.Height;
+        var width = OverlayWidth() ?? fallbackWidth;
+        var borrowed = embed.Parent is null && attached;
+        if (borrowed)
+        {
+            embed.Opacity = 0;
+            OverlayLayer.Children.Add(embed);
+        }
+
+        try
+        {
+            embed.Width = width;
+            embed.Measure(new Size(width, double.PositiveInfinity));
+            return embed.DesiredSize.Height;
+        }
+        finally
+        {
+            if (borrowed)
+            {
+                OverlayLayer.Children.Remove(embed);
+                embed.Opacity = 1;
+            }
+        }
+    }
+
+    /// <summary>The width overlay controls get (left edge of the first text view to the right edge of the visible one).</summary>
+    private double? OverlayWidth()
+    {
+        var textView = primary.Editor.TextArea.TextView;
+        var visibleView = split ? secondary.Editor.TextArea.TextView : textView;
+        if (!attached || visibleView.Bounds.Width <= 0
+            || textView.TranslatePoint(default, OverlayLayer) is not { } origin
+            || visibleView.TranslatePoint(new Point(visibleView.Bounds.Width, 0), OverlayLayer) is not { } rightEdge)
+        {
+            return null;
+        }
+
+        var width = rightEdge.X - origin.X;
+        return width > 0 ? width : null;
     }
 
     /// <summary>
@@ -472,7 +519,7 @@ internal sealed partial class DiffEditorView : UserControl
                 expanded.TryGetValue(item, out var folds);
                 var preview = factory is not null && item.IsMarkdown && item.IsMarkdownPreview;
                 embedHeights[file] = preview && !item.IsCollapsed ? MeasureEmbed(item, factory!, width) : 0;
-                var spec = new DiffFileSpec(item.Diff, item.IsCollapsed, preview, item.HasFullContext, folds);
+                var spec = new DiffFileSpec(item.Diff, item.IsCollapsed, preview, item.HasFullContext, folds, item.CanLoadContext);
                 var (left, right) = DiffDocumentBuilder.BuildOne(spec, file, split);
                 FilesBuilt++;
                 diffs[file] = item.Diff;
@@ -1071,6 +1118,13 @@ internal sealed partial class DiffEditorView : UserControl
         }
 
         set.Add(fold.Key);
+        if (!item.HasFullContext)
+        {
+            // An unloaded stretch: the whole file is read first; its Diff change rebuilds this file with the fold open.
+            _ = item.LoadFullContextAsync();
+            return;
+        }
+
         dirty.Add(fold.FileIndex);
         RebuildFiles();
     }

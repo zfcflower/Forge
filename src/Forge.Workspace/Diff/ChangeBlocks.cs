@@ -8,7 +8,9 @@ namespace Forge.Workspace;
 /// blocks). <see cref="OldStart"/>/<see cref="NewStart"/> are 1-based; when a side has no lines the start is the line the
 /// block sits after on that side (0 = before the first line), matching git's zero-count hunk convention.
 /// <see cref="Hash"/> is content-addressed (path + the block's -/+ lines), so it identifies "the same change" across reloads
-/// and stops matching as soon as the change itself differs.
+/// and stops matching as soon as the change itself differs. Within one file, identical blocks are told apart by their
+/// occurrence ordinal: the first block with a given content hash keeps the plain content hash (so stored marks of
+/// non-duplicated blocks stay valid), the 2nd, 3rd... mix their 1-based occurrence number among identical blocks into it.
 /// </summary>
 public sealed record ChangeBlock(
     int Index,
@@ -36,6 +38,7 @@ public static class DiffBlocks
         ArgumentNullException.ThrowIfNull(diff);
         var blocks = new List<ChangeBlock>();
         var path = diff.Path.Replace('\\', '/');
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var hunk in diff.Hunks)
         {
             // Running positions: the last old/new line number seen so far inside this hunk.
@@ -55,13 +58,21 @@ public static class DiffBlocks
 
                 IReadOnlyList<string> removed = oldLines ?? [];
                 IReadOnlyList<string> added = newLines ?? [];
+                var hash = HashOf(path, removed, added);
+                var occurrence = seen.GetValueOrDefault(hash) + 1;
+                seen[hash] = occurrence;
+                if (occurrence > 1)
+                {
+                    hash = Hex(hash + "#" + occurrence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+
                 blocks.Add(new ChangeBlock(
                     blocks.Count,
                     removed.Count == 0 ? lastOld : blockOldStart,
                     removed,
                     added.Count == 0 ? lastNew : blockNewStart,
                     added,
-                    HashOf(path, removed, added)));
+                    hash));
                 oldLines = null;
                 newLines = null;
             }

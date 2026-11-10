@@ -11,9 +11,9 @@ namespace Forge.App.Tests.Git;
 
 /// <summary>
 /// Pins the failure edges of the "new session on a repository project" flow that
-/// <see cref="ProjectTreeBranchPromptTests"/> does not cover:
+/// <see cref="ProjectTreeNewBranchFlowTests"/> does not cover:
 /// <list type="bullet">
-/// <item>a cancellation between the branch prompt and the creation creates neither a worktree nor a session row, and an
+/// <item>a cancellation between the branch dialog and the creation creates neither a worktree nor a session row, and an
 /// otherwise identical call that is not cancelled does create them (so the first assertion cannot pass vacuously);</item>
 /// <item>an invalid branch name is reported with the fixed localized message and never with the raw
 /// <see cref="ArgumentException"/> text, whose <c>(Parameter 'x')</c> suffix leaks the parameter name to the user;</item>
@@ -43,7 +43,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         var outcome = await session.Dispatch(
             async () =>
             {
-                using var world = World.Create(repo, new RecordingCatalog(), _ => Task.FromResult<string?>(typed));
+                using var world = World.Create(repo, new RecordingCatalog(), (_, _) => Task.FromResult<NewBranchChoice?>(new NewBranchChoice("main", typed)));
                 await world.Tree.RefreshAsync(CancellationToken.None);
                 var baseline = world.Tree.StatusText;
 
@@ -79,7 +79,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         var outcome = await session.Dispatch(
             async () =>
             {
-                using var world = World.Create(repo, new RecordingCatalog(), _ => Task.FromResult<string?>("taken"));
+                using var world = World.Create(repo, new RecordingCatalog(), (_, _) => Task.FromResult<NewBranchChoice?>(new NewBranchChoice("main", "taken")));
                 await world.Tree.RefreshAsync(CancellationToken.None);
                 var baseline = world.Tree.StatusText;
 
@@ -115,12 +115,12 @@ public sealed class ProjectTreeWorktreeSessionTests
                 using var world = World.Create(
                     repo,
                     new RecordingCatalog(),
-                    _ =>
+                    (_, _) =>
                     {
-                        // The flow is cancelled while the prompt is open (the window closed under it); the answer
+                        // The flow is cancelled while the dialog is open (the window closed under it); the answer
                         // that arrives afterwards must not be acted upon.
                         cancellation.Cancel();
-                        return Task.FromResult<string?>("feature/never-created");
+                        return Task.FromResult<NewBranchChoice?>(new NewBranchChoice("main", "feature/never-created"));
                     });
 
                 var task = world.InvokeCreateWorktreeSession(cancellation.Token);
@@ -150,7 +150,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         var outcome = await session.Dispatch(
             async () =>
             {
-                using var world = World.Create(repo, new RecordingCatalog(), _ => Task.FromResult<string?>("feature/created"));
+                using var world = World.Create(repo, new RecordingCatalog(), (_, _) => Task.FromResult<NewBranchChoice?>(new NewBranchChoice("main", "feature/created")));
 
                 await world.InvokeCreateWorktreeSession(CancellationToken.None);
 
@@ -189,7 +189,7 @@ public sealed class ProjectTreeWorktreeSessionTests
                 };
 
                 var catalog = new RecordingCatalog { Failure = Failure };
-                using var world = World.Create(repo, catalog, _ => Task.FromResult<string?>("feature/orphan"));
+                using var world = World.Create(repo, catalog, (_, _) => Task.FromResult<NewBranchChoice?>(new NewBranchChoice("main", "feature/orphan")));
                 await world.Tree.RefreshAsync(CancellationToken.None);
                 var baseline = world.Tree.StatusText;
 
@@ -269,7 +269,7 @@ public sealed class ProjectTreeWorktreeSessionTests
 
         public WorktreeService Worktrees { get; }
 
-        public static World Create(string repositoryRoot, RecordingCatalog catalog, Func<string, Task<string?>> answer)
+        public static World Create(string repositoryRoot, RecordingCatalog catalog, Func<NewBranchRequest, CancellationToken, Task<NewBranchChoice?>> answer)
         {
             var project = new ProjectInfo(ProjectId, "repo", repositoryRoot, ProjectKind.Repository, 0, DateTimeOffset.UtcNow);
             var worktrees = new WorktreeService(new GitCli());
@@ -277,13 +277,15 @@ public sealed class ProjectTreeWorktreeSessionTests
                 new SingleProjectRegistry(project),
                 catalog,
                 worktrees,
+                (_, _) => Task.FromResult(new GitHead(GitHeadKind.Branch, "main")),
                 (_, _) => Task.CompletedTask,
                 async factory =>
                 {
                     await factory(CancellationToken.None);
                     return true;
                 },
-                (_, initial) => answer(initial),
+                (_, _) => Task.FromResult<string?>(null),
+                answer,
                 _ => Task.CompletedTask,
                 _ => Task.CompletedTask);
             return new World(project, tree, catalog, worktrees);
@@ -301,7 +303,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         }
 
         /// <summary>
-        /// The command always runs with <see cref="CancellationToken.None"/>, so a cancellation between the prompt and the
+        /// The command always runs with <see cref="CancellationToken.None"/>, so a cancellation between the dialog and the
         /// creation can only be driven by calling the private flow directly.
         /// </summary>
         public Task InvokeCreateWorktreeSession(CancellationToken ct) =>

@@ -83,6 +83,18 @@ public sealed class DiffDocumentBuilderTests
     }
 
     [Fact]
+    public void A_gap_that_can_be_loaded_is_expandable_and_keyed_like_the_whole_file_fold()
+    {
+        var diff = DiffFixtures.TwoHunks("a.cs");
+        var map = DiffDocumentBuilder.Build([new DiffFileSpec(diff, false, false, false, null, CanLoadContext: true)], false).Primary.Map;
+        Assert.Equal(DiffRowKind.Fold, map[8].Kind);
+
+        // The first hidden new-side line (6) is the key the same stretch's fold has once the whole file is loaded.
+        Assert.Equal((21, 6, true), (map[8].Count, map[8].Key, map[8].Expandable));
+        Assert.Contains(6, DiffDocumentBuilder.FoldKeys(diff));
+    }
+
+    [Fact]
     public void Each_change_block_gets_one_bar_numbered_like_DiffBlocks_Split()
     {
         var diff = DiffFixtures.TwoHunks("a.cs");

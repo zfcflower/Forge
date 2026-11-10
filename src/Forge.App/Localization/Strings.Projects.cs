@@ -21,6 +21,21 @@ internal static class ProjectStrings
     public const string ArchivedSubtitleKey = "project.archivedSubtitle";
     public const string RunningLabelKey = "project.running";
     public const string TreeNameKey = "project.treeName";
+    public const string MainCheckoutDetachedKey = "project.mainCheckout.detached";
+
+    // ---------------------------------------------------------------- the new-branch dialog
+    public const string NewBranchTitleKey = "project.newBranch.title";
+    public const string NewBranchBaseLabelKey = "project.newBranch.baseLabel";
+    public const string NewBranchNameLabelKey = "project.newBranch.nameLabel";
+    public const string NewBranchNamePlaceholderKey = "project.newBranch.namePlaceholder";
+    public const string NewBranchCreateKey = "project.newBranch.create";
+    public const string NewBranchCancelKey = "project.newBranch.cancel";
+    public const string NewBranchNameRequiredKey = "project.newBranch.nameRequired";
+    public const string NewBranchNameInvalidKey = "project.newBranch.nameInvalid";
+    public const string NewBranchNameTakenKey = "project.newBranch.nameTaken";
+    public const string NewBranchLoadingKey = "project.newBranch.loading";
+    public const string NewBranchNoBaseKey = "project.newBranch.noBase";
+    public const string NewBranchBasePlaceholderKey = "project.newBranch.basePlaceholder";
 
     // ---------------------------------------------------------------- default session titles (generated once, at creation)
     public const string GeneralSessionTitleKey = "project.sessionTitle.general";
@@ -95,6 +110,20 @@ internal static class ProjectStrings
         Loc.Register(AddProjectTooltipKey, "添加一个 git 仓库作为项目", "Add a git repository as a project");
         Loc.Register(NewBranchTooltipKey, "在该项目中新建分支", "New branch in this project");
         Loc.Register(NewGeneralSessionTooltipKey, "新建常规对话", "New general chat");
+        Loc.Register(MainCheckoutDetachedKey, "游离 HEAD", "Detached HEAD");
+
+        Loc.Register(NewBranchTitleKey, "新建分支", "New branch");
+        Loc.Register(NewBranchBaseLabelKey, "基于分支", "Start from");
+        Loc.Register(NewBranchNameLabelKey, "分支名称", "Branch name");
+        Loc.Register(NewBranchNamePlaceholderKey, "分支名称", "Branch name");
+        Loc.Register(NewBranchCreateKey, "创建", "Create");
+        Loc.Register(NewBranchCancelKey, "取消", "Cancel");
+        Loc.Register(NewBranchNameRequiredKey, "请输入分支名称", "Enter a branch name");
+        Loc.Register(NewBranchNameInvalidKey, "不是合法的分支名", "Not a valid branch name");
+        Loc.Register(NewBranchNameTakenKey, "已有同名分支", "A branch with that name already exists");
+        Loc.Register(NewBranchLoadingKey, "正在读取分支…", "Loading branches…");
+        Loc.Register(NewBranchNoBaseKey, "没有可用的分支", "No branches available");
+        Loc.Register(NewBranchBasePlaceholderKey, "选择分支", "Choose a branch");
     }
 
     // ---------------------------------------------------------------- accessors: the general section and the tree rows
@@ -120,6 +149,35 @@ internal static class ProjectStrings
 
     /// <summary>The accessible name of the tree itself.</summary>
     public static string TreeName => Loc.Instance[TreeNameKey];
+
+    /// <summary>The main checkout row's label when the repository's HEAD is detached from every branch.</summary>
+    public static string MainCheckoutDetached => Loc.Instance[MainCheckoutDetachedKey];
+
+    // ---------------------------------------------------------------- accessors: the new-branch dialog
+
+    public static string NewBranchTitle => Loc.Instance[NewBranchTitleKey];
+
+    public static string NewBranchBaseLabel => Loc.Instance[NewBranchBaseLabelKey];
+
+    public static string NewBranchNameLabel => Loc.Instance[NewBranchNameLabelKey];
+
+    public static string NewBranchNamePlaceholder => Loc.Instance[NewBranchNamePlaceholderKey];
+
+    public static string NewBranchCreate => Loc.Instance[NewBranchCreateKey];
+
+    public static string NewBranchCancel => Loc.Instance[NewBranchCancelKey];
+
+    public static string NewBranchNameRequired => Loc.Instance[NewBranchNameRequiredKey];
+
+    public static string NewBranchNameInvalid => Loc.Instance[NewBranchNameInvalidKey];
+
+    public static string NewBranchNameTaken => Loc.Instance[NewBranchNameTakenKey];
+
+    public static string NewBranchLoading => Loc.Instance[NewBranchLoadingKey];
+
+    public static string NewBranchNoBase => Loc.Instance[NewBranchNoBaseKey];
+
+    public static string NewBranchBasePlaceholder => Loc.Instance[NewBranchBasePlaceholderKey];
 
     // ---------------------------------------------------------------- accessors: default session titles
 

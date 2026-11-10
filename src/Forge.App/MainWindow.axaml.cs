@@ -5,7 +5,9 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
+using Forge.App.Views;
 using Forge.App.Workbench.Controls;
+using Forge.Workspace;
 
 namespace Forge.App;
 
@@ -170,7 +172,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        viewModel.AttachDialogs(new ShellDialogs(this));
+        viewModel.AttachDialogs(new ShellDialogs(this, viewModel.GitClient));
         _ = InitializeAsync(viewModel);
     }
 
@@ -206,9 +208,20 @@ public partial class MainWindow : Window
     }
 }
 
-/// <summary>Folder picker plus the two small modal windows the shell needs.</summary>
-internal sealed class ShellDialogs(Window owner) : IDialogService
+/// <summary>Folder picker plus the small modal windows the shell needs: confirms, text prompts and the new-branch dialog.</summary>
+internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
 {
+    /// <summary>
+    /// The new-branch dialog: it owns the branch list and the name validation, so the shell only wires the view model to a
+    /// window and waits for the answer. Cancelled and closed dialogs both come back as null, and nothing is created.
+    /// </summary>
+    public async Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct)
+    {
+        var model = new NewBranchDialogViewModel(git, request, ct);
+        var dialog = new NewBranchDialog { DataContext = model };
+        return await dialog.ShowDialog<NewBranchChoice?>(owner).ConfigureAwait(true);
+    }
+
     public async Task<string?> PickFolderAsync(string title)
     {
         var top = TopLevel.GetTopLevel(owner);
