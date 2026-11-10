@@ -117,7 +117,7 @@ public sealed class WorkbenchInteractionRegressionTests
 
     [Theory]
     [InlineData("project", "projects")]
-    [InlineData("project", "git-panel")]
+    [InlineData("project", "general-chats")]
     [InlineData("main", "main")]
     [InlineData("main", "bottom")]
     [InlineData("inspector", "files")]
@@ -208,7 +208,7 @@ public sealed class WorkbenchInteractionRegressionTests
     public Task Every_panel_title_bar_uses_one_chrome_colour_that_differs_from_its_body(bool dark, bool swapped) => Ui(() =>
     {
         var o = new object();
-        var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o), Wide);
+        var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o, o), Wide);
         WorkbenchUi.OpenPreviewTab(scene);
         WorkbenchUi.OpenBottomTab(scene);
         if (swapped)
@@ -220,7 +220,7 @@ public sealed class WorkbenchInteractionRegressionTests
         WorkbenchUi.Settle(scene.Window);
         var titles = new List<Color>();
         // Side panels, the main region and its bottom group: one chrome colour, whichever region a panel lives in.
-        foreach (var id in new[] { "projects", "git-panel", "main", "bottom", "files", "inspector-tools", "preview" })
+        foreach (var id in new[] { "projects", "general-chats", "git-panel", "main", "bottom", "files", "inspector-tools", "preview" })
         {
             var chrome = Chrome(scene, id);
             var bar = chrome.GetVisualDescendants().OfType<Border>().First(b => b.Name == "PART_TitleBar");
@@ -297,7 +297,7 @@ public sealed class WorkbenchInteractionRegressionTests
         if (scenario == "project")
         {
             var o = new object();
-            return (WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o), Wide), RegionRole.Project);
+            return (WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, generalContent: o), Wide), RegionRole.Project);
         }
 
         var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout(), Wide);
@@ -317,7 +317,7 @@ public sealed class WorkbenchInteractionRegressionTests
 
     private static string[] IdsOf(string scenario) => scenario switch
     {
-        "project" => new[] { "projects", "git-panel" },
+        "project" => new[] { "projects", "general-chats" },
         "main" => new[] { "main", "bottom" },
         "inspector+preview" => new[] { "preview", "files", "inspector-tools" },
         _ => new[] { "files", "inspector-tools" },

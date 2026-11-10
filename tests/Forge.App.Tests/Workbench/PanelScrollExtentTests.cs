@@ -22,7 +22,7 @@ public sealed class PanelScrollExtentTests
     {
         foreach (var list in new[] { false, true })
         {
-            foreach (var panel in new[] { "project", "git", "main", "bottom", "files", "tools", "preview" })
+            foreach (var panel in new[] { "project", "main", "bottom", "files", "tools", "preview" })
             {
                 foreach (var state in new[] { "split", "resize", "splitter", "peer-minimized", "window-restore" })
                 {
@@ -79,8 +79,7 @@ public sealed class PanelScrollExtentTests
                 panel == "project" ? content : new object(),
                 panel == "files" ? content : new object(),
                 panel == "tools" ? content : new object(),
-                new object(), new object(),
-                panel == "git" ? content : new object());
+                new object(), new object());
             layout.OpenTab(layout.MainTabs, "scroll-main", TabKind.Session,
                 panel == "main" ? content : new object(), "Main");
             layout.OpenTab(layout.BottomTabs, "scroll-bottom", TabKind.SubAgent,
@@ -90,7 +89,6 @@ public sealed class PanelScrollExtentTests
             var model = panel switch
             {
                 "project" => layout.ProjectPanel,
-                "git" => layout.Project.Panels.Single(p => p.Id == WorkbenchIds.GitPanel),
                 "main" => layout.MainTabs,
                 "bottom" => layout.BottomTabs,
                 "files" => layout.FilesPanel,

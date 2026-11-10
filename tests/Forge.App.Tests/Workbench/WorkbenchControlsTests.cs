@@ -847,23 +847,23 @@ public sealed class WorkbenchControlsTests
         var geometry = await WorkbenchUi.QueryAsync(session, () =>
         {
             var o = new object();
-            var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o));
+            var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, generalContent: o));
             scene.Window.RequestedThemeVariant = ThemeVariant.Light;
             WorkbenchUi.Settle(scene.Window);
             var presenter = WorkbenchUi.Region(scene.Window, RegionRole.Project);
             var project = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(ProjectPanelId));
-            var git = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId("git-panel"));
+            var general = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(WorkbenchIds.GeneralPanel));
             var gapTop = project.Bounds.Y + project.Bounds.Height;
             var line = presenter.GetVisualChildren()
                 .OfType<Border>()
                 .FirstOrDefault(border => border.Bounds.Width > 0
                     && Math.Abs(border.Bounds.Height - WorkbenchMetrics.PanelSplitterWidth) < Precision
                     && Math.Abs(border.Bounds.Y - gapTop) < Precision);
-            return (Gap: git.Bounds.Y - gapTop, LineY: line?.Bounds.Y,
+            return (Gap: general.Bounds.Y - gapTop, LineY: line?.Bounds.Y,
                 LineColour: line is null ? (Color?)null : Assert.IsAssignableFrom<ISolidColorBrush>(line.Background).Color);
         });
 
-        // The gap used to be empty, so the Git panel's title bar had no top line while the inspector's had one.
+        // The lower panel of the project region (general chats) gets the same 1px line above its title bar as the inspector's.
         Assert.Equal(WorkbenchMetrics.PanelSplitterWidth, geometry.Gap, Precision);
         Assert.Equal(Color.Parse("#D4D4D8"), geometry.LineColour);
     }

@@ -296,10 +296,11 @@ internal sealed class RegionPresenter : Panel
         double firstSlot = -1;
         if (Role == RegionRole.Project && expanded > 1 && !AnyMinimized())
         {
-            firstSlot = Math.Clamp(
+            // Whole pixels, for the same reason as the equal slots below.
+            firstSlot = Math.Floor(Math.Clamp(
                 Layout.ProjectSplitRatio * available,
                 WorkbenchMetrics.PanelMinHeight,
-                Math.Max(WorkbenchMetrics.PanelMinHeight, available - ((expanded - 1) * WorkbenchMetrics.PanelMinHeight)));
+                Math.Max(WorkbenchMetrics.PanelMinHeight, available - ((expanded - 1) * WorkbenchMetrics.PanelMinHeight))));
         }
         // Whole pixels per expanded panel, the remainder on the last one: a fractional slot would land the split on a
         // half pixel, and layout rounding then swallows the 1 px gap — and with it the separator above the lower panel's

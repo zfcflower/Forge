@@ -107,19 +107,18 @@ public sealed class MainWindowGitStatusTests
     }
 
     [Fact]
-    public async Task Git_is_an_independent_panel_under_the_project_panel()
+    public async Task Git_panel_sits_in_the_inspector_with_its_view_model_and_title_bar_tools()
     {
         var plain = NewTempDir();
         await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
         try
         {
-            var (tabIds, panelIds, gitContent, gitTools) = await session.Dispatch(
+            var (region, gitContent, gitTools) = await session.Dispatch(
                 async () =>
                 {
                     await using var harness = await AppHarness.OpenWithSession(plain);
                     var workbench = harness.ViewModel.Workbench;
-                    var tabs = workbench.InspectorTools.Tabs.Select(static tab => tab.Id).ToList();
-                    var panels = workbench.Project.Panels.Select(static panel => panel.Id).ToList();
+                    var where = workbench.GitPanel!.Region;
                     var content = workbench.GitPanel?.Content?.GetType().FullName;
                     var git = harness.ViewModel.GitPanel;
                     var tools = workbench.GitPanel!.HeaderTools.OfType<PanelToolButton>()
@@ -132,12 +131,11 @@ public sealed class MainWindowGitStatusTests
                         })))
                         .ToList();
                     harness.Detach(harness.ViewModel);
-                    return (tabs, panels, content, tools);
+                    return (where, content, tools);
                 },
                 CancellationToken.None);
 
-            Assert.Equal(new[] { WorkbenchIds.TodoTab, WorkbenchIds.ReviewTab, WorkbenchIds.SpecsTab }, tabIds);
-            Assert.Equal(new[] { WorkbenchIds.ProjectPanel, WorkbenchIds.GitPanel }, panelIds);
+            Assert.Equal(RegionRole.Inspector, region);
             Assert.Equal(typeof(Forge.App.Git.GitPanelViewModel).FullName, gitContent);
             // Fetch, pull, push and refresh are icon tools in the Git panel's title bar, each bound to its command.
             Assert.Equal(new[] { "git-fetch", "git-pull", "git-push", "git-refresh" }, gitTools.Select(static tool => tool.Id));
