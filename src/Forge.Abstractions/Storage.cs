@@ -53,6 +53,12 @@ public sealed record SessionInfo(string Id, string WorkspacePath, string Title, 
 
     /// <summary>Hash of the last composed stable prefix (system prompt + tool definitions); null until first computed.</summary>
     public string? PrefixFingerprint { get; init; }
+
+    /// <summary>Automation that created this session; null for a session the user created.</summary>
+    public string? AutomationId { get; init; }
+
+    /// <summary>Run that created this session; set together with <see cref="AutomationId"/>.</summary>
+    public string? AutomationRunId { get; init; }
 }
 
 public sealed record SessionCreate(string WorkspacePath, string Title)
@@ -82,6 +88,11 @@ public sealed record SessionCreate(string WorkspacePath, string Title)
     public long? InheritsUpToSeq { get; init; }
 
     public SessionOrigin Origin { get; init; } = SessionOrigin.Cold;
+
+    /// <summary>See <see cref="SessionInfo.AutomationId"/>.</summary>
+    public string? AutomationId { get; init; }
+
+    public string? AutomationRunId { get; init; }
 }
 
 /// <summary>Filter for <see cref="ISessionCatalog.QueryAsync"/>; null members do not filter.</summary>
