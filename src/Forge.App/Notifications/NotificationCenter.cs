@@ -47,7 +47,7 @@ internal sealed class NotificationCenter : INotifications, IDisposable
     private readonly TimeProvider time;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private volatile bool background;
-    private bool disposed;
+    private int disposed;
 
     /// <param name="enabled">Read on every call (the <c>notifications</c> preference); false shows nothing at all.</param>
     /// <param name="notifier">Raises the desktop notification; the only implementation talks to the platform's own tool.</param>
@@ -105,6 +105,9 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         _ => InfoDuration,
     };
 
+    /// <summary>True once <see cref="Dispose"/> ran; every queued action and timer callback checks it.</summary>
+    private bool IsDisposed => Volatile.Read(ref disposed) != 0;
+
     /// <inheritdoc />
     public Task NotifyAsync(
         NotificationLevel level,
@@ -114,7 +117,7 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (!enabled())
+        if (!enabled() || IsDisposed)
         {
             return Task.CompletedTask;
         }
@@ -125,7 +128,14 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         }
 
         var identity = key ?? DefaultKeyOf(level, title, body);
-        post(() => Show(level, title, body, identity));
+        // The post may run after the graph was torn down; a toast must not be created for a window that is gone.
+        post(() =>
+        {
+            if (!IsDisposed)
+            {
+                Show(level, title, body, identity);
+            }
+        });
         return Task.CompletedTask;
     }
 
@@ -198,7 +208,7 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         entry.Timer = time.CreateTimer(
             _ => post(() =>
             {
-                if (entry.Version == version)
+                if (!IsDisposed && entry.Version == version)
                 {
                     BeginLeave(entry, ExitDelay);
                 }
@@ -225,7 +235,7 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         entry.LeaveTimer = time.CreateTimer(
             _ => post(() =>
             {
-                if (entry.Version == version)
+                if (!IsDisposed && entry.Version == version)
                 {
                     Remove(entry);
                 }
@@ -255,6 +265,11 @@ internal sealed class NotificationCenter : INotifications, IDisposable
 
         post(() =>
         {
+            if (IsDisposed)
+            {
+                return;
+            }
+
             foreach (var item in items)
             {
                 item.RefreshText();
@@ -262,15 +277,21 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         });
     }
 
-    /// <summary>Stops every timer and drops the process-wide reference; idempotent.</summary>
+    /// <summary>
+    /// Stops every timer and drops the process-wide reference; idempotent and callable from any thread.
+    /// <para>The composition root tears the graph down with <c>ConfigureAwait(false)</c>, so this may run on a pool thread
+    /// while the window is closing. The timers and the dictionary are not bound to anything, so they are stopped in place;
+    /// the toast collection is read by the view, so it is only cleared on its own thread — directly when this is that
+    /// thread, otherwise through <c>post</c>. Nothing posts into the collection after this point: every queued action and
+    /// timer callback is dropped once <see cref="IsDisposed"/> is set.</para>
+    /// </summary>
     public void Dispose()
     {
-        if (disposed)
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
         {
             return;
         }
 
-        disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         if (ReferenceEquals(Current, this))
         {
@@ -284,7 +305,15 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         }
 
         entries.Clear();
-        items.Clear();
+
+        if (Environment.CurrentManagedThreadId == uiThread)
+        {
+            items.Clear();
+        }
+        else
+        {
+            post(items.Clear);
+        }
     }
 
     /// <summary>One visible toast and the two timers that decide its life.</summary>
