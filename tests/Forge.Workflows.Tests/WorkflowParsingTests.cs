@@ -99,6 +99,25 @@ public sealed class WorkflowParsingTests
     }
 
     [Fact]
+    public void A_commented_document_without_steps_is_still_a_format_error()
+    {
+        // The presence scan reads the document a second time; it must accept the same comments and
+        // trailing commas WorkflowJsonContext does, or a documented-as-invalid document would surface
+        // as a JSON reader error instead of a missing-steps format error.
+        const string json = """
+            {
+              // steps would go here
+              "name": "sync",
+            }
+            """;
+
+        var ex = Assert.Throws<WorkflowFormatException>(() => WorkflowJson.Parse(json));
+
+        Assert.Equal("$.steps", ex.JsonPath);
+        Assert.StartsWith("invalid workflow JSON", ex.Message);
+    }
+
+    [Fact]
     public void Json_null_document_throws_format_exception()
     {
         var ex = Assert.Throws<WorkflowFormatException>(() => WorkflowJson.Parse("null"));

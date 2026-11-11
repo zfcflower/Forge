@@ -12,6 +12,7 @@ namespace Forge.App.Tests;
 /// become the expected turn cards — one card per assistant turn, ✓/✗ tool rows, and "—" where the provider
 /// reported no usage.
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class TranscriptReplayTests
 {
     private static readonly DateTimeOffset T0 = new(2025, 6, 1, 12, 0, 0, TimeSpan.Zero);
@@ -19,7 +20,7 @@ public sealed class TranscriptReplayTests
     [Fact]
     public async Task User_and_assistant_text_produce_ordered_bubbles_and_one_card_per_turn()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var result = await session.Dispatch(
             () =>
             {
@@ -60,7 +61,7 @@ public sealed class TranscriptReplayTests
     [Fact]
     public async Task Tool_calls_and_results_map_to_rows_with_checkmarks()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var cards = await session.Dispatch(
             () =>
             {
@@ -96,7 +97,7 @@ public sealed class TranscriptReplayTests
     [Fact]
     public async Task Zero_usage_is_shown_as_a_dash()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var card = await session.Dispatch(
             () =>
             {
@@ -122,7 +123,7 @@ public sealed class TranscriptReplayTests
     [Fact]
     public async Task The_replayed_usage_sum_keeps_the_cache_tokens()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var usage = await session.Dispatch(
             () =>
             {
@@ -149,7 +150,7 @@ public sealed class TranscriptReplayTests
     [Fact]
     public async Task Assistant_turns_without_a_new_user_message_share_one_card()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var items = await session.Dispatch(
             () =>
             {

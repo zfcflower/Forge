@@ -45,6 +45,11 @@ tags: [workflow, declarative, l0]
 **AOT 与零反射。** JSON 走源生成 `WorkflowJsonContext`（`IsAotCompatible=true`，分析器 0 警告；以 Native AOT 发布二进制
 实测通过）。`args` 无指令时按原始 `JsonElement` 原样传给工具，不重新序列化；有指令时用 `Utf8JsonWriter` 写一次再解析。
 
+**格式错误的判定不依赖 STJ 对缺失属性的处理。** `steps` 是否出现由对同一份 UTF-8 字节的一次 `Utf8JsonReader` 扫描决定
+（注释与尾随逗号选项与 `WorkflowJsonContext` 一致），不靠 `Steps is null`：.NET 11 起源生成反序列化保留属性初始化器，
+缺失属性不再写成 `default(T)`，`{}` 会得到空 `steps`。契约不变——`steps` 缺失仍是格式错误（`$.steps`）——但实现不能再
+依赖该默认值行为。
+
 **校验不抛异常。** `WorkflowValidator.Validate` 返回确定顺序的诊断列表；环检测用 Kahn 剥点定位环上节点，再按最小下标
 各报一次并给出路径。`BindingOnNonDependency` 刻意收紧为“只能绑定传递依赖”，避免与并行步骤抢数据。
 
@@ -54,8 +59,8 @@ tags: [workflow, declarative, l0]
 
 ## 未决
 
-- 源生成反序列化对缺失属性写 `default(T)`（不保留属性初始化器），解析后需归一化（`version` 缺失视为 1）；该行为
-  依赖 STJ 实现细节，升级 SDK 时需回归。
+- ~~源生成反序列化对缺失属性写 `default(T)`~~：已在 .NET 11 上回归并解决。该版本起缺失属性保留属性初始化器，
+  `steps` 缺失改由文档扫描判定（见“关键决策”）；其余缺失属性现在取初始化器默认值，不再需要解析后归一化。
 - `onError` 的 `retry`/`continue`、步骤级超时、`when`/`foreach`、`{"$expr": ...}` 表达式均未实现；格式按可向前兼容
   设计（未知属性忽略、`version` 守卫、`$` 前缀指令命名空间），加入时需扩展 README 与校验错误码。
 - 每步只保留 `Content` 文本，未记录解析后的 `args`；排查绑定问题目前靠错误文本，必要时再加可选的 `CaptureResolvedArgs`。

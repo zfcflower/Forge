@@ -31,7 +31,7 @@ public sealed class GitApprovalEndToEndTests
         using var sandbox = GitTestSandbox.Create();
         var work = sandbox.CloneTracked("work");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await RunScriptedTurnAsync(
             session,
             work,
@@ -70,7 +70,7 @@ public sealed class GitApprovalEndToEndTests
         using var sandbox = GitTestSandbox.Create();
         var work = sandbox.CloneTracked("work");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await RunScriptedTurnAsync(
             session,
             work,
@@ -97,7 +97,7 @@ public sealed class GitApprovalEndToEndTests
         using var sandbox = GitTestSandbox.Create();
         var work = sandbox.CloneTracked("work");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await RunScriptedTurnAsync(
             session,
             work,
@@ -123,7 +123,7 @@ public sealed class GitApprovalEndToEndTests
         using var sandbox = GitTestSandbox.Create();
         var work = sandbox.CloneTracked("work");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await RunScriptedTurnAsync(
             session,
             work,

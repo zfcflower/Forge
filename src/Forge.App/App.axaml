@@ -53,9 +53,6 @@
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
     </DataTemplate>
-    <DataTemplate DataType="git:GitPanelViewModel" x:DataType="git:GitPanelViewModel">
-      <views:GitToolView />
-    </DataTemplate>
 
     <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
     <DataTemplate DataType="term:TerminalViewModel" x:DataType="term:TerminalViewModel">

@@ -86,7 +86,7 @@ public sealed class FinishedSubAgentReplayTests
     /// <summary>Loads the history of a session that already has one stored child session, then opens that child's tab.</summary>
     private static async Task<Outcome> RestoreAsync(IReadOnlyList<StoredMessage> childMessages)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         return await session.Dispatch(
             async () =>
             {

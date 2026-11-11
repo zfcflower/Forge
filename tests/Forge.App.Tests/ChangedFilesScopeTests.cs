@@ -24,7 +24,7 @@ public sealed class ChangedFilesScopeTests
     public async Task All_uncommitted_and_turn_scopes_show_only_their_own_files()
     {
         using var workspace = await CreateWorkspaceAsync();
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var result = await session.Dispatch(
             async () =>
@@ -103,7 +103,7 @@ public sealed class ChangedFilesScopeTests
     public async Task Watcher_refresh_updates_only_uncommitted_scope_and_reuses_an_unchanged_fingerprint()
     {
         using var workspace = await CreateWorkspaceAsync();
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         ChangesViewModel? changes = null;
         try
         {
@@ -177,7 +177,7 @@ public sealed class ChangedFilesScopeTests
     public async Task The_latest_scope_wins_when_range_refreshes_overlap()
     {
         using var workspace = await CreateWorkspaceAsync();
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await session.Dispatch(
             async () =>
@@ -210,7 +210,7 @@ public sealed class ChangedFilesScopeTests
         sandbox.CommitFile(work, "unrelated.txt", "unrelated\n", "unrelated root");
         GitTestShell.RunChecked(work, "switch", "feature/current");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var messages = await session.Dispatch(
             async () =>
             {
@@ -269,7 +269,7 @@ public sealed class ChangedFilesScopeTests
         using var workspace = await CreateWorkspaceAsync();
         // refs/remotes/origin/HEAD lists with the short name "origin"; it is an alias, never a selectable branch.
         GitTestShell.RunChecked(workspace.WorkingDirectory, "remote", "set-head", "origin", "main");
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         await session.Dispatch(
             async () =>
@@ -434,7 +434,7 @@ public sealed class ChangedFilesScopeTests
     public async Task Branch_search_filters_case_insensitively_and_groups_remotes()
     {
         using var workspace = await CreateWorkspaceAsync();
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {
@@ -467,7 +467,7 @@ public sealed class ChangedFilesScopeTests
     public async Task Scope_picker_reports_uncommitted_turn_counts_and_checks_only_the_active_scope()
     {
         using var workspace = await CreateWorkspaceAsync();
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {

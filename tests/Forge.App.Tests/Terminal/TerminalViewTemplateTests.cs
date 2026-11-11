@@ -22,7 +22,7 @@ public sealed class TerminalViewTemplateTests
     [Fact]
     public async Task Terminal_view_model_resolves_to_the_terminal_view()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var found = await TerminalUi.RunTestAsync(
                 session,
                 async () =>
@@ -65,7 +65,7 @@ public sealed class TerminalViewTemplateTests
     [Fact]
     public async Task Terminal_settings_view_model_resolves_to_the_settings_body()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var ids = await TerminalUi.RunTestAsync(
                 session,
                 async () =>

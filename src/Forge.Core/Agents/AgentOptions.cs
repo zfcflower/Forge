@@ -30,4 +30,10 @@ public sealed record AgentOptions
     public int ArtifactThresholdChars { get; init; } = 32_000;
 
     public int ArtifactPreviewChars { get; init; } = 2_000;
+
+    /// <summary>
+    /// Prompt-cache lifetime asked for on the message breakpoint (<see cref="CacheHint.MessageTtl"/>): null or "5m" = the
+    /// provider default, "1h" = the one-hour cache. Any other value is treated as the default.
+    /// </summary>
+    public string? MessageCacheTtl { get; init; }
 }

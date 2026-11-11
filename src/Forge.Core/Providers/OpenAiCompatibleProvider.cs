@@ -11,10 +11,21 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
 {
     private const string StopReasonProperty = "finish_reason";
 
-    public OpenAiCompatibleProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null)
+    private readonly bool sendPromptCacheKey;
+
+    public OpenAiCompatibleProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null, ProviderOptions? options = null)
         : base(config, http, idleTimeout)
     {
+        sendPromptCacheKey = (options ?? ProviderOptions.Default).SendPromptCacheKey && !IsDeepSeek(config.BaseUrl);
     }
+
+    /// <summary>
+    /// True when <paramref name="baseUrl"/> points at DeepSeek's own API (host contains "deepseek"). DeepSeek caches by
+    /// prefix on its own and is never sent <c>prompt_cache_key</c>.
+    /// </summary>
+    public static bool IsDeepSeek(string? baseUrl) =>
+        Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+        && uri.Host.Contains("deepseek", StringComparison.OrdinalIgnoreCase);
 
     protected override string Endpoint => "chat/completions";
 
@@ -45,6 +56,11 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         writer.WriteStartObject("stream_options");
         writer.WriteBoolean("include_usage", true);
         writer.WriteEndObject();
+
+        if (sendPromptCacheKey && !string.IsNullOrEmpty(request.CacheRoutingKey))
+        {
+            writer.WriteString("prompt_cache_key", request.CacheRoutingKey);
+        }
 
         writer.WriteStartArray("messages");
         WriteMessages(writer, request);
@@ -458,21 +474,32 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         }
     }
 
+    /// <summary>
+    /// Reads a usage object. <c>InputTokens</c> includes cached input, as OpenAI's <c>prompt_tokens</c> does. DeepSeek reports
+    /// <c>prompt_cache_hit_tokens</c> (cache read) and <c>prompt_cache_miss_tokens</c> (uncached input) instead; when a
+    /// <c>cached_tokens</c> field is present as well, it wins.
+    /// </summary>
     private static TokenUsage ReadUsage(JsonElement usage, TokenUsage previous)
     {
-        var input = ProviderJson.Int(usage, "prompt_tokens") ?? previous.InputTokens;
+        var hit = ProviderJson.Int(usage, "prompt_cache_hit_tokens");
+        var miss = ProviderJson.Int(usage, "prompt_cache_miss_tokens");
+        var input = ProviderJson.Int(usage, "prompt_tokens")
+                    ?? (hit is null && miss is null ? previous.InputTokens : (hit ?? 0) + (miss ?? 0));
         var output = ProviderJson.Int(usage, "completion_tokens") ?? previous.OutputTokens;
 
-        var cacheRead = 0;
+        int? detailsCached = null;
         if (usage.TryGetProperty("prompt_tokens_details", out var details) && details.ValueKind == JsonValueKind.Object)
         {
-            cacheRead = ProviderJson.Int(details, "cached_tokens") ?? 0;
+            detailsCached = ProviderJson.Int(details, "cached_tokens");
         }
 
-        if (cacheRead == 0)
+        var cached = detailsCached is > 0 ? detailsCached : ProviderJson.Int(usage, "cached_tokens") ?? detailsCached;
+        var cacheRead = cached switch
         {
-            cacheRead = ProviderJson.Int(usage, "cached_tokens") ?? previous.CacheReadTokens;
-        }
+            > 0 => cached.Value,
+            0 => hit is null ? previous.CacheReadTokens : 0,
+            _ => hit ?? previous.CacheReadTokens,
+        };
 
         return new TokenUsage(input, output, cacheRead, previous.CacheWriteTokens);
     }

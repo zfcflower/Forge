@@ -35,7 +35,7 @@ public sealed class ChangedLineCountsCacheTests : IDisposable
     [Fact]
     public async Task Unchanged_fingerprint_reuses_cached_line_counts()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         await InitRepoAsync(root);
         Write(root, "changed.txt", "a");
@@ -66,7 +66,7 @@ public sealed class ChangedLineCountsCacheTests : IDisposable
     [Fact]
     public async Task Changed_fingerprint_recomputes_line_counts()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         await InitRepoAsync(root);
         Write(root, "changed.txt", "a");
@@ -100,7 +100,7 @@ public sealed class ChangedLineCountsCacheTests : IDisposable
     [Fact]
     public async Task Interleaved_refreshes_publish_a_consistent_fingerprint_result_pair()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         await InitRepoAsync(root);
         Write(root, "changed.txt", "a");

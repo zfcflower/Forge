@@ -210,7 +210,7 @@ public sealed class ChangedFilesCommitScopeTests
 
     private static async Task RunAsync(Func<Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await session.Dispatch(
             async () =>

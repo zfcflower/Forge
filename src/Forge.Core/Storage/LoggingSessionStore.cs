@@ -82,6 +82,47 @@ public sealed class LoggingSessionStore(ISessionStore inner, JsonlEventLog log) 
     Task ISessionCatalog.TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) =>
         Catalog.TouchAsync(sessionId, at, ct);
 
+    // Lifecycle members are forwarded explicitly: falling through to the interface defaults would turn every
+    // occupancy / handover call on a decorated store into NotSupportedException.
+
+    Task<bool> ISessionCatalog.ActivateAsync(string sessionId, CancellationToken ct) =>
+        Catalog.ActivateAsync(sessionId, ct);
+
+    Task<SessionInfo> ISessionCatalog.HandoverAsync(string oldSessionId, HandoverTarget target, CancellationToken ct) =>
+        Catalog.HandoverAsync(oldSessionId, target, ct);
+
+    Task<int> ISessionCatalog.SoftDeleteAsync(IReadOnlyList<string> sessionIds, CancellationToken ct) =>
+        Catalog.SoftDeleteAsync(sessionIds, ct);
+
+    Task<IReadOnlyList<string>> ISessionCatalog.PurgeAsync(string sessionId, CancellationToken ct) =>
+        Catalog.PurgeAsync(sessionId, ct);
+
+    Task<IReadOnlyList<SessionInfo>> ISessionCatalog.ListHistoryAsync(SessionQuery query, CancellationToken ct) =>
+        Catalog.ListHistoryAsync(query, ct);
+
+    Task<IReadOnlyList<string>> ISessionCatalog.HealMissingDirectoriesAsync(
+        Func<string, bool> directoryExists,
+        Func<string, bool> projectRootExists,
+        CancellationToken ct) =>
+        Catalog.HealMissingDirectoriesAsync(directoryExists, projectRootExists, ct);
+
+    Task<bool> ISessionCatalog.SetPrefixFingerprintAsync(string sessionId, string fingerprint, CancellationToken ct) =>
+        Catalog.SetPrefixFingerprintAsync(sessionId, fingerprint, ct);
+
+    Task<int> ISessionCatalog.RenameBranchAsync(
+        string projectId,
+        string worktreePath,
+        string oldBranch,
+        string newBranch,
+        CancellationToken ct) =>
+        Catalog.RenameBranchAsync(projectId, worktreePath, oldBranch, newBranch, ct);
+
+    Task<IReadOnlyList<StorageNotice>> ISessionCatalog.ReadNoticesAsync(CancellationToken ct) =>
+        Catalog.ReadNoticesAsync(ct);
+
+    Task ISessionCatalog.AcknowledgeNoticesAsync(IReadOnlyList<long> noticeIds, CancellationToken ct) =>
+        Catalog.AcknowledgeNoticesAsync(noticeIds, ct);
+
     public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
         Inner.GetSummariesAsync(sessionId, ct);
 

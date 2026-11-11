@@ -1,4 +1,4 @@
-# .NET 10 / C# 14 / Avalonia —— 构建、测试、打包、发布
+# .NET 11 / C# 15 / Avalonia —— 构建、测试、打包、发布
 #
 # 放置路径：.github/workflows/dotnet-desktop.yml
 #
@@ -25,7 +25,7 @@
 #     ScriptExecutor 后经 HostClient 做 plugins.status + run_code 往返。Forge.App 存在时
 #     App 与 Smoke 都发布并冒烟；若 App 目录被移除，Smoke 仍保留 AOT↔JIT 验证入口，
 #     绝不静默跳过 AOT 验证。
-#   - SDK 版本由仓库根的 global.json 钉死（10.0.403，rollForward latestPatch），
+#   - SDK 版本由仓库根的 global.json 钉死（11.0.100，rollForward latestPatch），
 #     环境变量 DOTNET_SDK_VERSION 与它保持一致；改版本时两处一起改。
 #   - macOS 产物未签名/未公证（无 Apple Developer 证书），用户首次运行需去隔离属性；
 #     等有证书再补 codesign + notarytool 步骤。
@@ -53,8 +53,8 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
-  # 与 global.json（10.0.403 / rollForward latestPatch）对齐；改 SDK 时两处一起改。
-  DOTNET_SDK_VERSION: 10.0.403
+  # 与 global.json（11.0.100 / rollForward latestPatch）对齐；改 SDK 时两处一起改。
+  DOTNET_SDK_VERSION: 11.0.100
   FORGE_SOLUTION: Forge.slnx
   FORGE_APP_PROJECT: src/Forge.App/Forge.App.csproj              # 主程序（Native AOT）
   FORGE_EXTENSION_HOST_PROJECT: src/Forge.ExtensionHost/Forge.ExtensionHost.csproj   # 常驻 Host（JIT）

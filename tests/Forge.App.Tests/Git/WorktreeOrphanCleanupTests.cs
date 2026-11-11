@@ -212,7 +212,7 @@ public sealed class WorktreeOrphanCleanupTests
     {
         using var repo = await StepCommitRepo.CreateAsync();
         const string Branch = "forge/orphan-check";
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var outcome = await session.Dispatch(
             async () =>
@@ -241,7 +241,7 @@ public sealed class WorktreeOrphanCleanupTests
     {
         using var repo = await StepCommitRepo.CreateAsync();
         const string Branch = "forge/kept";
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var attempt = await session.Dispatch(
             async () =>

@@ -44,7 +44,7 @@ public sealed class PanelScrollExtentTests
     [MemberData(nameof(Cases))]
     public async Task Last_row_viewport_and_scrollbars_stay_inside_panel(bool list, string panel, string state)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await WorkbenchUi.RunAsync(session, () =>
         {
             var rows = Enumerable.Range(0, RowCount)

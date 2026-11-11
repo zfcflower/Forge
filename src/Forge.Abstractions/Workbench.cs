@@ -15,8 +15,19 @@ public interface IProjectRegistry
     /// <summary>Registers <paramref name="rootPath"/> (full path, compared case-insensitively on Windows); returns the existing entry when already registered.</summary>
     Task<ProjectInfo> AddAsync(string rootPath, string name, ProjectKind kind, CancellationToken ct);
 
-    /// <summary>Unregisters the project only; sessions, worktrees and files are kept.</summary>
+    /// <summary>
+    /// Hard-deletes the registration row; sessions, worktrees and files are kept. Superseded by <see cref="CloseAsync"/>
+    /// and no longer reachable from the UI.
+    /// </summary>
     Task<bool> RemoveAsync(string projectId, CancellationToken ct);
+
+    /// <summary>
+    /// Soft close: sets <c>closed_at</c>. A closed project is left out of <see cref="ListAsync"/>; <see cref="AddAsync"/>
+    /// with the same root reopens it (clears <c>closed_at</c>) and returns the original id, so its sessions come back.
+    /// Session states are not touched.
+    /// </summary>
+    Task<bool> CloseAsync(string projectId, CancellationToken ct) =>
+        throw new NotSupportedException(nameof(CloseAsync));
 
     Task<bool> RenameAsync(string projectId, string name, CancellationToken ct);
 

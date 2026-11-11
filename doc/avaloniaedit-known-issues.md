@@ -38,7 +38,7 @@ option set are implemented and covered; what remains is listed at the end.
 - `dotnet test Forge.slnx` (Debug) → 0 failures across HostClient 486, Workspace 1152, Integration 265, Core 757, Editor
   394, IO 363, Scripting 264, Approval 188, Mcp 179, Workflows 147, Ipc 101. `Forge.App.Tests` and
   `Forge.App.LiveSwitch.Tests` are the two projects that run left out, for that same build collision;
-  `tests/Forge.Plugin.Sdk.Tests` reports no discoverable tests, as before.
+  `tests/Forge.Plugin.Sdk.Tests` reports no discoverable tests, as before (that empty project was deleted in 2026-11; `Forge.Plugin.Sdk` itself is covered by `Forge.Integration.Tests`).
 - From the original record: the native editor mixed scope passed 132/132 twice in an isolated copy. Those targeted runs
   did not reveal the full-suite UI failure below.
 - From the original record: main application Release Native AOT publish succeeded. The published executable created a

@@ -130,7 +130,7 @@ public sealed class TreeRowActivationTests
 
     private static async Task RunAsync(Action body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(body, CancellationToken.None);
     }
 

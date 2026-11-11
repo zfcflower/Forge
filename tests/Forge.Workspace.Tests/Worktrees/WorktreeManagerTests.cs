@@ -207,6 +207,53 @@ public sealed class WorktreeManagerTests
     }
 
     [Fact]
+    public async Task Check_commits_from_the_repository_answers_like_the_worktree_check_when_git_cannot_run_inside_it()
+    {
+        if (!GitProbe.IsAvailable) return;
+        var (sandbox, repo) = Repository();
+        using (sandbox)
+        using (repo)
+        {
+            var manager = Manager();
+            var onBranch = await manager.CreateAsync(repo.Root, "on-branch");
+            File.WriteAllText(Path.Combine(onBranch.Path, "work.txt"), "work\n");
+            await new GitCli().CommitAsync(onBranch.Path, [], "work in progress");
+            var detached = await manager.CreateAsync(repo.Root, "detached");
+            GitFixture.RunChecked(detached.Path, "checkout", "-q", "--detach");
+            File.WriteAllText(Path.Combine(detached.Path, "loose.txt"), "loose\n");
+            GitFixture.RunChecked(detached.Path, "add", "-A");
+            GitFixture.RunChecked(detached.Path, "commit", "-q", "-m", "loose commit");
+            var expectedOnBranch = await manager.CheckRemovableAsync(repo.Root, onBranch.Path);
+            var expectedDetached = await manager.CheckRemovableAsync(repo.Root, detached.Path);
+            Assert.Equal(2, expectedDetached.Count);
+
+            var list = await manager.ListAsync(repo.Root);
+            var onBranchEntry = list.Single(w => Path.GetFileName(w.Path) == Path.GetFileName(onBranch.Path));
+            var detachedEntry = list.Single(w => Path.GetFileName(w.Path) == Path.GetFileName(detached.Path));
+
+            // A broken .git link: git cannot run inside either worktree any more, the commits are still in the repository.
+            // (git hides the .git file on Windows, which a plain overwrite refuses: delete it first.)
+            foreach (var worktree in new[] { onBranch.Path, detached.Path })
+            {
+                File.Delete(Path.Combine(worktree, ".git"));
+                File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: " + Path.Combine(sandbox.Path, "nowhere") + "\n");
+            }
+            await Assert.ThrowsAsync<GitException>(() => manager.CheckRemovableAsync(repo.Root, onBranch.Path));
+
+            Assert.Equal(
+                expectedOnBranch,
+                await manager.CheckCommitsAsync(repo.Root, onBranchEntry.HeadCommit!, onBranchEntry.IsDetached));
+            Assert.Equal(
+                expectedDetached,
+                await manager.CheckCommitsAsync(repo.Root, detachedEntry.HeadCommit!, detachedEntry.IsDetached));
+            Assert.Equal(
+                ["1 commit not merged into 'main'"],
+                await manager.CheckCommitsAsync(repo.Root, onBranchEntry.HeadCommit!, false, "main"));
+            Assert.Empty(await manager.CheckCommitsAsync(repo.Root, repo.Head(), false));
+        }
+    }
+
+    [Fact]
     public async Task Remove_accepts_worktree_whose_commits_are_merged_into_the_given_base()
     {
         if (!GitProbe.IsAvailable) return;

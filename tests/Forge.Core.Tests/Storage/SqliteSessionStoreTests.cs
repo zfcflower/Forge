@@ -183,7 +183,7 @@ public class SqliteSessionStoreTests
         using var directory = new TempDirectory();
         await using var store = new SqliteSessionStore(directory.Path);
         var session = await store.CreateSessionAsync("D:/ws", "t", default);
-        var other = await store.CreateSessionAsync("D:/ws", "other", default);
+        var other = await store.CreateSessionAsync("D:/ws/other", "other", default);
 
         await store.AppendAsync(session.Id, Text("the kumquat harvest happened early"), null, default);
         await store.AppendAsync(session.Id, new ChatMessage(MessageRole.Tool,

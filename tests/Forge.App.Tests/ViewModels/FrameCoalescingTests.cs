@@ -34,7 +34,7 @@ public sealed class FrameCoalescingTests
     [Fact]
     public async Task Burst_of_ten_thousand_items_is_coalesced_into_few_flushes_and_keeps_order()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var (flushes, seen) = await session.Dispatch(
             async () =>
             {
@@ -75,7 +75,7 @@ public sealed class FrameCoalescingTests
     [Fact]
     public async Task Concurrent_producers_keep_each_producers_order()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         const int producers = 4;
         const int perProducer = 2500;
 
@@ -115,7 +115,7 @@ public sealed class FrameCoalescingTests
     [Fact]
     public async Task Single_flush_respects_the_item_cap()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var passCounts = await session.Dispatch(
             async () =>
             {
@@ -165,7 +165,7 @@ public sealed class FrameCoalescingTests
     [Fact]
     public async Task Items_enqueued_after_dispose_are_dropped_without_throwing()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var processed = await session.Dispatch(
             async () =>
             {
@@ -189,7 +189,7 @@ public sealed class FrameCoalescingTests
     [Fact]
     public async Task Session_mixed_event_stream_matches_per_event_processing()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var state = await session.Dispatch(
             async () =>
             {

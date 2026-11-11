@@ -67,7 +67,7 @@ internal sealed class GitAppHarness : IAsyncDisposable
     public void Detach(MainWindowViewModel viewModel)
     {
         viewModel.Files.Attach(PanelContext.Empty);
-        viewModel.GitPanel.Attach(PanelContext.Empty);
+        viewModel.GitSync.Attach(PanelContext.Empty);
         viewModel.Dispose();
     }
 

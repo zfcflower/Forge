@@ -587,17 +587,25 @@ public sealed partial class GitCli
     }
 
     /// <summary>Merges <paramref name="revision"/> into the current branch (no fast-forward forcing); stops on conflicts.</summary>
-    public async Task<GitRemoteResult> MergeAsync(string workingDirectory, string revision, CancellationToken ct = default)
+    public Task<GitRemoteResult> MergeAsync(string workingDirectory, string revision, CancellationToken ct = default) =>
+        MergeAsync(workingDirectory, revision, noFastForward: false, ct);
+
+    /// <summary>
+    /// Merges <paramref name="revision"/> into the current branch. With <paramref name="noFastForward"/> a merge commit is
+    /// always created (<c>--no-ff</c>). The target tree need not be clean: when git refuses to overwrite local changes the
+    /// failure carries git's own file list in <see cref="GitRemoteResult.StandardError"/>.
+    /// </summary>
+    public async Task<GitRemoteResult> MergeAsync(string workingDirectory, string revision, bool noFastForward, CancellationToken ct = default)
     {
         if (RejectOptionLike(revision, "revision") is { } invalid)
         {
             return invalid;
         }
 
-        var result = await RunAsync(
-            workingDirectory,
-            Args("merge", "--no-edit", "--end-of-options", revision),
-            ct).ConfigureAwait(false);
+        var mergeArguments = noFastForward
+            ? Args("merge", "--no-ff", "--no-edit", "--end-of-options", revision)
+            : Args("merge", "--no-edit", "--end-of-options", revision);
+        var result = await RunAsync(workingDirectory, mergeArguments, ct).ConfigureAwait(false);
         if (!result.Success)
         {
             return await ToRemoteFailureAsync(workingDirectory, result, $"Could not merge {revision}.", ct).ConfigureAwait(false);

@@ -7,14 +7,17 @@ using Forge.App.Appearance;
 using Forge.App.Approval;
 using Forge.App.Editing;
 using Forge.App.Git;
+using Forge.App.Lifecycle;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
+using Forge.Core.Agents;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
 using Forge.HostClient;
+using Forge.IO;
 using Forge.IO.Tools;
 using Forge.Workspace;
 
@@ -183,6 +186,9 @@ internal sealed class AppComposition : IAsyncDisposable
 
     public AgentRuntimeManager Runtimes => runtimes;
 
+    /// <summary>Process-level workspace states (operation in progress, merge conflict) the turn-start check and the tree read.</summary>
+    public WorkspaceStates WorkspaceStates { get; } = new();
+
     /// <summary>Registers the general workspace; awaited before the window shows any session state.</summary>
     public Task Initialization { get; }
 
@@ -199,11 +205,28 @@ internal sealed class AppComposition : IAsyncDisposable
     public IStepCommitter TodoStepCommitter { get; private set; } = null!;
 
     /// <summary>
-    /// What the Git tab needs to show the branch's pull request and to wait for its checks: the same platform and poller the
-    /// agent's pull request tools use, the wait timing and notification settings (all read live from the preferences) and
-    /// the system notifier.
+    /// The handover sequence (lifecycle 6.2) over the real store, git, step committer, provider and review store; set by
+    /// <see cref="Create"/>. Settable so shell tests can run the handover against substitutes.
     /// </summary>
-    public GitPrServices GitPullRequests { get; private set; } = null!;
+    internal HandoverFlow Handover { get; set; } = null!;
+
+    /// <summary>The parallel fork (lifecycle 6.5) over the real store, git, step committer and provider; set by <see cref="Create"/>.</summary>
+    internal ForkFlow Fork { get; set; } = null!;
+
+    /// <summary>Merge back / sync (lifecycle 6.6) over the real git; set by <see cref="Create"/>.</summary>
+    internal MergeFlow Merge { get; set; } = null!;
+
+    /// <summary>
+    /// The platform trash (lifecycle 7.1): the only way a workspace directory is removed. Settable so tests move into a
+    /// temporary folder instead of the real recycle bin.
+    /// </summary>
+    internal ITrashService Trash { get; set; } = TrashService.CreateDefault();
+
+    /// <summary>Remove / restore / purge (lifecycle 7.2-7.5) over the real store and git; set by <see cref="Create"/>.</summary>
+    internal RemovalFlow Removal { get; set; } = null!;
+
+    /// <summary>The purge file cleanup and its journal; the startup retries what an earlier purge left (7.5).</summary>
+    internal PurgeCleanup PurgeCleanup { get; set; } = null!;
 
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
 
@@ -317,6 +340,10 @@ internal sealed class AppComposition : IAsyncDisposable
         var todos = new SqliteTodoStore(paths.UserDataDirectory);
         var uiState = new SqliteUiStateStore(paths.UserDataDirectory);
         var turnCheckpoints = new SqliteTurnCheckpointStore(paths.UserDataDirectory);
+        // Artifacts (Core SPEC "循环"): oversized tool output lands in forge.db's artifacts table and <UserData>/artifacts,
+        // and a permanent delete removes one session's share of both. Not disposed with the composition: disposing it
+        // clears every SQLite pool of the process, and it holds nothing else.
+        var artifacts = new FileArtifactStore(Path.Combine(paths.UserDataDirectory, "artifacts"), sessions.ConnectionString);
         var checkpoints = new TurnCheckpointService(git, turnCheckpoints);
         var worktrees = new WorktreeService(git);
 
@@ -339,15 +366,6 @@ internal sealed class AppComposition : IAsyncDisposable
             .. new PrCheckTools(prPlatform, prChecksPoller, checksOptions).All,
             .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
         ];
-        var gitPullRequests = new GitPrServices(
-            prPlatform,
-            prChecksPoller,
-            checksOptions,
-            new SystemNotifier(() => preferences.Current.GitNotifications))
-        {
-            // The Git panel's screenshot button runs the same step as pr_screenshots, with the same settings.
-            GitSettings = gitToolSettings,
-        };
         var runtimeServices = new AgentRuntimeServices(
             BuildProviderFactory(provider, httpClient),
             host?.Client,
@@ -357,6 +375,7 @@ internal sealed class AppComposition : IAsyncDisposable
             provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty),
             Git: gitTools);
         runtimeServices.Approvals = approvals;
+        runtimeServices.MessageCacheTtl = provider.Provider?.PromptCacheTtl;
         runtimeServices.PullRequestTools = pullRequestTools;
         // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
         // options are read through a factory, so a preference change (ripgrep path, shell, bash timeout) applies to the
@@ -370,6 +389,7 @@ internal sealed class AppComposition : IAsyncDisposable
             () => preferences.Current.GitStepCommits);
         runtimeServices.StepCommitter = stepCommitter;
         runtimeServices.ToolRouter = toolRouter;
+        runtimeServices.Artifacts = artifacts;
         var runtimes = new AgentRuntimeManager(runtimeServices);
 
         var initialization = InitializeWorkbenchAsync(projects, worktrees, paths, preferences, appearance);
@@ -410,7 +430,32 @@ internal sealed class AppComposition : IAsyncDisposable
             initialization);
         composition.Approvals = approvals;
         composition.TodoStepCommitter = stepCommitter;
-        composition.GitPullRequests = gitPullRequests;
+        var reviews = workspace?.Reviews;
+        composition.Handover = new HandoverFlow(
+            sessions,
+            sessions,
+            new HandoverGit(git, stepCommitter),
+            (history, tree, ct) => composition.SummarizeHandoverAsync(history, tree, ct),
+            reviews is null
+                ? null
+                : async (directory, from, to, ct) => await reviews.CopySessionAsync(directory, from, to, ct).ConfigureAwait(false));
+        composition.Fork = new ForkFlow(
+            sessions,
+            sessions,
+            new ForkGit(git, stepCommitter, worktrees),
+            (history, tree, ct) => composition.SummarizeHandoverAsync(history, tree, ct));
+        composition.Merge = new MergeFlow(new MergeGit(git));
+        var purgeReviews = reviews ?? new ReviewStore(paths.ReviewsDirectory);
+        composition.PurgeCleanup = new PurgeCleanup(
+            new PurgeCleanupJournal(Path.Combine(paths.UserDataDirectory, "purge-pending.txt")),
+            (sessionId, ct) => PurgeSessionFilesAsync(artifacts, purgeReviews, sessionId, ct),
+            async (sessionId, ct) => await sessions.GetSessionAsync(sessionId, ct).ConfigureAwait(false) is not null);
+        composition.Removal = new RemovalFlow(
+            sessions,
+            sessions,
+            new RemovalGit(git, worktrees.Manager),
+            (directory, ct) => composition.Trash.MoveToTrashAsync(directory, ct),
+            composition.PurgeCleanup.CleanUpAsync);
 
         // The four instrument sections: the click target of each counter in the session strip. They read the composition
         // lazily (on the settings page opening), so they are registered here, still inside the composition root, once the
@@ -441,6 +486,46 @@ internal sealed class AppComposition : IAsyncDisposable
 
     /// <summary>Re-reads <c>settings.json</c>; the running runtime keeps its provider until the next launch.</summary>
     public ProviderSettings ReloadProvider() => Provider = ProviderSettings.Load(Paths.SettingsPath);
+
+    /// <summary>
+    /// What a purge removes besides the catalog rows (7.5): the session's artifacts (their <c>artifacts</c> rows and its
+    /// <c>&lt;UserData&gt;/artifacts/&lt;id&gt;</c> folder) and its review marks and comments. Each part runs even when
+    /// another failed, so one stuck file does not leave the rest behind; every failure is then reported in one exception,
+    /// which <see cref="RemovalFlow"/> shows as a partial purge. Both parts delete by session id only and are idempotent.
+    /// </summary>
+    internal static async Task PurgeSessionFilesAsync(
+        IArtifactStore artifacts,
+        ReviewStore reviews,
+        string sessionId,
+        CancellationToken ct)
+    {
+        List<Exception>? failures = null;
+        try
+        {
+            await artifacts.DeleteSessionAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            await reviews.DeleteSessionAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            (failures ??= []).Add(exception);
+        }
+
+        if (failures is not null)
+        {
+            throw new IOException(
+                string.Join("; ", failures.Select(static f => f.Message)),
+                failures.Count == 1 ? failures[0] : new AggregateException(failures));
+        }
+    }
 
     /// <summary>
     /// Startup work the window waits for: the preferences are read on the pool and then applied here, and the general
@@ -487,6 +572,20 @@ internal sealed class AppComposition : IAsyncDisposable
         {
             ApplyLanguage(preferences.Current.Language);
         }
+    }
+
+    /// <summary>
+    /// The handover summary over the provider configured right now (a reload in settings applies to the next handover),
+    /// with its default model. No provider configured is a summary failure the dialog reports.
+    /// </summary>
+    private Task<string> SummarizeHandoverAsync(IReadOnlyList<ChatMessage> history, string? tree, CancellationToken ct)
+    {
+        if (Provider.Provider is not { } snapshot)
+        {
+            throw new HandoverSummaryException(Provider.Status);
+        }
+
+        return HandoverSummary.GenerateAsync(snapshot.CreateProvider(httpClient), snapshot.ModelSettings, history, tree, ct);
     }
 
     private static Func<ModelSettings, IChatProvider> BuildProviderFactory(ProviderSettings settings, HttpClient httpClient)

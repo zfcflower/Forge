@@ -14,12 +14,13 @@ namespace Forge.App.Tests.Workbench;
 /// ("primary action") tool a panel may carry, which <see cref="PanelToolButton.IconSize"/> grows. A stray 13 or 15 in a
 /// title bar reads as a mistake next to its neighbours, so the rule is pinned here rather than left to review.
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class WorkbenchIconSizeTests
 {
     [Fact]
     public async Task Every_panel_title_bar_icon_is_the_same_size_apart_from_the_accent_tools()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var sizes = await WorkbenchUi.QueryAsync(session, () =>
         {

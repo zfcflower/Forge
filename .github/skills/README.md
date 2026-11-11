@@ -27,7 +27,7 @@
 
 - **NuGet 白名单**:仅 BCL、Avalonia(含官方同仓包,见 `architecture.md`)、Roslyn、Microsoft.Data.Sqlite、neuecc 的库、xunit(仅测试)。skill 里出现的其他包(BenchmarkDotNet、CommunityToolkit.Mvvm、ReactiveUI、FluentAvalonia 等)一律需先经用户同意才可引入。
 - **不含 Python/JS**:skill 提供的 `.py`/`.js` 脚本不执行;只取其中的方法论与命令。
-- **栈固定**:`net10.0` / C# 14 / xunit v2 + VSTest(不是 MTP、不是 MSTest)。skill 里面向 .NET 11、MSTest、MTP 的分支不适用。唯一已知的连带升级:Avalonia 12.1.4 的 `Avalonia.Headless.XUnit` 依赖 xunit v3,启用 headless UI 测试时一并升。
+- **栈固定**:`net11.0` / C# 15(SDK 11.0.100)/ Avalonia 12.1.6 / xunit v2(2.9.x)+ `xunit.runner.visualstudio` 3.x + VSTest(不是 MTP、不是 MSTest)。skill 里面向 MSTest、MTP 的分支不适用;面向 .NET 10 写的建议在 .NET 11 上照常适用,以 `Directory.Build.props` 与各 csproj 的实际版本为准。唯一已知的连带升级:Avalonia 的 `Avalonia.Headless.XUnit` 依赖 xunit v3,哪天要用它就得连带把 xunit 升到 v3(本仓直接手写 `HeadlessUnitTestSession`,所以仍留在 v2)。
 - **性能第一**:与 `architecture.md` 的"性能第一"一致时可直接采纳;相互矛盾时以 spec 为准。
 
 ## 内容与来源
@@ -54,7 +54,7 @@
 
 ## 未纳入
 
-- `dotnet/skills` 的 `dotnet11`(net11-only)、`dotnet-upgrade`(已在 net10.0)、`dotnet-data`(EF Core,本项目直用 Microsoft.Data.Sqlite)、`dotnet-maui`/`dotnet-winforms`/`dotnet-aspnetcore`/`dotnet-blazor`/`dotnet-template-engine`、`dotnet-test-migration`、`dotnet-ai`(引导引 MEAI/MAF 包,与内化 agent-framework 源码的路线相反)。
+- `dotnet/skills` 的 `dotnet11`(net11-only)、`dotnet-upgrade`(已在 net11.0)、`dotnet-data`(EF Core,本项目直用 Microsoft.Data.Sqlite)、`dotnet-maui`/`dotnet-winforms`/`dotnet-aspnetcore`/`dotnet-blazor`/`dotnet-template-engine`、`dotnet-test-migration`、`dotnet-ai`(引导引 MEAI/MAF 包,与内化 agent-framework 源码的路线相反)。
 - `dotnet-advanced` 的其余三项:`vectorization`(SIMD 专用)、`dotnet-pinvoke`、`nuget-trusted-publishing`;只取了同 plugin 的 `csharp-scripts`。
 - `csharp-scripts` 的 `#:package` 指令能拉任意 NuGet 包。它在开发期用于原型无妨;一旦作为 codemode 的执行面,包来源、版本与离线可用性需要单独定规则,不能默认放行。
 
@@ -70,11 +70,11 @@
 |---|---|
 | 官方同仓包:`Avalonia.Controls.DataGrid`、`.TreeDataGrid`、`.WebView`、`Avalonia.Headless`(+ `.XUnit`)、`Avalonia.Skia`(含传递的 SkiaSharp)、`Avalonia.Themes.*`、`Avalonia.Fonts.*` | 已批准,逐名写入 `architecture.md` |
 | `AvaloniaUI.DiagnosticsSupport`(12.x DevTools) | 未批准:Avalonia Plus 商业工具链。`RendererDiagnostics` 叠加层不依赖它,先用那部分 |
-| `Avalonia.Headless.XUnit` | 已批准,但 12.1.4 的适配依赖 `xunit.v3.extensibility.core`;启用 headless UI 测试要连带把 xunit 升到 v3 |
+| `Avalonia.Headless.XUnit` | 已批准,但它的适配依赖 `xunit.v3.extensibility.core`;启用 headless UI 测试要连带把 xunit 升到 v3。本仓不用它:测试直接用 `Avalonia.Headless` 的 `HeadlessUnitTestSession`(见 `SharedUi.cs`) |
 | 三方主题/图标/图表库(`FluentAvaloniaUI`、`SukiUI`、`Semi.Avalonia`、`Irihi.Ursa`、`Material.Avalonia`、`Citrus.Avalonia`、`ShadUI`、`LiveCharts`、`Projektanker.Icons.*`、`Lucide.Avalonia`、`Svg.Skia`) | 待定,引入前逐个确认;`avalonia-styling` 与 `avalonia-pro-max` 正文里的选型表按"候选"读 |
 | `CommunityToolkit.Mvvm` / `ReactiveUI`(`avalonia-mvvm`、`avalonia-threading`、`avalonia-data-binding` 中提及) | 待定;手写 `INotifyPropertyChanged` + `ICommand` 的分支无需它们 |
 
-**启用前提:** 本套按 Avalonia 12.1.4 撰写(当前 stable,`net10.0` 推荐),而路由器第一条规则是"先读 csproj 检测版本"。`Forge.App` 建立后先把 `Avalonia` 版本钉进 `Directory.Packages.props` 或 csproj,再让 Agent 加载这套 skill,否则它只能按 12.1.x 猜。主程序走 Native AOT,则 `avalonia-interop-rendering` 与 `avalonia-performance` 的 NativeAOT/trimming 段需按 AOT 约束读。
+**启用前提:** 本套按 Avalonia 12.1.x 撰写(skill 正文里的示例版本是 12.1.4,本仓库钉在 12.1.6;skill 内推荐 `net10.0`,本仓库为 `net11.0`),而路由器第一条规则是"先读 csproj 检测版本"。`Forge.App` 建立后先把 `Avalonia` 版本钉进 `Directory.Packages.props` 或 csproj,再让 Agent 加载这套 skill,否则它只能按 12.1.x 猜。主程序走 Native AOT,则 `avalonia-interop-rendering` 与 `avalonia-performance` 的 NativeAOT/trimming 段需按 AOT 约束读。
 
 ## 接入与可见性
 

@@ -24,7 +24,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task Changed_for_another_session_is_ignored()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.Seed(new TodoItem("t1", "s1", "first", TodoStatus.Pending, null, 0, DateTimeOffset.UtcNow));
         var panel = await session.Dispatch(() => new TodoListViewModel(store), CancellationToken.None);
@@ -55,7 +55,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task Attach_to_a_new_session_resubscribes_and_detaches_the_old()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.Seed(new TodoItem("a", "s1", "from-one", TodoStatus.Pending, null, 0, DateTimeOffset.UtcNow));
         store.Seed(new TodoItem("b", "s2", "from-two", TodoStatus.Pending, null, 0, DateTimeOffset.UtcNow));
@@ -101,7 +101,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task Queueing_an_item_reaches_the_store_as_a_user_added_loose_row()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         var panel = await session.Dispatch(() => new TodoListViewModel(store), CancellationToken.None);
         await RefreshAfterAttachAsync(session, panel, "s1");
@@ -151,7 +151,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task Delete_and_move_reach_the_store()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.Seed(new TodoItem("m1", "s1", "first", TodoStatus.Pending, null, 0, DateTimeOffset.UtcNow));
         store.Seed(new TodoItem("m2", "s1", "second", TodoStatus.Pending, null, 1, DateTimeOffset.UtcNow));
@@ -196,7 +196,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task A_group_shows_its_steps_in_order_with_its_progress()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.SeedGroup(new TodoGroup("g1", "s1", "Fix the layout", 0, DateTimeOffset.UtcNow));
         store.Seed(new TodoItem("t1", "s1", "done step", TodoStatus.Done, null, 0, DateTimeOffset.UtcNow, GroupId: "g1"));
@@ -228,7 +228,7 @@ public sealed class TodoPanelTests
     [InlineData(new[] { TodoStatus.Done, TodoStatus.Done }, TodoStatus.Done)]
     public async Task A_group_status_follows_its_steps(TodoStatus[] steps, TodoStatus expected)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.SeedGroup(new TodoGroup("g1", "s1", "Plan", 0, DateTimeOffset.UtcNow));
         for (var i = 0; i < steps.Length; i++)
@@ -248,7 +248,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task An_empty_group_is_pending()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.SeedGroup(new TodoGroup("g1", "s1", "Nothing planned yet", 0, DateTimeOffset.UtcNow));
 
@@ -272,7 +272,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task A_finished_group_folds_into_the_done_section_and_opens_on_demand()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.SeedGroup(new TodoGroup("g1", "s1", "Finished plan", 0, DateTimeOffset.UtcNow));
         store.Seed(new TodoItem("t1", "s1", "step one", TodoStatus.Done, null, 0, DateTimeOffset.UtcNow, GroupId: "g1", CommitId: "0123456789abcdef"));
@@ -313,7 +313,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task Finished_loose_items_move_to_the_done_section_read_only()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         store.Seed(new TodoItem("p", "s1", "queued", TodoStatus.Pending, null, 0, DateTimeOffset.UtcNow, Origin: TodoOrigin.User));
         store.Seed(new TodoItem("d", "s1", "queued too", TodoStatus.Done, null, 1, DateTimeOffset.UtcNow));
@@ -335,7 +335,7 @@ public sealed class TodoPanelTests
     [Fact]
     public async Task The_status_line_reports_a_missing_session_and_a_failing_store()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeTodoStore();
         var panel = await session.Dispatch(() => new TodoListViewModel(store), CancellationToken.None);
 

@@ -42,7 +42,7 @@ internal static class Program
           -h, --help          this text
 
         Each JIT assembly is resolved from the switch, then FORGE_SMOKE_JIT_DIR, then this tool's own directory, then the
-        walking-up sibling layout (<root>/src/<project>/bin/<configuration>/net10.0, <root>/<project>/bin/<configuration>,
+        walking-up sibling layout (<root>/src/<project>/bin/<configuration>/net11.0, <root>/<project>/bin/<configuration>,
         <root>/artifacts/publish/<project>, <root>/publish/<project>), preferring the configuration this tool was built in.
         The host is started as `dotnet <host.dll> --pipe <name> --plugins <dir> --data <dir>` with FORGE_PLUGIN_WORKER and
         FORGE_SCRIPT_EXECUTOR pointing at the resolved worker and executor - the same convention the integration tests use.
@@ -556,7 +556,7 @@ internal sealed record JitLayout(string HostPath, string WorkerPath, string Exec
 
     private const string ExecutorAssemblyName = "Forge.ScriptExecutor";
 
-    private const string TargetFramework = "net10.0";
+    private const string TargetFramework = "net11.0";
 
     private const string JitDirectoryEnvironmentVariable = "FORGE_SMOKE_JIT_DIR";
 

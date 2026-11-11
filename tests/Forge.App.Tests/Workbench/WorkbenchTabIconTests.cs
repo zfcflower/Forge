@@ -16,12 +16,13 @@ namespace Forge.App.Tests.Workbench;
 /// object, so the two can never drift into different drawings. Kinds that spell themselves out in the title reserve no
 /// icon slot.
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class WorkbenchTabIconTests
 {
     [Fact]
     public async Task A_file_preview_tab_leads_with_the_document_the_file_tree_draws()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -53,7 +54,7 @@ public sealed class WorkbenchTabIconTests
     [Fact]
     public async Task A_session_tab_keeps_its_chat_bubble_and_fills_it_while_active()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {

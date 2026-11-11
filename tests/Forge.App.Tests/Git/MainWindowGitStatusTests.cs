@@ -34,7 +34,7 @@ public sealed class MainWindowGitStatusTests
         GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
         var sessionDir = Directory.CreateDirectory(Path.Combine(sandbox.Root, "session-work")).FullName;
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {
@@ -45,12 +45,12 @@ public sealed class MainWindowGitStatusTests
                 Assert.Equal(string.Empty, viewModel.ActiveBranchText);
                 Assert.False(viewModel.HasActiveBranch);
 
-                viewModel.GitPanel.Attach(new PanelContext(viewModel.ActiveSession!.SessionId, work, null));
+                viewModel.GitSync.Attach(new PanelContext(viewModel.ActiveSession!.SessionId, work, null));
                 await WaitIdleAsync(viewModel);
                 Assert.Equal("main", viewModel.ActiveBranchText);
                 Assert.True(viewModel.HasActiveBranch);
 
-                viewModel.GitPanel.Attach(PanelContext.Empty);
+                viewModel.GitSync.Attach(PanelContext.Empty);
                 await WaitIdleAsync(viewModel);
                 Assert.Equal(string.Empty, viewModel.ActiveBranchText);
                 Assert.False(viewModel.HasActiveBranch);
@@ -70,7 +70,7 @@ public sealed class MainWindowGitStatusTests
         GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
         var sessionDir = Directory.CreateDirectory(Path.Combine(sandbox.Root, "session-work")).FullName;
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {
@@ -91,10 +91,10 @@ public sealed class MainWindowGitStatusTests
 
                 // The shell forwards the panel's divergence into the status bar on every re-read.
                 sandbox.CommitFile(work, "file.txt", "v2\n", "second");
-                viewModel.GitPanel.Attach(new PanelContext(viewModel.ActiveSession!.SessionId, work, null));
+                viewModel.GitSync.Attach(new PanelContext(viewModel.ActiveSession!.SessionId, work, null));
                 await WaitIdleAsync(viewModel);
 
-                Assert.Equal(viewModel.GitPanel.AheadBehindText, viewModel.Status.AheadBehindText);
+                Assert.Equal(viewModel.GitSync.AheadBehindText, viewModel.Status.AheadBehindText);
                 Assert.Equal(
                     Loc.Instance.Format(GitStrings.AheadBehind, 1, 0),
                     viewModel.Status.AheadBehindText);
@@ -106,54 +106,12 @@ public sealed class MainWindowGitStatusTests
             CancellationToken.None);
     }
 
-    [Fact]
-    public async Task Git_panel_sits_in_the_inspector_with_its_view_model_and_title_bar_tools()
-    {
-        var plain = NewTempDir();
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
-        try
-        {
-            var (region, gitContent, gitTools) = await session.Dispatch(
-                async () =>
-                {
-                    await using var harness = await AppHarness.OpenWithSession(plain);
-                    var workbench = harness.ViewModel.Workbench;
-                    var where = workbench.GitPanel!.Region;
-                    var content = workbench.GitPanel?.Content?.GetType().FullName;
-                    var git = harness.ViewModel.GitPanel;
-                    var tools = workbench.GitPanel!.HeaderTools.OfType<PanelToolButton>()
-                        .Select(tool => (tool.Id, tool.IconKey, Bound: ReferenceEquals(tool.Command, tool.Id switch
-                        {
-                            "git-fetch" => git.FetchCommand,
-                            "git-pull" => git.PullCommand,
-                            "git-push" => git.PushCommand,
-                            _ => git.RefreshCommand,
-                        })))
-                        .ToList();
-                    harness.Detach(harness.ViewModel);
-                    return (where, content, tools);
-                },
-                CancellationToken.None);
-
-            Assert.Equal(RegionRole.Inspector, region);
-            Assert.Equal(typeof(Forge.App.Git.GitPanelViewModel).FullName, gitContent);
-            // Fetch, pull, push and refresh are icon tools in the Git panel's title bar, each bound to its command.
-            Assert.Equal(new[] { "git-fetch", "git-pull", "git-push", "git-refresh" }, gitTools.Select(static tool => tool.Id));
-            Assert.Equal(new[] { "IconGitFetch", "IconGitPull", "IconGitPush", "IconRefresh" }, gitTools.Select(static tool => tool.IconKey));
-            Assert.All(gitTools, static tool => Assert.True(tool.Bound, tool.Id));
-        }
-        finally
-        {
-            DeleteTree(plain);
-        }
-    }
-
     // ------------------------------------------------------------ harness
 
     private static async Task WaitIdleAsync(MainWindowViewModel viewModel)
     {
         var deadline = DateTime.UtcNow + IdleBudget;
-        while (viewModel.GitPanel.IsBusy)
+        while (viewModel.GitSync.IsBusy)
         {
             if (DateTime.UtcNow >= deadline)
             {
@@ -226,7 +184,7 @@ public sealed class MainWindowGitStatusTests
         public void Detach(MainWindowViewModel viewModel)
         {
             viewModel.Files.Attach(PanelContext.Empty);
-            viewModel.GitPanel.Attach(PanelContext.Empty);
+            viewModel.GitSync.Attach(PanelContext.Empty);
             viewModel.Dispose();
         }
 

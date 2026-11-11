@@ -11,6 +11,10 @@
     <Style Selector="TextBlock.project-name">
       <Setter Property="FontWeight" Value="Bold" />
     </Style>
+    <!-- A recycled workspace row (lifecycle 5.1) stays in the tree only to be restored or purged, so it reads greyed. -->
+    <Style Selector="Border.tree-row-content.recycled">
+      <Setter Property="Opacity" Value="0.55" />
+    </Style>
   </UserControl.Styles>
 
   <UserControl.Resources>
@@ -43,17 +47,10 @@
             </ItemsControl>
             <Border Grid.Column="1"
                     Classes="tree-row-content"
-                    Classes.active-row="{Binding IsActiveRow}">
-              <Border.ContextMenu>
-                <ContextMenu>
-                  <MenuItem Header="{Binding [project.newSession], Source={x:Static loc:Loc.Instance}}" Command="{Binding NewSessionCommand}" />
-                  <MenuItem Header="{Binding [project.rename], Source={x:Static loc:Loc.Instance}}" Command="{Binding RenameCommand}" />
-                  <MenuItem Header="{Binding [project.archive], Source={x:Static loc:Loc.Instance}}" Command="{Binding ArchiveCommand}" />
-                  <MenuItem Header="{Binding [project.reveal], Source={x:Static loc:Loc.Instance}}" Command="{Binding RevealCommand}" />
-                  <Separator />
-                  <MenuItem Header="{Binding [project.remove], Source={x:Static loc:Loc.Instance}}" Command="{Binding RemoveCommand}" />
-                </ContextMenu>
-              </Border.ContextMenu>
+                    Classes.active-row="{Binding IsActiveRow}"
+                    Classes.recycled="{Binding IsRecycled}">
+              <!-- No shared ContextMenu: each row's menu is generated when it opens (lifecycle 5.4 rule 1), from the row's
+                   snapshot only, by the view's context-request handler. -->
               <Grid>
                 <!-- Project / worktree / session rows: the chevron leads, then icon, title and the row's one tool. The row
                      itself is the hit target - a tap anywhere on it activates the row - so a session row needs no separate
@@ -83,7 +80,7 @@
                                  Width="12"
                                  Height="12"
                                  Margin="6,0,4,0" />
-                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
                     <!-- A project's own name is the heading of its subtree, so it reads one weight above the rows under it. -->
                     <TextBlock Text="{Binding Title}"
                                Classes.project-name="{Binding IsProject}"
@@ -91,15 +88,40 @@
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"
                                Margin="0,0,6,0" />
-                    <Ellipse Grid.Column="1" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+                    <!-- A fork workspace names its source branch after the title (5.4 rule 6), in the muted caption style. -->
+                    <TextBlock Grid.Column="1"
+                               Classes="caption"
+                               Text="{Binding ForkLabel}"
+                               IsVisible="{Binding HasForkLabel}"
+                               TextWrapping="NoWrap"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,6,0" />
+                    <!-- Recycled / directory missing / removed (lifecycle 5.1, 5.3), in the same muted caption style. -->
+                    <TextBlock Grid.Column="2"
+                               Classes="caption"
+                               Text="{Binding RowMarkText}"
+                               IsVisible="{Binding HasRowMark}"
+                               TextWrapping="NoWrap"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0" />
+                    <!-- A sparse checkout (7.9), read-only: the mark only says so. -->
+                    <TextBlock Grid.Column="3"
+                               Classes="caption"
+                               Text="{Binding SparseLabel}"
+                               IsVisible="{Binding IsSparse}"
+                               TextWrapping="NoWrap"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0" />
+                    <Ellipse Grid.Column="4" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
                   </Grid>
-                  <!-- The section's own "new conversation" tool, or the project's "new branch": same button, two actions,
-                       so the glyph and the tooltip tell them apart instead of sharing one plus. -->
+                  <!-- The section's own "new conversation" tool, or the project's "new workspace": same button, two actions,
+                       so the glyph and the tooltip tell them apart instead of sharing one plus. On a workspace row it is the
+                       menu's first group (5.3): the view runs its one enabled entry, or shows the group as a small menu. -->
                   <Button Grid.Column="3"
-                          Classes="ghost icon"
+                          Classes="ghost icon tree-plus"
                           Width="22"
                           Height="22"
-                          Command="{Binding NewSessionCommand}"
                           IsVisible="{Binding HasNewSession}"
                           ToolTip.Tip="{Binding NewSessionTooltip}"
                           AutomationProperties.AutomationId="project-new-session"

@@ -15,6 +15,7 @@ namespace Forge.App.Tests.Workbench;
 /// The store never sees the UI thread: the loader routes every store call through <c>BackgroundRead</c>, which is what
 /// the spec's "UI 线程不碰存储" rule requires of the call sites in <c>MainWindowViewModel</c>.
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class LayoutStateLoaderTests
 {
     private const int DockEraLayoutVersion = 2;
@@ -408,7 +409,7 @@ public sealed class LayoutStateLoaderTests
     [Fact]
     public async Task Store_reads_run_off_the_ui_thread()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var store = new FakeUiStateStore();
         store.Seed("layout", LayoutSnapshot.CurrentVersion, ValidLayoutJson);
         store.Seed("open-tabs", OpenTabsSnapshot.CurrentVersion, ValidOpenTabsJson);

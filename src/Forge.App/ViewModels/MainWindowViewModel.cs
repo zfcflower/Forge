@@ -12,6 +12,8 @@ using Forge.App.Services;
 using Forge.App.Terminal;
 using Forge.App.Git;
 using Forge.App.Workbench;
+using Forge.App.Lifecycle;
+using Forge.Core.Storage;
 using Forge.HostClient;
 using Forge.Workspace;
 
@@ -28,6 +30,70 @@ internal interface IDialogService
 
     /// <summary>Asks for the start point and the name of a new worktree branch; null means the user cancelled.</summary>
     Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct);
+
+    /// <summary>An information message with a single OK button.</summary>
+    Task NotifyAsync(string title, string message) => ConfirmAsync(title, message, ShellStrings.Ok, ShellStrings.Ok);
+
+    /// <summary>
+    /// A question with several buttons; the last option is the cancel button. Returns the chosen index, -1 when the
+    /// dialog was closed. The default offers the first and the last option only.
+    /// </summary>
+    async Task<int> ChooseAsync(string title, string message, IReadOnlyList<string> options) =>
+        await ConfirmAsync(title, message, options[0], options[^1]).ConfigureAwait(true) ? 0 : -1;
+
+    /// <summary>
+    /// The handover dialog (lifecycle 6.2): shows <paramref name="model"/>'s choices, runs
+    /// <see cref="HandoverDialogModel.ExecuteAsync"/> and stays open with its error until it succeeds or the user
+    /// cancels. True = handed over, false = cancelled; null = this host cannot show it (the caller reports that).
+    /// </summary>
+    Task<bool?> RunHandoverAsync(HandoverDialogModel model, CancellationToken ct) => Task.FromResult<bool?>(null);
+
+    /// <summary>
+    /// The parallel fork dialog (lifecycle 6.5), hosted like <see cref="RunHandoverAsync"/>: true = forked, false =
+    /// cancelled; null = this host cannot show it (the caller reports that).
+    /// </summary>
+    Task<bool?> RunForkAsync(ForkDialogModel model, CancellationToken ct) => Task.FromResult<bool?>(null);
+
+    /// <summary>
+    /// A single choice from a list (7.10); entries with a <see cref="PickEntry.DisabledReason"/> are shown greyed out with
+    /// that reason and cannot be chosen. Returns the chosen index, -1 when cancelled. The default offers the enabled
+    /// entries as buttons of <see cref="ChooseAsync"/> (with the default <see cref="ChooseAsync"/> only the first of them),
+    /// and with none enabled shows every entry's reason.
+    /// </summary>
+    async Task<int> PickAsync(string title, string message, IReadOnlyList<PickEntry> entries)
+    {
+        var enabled = new List<int>();
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].DisabledReason is null)
+            {
+                enabled.Add(i);
+            }
+        }
+
+        if (enabled.Count == 0)
+        {
+            var reasons = entries.Select(static entry => "• " + entry.Label + "\n  " + entry.DisabledReason);
+            await NotifyAsync(title, message + "\n" + string.Join("\n", reasons)).ConfigureAwait(true);
+            return -1;
+        }
+
+        var options = enabled.Select(i => entries[i].Label).Append(ShellStrings.Cancel).ToArray();
+        var choice = await ChooseAsync(title, message, options).ConfigureAwait(true);
+        return choice >= 0 && choice < enabled.Count ? enabled[choice] : -1;
+    }
+}
+
+/// <summary>
+/// A session could not be created because its workspace already has an active session; carries what would have been
+/// created, so the shell can offer to take the workspace over with exactly that session.
+/// </summary>
+internal sealed class SessionCreateOccupiedException(WorktreeOccupiedException occupied, SessionCreate create)
+    : InvalidOperationException(occupied.Message, occupied)
+{
+    public WorktreeOccupiedException Occupied { get; } = occupied;
+
+    public SessionCreate Create { get; } = create;
 }
 
 /// <summary>
@@ -62,6 +128,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private readonly LayoutStateLoader layoutState;
     private readonly Dictionary<string, SessionWorkspaceViewModel> sessions = new(StringComparer.Ordinal);
+    private readonly HashSet<string> handingOver = new(StringComparer.Ordinal);
     private readonly HashSet<string> openTabs = new(StringComparer.Ordinal);
     private readonly FinishedSubAgentsViewModel emptyFinishedMenu = new();
     private readonly Dictionary<string, string> projectRoots = new(StringComparer.Ordinal);
@@ -120,6 +187,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         };
         Projects.SessionArchived = OnSessionArchived;
         Projects.ArchiveGuard = ConfirmArchiveAsync;
+        WireLifecycle(Projects);
         Projects.AgentTrees = sessionId =>
             sessions.TryGetValue(sessionId, out var session) ? session.AgentSnapshots() : [];
         Projects.OpenSubAgent = OpenSubAgentTabAsync;
@@ -145,6 +213,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             SessionArchived = OnSessionArchived,
             ArchiveGuard = ConfirmArchiveAsync,
         };
+        WireLifecycle(GeneralChats);
         Changes = new ChangesViewModel(
             composition.Git,
             composition.TurnCheckpoints,
@@ -154,24 +223,24 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             (title, message, confirm, cancel) => dialogs is null
                 ? Task.FromResult(false)
                 : dialogs.ConfirmAsync(title, message, confirm, cancel));
+        GitSync = new GitSyncViewModel(
+            composition.Git,
+            composition.GitPanelSettings,
+            path => OpenFile(path, newTab: false));
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
             path => OpenFile(path, newTab: true),
             path => ShowChangesAsync(path),
             lineCountsFactory: null,
-            changeReview: Changes);
+            changeReview: Changes,
+            gitSync: GitSync);
         Todos = new TodoListViewModel(composition.Todos, composition.TodoStepCommitter);
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
-        GitPanel = new GitPanelViewModel(
-            composition.Git,
-            composition.GitPanelSettings,
-            ConfirmGitActionAsync,
-            composition.GitPullRequests);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         NewTerminalCommand = new RelayCommand(OpenTerminal);
-        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GitPanel, GeneralChats);
+        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GeneralChats);
         terminals = new TerminalWorkbench(
             Workbench,
             composition.Preferences,
@@ -179,9 +248,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             () => RevealBottomGroup(activeSession));
         newTerminalButton = CreateNewTerminalButton();
 
-        // Git is its own panel, stacked under the files panel in the inspector column; its title follows the view model.
-        Workbench.GitPanel!.Title = GitPanel.Title;
-        GitPanel.PropertyChanged += OnGitPanelPropertyChanged;
+        GitSync.PropertyChanged += OnGitSyncPropertyChanged;
         openChangesTool = new PanelToolButton(
             OpenChangesToolId,
             ShellStrings.OpenChangesTooltip,
@@ -203,8 +270,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         Workbench.BottomTabs.HeaderTools.Add(emptyFinishedMenu);
         Workbench.BottomTabs.HeaderTools.Add(newTerminalButton);
-        // The Git panel's remote operations are icons in its title bar, like the project panel's tools.
-        RefreshGitTools();
         Workbench.TabClosed += OnTabClosed;
         Workbench.ContentCloseGuard = ConfirmCloseTabAsync;
         Workbench.ActiveTabChanged += OnActiveTabChanged;
@@ -259,8 +324,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     public ChangesViewModel Changes { get; }
 
-    /// <summary>The inspector's Git tab for the active session; its branch also feeds the title and status bars.</summary>
-    public GitPanelViewModel GitPanel { get; }
+    /// <summary>
+    /// The git row at the bottom of the files panel: the active worktree's branch state, the three sync verbs and the last
+    /// result. Its ahead/behind and branch also feed the composer strip and the session title row.
+    /// </summary>
+
+    public GitSyncViewModel GitSync { get; }
 
     public WorkbenchLayout Workbench { get; }
 
@@ -294,7 +363,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             var previous = activeSession;
             if (Set(ref activeSession, value))
             {
-                previous?.Instruments.SetGit(null, null);
+                previous?.Instruments.SetGit(null);
                 SetTreesActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
@@ -310,7 +379,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public string ActiveSessionTitle => activeSession?.Title ?? ShellStrings.NoOpenSession;
 
     /// <summary>The active session's branch as the Git tab last read it; empty outside a repository.</summary>
-    public string ActiveBranchText => activeSession is null ? string.Empty : GitPanel.BranchText;
+    public string ActiveBranchText => activeSession is null ? string.Empty : GitSync.BranchLabel;
 
     public bool HasActiveBranch => ActiveBranchText.Length > 0;
 
@@ -332,6 +401,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        await RunStartupLifecycleAsync().ConfigureAwait(true);
         RefreshProjectCacheAsync();
         await Projects.InitializeAsync(composition.Paths.GeneralWorkspaceDirectory, CancellationToken.None).ConfigureAwait(true);
         await GeneralChats.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
@@ -351,6 +421,88 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     {
         await GeneralChats.RefreshAsync(ct).ConfigureAwait(true);
         await Projects.RefreshAsync(ct).ConfigureAwait(true);
+        await RefreshConflictSnapshotAsync(ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Refreshes the merge-conflict flag (section 2) of every repository workspace row in the trees and of the workspace
+    /// of every live project session tab, off the dispatcher (<c>MERGE_HEAD</c> in the checkout's own git dir, four reads
+    /// at a time), then lets the trees re-read it (the "abort the merge" entry, the disabled items). Only the checked
+    /// workspaces are updated, so a flag a flow set elsewhere stays; a workspace git cannot read keeps its previous flag,
+    /// and a read that overlapped an operation in that workspace is dropped (<see cref="WorkspaceStates.Epoch"/>).
+    /// </summary>
+    private async Task RefreshConflictSnapshotAsync(CancellationToken ct)
+    {
+        var directories = new HashSet<string>(StringComparer.Ordinal);
+        var unique = new List<string>();
+        void Add(string directory)
+        {
+            if (directories.Add(OccupancyKey.Compute(null, directory)))
+            {
+                unique.Add(directory);
+            }
+        }
+
+        foreach (var directory in Projects.WorkspaceDirectories())
+        {
+            Add(directory);
+        }
+
+        foreach (var directory in GeneralChats.WorkspaceDirectories())
+        {
+            Add(directory);
+        }
+
+        foreach (var session in sessions.Values)
+        {
+            if (!session.IsReadOnlyView && session.Info.ProjectId is not null)
+            {
+                Add(session.Info.WorktreePath ?? session.Info.WorkspacePath);
+            }
+        }
+
+        if (unique.Count > 0)
+        {
+            var git = composition.Git;
+            var states = composition.WorkspaceStates;
+            await Task.Run(
+                    () => Parallel.ForEachAsync(
+                        unique,
+                        new ParallelOptions { MaxDegreeOfParallelism = ConflictReadConcurrency, CancellationToken = ct },
+                        async (directory, token) =>
+                        {
+                            // A workspace a flow is working in is the flow's to flag; a read that raced an operation
+                            // (started, or ended with its own flag, while git ran) is dropped, not written over it.
+                            var epoch = states.Epoch(directory);
+                            if (states.IsOperating(directory))
+                            {
+                                return;
+                            }
+
+                            try
+                            {
+                                var inMerge = await git.HasMergeInProgressAsync(directory, token).ConfigureAwait(false);
+                                states.TrySetConflictedFromRead(directory, inMerge, epoch);
+                            }
+                            catch (Exception exception) when (exception is GitException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+                            {
+                                Trace.WriteLine("[lifecycle] merge state read failed: " + exception.Message);
+                            }
+                        }),
+                    ct)
+                .ConfigureAwait(true);
+        }
+
+        NotifyTreeCommandStates();
+    }
+
+    /// <summary>Concurrent <c>MERGE_HEAD</c> reads of the conflict snapshot.</summary>
+    private const int ConflictReadConcurrency = 4;
+
+    private void NotifyTreeCommandStates()
+    {
+        GeneralChats.NotifyCommandStates();
+        Projects.NotifyCommandStates();
     }
 
     private void RefreshTreeAgents()
@@ -363,6 +515,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     {
         GeneralChats.MarkRunning(sessionId, isRunning);
         Projects.MarkRunning(sessionId, isRunning);
+
+        // A session going busy or idle changes whether its fork / merge entries can run.
+        NotifyTreeCommandStates();
     }
 
     private void SetTreesActiveSession(string? sessionId)
@@ -661,7 +816,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     // ---------------------------------------------------------------- sessions
 
-    private async Task OpenSessionByIdAsync(string sessionId, CancellationToken ct)
+    internal async Task OpenSessionByIdAsync(string sessionId, CancellationToken ct)
     {
         var sessions = composition.Sessions;
         var info = await BackgroundRead.RunAsync(token => sessions.GetSessionAsync(sessionId, token), ct)
@@ -671,47 +826,1044 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        if (info.Status == SessionStatus.Archived)
-        {
-            var catalog = composition.Catalog;
-            await BackgroundRead.RunAsync(token => catalog.SetStatusAsync(sessionId, SessionStatus.Active, token), ct)
-                .ConfigureAwait(true);
-            info = info with { Status = SessionStatus.Active };
-        }
-
+        // Opening never changes a session's status (6.3): a session that is not Active opens as a read-only view, and
+        // only "continue" (ActivateAsync, which honours the one-active-session-per-workspace rule) makes it Active again.
         await OpenSessionAsync(info, ct).ConfigureAwait(true);
     }
 
     private async Task OpenSessionAsync(SessionInfo info, CancellationToken ct)
     {
+        (string Draft, IReadOnlyList<string> Queued)? carried = null;
         if (sessions.TryGetValue(info.Id, out var existing))
         {
-            ShowSessionTab(existing);
-            openTabs.Add(info.Id);
-            ActiveSession = existing;
-            ScheduleLayoutSave();
-            return;
+            if (!(existing.IsReadOnlyView && info.Status == SessionStatus.Active) || existing.IsRunning)
+            {
+                ShowSessionTab(existing);
+                openTabs.Add(info.Id);
+                ActiveSession = existing;
+                ScheduleLayoutSave();
+                return;
+            }
+
+            // The read-only view of a session that became Active again ("continue"): the live view replaces it in the
+            // same tab (ShowSessionTab re-binds the tab), and takes over its unsent draft and queue (R6).
+            sessions.Remove(info.Id);
+            existing.BecameReadOnly -= OnSessionBecameReadOnly;
+            carried = existing.TakeComposerState();
+            existing.Dispose();
         }
 
-        var runtime = composition.Runtimes.Get(info);
+        var readOnly = info.Status != SessionStatus.Active;
+        var catalog = composition.Catalog;
         var session = new SessionWorkspaceViewModel(
             info,
-            runtime,
+            readOnly ? null : composition.Runtimes.Get(info),
             composition.Checkpoints,
             composition.Sessions,
             composition.Provider,
             OnSubAgentToolRequested,
-            instrumentSources: instruments);
+            instrumentSources: instruments)
+        {
+            ChildQuery = readOnly
+                ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
+                : null,
+        };
+        if (readOnly)
+        {
+            AttachReadOnlyCommands(session);
+        }
+        else
+        {
+            session.TurnGate = token => CheckTurnAsync(session, token);
+        }
+
+        session.BecameReadOnly += OnSessionBecameReadOnly;
         ApplyProject(session);
         session.TurnCompleted += OnTurnCompleted;
         session.SubAgentsChanged += OnSubAgentsChanged;
         session.AgentTreeChanged += OnAgentTreeChanged;
         sessions[info.Id] = session;
+        if (carried is { } state)
+        {
+            session.RestoreComposerState(state);
+        }
+
         await session.LoadHistoryAsync(ct).ConfigureAwait(true);
         ShowSessionTab(session);
         openTabs.Add(info.Id);
         ActiveSession = session;
         ScheduleLayoutSave();
+    }
+
+    /// <summary>
+    /// The turn-start check (6.3), read off the dispatcher: the store must still have the session as Active (a handover
+    /// or a restore elsewhere may have replaced it), and its workspace must be neither in an operation (a merge back /
+    /// sync running in it: this also covers a tab opened after the operation began) nor in a merge conflict (the snapshot
+    /// the tree refresh keeps; no git runs here). A store failure lets the turn start: the check guards against a stale tab,
+    /// it is not a second source of truth.
+    /// </summary>
+    private async Task<TurnRejection> CheckTurnAsync(SessionWorkspaceViewModel session, CancellationToken ct)
+    {
+        var store = composition.Sessions;
+        var id = session.SessionId;
+        SessionInfo? current;
+        try
+        {
+            current = await BackgroundRead.RunAsync(token => store.GetSessionAsync(id, token), ct).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Trace.WriteLine("[turn] status check failed: " + exception.Message);
+            Status.SetWorkspaceProblem(LifecycleStrings.TurnCheckFailed(exception.Message));
+            return TurnRejection.None;
+        }
+
+        if (current is null || current.Status == SessionStatus.Deleted)
+        {
+            return TurnRejection.Removed;
+        }
+
+        if (current.Status != SessionStatus.Active)
+        {
+            return TurnRejection.TakenOver;
+        }
+
+        var directory = current.WorktreePath ?? current.WorkspacePath;
+        if (composition.WorkspaceStates.IsOperating(directory))
+        {
+            return TurnRejection.WorkspaceOperating;
+        }
+
+        return composition.WorkspaceStates.IsConflicted(directory)
+            ? TurnRejection.MergeConflict
+            : TurnRejection.None;
+    }
+
+    /// <summary>A live tab found taken over at turn start: its runtime goes, the tab stays as a read-only view.</summary>
+    private void OnSessionBecameReadOnly(SessionWorkspaceViewModel session)
+    {
+        composition.Runtimes.Release(session.SessionId);
+        AttachReadOnlyCommands(session);
+        _ = RefreshTreesAfterLifecycleAsync();
+    }
+
+    /// <summary>
+    /// "Continue this session" on an archived read-only view; disabled when its workspace folder is gone (6.3). The folder
+    /// probe runs on the thread pool (a dead network drive must not stall the dispatcher); until it answers the command
+    /// stays enabled and <see cref="ContinueSessionAsync"/> checks the folder again itself.
+    /// </summary>
+    private void AttachReadOnlyCommands(SessionWorkspaceViewModel session)
+    {
+        var info = session.Info;
+        var directory = info.WorktreePath ?? info.WorkspacePath;
+        var command = new AsyncRelayCommand(
+            ct => ContinueSessionAsync(session.SessionId, ct),
+            () => session.ContinueBlockedReason is null,
+            exception => Status.SetWorkspaceProblem(LocText.Literal(exception.Message)));
+        session.ContinueCommand = command;
+        _ = ProbeContinueAsync(session, command, info);
+    }
+
+    private async Task ProbeContinueAsync(SessionWorkspaceViewModel session, AsyncRelayCommand command, SessionInfo info)
+    {
+        string? reason;
+        try
+        {
+            reason = await ContinueBlockAsync(info, CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The probe only greys the button; the click checks again and reports what it finds.
+            Trace.WriteLine($"[lifecycle] could not probe whether '{info.Id}' can continue: {exception.Message}");
+            reason = null;
+        }
+
+        session.ContinueBlockedReason = reason;
+        command.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Why a session cannot continue where it is (6.3), or null: its folder is gone, or it is a repository worktree that
+    /// git marks prunable or does not list (a turn there would run git against a broken or an enclosing repository). A
+    /// worktree list that cannot be read is unknown and blocks nothing: it is neither healthy nor stale, and the turn's own
+    /// git calls report what is wrong. Runs off the dispatcher.
+    /// </summary>
+    internal Task<string?> ContinueBlockAsync(SessionInfo info, CancellationToken ct)
+    {
+        var git = composition.Git;
+        var projects = composition.Projects;
+        return Task.Run(
+            async () =>
+            {
+                var directory = info.WorktreePath ?? info.WorkspacePath;
+                if (!Directory.Exists(directory))
+                {
+                    return LifecycleStrings.DirectoryMissing;
+                }
+
+                if (info.ProjectId is not { } projectId || string.IsNullOrEmpty(info.WorktreePath))
+                {
+                    return null;
+                }
+
+                var project = (await projects.ListAsync(ct).ConfigureAwait(false))
+                    .FirstOrDefault(p => string.Equals(p.Id, projectId, StringComparison.Ordinal));
+                if (project is not { Kind: ProjectKind.Repository } || RemovalFlow.SameDirectory(directory, project.RootPath))
+                {
+                    return null;
+                }
+
+                IReadOnlyList<GitWorktree>? list = null;
+                try
+                {
+                    list = await git.ListWorktreesAsync(project.RootPath, ct).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    Trace.WriteLine($"[lifecycle] could not list the worktrees of '{project.RootPath}': {exception.Message}");
+                }
+
+                return WorktreeList.Judge(list, directory) switch
+                {
+                    (WorktreeRegistration.Prunable, var prunableReason) => LifecycleStrings.WorktreePrunable(prunableReason),
+                    (WorktreeRegistration.Unregistered, _) => LifecycleStrings.WorktreeUnregistered,
+                    _ => (string?)null,
+                };
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// Makes a session Active again through <see cref="ISessionCatalog.ActivateAsync"/>, the one path that honours the
+    /// one-active-session-per-workspace rule; a workspace that already has an active session ends in the occupied dialog.
+    /// </summary>
+    internal async Task ContinueSessionAsync(string sessionId, CancellationToken ct)
+    {
+        var catalog = composition.Catalog;
+        var store = composition.Sessions;
+        try
+        {
+            var info = await BackgroundRead.RunAsync(token => store.GetSessionAsync(sessionId, token), ct).ConfigureAwait(true);
+            var block = info is null ? LifecycleStrings.DirectoryMissing : await ContinueBlockAsync(info, ct).ConfigureAwait(true);
+            if (block is not null)
+            {
+                Status.SetWorkspaceProblem(LocText.Literal(LifecycleStrings.ContinueBlocked(block)));
+                return;
+            }
+
+            var activated = await BackgroundRead.RunAsync(token => catalog.ActivateAsync(sessionId, token), ct)
+                .ConfigureAwait(true);
+            if (!activated)
+            {
+                // The session is gone or no longer resumable (removed elsewhere): say so instead of doing nothing.
+                Status.SetWorkspaceProblem(LifecycleStrings.ContinueFailed);
+                await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
+                return;
+            }
+        }
+        catch (WorktreeOccupiedException occupied)
+        {
+            await ShowOccupiedAsync(occupied, HandoverIntent.Resume(sessionId), ct).ConfigureAwait(true);
+            return;
+        }
+
+        await OpenSessionByIdAsync(sessionId, ct).ConfigureAwait(true);
+        await RefreshTreesAsync(ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// The one place a <see cref="WorktreeOccupiedException"/> ends up (6.1): the workspace's active session is named,
+    /// and the user can take it over with <paramref name="intent"/> (the session that was to be created or continued),
+    /// view it, or cancel. Nothing changes before the handover dialog.
+    /// </summary>
+    internal async Task ShowOccupiedAsync(WorktreeOccupiedException occupied, HandoverIntent? intent, CancellationToken ct)
+    {
+        var store = composition.Sessions;
+        var holderId = occupied.HolderSessionId;
+        var holder = await BackgroundRead.RunAsync(token => store.GetSessionAsync(holderId, token), ct).ConfigureAwait(true);
+        var title = holder?.Title ?? holderId;
+        if (dialogs is null)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(LifecycleStrings.OccupiedMessage(title)));
+            return;
+        }
+
+        if (holder is null)
+        {
+            await dialogs.NotifyAsync(LifecycleStrings.OccupiedTitle, LifecycleStrings.OccupiedMessage(title)).ConfigureAwait(true);
+            return;
+        }
+
+        var takeOver = intent is not null;
+        IReadOnlyList<string> options = takeOver
+            ? [HandoverStrings.TakeOver, LifecycleStrings.ViewHolder(title), ShellStrings.Cancel]
+            : [LifecycleStrings.ViewHolder(title), ShellStrings.Cancel];
+        var choice = await dialogs.ChooseAsync(
+                LifecycleStrings.OccupiedTitle,
+                takeOver ? HandoverStrings.OccupiedQuestion(title) : LifecycleStrings.OccupiedMessage(title),
+                options)
+            .ConfigureAwait(true);
+        if (takeOver && choice == 0)
+        {
+            await TakeOverAsync(holder, intent!, ct).ConfigureAwait(true);
+        }
+        else if (choice >= 0 && choice == (takeOver ? 1 : 0))
+        {
+            await OpenSessionAsync(holder, ct).ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// The handover (6.2) of <paramref name="holder"/>'s workspace to <paramref name="intent"/>: the idle check (busy
+    /// reasons listed, only "wait" and "cancel" offered, nothing queued or forced), the unsaved-buffer guard, then the
+    /// "handing over" flag for the whole dialog, in which the commit / carry choice and the context mode are made and
+    /// executed (<see cref="HandoverFlow"/>). On success the old runtime goes, its tab turns read-only, the session that
+    /// took over opens and the trees refresh. Every failure is reported in the dialog or as a notice.
+    /// </summary>
+    internal async Task TakeOverAsync(SessionInfo holder, HandoverIntent intent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(holder);
+        ArgumentNullException.ThrowIfNull(intent);
+        if (dialogs is null)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(HandoverStrings.Unavailable));
+            return;
+        }
+
+        sessions.TryGetValue(holder.Id, out var holderView);
+        if (await ShowBusyAsync(holder, holderView).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        if (!await ConfirmArchiveAsync(holder.Id).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        // The guard awaited a dialog: the session may have started something meanwhile. The UI thread owns every busy
+        // source, so nothing changes between this second check and setting the flag.
+        if (await ShowBusyAsync(holder, holderView).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        handingOver.Add(holder.Id);
+        if (holderView is not null)
+        {
+            holderView.IsHandingOver = true;
+        }
+
+        try
+        {
+            await RunHandoverDialogAsync(holder, holderView, intent, ct).ConfigureAwait(true);
+        }
+        finally
+        {
+            handingOver.Remove(holder.Id);
+            if (holderView is not null)
+            {
+                holderView.IsHandingOver = false;
+            }
+        }
+    }
+
+    /// <summary>The idle check (6.2 step 1): when busy, lists the reasons with "wait" and "cancel" and returns true.</summary>
+    private async Task<bool> ShowBusyAsync(SessionInfo holder, SessionWorkspaceViewModel? holderView)
+    {
+        var reasons = HandoverBusyReasons(holder, holderView);
+        if (reasons.Count == 0)
+        {
+            return false;
+        }
+
+        await dialogs!.ConfirmAsync(
+                HandoverStrings.Title,
+                HandoverStrings.BusyMessage(holder.Title, reasons),
+                HandoverStrings.Wait,
+                ShellStrings.Cancel)
+            .ConfigureAwait(true);
+        return true;
+    }
+
+    private async Task RunHandoverDialogAsync(
+        SessionInfo holder,
+        SessionWorkspaceViewModel? holderView,
+        HandoverIntent intent,
+        CancellationToken ct)
+    {
+        var flow = composition.Handover;
+        var directory = HandoverFlow.DirectoryOf(holder);
+        int uncommitted;
+        try
+        {
+            var git = composition.Git;
+            uncommitted = await BackgroundRead.RunAsync(
+                    async token => Directory.Exists(directory) && await git.IsRepositoryAsync(directory, token).ConfigureAwait(false)
+                        ? (await git.GetStatusAsync(directory, includeUntracked: true, token).ConfigureAwait(false)).Count
+                        : 0,
+                    ct)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is GitException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            await dialogs!.NotifyAsync(HandoverStrings.Title, HandoverStrings.StatusFailed(exception.Message)).ConfigureAwait(true);
+            return;
+        }
+
+        HandoverAttempt? done = null;
+        var model = new HandoverDialogModel(
+            holder.Title,
+            uncommitted,
+            IsRootCheckout(holder),
+            intent.IsNewSession,
+            async (choice, token) =>
+            {
+                var attempt = await Task.Run(() => flow.ExecuteAsync(holder, intent, choice, token), CancellationToken.None)
+                    .ConfigureAwait(true);
+                if (!attempt.Succeeded)
+                {
+                    return attempt.Error;
+                }
+
+                done = attempt;
+                return null;
+            });
+        var shown = await dialogs!.RunHandoverAsync(model, ct).ConfigureAwait(true);
+        if (shown is null && done is null)
+        {
+            await dialogs.NotifyAsync(HandoverStrings.Title, HandoverStrings.Unavailable).ConfigureAwait(true);
+            return;
+        }
+
+        if (done?.Session is not { } taker)
+        {
+            return;
+        }
+
+        // The old session: its runtime goes and an open tab stays as a read-only view (6.2, "the old session").
+        var store = composition.Sessions;
+        var oldInfo = await BackgroundRead.RunAsync(token => store.GetSessionAsync(holder.Id, token), CancellationToken.None)
+            .ConfigureAwait(true);
+        if (holderView is not null && oldInfo is not null)
+        {
+            holderView.IsHandingOver = false;
+            holderView.EnterReadOnly(oldInfo);
+        }
+        else
+        {
+            composition.Runtimes.Release(holder.Id);
+        }
+
+        await OpenSessionAsync(taker, CancellationToken.None).ConfigureAwait(true);
+        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+        if (done.Warning is { } warning)
+        {
+            await dialogs.NotifyAsync(HandoverStrings.Title, warning).ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// Why <paramref name="holder"/> cannot be taken over now (section 2, idle): the busy sources of its open tab, a
+    /// handover already running for it, and the workspace-level states (an operation under way, a merge conflict).
+    /// </summary>
+    private List<string> HandoverBusyReasons(SessionInfo holder, SessionWorkspaceViewModel? holderView)
+    {
+        var reasons = new List<string>(holderView?.BusyReasons() ?? []);
+        if (handingOver.Contains(holder.Id) && !reasons.Contains(HandoverStrings.BusyHandingOver))
+        {
+            reasons.Add(HandoverStrings.BusyHandingOver);
+        }
+
+        var directory = HandoverFlow.DirectoryOf(holder);
+        if (composition.WorkspaceStates.IsOperating(directory))
+        {
+            reasons.Add(HandoverStrings.BusyWorkspaceOperating);
+        }
+
+        if (composition.WorkspaceStates.IsConflicted(directory))
+        {
+            reasons.Add(HandoverStrings.BusyMergeConflict);
+        }
+
+        return reasons;
+    }
+
+    /// <summary>
+    /// Archives the fork session and removes its workspace after a merge back (6.6 step 6), through the removal pipeline
+    /// (7.3) with <c>baseBranch</c> = the fork's source branch; returns null on success (or a cancel), else the reason.
+    /// Wired to <see cref="RemoveForkWorkspaceAsync"/>; settable so shell tests can substitute it.
+    /// </summary>
+    internal Func<ForkRelation, string, CancellationToken, Task<string?>>? RemoveForkWorkspace { get; set; }
+
+    /// <summary>Hands a tree the lifecycle callbacks (6.5, 6.6) and the in-memory states its menus read (I3).</summary>
+    private void WireLifecycle(ProjectTreeViewModel tree)
+    {
+        var states = composition.WorkspaceStates;
+        tree.ForkWorkspace = ForkWorkspaceAsync;
+        tree.MergeFork = MergeForkAsync;
+        tree.AbortMerge = AbortMergeAsync;
+        tree.IsWorkspaceBlocked = directory => states.IsOperating(directory) || states.IsConflicted(directory);
+        tree.IsWorkspaceConflicted = states.IsConflicted;
+        tree.IsSessionBusy = IsSessionBusy;
+        WireRemoval(tree);
+        WireMenu(tree);
+        RemoveForkWorkspace ??= RemoveForkWorkspaceAsync;
+    }
+
+    /// <summary>The busy flags of a session's open tab and a handover running for it; in memory only.</summary>
+    private bool IsSessionBusy(string sessionId) =>
+        handingOver.Contains(sessionId)
+        || (sessions.TryGetValue(sessionId, out var view) && view.BusyReasons().Count > 0);
+
+    /// <summary>
+    /// The parallel fork (6.5) of <paramref name="source"/>: reads the live HEAD, changes and sparse config off the UI
+    /// thread (detached / unborn / not a repository refuse with a notice), then runs the fork dialog. A busy source only
+    /// allows "fork anyway"; "commit first" re-checks the source right before committing and holds it in the handing-over
+    /// state until the attempt ends, so no turn starts under the commit (its queued input waits, nothing is dropped). On
+    /// success the new session opens and the trees refresh; the source session goes on untouched.
+    /// </summary>
+    internal async Task ForkWorkspaceAsync(ForkSource source, HandoverContextMode defaultMode, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (dialogs is null)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(ForkStrings.Unavailable));
+            return;
+        }
+
+        var flow = composition.Fork;
+        var preparation = await Task.Run(() => flow.PrepareAsync(source, ct), ct).ConfigureAwait(true);
+        if (!preparation.CanFork)
+        {
+            await dialogs.NotifyAsync(ForkStrings.Title, preparation.Error!).ConfigureAwait(true);
+            if (source.Session is not null)
+            {
+                // A stale source is the tree's: let it show the workspace's current session.
+                await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+            }
+
+            return;
+        }
+
+        var owner = source.Session;
+        SessionWorkspaceViewModel? ownerView = null;
+        if (owner is not null)
+        {
+            sessions.TryGetValue(owner.Id, out ownerView);
+        }
+
+        var sourceBusy = owner is not null && HandoverBusyReasons(owner, ownerView).Count > 0;
+        ForkAttempt? done = null;
+        var model = new ForkDialogModel(
+            preparation.Branch!,
+            preparation.StartCommit!,
+            owner?.Title,
+            preparation.Uncommitted.Count,
+            sourceBusy,
+            preparation.Sparse is not null,
+            ForkFlow.DefaultBranchName(composition.Worktrees.Manager.Options.BranchPrefix),
+            defaultMode,
+            async (choice, token) =>
+            {
+                // "Commit first": checked and claimed on the UI thread, which owns every busy source, so nothing can start
+                // between the check and the flag; the flow's own check then only confirms it. The source workspace is
+                // also "operating" for the attempt, so no merge, sync or abort starts in it under the commit.
+                var holding = choice.CommitFirst && owner is not null;
+                if (holding)
+                {
+                    if (HandoverBusyReasons(owner!, ownerView).Count > 0 || !composition.WorkspaceStates.TryBeginOperation(source.Directory))
+                    {
+                        return ForkStrings.BusyNow(owner!.Title);
+                    }
+
+                    NotifyTreeCommandStates();
+                    handingOver.Add(owner!.Id);
+                    if (ownerView is not null)
+                    {
+                        ownerView.IsHandingOver = true;
+                    }
+                }
+
+                ForkAttempt attempt;
+                try
+                {
+                    attempt = await Task.Run(() => flow.ExecuteAsync(source, choice, static () => true, token), CancellationToken.None)
+                        .ConfigureAwait(true);
+                }
+                finally
+                {
+                    if (holding)
+                    {
+                        composition.WorkspaceStates.EndOperation(source.Directory);
+                        NotifyTreeCommandStates();
+                        handingOver.Remove(owner!.Id);
+                        if (ownerView is not null)
+                        {
+                            ownerView.IsHandingOver = false;
+                        }
+                    }
+                }
+
+                if (!attempt.Succeeded)
+                {
+                    return attempt.Error;
+                }
+
+                done = attempt;
+                return null;
+            });
+        var shown = await dialogs.RunForkAsync(model, ct).ConfigureAwait(true);
+        if (shown is null && done is null)
+        {
+            await dialogs.NotifyAsync(ForkStrings.Title, ForkStrings.Unavailable).ConfigureAwait(true);
+            return;
+        }
+
+        if (done?.Session is not { } fork)
+        {
+            return;
+        }
+
+        await OpenSessionAsync(fork, CancellationToken.None).ConfigureAwait(true);
+        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Merge back / sync (6.6): the preview read off the UI thread (an unplannable merge is a notice; a merge back with
+    /// no workspace on the source branch degrades to pushing the fork branch; nothing to merge is a notice), the target
+    /// workspace's idle check, the confirmation listing the commits, then the merge with the target in the "operation in
+    /// progress" state. A conflict marks the target conflicted (its session cannot start a turn) and offers to abort now
+    /// or later; a merge back that went through offers to remove the fork when <see cref="RemoveForkWorkspace"/> is set.
+    /// </summary>
+    internal async Task MergeForkAsync(ForkRelation relation, MergeDirection direction, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+        var title = direction == MergeDirection.MergeBack ? ForkStrings.MergeBackTitle : ForkStrings.SyncTitle;
+        if (dialogs is null)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(ForkStrings.Unavailable));
+            return;
+        }
+
+        var flow = composition.Merge;
+        var preview = await Task.Run(() => flow.PreviewAsync(relation, direction, ct), ct).ConfigureAwait(true);
+        if (preview.Error is { } error)
+        {
+            await dialogs.NotifyAsync(title, error).ConfigureAwait(true);
+            return;
+        }
+
+        if (preview.TargetMissing)
+        {
+            await OfferPushForkAsync(relation, preview, title, ct).ConfigureAwait(true);
+            return;
+        }
+
+        if (preview.AlreadyDone)
+        {
+            await dialogs.NotifyAsync(
+                    title,
+                    direction == MergeDirection.MergeBack
+                        ? ForkStrings.AlreadyMerged(preview.ForkBranch, preview.SourceBranch)
+                        : ForkStrings.UpToDate(preview.ForkBranch, preview.SourceBranch))
+                .ConfigureAwait(true);
+            return;
+        }
+
+        var target = preview.TargetDirectory!;
+        if (await ShowTargetBusyAsync(title, target).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        var choice = await dialogs.ChooseAsync(
+                title,
+                MergeMessage(preview),
+                [direction == MergeDirection.MergeBack ? ForkStrings.Merge : ForkStrings.Sync, ShellStrings.Cancel])
+            .ConfigureAwait(true);
+        if (choice != 0)
+        {
+            return;
+        }
+
+        // The confirmation awaited a dialog: the target may have started something meanwhile. The UI thread owns every
+        // busy source, so nothing starts between this check and the operation flag.
+        var states = composition.WorkspaceStates;
+        if (await ShowTargetBusyAsync(title, target).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        if (!states.TryBeginOperation(target))
+        {
+            await dialogs.NotifyAsync(title, ForkStrings.Busy(target, [HandoverStrings.BusyWorkspaceOperating])).ConfigureAwait(true);
+            return;
+        }
+
+        // Step 3: the target's live session is held in the handing-over state for the merge (nothing can be sent or
+        // queued; what is already queued stays); a tab opened meanwhile is stopped by the turn-start check.
+        MergeOutcome outcome;
+        var held = HoldWorkspaceSessions(target);
+        NotifyTreeCommandStates();
+        try
+        {
+            outcome = await Task.Run(() => flow.ExecuteAsync(preview), CancellationToken.None).ConfigureAwait(true);
+            if (outcome.Kind == MergeOutcomeKind.Conflict)
+            {
+                // Step 5: the conflict state takes over from "operation in progress" and keeps blocking by itself.
+                states.SetConflicted(target, true);
+            }
+        }
+        finally
+        {
+            states.EndOperation(target);
+            ReleaseWorkspaceSessions(held);
+            NotifyTreeCommandStates();
+        }
+
+        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+        switch (outcome.Kind)
+        {
+            case MergeOutcomeKind.Conflict:
+                if (await dialogs.ChooseAsync(title, outcome.Message, [ForkStrings.MenuAbort, ForkStrings.Later]).ConfigureAwait(true) == 0)
+                {
+                    await AbortMergeAsync(target, CancellationToken.None).ConfigureAwait(true);
+                }
+
+                break;
+            case MergeOutcomeKind.Merged when direction == MergeDirection.MergeBack && RemoveForkWorkspace is { } remove:
+                if (await dialogs.ChooseAsync(title, outcome.Message, [ForkStrings.OfferRemove, ForkStrings.KeepFork]).ConfigureAwait(true) == 0)
+                {
+                    // baseBranch is the fork's source branch, which the fork was just merged into (6.6 step 6).
+                    if (await remove(relation, preview.SourceBranch, CancellationToken.None).ConfigureAwait(true) is { } reason)
+                    {
+                        await dialogs.NotifyAsync(title, ForkStrings.RemoveFailed(reason)).ConfigureAwait(true);
+                    }
+
+                    await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+                }
+
+                break;
+            default:
+                await dialogs.NotifyAsync(title, outcome.Message).ConfigureAwait(true);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// <c>merge --abort</c> in a conflicted workspace (6.6 step 5), with the workspace in the "operation in progress" state
+    /// while it runs; success clears the conflict flag, a failure keeps it and says why.
+    /// </summary>
+    internal async Task AbortMergeAsync(string directory, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(directory);
+        var states = composition.WorkspaceStates;
+        if (!states.TryBeginOperation(directory))
+        {
+            await NotifyOrReportAsync(ForkStrings.MenuAbort, ForkStrings.Busy(directory, [HandoverStrings.BusyWorkspaceOperating]))
+                .ConfigureAwait(true);
+            return;
+        }
+
+        string? error;
+        NotifyTreeCommandStates();
+        try
+        {
+            var flow = composition.Merge;
+            error = await Task.Run(() => flow.AbortAsync(directory), CancellationToken.None).ConfigureAwait(true);
+            if (error is null)
+            {
+                states.SetConflicted(directory, false);
+            }
+        }
+        finally
+        {
+            states.EndOperation(directory);
+            NotifyTreeCommandStates();
+        }
+
+        await NotifyOrReportAsync(ForkStrings.MenuAbort, error ?? ForkStrings.Aborted).ConfigureAwait(true);
+        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>Puts every live tab of the workspace into the handing-over state; returns the ones this call set.</summary>
+    private List<SessionWorkspaceViewModel> HoldWorkspaceSessions(string directory)
+    {
+        var key = OccupancyKey.Compute(null, directory);
+        var held = new List<SessionWorkspaceViewModel>();
+        foreach (var session in sessions.Values)
+        {
+            if (!session.IsReadOnlyView
+                && OccupancyKey.Compute(null, session.Info.WorktreePath ?? session.Info.WorkspacePath) == key
+                && handingOver.Add(session.SessionId))
+            {
+                session.IsHandingOver = true;
+                held.Add(session);
+            }
+        }
+
+        return held;
+    }
+
+    private void ReleaseWorkspaceSessions(List<SessionWorkspaceViewModel> held)
+    {
+        foreach (var session in held)
+        {
+            handingOver.Remove(session.SessionId);
+            session.IsHandingOver = false;
+        }
+    }
+
+    private async Task NotifyOrReportAsync(string title, string message)
+    {
+        if (dialogs is null)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(message));
+            return;
+        }
+
+        await dialogs.NotifyAsync(title, message).ConfigureAwait(true);
+    }
+
+    /// <summary>The degraded merge back (6.6): no workspace has the source branch, so only pushing the fork branch is offered.</summary>
+    private async Task OfferPushForkAsync(ForkRelation relation, MergePreview preview, string title, CancellationToken ct)
+    {
+        var choice = await dialogs!.ChooseAsync(
+                title,
+                ForkStrings.TargetMissing(preview.SourceBranch, preview.ForkBranch),
+                [ForkStrings.PushFork(preview.ForkBranch), ShellStrings.Cancel])
+            .ConfigureAwait(true);
+        if (choice != 0)
+        {
+            return;
+        }
+
+        var flow = composition.Merge;
+        var forkBranch = preview.ForkBranch;
+        var failure = await Task.Run(() => flow.PushForkAsync(relation, forkBranch, ct), CancellationToken.None).ConfigureAwait(true);
+        await dialogs.NotifyAsync(title, failure ?? ForkStrings.Pushed(forkBranch)).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// The idle check of the merge target (section 2): the busy sources of the active session open in that workspace and
+    /// the workspace's own states. When busy, lists the reasons and returns true; nothing is queued or forced.
+    /// </summary>
+    private async Task<bool> ShowTargetBusyAsync(string title, string target)
+    {
+        var key = OccupancyKey.Compute(null, target);
+        var live = sessions.Values.FirstOrDefault(session =>
+            !session.IsReadOnlyView
+            && OccupancyKey.Compute(null, session.Info.WorktreePath ?? session.Info.WorkspacePath) == key);
+        List<string> reasons;
+        string owner;
+        if (live is not null)
+        {
+            reasons = HandoverBusyReasons(live.Info, live);
+            owner = live.Info.Title;
+        }
+        else
+        {
+            reasons = [];
+            if (composition.WorkspaceStates.IsOperating(target))
+            {
+                reasons.Add(HandoverStrings.BusyWorkspaceOperating);
+            }
+
+            if (composition.WorkspaceStates.IsConflicted(target))
+            {
+                reasons.Add(HandoverStrings.BusyMergeConflict);
+            }
+
+            owner = target;
+        }
+
+        if (reasons.Count == 0)
+        {
+            return false;
+        }
+
+        await dialogs!.NotifyAsync(title, ForkStrings.Busy(owner, reasons)).ConfigureAwait(true);
+        return true;
+    }
+
+    /// <summary>The confirmation text: what merges where, and the commits it brings in (the newest listed, the rest counted).</summary>
+    internal static string MergeMessage(MergePreview preview)
+    {
+        var builder = new System.Text.StringBuilder(512);
+        builder.Append(preview.Direction == MergeDirection.MergeBack
+            ? ForkStrings.MergeBackIntro(preview.ForkBranch, preview.SourceBranch, preview.TargetDirectory ?? string.Empty)
+            : ForkStrings.SyncIntro(preview.SourceBranch, preview.ForkBranch));
+        if (preview.CommitCount > 0)
+        {
+            builder.Append("\n\n").Append(ForkStrings.Commits(preview.CommitCount));
+            foreach (var commit in preview.Commits)
+            {
+                builder.Append('\n').Append(commit.ShortId).Append("  ").Append(commit.Subject);
+            }
+
+            if (preview.CommitCount > preview.Commits.Count)
+            {
+                builder.Append('\n').Append(ForkStrings.MoreCommits(preview.CommitCount - preview.Commits.Count));
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>The repository's own checkout: a project session with no worktree of its own, or whose worktree is the project root.</summary>
+    private bool IsRootCheckout(SessionInfo session)
+    {
+        if (session.ProjectId is null)
+        {
+            return false;
+        }
+
+        if (session.WorktreePath is null)
+        {
+            return true;
+        }
+
+        return projectRoots.TryGetValue(session.ProjectId, out var root)
+               && string.Equals(
+                   OccupancyKey.Compute(null, root),
+                   OccupancyKey.Compute(session.WorktreePath, session.WorkspacePath),
+                   StringComparison.Ordinal);
+    }
+
+    private async Task RefreshTreesAfterLifecycleAsync()
+    {
+        // A lifecycle flow may have moved a branch, a checkout or a merge: the menus' cached git reads are stale now.
+        Projects.InvalidateGitState();
+        GeneralChats.InvalidateGitState();
+        try
+        {
+            await RefreshTreesAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            Trace.WriteLine("[lifecycle] refresh failed: " + exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// The files an earlier permanent delete could not clean up (7.5) are cleaned up now; what still fails is a status-bar
+    /// problem and is tried again at the next start.
+    /// </summary>
+    internal async Task RetryPurgeCleanupAsync()
+    {
+        var cleanup = composition.PurgeCleanup;
+        if (cleanup is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> failures;
+        try
+        {
+            failures = await BackgroundRead.RunAsync(token => cleanup.RetryPendingAsync(token), CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            Trace.WriteLine("[lifecycle] the purge cleanup retry failed: " + exception.Message);
+            failures = [exception.Message];
+        }
+
+        if (failures.Count > 0)
+        {
+            Status.SetWorkspaceProblem(LocText.Literal(RemovalStrings.PurgeRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal)))));
+        }
+    }
+
+    /// <summary>
+    /// Startup, after the migration and before the trees load (7.6, R6): heal sessions whose workspace folder is gone,
+    /// then show every unacknowledged storage notice (the v5 de-duplication, the heal) once and acknowledge it. A shell
+    /// without dialogs acknowledges nothing, so the notices wait for a window that can show them, and only notice kinds
+    /// this build shows are acknowledged. A heal or notice failure is a status-bar problem (R6); the tidy-up never stops
+    /// the window from opening.
+    /// </summary>
+    private async Task RunStartupLifecycleAsync()
+    {
+        var catalog = composition.Catalog;
+        try
+        {
+            await BackgroundRead.RunAsync(
+                    token => catalog.HealMissingDirectoriesAsync(Directory.Exists, Directory.Exists, token),
+                    CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Trace.WriteLine("[lifecycle] self-heal failed: " + exception.Message);
+            Status.SetWorkspaceProblem(LifecycleStrings.StartupFailed(exception.Message));
+        }
+
+        await RetryPurgeCleanupAsync().ConfigureAwait(true);
+
+        IReadOnlyList<StorageNotice> notices;
+        try
+        {
+            notices = await BackgroundRead.RunAsync(token => catalog.ReadNoticesAsync(token), CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Trace.WriteLine("[lifecycle] notices failed: " + exception.Message);
+            Status.SetWorkspaceProblem(LifecycleStrings.StartupFailed(exception.Message));
+            return;
+        }
+
+        if (notices.Count == 0 || dialogs is null)
+        {
+            return;
+        }
+
+        // Only the kinds this build can show are acknowledged; a kind it does not know waits for a build that does.
+        var lines = new List<string>();
+        var shown = new List<long>();
+        foreach (var notice in notices)
+        {
+            switch (notice.Kind)
+            {
+                case StorageNoticeKinds.DedupeArchived:
+                    lines.Add(LifecycleStrings.DedupeArchived(notice.SessionIds.Count));
+                    shown.Add(notice.Id);
+                    break;
+                case StorageNoticeKinds.HealDeleted:
+                    lines.Add(LifecycleStrings.HealDeleted(notice.SessionIds.Count));
+                    shown.Add(notice.Id);
+                    break;
+            }
+        }
+
+        if (lines.Count > 0)
+        {
+            await dialogs.NotifyAsync(LifecycleStrings.NoticeTitle, string.Join(Environment.NewLine, lines)).ConfigureAwait(true);
+        }
+
+        if (shown.Count == 0)
+        {
+            return;
+        }
+
+        var ids = shown.ToArray();
+        try
+        {
+            await BackgroundRead.RunAsync(
+                    async token =>
+                    {
+                        await catalog.AcknowledgeNoticesAsync(ids, token).ConfigureAwait(false);
+                        return true;
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Trace.WriteLine("[lifecycle] acknowledge failed: " + exception.Message);
+            Status.SetWorkspaceProblem(LifecycleStrings.StartupFailed(exception.Message));
+        }
     }
 
     /// <summary>
@@ -780,7 +1932,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ReleaseClosedSession(session);
         }
 
-        GitPanel.NotifyTurnCompleted(session.SessionId);
+        GitSync.NotifyTurnCompleted(session.SessionId);
         _ = RefreshAfterTurnAsync(session);
     }
 
@@ -805,7 +1957,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         terminals.OnSessionArchived(sessionId);
         CloseSessionTab(sessionId);
         openTabs.Remove(sessionId);
-        GitPanel.ReleaseSession(sessionId);
 
         if (sessions.TryGetValue(sessionId, out var session) && !session.IsRunning)
         {
@@ -1017,25 +2168,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
     }
 
-    /// <summary>
-    /// (Re)builds the Git panel's title-bar tools - fetch, pull, push, refresh; the panel never fetches on its own, so every
-    /// network call is one of these. Rebuilt on a language switch so the tooltips follow. The ids are the AutomationIds.
-    /// </summary>
-    private void RefreshGitTools()
-    {
-        if (Workbench.GitPanel is not { } panel)
-        {
-            return;
-        }
-
-        var tools = panel.HeaderTools;
-        tools.Clear();
-        tools.Add(new PanelToolButton("git-fetch", Loc.Instance[GitStrings.ButtonFetch], "IconGitFetch", GitPanel.FetchCommand));
-        tools.Add(new PanelToolButton("git-pull", Loc.Instance[GitStrings.ButtonPull], "IconGitPull", GitPanel.PullCommand));
-        tools.Add(new PanelToolButton("git-push", Loc.Instance[GitStrings.ButtonPush], "IconGitPush", GitPanel.PushCommand));
-        tools.Add(new PanelToolButton("git-refresh", Loc.Instance[GitStrings.ButtonRefresh], "IconRefresh", GitPanel.RefreshCommand));
-    }
-
     /// <summary>Opens a terminal in the active session, or says in the status bar why it cannot.</summary>
     private void OpenTerminal()
     {
@@ -1110,8 +2242,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             session.TabTitleChanged -= OnSessionTitleChanged;
             openTabs.Remove(session.SessionId);
 
-            // A wait for checks that this session started ends with its tab; the session keeps running without it.
-            GitPanel.ReleaseSession(session.SessionId);
             if (!session.IsRunning)
             {
                 ReleaseClosedSession(session);
@@ -1153,7 +2283,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             Todos.Attach(null);
             Reviews.Attach(PanelContext.Empty);
             Specs.Attach(PanelContext.Empty);
-            GitPanel.Attach(PanelContext.Empty);
+            GitSync.Attach(PanelContext.Empty);
             SyncFinishedMenu(null);
             PruneSubAgentTabs(null, []);
             return;
@@ -1168,46 +2298,29 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Todos.Attach(session.SessionId);
         Reviews.Attach(context);
         Specs.Attach(context);
-        GitPanel.Attach(context);
+        GitSync.Attach(context);
         SyncSubAgentRegion();
     }
 
     /// <summary>
-    /// The Git tab carries the branch of the title bar and the ahead/behind of the status bar; both also follow a branch
-    /// switch made in the tab itself, which the session record does not know about.
+    /// The files panel's git row feeds the composer's strip: the branch in the title row and the ahead/behind markers. The
+    /// CI marker went away with the Git panel — a pull request is a conversation topic now, not a status readout.
     /// </summary>
-    private void OnGitPanelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private void OnGitSyncPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
         {
-            case nameof(GitPanelViewModel.BranchText):
+            case nameof(GitSyncViewModel.BranchLabel):
                 OnPropertyChanged(nameof(ActiveBranchText));
                 OnPropertyChanged(nameof(HasActiveBranch));
                 PushGitText();
                 break;
-            case nameof(GitPanelViewModel.AheadBehindText):
-                Status.SetAheadBehind(GitPanel.AheadBehindText);
+            case nameof(GitSyncViewModel.AheadBehindText):
+                Status.SetAheadBehind(GitSync.AheadBehindText);
                 PushGitText();
-                break;
-            case nameof(GitPanelViewModel.ChecksText):
-                Status.SetChecks(GitPanel.ChecksText);
-                PushGitText();
-                break;
-            case nameof(GitPanelViewModel.Title):
-                if (Workbench.GitPanel is { } panel)
-                {
-                    panel.Title = GitPanel.Title;
-                }
-
                 break;
         }
     }
-
-    /// <summary>The Git tab's confirmations go through the same dialog as every other shell question.</summary>
-    private Task<bool> ConfirmGitActionAsync(string title, string message) =>
-        dialogs is null
-            ? Task.FromResult(false)
-            : dialogs.ConfirmAsync(title, message, Loc.Instance[GitStrings.ConfirmButton], ShellStrings.Cancel);
 
     private void OpenFile(string path, bool newTab) => _ = OpenFileAsync(path, newTab, CancellationToken.None);
 
@@ -1595,6 +2708,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             await OpenSessionAsync(session, CancellationToken.None).ConfigureAwait(true);
             return true;
         }
+        catch (SessionCreateOccupiedException occupied)
+        {
+            await ShowOccupiedAsync(occupied.Occupied, HandoverIntent.NewSession(occupied.Create), CancellationToken.None)
+                .ConfigureAwait(true);
+            return false;
+        }
+        catch (WorktreeOccupiedException occupied)
+        {
+            await ShowOccupiedAsync(occupied, null, CancellationToken.None).ConfigureAwait(true);
+            return false;
+        }
         catch (Exception exception) when (exception is GitException or InvalidOperationException or IOException or ArgumentException)
         {
             Status.SetWorkspaceProblem(LocText.Literal(exception.Message));
@@ -1653,7 +2777,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     /// <summary>Hands the active session's strip the Git panel's live branch, ahead/behind and CI marker.</summary>
     private void PushGitText() =>
-        activeSession?.Instruments.SetGit(GitPanel.AheadBehindText, GitPanel.ChecksText);
+        activeSession?.Instruments.SetGit(GitSync.AheadBehindText);
 
     private static Task RevealAsync(string path)
     {
@@ -1719,7 +2843,6 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(ProviderNotice));
         RefreshOpenChangesTool();
         RefreshProjectTools();
-        RefreshGitTools();
 
         // The bottom group's "new terminal" tool carries its tooltip as a plain string too; rebuild it and re-sync the row.
         newTerminalButton = CreateNewTerminalButton();
@@ -1833,8 +2956,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Workbench.ActiveTabChanged -= OnActiveTabChanged;
         Workbench.LayoutChanged -= OnLayoutChanged;
         Workbench.PropertyChanged -= OnWorkbenchPropertyChanged;
-        GitPanel.PropertyChanged -= OnGitPanelPropertyChanged;
-        GitPanel.Dispose();
+        GitSync.PropertyChanged -= OnGitSyncPropertyChanged;
+        GitSync.Dispose();
 
         // The long-lived owners subscribe to the string table themselves; they drop it with the window.
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
