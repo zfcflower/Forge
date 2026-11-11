@@ -1,0 +1,258 @@
+using System.Runtime.CompilerServices;
+
+namespace Forge.App.Localization;
+
+/// <summary>
+/// String table of the automations settings section (list, run history) and its editor dialog. Keys are namespaced with
+/// <c>automations.settings.</c> and registered from <see cref="Initialize"/>.
+/// </summary>
+internal static class AutomationSettingsStrings
+{
+    // ---------------------------------------------------------------- section
+    public const string SectionTitleKey = "automations.settings.section.title";
+    public const string RunningKey = "automations.settings.global.running";
+    public const string PausedKey = "automations.settings.global.paused";
+    public const string GlobalHintKey = "automations.settings.global.hint";
+    public const string NewKey = "automations.settings.list.new";
+    public const string BuiltInBadgeKey = "automations.settings.list.builtIn";
+    public const string RunNowKey = "automations.settings.list.runNow";
+    public const string EditKey = "automations.settings.list.edit";
+    public const string DeleteKey = "automations.settings.list.delete";
+    public const string DeleteConfirmKey = "automations.settings.list.deleteConfirm";
+    public const string EnabledKey = "automations.settings.list.enabled";
+    public const string NextKey = "automations.settings.list.next";
+    public const string LastKey = "automations.settings.list.last";
+    public const string NeverRanKey = "automations.settings.list.neverRan";
+    public const string NoneKey = "automations.settings.list.none";
+    public const string ConfigErrorKey = "automations.settings.list.configError";
+    public const string StartRefusedKey = "automations.settings.list.startRefused";
+    public const string StartBusyKey = "automations.settings.list.startBusy";
+    public const string ActionFailedKey = "automations.settings.list.actionFailed";
+    public const string CiTitleKey = "automations.settings.ci.title";
+    public const string CiHintKey = "automations.settings.ci.hint";
+    public const string CiNoProjectsKey = "automations.settings.ci.noProjects";
+    public const string CiExpandKey = "automations.settings.ci.expand";
+    public const string CiCollapseKey = "automations.settings.ci.collapse";
+    public const string RunsTitleKey = "automations.settings.runs.title";
+    public const string RunsNoneKey = "automations.settings.runs.none";
+    public const string RunsSelectHintKey = "automations.settings.runs.selectHint";
+    public const string RunsUsageKey = "automations.settings.runs.usage";
+    public const string RunsRangeKey = "automations.settings.runs.range";
+    public const string RunsStartedKey = "automations.settings.runs.started";
+    public const string RunsOpenKey = "automations.settings.runs.open";
+
+    // ---------------------------------------------------------------- built-ins
+    public const string BuiltInQuotaResumeKey = "automations.settings.builtin.quotaResume";
+    public const string BuiltInCiChainKey = "automations.settings.builtin.ciChain";
+    public const string BuiltInSessionWatchKey = "automations.settings.builtin.sessionWatch";
+    public const string BuiltInHousekeepingKey = "automations.settings.builtin.housekeeping";
+
+    // ---------------------------------------------------------------- trigger summary
+    public const string TriggerManualKey = "automations.settings.trigger.manual";
+    public const string TriggerEventKey = "automations.settings.trigger.event";
+    public const string TriggerDailyKey = "automations.settings.trigger.daily";
+    public const string TriggerWeeklyKey = "automations.settings.trigger.weekly";
+    public const string TriggerHourlyOneKey = "automations.settings.trigger.hourlyOne";
+    public const string TriggerHourlyManyKey = "automations.settings.trigger.hourlyMany";
+    public const string TriggerCronKey = "automations.settings.trigger.cron";
+    public const string DaySeparatorKey = "automations.settings.day.separator";
+    public const string DayMondayKey = "automations.settings.day.mon";
+    public const string DayTuesdayKey = "automations.settings.day.tue";
+    public const string DayWednesdayKey = "automations.settings.day.wed";
+    public const string DayThursdayKey = "automations.settings.day.thu";
+    public const string DayFridayKey = "automations.settings.day.fri";
+    public const string DaySaturdayKey = "automations.settings.day.sat";
+    public const string DaySundayKey = "automations.settings.day.sun";
+
+    // ---------------------------------------------------------------- statuses and sources
+    public const string StatusRunningKey = "automations.settings.status.running";
+    public const string StatusWaitingIdleKey = "automations.settings.status.waitingIdle";
+    public const string StatusWaitingQuotaKey = "automations.settings.status.waitingQuota";
+    public const string StatusCompletedKey = "automations.settings.status.completed";
+    public const string StatusFailedKey = "automations.settings.status.failed";
+    public const string StatusCancelledKey = "automations.settings.status.cancelled";
+    public const string StatusInterruptedKey = "automations.settings.status.interrupted";
+    public const string StatusSkippedKey = "automations.settings.status.skipped";
+    public const string SourceScheduleKey = "automations.settings.source.schedule";
+    public const string SourceCatchUpKey = "automations.settings.source.catchUp";
+    public const string SourceManualKey = "automations.settings.source.manual";
+    public const string SourceEventKey = "automations.settings.source.event";
+    public const string SourceChainKey = "automations.settings.source.chain";
+
+    // ---------------------------------------------------------------- editor
+    public const string EditorNewTitleKey = "automations.settings.editor.titleNew";
+    public const string EditorEditTitleKey = "automations.settings.editor.titleEdit";
+    public const string EditorNameKey = "automations.settings.editor.name";
+    public const string EditorEnabledKey = "automations.settings.editor.enabled";
+    public const string EditorActionKey = "automations.settings.editor.action";
+    public const string EditorActionPromptKey = "automations.settings.editor.actionPrompt";
+    public const string EditorActionRemindKey = "automations.settings.editor.actionRemind";
+    public const string EditorPromptKey = "automations.settings.editor.prompt";
+    public const string EditorRemindTextKey = "automations.settings.editor.remindText";
+    public const string EditorTriggersKey = "automations.settings.editor.triggers";
+    public const string EditorAddTriggerKey = "automations.settings.editor.addTrigger";
+    public const string EditorRemoveTriggerKey = "automations.settings.editor.removeTrigger";
+    public const string EditorNoTriggersKey = "automations.settings.editor.noTriggers";
+    public const string EditorKindHourlyKey = "automations.settings.editor.kindHourly";
+    public const string EditorKindDailyKey = "automations.settings.editor.kindDaily";
+    public const string EditorKindWeeklyKey = "automations.settings.editor.kindWeekly";
+    public const string EditorKindCronKey = "automations.settings.editor.kindCron";
+    public const string EditorIntervalKey = "automations.settings.editor.interval";
+    public const string EditorMinuteKey = "automations.settings.editor.minute";
+    public const string EditorTimesKey = "automations.settings.editor.times";
+    public const string EditorTimesHintKey = "automations.settings.editor.timesHint";
+    public const string EditorDaysKey = "automations.settings.editor.days";
+    public const string EditorCronKey = "automations.settings.editor.cron";
+    public const string EditorCronHintKey = "automations.settings.editor.cronHint";
+    public const string EditorPreviewKey = "automations.settings.editor.preview";
+    public const string EditorPreviewNoneKey = "automations.settings.editor.previewNone";
+    public const string EditorPlacementKey = "automations.settings.editor.placement";
+    public const string EditorPlacementScratchKey = "automations.settings.editor.placementScratch";
+    public const string EditorPlacementForkKey = "automations.settings.editor.placementFork";
+    public const string EditorPlacementScoutKey = "automations.settings.editor.placementScout";
+    public const string EditorReadOnlyToolsKey = "automations.settings.editor.readOnlyTools";
+    public const string EditorProjectKey = "automations.settings.editor.project";
+    public const string EditorSessionKey = "automations.settings.editor.session";
+    public const string EditorModelKey = "automations.settings.editor.model";
+    public const string EditorProviderKey = "automations.settings.editor.provider";
+    public const string EditorCatchUpKey = "automations.settings.editor.catchUp";
+    public const string EditorSaveKey = "automations.settings.editor.save";
+    public const string EditorCancelKey = "automations.settings.editor.cancel";
+    public const string EditorSaveFailedKey = "automations.settings.editor.saveFailed";
+    public const string ErrNeedNameKey = "automations.settings.error.needName";
+    public const string ErrNeedPromptKey = "automations.settings.error.needPrompt";
+    public const string ErrIntervalKey = "automations.settings.error.interval";
+    public const string ErrMinuteKey = "automations.settings.error.minute";
+    public const string ErrTimeKey = "automations.settings.error.time";
+    public const string ErrNeedTimeKey = "automations.settings.error.needTime";
+    public const string ErrNeedDayKey = "automations.settings.error.needDay";
+    public const string ErrNeedCronKey = "automations.settings.error.needCron";
+    public const string ErrNeedProjectKey = "automations.settings.error.needProject";
+    public const string ErrNeedSessionKey = "automations.settings.error.needSession";
+    public const string ErrTriggerKey = "automations.settings.error.trigger";
+
+    /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
+    [ModuleInitializer]
+    internal static void Initialize() => Register();
+
+    internal static void Register()
+    {
+        Loc.Register(SectionTitleKey, "自动化", "Automations");
+        Loc.Register(RunningKey, "运行中", "Running");
+        Loc.Register(PausedKey, "已暂停", "Paused");
+        Loc.Register(GlobalHintKey, "Forge 关闭期间不会执行,下次启动按各任务设置补跑", "Nothing runs while Forge is closed; on the next start, missed runs are caught up as each task allows");
+        Loc.Register(NewKey, "新建", "New");
+        Loc.Register(BuiltInBadgeKey, "内置", "Built-in");
+        Loc.Register(RunNowKey, "立即运行", "Run now");
+        Loc.Register(EditKey, "编辑", "Edit");
+        Loc.Register(DeleteKey, "删除", "Delete");
+        Loc.Register(DeleteConfirmKey, "删除自动化“{0}”?", "Delete the automation \"{0}\"?");
+        Loc.Register(EnabledKey, "启用", "Enabled");
+        Loc.Register(NextKey, "下次执行", "Next run");
+        Loc.Register(LastKey, "最近一次", "Last run");
+        Loc.Register(NeverRanKey, "尚未运行", "Never ran");
+        Loc.Register(NoneKey, "-", "-");
+        Loc.Register(ConfigErrorKey, "第 {0} 条自动化({1})无法读取:{2}", "Automation #{0} ({1}) could not be read: {2}");
+        Loc.Register(StartRefusedKey, "未能启动:{0}", "Could not start: {0}");
+        Loc.Register(StartBusyKey, "该自动化已在运行", "This automation is already running");
+        Loc.Register(ActionFailedKey, "操作失败:{0}", "Action failed: {0}");
+        Loc.Register(CiTitleKey, "CI 自动推送", "CI auto-push");
+        Loc.Register(CiHintKey, "关闭后,该项目的 CI 修复只提交到分支会话,不自动推送", "When off, CI fixes for that project stay on the branch session and are not pushed automatically");
+        Loc.Register(CiNoProjectsKey, "没有 Git 仓库项目", "No repository projects");
+        Loc.Register(CiExpandKey, "按项目设置", "Per project");
+        Loc.Register(CiCollapseKey, "收起", "Collapse");
+        Loc.Register(RunsTitleKey, "运行记录", "Run history");
+        Loc.Register(RunsNoneKey, "还没有运行记录", "No runs yet");
+        Loc.Register(RunsSelectHintKey, "选择一个自动化查看运行记录", "Select an automation to see its runs");
+        Loc.Register(RunsUsageKey, "输入 {0} / 输出 {1}", "in {0} / out {1}");
+        Loc.Register(RunsRangeKey, "{0} - {1}", "{0} - {1}");
+        Loc.Register(RunsStartedKey, "{0} 起", "from {0}");
+        Loc.Register(RunsOpenKey, "打开会话", "Open session");
+
+        Loc.Register(BuiltInQuotaResumeKey, "限额恢复", "Quota resume");
+        Loc.Register(BuiltInCiChainKey, "CI 分析与修复", "CI analysis and fix");
+        Loc.Register(BuiltInSessionWatchKey, "长任务看护", "Long-task watch");
+        Loc.Register(BuiltInHousekeepingKey, "Forge 内务清理", "Forge housekeeping");
+
+        Loc.Register(TriggerManualKey, "仅手动", "Manual only");
+        Loc.Register(TriggerEventKey, "事件触发", "Event-driven");
+        Loc.Register(TriggerDailyKey, "每天 {0}", "Daily {0}");
+        Loc.Register(TriggerWeeklyKey, "每周{0} {1}", "Weekly {0} {1}");
+        Loc.Register(TriggerHourlyOneKey, "每小时第 {0} 分", "Hourly at minute {0}");
+        Loc.Register(TriggerHourlyManyKey, "每 {0} 小时第 {1} 分", "Every {0} hours at minute {1}");
+        Loc.Register(TriggerCronKey, "Cron {0}", "Cron {0}");
+        Loc.Register(DaySeparatorKey, "、", ", ");
+        Loc.Register(DayMondayKey, "一", "Mon");
+        Loc.Register(DayTuesdayKey, "二", "Tue");
+        Loc.Register(DayWednesdayKey, "三", "Wed");
+        Loc.Register(DayThursdayKey, "四", "Thu");
+        Loc.Register(DayFridayKey, "五", "Fri");
+        Loc.Register(DaySaturdayKey, "六", "Sat");
+        Loc.Register(DaySundayKey, "日", "Sun");
+
+        Loc.Register(StatusRunningKey, "执行中", "Running");
+        Loc.Register(StatusWaitingIdleKey, "等待空闲", "Waiting for idle");
+        Loc.Register(StatusWaitingQuotaKey, "等待额度", "Waiting for quota");
+        Loc.Register(StatusCompletedKey, "已完成", "Completed");
+        Loc.Register(StatusFailedKey, "失败", "Failed");
+        Loc.Register(StatusCancelledKey, "已取消", "Cancelled");
+        Loc.Register(StatusInterruptedKey, "已中断", "Interrupted");
+        Loc.Register(StatusSkippedKey, "已跳过", "Skipped");
+        Loc.Register(SourceScheduleKey, "定时", "Schedule");
+        Loc.Register(SourceCatchUpKey, "补跑", "Catch-up");
+        Loc.Register(SourceManualKey, "手动", "Manual");
+        Loc.Register(SourceEventKey, "事件", "Event");
+        Loc.Register(SourceChainKey, "链条", "Chain");
+
+        Loc.Register(EditorNewTitleKey, "新建自动化", "New automation");
+        Loc.Register(EditorEditTitleKey, "编辑自动化", "Edit automation");
+        Loc.Register(EditorNameKey, "名称", "Name");
+        Loc.Register(EditorEnabledKey, "启用", "Enabled");
+        Loc.Register(EditorActionKey, "动作", "Action");
+        Loc.Register(EditorActionPromptKey, "运行提示词", "Run a prompt");
+        Loc.Register(EditorActionRemindKey, "仅提醒", "Remind only");
+        Loc.Register(EditorPromptKey, "提示词", "Prompt");
+        Loc.Register(EditorRemindTextKey, "提醒内容", "Reminder text");
+        Loc.Register(EditorTriggersKey, "触发器", "Triggers");
+        Loc.Register(EditorAddTriggerKey, "添加触发器", "Add trigger");
+        Loc.Register(EditorRemoveTriggerKey, "移除", "Remove");
+        Loc.Register(EditorNoTriggersKey, "没有触发器,只能手动运行", "No triggers: manual runs only");
+        Loc.Register(EditorKindHourlyKey, "每小时", "Hourly");
+        Loc.Register(EditorKindDailyKey, "每天", "Daily");
+        Loc.Register(EditorKindWeeklyKey, "每周", "Weekly");
+        Loc.Register(EditorKindCronKey, "Cron", "Cron");
+        Loc.Register(EditorIntervalKey, "每 N 小时(1-12)", "Every N hours (1-12)");
+        Loc.Register(EditorMinuteKey, "第几分钟(0-59)", "At minute (0-59)");
+        Loc.Register(EditorTimesKey, "时刻(HH:mm,多个用逗号分隔)", "Times (HH:mm, separate several with commas)");
+        Loc.Register(EditorTimesHintKey, "HH:mm", "HH:mm");
+        Loc.Register(EditorDaysKey, "星期", "Days");
+        Loc.Register(EditorCronKey, "Cron 表达式(分 时 日 月 周)", "Cron expression (minute hour day month weekday)");
+        Loc.Register(EditorCronHintKey, "*/5 * * * *", "*/5 * * * *");
+        Loc.Register(EditorPreviewKey, "接下来 5 次", "Next 5 runs");
+        Loc.Register(EditorPreviewNoneKey, "没有可预览的执行时间", "Nothing to preview");
+        Loc.Register(EditorPlacementKey, "落点", "Placement");
+        Loc.Register(EditorPlacementScratchKey, "新会话(scratch)", "New scratch session");
+        Loc.Register(EditorPlacementForkKey, "项目固定分叉工作区", "Project fixed fork");
+        Loc.Register(EditorPlacementScoutKey, "只读子 Agent(附着到会话)", "Read-only Scout (attach to a session)");
+        Loc.Register(EditorReadOnlyToolsKey, "只读工具", "Read-only tools");
+        Loc.Register(EditorProjectKey, "项目", "Project");
+        Loc.Register(EditorSessionKey, "会话", "Session");
+        Loc.Register(EditorModelKey, "模型 id(留空用全局默认)", "Model id (empty = global default)");
+        Loc.Register(EditorProviderKey, "提供商 id(可选)", "Provider id (optional)");
+        Loc.Register(EditorCatchUpKey, "补跑:Forge 关闭期间错过的时刻,下次启动补跑一次", "Catch up: run once on the next start for occurrences missed while Forge was closed");
+        Loc.Register(EditorSaveKey, "保存", "Save");
+        Loc.Register(EditorCancelKey, "取消", "Cancel");
+        Loc.Register(EditorSaveFailedKey, "保存失败:{0}", "Save failed: {0}");
+        Loc.Register(ErrNeedNameKey, "请填写名称", "Enter a name");
+        Loc.Register(ErrNeedPromptKey, "请填写提示词或提醒内容", "Enter the prompt or reminder text");
+        Loc.Register(ErrIntervalKey, "小时间隔须为 1 到 12 的整数", "The hour interval must be a whole number from 1 to 12");
+        Loc.Register(ErrMinuteKey, "分钟须为 0 到 59 的整数", "The minute must be a whole number from 0 to 59");
+        Loc.Register(ErrTimeKey, "时刻“{0}”无效,请用 HH:mm", "The time \"{0}\" is invalid; use HH:mm");
+        Loc.Register(ErrNeedTimeKey, "至少填写一个时刻", "Enter at least one time");
+        Loc.Register(ErrNeedDayKey, "至少选择一个星期", "Select at least one day");
+        Loc.Register(ErrNeedCronKey, "请填写 Cron 表达式", "Enter a cron expression");
+        Loc.Register(ErrNeedProjectKey, "请选择一个 Git 仓库项目", "Pick a repository project");
+        Loc.Register(ErrNeedSessionKey, "请选择要附着的会话", "Pick the session to attach to");
+        Loc.Register(ErrTriggerKey, "触发器 {0}:{1}", "Trigger {0}: {1}");
+    }
+}

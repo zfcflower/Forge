@@ -255,7 +255,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - 浮动窗口整体带 1px 边框(`BorderBrush`):`BorderOnly` 装饰下系统边框几乎不可见,靠它把浮出面板与背景分开。
 - 浮出窗口的标题条可拖动窗口、双击最大化/还原:热区只有它自己那条 28 px 标题条(文件 panel 窗口里是右侧那条),左侧预览组的选项卡条仍归选项卡手势;按在工具按钮/停靠按钮/输入框上不拖动。最大化沿用 `FloatGeometry.IsMaximized` 持久化,不新增状态。
 
-**窗口顶部。** `WindowDecorations="BorderOnly"` + `ExtendClientAreaToDecorationsHint="True"` + `ExtendClientAreaTitleBarHeightHint="-1"`:保留系统可缩放边框、去掉系统标题栏,且客户区一直铺到窗口上边缘(不设扩展提示时 Windows 会在顶部留一条系统框高的白带,实测 6.5 px)。标题行由 App 自绘,底色 = `PanelTitleBarBrush`(与下方 panel 标题栏同色,窗口顶边读成一整条 chrome;窗口自身 `Background` 仍是 `SurfaceBackgroundBrush`)。标题行 40 px:左侧只有 Forge 图标(会话标题与分支不再重复显示——左侧项目树里用户看得到,重复是多余的;`ActiveSessionTitle`/`ActiveBranchText` 仍在视图模型上,只是不再绑定);靠右的一组(在 caption 按钮之前):一个放大镜图标(搜索还不是功能,`AutomationId` 仍叫 `shell-search`,tooltip 用“搜索（即将可用）”)加“● 扩展宿主”——圆点复用状态栏的 `status-dot` 类(运行中绿/启动中黄/失败红/其余灰),tooltip 用 `Status.HostTooltip`(状态 + 状态栏删掉后无处安放的明细:进程 id、失败原因),文字只写“扩展宿主”不写状态;紧接着右边是 **终端图标按钮**(`terminal-open`,圆角方框 `IconTerminalFrame` + 实心下半屏 `IconTerminalScreen`,只填不描边)、设置、最小化、最大化、关闭。提供方状态进设置页 `provider` 分区;插件/工具/命令清单进设置页 `tools` 分区;MCP、审批与工具计数进输入框上条(见“会话输入框”);窗口不再有底部应用状态栏(已删除)。标题行可拖动、双击最大化,与浮出窗口共用 `Workbench/Controls/WindowCaption.cs` 的同一套按下分类(`CaptionPress`:按钮/输入框上的按下不拖动,双击最大化,其余左键按下移动;三连击按移动处理)——自绘标题栏的两处窗口只有这一份规则,`MainWindow` 与 `FloatingPanelWindow` 都只转调它,`ToggleMaximize` 按钮同路。
+**窗口顶部。** `WindowDecorations="BorderOnly"` + `ExtendClientAreaToDecorationsHint="True"` + `ExtendClientAreaTitleBarHeightHint="-1"`:保留系统可缩放边框、去掉系统标题栏,且客户区一直铺到窗口上边缘(不设扩展提示时 Windows 会在顶部留一条系统框高的白带,实测 6.5 px)。标题行由 App 自绘,底色 = `PanelTitleBarBrush`(与下方 panel 标题栏同色,窗口顶边读成一整条 chrome;窗口自身 `Background` 仍是 `SurfaceBackgroundBrush`)。标题行 40 px:左侧只有 Forge 图标(会话标题与分支不再重复显示——左侧项目树里用户看得到,重复是多余的;`ActiveSessionTitle`/`ActiveBranchText` 仍在视图模型上,只是不再绑定);Forge 字标右侧是 **“自动化任务”入口**(`automations-open`,闪电图标 + 文字;徽标 `automations-running` 只计执行中与等待中的运行,0 时隐藏,不计已完成数;点击打开设置页“自动化”分区);靠右的一组(在 caption 按钮之前):一个放大镜图标(搜索还不是功能,`AutomationId` 仍叫 `shell-search`,tooltip 用“搜索（即将可用）”)加“● 扩展宿主”——圆点复用状态栏的 `status-dot` 类(运行中绿/启动中黄/失败红/其余灰),tooltip 用 `Status.HostTooltip`(状态 + 状态栏删掉后无处安放的明细:进程 id、失败原因),文字只写“扩展宿主”不写状态;紧接着右边是 **终端图标按钮**(`terminal-open`,圆角方框 `IconTerminalFrame` + 实心下半屏 `IconTerminalScreen`,只填不描边)、设置、最小化、最大化、关闭。提供方状态进设置页 `provider` 分区;插件/工具/命令清单进设置页 `tools` 分区;MCP、审批与工具计数进输入框上条(见“会话输入框”);窗口不再有底部应用状态栏(已删除)。标题行可拖动、双击最大化,与浮出窗口共用 `Workbench/Controls/WindowCaption.cs` 的同一套按下分类(`CaptionPress`:按钮/输入框上的按下不拖动,双击最大化,其余左键按下移动;三连击按移动处理)——自绘标题栏的两处窗口只有这一份规则,`MainWindow` 与 `FloatingPanelWindow` 都只转调它,`ToggleMaximize` 按钮同路。
 
 **交互终端(`Terminal/**`)。** 终端是底部组里的选项卡(`TabKind.Terminal`,id 前缀 `terminal:`),可开多个,也可浮出。工作目录取会话的 worktree。
 - **VT 引擎(`Terminal/Vt/`)**:纯 BCL、不依赖 Avalonia,AOT 无警告。包括 DEC ANSI 解析器(UTF-8 跨分块续接,非法字节输出 U+FFFD)、主屏和备用屏、回滚环(偏好 `TerminalScrollbackLines`,1000–100000,默认 10000)、SGR 16/256/truecolor、DECSET/DECRST(含鼠标 1000/1002/1003/1006、2004 括号粘贴、2026 同步输出)、OSC 0/1/2 标题、OSC 8 链接、OSC 52 只写剪贴板、OSC 10/11 按主题回答,以及 xterm 按键与 SGR 鼠标编码、East Asian Width 宽字符。缩放时不重排行。实测吞吐约 99 MiB/s(20 MiB 混合文本),稳态滚动零分配。**已记录偏差**:在整屏顶行执行 `CSI M` 时,被删的行会进回滚(xterm 不会),这是为了保证不丢内容。
@@ -311,6 +311,16 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - `WorkspaceStates`(组合根持有,进程级、线程安全)按占用键保存“工作区操作中”与“合并冲突态”两组标志。
 - 提供方缓存配置只读 `settings.json`(`provider.sendPromptCacheKey`、`provider.promptCacheTtl` = `5m`/`1h`,其它值是格式错误),无设置界面。
 
+**自动化(`Automations/`)。** 组合根经 `AutomationComposition.Create` 建 `AutomationService`(定义 `automations.json` 在 `settings.json` 旁,运行与状态在 `forge.db`),设置页加“自动化”分区(Agent 组,`IconBolt`)。引擎在主窗口恢复完标签后 `Attach(IAutomationHost)` 才启动,主窗口视图模型(`MainWindowViewModel.Automations.cs`)实现宿主:按 id 找已打开会话、在**不抢焦点**的前提下打开活动根会话、列出已加载会话、报告窗口是否前台。
+- **投递只走邮箱。** 自动化写进会话一律经 `SessionMailbox`:会话忙(回合、子 Agent、排队消息、交接)就等它空闲(运行状态 `WaitingIdle`),从不打断;会话被接手/归档/移除/关闭即撤回。自动化回合在转录里先插一条来源提示,被回合闸拒绝时报告“撤回”,不落进输入框。
+- **两种会话环境。** 用户定义的放置方式:`Scratch` 每次在 General 项目建一个暂存目录会话(带 `AutomationId`/`AutomationRunId`);`FixedFork` 在指定仓库项目里复用该自动化自己的 `forge/` 分支 worktree 会话(状态 `fork.session:<id>`,失效才新建);`Scout` 在指定活动根会话下起只读 Scout 子 Agent,不占主 Agent 回合。`ReadOnlyTools` 把工具限为 read/grep/find/ls;可单独指定模型。`Remind` 只发通知。
+- **内置项**(定义按 id 合成,可在设置页逐项停用,全局可暂停):
+  - 额度恢复 `QuotaResume`:根 Agent 回合以额度用尽失败时,记下 `quota.latest:<会话>` 并起一次运行(`WaitingQuota`,`ResumeAt` = 重置时间 + 0–60 秒抖动;无重置时间则探测)。到点后同一提供方的恢复间隔至少 10 秒,经邮箱发“继续”;再次用尽回到等待,最多 5 轮。用户自己在该会话发消息即取消等待中的运行。
+  - CI 失败修复链 `CiChain`:每 5 分钟查有打开 PR 的分支会话的检查结果;新失败(`ci.seen:`)起一次运行:Scout 只读分析失败日志(截断:每 job 200 行/12k 字符,总 40k),再把结论经邮箱交给该会话的主 Agent 修复;修复后**只推送到 PR 的 head 分支,永不推 base**,可按项目关闭自动推送(`CiAutoPushOffProjects`)。每个 PR 尝试预算 3 次,耗尽时通知一次。
+  - 长任务看护 `SessionWatch`:每分钟看一次已打开会话,回合 15 分钟无 Agent 事件记“停滞”,审批卡等待 10 分钟记“待审批”,窗口在后台时用户回合结束记“已完成”;只通知,不动会话。
+  - 周期清理 `Housekeeping`(每日 04:00):prune 仓库项目的 worktree 记录、删除空的未使用暂存目录、修剪运行历史(每定义 200 / 总 2000)、归档闲置 7 天以上且未打开的自动化创建的根会话。
+- **界面。** 会话视图在输入框上方显示附着运行的横幅(等待额度到某时刻/等待恢复、等待空闲、执行中)与“取消”;项目树里自动化创建的会话行带闪电标记(提示“由自动化任务创建”)。设置页列出定义(启停、立即运行、编辑、删除需确认)与运行历史(点运行可打开其会话)。
+
 ## 未决
 
 - 文件预览已支持编辑保存、TextMate 预览着色及 LSP 文档同步;编辑模式尚为无着色 TextBox,LSP 诊断、语义 token 叠加与补全尚未接到 UI。评审面板仍只读,逐行审阅的行评论交互与声明式插件面板渲染未做。
@@ -322,3 +332,4 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
 - Worker 资源限制受威胁模型决策门控,不在此模块实现。
 - `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。
+- 自动化的未决项:长任务看护的“停滞”只看 Agent 事件静默,不区分长时间运行的外部命令;额度分类按错误文本里的额度类标记判断,范围偏宽;用户取消等待中的额度运行后 `quota.run:` 状态键残留到下次清理;设置页定义行的文字不随语言切换即时刷新;`automations.json` 的校验错误文案为英文。

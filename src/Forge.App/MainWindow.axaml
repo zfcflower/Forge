@@ -57,6 +57,26 @@
                      FontWeight="Medium"
                      Foreground="{DynamicResource AccentTextBrush}"
                      Text="FORGE" />
+          <!-- Automations entry: opens Settings > Automations; the badge counts the running and waiting runs only and
+          is hidden at zero. -->
+          <Button Classes="ghost"
+                  Margin="10,0,0,0"
+                  Height="26"
+                  Padding="6,0"
+                  Command="{Binding OpenAutomationsCommand}"
+                  ToolTip.Tip="{Binding AutomationsTooltip}"
+                  AutomationProperties.AutomationId="automations-open"
+                  AutomationProperties.Name="{Binding [automations.titleBar.label], Source={x:Static loc:Loc.Instance}}">
+            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+              <wc:FluentIcon Data="{StaticResource IconBolt}" Width="14" Height="14" />
+              <TextBlock Classes="caption" Text="{Binding [automations.titleBar.label], Source={x:Static loc:Loc.Instance}}" />
+              <Border Classes="count-badge"
+                      IsVisible="{Binding HasRunningAutomations}"
+                      AutomationProperties.AutomationId="automations-running">
+                <TextBlock Text="{Binding AutomationsRunningText}" />
+              </Border>
+            </StackPanel>
+          </Button>
         </StackPanel>
 
         <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: search is not a

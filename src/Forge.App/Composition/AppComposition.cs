@@ -5,6 +5,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Appearance;
 using Forge.App.Approval;
+using Forge.App.Automations;
 using Forge.App.Editing;
 using Forge.App.Git;
 using Forge.App.Lifecycle;
@@ -247,6 +248,12 @@ internal sealed class AppComposition : IAsyncDisposable
     /// The same instance backs the agent's <c>pr_*</c> tools; gh is resolved from the live preferences on every call.
     /// </summary>
     public IPrPlatform PullRequests { get; private set; } = null!;
+
+    /// <summary>The automation engine, runners and watchers; attached to the main window when it opens.</summary>
+    public AutomationService Automations { get; private set; } = null!;
+
+    /// <summary>The window callbacks of the automations settings page (filled by the main window).</summary>
+    public AutomationUiBridge AutomationUi { get; } = new();
 
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
 
@@ -515,6 +522,23 @@ internal sealed class AppComposition : IAsyncDisposable
             composition.PurgeCleanup.CleanUpAsync);
         composition.Notifications = notifications;
 
+        // Automations: the engine and its stores (automations.json beside settings.json, runs in forge.db), the built-in
+        // runners and the CI watcher. The engine loop starts when the main window attaches (it delivers to sessions).
+        var automations = AutomationComposition.Create(
+            Path.GetDirectoryName(paths.SettingsPath) ?? paths.UserDataDirectory,
+            paths.UserDataDirectory,
+            projects,
+            sessions,
+            sessions,
+            worktrees,
+            providers.CreateProvider,
+            () => providers.Catalog.DefaultModelSettings,
+            prPlatform,
+            git,
+            notifications);
+        composition.Automations = automations;
+        settings.Add(AutomationComposition.Section(automations, projects, sessions, composition.AutomationUi));
+
         // The four instrument sections: the click target of each counter in the session strip. They read the composition
         // lazily (on the settings page opening), so they are registered here, still inside the composition root, once the
         // instance they read exists.
@@ -683,6 +707,12 @@ internal sealed class AppComposition : IAsyncDisposable
         foreach (var section in settings.Items)
         {
             (section.ViewModel as IDisposable)?.Dispose();
+        }
+
+        // Before the runtimes: the engine stops its loop and cancels in-flight runs (waiting-for-quota runs stay recorded).
+        if (Automations is { } automations)
+        {
+            await automations.DisposeAsync().ConfigureAwait(false);
         }
 
         runtimes.Dispose();

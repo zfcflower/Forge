@@ -79,6 +79,9 @@ internal abstract class ApprovalCardViewModel : ObservableObject, IDisposable
     /// <summary>The main session that produced the card; a plugin card from a previous run has no session.</summary>
     public string SessionTitle { get; }
 
+    /// <summary>When the card was raised; the session watch reports approvals left waiting too long.</summary>
+    public DateTimeOffset CreatedAt => createdAt;
+
     public string CreatedAtText => createdAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 
     /// <summary>The waiter's task; completed exactly once, with <see cref="ApprovalCardOutcome.Deny"/> on withdrawal.</summary>

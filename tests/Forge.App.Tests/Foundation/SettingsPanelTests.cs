@@ -401,6 +401,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         private static readonly string[] KnownSectionIds =
         [
             SettingsSectionIds.Provider,
+            SettingsSectionIds.Automations,
             SettingsSectionIds.Appearance,
             SettingsSectionIds.Language,
             SettingsSectionIds.Editor,

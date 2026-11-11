@@ -19,7 +19,7 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `chat_sparkle` (regular + filled), `checkmark`, `checkmark_circle`, `chevron_down`, `chevron_left`, `chevron_right`, `chevron_up`,
   `circle`,
   `circle_half_fill`, `cloud_arrow_down`, `color`, `comment_add`, `copy`, `delete`, `dismiss`, `document_bullet_list_clock`,
-  `edit`, `eye`, `folder`,
+  `edit`, `eye`, `flash` (regular + filled), `folder`,
   `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
   filled), `plug_connected`, `local_language`, `save`, `search`, `send`, `server`, `settings`, `shield_checkmark`, `sparkle`, `square`,
   `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`.

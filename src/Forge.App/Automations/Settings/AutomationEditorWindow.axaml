@@ -1,0 +1,196 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:auto="using:Forge.App.Automations.Settings"
+        x:Class="Forge.App.Automations.Settings.AutomationEditorWindow"
+        x:DataType="auto:AutomationEditorViewModel"
+        Title="{Binding Title}"
+        Width="560"
+        Height="680"
+        MinHeight="400"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Window.Styles>
+    <Style Selector="TextBlock.field-label">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Margin" Value="0,0,0,3" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="*,Auto" Margin="18,16">
+    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="12" Margin="0,0,12,0">
+        <StackPanel Spacing="3">
+          <TextBlock Classes="field-label" Text="{Binding NameLabel}" />
+          <TextBox Text="{Binding Name, Mode=TwoWay}" AutomationProperties.AutomationId="automation-editor-name" />
+        </StackPanel>
+
+        <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}" Content="{Binding EnabledText}" />
+
+        <StackPanel Spacing="3">
+          <TextBlock Classes="field-label" Text="{Binding ActionLabel}" />
+          <ComboBox ItemsSource="{Binding ActionOptions}"
+                    SelectedIndex="{Binding ActionIndex, Mode=TwoWay}"
+                    HorizontalAlignment="Stretch"
+                    AutomationProperties.AutomationId="automation-editor-action" />
+        </StackPanel>
+
+        <StackPanel Spacing="3">
+          <TextBlock Classes="field-label" Text="{Binding PromptLabel}" />
+          <TextBox Text="{Binding Prompt, Mode=TwoWay}"
+                   AcceptsReturn="True"
+                   TextWrapping="Wrap"
+                   MinHeight="80"
+                   MaxHeight="200"
+                   AutomationProperties.AutomationId="automation-editor-prompt" />
+        </StackPanel>
+
+        <!-- Triggers. -->
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="field-label" Text="{Binding TriggersLabel}" VerticalAlignment="Center" />
+          <Button Grid.Column="1"
+                  Classes="ghost"
+                  Command="{Binding AddTriggerCommand}"
+                  Content="{Binding AddTriggerText}"
+                  AutomationProperties.AutomationId="automation-editor-add-trigger" />
+        </Grid>
+        <TextBlock Classes="caption" IsVisible="{Binding HasNoTriggers}" Text="{Binding NoTriggersText}" />
+        <ItemsControl ItemsSource="{Binding Triggers}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="auto:AutomationTriggerEditorViewModel">
+              <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                <StackPanel Spacing="8">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <ComboBox ItemsSource="{Binding KindOptions}"
+                              SelectedIndex="{Binding KindIndex, Mode=TwoWay}"
+                              HorizontalAlignment="Stretch" />
+                    <Button Grid.Column="1" Classes="ghost" Command="{Binding RemoveCommand}" Content="{Binding RemoveText}" />
+                  </Grid>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding IsHourly}">
+                    <TextBlock Classes="field-label" Text="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).IntervalLabel}" />
+                    <TextBox Text="{Binding IntervalText, Mode=TwoWay}" Width="100" HorizontalAlignment="Left" />
+                    <TextBlock Classes="field-label" Text="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).MinuteLabel}" />
+                    <TextBox Text="{Binding MinuteText, Mode=TwoWay}" Width="100" HorizontalAlignment="Left" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding IsWeekly}">
+                    <TextBlock Classes="field-label" Text="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).DaysLabel}" />
+                    <ItemsControl ItemsSource="{Binding Days}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <WrapPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="auto:AutomationDayToggleViewModel">
+                          <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Content="{Binding Label}" Margin="0,0,8,0" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding ShowsTimes}">
+                    <TextBlock Classes="field-label" Text="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).TimesLabel}" />
+                    <TextBox Text="{Binding TimesText, Mode=TwoWay}"
+                             PlaceholderText="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).TimesHint}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding IsCron}">
+                    <TextBlock Classes="field-label" Text="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).CronLabel}" />
+                    <TextBox Text="{Binding CronText, Mode=TwoWay}"
+                             PlaceholderText="{Binding $parent[Window].((auto:AutomationEditorViewModel)DataContext).CronHint}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- Live preview. -->
+        <StackPanel Spacing="3">
+          <TextBlock Classes="field-label" Text="{Binding PreviewLabel}" />
+          <ItemsControl ItemsSource="{Binding PreviewLines}" AutomationProperties.AutomationId="automation-editor-preview">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock Classes="caption" Text="{Binding}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="caption" IsVisible="{Binding HasPreviewError}" TextWrapping="Wrap"
+                     Foreground="{DynamicResource DangerBrush}" Text="{Binding PreviewError}" />
+        </StackPanel>
+
+        <!-- Placement (prompt runs only). -->
+        <StackPanel Spacing="8" IsVisible="{Binding ShowsPlacement}">
+          <StackPanel Spacing="3">
+            <TextBlock Classes="field-label" Text="{Binding PlacementLabel}" />
+            <ComboBox ItemsSource="{Binding PlacementOptions}"
+                      SelectedIndex="{Binding PlacementIndex, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      AutomationProperties.AutomationId="automation-editor-placement" />
+          </StackPanel>
+          <CheckBox IsVisible="{Binding ShowsScratchOptions}"
+                    IsChecked="{Binding ReadOnlyTools, Mode=TwoWay}"
+                    Content="{Binding ReadOnlyToolsText}" />
+          <StackPanel Spacing="3" IsVisible="{Binding ShowsProject}">
+            <TextBlock Classes="field-label" Text="{Binding ProjectLabel}" />
+            <ComboBox ItemsSource="{Binding Projects}"
+                      SelectedItem="{Binding SelectedProject, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="auto:AutomationProjectChoice">
+                  <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+          <StackPanel Spacing="3" IsVisible="{Binding ShowsSession}">
+            <TextBlock Classes="field-label" Text="{Binding SessionLabel}" />
+            <ComboBox ItemsSource="{Binding Sessions}"
+                      SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="auto:AutomationSessionChoice">
+                  <TextBlock Text="{Binding Display}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Model. -->
+        <StackPanel Spacing="3" IsVisible="{Binding ShowsPlacement}">
+          <TextBlock Classes="field-label" Text="{Binding ModelLabel}" />
+          <TextBox Text="{Binding ModelText, Mode=TwoWay}" AutomationProperties.AutomationId="automation-editor-model" />
+          <TextBlock Classes="field-label" Margin="0,6,0,3" Text="{Binding ProviderLabel}" />
+          <TextBox Text="{Binding ProviderText, Mode=TwoWay}" AutomationProperties.AutomationId="automation-editor-provider" />
+        </StackPanel>
+
+        <CheckBox IsChecked="{Binding CatchUp, Mode=TwoWay}" Content="{Binding CatchUpText}" />
+
+        <TextBlock Classes="caption"
+                   IsVisible="{Binding HasError}"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource DangerBrush}"
+                   Text="{Binding Error}"
+                   AutomationProperties.AutomationId="automation-editor-error" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,12,0,0">
+      <Button Grid.Column="0"
+              Classes="ghost"
+              Command="{Binding CancelCommand}"
+              Content="{Binding CancelText}"
+              AutomationProperties.AutomationId="automation-editor-cancel" />
+      <Button Grid.Column="2"
+              Classes="primary"
+              Command="{Binding SaveCommand}"
+              Content="{Binding SaveText}"
+              AutomationProperties.AutomationId="automation-editor-save" />
+    </Grid>
+  </Grid>
+</Window>

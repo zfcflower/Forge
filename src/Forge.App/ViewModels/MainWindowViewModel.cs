@@ -458,6 +458,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         await Projects.InitializeAsync(composition.Paths.GeneralWorkspaceDirectory, CancellationToken.None).ConfigureAwait(true);
         await GeneralChats.RefreshAsync(CancellationToken.None).ConfigureAwait(true);
         await RestoreAsync().ConfigureAwait(true);
+        AttachAutomations();
 
         // The sessions (and with them the agent trees of each session) only exist after the tabs are restored, while the
         // tree was built before that: without this second pass a session row shows no chevron until the first click
@@ -911,6 +912,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             sessions.Remove(info.Id);
             existing.BecameReadOnly -= OnSessionBecameReadOnly;
             carried = existing.TakeComposerState();
+            UnhookAutomations(existing);
             existing.Dispose();
         }
 
@@ -941,6 +943,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         session.BecameReadOnly += OnSessionBecameReadOnly;
         ApplyProject(session);
         session.TurnCompleted += OnTurnCompleted;
+        if (!readOnly)
+        {
+            HookAutomations(session);
+        }
+
         session.SubAgentsChanged += OnSubAgentsChanged;
         session.AgentTreeChanged += OnAgentTreeChanged;
         sessions[info.Id] = session;
@@ -1994,6 +2001,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private void OnTurnCompleted(SessionWorkspaceViewModel session)
     {
         SetTreeRunning(session.SessionId, false);
+        NotifyAutomationsTurnCompleted(session);
         if (!openTabs.Contains(session.SessionId))
         {
             ReleaseClosedSession(session);
@@ -2011,6 +2019,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             return;
         }
 
+        UnhookAutomations(session);
         session.Dispose();
         composition.Runtimes.Release(session.SessionId);
     }
@@ -2028,6 +2037,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         if (sessions.TryGetValue(sessionId, out var session) && !session.IsRunning)
         {
             sessions.Remove(sessionId);
+            UnhookAutomations(session);
             session.Dispose();
         }
 
@@ -3116,8 +3126,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             approvalServices.Queue.Changed -= OnApprovalQueueChanged;
         }
 
+        DetachAutomations();
         foreach (var session in sessions.Values)
         {
+            UnhookAutomations(session);
             session.Dispose();
         }
 

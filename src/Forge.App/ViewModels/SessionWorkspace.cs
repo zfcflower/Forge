@@ -7,6 +7,7 @@ using System.Text;
 using Avalonia.Threading;
 using Forge.Abstractions;
 using Forge.App.Agents;
+using Forge.App.Automations;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
@@ -42,7 +43,7 @@ internal enum TurnRejection
 /// <see cref="Loc.LanguageChanged"/>: the cards, tool rows, notices and sub-agent labels re-derive their texts when the
 /// language changes and are told to re-raise them from here, and the subscription ends with <see cref="Dispose"/>.</para>
 /// </summary>
-internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
+internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable, IAutomationSession
 {
     /// <summary>How much text of a child agent is parked while its start event is still in flight.</summary>
     private const int EarlyDeltaLimit = 8192;
@@ -86,6 +87,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     /// <summary>Set while the turn-start check reads the store, so a second send cannot slip in before the turn starts.</summary>
     private bool gating;
+
+    // Automation turns (see RunAutomationTurnAsync): set only on the UI thread.
+    private bool automationTurn;
+    private string? automationBanner;
+    private Action? cancelAutomation;
+    private RelayCommand? cancelAutomationCommand;
+    private long lastActivityTicks = DateTimeOffset.UtcNow.UtcTicks;
+    private bool automationRejected;
+    private string? rootFailure;
+    private LocText? lastTurnError;
     private bool isReadOnlyView;
     private bool isHandingOver;
     private AsyncRelayCommand? continueCommand;
@@ -360,6 +371,40 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     public event EventHandler? TabTitleChanged;
 
     public event Action<SessionWorkspaceViewModel>? TurnCompleted;
+
+    /// <summary>A turn passed the gate and started; the flag is true for a turn an automation delivered.</summary>
+    public event Action<SessionWorkspaceViewModel, bool>? TurnStarted;
+
+    /// <summary>The root agent's turn failed because a provider quota is used up (raised on the UI thread).</summary>
+    public event Action<SessionWorkspaceViewModel, ProviderQuotaExhausted>? QuotaExhausted;
+
+    /// <summary>The running (or just-ended) turn was delivered by an automation; read by <see cref="TurnCompleted"/> handlers.</summary>
+    public bool IsAutomationTurn => automationTurn;
+
+    /// <summary>The automation run attached to this session (the banner above the composer); null hides the banner.</summary>
+    public string? AutomationBanner
+    {
+        get => automationBanner;
+        private set
+        {
+            if (Set(ref automationBanner, value))
+            {
+                OnPropertyChanged(nameof(HasAutomationBanner));
+            }
+        }
+    }
+
+    public bool HasAutomationBanner => automationBanner is not null;
+
+    /// <summary>Cancels the attached run; set by the main window together with the banner text.</summary>
+    public RelayCommand CancelAutomationCommand => cancelAutomationCommand ??= new RelayCommand(() => cancelAutomation?.Invoke());
+
+    /// <summary>Shows (or with a null text hides) the automation banner; <paramref name="cancel"/> backs its cancel button.</summary>
+    public void SetAutomationBanner(string? text, Action? cancel)
+    {
+        cancelAutomation = cancel;
+        AutomationBanner = text;
+    }
 
     public event Action? SubAgentsChanged;
 
@@ -858,6 +903,59 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         return true;
     }
 
+    /// <summary>Idle in the lifecycle sense (section 2) and able to run a turn now: what an automation waits for.</summary>
+    public bool IsAutomationIdle => !disposed && !isReadOnlyView && runtime is not null && !gating && BusyReasons().Count == 0;
+
+    /// <summary>The session can no longer take automation turns here: the tab closed, or it was taken over / archived / removed.</summary>
+    public bool IsAutomationClosed => disposed || isReadOnlyView || runtime is null;
+
+    /// <summary>
+    /// Runs <paramref name="text"/> as a turn on behalf of an automation; the caller checked <see cref="IsAutomationIdle"/>.
+    /// A rejected turn never lands in the user's draft or queue: it is reported as withdrawn instead.
+    /// </summary>
+    public async Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin)
+    {
+        if (!IsAutomationIdle)
+        {
+            return new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.SessionBusyText);
+        }
+
+        automationTurn = true;
+        automationRejected = false;
+        rootFailure = null;
+        Transcript.AddNotice(origin);
+        try
+        {
+            await RunTurnAsync(text).ConfigureAwait(true);
+        }
+        finally
+        {
+            automationTurn = false;
+        }
+
+        if (automationRejected)
+        {
+            return new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.SessionUnavailableText);
+        }
+
+        if (lastTurnError is { IsEmpty: false } failure)
+        {
+            return failure.Equals(SessionStrings.Stopped)
+                ? new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.TurnStoppedText)
+                : new MailboxResult(MailboxStatus.TurnFailed, failure.Resolve());
+        }
+
+        return rootFailure is { } error
+            ? new MailboxResult(MailboxStatus.TurnFailed, error)
+            : new MailboxResult(MailboxStatus.Completed);
+    }
+
+    /// <summary>Starts a sub-agent under this session outside a turn (automations); its tab appears like a tool-spawned one.</summary>
+    public Task<ChildAgentResult> LaunchChildAsync(string kind, string task, CancellationToken ct) =>
+        runtime is { } live && !IsAutomationClosed
+            ? live.SpawnChildAsync(kind, task, OnAgentEvent, ct)
+            : Task.FromException<ChildAgentResult>(new InvalidOperationException(AutomationStrings.SessionUnavailableText));
+
     private void Interject()
     {
         var text = draft.Trim();
@@ -1023,6 +1121,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Last agent event of the running turn, or the turn start (written off the UI thread).</summary>
+    public DateTimeOffset LastActivityAt => new(Interlocked.Read(ref lastActivityTicks), TimeSpan.Zero);
+
+    /// <summary>An automation-owned session runs with this agent (a read-only scout, a model override); null restores the main agent.</summary>
+    public void UseAutomationAgent(AgentDefinition? definition) => ApplyRootDefinition(definition);
+
     private void ApplyRootDefinition(AgentDefinition? definition)
     {
         if (runtime?.SetRootDefinition(definition) == true)
@@ -1045,7 +1149,9 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             agentUsage.Remove("root");
         }
 
+        TurnStarted?.Invoke(this, automationTurn);
         turnStartedAt = DateTimeOffset.Now;
+        Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
         Instruments.RefreshCounters();
         Instruments.RefreshSources();
         Transcript.AddUserMessage(text, turnStartedAt);
@@ -1105,6 +1211,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                     notifications.Notify(NotificationLevel.Error, NotificationsStrings.TurnFailedTitle, failure, "turn-failed:" + SessionId);
                 }
 
+                lastTurnError = error;
                 Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
                 if (checkpoints is not null)
                 {
@@ -1181,7 +1288,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             return true;
         }
 
-        Restore(text);
+        if (automationTurn)
+        {
+            // An automation's text is not the user's: it is reported back as withdrawn, never parked in the composer.
+            automationRejected = true;
+        }
+        else
+        {
+            Restore(text);
+        }
+
         if (rejection is TurnRejection.TakenOver or TurnRejection.Removed)
         {
             Transcript.AddNotice(LifecycleStrings.TakenOver, isError: true);
@@ -1232,6 +1348,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
     private void OnAgentEvent(AgentEvent value)
     {
+        Interlocked.Exchange(ref lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
         switch (value)
         {
             case AgentTextDelta delta:
@@ -1353,6 +1470,14 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 break;
             case AgentFailed failed:
                 Card(failed.AgentId)?.AddNotice(LocText.Literal(failed.Error), isError: true);
+                if (string.Equals(failed.AgentId, "root", StringComparison.Ordinal))
+                {
+                    rootFailure = failed.Error;
+                }
+
+                break;
+            case AgentQuotaExhausted quota when string.Equals(quota.AgentId, "root", StringComparison.Ordinal):
+                QuotaExhausted?.Invoke(this, quota.Quota);
                 break;
         }
     }

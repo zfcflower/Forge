@@ -169,6 +169,31 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
+    /// Starts a <paramref name="kind"/> sub-agent under this session's root outside a turn (automations, e.g. the Scout
+    /// that analyses a CI failure). Its events reach <paramref name="sink"/> on a worker thread, like a tool-spawned child.
+    /// </summary>
+    public async Task<ChildAgentResult> SpawnChildAsync(string kind, string task, Action<AgentEvent> sink, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(task);
+        ArgumentNullException.ThrowIfNull(sink);
+
+        var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
+        var forward = new ForwardingSink(value =>
+        {
+            TrackSubAgent(value);
+            sink(value);
+        });
+        return await Task.Run(() => agentHost.SpawnChildAsync(agent, kind, task, forward, ct), CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
+    private sealed class ForwardingSink(Action<AgentEvent> forward) : IAgentEventSink
+    {
+        public void Emit(AgentEvent value) => forward(value);
+    }
+
+    /// <summary>
     /// The definition the root agent runs with from the next turn on: null is the default main agent with the configured
     /// model. A change rebuilds the root from the store before the next turn, so the conversation keeps its context; the
     /// turn already running keeps the definition it started with.

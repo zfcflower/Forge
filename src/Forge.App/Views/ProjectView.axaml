@@ -80,7 +80,7 @@
                                  Width="12"
                                  Height="12"
                                  Margin="6,0,4,0" />
-                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
+                  <Grid Grid.Column="2" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
                     <!-- A project's own name is the heading of its subtree, so it reads one weight above the rows under it. -->
                     <TextBlock Text="{Binding Title}"
                                Classes.project-name="{Binding IsProject}"
@@ -113,7 +113,16 @@
                                TextWrapping="NoWrap"
                                VerticalAlignment="Center"
                                Margin="0,0,6,0" />
-                    <Ellipse Grid.Column="4" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
+                    <!-- Created by an automation: a small bolt, the same glyph as the title-bar entry. -->
+                    <wc:FluentIcon Grid.Column="4"
+                                   Data="{StaticResource IconBolt}"
+                                   Width="11"
+                                   Height="11"
+                                   Margin="0,0,6,0"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   IsVisible="{Binding IsAutomationSession}"
+                                   ToolTip.Tip="{Binding [automations.session.createdBy], Source={x:Static loc:Loc.Instance}}" />
+                    <Ellipse Grid.Column="5" Classes="status-dot running" IsVisible="{Binding IsRunning}" />
                   </Grid>
                   <!-- The section's own "new conversation" tool, or the project's "new workspace": same button, two actions,
                        so the glyph and the tooltip tell them apart instead of sharing one plus. On a workspace row it is the

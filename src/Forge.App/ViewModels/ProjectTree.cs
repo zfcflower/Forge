@@ -144,6 +144,7 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
     private bool archived;
     private bool isMainCheckout;
     private string? forkOfBranch;
+    private bool automationSession;
     private bool isConflicted;
     private TreeRowMark rowMark;
 
@@ -546,6 +547,13 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
                 OnPropertyChanged(nameof(SyncHeader));
             }
         }
+    }
+
+    /// <summary>A session row an automation created (a scratch run or an automation's own branch session).</summary>
+    public bool IsAutomationSession
+    {
+        get => automationSession;
+        set => Set(ref automationSession, value);
     }
 
     /// <summary>"⑂ forked from &lt;source&gt;" after a fork workspace row's title.</summary>
@@ -1786,6 +1794,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         node.HistoryCount = plan.HistoryCount;
         node.IsArchived = plan.IsArchived;
         node.IsMainCheckout = plan.IsMainCheckout;
+        node.IsAutomationSession = plan.Kind == TreeNodeKind.Session && plan.Session?.AutomationId is not null;
         node.ForkOfBranch = plan.Kind == TreeNodeKind.Worktree && plan.RowMark != TreeRowMark.Recycled ? plan.ForkOfBranch : null;
         node.RowMark = plan.RowMark;
         node.StatusText = plan.StatusText;

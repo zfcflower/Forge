@@ -117,6 +117,9 @@ internal static class SettingsSectionIds
 
     public const string Tools = "tools";
 
+    /// <summary>The automations page: built-ins, user definitions and their run history (the title-bar entry opens it).</summary>
+    public const string Automations = "automations";
+
     public const int ProviderOrder = 100;
     public const int AppearanceOrder = 200;
     public const int LanguageOrder = 300;
@@ -141,4 +144,6 @@ internal static class SettingsSectionIds
     public const int McpOrder = 720;
 
     public const int ToolsOrder = 730;
+
+    public const int AutomationsOrder = 150;
 }

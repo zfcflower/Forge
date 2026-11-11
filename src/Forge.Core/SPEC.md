@@ -72,6 +72,13 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **模型元数据与用量换算(`Providers/`)。** `ModelMetadataCatalog` 是内置的模型窗口与价格表:归一化模型 id(小写、去掉 `vendor/` 前缀与 `:free`/`-latest` 后缀)后按“精确 → 最长前缀 → 包含”匹配,表里只收能核对的条目,数值只用于展示估算。`ModelMetadataResolver.Resolve` 按 **内置表 → provider 上报的元数据 → 用户 `settings.json` 的 `provider.modelMeta`** 逐字段合并(`ModelMetadata.With`),任何一半未知就保持未知,绝不补 0。`SessionUsageMath` 全是纯算术:缓存命中率以 `InputTokens` 为分母(OpenAI 兼容的 `prompt_tokens` 与 Anthropic 的 `input + cacheRead + cacheWrite` 都把缓存折进输入)、计费输入先减去缓存、每个 token 数夹到 ≥ 0 后按每百万单价计费、窗口占比夹到 0..1。展示层(百分比、`9% / 1.0M`、`$0.041`)与它无关,见 forge-app 的会话输入框一节。
 
+**自动化(`Automations/`)。** 契约在 `Forge.Abstractions/Automations.cs`,引擎与调度在这里,参考 CodeAlta.Automations(BSD-2,见 `THIRD_PARTY_NOTICES.md`)的调度形状,未逐字拷贝。
+- `AutomationSchedule`:间隔(每 N 小时的第 M 分)、每日若干时刻、每周若干天的若干时刻、5 段 cron;按本地时区算下一次,DST 跳过/重复的时刻各只触发一次。`TryCreate` 给出校验错误,设置页的“接下来 5 次”预览直接用它。
+- `AutomationEngine`:单个后台循环,最长睡 30 秒;按定义的下次触发时间启动运行。忙键 =(定义 id, 目标会话 id),同键已有活动运行时新请求返回 `Busy`;同一 `Occurrence` 只跑一次(`Duplicate`)。链条深度上限 `MaxChainDepth = 5`(运行由另一次运行引起时深度 +1),运行不能触发自己(`SelfTriggered`);带 `TargetKey` 的请求计入尝试预算(`budget:<key>`,到额即 `BudgetExhausted`,由调用方 `ResetTargetBudgetAsync` 清零)。每分钟写一次心跳 `engine.alive_at`;启动时把上次未结束的运行标为中断,`CatchUp` 定义在停机期间错过的触发补跑一次。`StartAsync` 不检查定义启用/暂停——事件启动的运行由调用方先判(App 的 `AutomationService.IsEnabled`)。
+- 存储:schema v10 新增 `automation_runs`(运行历史,`TrimAsync` 按定义保留条数与总条数修剪)、`automation_state`(键值:心跳、预算、各 runner 的持久笔记)与 `sessions.automation_id`/`automation_run_id`(会话由哪次运行创建)。
+- 额度用尽:`ProviderQuota.Classify` 把 402、带额度标记或长 Retry-After 的 429、带额度标记的 400/403 归为 `ProviderQuotaExhausted`(含 provider、模型、可解析出的重置时间;未知错误从不算额度),重试层对它不重试,`AgentHost` 以 `AgentQuotaExhausted` 事件上报且不重试;`QuotaProbeSchedule` 在没有重置时间时按退避间隔用最小请求探测额度是否恢复(用户已接受探测的额外消耗)。
+- `AgentHost` 可在回合之外启动子 Agent(自动化的 Scout 用它),结果与普通子 Agent 相同。
+
 ## 未决
 
 - 事件通道保持无界(决定):`AgentHost.RunAsync` 的 `Channel.CreateUnbounded<AgentEvent>` 不加背压、不丢事件;UI 合并在 App 侧由 `FrameCoalescer` 实现,见 forge-app。

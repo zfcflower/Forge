@@ -11,6 +11,7 @@
              xmlns:editing="using:Forge.App.Editing"
              xmlns:set="using:Forge.App.ViewModels.Settings"
              xmlns:settings="using:Forge.App.Settings"
+             xmlns:autoset="using:Forge.App.Automations.Settings"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -100,6 +101,9 @@
     </DataTemplate>
 
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
+    <DataTemplate DataType="autoset:AutomationsSettingsViewModel" x:DataType="autoset:AutomationsSettingsViewModel">
+      <autoset:AutomationsSettingsView />
+    </DataTemplate>
     <DataTemplate DataType="settings:ProvidersSettingsViewModel" x:DataType="settings:ProvidersSettingsViewModel">
       <settings:ProvidersSettingsView />
     </DataTemplate>

@@ -1,0 +1,164 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:auto="using:Forge.App.Automations.Settings"
+             x:Class="Forge.App.Automations.Settings.AutomationsSettingsView"
+             x:DataType="auto:AutomationsSettingsViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.automation-badge">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+    </Style>
+    <Style Selector="Button.automation-action">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    </Style>
+    <Style Selector="Button.automation-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Border.automation-row">
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="0,8" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="12">
+    <!-- Global switch. -->
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <CheckBox Grid.Column="0"
+                IsChecked="{Binding IsRunning, Mode=TwoWay}"
+                Content="{Binding GlobalStatusText}"
+                AutomationProperties.AutomationId="automations-global" />
+      <Button Grid.Column="1"
+              Classes="primary"
+              Command="{Binding NewCommand}"
+              Content="{Binding NewText}"
+              AutomationProperties.AutomationId="automations-new" />
+    </Grid>
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GlobalHint}" />
+
+    <ItemsControl ItemsSource="{Binding ConfigErrors}" IsVisible="{Binding HasConfigErrors}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="x:String">
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}" Text="{Binding}" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <TextBlock Classes="caption"
+               IsVisible="{Binding HasProblem}"
+               TextWrapping="Wrap"
+               Foreground="{DynamicResource DangerBrush}"
+               Text="{Binding Problem}"
+               AutomationProperties.AutomationId="automations-problem" />
+
+    <!-- The list: built-ins first. -->
+    <ListBox ItemsSource="{Binding Rows}"
+             SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+             Background="Transparent"
+             AutomationProperties.AutomationId="automations-list">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="auto:AutomationRowViewModel">
+          <Border Classes="automation-row">
+            <StackPanel Spacing="6">
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
+                    <Border Classes="automation-badge" IsVisible="{Binding IsBuiltIn}">
+                      <TextBlock Text="{Binding BadgeText}"
+                                 FontSize="{DynamicResource FontSizeXs}"
+                                 Foreground="{DynamicResource AccentTextBrush}" />
+                    </Border>
+                  </StackPanel>
+                  <TextBlock Classes="caption" Text="{Binding TriggerSummary}" TextTrimming="CharacterEllipsis" />
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Classes="caption" Text="{Binding NextText}" />
+                    <TextBlock Classes="caption" Text="{Binding LastStatusText}" />
+                  </StackPanel>
+                </StackPanel>
+
+                <CheckBox Grid.Column="1"
+                          IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                          Content="{Binding EnabledText}"
+                          VerticalAlignment="Center"
+                          AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-enabled-{0}}" />
+                <Button Grid.Column="2"
+                        Classes="automation-action"
+                        Command="{Binding RunNowCommand}"
+                        Content="{Binding RunNowText}"
+                        AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-run-{0}}" />
+                <Button Grid.Column="3"
+                        Classes="automation-action"
+                        IsVisible="{Binding CanEdit}"
+                        Command="{Binding EditCommand}"
+                        Content="{Binding EditText}"
+                        AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-edit-{0}}" />
+                <Button Grid.Column="4"
+                        Classes="automation-action"
+                        IsVisible="{Binding CanDelete}"
+                        Command="{Binding DeleteCommand}"
+                        Content="{Binding DeleteText}"
+                        AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-delete-{0}}" />
+              </Grid>
+
+              <!-- The CI built-in: auto-push per repository project. -->
+              <StackPanel Spacing="4" IsVisible="{Binding IsCi}">
+                <Button Classes="automation-action"
+                        HorizontalAlignment="Left"
+                        Command="{Binding ToggleCiCommand}"
+                        Content="{Binding CiToggleText}"
+                        AutomationProperties.AutomationId="automation-ci-expand" />
+                <StackPanel Spacing="4" Margin="12,0,0,0" IsVisible="{Binding IsCiExpanded}">
+                  <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding CiHint}" />
+                  <TextBlock Classes="caption" IsVisible="{Binding HasNoCiProjects}" Text="{Binding CiNoProjectsText}" />
+                  <ItemsControl ItemsSource="{Binding CiProjects}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="auto:AutomationCiProjectViewModel">
+                        <CheckBox IsChecked="{Binding AutoPush, Mode=TwoWay}"
+                                  Content="{Binding Name}"
+                                  AutomationProperties.AutomationId="{Binding Id, StringFormat=automation-ci-push-{0}}" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- Runs of the selected row. -->
+    <TextBlock Classes="section-title" Text="{Binding RunsTitle}" />
+    <TextBlock Classes="caption" IsVisible="{Binding SelectedRow, Converter={x:Static ObjectConverters.IsNull}}" Text="{Binding RunsSelectHint}" />
+    <TextBlock Classes="caption" IsVisible="{Binding ShowsNoRuns}" Text="{Binding RunsNoneText}" />
+    <ItemsControl ItemsSource="{Binding Runs}" AutomationProperties.AutomationId="automations-runs">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="auto:AutomationRunRowViewModel">
+          <Button Classes="automation-action"
+                  HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Stretch"
+                  Command="{Binding OpenCommand}"
+                  ToolTip.Tip="{Binding MessageText}">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12">
+              <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontWeight="SemiBold" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding SourceText}" />
+              <TextBlock Grid.Column="2" Classes="caption" Text="{Binding TimeText}" />
+              <TextBlock Grid.Column="3" Classes="caption" Text="{Binding UsageText}" IsVisible="{Binding HasUsage}" />
+              <TextBlock Grid.Row="1" Grid.ColumnSpan="4"
+                         Classes="caption"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding HasMessage}"
+                         Text="{Binding MessageText}" />
+            </Grid>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>
