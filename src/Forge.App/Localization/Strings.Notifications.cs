@@ -27,9 +27,7 @@ internal static class NotificationsStrings
     public const string ProviderMissingTitleKey = "notifications.title.providerMissing";
     public const string SubAgentFinishedTitleKey = "notifications.title.subAgentFinished";
     public const string StepCommitFailedTitleKey = "notifications.title.stepCommitFailed";
-    public const string ScreenshotTitleKey = "notifications.title.screenshot";
     public const string GitOperationFailedTitleKey = "notifications.title.gitOperationFailed";
-    public const string GitHubNotReadyTitleKey = "notifications.title.githubNotReady";
     public const string HostUnavailableTitleKey = "notifications.title.hostUnavailable";
     public const string McpFailedTitleKey = "notifications.title.mcpFailed";
     public const string PreferencesProblemTitleKey = "notifications.title.preferencesProblem";
@@ -59,14 +57,8 @@ internal static class NotificationsStrings
     /// <summary>Headline of the "step commit failed" notification.</summary>
     public static LocText StepCommitFailedTitle => new(StepCommitFailedTitleKey);
 
-    /// <summary>Headline of the "screenshot" notification.</summary>
-    public static LocText ScreenshotTitle => new(ScreenshotTitleKey);
-
     /// <summary>Headline of the "git operation failed" notification.</summary>
     public static LocText GitOperationFailedTitle => new(GitOperationFailedTitleKey);
-
-    /// <summary>Headline of the "git hub not ready" notification.</summary>
-    public static LocText GitHubNotReadyTitle => new(GitHubNotReadyTitleKey);
 
     /// <summary>Headline of the "host unavailable" notification.</summary>
     public static LocText HostUnavailableTitle => new(HostUnavailableTitleKey);
@@ -126,9 +118,7 @@ internal static class NotificationsStrings
         Loc.Register(ProviderMissingTitleKey, "提供方不可用", "Provider unavailable");
         Loc.Register(SubAgentFinishedTitleKey, "子 Agent 结束", "Sub-agent finished");
         Loc.Register(StepCommitFailedTitleKey, "步骤提交失败", "Step commit failed");
-        Loc.Register(ScreenshotTitleKey, "截图", "Screenshots");
         Loc.Register(GitOperationFailedTitleKey, "Git 操作失败", "Git operation failed");
-        Loc.Register(GitHubNotReadyTitleKey, "GitHub CLI 不可用", "GitHub CLI unavailable");
         Loc.Register(HostUnavailableTitleKey, "扩展宿主不可用", "Extension host unavailable");
         Loc.Register(McpFailedTitleKey, "MCP 服务器异常", "MCP server failed");
         Loc.Register(PreferencesProblemTitleKey, "设置未能读取", "Settings could not be read");

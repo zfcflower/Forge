@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using Forge.App.Notifications;
@@ -230,7 +231,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task An_unsupported_platform_makes_no_call_and_is_traced_as_skipped()
     {
-        using var trace = new PrAppTraceCapture();
+        using var trace = new NotifyTraceCapture();
         var recorder = new RunnerRecorder();
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Unsupported);
 
@@ -244,7 +245,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_runner_that_throws_does_not_throw_and_is_traced_with_the_tool_name()
     {
-        using var trace = new PrAppTraceCapture();
+        using var trace = new NotifyTraceCapture();
         var notifier = new SystemNotifier(
             run: static (_, _) => throw new InvalidOperationException("boom-from-runner"),
             platform: NotifyPlatform.Linux);
@@ -260,7 +261,7 @@ public sealed class SystemNotifierTests
     public async Task A_missing_tool_is_a_traced_skip_not_an_exception()
     {
         // What Process.Start throws when the executable is not on PATH.
-        using var trace = new PrAppTraceCapture();
+        using var trace = new NotifyTraceCapture();
         var notifier = new SystemNotifier(
             run: static (_, _) => throw new Win32Exception(2, "The system cannot find the file specified."),
             platform: NotifyPlatform.MacOS);
@@ -276,7 +277,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_runner_that_faults_asynchronously_is_handled_the_same_way()
     {
-        using var trace = new PrAppTraceCapture();
+        using var trace = new NotifyTraceCapture();
         var notifier = new SystemNotifier(
             run: static async (_, _) =>
             {
@@ -298,7 +299,7 @@ public sealed class SystemNotifierTests
     [InlineData(-1)]
     public async Task A_non_zero_exit_code_is_traced_and_never_throws(int exitCode)
     {
-        using var trace = new PrAppTraceCapture();
+        using var trace = new NotifyTraceCapture();
         var notifier = new SystemNotifier(run: (_, _) => Task.FromResult(exitCode), platform: NotifyPlatform.Linux);
 
         await notifier.NotifyAsync(Title, Body, CancellationToken.None);
@@ -311,7 +312,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_zero_exit_code_leaves_no_trace_line()
     {
-        using var trace = new PrAppTraceCapture();
+        using var trace = new NotifyTraceCapture();
         var notifier = new SystemNotifier(run: static (_, _) => Task.FromResult(0), platform: NotifyPlatform.Linux);
 
         await notifier.NotifyAsync("quiet-title", "quiet-body", CancellationToken.None);
@@ -330,8 +331,8 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_tool_that_hangs_is_abandoned_after_five_seconds_of_the_injected_clock()
     {
-        using var trace = new PrAppTraceCapture();
-        var time = new PrAppControlledTime();
+        using var trace = new NotifyTraceCapture();
+        var time = new NotifyControlledTime();
         var recorder = new RunnerRecorder { WaitForToken = true };
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Windows, time: time);
 
@@ -345,7 +346,7 @@ public sealed class SystemNotifierTests
         Assert.False(recorder.LastToken.IsCancellationRequested);
 
         time.Advance(TimeSpan.FromMilliseconds(1));
-        await pending.WaitAsync(PrKit.Budget);
+        await pending.WaitAsync(NotifyBudget);
 
         Assert.True(recorder.LastToken.IsCancellationRequested);
         Assert.Contains(
@@ -356,7 +357,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_tool_that_finishes_in_time_leaves_no_armed_timer_behind()
     {
-        var time = new PrAppControlledTime();
+        var time = new NotifyControlledTime();
         var notifier = new SystemNotifier(run: static (_, _) => Task.FromResult(0), platform: NotifyPlatform.Linux, time: time);
 
         await notifier.NotifyAsync(Title, Body, CancellationToken.None);
@@ -370,8 +371,8 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task Cancellation_by_the_caller_propagates_and_reaches_the_runner()
     {
-        using var trace = new PrAppTraceCapture();
-        var time = new PrAppControlledTime();
+        using var trace = new NotifyTraceCapture();
+        var time = new NotifyControlledTime();
         var recorder = new RunnerRecorder { WaitForToken = true };
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Linux, time: time);
         using var cancellation = new CancellationTokenSource();
@@ -382,7 +383,7 @@ public sealed class SystemNotifierTests
 
         await cancellation.CancelAsync();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(PrKit.Budget));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(NotifyBudget));
         Assert.True(recorder.LastToken.IsCancellationRequested);
 
         // Told apart from the limit: no "did not finish" line for a user's cancellation.
@@ -421,7 +422,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task Cancellation_of_the_caller_wins_over_a_limit_that_expires_at_the_same_time()
     {
-        var time = new PrAppControlledTime();
+        var time = new NotifyControlledTime();
         var recorder = new RunnerRecorder { WaitForToken = true };
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Windows, time: time);
         using var cancellation = new CancellationTokenSource();
@@ -432,8 +433,11 @@ public sealed class SystemNotifierTests
         time.Advance(TimeSpan.FromSeconds(5));
 
         // The caller asked to stop, so the caller is told (the limit's quiet skip is only for a tool that overran).
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(PrKit.Budget));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(NotifyBudget));
     }
+
+    /// <summary>Upper bound of every wait on a fake; reaching it fails the test instead of hanging.</summary>
+    private static readonly TimeSpan NotifyBudget = TimeSpan.FromSeconds(30);
 
     // ------------------------------------------------------------ helpers
 
@@ -443,7 +447,7 @@ public sealed class SystemNotifierTests
         private readonly List<ProcessStartInfo> started = [];
         private readonly object gate = new();
 
-        public PrAppCounter Entered { get; } = new();
+        public NotifyCounter Entered { get; } = new();
 
         /// <summary>When set, the runner waits until its token is cancelled (a tool that hangs) and then throws.</summary>
         public bool WaitForToken { get; init; }
@@ -479,3 +483,244 @@ public sealed class SystemNotifierTests
         }
     }
 }
+
+/// <summary>
+/// A counter that can be awaited: <see cref="WhenAtLeastAsync"/> completes once <see cref="Hit"/> was called that often. It
+/// lives here because the notifier's own tests no longer share a kit with a git-panel test file.
+/// </summary>
+internal sealed class NotifyCounter
+{
+    private readonly object gate = new();
+    private readonly List<(int Target, TaskCompletionSource Source)> waiters = [];
+    private int count;
+
+    public int Count
+    {
+        get
+        {
+            lock (gate)
+            {
+                return count;
+            }
+        }
+    }
+
+    public int Hit()
+    {
+        List<TaskCompletionSource> ready = [];
+        int total;
+        lock (gate)
+        {
+            total = ++count;
+            for (var index = waiters.Count - 1; index >= 0; index--)
+            {
+                if (count >= waiters[index].Target)
+                {
+                    ready.Add(waiters[index].Source);
+                    waiters.RemoveAt(index);
+                }
+            }
+        }
+
+        foreach (var source in ready)
+        {
+            source.TrySetResult();
+        }
+
+        return total;
+    }
+
+    /// <summary>Completes when the counter reached <paramref name="target"/>; fails the test (not hangs) after the budget.</summary>
+    public async Task WhenAtLeastAsync(int target, string what)
+    {
+        Task task;
+        lock (gate)
+        {
+            if (count >= target)
+            {
+                return;
+            }
+
+            var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            waiters.Add((target, source));
+            task = source.Task;
+        }
+
+        try
+        {
+            await task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail($"timed out waiting for {what} (wanted {target}, saw {Count})");
+        }
+    }
+}
+
+/// <summary>Captures <see cref="Trace"/> output for the duration of a test and removes itself.</summary>
+internal sealed class NotifyTraceCapture : TraceListener
+{
+    private readonly ConcurrentQueue<string> lines = new();
+
+    public NotifyTraceCapture()
+    {
+        Trace.Listeners.Add(this);
+    }
+
+    public IReadOnlyList<string> Lines => [.. lines];
+
+    public override void Write(string? message)
+    {
+        if (!string.IsNullOrEmpty(message))
+        {
+            lines.Enqueue(message);
+        }
+    }
+
+    public override void WriteLine(string? message) => Write(message);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Trace.Listeners.Remove(this);
+        }
+
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>A clock a test moves by hand: timers fire only when the test advances past their due time.</summary>
+internal sealed class NotifyControlledTime : TimeProvider
+{
+    private readonly object gate = new();
+    private readonly List<ControlledTimer> timers = [];
+    private readonly List<TimeSpan> requested = [];
+    private TimeSpan now;
+
+    /// <summary>The due times of every timer that was created or changed to a finite delay.</summary>
+    public IReadOnlyList<TimeSpan> RequestedDueTimes
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. requested];
+            }
+        }
+    }
+
+    public int ActiveTimers
+    {
+        get
+        {
+            lock (gate)
+            {
+                return timers.Count(static timer => !timer.Disposed && !timer.Fired && timer.Due is not null);
+            }
+        }
+    }
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        lock (gate)
+        {
+            return new DateTimeOffset(2026, 11, 7, 12, 0, 0, TimeSpan.Zero) + now;
+        }
+    }
+
+    public override long GetTimestamp()
+    {
+        lock (gate)
+        {
+            return now.Ticks;
+        }
+    }
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        var timer = new ControlledTimer(this, callback, state);
+        lock (gate)
+        {
+            timers.Add(timer);
+        }
+
+        timer.Change(dueTime, period);
+        return timer;
+    }
+
+    /// <summary>Moves the clock forward and fires, on the calling thread, every timer that became due.</summary>
+    public void Advance(TimeSpan by)
+    {
+        List<ControlledTimer> due = [];
+        lock (gate)
+        {
+            now += by;
+            foreach (var timer in timers)
+            {
+                if (!timer.Disposed && !timer.Fired && timer.Due is { } at && at <= now)
+                {
+                    timer.Fired = true;
+                    due.Add(timer);
+                }
+            }
+        }
+
+        foreach (var timer in due)
+        {
+            timer.Fire();
+        }
+    }
+
+    private void Record(TimeSpan dueTime)
+    {
+        lock (gate)
+        {
+            requested.Add(dueTime);
+        }
+    }
+
+    private TimeSpan Now()
+    {
+        lock (gate)
+        {
+            return now;
+        }
+    }
+
+    private sealed class ControlledTimer(NotifyControlledTime owner, TimerCallback callback, object? state) : ITimer
+    {
+        public TimeSpan? Due { get; private set; }
+
+        public bool Disposed { get; private set; }
+
+        public bool Fired { get; set; }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime == Timeout.InfiniteTimeSpan)
+            {
+                Due = null;
+                return true;
+            }
+
+            owner.Record(dueTime);
+            Fired = false;
+            Due = owner.Now() + dueTime;
+            return true;
+        }
+
+        public void Fire() => callback(state);
+
+        public void Dispose() => Disposed = true;
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+}
+

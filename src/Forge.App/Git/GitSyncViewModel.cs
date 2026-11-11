@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.ViewModels;
 using Forge.Workspace;
 
@@ -57,6 +58,9 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     private PanelContext context = PanelContext.Empty;
     private WorktreeState current;
     private GitSnapshot snapshot = GitSnapshot.Empty;
+    /// <summary>The shell's notification entry; null (a row built on its own) means nothing is announced.</summary>
+    private readonly INotifications? notifications;
+
     private string? refreshProblem;
     private bool busy;
     private bool refreshQueued;
@@ -67,7 +71,11 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     private bool disposed;
 
     /// <param name="openFile">Opens a conflicted file in the editor; null leaves the banner's rows inert (tests).</param>
-    public GitSyncViewModel(GitCli git, GitPanelSettings settings, Action<string>? openFile = null)
+    public GitSyncViewModel(
+        GitCli git,
+        GitPanelSettings settings,
+        Action<string>? openFile = null,
+        INotifications? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(settings);
@@ -75,6 +83,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         this.git = git;
         this.settings = settings;
         this.openFile = openFile;
+        this.notifications = notifications;
         current = emptyState;
 
         RefreshCommand = new RelayCommand(() => Launch(ReadOnlyAsync), CanRead);
@@ -586,6 +595,17 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             if (outcome is not null)
             {
                 Report(state, ResultOf(outcome));
+                if (!outcome.Success)
+                {
+                    // The row's own line is the record; a push or pull that failed is what the user misses while the
+                    // workbench is showing something else.
+                    notifications.Notify(
+                        NotificationLevel.Error,
+                        NotificationsStrings.GitOperationFailedTitle,
+                        LocText.Literal(
+                            outcome.StandardError.Trim() is { Length: > 0 } error ? error : outcome.Message),
+                        "git-op:" + workingDirectory);
+                }
             }
 
             if (IsCurrent(state))

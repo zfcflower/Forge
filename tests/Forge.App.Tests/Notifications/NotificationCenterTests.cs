@@ -190,12 +190,12 @@ public sealed class NotificationCenterTests
         using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
 
         center.IsBackground = true;
-        var title = new LocText(GitStrings.NotifyTitle, 7);
+        var title = new LocText(NotificationsStrings.TerminalExitedTitleKey);
         await center.NotifyAsync(NotificationLevel.Success, title, LocText.Literal("plain-body"));
 
         Assert.Empty(center.Items);
         var call = Assert.Single(desktop.Calls);
-        Assert.Equal(Loc.Instance.Format(GitStrings.NotifyTitle, 7), call.Title);
+        Assert.Equal(Loc.Instance[NotificationsStrings.TerminalExitedTitleKey], call.Title);
         Assert.Equal("plain-body", call.Body);
 
         center.IsBackground = false;
@@ -229,7 +229,7 @@ public sealed class NotificationCenterTests
         using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
 
         await center.NotifyAsync(NotificationLevel.Info, new LocText(NotificationsStrings.EnabledLabel), new LocText(NotificationsStrings.EnabledHint));
-        await center.NotifyAsync(NotificationLevel.Success, new LocText(GitStrings.NotifyTitle, 9), LocText.Literal("stable"));
+        await center.NotifyAsync(NotificationLevel.Success, new LocText(NotificationsStrings.ApprovalWaitingBody, "a", "b"), LocText.Literal("stable"));
 
         Assert.Equal(2, center.Items.Count);
         var first = center.Items[1];
@@ -243,7 +243,7 @@ public sealed class NotificationCenterTests
             Assert.Equal(Loc.Instance[NotificationsStrings.EnabledLabel], first.Title);
             Assert.Equal(Loc.Instance[NotificationsStrings.EnabledHint], first.Body);
             Assert.Equal(Loc.Instance[NotificationsStrings.LevelInfo], first.LevelText);
-            Assert.Equal(Loc.Instance.Format(GitStrings.NotifyTitle, 9), second.Title);
+            Assert.Equal(Loc.Instance.Format(NotificationsStrings.ApprovalWaitingBody, "a", "b"), second.Title);
             Assert.Equal(Loc.Instance[NotificationsStrings.LevelSuccess], second.LevelText);
             Assert.NotEqual(beforeTitle, first.Title);
             Assert.NotEqual(beforeBody, first.Body);

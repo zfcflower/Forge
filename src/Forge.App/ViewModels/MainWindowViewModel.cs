@@ -227,7 +227,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         GitSync = new GitSyncViewModel(
             composition.Git,
             composition.GitPanelSettings,
-            path => OpenFile(path, newTab: false));
+            path => OpenFile(path, newTab: false),
+            composition.Notifications);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -649,7 +650,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or IOException)
                 {
-                    Dispatcher.UIThread.Post(() => Status.SetWorkspaceProblem(ShellStrings.ProjectsProblem(exception.Message)));
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        var problem = ShellStrings.ProjectsProblem(exception.Message);
+                        Status.SetWorkspaceProblem(problem);
+                        composition.Notifications.Notify(
+                            NotificationLevel.Warning,
+                            NotificationsStrings.StartupProblemTitle,
+                            problem,
+                            "projects-problem");
+                    });
                 }
             });
 
@@ -1789,7 +1799,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         if (failures.Count > 0)
         {
-            Status.SetWorkspaceProblem(LocText.Literal(RemovalStrings.PurgeRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal)))));
+            var problem = LocText.Literal(RemovalStrings.PurgeRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal))));
+            Status.SetWorkspaceProblem(problem);
+            composition.Notifications.Notify(
+                NotificationLevel.Warning,
+                NotificationsStrings.StartupProblemTitle,
+                problem,
+                "purge-cleanup");
         }
     }
 
