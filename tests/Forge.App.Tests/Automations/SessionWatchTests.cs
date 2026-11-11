@@ -54,6 +54,29 @@ public sealed class SessionWatchTests
     // ------------------------------------------------------------------ Check
 
     [Fact]
+    public void A_running_tool_call_is_not_a_stall_at_fifteen_minutes()
+    {
+        var h = new Harness();
+        h.Host.Add(new RunnerSession("s1") { IsRunning = true, IsToolRunning = true, LastActivityAt = h.Now - TimeSpan.FromMinutes(30) });
+
+        Assert.Empty(h.Watch.Check());
+        Assert.Empty(h.Engine.Started);
+    }
+
+    [Fact]
+    public void A_tool_call_silent_for_an_hour_is_reported_as_a_long_command()
+    {
+        var h = new Harness();
+        var last = h.Now - SessionWatch.ToolStallAfter;
+        h.Host.Add(new RunnerSession("s1", "Build") { IsRunning = true, IsToolRunning = true, LastActivityAt = last });
+
+        var finding = Assert.Single(h.Watch.Check());
+
+        Assert.Equal(new WatchFinding(WatchKind.ToolRunning, "s1", 60, "Build"), finding);
+        Assert.Equal("watch:tool:s1:" + last.UtcTicks.ToString(CultureInfo.InvariantCulture), Assert.Single(h.Engine.Started).Occurrence);
+    }
+
+    [Fact]
     public void Check_reports_a_session_without_progress_for_fifteen_minutes()
     {
         var h = new Harness();

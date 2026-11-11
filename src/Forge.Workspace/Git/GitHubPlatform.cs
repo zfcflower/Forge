@@ -13,7 +13,7 @@ namespace Forge.Workspace;
 public sealed class GitHubPlatform : IPrPlatform
 {
     private const string PullRequestFields =
-        "number,url,state,title,body,headRefName,baseRefName,headRefOid,isDraft,mergeStateStatus,reviewDecision";
+        "number,url,state,title,body,headRefName,baseRefName,headRefOid,isDraft,mergeStateStatus,reviewDecision,isCrossRepository";
 
     private const string MergeStateFields = "mergeStateStatus,isDraft,reviewDecision,mergeable,state";
     private const string CheckFields = "name,state,bucket,link,workflow,startedAt,completedAt,description";

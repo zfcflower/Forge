@@ -60,7 +60,15 @@ internal sealed class AutomationService : IAsyncDisposable
         var schedule = new QuotaProbeSchedule(
             time: this.time,
             onProbeError: static (key, exception) => Trace.WriteLine("[automation] quota probe " + key + " failed: " + exception.Message));
-        quotaRunner = new QuotaResumeRunner(Mailbox, runs, probe, schedule, new ResumeStagger(this.time), notifications, this.time);
+        quotaRunner = new QuotaResumeRunner(
+            Mailbox,
+            runs,
+            probe,
+            schedule,
+            new ResumeStagger(this.time),
+            notifications,
+            this.time,
+            shuttingDown: () => stopping.IsCancellationRequested);
         Engine.RegisterRunner(BuiltInAutomations.QuotaResume, quotaRunner);
         Engine.RegisterRunner(BuiltInAutomations.SessionWatch, new SessionWatchRunner(notifications));
         Engine.RegisterRunner(
@@ -72,7 +80,12 @@ internal sealed class AutomationService : IAsyncDisposable
                 Definitions,
                 (root, ct) => worktrees.Manager.PruneAsync(root, ct),
                 () => OpenSessionIdsSnapshot,
-                this.time));
+                this.time,
+                ids => this.ui.InvokeAsync(async () =>
+                {
+                    await host.OnSessionsArchivedAsync(ids).ConfigureAwait(true);
+                    return true;
+                })));
         watch = new SessionWatch(Engine, host, PendingApprovals, () => IsEnabled(BuiltInAutomations.SessionWatch), this.time);
         Engine.Changed += OnEngineChanged;
     }
@@ -110,6 +123,9 @@ internal sealed class AutomationService : IAsyncDisposable
     }
 
     /// <summary>The active run attached to <paramref name="sessionId"/>, if any (the session banner).</summary>
+    /// <summary>The service clock (the banner countdown is relative to it).</summary>
+    public DateTimeOffset Now => time.GetUtcNow();
+
     public AutomationRun? ActiveRunFor(string sessionId)
     {
         foreach (var run in Engine.ActiveRuns)
@@ -377,5 +393,8 @@ internal sealed class AutomationService : IAsyncDisposable
             Target?.OpenAsync(sessionId, ct) ?? Task.FromResult<IAutomationSession?>(null);
 
         public Task RefreshTreesAsync() => Target?.RefreshTreesAsync() ?? Task.CompletedTask;
+
+        public Task OnSessionsArchivedAsync(IReadOnlyList<string> sessionIds) =>
+            Target?.OnSessionsArchivedAsync(sessionIds) ?? Task.CompletedTask;
     }
 }

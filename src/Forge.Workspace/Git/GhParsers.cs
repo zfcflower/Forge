@@ -47,7 +47,10 @@ internal static class GhParsers
             dto.HeadRefOid ?? string.Empty,
             dto.IsDraft ?? false,
             MapMergeStateStatus(dto.MergeStateStatus),
-            MapReviewDecision(dto.ReviewDecision));
+            MapReviewDecision(dto.ReviewDecision))
+        {
+            IsCrossRepository = dto.IsCrossRepository ?? false,
+        };
     }
 
     public static PrMergeState? ParseMergeState(string json)

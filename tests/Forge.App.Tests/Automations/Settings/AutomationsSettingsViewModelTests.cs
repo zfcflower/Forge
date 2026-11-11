@@ -1,5 +1,7 @@
 using Forge.Abstractions;
+using Forge.App.Automations;
 using Forge.App.Automations.Settings;
+using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Tests.Localization;
 using Xunit;
@@ -260,6 +262,37 @@ public sealed class AutomationsSettingsViewModelTests
         var line = Assert.Single(vm.ConfigErrors);
         Assert.Contains("no name", line);
         Assert.True(vm.HasConfigErrors);
+    }
+
+    [Fact]
+    public async Task Config_errors_are_shown_in_the_ui_language_and_follow_a_language_switch()
+    {
+        using var scope = new LanguageScope(UiLanguage.Chinese);
+        var h = new Harness();
+        h.Engine.ConfigErrors =
+        [
+            new AutomationDefinitionError(0, "user.x", "The definition has no name.") { MessageKey = AutomationSettingsStrings.ErrNoNameKey },
+            new AutomationDefinitionError(AutomationDefinitionStore.FileErrorIndex, null, "'x' must be an array of strings.")
+            {
+                MessageKey = AutomationSettingsStrings.ErrStringsArrayKey,
+                MessageArgs = ["x"],
+            },
+        ];
+        using var vm = h.Create();
+        await vm.LoadAsync();
+
+        Assert.Equal(
+            [
+                Loc.Instance.Format(AutomationSettingsStrings.ConfigErrorKey, "1", "user.x", Loc.Instance[AutomationSettingsStrings.ErrNoNameKey]),
+                Loc.Instance.Format(AutomationSettingsStrings.ConfigFileErrorKey, Loc.Instance.Format(AutomationSettingsStrings.ErrStringsArrayKey, "x")),
+            ],
+            vm.ConfigErrors);
+        Assert.DoesNotContain(vm.ConfigErrors, line => line.Contains("The definition", StringComparison.Ordinal));
+
+        Loc.Instance.Language = UiLanguage.English;
+        await vm.RefreshAsync();
+
+        Assert.Contains(vm.ConfigErrors, line => line.Contains("The definition has no name.", StringComparison.Ordinal));
     }
 
     [Fact]

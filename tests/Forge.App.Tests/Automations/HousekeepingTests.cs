@@ -16,6 +16,8 @@ public sealed class HousekeepingTests : IDisposable
     private readonly HashSet<string> open = new(StringComparer.Ordinal);
     private readonly FakeDefinitions definitions = new();
     private Func<string, CancellationToken, Task>? prune;
+    private readonly List<IReadOnlyList<string>> archiveNotices = [];
+    private Exception? archiveNoticeFailure;
 
     public HousekeepingTests()
     {
@@ -88,7 +90,12 @@ public sealed class HousekeepingTests : IDisposable
             return Task.CompletedTask;
         }),
         () => open,
-        time);
+        time,
+        ids =>
+        {
+            archiveNotices.Add([.. ids]);
+            return archiveNoticeFailure is null ? Task.CompletedTask : Task.FromException(archiveNoticeFailure);
+        });
 
     private static RunnerContext Context() =>
         new(RunnerContext.NewRun(BuiltInAutomations.Housekeeping, DateTimeOffset.UnixEpoch), new AutomationDefinition(BuiltInAutomations.Housekeeping, "hk"));
@@ -233,6 +240,7 @@ public sealed class HousekeepingTests : IDisposable
         Assert.Equal(["old", "boundary"], catalog.StatusChanges.Select(static c => c.Id));
         Assert.All(catalog.StatusChanges, static c => Assert.Equal(SessionStatus.Archived, c.Status));
         Assert.Equal(Summary(0, 0, 4, 2), outcome.Message);
+        Assert.Equal(["old", "boundary"], Assert.Single(archiveNotices));
         Assert.Equal((HousekeepingRunner.RunsPerAutomation, HousekeepingRunner.RunsTotal), Assert.Single(runs.Trims));
     }
 
@@ -279,6 +287,30 @@ public sealed class HousekeepingTests : IDisposable
 
         Assert.Equal("b", Assert.Single(catalog.StatusChanges).Id);
         Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
+        Assert.Equal(["b"], Assert.Single(archiveNotices));
+    }
+
+    [Fact]
+    public async Task The_window_is_not_told_when_nothing_was_archived()
+    {
+        catalog.Sessions = [Session("recent", "/w/recent", TimeSpan.FromDays(1))];
+
+        await Runner().RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Empty(archiveNotices);
+    }
+
+    [Fact]
+    public async Task A_failing_window_cleanup_does_not_fail_the_run()
+    {
+        catalog.Sessions = [Session("old", "/w/old", TimeSpan.FromDays(9))];
+        archiveNoticeFailure = new InvalidOperationException("window gone");
+
+        var outcome = await Runner().RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
+        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
+        Assert.Single(archiveNotices);
     }
 
     [Fact]

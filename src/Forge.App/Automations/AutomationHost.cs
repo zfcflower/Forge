@@ -19,6 +19,9 @@ internal interface IAutomationSession
     /// <summary>Last agent event of the running turn (or the turn start); the session watch measures "no progress" from it.</summary>
     DateTimeOffset LastActivityAt { get; }
 
+    /// <summary>A tool call is executing (a shell command, a build): silence is expected, so the watch waits longer.</summary>
+    bool IsToolRunning { get; }
+
     /// <summary>Idle in the lifecycle sense (no turn, no running or queued sub-agent, no queued message, no handover).</summary>
     bool IsAutomationIdle { get; }
 
@@ -55,6 +58,12 @@ internal interface IAutomationHost
 
     /// <summary>Re-reads the project tree after an automation created or archived sessions.</summary>
     Task RefreshTreesAsync();
+
+    /// <summary>
+    /// Sessions were archived outside the UI (housekeeping): applies the same cleanup as a UI archive (terminals, tabs,
+    /// runtimes) and refreshes the project tree. Runs on the UI thread.
+    /// </summary>
+    Task OnSessionsArchivedAsync(IReadOnlyList<string> sessionIds);
 }
 
 /// <summary>Runs work on the UI thread; the product uses the Avalonia dispatcher, tests run it inline.</summary>

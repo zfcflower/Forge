@@ -6,7 +6,8 @@ namespace Forge.Core.Providers;
 
 /// <summary>
 /// Tells a spent quota (hours/days until it resets; the automation flow waits for it) apart from a short rate
-/// limit (seconds; the retry layer handles it) and from everything else. Conservative: an unknown error is never quota.
+/// limit (seconds; the retry layer handles it) and from everything else. Conservative: an unknown error is never quota, and
+/// loose wording ("quota exceeded", "usage limit") does not count when the message describes a per-minute rate.
 /// </summary>
 public static partial class ProviderQuota
 {
@@ -15,21 +16,26 @@ public static partial class ProviderQuota
 
     private const int MaxMessageLength = 500;
 
-    // Lower-case substrings of the exception message (status code and body text). One source per line.
-    private static readonly string[] Markers =
+    // Substrings that name a spent quota or balance unambiguously (an error code or a fixed sentence). One source per line.
+    private static readonly string[] DefiniteMarkers =
     [
         "insufficient_quota",                 // OpenAI: error.code on 429
         "exceeded your current quota",        // OpenAI: error.message
-        "quota exceeded",                     // Gemini / generic OpenAI-compatible
         "exceeded_current_quota",             // Kimi / Moonshot: exceeded_current_quota_error
-        "usage limit",                        // Claude subscription / Codex: "usage limit reached"
-        "usage_limit",                        // Codex / ChatGPT: usage_limit_reached
-        "limit reached",                      // Copilot / generic: "monthly limit reached"
+        "usage_limit_reached",                // Codex / ChatGPT
+        "usage limit reached",                // Claude subscription ("Claude AI usage limit reached", sent as rate_limit_error)
+        "billing_hard_limit_reached",         // OpenAI: organization hard limit
         "credit balance is too low",          // Anthropic: 400 invalid_request_error
-        "billing",                            // Anthropic / OpenAI: "check your plan and billing details"
         "余额不足",                            // GLM / Zhipu, DeepSeek-CN: insufficient balance
+    ];
+
+    // Wording that usually means a spent quota but also appears in per-minute rate limits ("Quota exceeded for metric:
+    // ..._per_minute"); it counts only when the message does not describe a rate (see RateWordingRegex).
+    private static readonly string[] WordedMarkers =
+    [
+        "quota exceeded",                     // Gemini / generic OpenAI-compatible
+        "usage limit",                        // Claude subscription / Codex: "usage limit reached"
         "使用上限",                            // GLM / Zhipu: usage cap reached
-        "额度",                                // Chinese providers: quota wording
     ];
 
     /// <summary>Returns the quota failure described by <paramref name="exception"/>, or null when it is not one.</summary>
@@ -65,7 +71,7 @@ public static partial class ProviderQuota
 
     private static bool HasMarker(string message)
     {
-        foreach (var marker in Markers)
+        foreach (var marker in DefiniteMarkers)
         {
             if (message.Contains(marker, StringComparison.OrdinalIgnoreCase))
             {
@@ -74,7 +80,26 @@ public static partial class ProviderQuota
         }
 
         // GLM / Zhipu business codes: 1113 insufficient balance, 1308 usage limit, 1310 weekly/monthly cap.
-        return ZhipuCodeRegex().IsMatch(message);
+        if (ZhipuCodeRegex().IsMatch(message))
+        {
+            return true;
+        }
+
+        // A short rate limit ("Rate limit reached ... tokens per min", "..._per_minute", 请求过于频繁) is the retry layer's.
+        if (RateWordingRegex().IsMatch(message))
+        {
+            return false;
+        }
+
+        foreach (var marker in WordedMarkers)
+        {
+            if (message.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return PeriodLimitRegex().IsMatch(message) || ChineseQuotaRegex().IsMatch(message);
     }
 
     private static string Trim(string message)
@@ -147,6 +172,17 @@ public static partial class ProviderQuota
 
     [GeneratedRegex(@"(?:code|错误码)\W{0,4}(?:1113|1308|1310)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ZhipuCodeRegex();
+
+    [GeneratedRegex(@"rate[ _-]?limit|per[ _-]?(?:minute|min|second|sec)\b|\b(?:rpm|tpm|rps)\b|请求过于频繁|频率|速率|并发", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RateWordingRegex();
+
+    // "monthly limit reached" (Copilot), "daily usage limit exceeded", "plan limit reached".
+    [GeneratedRegex(@"\b(?:daily|weekly|monthly|hourly|plan|subscription)\s+(?:usage\s+|request\s+|token\s+)?limit\s+(?:reached|exceeded|hit)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PeriodLimitRegex();
+
+    // 额度 only together with a word saying it is spent: 额度已用尽 / 额度不足 / 超出额度 / 额度用完.
+    [GeneratedRegex(@"额度\s*(?:已)?(?:用尽|用完|耗尽|不足|超限)|(?:超出|超过|已达|达到)\s*(?:\S{0,6})额度", RegexOptions.CultureInvariant)]
+    private static partial Regex ChineseQuotaRegex();
 
     [GeneratedRegex(@"(?:reset|resets|重置)\D{0,60}?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex IsoResetRegex();

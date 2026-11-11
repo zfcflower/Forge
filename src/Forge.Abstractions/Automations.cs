@@ -113,7 +113,13 @@ public sealed record AutomationConfig
 }
 
 /// <summary>A definition the store could not read; the others still load.</summary>
-public sealed record AutomationDefinitionError(int Index, string? Id, string Message);
+public sealed record AutomationDefinitionError(int Index, string? Id, string Message)
+{
+    /// <summary>Localization key of the problem (the App resolves it with <see cref="MessageArgs"/>); <see cref="Message"/> is the English text.</summary>
+    public string? MessageKey { get; init; }
+
+    public IReadOnlyList<string> MessageArgs { get; init; } = [];
+}
 
 public sealed record AutomationConfigLoad(AutomationConfig Config, IReadOnlyList<AutomationDefinitionError> Errors);
 

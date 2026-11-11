@@ -32,6 +32,8 @@ internal sealed class GhPullRequestDto
     public string? ReviewDecision { get; set; }
 
     public string? Mergeable { get; set; }
+
+    public bool? IsCrossRepository { get; set; }
 }
 
 internal sealed class GhCheckDto

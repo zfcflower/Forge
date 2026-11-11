@@ -49,9 +49,9 @@ internal sealed class GitCliCiGit : ICiGit
 
     public Task<string?> HeadAsync(string worktree, CancellationToken ct) => git.RevParseAsync(worktree, "HEAD", ct);
 
-    // Limitation: the PR record (PullRequestInfo) carries no head-repository / cross-repository flag, so a fork PR cannot be
-    // recognised directly. The guards below make it harmless in practice: a fork head is not what the session branch tracks
-    // (upstream/name check), its commit is normally not an ancestor of the local HEAD, and the push is never forced.
+    // A fork PR (PullRequestInfo.IsCrossRepository) never reaches this method: the runner stops before pushing. The guards
+    // below still hold for any other case: the session branch must be or track the PR branch, HEAD must descend from the PR
+    // head, and the push is never forced.
     public async Task<CiPushResult> PushAsync(string worktree, string branch, string baseBranch, string headOid, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(branch) || string.Equals(branch, baseBranch, StringComparison.Ordinal))
@@ -124,10 +124,13 @@ internal sealed class GitCliCiGit : ICiGit
 /// <summary>What a CI chain run was started for; serialized as <c>key=value</c> lines in <see cref="AutomationRun.Detail"/>.</summary>
 internal sealed record CiDetail(int PrNumber, string HeadBranch, string BaseBranch, string HeadOid, string Signature)
 {
+    /// <summary>The PR comes from a fork: its head is not on <c>origin</c>, so the fix is never pushed.</summary>
+    public bool IsFork { get; init; }
+
     public string Serialize() =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"pr={PrNumber}\nhead={Clean(HeadBranch)}\nbase={Clean(BaseBranch)}\noid={Clean(HeadOid)}\nsig={Clean(Signature)}");
+            $"pr={PrNumber}\nhead={Clean(HeadBranch)}\nbase={Clean(BaseBranch)}\noid={Clean(HeadOid)}\nsig={Clean(Signature)}{(IsFork ? "\nfork=1" : string.Empty)}");
 
     public static CiDetail? Parse(string? text)
     {
@@ -137,6 +140,7 @@ internal sealed record CiDetail(int PrNumber, string HeadBranch, string BaseBran
         }
 
         var pr = 0;
+        var fork = false;
         string head = string.Empty, baseBranch = string.Empty, oid = string.Empty, sig = string.Empty;
         foreach (var raw in text.Split('\n'))
         {
@@ -165,10 +169,13 @@ internal sealed record CiDetail(int PrNumber, string HeadBranch, string BaseBran
                 case "sig":
                     sig = value;
                     break;
+                case "fork":
+                    fork = value == "1";
+                    break;
             }
         }
 
-        return pr > 0 ? new CiDetail(pr, head, baseBranch, oid, sig) : null;
+        return pr > 0 ? new CiDetail(pr, head, baseBranch, oid, sig) { IsFork = fork } : null;
     }
 
     private static string Clean(string value) => value.Replace('\n', ' ').Replace('\r', ' ');
@@ -359,7 +366,10 @@ internal sealed class CiFailureWatcher
             return;
         }
 
-        var detail = new CiDetail(info.Number, info.HeadRefName, info.BaseRefName, info.HeadRefOid, signature);
+        var detail = new CiDetail(info.Number, info.HeadRefName, info.BaseRefName, info.HeadRefOid, signature)
+        {
+            IsFork = info.IsCrossRepository,
+        };
         var request = new AutomationRunRequest(BuiltInAutomations.CiChain, AutomationTriggerSource.Event)
         {
             Occurrence = $"ci:{session.Id}:{info.HeadRefOid}:{CiState.Hash(signature)}",
@@ -495,9 +505,11 @@ internal sealed class CiChainRunner : IAutomationRunner
             AutomationStrings.CiFixPrompt(prText, scout.Text),
             run.Id,
             AutomationStrings.DisplayName(BuiltInAutomations.CiChain, run.AutomationName));
+        var progress = new WaitingProgress(context);
         var delivered = await mailbox
-            .DeliverAsync(message, new StatusProgress(context), ct)
+            .DeliverAsync(message, progress, ct)
             .ConfigureAwait(false);
+        await progress.DrainAsync().ConfigureAwait(false);
         switch (delivered.Status)
         {
             case MailboxStatus.Withdrawn:
@@ -533,6 +545,17 @@ internal sealed class CiChainRunner : IAutomationRunner
                 NotificationLevel.Info,
                 AutomationStrings.CiFailedTitle,
                 AutomationStrings.CiNotPushedBody(session.Title),
+                key: "ci.notpushed:" + run.Id);
+            return AutomationRunOutcome.Completed();
+        }
+
+        if (detail.IsFork)
+        {
+            // The head branch lives in the contributor's fork; pushing to origin would create a stray branch there instead.
+            notifications.Notify(
+                NotificationLevel.Info,
+                AutomationStrings.CiFailedTitle,
+                AutomationStrings.CiNotPushedForkBody(session.Title),
                 key: "ci.notpushed:" + run.Id);
             return AutomationRunOutcome.Completed();
         }
@@ -637,33 +660,5 @@ internal sealed class CiChainRunner : IAutomationRunner
         }
 
         return report.ToString();
-    }
-
-    private sealed class StatusProgress : IProgress<bool>
-    {
-        private readonly IAutomationRunContext context;
-
-        public StatusProgress(IAutomationRunContext context)
-        {
-            this.context = context;
-        }
-
-        public void Report(bool waiting)
-        {
-            var status = waiting ? AutomationRunStatus.WaitingIdle : AutomationRunStatus.Running;
-            _ = Update(status);
-        }
-
-        private async Task Update(AutomationRunStatus status)
-        {
-            try
-            {
-                await context.UpdateAsync(run => run with { Status = status }, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                Trace.WriteLine("[ci] status update failed: " + exception.Message);
-            }
-        }
     }
 }

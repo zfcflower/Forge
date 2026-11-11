@@ -244,11 +244,16 @@ internal sealed class AutomationsSettingsViewModel : ObservableObject, IDisposab
         ConfigErrors.Clear();
         foreach (var error in engine.ConfigErrors)
         {
-            ConfigErrors.Add(Loc.Instance.Format(
-                AutomationSettingsStrings.ConfigErrorKey,
-                (error.Index + 1).ToString(CultureInfo.InvariantCulture),
-                error.Id ?? "?",
-                error.Message));
+            var message = error.MessageKey is { } key
+                ? Loc.Instance.Format(key, [.. error.MessageArgs])
+                : error.Message;
+            ConfigErrors.Add(error.Index < 0
+                ? Loc.Instance.Format(AutomationSettingsStrings.ConfigFileErrorKey, message)
+                : Loc.Instance.Format(
+                    AutomationSettingsStrings.ConfigErrorKey,
+                    (error.Index + 1).ToString(CultureInfo.InvariantCulture),
+                    error.Id ?? "?",
+                    message));
         }
 
         OnPropertyChanged(nameof(HasConfigErrors));
@@ -474,6 +479,11 @@ internal sealed class AutomationsSettingsViewModel : ObservableObject, IDisposab
         if (!disposed)
         {
             OnPropertyChanged(null);
+            foreach (var row in Rows)
+            {
+                row.Relocalize();
+            }
+
             Track(RefreshAsync());
         }
     });

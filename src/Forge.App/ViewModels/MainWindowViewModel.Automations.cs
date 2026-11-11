@@ -83,6 +83,21 @@ internal sealed partial class MainWindowViewModel : IAutomationHost
 
     Task IAutomationHost.RefreshTreesAsync() => RefreshTreesAfterLifecycleAsync();
 
+    async Task IAutomationHost.OnSessionsArchivedAsync(IReadOnlyList<string> sessionIds)
+    {
+        if (disposed || closing)
+        {
+            return;
+        }
+
+        foreach (var id in sessionIds)
+        {
+            OnSessionArchived(id);
+        }
+
+        await RefreshTreesAfterLifecycleAsync().ConfigureAwait(true);
+    }
+
     /// <summary>Connects the window to the automation service once the sessions are restored (the engine starts here).</summary>
     private void AttachAutomations()
     {
@@ -161,16 +176,29 @@ internal sealed partial class MainWindowViewModel : IAutomationHost
             return;
         }
 
-        var name = AutomationStrings.DisplayName(run.AutomationId, run.AutomationName);
-        var text = run.Status switch
-        {
-            AutomationRunStatus.WaitingQuota when run.ResumeAt is { } at => AutomationStrings.BannerWaitingQuota(TextFormat.ShortStamp(at)),
-            AutomationRunStatus.WaitingQuota => AutomationStrings.BannerWaitingQuotaProbe,
-            AutomationRunStatus.WaitingIdle => AutomationStrings.BannerWaitingIdle(name),
-            _ => AutomationStrings.BannerRunning(name),
-        };
         var runId = run.Id;
-        session.SetAutomationBanner(text, () => automations.Cancel(runId));
+        session.SetAutomationBanner(AutomationStrings.Banner(run, automations.Now), () => automations.Cancel(runId));
+    }
+
+    /// <summary>
+    /// Clock tick: a quota banner counts down ("in about 5 min"), so its text is recomputed; the banner only raises a change
+    /// when the text differs, which is about once a minute.
+    /// </summary>
+    private void TickAutomationBanners()
+    {
+        if (composition.Automations is not { ActiveCount: > 0 } automations)
+        {
+            return;
+        }
+
+        foreach (var session in sessions.Values)
+        {
+            if (!session.IsReadOnlyView &&
+                automations.ActiveRunFor(session.SessionId) is { Status: AutomationRunStatus.WaitingQuota, ResumeAt: not null })
+            {
+                UpdateAutomationBanner(session);
+            }
+        }
     }
 
     private async Task OpenAutomationSessionAsync(string sessionId)

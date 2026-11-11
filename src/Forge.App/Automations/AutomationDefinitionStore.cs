@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Forge.Abstractions;
+using System.Globalization;
+using Forge.App.Localization;
 using Forge.IO;
 
 namespace Forge.App.Automations;
@@ -69,7 +71,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
         }
         catch (JsonException exception)
         {
-            return new AutomationConfigLoad(new AutomationConfig(), [new AutomationDefinitionError(FileErrorIndex, null, "The automation file is not valid JSON: " + exception.Message)]);
+            return new AutomationConfigLoad(new AutomationConfig(), [Problem(FileErrorIndex, null, AutomationSettingsStrings.ErrNotJsonKey, "The automation file is not valid JSON: {0}", exception.Message)]);
         }
 
         using (document)
@@ -77,7 +79,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                return new AutomationConfigLoad(new AutomationConfig(), [new AutomationDefinitionError(FileErrorIndex, null, "The automation file must hold a JSON object.")]);
+                return new AutomationConfigLoad(new AutomationConfig(), [Problem(FileErrorIndex, null, AutomationSettingsStrings.ErrNotObjectKey, "The automation file must hold a JSON object.")]);
             }
 
             var paused = false;
@@ -89,7 +91,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
                 }
                 else
                 {
-                    errors.Add(new AutomationDefinitionError(FileErrorIndex, null, "'paused' must be true or false."));
+                    errors.Add(Problem(FileErrorIndex, null, AutomationSettingsStrings.ErrPausedBoolKey, "'paused' must be true or false."));
                 }
             }
 
@@ -100,7 +102,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
             {
                 if (list.ValueKind != JsonValueKind.Array)
                 {
-                    errors.Add(new AutomationDefinitionError(FileErrorIndex, null, "'definitions' must be an array."));
+                    errors.Add(Problem(FileErrorIndex, null, AutomationSettingsStrings.ErrDefinitionsArrayKey, "'definitions' must be an array."));
                 }
                 else
                 {
@@ -134,27 +136,52 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
                 }
 
                 var dto = element.Deserialize(AutomationJsonContext.Default.AutomationDefinitionDocument)
-                    ?? throw new FormatException("The definition is null.");
+                    ?? throw Bad(AutomationSettingsStrings.ErrNullDefinitionKey, "The definition is null.");
                 var definition = ToDefinition(dto);
                 if (BuiltInAutomations.IsBuiltIn(definition.Id))
                 {
-                    throw new FormatException($"The id '{definition.Id}' is reserved for built-in automations.");
+                    throw Bad(AutomationSettingsStrings.ErrReservedIdKey, "The id '{0}' is reserved for built-in automations.", definition.Id);
                 }
 
                 if (!seen.Add(definition.Id))
                 {
-                    throw new FormatException($"The id '{definition.Id}' is used by an earlier definition.");
+                    throw Bad(AutomationSettingsStrings.ErrDuplicateIdKey, "The id '{0}' is used by an earlier definition.", definition.Id);
                 }
 
                 definitions.Add(definition);
             }
+            catch (ConfigProblem problem)
+            {
+                errors.Add(Problem(index, id, problem.Key, problem.English, [.. problem.Args]));
+            }
             catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException)
             {
-                errors.Add(new AutomationDefinitionError(index, id, exception.Message));
+                errors.Add(Problem(index, id, AutomationSettingsStrings.ErrInvalidElementKey, "The definition is malformed: {0}", exception.Message));
             }
 
             index++;
         }
+    }
+
+    /// <summary>One load problem: the English text (logs, tests) plus the key the settings page shows in the UI language.</summary>
+    private static AutomationDefinitionError Problem(int index, string? id, string key, string english, params string[] args) =>
+        new(index, id, string.Format(CultureInfo.InvariantCulture, english, args))
+        {
+            MessageKey = key,
+            MessageArgs = args,
+        };
+
+    private static ConfigProblem Bad(string key, string english, params string[] args) => new(key, english, args);
+
+    /// <summary>A definition problem raised while converting one element; caught per element.</summary>
+    private sealed class ConfigProblem(string key, string english, string[] args)
+        : FormatException(string.Format(CultureInfo.InvariantCulture, english, args))
+    {
+        public string Key { get; } = key;
+
+        public string English { get; } = english;
+
+        public IReadOnlyList<string> Args { get; } = args;
     }
 
     private static bool TryGet(JsonElement root, string name, out JsonElement value) =>
@@ -170,7 +197,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
 
         if (element.ValueKind != JsonValueKind.Array)
         {
-            errors.Add(new AutomationDefinitionError(FileErrorIndex, null, $"'{name}' must be an array of strings."));
+            errors.Add(Problem(FileErrorIndex, null, AutomationSettingsStrings.ErrStringsArrayKey, "'{0}' must be an array of strings.", name));
             return result;
         }
 
@@ -182,7 +209,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
             }
             else
             {
-                errors.Add(new AutomationDefinitionError(FileErrorIndex, null, $"'{name}' must hold only non-empty strings."));
+                errors.Add(Problem(FileErrorIndex, null, AutomationSettingsStrings.ErrStringsNonEmptyKey, "'{0}' must hold only non-empty strings.", name));
             }
         }
 
@@ -210,18 +237,18 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
     {
         if (string.IsNullOrWhiteSpace(dto.Id))
         {
-            throw new FormatException("The definition has no id.");
+            throw Bad(AutomationSettingsStrings.ErrNoIdKey, "The definition has no id.");
         }
 
         if (string.IsNullOrWhiteSpace(dto.Name))
         {
-            throw new FormatException("The definition has no name.");
+            throw Bad(AutomationSettingsStrings.ErrNoNameKey, "The definition has no name.");
         }
 
         var triggers = new List<AutomationTrigger>();
         foreach (var trigger in dto.Triggers ?? [])
         {
-            triggers.Add(ToTrigger(trigger ?? throw new FormatException("A trigger is null.")));
+            triggers.Add(ToTrigger(trigger ?? throw Bad(AutomationSettingsStrings.ErrNullTriggerKey, "A trigger is null.")));
         }
 
         ModelSettings? model = null;
@@ -229,7 +256,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
         {
             if (string.IsNullOrWhiteSpace(m.Model))
             {
-                throw new FormatException("The model has no name.");
+                throw Bad(AutomationSettingsStrings.ErrNoModelNameKey, "The model has no name.");
             }
 
             model = new ModelSettings(m.Model, m.Thinking, m.MaxOutputTokens, m.ProviderId);
@@ -257,7 +284,7 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
         {
             if (time is null || time.Hour is < 0 or > 23 || time.Minute is < 0 or > 59)
             {
-                throw new FormatException("A time of day must be hour 0-23 and minute 0-59.");
+                throw Bad(AutomationSettingsStrings.ErrBadTimeKey, "A time of day must be hour 0-23 and minute 0-59.");
             }
 
             times.Add(new AutomationTime(time.Hour, time.Minute));
@@ -267,20 +294,20 @@ internal sealed class AutomationDefinitionStore : IAutomationDefinitionStore
         {
             if (!Enum.IsDefined(day))
             {
-                throw new FormatException("A weekday is out of range.");
+                throw Bad(AutomationSettingsStrings.ErrBadWeekdayKey, "A weekday is out of range.");
             }
         }
 
         switch (dto.Kind)
         {
             case AutomationTriggerKind.Hourly when dto.IntervalHours is < 1 or > 12 || dto.Minute is < 0 or > 59:
-                throw new FormatException("An hourly trigger needs an interval of 1-12 hours and a minute of 0-59.");
+                throw Bad(AutomationSettingsStrings.ErrBadHourlyKey, "An hourly trigger needs an interval of 1-12 hours and a minute of 0-59.");
             case AutomationTriggerKind.Daily when times.Count == 0:
-                throw new FormatException("A daily trigger needs at least one time.");
+                throw Bad(AutomationSettingsStrings.ErrDailyNeedsTimeKey, "A daily trigger needs at least one time.");
             case AutomationTriggerKind.Weekly when times.Count == 0 || (dto.Days ?? []).Count == 0:
-                throw new FormatException("A weekly trigger needs at least one day and one time.");
+                throw Bad(AutomationSettingsStrings.ErrWeeklyNeedsDayTimeKey, "A weekly trigger needs at least one day and one time.");
             case AutomationTriggerKind.Cron when string.IsNullOrWhiteSpace(dto.Cron):
-                throw new FormatException("A cron trigger needs an expression.");
+                throw Bad(AutomationSettingsStrings.ErrCronNeedsExpressionKey, "A cron trigger needs an expression.");
         }
 
         return new AutomationTrigger(dto.Kind)

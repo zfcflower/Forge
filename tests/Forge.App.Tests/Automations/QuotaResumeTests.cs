@@ -456,6 +456,39 @@ public sealed class QuotaResumeTests
     }
 
     [Fact]
+    public async Task A_user_cancel_outside_a_shutdown_removes_the_note()
+    {
+        var h = new Harness();
+        h.Note();
+        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.Stagger, h.Notes, h.Time, () => 0, shuttingDown: () => false);
+        using var cts = new CancellationTokenSource();
+
+        var task = runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow() + TimeSpan.FromHours(1)), cts.Token);
+        await h.Time.WaitForTimerAsync();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task).Within();
+        Assert.Empty(h.Mailbox.Messages);
+        Assert.Null(h.State.Peek(QuotaNote.RunPrefix + Occurrence));
+    }
+
+    [Fact]
+    public async Task A_cancel_during_shutdown_keeps_the_note()
+    {
+        var h = new Harness();
+        h.Note();
+        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.Stagger, h.Notes, h.Time, () => 0, shuttingDown: () => true);
+        using var cts = new CancellationTokenSource();
+
+        var task = runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow() + TimeSpan.FromHours(1)), cts.Token);
+        await h.Time.WaitForTimerAsync();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task).Within();
+        Assert.NotNull(h.State.Peek(QuotaNote.RunPrefix + Occurrence));
+    }
+
+    [Fact]
     public async Task Cancelling_during_the_stagger_gap_sends_nothing()
     {
         var h = new Harness();

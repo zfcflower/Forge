@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Forge.Abstractions;
 
@@ -56,6 +57,7 @@ internal static class AutomationStrings
     public const string CiPushedTitleKey = "automations.ci.pushedTitle";
     public const string CiPushedBodyKey = "automations.ci.pushedBody";
     public const string CiNotPushedBodyKey = "automations.ci.notPushedBody";
+    public const string CiNotPushedForkBodyKey = "automations.ci.notPushedForkBody";
     public const string CiNoFixBodyKey = "automations.ci.noFixBody";
     public const string CiStoppedTitleKey = "automations.ci.stoppedTitle";
     public const string CiStoppedSameFailureKey = "automations.ci.stoppedSameFailure";
@@ -76,6 +78,8 @@ internal static class AutomationStrings
     // ---------------------------------------------------------------- session watch
     public const string WatchStalledTitleKey = "automations.watch.stalledTitle";
     public const string WatchStalledBodyKey = "automations.watch.stalledBody";
+    public const string WatchToolTitleKey = "automations.watch.toolTitle";
+    public const string WatchToolBodyKey = "automations.watch.toolBody";
     public const string WatchApprovalTitleKey = "automations.watch.approvalTitle";
     public const string WatchApprovalBodyKey = "automations.watch.approvalBody";
     public const string WatchFinishedTitleKey = "automations.watch.finishedTitle";
@@ -89,6 +93,9 @@ internal static class AutomationStrings
     public const string TitleBarTooltipKey = "automations.titleBar.tooltip";
     public const string BannerWaitingQuotaKey = "automations.banner.waitingQuota";
     public const string BannerWaitingQuotaProbeKey = "automations.banner.waitingQuotaProbe";
+    public const string BannerSoonKey = "automations.banner.soon";
+    public const string BannerInMinutesKey = "automations.banner.inMinutes";
+    public const string BannerInHoursKey = "automations.banner.inHours";
     public const string BannerWaitingIdleKey = "automations.banner.waitingIdle";
     public const string BannerRunningKey = "automations.banner.running";
     public const string BannerCancelKey = "automations.banner.cancel";
@@ -167,6 +174,8 @@ internal static class AutomationStrings
 
     public static LocText CiNotPushedBody(string session) => new(CiNotPushedBodyKey, session);
 
+    public static LocText CiNotPushedForkBody(string session) => new(CiNotPushedForkBodyKey, session);
+
     public static LocText CiNoFixBody(string session) => new(CiNoFixBodyKey, session);
 
     public static LocText CiStoppedTitle => new(CiStoppedTitleKey);
@@ -202,6 +211,10 @@ internal static class AutomationStrings
 
     public static LocText WatchStalledBody(string session, string minutes) => new(WatchStalledBodyKey, session, minutes);
 
+    public static LocText WatchToolTitle => new(WatchToolTitleKey);
+
+    public static LocText WatchToolBody(string session, string minutes) => new(WatchToolBodyKey, session, minutes);
+
     public static LocText WatchApprovalTitle => new(WatchApprovalTitleKey);
 
     public static LocText WatchApprovalBody(string session, string minutes) => new(WatchApprovalBodyKey, session, minutes);
@@ -215,7 +228,37 @@ internal static class AutomationStrings
 
     public static string TitleBarTooltip(string running) => Loc.Instance.Format(TitleBarTooltipKey, running);
 
-    public static string BannerWaitingQuota(string time) => Loc.Instance.Format(BannerWaitingQuotaKey, time);
+    public static string BannerWaitingQuota(string time, string remaining) => Loc.Instance.Format(BannerWaitingQuotaKey, time, remaining);
+
+    /// <summary>Time left until a quota resume, rounded up to the minute: "shortly", "in about 5 min", "in about 2 h 05 min".</summary>
+    public static string BannerRemaining(TimeSpan left)
+    {
+        if (left <= TimeSpan.FromSeconds(30))
+        {
+            return Loc.Instance[BannerSoonKey];
+        }
+
+        var minutes = (long)Math.Ceiling(left.TotalMinutes);
+        return minutes < 60
+            ? Loc.Instance.Format(BannerInMinutesKey, minutes.ToString(CultureInfo.InvariantCulture))
+            : Loc.Instance.Format(
+                BannerInHoursKey,
+                (minutes / 60).ToString(CultureInfo.InvariantCulture),
+                (minutes % 60).ToString("00", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The session banner for an active run; the quota countdown is relative to <paramref name="now"/>.</summary>
+    public static string Banner(AutomationRun run, DateTimeOffset now)
+    {
+        var name = DisplayName(run.AutomationId, run.AutomationName);
+        return run.Status switch
+        {
+            AutomationRunStatus.WaitingQuota when run.ResumeAt is { } at => BannerWaitingQuota(TextFormat.ShortStamp(at), BannerRemaining(at - now)),
+            AutomationRunStatus.WaitingQuota => BannerWaitingQuotaProbe,
+            AutomationRunStatus.WaitingIdle => BannerWaitingIdle(name),
+            _ => BannerRunning(name),
+        };
+    }
 
     public static string BannerWaitingQuotaProbe => Loc.Instance[BannerWaitingQuotaProbeKey];
 
@@ -283,6 +326,7 @@ internal static class AutomationStrings
         Loc.Register(CiAnalysingBodyKey, "PR #{0}（{1}）有 {2} 项检查失败，Scout 正在分析。", "PR #{0} ({1}): {2} checks failed; Scout is analysing.");
         Loc.Register(CiPushedTitleKey, "已推送 CI 修复", "CI fix pushed");
         Loc.Register(CiPushedBodyKey, "修复已推送到 {0}，等待新的检查结果。", "The fix was pushed to {0}; waiting for the new checks.");
+        Loc.Register(CiNotPushedForkBodyKey, "「{0}」的修复已提交在本地；该 PR 来自 fork，自动推送只推本仓库的分支，未推送。", "The fix in \"{0}\" is committed locally; the PR comes from a fork and auto-push only pushes branches of this repository.");
         Loc.Register(CiNotPushedBodyKey, "「{0}」的修复已提交在本地；该项目关闭了自动推送。", "The fix in \"{0}\" is committed locally; auto-push is off for this project.");
         Loc.Register(CiNoFixBodyKey, "「{0}」没有提交修复，请查看分析结果。", "\"{0}\" committed no fix; see the analysis.");
         Loc.Register(CiStoppedTitleKey, "CI 自动修复已停止", "CI auto-fix stopped");
@@ -309,6 +353,8 @@ internal static class AutomationStrings
 
         Loc.Register(WatchStalledTitleKey, "长任务可能停滞", "A long turn may be stuck");
         Loc.Register(WatchStalledBodyKey, "「{0}」已 {1} 分钟没有进展。", "\"{0}\" has made no progress for {1} minutes.");
+        Loc.Register(WatchToolTitleKey, "命令运行时间很长", "A command has been running a long time");
+        Loc.Register(WatchToolBodyKey, "「{0}」里的命令已运行 {1} 分钟，Agent 仍在等它结束。", "A command in \"{0}\" has been running for {1} minutes; the agent is still waiting for it.");
         Loc.Register(WatchApprovalTitleKey, "审批仍在等待", "An approval is still waiting");
         Loc.Register(WatchApprovalBodyKey, "「{0}」的审批已等待 {1} 分钟。", "An approval in \"{0}\" has waited {1} minutes.");
         Loc.Register(WatchFinishedTitleKey, "后台任务已完成", "Background turn finished");
@@ -321,7 +367,10 @@ internal static class AutomationStrings
 
         Loc.Register(TitleBarLabelKey, "自动化任务", "Automations");
         Loc.Register(TitleBarTooltipKey, "自动化任务：{0} 个执行中（点击管理）", "Automations: {0} running (click to manage)");
-        Loc.Register(BannerWaitingQuotaKey, "模型额度已用尽，将于 {0} 自动继续", "Model quota exhausted; continues automatically at {0}");
+        Loc.Register(BannerWaitingQuotaKey, "模型额度已用尽，将于 {0}（{1}）自动继续", "Model quota exhausted; continues automatically at {0} ({1})");
+        Loc.Register(BannerSoonKey, "即将", "shortly");
+        Loc.Register(BannerInMinutesKey, "约 {0} 分钟后", "in about {0} min");
+        Loc.Register(BannerInHoursKey, "约 {0} 小时 {1} 分钟后", "in about {0} h {1} min");
         Loc.Register(BannerWaitingQuotaProbeKey, "模型额度已用尽，恢复后自动继续", "Model quota exhausted; continues once it is back");
         Loc.Register(BannerWaitingIdleKey, "自动化任务「{0}」将在会话空闲后发送消息", "Automation \"{0}\" sends its message once the session is idle");
         Loc.Register(BannerRunningKey, "自动化任务「{0}」执行中", "Automation \"{0}\" is running");

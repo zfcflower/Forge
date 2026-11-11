@@ -314,7 +314,8 @@ public class AutomationEngineTests
     [Fact]
     public async Task Concurrent_run_updates_are_applied_one_after_another()
     {
-        var store = new FakeRunStore();
+        // Each write takes a moment, so unserialized updates would all read the same base and lose increments.
+        var store = new FakeRunStore { UpdateDelay = TimeSpan.FromMilliseconds(1) };
         var done = new TaskCompletionSource<AutomationRun>(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new DelegateRunner(async (ctx, ct) =>
         {

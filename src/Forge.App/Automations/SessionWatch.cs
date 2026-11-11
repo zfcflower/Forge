@@ -11,6 +11,9 @@ internal enum WatchKind
     Stalled,
     Approval,
     Finished,
+
+    /// <summary>No agent event for a long time, but a tool call (a build, a long command) is still executing.</summary>
+    ToolRunning,
 }
 
 internal sealed record WatchFinding(WatchKind Kind, string SessionId, int Minutes, string Title)
@@ -38,7 +41,8 @@ internal sealed record WatchFinding(WatchKind Kind, string SessionId, int Minute
 
 /// <summary>
 /// <see cref="BuiltInAutomations.SessionWatch"/>: looks at the open root sessions once a minute and records a run (with a
-/// notification) when a turn has made no progress for <see cref="StallAfter"/>, an approval card has waited
+/// notification) when a turn has made no progress for <see cref="StallAfter"/> (<see cref="ToolStallAfter"/> while a tool call
+/// is executing: a long build is silent, not stuck), an approval card has waited
 /// <see cref="ApprovalAfter"/>, or a turn finished while the window was in the background. It never acts on a session.
 /// </summary>
 internal sealed class SessionWatch(
@@ -51,6 +55,8 @@ internal sealed class SessionWatch(
     public static readonly TimeSpan StallAfter = TimeSpan.FromMinutes(15);
 
     public static readonly TimeSpan ApprovalAfter = TimeSpan.FromMinutes(10);
+
+    public static readonly TimeSpan ToolStallAfter = TimeSpan.FromMinutes(60);
 
     /// <summary>One look; runs on the UI thread (the host's sessions are UI objects). Returns the findings it started.</summary>
     public IReadOnlyList<WatchFinding> Check()
@@ -72,11 +78,12 @@ internal sealed class SessionWatch(
             }
 
             var quiet = now - session.LastActivityAt;
-            if (quiet >= StallAfter)
+            var tool = session.IsToolRunning;
+            if (quiet >= (tool ? ToolStallAfter : StallAfter))
             {
                 found.Add((
-                    new WatchFinding(WatchKind.Stalled, session.SessionId, (int)quiet.TotalMinutes, session.Title),
-                    "watch:stall:" + session.SessionId + ":" + session.LastActivityAt.UtcTicks.ToString(CultureInfo.InvariantCulture)));
+                    new WatchFinding(tool ? WatchKind.ToolRunning : WatchKind.Stalled, session.SessionId, (int)quiet.TotalMinutes, session.Title),
+                    (tool ? "watch:tool:" : "watch:stall:") + session.SessionId + ":" + session.LastActivityAt.UtcTicks.ToString(CultureInfo.InvariantCulture)));
             }
         }
 
@@ -152,6 +159,7 @@ internal sealed class SessionWatchRunner(INotifications? notifications) : IAutom
         var (level, title, body) = finding.Kind switch
         {
             WatchKind.Stalled => (NotificationLevel.Warning, AutomationStrings.WatchStalledTitle, AutomationStrings.WatchStalledBody(finding.Title, minutes)),
+            WatchKind.ToolRunning => (NotificationLevel.Warning, AutomationStrings.WatchToolTitle, AutomationStrings.WatchToolBody(finding.Title, minutes)),
             WatchKind.Approval => (NotificationLevel.Warning, AutomationStrings.WatchApprovalTitle, AutomationStrings.WatchApprovalBody(finding.Title, minutes)),
             _ => (NotificationLevel.Success, AutomationStrings.WatchFinishedTitle, AutomationStrings.WatchFinishedBody(finding.Title)),
         };

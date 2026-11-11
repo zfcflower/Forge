@@ -36,6 +36,26 @@ public sealed class CiChainTests
     }
 
     [Fact]
+    public async Task A_fork_pr_is_marked_in_the_run_detail()
+    {
+        var h = new Harness();
+        h.Pr.Pull = h.Pr.Pull! with { IsCrossRepository = true };
+        await h.Watcher.PollOnceAsync(CancellationToken.None);
+
+        var detail = CiDetail.Parse(Assert.Single(h.Engine.Started).Detail);
+        Assert.NotNull(detail);
+        Assert.True(detail.IsFork);
+    }
+
+    [Fact]
+    public void Detail_round_trips_the_fork_flag()
+    {
+        var fork = new CiDetail(7, "patch-1", "main", "abc", "build") { IsFork = true };
+        Assert.Equal(fork, CiDetail.Parse(fork.Serialize()));
+        Assert.False(CiDetail.Parse(new CiDetail(7, "f", "main", "abc", "build").Serialize())!.IsFork);
+    }
+
+    [Fact]
     public async Task Same_watermark_does_not_start_again_but_a_new_head_does()
     {
         var h = new Harness();
@@ -247,6 +267,16 @@ public sealed class CiChainTests
         Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
         Assert.Empty(r.Git.Pushes);
         Assert.Contains(r.Notes.Calls, c => c.Body == AutomationStrings.CiNotPushedBody("Session one").Resolve());
+    }
+
+    [Fact]
+    public async Task Runner_never_pushes_a_fork_pr_and_says_why()
+    {
+        var r = new RunnerHarness { Detail = new CiDetail(7, "feature", "main", "abc123", "build, test") { IsFork = true } };
+        var outcome = await r.RunAsync();
+        Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
+        Assert.Empty(r.Git.Pushes);
+        Assert.Contains(r.Notes.Calls, c => c.Body == AutomationStrings.CiNotPushedForkBody("Session one").Resolve());
     }
 
     [Theory]

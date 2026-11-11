@@ -11,6 +11,8 @@ namespace Forge.Core.Automations;
 /// time zone. A cron expression is one rule; hourly is one rule; daily and weekly are one rule per time of day.
 /// DST: a local time the clock skips is due at the instant it would have been reached; a local time the clock shows
 /// twice is due only the first time.
+/// <para>Public on purpose: the settings editor previews a trigger's next fire times (and its validation error) with
+/// the same rules the engine fires on, and Core grants no <c>InternalsVisibleTo</c> to product assemblies.</para>
 /// </summary>
 public sealed class AutomationSchedule
 {

@@ -16,7 +16,8 @@ internal sealed class HousekeepingRunner(
     IAutomationDefinitionStore definitions,
     Func<string, CancellationToken, Task> pruneWorktrees,
     Func<IReadOnlySet<string>> openSessions,
-    TimeProvider time) : IAutomationRunner
+    TimeProvider time,
+    Func<IReadOnlyList<string>, Task>? archivedSessions = null) : IAutomationRunner
 {
     public static readonly TimeSpan ArchiveAfter = TimeSpan.FromDays(7);
 
@@ -194,7 +195,7 @@ internal sealed class HousekeepingRunner(
             return 0; // cannot tell which sessions a weekly automation reuses: archive nothing rather than abandon its branch
         }
 
-        var archived = 0;
+        var archived = new List<string>();
         foreach (var session in sessions)
         {
             if (session is not { Status: SessionStatus.Active, ParentSessionId: null, AutomationId: not null } ||
@@ -205,14 +206,26 @@ internal sealed class HousekeepingRunner(
                 continue;
             }
 
-            // Plain catalog status change on purpose: the UI archive path lives in MainWindowViewModel/ProjectTree (terminal and view
-            // cleanup, UI thread), and these sessions are not open, so there is no runtime state to release.
             if (await catalog.SetStatusAsync(session.Id, SessionStatus.Archived, ct).ConfigureAwait(false))
             {
-                archived++;
+                archived.Add(session.Id);
             }
         }
 
-        return archived;
+        // The sessions are not open, but terminals and runtimes may still be bound to them: the window applies the same
+        // cleanup as a UI archive and refreshes the tree. Best effort: the archive itself already happened.
+        if (archived.Count > 0 && archivedSessions is not null)
+        {
+            try
+            {
+                await archivedSessions(archived).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+            {
+                System.Diagnostics.Trace.WriteLine("[housekeeping] archive cleanup failed: " + exception.Message);
+            }
+        }
+
+        return archived.Count;
     }
 }

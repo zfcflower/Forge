@@ -72,6 +72,21 @@ public sealed class GhParserSmokeTests
         Assert.Equal(PrMergeStateStatus.HasHooks, info.MergeStateStatus);
         Assert.Equal(PrReviewDecision.None, info.ReviewDecision);
         Assert.Equal("feature", info.HeadRefName);
+        Assert.False(info.IsCrossRepository);
+    }
+
+    [Fact]
+    public void Pull_request_from_a_fork_is_marked_cross_repository()
+    {
+        const string json = """
+            {"number":7,"url":"https://github.com/acme/forge/pull/7","state":"OPEN","headRefName":"patch-1","baseRefName":"main",
+             "headRefOid":"abc","isCrossRepository":true}
+            """;
+
+        var info = Internals.InvokeStatic<PullRequestInfo?>("GhParsers", "ParsePullRequest", json);
+
+        Assert.NotNull(info);
+        Assert.True(info.IsCrossRepository);
     }
 
     [Theory]

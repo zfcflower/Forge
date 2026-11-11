@@ -1,6 +1,7 @@
 using System.Text;
 using Forge.Abstractions;
 using Forge.App.Automations;
+using Forge.App.Localization;
 using Xunit;
 
 namespace Forge.App.Tests.Automations;
@@ -148,6 +149,9 @@ public sealed class AutomationDefinitionStoreTests : IDisposable
         Assert.Null(load.Errors[1].Id);
         Assert.Equal("bad-trigger", load.Errors[3].Id);
         Assert.All(load.Errors, error => Assert.False(string.IsNullOrWhiteSpace(error.Message)));
+        Assert.All(load.Errors, error => Assert.StartsWith("automations.settings.config.", error.MessageKey, StringComparison.Ordinal));
+        Assert.Equal(AutomationSettingsStrings.ErrNoIdKey, load.Errors[1].MessageKey);
+        Assert.Equal(AutomationSettingsStrings.ErrBadHourlyKey, load.Errors[3].MessageKey);
     }
 
     [Fact]

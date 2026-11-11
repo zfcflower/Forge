@@ -89,7 +89,11 @@ public sealed record PullRequestInfo(
     string HeadRefOid,
     bool IsDraft,
     PrMergeStateStatus MergeStateStatus,
-    PrReviewDecision ReviewDecision);
+    PrReviewDecision ReviewDecision)
+{
+    /// <summary>The head branch lives in another repository (a fork): pushing to <c>origin</c> does not reach it.</summary>
+    public bool IsCrossRepository { get; init; }
+}
 
 /// <summary>
 /// Merge readiness read in one call. The <c>*Text</c> members are the platform's raw strings, kept so a report can show

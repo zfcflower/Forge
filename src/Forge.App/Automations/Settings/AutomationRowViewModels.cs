@@ -150,6 +150,9 @@ internal sealed class AutomationRowViewModel : ObservableObject
         }
     }
 
+    /// <summary>The UI language changed: the fixed labels re-read their text (the data texts come back with the refresh).</summary>
+    internal void Relocalize() => OnPropertyChanged(null);
+
     internal void Apply(AutomationDefinition definition, string next, string lastStatus)
     {
         Name = AutomationText.DisplayName(definition);

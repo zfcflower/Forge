@@ -37,6 +37,8 @@ internal sealed class RunnerSession(string id, string title = "Session") : IAuto
 
     public DateTimeOffset LastActivityAt { get; set; }
 
+    public bool IsToolRunning { get; set; }
+
     public bool IsAutomationIdle { get; set; } = true;
 
     public bool IsAutomationClosed { get; set; }
@@ -115,6 +117,14 @@ internal sealed class RunnerHost : IAutomationHost
     public Task RefreshTreesAsync()
     {
         Refreshes++;
+        return Task.CompletedTask;
+    }
+
+    public List<string> Archived { get; } = [];
+
+    public Task OnSessionsArchivedAsync(IReadOnlyList<string> sessionIds)
+    {
+        Archived.AddRange(sessionIds);
         return Task.CompletedTask;
     }
 }

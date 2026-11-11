@@ -99,6 +99,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     private Action? cancelAutomation;
     private RelayCommand? cancelAutomationCommand;
     private long lastActivityTicks = DateTimeOffset.UtcNow.UtcTicks;
+    private int runningTools;
     private bool automationRejected;
     private string? rootFailure;
     private LocText? lastTurnError;
@@ -1155,6 +1156,9 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     /// <summary>Last agent event of the running turn, or the turn start (written off the UI thread).</summary>
     public DateTimeOffset LastActivityAt => new(Interlocked.Read(ref lastActivityTicks), TimeSpan.Zero);
 
+    /// <summary>A tool call of any agent of the running turn has started and not finished (a build, a long command).</summary>
+    public bool IsToolRunning => IsRunning && Volatile.Read(ref runningTools) > 0;
+
     private void ApplyRootDefinition(AgentDefinition? definition)
     {
         if (runtime?.SetRootDefinition(definition) == true)
@@ -1181,6 +1185,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         TurnStarted?.Invoke(this, automationTurn);
         turnStartedAt = DateTimeOffset.Now;
         Interlocked.Exchange(ref lastActivityTicks, turnStartedAt.UtcTicks);
+        Interlocked.Exchange(ref runningTools, 0);
         Instruments.RefreshCounters();
         Instruments.RefreshSources();
         Transcript.AddUserMessage(text, turnStartedAt);
@@ -1378,6 +1383,15 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     private void OnAgentEvent(AgentEvent value)
     {
         Interlocked.Exchange(ref lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
+        if (value is AgentToolStarted)
+        {
+            Interlocked.Increment(ref runningTools);
+        }
+        else if (value is AgentToolFinished && Interlocked.Decrement(ref runningTools) < 0)
+        {
+            Interlocked.Exchange(ref runningTools, 0);
+        }
+
         switch (value)
         {
             case AgentFailed failed when string.Equals(failed.AgentId, "root", StringComparison.Ordinal):

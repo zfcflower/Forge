@@ -86,6 +86,36 @@ public class ProviderQuotaTests
         Assert.Null(Classify(Error(429, "slow down", TimeSpan.FromMinutes(5))));
     }
 
+    [Theory]
+    [InlineData("""{"error":{"message":"Rate limit reached for gpt-4o in organization org-x on tokens per min (TPM): Limit 30000, Used 29000.","type":"tokens","code":"rate_limit_exceeded"}}""")]
+    [InlineData("""{"error":{"code":429,"message":"Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_requests_per_minute","status":"RESOURCE_EXHAUSTED"}}""")]
+    [InlineData("请求过于频繁,请稍后再试")]
+    [InlineData("limit reached: context window")]
+    [InlineData("请检查额度配置")]
+    public void Rate_limits_and_loose_wording_are_not_quota(string body) =>
+        Assert.Null(Classify(Error(429, body)));
+
+    [Theory]
+    [InlineData("""{"error":{"code":429,"message":"Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_requests_per_day","status":"RESOURCE_EXHAUSTED"}}""")]
+    [InlineData("You have reached your monthly limit reached for premium requests; monthly limit reached")]
+    [InlineData("今日额度已用尽")]
+    [InlineData("您已超出本月额度")]
+    [InlineData("""{"error":{"code":"billing_hard_limit_reached","message":"Billing hard limit has been reached"}}""")]
+    public void Spent_quota_wording_is_quota(string body) =>
+        Assert.NotNull(Classify(Error(429, body)));
+
+    [Fact]
+    public void Claude_subscription_usage_limit_sent_as_rate_limit_error_is_quota() =>
+        Assert.NotNull(Classify(Error(429, """{"type":"error","error":{"type":"rate_limit_error","message":"Claude AI usage limit reached|1778000000"}}""")));
+
+    [Fact]
+    public void A_definite_marker_wins_over_rate_wording() =>
+        Assert.NotNull(Classify(Error(429, """{"error":{"code":"insufficient_quota","message":"rate limit: you exceeded your current quota"}}""")));
+
+    [Fact]
+    public void Generic_billing_text_on_403_is_not_quota() =>
+        Assert.Null(Classify(Error(403, "billing account not found for this project")));
+
     [Fact]
     public void Server_error_is_not_quota_even_with_marker_text() =>
         Assert.Null(Classify(Error(500, "usage limit billing quota exceeded")));

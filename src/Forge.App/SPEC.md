@@ -315,11 +315,11 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - **投递只走邮箱。** 自动化写进会话一律经 `SessionMailbox`:会话忙(回合、子 Agent、排队消息、交接)就等它空闲(运行状态 `WaitingIdle`),从不打断;会话被接手/归档/移除/关闭即撤回。自动化回合在转录里先插一条来源提示,被回合闸拒绝时报告“撤回”,不落进输入框。回合结果按工作线程收到的根 Agent 失败/额度事件判定(不等 UI 合并帧),额度用尽随结果带回 `MailboxResult.Quota`;自动化自己的回合用尽额度不再另起恢复运行,由发起的运行决定。消息可携带本回合专用的 Agent(只读工具、模型),回合前应用、回合后恢复为输入框所选,复用的分支会话不会被永久改成只读;会话打不开时运行直接撤回,不投递。运行状态更新按运行串行,等待空闲的进度写在运行自身的下一次更新前落盘。
 - **两种会话环境。** 用户定义的放置方式:`Scratch` 每次在 General 项目建一个暂存目录会话(带 `AutomationId`/`AutomationRunId`);`FixedFork` 在指定仓库项目里复用该自动化自己的 `forge/` 分支 worktree 会话(状态 `fork.session:<id>`,失效才新建);`Scout` 在指定活动根会话下起只读 Scout 子 Agent,不占主 Agent 回合。`ReadOnlyTools` 把工具限为 read/grep/find/ls;可单独指定模型。`Remind` 只发通知。
 - **内置项**(定义按 id 合成,可在设置页逐项停用,全局可暂停):
-  - 额度恢复 `QuotaResume`:根 Agent 回合以额度用尽失败时,记下 `quota.latest:<会话>` 并起一次运行(`WaitingQuota`,`ResumeAt` = 重置时间 + 0–60 秒抖动;无重置时间则探测)。到点后同一提供方的恢复间隔至少 10 秒,经邮箱发“继续”;再次用尽(以投递结果里的额度为准)回到等待,最多 5 轮。关闭时仍在等会话空闲的恢复运行,重启后作为“等待额度、无恢复时刻”续跑(先探测再发)。用户自己在该会话发消息即取消等待中的运行。
-  - CI 失败修复链 `CiChain`:每 5 分钟查有打开 PR 的分支会话的检查结果;新失败(`ci.seen:`)起一次运行:Scout 只读分析失败日志(截断:每 job 200 行/12k 字符,总 40k),再把结论经邮箱交给该会话的主 Agent 修复;修复后**只推送到 PR 的 head 分支,永不推 base**,可按项目关闭自动推送(`CiAutoPushOffProjects`)。推送前在会话 worktree 里逐项核对,任一不符即不推并通知原因:head 不是 PR base 也不是仓库默认分支;HEAD 不游离;当前分支名等于 head 或其上游是 `origin/<head>`;HEAD 是 PR head 提交的后代。推送固定为 `HEAD:refs/heads/<head>`,从不强推。“修复后同样失败”按“推送的提交 + 失败检查集”记录,在起 Scout 之前判定,PR 转绿时清除。每个 PR 尝试预算 3 次,耗尽时通知一次。
-  - 长任务看护 `SessionWatch`:每分钟看一次已打开会话,回合 15 分钟无 Agent 事件记“停滞”,审批卡等待 10 分钟记“待审批”,窗口在后台时用户回合结束记“已完成”;只通知,不动会话。
-  - 周期清理 `Housekeeping`(每日 04:00):prune 仓库项目的 worktree 记录、删除空的未使用暂存目录(不足 1 小时的目录不动,删除前重查目录库)、修剪运行历史(每定义 200 / 总 2000)、归档闲置 7 天以上且未打开的自动化创建的根会话(自动化复用中的分支会话 `fork.session:*` 除外;读不到定义时本次不归档)。
-- **界面。** 会话视图在输入框上方显示附着运行的横幅(等待额度到某时刻/等待恢复、等待空闲、执行中)与“取消”;项目树里自动化创建的会话行带闪电标记(提示“由自动化任务创建”)。设置页列出定义(启停、立即运行、编辑、删除需确认)与运行历史(点运行可打开其会话)。
+  - 额度恢复 `QuotaResume`:根 Agent 回合以额度用尽失败时,记下 `quota.latest:<会话>` 并起一次运行(`WaitingQuota`,`ResumeAt` = 重置时间 + 0–60 秒抖动;无重置时间则探测)。到点后同一提供方的恢复间隔至少 10 秒,经邮箱发“继续”;再次用尽(以投递结果里的额度为准)回到等待,最多 5 轮。关闭时仍在等会话空闲的恢复运行,重启后作为“等待额度、无恢复时刻”续跑(先探测再发)。用户自己在该会话发消息即取消等待中的运行;用户取消(横幅或设置页)时一并删除 `quota.run:` 状态键,只有关闭应用造成的取消保留它供重启续跑。
+  - CI 失败修复链 `CiChain`:每 5 分钟查有打开 PR 的分支会话的检查结果;新失败(`ci.seen:`)起一次运行:Scout 只读分析失败日志(截断:每 job 200 行/12k 字符,总 40k),再把结论经邮箱交给该会话的主 Agent 修复;修复后**只推送到 PR 的 head 分支,永不推 base**,可按项目关闭自动推送(`CiAutoPushOffProjects`)。推送前在会话 worktree 里逐项核对,任一不符即不推并通知原因:head 不是 PR base 也不是仓库默认分支;HEAD 不游离;当前分支名等于 head 或其上游是 `origin/<head>`;HEAD 是 PR head 提交的后代。推送固定为 `HEAD:refs/heads/<head>`,从不强推。“修复后同样失败”按“推送的提交 + 失败检查集”记录,在起 Scout 之前判定,PR 转绿时清除。来自 fork 的 PR(`PullRequestInfo.IsCrossRepository`,取自 `gh` 的 `isCrossRepository`)修复只提交在本地,从不推送,并通知原因。每个 PR 尝试预算 3 次,耗尽时通知一次。
+  - 长任务看护 `SessionWatch`:每分钟看一次已打开会话,回合 15 分钟无 Agent 事件记“停滞”;有工具(外部命令)正在执行时改按 60 分钟记“命令运行时间很长”(`SessionWorkspaceViewModel.IsToolRunning`,按工作线程收到的工具开始/结束计数),审批卡等待 10 分钟记“待审批”,窗口在后台时用户回合结束记“已完成”;只通知,不动会话。
+  - 周期清理 `Housekeeping`(每日 04:00):prune 仓库项目的 worktree 记录、删除空的未使用暂存目录(不足 1 小时的目录不动,删除前重查目录库)、修剪运行历史(每定义 200 / 总 2000)、归档闲置 7 天以上且未打开的自动化创建的根会话(自动化复用中的分支会话 `fork.session:*` 除外;读不到定义时本次不归档)。归档后经 `IAutomationHost.OnSessionsArchivedAsync` 在 UI 线程做与界面归档相同的收尾(结束该会话的终端、关标签、释放运行时)并刷新项目树;这一步失败不影响运行结果。
+- **界面。** 会话视图在输入框上方显示附着运行的横幅(等待额度到某时刻并倒计时“约 N 分钟后”——随窗口每秒时钟重算,文字变了才通知/等待恢复、等待空闲、执行中)与“取消”;项目树里自动化创建的会话行带闪电标记(提示“由自动化任务创建”)。设置页列出定义(启停、立即运行、编辑、删除需确认)与运行历史(点运行可打开其会话);切换界面语言时定义行即时刷新。`automations.json` 的校验错误带本地化键与参数(`AutomationDefinitionError.MessageKey`/`MessageArgs`),设置页按当前语言显示,英文 `Message` 留给日志与测试。
 
 ## 未决
 
@@ -332,4 +332,3 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 - `TurnCheckpointService` 是否上移到 `forge-workspace`(目前只做编排)未定。
 - Worker 资源限制受威胁模型决策门控,不在此模块实现。
 - `ReviewStore`(Forge.Workspace)不可释放:`reviews.db` 的池化句柄是靠 `SqliteSessionStore` 拆除时进程级 `ClearAllPools` 才释放的(`CompositionDisposeTests` 钉住)。拆除顺序或那次清池一变就会回退;给 `ReviewStore` 加 `IDisposable` 属于 forge-workspace,未做。
-- 自动化的未决项:长任务看护的“停滞”只看 Agent 事件静默,不区分长时间运行的外部命令;额度分类按错误文本里的额度类标记判断,范围偏宽;用户取消等待中的额度运行后 `quota.run:` 状态键残留到下次清理;设置页定义行的文字不随语言切换即时刷新;`automations.json` 的校验错误文案为英文;`PullRequestInfo` 不含 head 仓库信息,来自 fork 的 PR 只靠分支跟踪与祖先校验拦截,未单独判定;`RunAutomationTurnAsync` 的结果映射尚无视图模型级测试。

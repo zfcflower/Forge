@@ -88,7 +88,8 @@ internal sealed class QuotaResumeRunner(
     ResumeStagger stagger,
     INotifications? notifications,
     TimeProvider time,
-    Func<double>? random = null) : IAutomationRunner
+    Func<double>? random = null,
+    Func<bool>? shuttingDown = null) : IAutomationRunner
 {
     public const int MaxRounds = 5;
 
@@ -96,6 +97,9 @@ internal sealed class QuotaResumeRunner(
     public static readonly TimeSpan MaxJitter = TimeSpan.FromSeconds(60);
 
     private readonly Func<double> random = random ?? Random.Shared.NextDouble;
+
+    // Null = every cancellation counts as a shutdown (the note is kept); the service tells a user cancel apart.
+    private readonly Func<bool> shuttingDown = shuttingDown ?? (static () => true);
 
     /// <summary>The reset time a run waits for: the provider's, plus up to <see cref="MaxJitter"/>; null = probe.</summary>
     public DateTimeOffset? ResumeAtFor(DateTimeOffset? resetAt) =>
@@ -174,7 +178,9 @@ internal sealed class QuotaResumeRunner(
         }
         finally
         {
-            if (!ct.IsCancellationRequested)
+            // The note stays only when the app is shutting down (the run resumes on the next start); a run that ended or was
+            // cancelled by the user (banner, a user turn) never comes back, so its note goes with it.
+            if (!ct.IsCancellationRequested || !this.shuttingDown())
             {
                 await state.SetStateAsync(QuotaNote.RunPrefix + context.Run.Occurrence, null, CancellationToken.None).ConfigureAwait(false);
             }

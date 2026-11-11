@@ -114,6 +114,9 @@ internal sealed class FakeRunStore : IAutomationRunStore
 
     public Exception? SetStateFailure { get; set; }
 
+    /// <summary>When set, every run update waits this long before it is applied (a slow database write).</summary>
+    public TimeSpan? UpdateDelay { get; set; }
+
     public IReadOnlyList<AutomationRun> All
     {
         get { lock (_gate) return [.. _runs]; }
@@ -141,15 +144,18 @@ internal sealed class FakeRunStore : IAutomationRunStore
         }
     }
 
-    public Task UpdateAsync(AutomationRun run, CancellationToken ct)
+    public async Task UpdateAsync(AutomationRun run, CancellationToken ct)
     {
+        if (UpdateDelay is { } delay)
+        {
+            await Task.Delay(delay, ct).ConfigureAwait(false);
+        }
+
         lock (_gate)
         {
             var i = _runs.FindIndex(r => r.Id == run.Id);
             if (i >= 0) _runs[i] = run;
         }
-
-        return Task.CompletedTask;
     }
 
     public Task<AutomationRun?> GetAsync(string runId, CancellationToken ct)

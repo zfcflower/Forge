@@ -2997,6 +2997,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             SetTreeRunning(session.SessionId, session.IsRunning);
         }
+
+        TickAutomationBanners();
     }
 
     private void OnHostStatusChanged(HostStatus status, LocText? detail) =>
