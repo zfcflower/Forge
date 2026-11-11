@@ -9,7 +9,7 @@
 | 主 Agent(规划/调度) | `claude-bridge/claude-opus-5-5:medium`(中推理) | 读代码与 spec、拆解任务、写接口与骨架、派活、复核结果、合并、更新 spec、提交。能并行时才派活,不能并行时自己实现。 |
 | 实现 Worker | `opencode-go/deepseek-v4.1-flash:xhigh`(超高推理) | 按任务写实现代码。只在自己副本里工作,测试通过后只拷回自己负责的路径。 |
 | 测试 | `opencode-go/muse-spark-1.3-contributor:xhigh`(超高推理) | 只编写测试,不做 review。 |
-| Review | `claude-bridge/claude-sonnet-5-5:medium`(中推理) | 只读评审,输出实质性问题与结论。 |
+| Review | `opencode-go/gpt-6-luna`;该模型不在 opencode-go 目录时回退 `opencode-go/glm-5.3-flash` | 只读评审,输出实质性问题与结论。 |
 
 ## 评审标准
 
