@@ -1,0 +1,51 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:loc="using:Forge.App.Localization"
+        x:Class="Forge.App.Views.MergePullRequestDialog"
+        x:DataType="vm:MergePullRequestDialogViewModel"
+        Title="{Binding Title}"
+        Width="470"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}"
+        AutomationProperties.AutomationId="merge-pull-request-dialog">
+  <StackPanel Margin="18,16" Spacing="10">
+    <TextBlock Classes="h2" Text="{Binding Title}" TextWrapping="Wrap" />
+    <TextBlock Classes="caption" Text="{Binding Body}" TextWrapping="Wrap" />
+
+    <StackPanel Spacing="2" Margin="0,6,0,0">
+      <RadioButton GroupName="merge-method"
+                   Content="{Binding [git.ship.mergeDialog.squash], Source={x:Static loc:Loc.Instance}}"
+                   IsChecked="{Binding IsSquash, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="merge-method-squash" />
+      <RadioButton GroupName="merge-method"
+                   Content="{Binding [git.ship.mergeDialog.merge], Source={x:Static loc:Loc.Instance}}"
+                   IsChecked="{Binding IsMergeCommit, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="merge-method-merge" />
+      <RadioButton GroupName="merge-method"
+                   Content="{Binding [git.ship.mergeDialog.rebase], Source={x:Static loc:Loc.Instance}}"
+                   IsChecked="{Binding IsRebase, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="merge-method-rebase" />
+    </StackPanel>
+
+    <CheckBox Content="{Binding DeleteLabel}"
+              IsChecked="{Binding DeleteHeadBranch, Mode=TwoWay}"
+              AutomationProperties.AutomationId="merge-delete-branch" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,6,0,0">
+      <Button Classes="ghost"
+              Content="{Binding [git.ship.dialog.cancel], Source={x:Static loc:Loc.Instance}}"
+              Click="OnCancel"
+              IsCancel="True"
+              AutomationProperties.AutomationId="merge-cancel" />
+      <Button Classes="primary"
+              Content="{Binding GoLabel}"
+              Click="OnMerge"
+              IsDefault="True"
+              AutomationProperties.AutomationId="merge-confirm" />
+    </StackPanel>
+  </StackPanel>
+</Window>

@@ -285,6 +285,37 @@ public sealed class GitHubPlatform : IPrPlatform
             : PrResult<PrMergeState>.Ok(state);
     }
 
+    public async Task<PrResult<PrReference>> MergePullRequestAsync(
+        string workingDirectory,
+        int number,
+        PrMergeMethod method,
+        bool deleteBranch = false,
+        CancellationToken ct = default)
+    {
+        if (number <= 0)
+        {
+            return Invalid<PrReference>($"{number} is not a valid pull request number.");
+        }
+
+        var arguments = new List<string> { "pr", "merge", Number(number) };
+        arguments.Add(method switch
+        {
+            PrMergeMethod.Squash => "--squash",
+            PrMergeMethod.Rebase => "--rebase",
+            _ => "--merge",
+        });
+
+        if (deleteBranch)
+        {
+            arguments.Add("--delete-branch");
+        }
+
+        var result = await gh.RunAsync(workingDirectory, arguments, null, ct).ConfigureAwait(false);
+        return result.Success
+            ? PrResult<PrReference>.Ok(new PrReference(number, string.Empty), result.StandardOutput.Trim())
+            : Failure<PrReference>(result, "Could not merge the pull request.");
+    }
+
     public async Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default)
     {
         if (jobId <= 0 || runId is <= 0)

@@ -224,6 +224,28 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
     /// The new-branch dialog: it owns the branch list and the name validation, so the shell only wires the view model to a
     /// window and waits for the answer. Cancelled and closed dialogs both come back as null, and nothing is created.
     /// </summary>
+    /// <summary>The pull-request dialog: three inputs and an answer, nothing else; cancelled and closed both come back null.</summary>
+    /// <summary>The merge dialog: three strategies, the delete switch, and the answer; cancelled and closed come back null.</summary>
+    public async Task<Forge.App.Git.PullRequestMergeChoice?> ComposePullRequestMergeAsync(
+        Forge.App.Git.PullRequestMergeRequest request,
+        CancellationToken ct)
+    {
+        var dialog = new MergePullRequestDialog
+        {
+            DataContext = new MergePullRequestDialogViewModel(request),
+        };
+        return await dialog.ShowDialog<Forge.App.Git.PullRequestMergeChoice?>(owner).ConfigureAwait(true);
+    }
+
+    public async Task<Forge.App.Git.PullRequestDraft?> ComposePullRequestAsync(Forge.App.Git.PullRequestDraft draft, CancellationToken ct)
+    {
+        var dialog = new PullRequestDialog
+        {
+            DataContext = new PullRequestDialogViewModel(draft.Title, draft.Body, draft.Draft),
+        };
+        return await dialog.ShowDialog<Forge.App.Git.PullRequestDraft?>(owner).ConfigureAwait(true);
+    }
+
     public async Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct)
     {
         var model = new NewBranchDialogViewModel(git, request, ct);

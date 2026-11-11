@@ -14,6 +14,19 @@ public enum PrState { Unknown, Open, Closed, Merged }
 /// has not computed it yet" and a value this build does not know; callers keep waiting or report it, never treat it as
 /// good.
 /// </summary>
+/// <summary>How a pull request is merged: the three the platform offers, one per merge, chosen by the user.</summary>
+public enum PrMergeMethod
+{
+    /// <summary>One commit on the base branch (the platform's default in most repositories).</summary>
+    Squash,
+
+    /// <summary>A merge commit: the branch's commits plus one node that records where they came from.</summary>
+    Merge,
+
+    /// <summary>The branch's commits replayed on the base branch.</summary>
+    Rebase,
+}
+
 public enum PrMergeStateStatus { Unknown, Clean, HasHooks, Behind, Dirty, Blocked, Unstable, Draft }
 
 /// <summary>Review gate on the pull request. <see cref="None"/> means no review is required or none was given.</summary>

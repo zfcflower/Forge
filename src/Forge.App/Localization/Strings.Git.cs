@@ -162,6 +162,72 @@ internal static class GitStrings
     /// <summary>Why a detached head cannot be pushed.</summary>
     public const string PushDetached = "git.push.detached";
 
+
+    // ---------------------------------------------------------------- the 提交目标 row
+
+    /// <summary>The split button's label before any pull request exists.</summary>
+    public const string ShipTarget = "git.ship.target";
+
+    public const string ShipCompose = "git.ship.compose";
+    public const string ShipOpenInBrowser = "git.ship.browser";
+    public const string ShipNoRemote = "git.ship.noRemote";
+    public const string ShipNoPlatform = "git.ship.noPlatform";
+    public const string ShipNoDialog = "git.ship.noDialog";
+    public const string ShipPublishFirst = "git.ship.publishFirst";
+    public const string ShipReading = "git.ship.reading";
+    public const string ShipAlreadyExists = "git.ship.alreadyExists";
+    public const string ShipNoPullRequest = "git.ship.noPullRequest";
+
+    /// <summary>Format: <c>{0}</c> is the new pull request's number.</summary>
+    public const string ShipCreated = "git.ship.created";
+
+    public const string PrStateOpen = "git.pr.state.open";
+    public const string PrStateDraft = "git.pr.state.draft";
+    public const string PrStateMerged = "git.pr.state.merged";
+    public const string PrStateClosed = "git.pr.state.closed";
+
+    /// <summary>The publish pill on the 提交目标 row (first push + upstream).</summary>
+    public const string ShipPublish = "git.ship.publish";
+
+    public const string ShipDialogTitle = "git.ship.dialog.title";
+    public const string ShipDialogTitleLabel = "git.ship.dialog.titleLabel";
+    public const string ShipDialogBodyLabel = "git.ship.dialog.bodyLabel";
+    public const string ShipDialogDraft = "git.ship.dialog.draft";
+    public const string ShipDialogCreate = "git.ship.dialog.create";
+    public const string ShipDialogCancel = "git.ship.dialog.cancel";
+
+    public const string ShipMergeLocally = "git.ship.mergeLocally";
+    public const string ShipMergePullRequest = "git.ship.mergePullRequest";
+    public const string ShipDeleteRemoteBranch = "git.ship.deleteRemote";
+    public const string ShipDeleteRemoteHint = "git.ship.deleteRemoteHint";
+    public const string ShipDeleteRemoteNotYet = "git.ship.deleteRemoteNotYet";
+    public const string ShipDeleteRemoteTitle = "git.ship.deleteRemoteTitle";
+    public const string ShipDeleteRemoteMessage = "git.ship.deleteRemoteMessage";
+    public const string ShipNoProjectRoot = "git.ship.noProjectRoot";
+    public const string ShipNoDefaultBranch = "git.ship.noDefaultBranch";
+    public const string ShipAlreadyOnBranch = "git.ship.alreadyOnBranch";
+    public const string ShipAlreadyMerged = "git.ship.alreadyMerged";
+    public const string ShipRootDirty = "git.ship.rootDirty";
+    public const string ShipRootElsewhere = "git.ship.rootElsewhere";
+    public const string ShipMergeCommitTitle = "git.ship.mergeCommitTitle";
+    public const string ShipMergeCommitMessage = "git.ship.mergeCommitMessage";
+    public const string ShipMergedNumber = "git.ship.mergedNumber";
+    public const string ShipMergeDraft = "git.ship.mergeDraft";
+    public const string ShipMerged = "git.ship.merged";
+    public const string ShipClosed = "git.ship.closed";
+    public const string ShipMergeBehind = "git.ship.mergeBehind";
+    public const string ShipMergeDirty = "git.ship.mergeDirty";
+    public const string ShipMergeBlocked = "git.ship.mergeBlocked";
+    public const string ShipMergeUnknown = "git.ship.mergeUnknown";
+
+    public const string ShipMergeDialogTitle = "git.ship.mergeDialog.title";
+    public const string ShipMergeDialogBody = "git.ship.mergeDialog.body";
+    public const string ShipMergeDialogDelete = "git.ship.mergeDialog.delete";
+    public const string ShipMergeDialogGo = "git.ship.mergeDialog.go";
+    public const string ShipMergeDialogSquash = "git.ship.mergeDialog.squash";
+    public const string ShipMergeDialogMerge = "git.ship.mergeDialog.merge";
+    public const string ShipMergeDialogRebase = "git.ship.mergeDialog.rebase";
+
     // ---------------------------------------------------------------- recovery hints, one per failure kind
 
     public const string HintAuthentication = "git.hint.authentication";
@@ -274,6 +340,61 @@ internal static class GitStrings
 
         Loc.Register(TodoCommitFailed, "提交失败", "Commit failed");
         Loc.Register(TodoCommitRetry, "重试提交", "Retry commit");
+
+        Loc.Register(ShipTarget, "提交目标", "Send to");
+        Loc.Register(ShipCompose, "打开 PR…", "Open a pull request…");
+        Loc.Register(ShipOpenInBrowser, "在浏览器打开", "Open in browser");
+        Loc.Register(ShipNoRemote, "没有配置远程", "No remote is configured");
+        Loc.Register(ShipNoPlatform, "这个版本没有连接 GitHub", "This build is not connected to GitHub");
+        Loc.Register(ShipNoDialog, "这个窗口无法弹出对话框", "This window cannot show the dialog");
+        Loc.Register(ShipPublishFirst, "先发布这个分支（首次推送顺便设上游）", "Publish the branch first (the first push sets the upstream)");
+        Loc.Register(ShipReading, "正在读取拉取请求…", "Reading the pull request…");
+        Loc.Register(ShipAlreadyExists, "这个分支已经有拉取请求", "This branch already has a pull request");
+        Loc.Register(ShipNoPullRequest, "当前分支还没有拉取请求", "This branch has no pull request yet");
+        Loc.Register(ShipCreated, "已打开 PR #{0}。", "Opened pull request #{0}.");
+        Loc.Register(PrStateOpen, "打开", "Open");
+        Loc.Register(PrStateDraft, "草稿", "Draft");
+        Loc.Register(PrStateMerged, "已合并", "Merged");
+        Loc.Register(PrStateClosed, "已关闭", "Closed");
+        Loc.Register(ShipPublish, "发布", "Publish");
+        Loc.Register(ShipMergeLocally, "在本地合并到 {0}", "Merge into {0} locally");
+        Loc.Register(ShipMergePullRequest, "合并 PR…", "Merge the pull request…");
+        Loc.Register(ShipDeleteRemoteBranch, "删除远程分支…", "Delete the remote branch…");
+        Loc.Register(ShipDeleteRemoteHint, "只删平台上的分支，本地分支与提交都留着", "Deletes the branch on the platform only; the local branch stays");
+        Loc.Register(ShipDeleteRemoteNotYet, "PR 合并后才能删除远程分支", "The remote branch can go once the pull request is merged");
+        Loc.Register(ShipDeleteRemoteTitle, "删除 {0}/{1}？", "Delete {0}/{1}?");
+        Loc.Register(ShipDeleteRemoteMessage, "分支会从平台上删除；已合并的提交不受影响。", "The branch is deleted on the platform; the merged commits stay.");
+        Loc.Register(ShipNoProjectRoot, "这个会话不在项目里，找不到根检出", "This session has no project root checkout");
+        Loc.Register(ShipNoDefaultBranch, "读不到仓库的默认分支", "The repository's default branch could not be read");
+        Loc.Register(ShipAlreadyOnBranch, "当前就在 {0} 上", "This session is already on {0}");
+        Loc.Register(ShipAlreadyMerged, "{0} 已经在 {1} 里了。", "{0} is already in {1}.");
+        Loc.Register(ShipRootDirty, "根检出（{0}）有 {1} 个未提交改动：先提交或暂存再合并。", "The root checkout ({0}) has {1} uncommitted change(s); commit or stash them first.");
+        Loc.Register(ShipRootElsewhere, "根检出（{0}）当前在 {1} 上，不是 {2}：先在根检出切到 {2} 再合并。", "The root checkout ({0}) is on {1}, not {2}: switch it to {2} before merging.");
+        Loc.Register(ShipMergeCommitTitle, "合并到 {0} 需要一个合并提交", "Merging into {0} needs a merge commit");
+        Loc.Register(ShipMergeCommitMessage, "{0} 与 {1} 已经分叉，无法快进：将创建一个合并提交。继续？", "{0} and {1} have diverged, so no fast-forward is possible: a merge commit will be created. Continue?");
+        Loc.Register(ShipMergedNumber, "已合并 PR #{0}。", "Merged pull request #{0}.");
+        Loc.Register(ShipMergeDialogTitle, "合并 PR 到 {0}？", "Merge the pull request into {0}?");
+        Loc.Register(ShipMergeDialogBody, "GitHub 会合并此拉取请求；这个工作区保留它本地的 {0} 分支。", "GitHub merges the pull request; this workspace keeps its local branch {0}.");
+        Loc.Register(ShipMergeDialogDelete, "在 GitHub 上删除 {0}", "Delete {0} on GitHub");
+        Loc.Register(ShipMergeDialogGo, "合并", "Merge");
+        Loc.Register(ShipMergeDialogSquash, "压缩成一个提交", "Squash into one commit");
+        Loc.Register(ShipMergeDialogMerge, "创建合并提交", "Create a merge commit");
+        Loc.Register(ShipMergeDialogRebase, "变基并合并", "Rebase and merge");
+
+        Loc.Register(ShipMergeDraft, "草稿 PR 不能合并", "A draft pull request cannot be merged");
+        Loc.Register(ShipMerged, "这个 PR 已经合并", "This pull request is already merged");
+        Loc.Register(ShipClosed, "这个 PR 已关闭", "This pull request is closed");
+        Loc.Register(ShipMergeBehind, "PR 落后于基线：先在浏览器里更新分支", "The pull request is behind its base: update it in the browser first");
+        Loc.Register(ShipMergeDirty, "PR 与基线有冲突：先在浏览器里解决", "The pull request conflicts with its base: resolve it in the browser first");
+        Loc.Register(ShipMergeBlocked, "还有未满足的合并要求（例如必需的评审）", "A merge requirement is unmet (for example a required review)");
+        Loc.Register(ShipMergeUnknown, "平台还没算出能否合并", "The platform has not computed mergeability yet");
+
+        Loc.Register(ShipDialogTitle, "打开拉取请求", "Open a pull request");
+        Loc.Register(ShipDialogTitleLabel, "标题", "Title");
+        Loc.Register(ShipDialogBodyLabel, "说明", "Description");
+        Loc.Register(ShipDialogDraft, "作为草稿打开", "Open as a draft");
+        Loc.Register(ShipDialogCreate, "创建", "Create");
+        Loc.Register(ShipDialogCancel, "取消", "Cancel");
 
         Loc.Register(RowFetchHint, "抓取：只看远端，不动本地分支", "Fetch: read the remote only, never touch the local branch");
         Loc.Register(

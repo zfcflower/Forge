@@ -242,6 +242,12 @@ internal sealed class AppComposition : IAsyncDisposable
     /// <summary>The purge file cleanup and its journal; the startup retries what an earlier purge left (7.5).</summary>
     internal PurgeCleanup PurgeCleanup { get; set; } = null!;
 
+    /// <summary>
+    /// The pull-request platform as the files panel's 提交目标 row sees it: read the branch's pull request and open one.
+    /// The same instance backs the agent's <c>pr_*</c> tools; gh is resolved from the live preferences on every call.
+    /// </summary>
+    public IPrPlatform PullRequests { get; private set; } = null!;
+
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
 
     public static AppComposition Create()
@@ -480,6 +486,7 @@ internal sealed class AppComposition : IAsyncDisposable
             initialization);
         composition.Approvals = approvals;
         composition.TodoStepCommitter = stepCommitter;
+        composition.PullRequests = prPlatform;
         var reviews = workspace?.Reviews;
         composition.Handover = new HandoverFlow(
             sessions,

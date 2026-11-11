@@ -142,8 +142,8 @@
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Background="Transparent">
-    <Border Classes="toolbar">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" Background="Transparent">
+    <Border Grid.Row="2" Classes="toolbar">
       <Grid ColumnDefinitions="*,Auto">
         <!-- Each tab carries its own count: the panel no longer spells both numbers out in a summary after the buttons. A
              badge is never hidden, so an idle session reads "已改动 0" rather than leaving the reader to guess. -->
@@ -208,7 +208,7 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="1"
+    <Border Grid.Row="3"
             Classes="toolbar"
             Padding="6,4"
             IsVisible="{Binding ShowSharedChanges}">
@@ -398,7 +398,7 @@
 
     <!-- A stopped rebase/merge is the one blocking state this panel owns: it says what stopped and opens the files it
          stopped on (the same files carry U in the 已改动 tree). Continue/Abort are the only writes here besides sync. -->
-    <Border Grid.Row="2"
+    <Border Grid.Row="4"
             Classes="git-banner"
             IsVisible="{Binding Git.HasOperation}"
             AutomationProperties.AutomationId="git-operation">
@@ -441,7 +441,7 @@
     </Border>
 
     <ListBox x:Name="TreeList"
-             Grid.Row="3"
+             Grid.Row="5"
              IsVisible="{Binding IsAllTab}"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource FileNodeTemplate}"
@@ -457,7 +457,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedDiffList"
-             Grid.Row="3"
+             Grid.Row="5"
              IsVisible="{Binding ShowSharedChanges}"
              ItemsSource="{Binding ChangedRows}"
              ItemTemplate="{StaticResource ChangedNodeTemplate}"
@@ -473,7 +473,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedList"
-             Grid.Row="3"
+             Grid.Row="5"
              IsVisible="{Binding ShowFallbackChanges}"
              ItemsSource="{Binding Changes}"
              SelectionChanged="OnChangedSelection"
@@ -502,9 +502,85 @@
       </ListBox.ItemTemplate>
     </ListBox>
 
+
+    <!-- Row 2 of the header: how this branch ships. Two controls only — publish (before the first push) and 提交目标, whose
+         menu lists the ways out. The branch name is one row above; it is never repeated here. -->
+    <Border Grid.Row="1"
+            Classes="git-ship"
+            IsVisible="{Binding Git.HasRepository}"
+            AutomationProperties.AutomationId="git-ship-row">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+        <TextBlock Grid.Column="0"
+                   Classes="git-ship-hint"
+                   IsVisible="{Binding Git.HasPublishHint}"
+                   VerticalAlignment="Center"
+                   Text="{Binding Git.PublishHint}"
+                   AutomationProperties.AutomationId="git-ship-hint" />
+
+        <Button Grid.Column="1"
+                Classes="git-pill publish"
+                IsVisible="{Binding Git.ShowPublish}"
+                VerticalAlignment="Center"
+                Command="{Binding Git.PushCommand}"
+                ToolTip.Tip="{Binding Git.PushTooltip}"
+                AutomationProperties.AutomationId="git-publish"
+                AutomationProperties.Name="{Binding Git.PushTooltip}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <wc:FluentIcon Data="{StaticResource IconGitPush}" Width="12" Height="12" />
+            <TextBlock Text="{Binding [git.ship.publish], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+        </Button>
+
+        <Button Grid.Column="2"
+                Classes="git-pill target"
+                Classes.open="{Binding Git.PullRequestIsOpen}"
+                Classes.draft="{Binding Git.PullRequestIsDraft}"
+                Classes.merged="{Binding Git.PullRequestIsMerged}"
+                Classes.closed="{Binding Git.PullRequestIsClosed}"
+                VerticalAlignment="Center"
+                ToolTip.Tip="{Binding Git.PullRequestProblemText}"
+                AutomationProperties.AutomationId="git-ship-target"
+                AutomationProperties.Name="{Binding Git.PullRequestLabel}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <Ellipse Width="6" Height="6" IsVisible="{Binding Git.HasPullRequestState}" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding Git.PullRequestLabel}" VerticalAlignment="Center" />
+            <TextBlock IsVisible="{Binding Git.HasPullRequestState}"
+                       Text="{Binding Git.PullRequestNumberText}"
+                       VerticalAlignment="Center" />
+            <wc:FluentIcon Data="{StaticResource IconChevronDown}" Width="12" Height="12" VerticalAlignment="Center" />
+          </StackPanel>
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <StackPanel MinWidth="230" Spacing="0">
+                <ItemsControl ItemsSource="{Binding Git.ShipActions}" AutomationProperties.AutomationId="git-ship-menu">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="git:ShipActionViewModel">
+                      <Button Classes="git-ship-item"
+                              Classes.disabled="{Binding !IsEnabled}"
+                              Command="{Binding Command}"
+                              ToolTip.Tip="{Binding DisabledReason}"
+                              AutomationProperties.AutomationId="{Binding Key}"
+                              AutomationProperties.Name="{Binding Label}">
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="{Binding Label}" />
+                          <TextBlock Classes="caption"
+                                     IsVisible="{Binding !IsEnabled}"
+                                     Text="{Binding DisabledReason}"
+                                     TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+      </Grid>
+    </Border>
     <!-- The git row: the branch of the active session at the left, the three sync verbs at the right, and the numbers on
          the two verbs that change something. Fetch carries no number because it only makes the others current. -->
-    <Border Grid.Row="4"
+    <Border Grid.Row="0"
             Classes="git-row"
             Classes.bad="{Binding Git.MessageIsError}"
             IsVisible="{Binding Git.HasRepository}"

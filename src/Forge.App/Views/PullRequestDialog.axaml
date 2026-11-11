@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:loc="using:Forge.App.Localization"
+        x:Class="Forge.App.Views.PullRequestDialog"
+        x:DataType="vm:PullRequestDialogViewModel"
+        Title="{Binding [git.ship.dialog.title], Source={x:Static loc:Loc.Instance}}"
+        Width="560"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}"
+        AutomationProperties.AutomationId="pull-request-dialog">
+  <StackPanel Margin="18,16" Spacing="10">
+    <TextBlock Classes="label" Text="{Binding [git.ship.dialog.titleLabel], Source={x:Static loc:Loc.Instance}}" />
+    <TextBox x:Name="TitleBox"
+             Text="{Binding Title, Mode=TwoWay}"
+             AutomationProperties.AutomationId="pull-request-title"
+             AutomationProperties.Name="{Binding [git.ship.dialog.titleLabel], Source={x:Static loc:Loc.Instance}}" />
+
+    <TextBlock Classes="label" Text="{Binding [git.ship.dialog.bodyLabel], Source={x:Static loc:Loc.Instance}}" />
+    <TextBox x:Name="BodyBox"
+             Text="{Binding Body, Mode=TwoWay}"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             Height="180"
+             VerticalContentAlignment="Top"
+             AutomationProperties.AutomationId="pull-request-body"
+             AutomationProperties.Name="{Binding [git.ship.dialog.bodyLabel], Source={x:Static loc:Loc.Instance}}" />
+
+    <CheckBox Content="{Binding [git.ship.dialog.draft], Source={x:Static loc:Loc.Instance}}"
+              IsChecked="{Binding IsDraft, Mode=TwoWay}"
+              AutomationProperties.AutomationId="pull-request-draft" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,6,0,0">
+      <Button Classes="ghost"
+              Content="{Binding [git.ship.dialog.cancel], Source={x:Static loc:Loc.Instance}}"
+              Click="OnCancel"
+              IsCancel="True"
+              AutomationProperties.AutomationId="pull-request-cancel" />
+      <Button Classes="primary"
+              Content="{Binding [git.ship.dialog.create], Source={x:Static loc:Loc.Instance}}"
+              IsEnabled="{Binding CanCreate}"
+              Click="OnCreate"
+              IsDefault="True"
+              AutomationProperties.AutomationId="pull-request-create" />
+    </StackPanel>
+  </StackPanel>
+</Window>

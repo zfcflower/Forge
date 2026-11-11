@@ -33,6 +33,21 @@ internal interface IDialogService
     /// <summary>Asks for the start point and the name of a new worktree branch; null means the user cancelled.</summary>
     Task<NewBranchChoice?> PickNewBranchAsync(NewBranchRequest request, CancellationToken ct);
 
+    /// <summary>
+    /// Asks for the pull request's title, body and draft flag, prefilled from <paramref name="draft"/>; null means the user
+    /// cancelled and nothing is created. A host that cannot show it (a recording double, a headless test) answers null, so
+    /// the row reports "this host cannot show the dialog" instead of creating something nobody described.
+    /// </summary>
+    Task<Git.PullRequestDraft?> ComposePullRequestAsync(Git.PullRequestDraft draft, CancellationToken ct) =>
+        Task.FromResult<Git.PullRequestDraft?>(null);
+
+    /// <summary>
+    /// Asks which merge strategy to use and whether the head branch goes away on the platform; null means the user cancelled
+    /// and nothing is merged. A host that cannot show it answers null, so the menu row stays disabled.
+    /// </summary>
+    Task<Git.PullRequestMergeChoice?> ComposePullRequestMergeAsync(Git.PullRequestMergeRequest request, CancellationToken ct) =>
+        Task.FromResult<Git.PullRequestMergeChoice?>(null);
+
     /// <summary>An information message with a single OK button.</summary>
     Task NotifyAsync(string title, string message) => ConfirmAsync(title, message, ShellStrings.Ok, ShellStrings.Ok);
 
@@ -230,7 +245,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Git,
             composition.GitPanelSettings,
             path => OpenFile(path, newTab: false),
-            composition.Notifications);
+            composition.Notifications,
+            composition.PullRequests,
+            ComposePullRequestAsync,
+            ComposePullRequestMergeAsync,
+            ConfirmGitRowActionAsync);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -2368,6 +2387,21 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 break;
         }
     }
+
+    /// <summary>The 提交目标 row's merge dialog, same split: the view owns the window, the row gets the answer.</summary>
+    private Task<Git.PullRequestMergeChoice?> ComposePullRequestMergeAsync(Git.PullRequestMergeRequest request) =>
+        dialogs is null ? Task.FromResult<Git.PullRequestMergeChoice?>(null) : dialogs.ComposePullRequestMergeAsync(request, CancellationToken.None);
+
+    /// <summary>
+    /// The row's own confirmations (a merge commit, deleting the remote branch) go through the same shell dialog as every other
+    /// question, so nothing destructive happens without one modal.
+    /// </summary>
+    private Task<bool> ConfirmGitRowActionAsync(string title, string message) =>
+        dialogs is null ? Task.FromResult(false) : dialogs.ConfirmAsync(title, message, ShellStrings.Ok, ShellStrings.Cancel);
+
+    /// <summary>The 提交目标 row's "打开 PR…": the dialog lives in the view, the row only gets the answer.</summary>
+    private Task<Git.PullRequestDraft?> ComposePullRequestAsync(Git.PullRequestDraft draft) =>
+        dialogs is null ? Task.FromResult<Git.PullRequestDraft?>(null) : dialogs.ComposePullRequestAsync(draft, CancellationToken.None);
 
     private void OpenFile(string path, bool newTab) => _ = OpenFileAsync(path, newTab, CancellationToken.None);
 

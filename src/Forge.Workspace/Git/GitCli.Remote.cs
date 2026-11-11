@@ -771,6 +771,34 @@ public sealed partial class GitCli
     }
 
     /// <summary>
+    /// Deletes a branch on the remote (<c>push &lt;remote&gt; --delete refs/heads/&lt;branch&gt;</c>). Only the post-merge
+    /// cleanup uses it, and only after the user confirmed: it is the one write here that cannot be undone locally.
+    /// </summary>
+    public async Task<GitRemoteResult> DeleteRemoteBranchAsync(
+        string workingDirectory,
+        string remote,
+        string branch,
+        CancellationToken ct = default)
+    {
+        foreach (var name in new[] { remote, branch })
+        {
+            if (RejectOptionLike(name, "name") is { } invalid)
+            {
+                return invalid;
+            }
+        }
+
+        var arguments = Args("push");
+        arguments.Add(remote);
+        arguments.Add("--delete");
+        arguments.Add("refs/heads/" + branch);
+        var result = await RunNetworkAsync(workingDirectory, arguments, options: null, ct).ConfigureAwait(false);
+        return result.Success
+            ? GitRemoteResult.Ok($"Deleted {remote}/{branch}.")
+            : ToRemoteFailure(result, $"Could not delete {remote}/{branch}.");
+    }
+
+    /// <summary>
     /// True when the local branch still matches what the lease expects; the empty expectation only holds when the branch
     /// has no commit at all, which a local branch that exists never satisfies.
     /// </summary>

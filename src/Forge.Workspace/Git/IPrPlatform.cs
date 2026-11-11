@@ -4,7 +4,8 @@ namespace Forge.Workspace;
 /// The pull request hosting platform as tools and UI see it. Every method works in <paramref name="workingDirectory"/>
 /// (a session worktree) and resolves the repository from it. All calls read the platform fresh – nothing is cached – and
 /// report expected failures through <see cref="PrResult{T}"/> instead of throwing; only cancellation throws. There is
-/// deliberately no merge operation: Forge never merges a pull request for the user.
+/// <para>Merging is the one write that is never automatic: <see cref="MergePullRequestAsync"/> runs only after the user
+/// confirmed a strategy in the shell's dialog, and nothing here ever merges, closes or force-pushes on its own.</para>
 /// </summary>
 public interface IPrPlatform
 {
@@ -40,6 +41,22 @@ public interface IPrPlatform
         string? title = null,
         string? body = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Merges the pull request with the strategy the user confirmed, optionally deleting the head branch on the platform
+    /// afterwards. The platform enforces its own protection rules; a refusal comes back as a failed result, never as an
+    /// exception. The default implementation refuses, so a platform that cannot merge (a test double, a future host) needs
+    /// no boilerplate — callers must therefore treat "not supported" as a real answer.
+    /// </summary>
+    Task<PrResult<PrReference>> MergePullRequestAsync(
+        string workingDirectory,
+        int number,
+        PrMergeMethod method,
+        bool deleteBranch = false,
+        CancellationToken ct = default) =>
+        Task.FromResult(PrResult<PrReference>.Fail(
+            GitRemoteFailureKind.Other,
+            "This platform cannot merge pull requests."));
 
     /// <summary>
     /// The checks reported for the pull request. A successful read with no checks means none are reported yet – CI may

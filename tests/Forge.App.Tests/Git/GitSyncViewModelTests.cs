@@ -556,6 +556,174 @@ public sealed class GitSyncViewModelTests
     // ------------------------------------------------------------ harness
 
     [Fact]
+    public async Task The_ship_row_offers_to_open_a_pull_request_once_the_branch_is_published()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("ship-none");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+
+        var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Fail(
+            GitRemoteFailureKind.Other, "no pull request", reason: PrFailureReason.PullRequestNotFound));
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(pullRequests: platform, composePullRequest: _ => Task.FromResult<PullRequestDraft?>(null));
+        try
+        {
+            await AttachAndWaitAsync(session, panel, "s1", work);
+
+            var state = await session.Dispatch(
+                () => new
+                {
+                    panel.PullRequestPhase,
+                    panel.CanComposePullRequest,
+                    panel.HasPullRequestState,
+                    Label = panel.PullRequestLabel,
+                    Compose = panel.ShipActions[0],
+                    Browser = panel.ShipActions[1],
+                    panel.ShowPublish,
+                },
+                CancellationToken.None);
+
+            Assert.Equal(PullRequestPhase.None, state.PullRequestPhase);
+            Assert.True(state.CanComposePullRequest);
+            Assert.False(state.HasPullRequestState);
+            Assert.Equal(Loc.Instance[GitStrings.ShipTarget], state.Label);
+            Assert.Equal("compose", state.Compose.Key);
+            Assert.True(state.Compose.IsEnabled);
+            Assert.False(state.Browser.IsEnabled);
+            Assert.Equal(Loc.Instance[GitStrings.ShipNoPullRequest], state.Browser.DisabledReason);
+
+            // Published already: the publish pill is not shown, the branch verb lives on the git row above.
+            Assert.False(state.ShowPublish);
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task An_open_pull_request_becomes_the_button_state_and_blocks_a_second_one()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("ship-open");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+
+        var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Ok(
+            new PullRequestInfo(12, "https://example.test/pr/12", PrState.Open, "t", "b", "main", "main", "sha", false,
+                PrMergeStateStatus.Clean, PrReviewDecision.None)));
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(pullRequests: platform);
+        try
+        {
+            await AttachAndWaitAsync(session, panel, "s1", work);
+
+            var state = await session.Dispatch(
+                () => new
+                {
+                    panel.PullRequestPhase,
+                    panel.PullRequestLabel,
+                    panel.PullRequestNumberText,
+                    panel.PullRequestIsOpen,
+                    Url = panel.PullRequestUrl,
+                    Compose = panel.ShipActions[0],
+                    Browser = panel.ShipActions[1],
+                },
+                CancellationToken.None);
+
+            Assert.Equal(PullRequestPhase.Open, state.PullRequestPhase);
+            Assert.Equal(Loc.Instance[GitStrings.PrStateOpen], state.PullRequestLabel);
+            Assert.Equal("#12", state.PullRequestNumberText);
+            Assert.True(state.PullRequestIsOpen);
+            Assert.Equal("https://example.test/pr/12", state.Url);
+            Assert.False(state.Compose.IsEnabled);
+            Assert.Equal(Loc.Instance[GitStrings.ShipAlreadyExists], state.Compose.DisabledReason);
+            Assert.True(state.Browser.IsEnabled);
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task Gh_not_ready_is_its_own_state_and_never_looks_like_no_pull_request()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("ship-gh");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+
+        var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Ok(
+            new PullRequestInfo(1, "u", PrState.Open, "t", "b", "main", "main", "sha", false,
+                PrMergeStateStatus.Clean, PrReviewDecision.None)))
+        {
+            Availability = new PrPlatformAvailability(PrPlatformState.NotAuthenticated, "run gh auth login"),
+        };
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(pullRequests: platform);
+        try
+        {
+            await AttachAndWaitAsync(session, panel, "s1", work);
+
+            var state = await session.Dispatch(
+                () => new
+                {
+                    panel.PullRequestPhase,
+                    panel.HasPullRequestProblem,
+                    Problem = panel.PullRequestProblemText,
+                    panel.CanComposePullRequest,
+                    Compose = panel.ShipActions[0],
+                },
+                CancellationToken.None);
+
+            Assert.Equal(PullRequestPhase.Unavailable, state.PullRequestPhase);
+            Assert.True(state.HasPullRequestProblem);
+            Assert.Equal("run gh auth login", state.Problem);
+            Assert.False(state.CanComposePullRequest);
+            Assert.Equal("run gh auth login", state.Compose.DisabledReason);
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task The_merge_pull_request_row_follows_the_platform_merge_state()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("merge-state");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+
+        var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Ok(
+            new PullRequestInfo(7, "u", PrState.Open, "t", "b", "main", "main", "sha", false,
+                PrMergeStateStatus.Blocked, PrReviewDecision.ReviewRequired)));
+        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(
+            pullRequests: platform,
+            composeMerge: _ => Task.FromResult<PullRequestMergeChoice?>(null),
+            confirm: (_, _) => Task.FromResult(false));
+        try
+        {
+            await AttachAndWaitAsync(session, panel, "s1", work);
+
+            var blocked = await session.Dispatch(
+                () => new { panel.CanMergePullRequest, Row = panel.ShipActions.First(action => action.Key == "merge-pr") },
+                CancellationToken.None);
+            Assert.False(blocked.CanMergePullRequest);
+            Assert.False(blocked.Row.IsEnabled);
+            Assert.False(string.IsNullOrWhiteSpace(blocked.Row.DisabledReason));
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task Refresh_requests_raised_during_a_read_collapse_into_one_more_read()
     {
         using var sandbox = GitSandbox.Create();
@@ -830,10 +998,21 @@ public sealed class GitSyncViewModelTests
         }
     }
 
-    private static GitSyncViewModel NewPanel(GitPullStrategy strategy = GitPullStrategy.FastForwardOnly) =>
+    private static GitSyncViewModel NewPanel(
+        GitPullStrategy strategy = GitPullStrategy.FastForwardOnly,
+        IPrPlatform? pullRequests = null,
+        Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest = null,
+        Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge = null,
+        Func<string, string, Task<bool>>? confirm = null) =>
         new(
             new GitCli(),
-            new GitPanelSettings(() => strategy, () => TimeSpan.FromSeconds(30)));
+            new GitPanelSettings(() => strategy, () => TimeSpan.FromSeconds(30)),
+            openFile: null,
+            notifications: null,
+            pullRequests: pullRequests,
+            composePullRequest: composePullRequest,
+            composeMerge: composeMerge,
+            confirm: confirm);
 
     /// <summary>
     /// Attaches and waits for the trailing refresh inside one UI dispatch: the panel's continuations only
@@ -1016,6 +1195,50 @@ public sealed class GitSyncViewModelTests
     }
 
     /// <summary>A bare <c>origin.git</c> plus clones with pinned local identity.</summary>
+    /// <summary>
+    /// The smallest pull-request platform the ship row talks to: availability and the branch's pull request are answered,
+    /// every write throws so a test that accidentally creates something fails loudly.
+    /// </summary>
+    private sealed class StubPullRequestPlatform(PrResult<PullRequestInfo> pullRequest) : IPrPlatform
+    {
+        public string Name => "Stub";
+
+        public PrPlatformAvailability Availability { get; set; } = new(PrPlatformState.Ready, string.Empty);
+
+        public Task<PrPlatformAvailability> GetAvailabilityAsync(string workingDirectory, CancellationToken ct = default) =>
+            Task.FromResult(Availability);
+
+        public Task<PrResult<PullRequestInfo>> ViewPullRequestAsync(string workingDirectory, string? selector = null, CancellationToken ct = default) =>
+            Task.FromResult(pullRequest);
+
+        public Task<PrResult<PrReference>> CreatePullRequestAsync(string workingDirectory, string title, string body, string baseBranch, string headBranch, bool draft = false, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrReference>> EditPullRequestAsync(string workingDirectory, int number, string? title = null, string? body = null, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrText>> GetPullRequestDiffAsync(string workingDirectory, int number, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrReviewComment>> ReplyToReviewThreadAsync(string workingDirectory, string threadId, string body, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<PrResult<PrThreadResolution>> ResolveReviewThreadAsync(string workingDirectory, string threadId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class GitSandbox : IDisposable
     {
         private GitSandbox(string root, string origin)
