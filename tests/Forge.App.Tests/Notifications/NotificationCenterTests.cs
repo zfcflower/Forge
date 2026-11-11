@@ -18,6 +18,61 @@ public sealed class NotificationCenterTests
     private static readonly TimeSpan Exit = TimeSpan.FromMilliseconds(180);
 
     [Fact]
+    public async Task Disposing_from_a_pool_thread_leaves_the_toast_list_to_the_ui_thread()
+    {
+        var time = new NotificationFakeTime();
+        var desktop = new NotificationFakeNotifier();
+        var post = new QueuedPost();
+        var center = new NotificationCenter(() => true, desktop, post.Post, time);
+        await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("t"), LocText.Literal("b"));
+        post.Drain();
+        Assert.Single(center.Items);
+
+        // The composition root tears down after ConfigureAwait(false): disposal must not clear a bound collection there.
+        await Task.Run(center.Dispose);
+
+        Assert.Single(center.Items);
+        Assert.Equal(1, post.Count);
+        post.Drain();
+        Assert.Empty(center.Items);
+    }
+
+    [Fact]
+    public async Task A_queued_toast_that_runs_after_disposal_is_dropped()
+    {
+        var time = new NotificationFakeTime();
+        var desktop = new NotificationFakeNotifier();
+        var post = new QueuedPost();
+        var center = new NotificationCenter(() => true, desktop, post.Post, time);
+        await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("t"), LocText.Literal("b"));
+
+        center.Dispose();
+        post.Drain();
+
+        Assert.Empty(center.Items);
+        Assert.Empty(desktop.Calls);
+    }
+
+    [Fact]
+    public async Task Nothing_is_shown_or_sent_after_disposal()
+    {
+        var time = new NotificationFakeTime();
+        var desktop = new NotificationFakeNotifier();
+        var post = new QueuedPost();
+        var center = new NotificationCenter(() => true, desktop, post.Post, time);
+        center.Dispose();
+
+        await center.NotifyAsync(NotificationLevel.Error, LocText.Literal("t"), LocText.Literal("b"));
+        center.IsBackground = true;
+        await center.NotifyAsync(NotificationLevel.Error, LocText.Literal("t"), LocText.Literal("b"));
+        post.Drain();
+
+        Assert.Empty(center.Items);
+        Assert.Empty(desktop.Calls);
+        center.Dispose();
+    }
+
+    [Fact]
     public async Task Switch_off_shows_nothing_and_calls_no_desktop_notifier()
     {
         var time = new NotificationFakeTime();
@@ -433,6 +488,46 @@ public sealed class NotificationCenterTests
             }
 
             return Task.CompletedTask;
+        }
+    }
+}
+
+/// <summary>A dispatcher stand-in that records what was posted, so a test can dispose before draining.</summary>
+internal sealed class QueuedPost
+{
+    private readonly List<Action> pending = [];
+
+    public int Count
+    {
+        get
+        {
+            lock (pending)
+            {
+                return pending.Count;
+            }
+        }
+    }
+
+    public void Post(Action action)
+    {
+        lock (pending)
+        {
+            pending.Add(action);
+        }
+    }
+
+    public void Drain()
+    {
+        Action[] copy;
+        lock (pending)
+        {
+            copy = [.. pending];
+            pending.Clear();
+        }
+
+        foreach (var action in copy)
+        {
+            action();
         }
     }
 }

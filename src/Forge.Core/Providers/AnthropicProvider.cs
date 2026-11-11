@@ -25,7 +25,24 @@ public sealed class AnthropicProvider : HttpChatProvider
 
     protected override void ApplyAuth(HttpRequestMessage request)
     {
+        // Every Messages request names the API version; an OAuth token still needs it.
         request.Headers.TryAddWithoutValidation("anthropic-version", Version);
+
+        if (Config.AuthStyle == ProviderAuthStyle.BearerOnly)
+        {
+            // A subscription token (or a gateway that speaks OAuth) authenticates as a bearer token, not as an API key, and
+            // the request must opt into the betas that admit an OAuth credential and the Claude Code client identity.
+            if (!string.IsNullOrEmpty(Config.ApiKey))
+            {
+                request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + Config.ApiKey);
+            }
+
+            request.Headers.TryAddWithoutValidation(
+                "anthropic-beta",
+                string.Join(',', ClaudeSubscriptionCredentials.Betas));
+            return;
+        }
+
         if (!string.IsNullOrEmpty(Config.ApiKey))
         {
             request.Headers.TryAddWithoutValidation("x-api-key", Config.ApiKey);
@@ -58,7 +75,7 @@ public sealed class AnthropicProvider : HttpChatProvider
         WriteTools(writer, request);
     });
 
-    private static void WriteSystem(Utf8JsonWriter writer, ChatRequest request)
+    private void WriteSystem(Utf8JsonWriter writer, ChatRequest request)
     {
         var system = new StringBuilder(request.SystemPrompt);
         foreach (var message in request.Messages)
@@ -76,22 +93,43 @@ public sealed class AnthropicProvider : HttpChatProvider
             system.Append(text);
         }
 
-        if (system.Length == 0)
+        // An OAuth (subscription) request is only accepted when the preamble is its own first system block; for an API-key
+        // request the preamble is empty and the array keeps its single block.
+        var preamble = Config.SystemPromptPreamble;
+        var hasPreamble = !string.IsNullOrEmpty(preamble);
+        if (system.Length == 0 && !hasPreamble)
         {
             return;
         }
 
         var cache = request.Cache?.CacheSystemAndTools == true;
         writer.WriteStartArray("system");
-        writer.WriteStartObject();
-        writer.WriteString("type", "text");
-        writer.WriteString("text", system.ToString());
-        if (cache)
+        if (hasPreamble)
         {
-            WriteCacheControl(writer);
+            writer.WriteStartObject();
+            writer.WriteString("type", "text");
+            writer.WriteString("text", preamble);
+            if (cache && system.Length == 0)
+            {
+                WriteCacheControl(writer);
+            }
+
+            writer.WriteEndObject();
         }
 
-        writer.WriteEndObject();
+        if (system.Length > 0)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "text");
+            writer.WriteString("text", system.ToString());
+            if (cache)
+            {
+                WriteCacheControl(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
         writer.WriteEndArray();
     }
 

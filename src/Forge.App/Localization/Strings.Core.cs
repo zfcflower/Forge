@@ -16,6 +16,18 @@ internal static class CoreStrings
     public const string SettingsReload = "settings.reload";
     public const string SettingsClose = "settings.close";
 
+    /// <summary>The three headings of the settings window's left column, in page order.</summary>
+    public const string SettingsGroupAgentKey = "settings.group.agent";
+
+    public const string SettingsGroupInterfaceKey = "settings.group.interface";
+
+    public const string SettingsGroupSystemKey = "settings.group.system";
+
+    /// <summary>Collapses the section column to an icon rail and back.</summary>
+    public const string SettingsCollapseNav = "settings.collapseNav";
+
+    public const string SettingsExpandNav = "settings.expandNav";
+
     public const string SettingsSectionProvider = "settings.section.provider";
     public const string SettingsSectionPaths = "settings.section.paths";
 
@@ -43,6 +55,11 @@ internal static class CoreStrings
         Loc.Register(SettingsTitle, "设置", "Settings");
         Loc.Register(SettingsReload, "重新加载设置", "Reload settings");
         Loc.Register(SettingsClose, "关闭", "Close");
+        Loc.Register(SettingsGroupAgentKey, "AGENT", "AGENT");
+        Loc.Register(SettingsGroupInterfaceKey, "界面", "INTERFACE");
+        Loc.Register(SettingsGroupSystemKey, "系统", "SYSTEM");
+        Loc.Register(SettingsCollapseNav, "收起左栏", "Collapse the section list");
+        Loc.Register(SettingsExpandNav, "展开左栏", "Expand the section list");
 
         Loc.Register(SettingsSectionProvider, "模型提供方", "Model provider");
         Loc.Register(SettingsSectionPaths, "路径与服务", "Paths and services");

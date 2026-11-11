@@ -10,6 +10,7 @@ using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.App.Services;
+using Forge.App.Settings;
 using Forge.App.Terminal;
 using Forge.App.Git;
 using Forge.App.Workbench;
@@ -152,6 +153,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// <summary>Set once the restored layout's bottom-group state has been handed to the first attached session.</summary>
     private bool bottomMinimizeAdopted;
     private bool disposed;
+    private SettingsWindow? settingsWindow;
     private bool closing;
 
     public MainWindowViewModel(AppComposition composition)
@@ -280,7 +282,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Loc.Instance.LanguageChanged += OnLanguageChanged;
 
         AddProjectCommand = new AsyncRelayCommand(AddProjectAsync, () => !disposed, OnCommandFailed);
-        ToggleSettingsCommand = new RelayCommand(() => Settings.IsOpen = !Settings.IsOpen);
+        ToggleSettingsCommand = new RelayCommand(ToggleSettings);
         ReloadSettingsCommand = new RelayCommand(ReloadSettings);
         RevealGeneralCommand = new AsyncRelayCommand(
             ct => RevealAsync(composition.Paths.GeneralWorkspaceDirectory),
@@ -310,6 +312,18 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public StatusBarViewModel Status { get; }
 
     public SettingsViewModel Settings { get; }
+
+    /// <summary>
+    /// The window the settings window is centred over; set by the shell once it exists, so the view model can open a
+    /// window without holding a reference to the window it lives in (which would be a cycle).
+    /// </summary>
+    public Func<Avalonia.Controls.Window?>? SettingsOwner { get; set; }
+
+    /// <summary>
+    /// The settings window the shell created, or <c>null</c> while none is open. A test seam: a headless test has no way to
+    /// observe the window otherwise, and the alternative (a test-only public API on the window) would be worse.
+    /// </summary>
+    internal Avalonia.Controls.Window? SettingsWindow => settingsWindow;
 
     public ProjectTreeViewModel Projects { get; }
 
@@ -351,9 +365,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     public AsyncRelayCommand RevealGeneralCommand { get; }
 
-    public string ProviderNotice => composition.Provider.StatusText.Resolve();
+    public string ProviderNotice => composition.Providers.StatusText.Resolve();
 
-    public bool ShowProviderNotice => !composition.Provider.IsConfigured;
+    public bool ShowProviderNotice => !composition.Providers.IsConfigured;
 
     public string GeneralWorkspaceText => composition.Paths.GeneralWorkspaceDirectory;
 
@@ -887,7 +901,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             readOnly ? null : composition.Runtimes.Get(info),
             composition.Checkpoints,
             composition.Sessions,
-            composition.Provider,
+            composition.Providers,
             OnSubAgentToolRequested,
             instrumentSources: instruments)
         {
@@ -2789,11 +2803,77 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         return pending;
     }
 
-    /// <summary>Opens the settings page on one section: the click target of the strip's four counters.</summary>
+    /// <summary>
+    /// Opens the settings page on one section: the click target of the strip's four counters. The window is created on
+    /// demand and reused; selecting the section before showing it means the window opens on the right page.
+    /// </summary>
     private void OpenSettingsSection(string sectionId)
     {
         Settings.SelectSection(sectionId);
-        Settings.IsOpen = true;
+        var window = ShowSettingsWindow();
+        window.Activate();
+    }
+
+    /// <summary>The gear button: closes the window when it is open, otherwise opens (or re-focuses) it.</summary>
+    private void ToggleSettings()
+    {
+        if (settingsWindow is { } open && open.IsVisible)
+        {
+            open.Close();
+            return;
+        }
+
+        ShowSettingsWindow();
+    }
+
+    /// <summary>
+    /// Creates the settings window unless it already exists, then shows it. Both entry points go through here so there is
+    /// only ever one, and closing it flips <see cref="SettingsViewModel.IsOpen"/> back in one place.
+    /// </summary>
+    private SettingsWindow ShowSettingsWindow()
+    {
+        if (settingsWindow is { } existing)
+        {
+            if (!existing.IsVisible)
+            {
+                if (SettingsOwner?.Invoke() is { } existingOwner)
+                {
+                    existing.Show(existingOwner);
+                }
+                else
+                {
+                    existing.Show();
+                }
+            }
+
+            return existing;
+        }
+
+        var window = new SettingsWindow(Settings);
+        settingsWindow = window;
+        window.Closed += OnSettingsWindowClosed;
+        var owner = SettingsOwner?.Invoke();
+        if (owner is not null)
+        {
+            window.Show(owner);
+        }
+        else
+        {
+            window.Show();
+        }
+
+        return window;
+    }
+
+    private void OnSettingsWindowClosed(object? sender, EventArgs e)
+    {
+        if (settingsWindow is { } window)
+        {
+            window.Closed -= OnSettingsWindowClosed;
+        }
+
+        settingsWindow = null;
+        Settings.IsOpen = false;
     }
 
     /// <summary>Cards come and go on their own schedule, so the active strip re-reads its approval count on every change.</summary>
@@ -2946,6 +3026,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         closing = true;
+        if (settingsWindow is { } window)
+        {
+            window.Closed -= OnSettingsWindowClosed;
+            window.Close();
+            settingsWindow = null;
+        }
+
         clock.Stop();
         layoutSaveTimer.Stop();
 

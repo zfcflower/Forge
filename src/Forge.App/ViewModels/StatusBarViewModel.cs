@@ -1,4 +1,5 @@
 using Forge.App.Composition;
+using Forge.App.Providers;
 using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.HostClient;
@@ -32,7 +33,7 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
     public StatusBarViewModel(AppComposition composition)
     {
         WorkspaceText = Shorten(composition.WorkspaceDirectory);
-        ApplyProvider(composition.Provider);
+        ApplyProvider(composition.Providers.Catalog);
 
         if (composition.Host is null)
         {
@@ -188,9 +189,9 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void ApplyProvider(ProviderSettings settings)
+    public void ApplyProvider(ProviderCatalog catalog)
     {
-        providerStatus = settings.StatusText;
+        providerStatus = catalog.StatusText;
         OnPropertyChanged(nameof(ProviderText));
     }
 

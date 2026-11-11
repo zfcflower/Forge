@@ -31,6 +31,12 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
 
     protected override void ApplyAuth(HttpRequestMessage request)
     {
+        if (Config.AuthStyle == ProviderAuthStyle.None)
+        {
+            // A gateway with its own auth scheme: the caller's headers are the only credential.
+            return;
+        }
+
         var apiKey = Config.ApiKey;
         if (!string.IsNullOrEmpty(apiKey))
         {

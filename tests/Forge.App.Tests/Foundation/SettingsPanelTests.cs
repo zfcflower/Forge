@@ -7,16 +7,17 @@ using Avalonia.VisualTree;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Settings;
 using Forge.App.ViewModels;
 using Xunit;
 
 namespace Forge.App.Tests.Foundation;
 
 /// <summary>
-/// Headless render of the settings page (forge-app spec, "偏好、文案与设置分区"): the page body is the section registry and
-/// every section's view model is drawn by its app-level data template, so a feature only has to register one. Pins that
-/// the two sections the shell owns today (<c>provider</c>, <c>paths</c>) really are on screen, in order and with their
-/// bodies rendered - a registry without a template would show an empty box.
+/// Headless render of the standalone settings window: the left column is the grouped registry
+/// (<c>AGENT</c> / <c>界面</c> / <c>系统</c>) and every section's view model is drawn by its app-level data template.
+/// Rewritten for the multi-provider window: the provider row is <c>ProvidersSettingsViewModel</c> (title
+/// "提供方"/"Providers"), the window is separate from the main shell, and the nav order is grouped rather than flat.
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
@@ -31,7 +32,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     public SettingsPanelTests(SettingsPanelFixture fixture) => this.fixture = fixture;
 
     [Fact]
-    public async Task The_settings_panel_renders_the_provider_and_paths_sections_in_order()
+    public async Task The_settings_window_renders_the_provider_and_paths_sections_in_grouped_order()
     {
         var session = fixture.Session;
         await using var shell = await OpensAsync(session);
@@ -40,16 +41,17 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         var provided = await session.Dispatch(() => PanelShell.Section(shell.Window, SettingsSectionIds.Provider), token);
         var paths = await session.Dispatch(() => PanelShell.Section(shell.Window, SettingsSectionIds.Paths), token);
 
-        Assert.Equal(Loc.Instance[CoreStrings.SettingsSectionProvider], provided.Title);
+        Assert.Equal(Loc.Instance[Forge.App.Localization.ProviderStrings.SectionTitleKey], provided.Title);
         Assert.Equal(Loc.Instance[CoreStrings.SettingsSectionPaths], paths.Title);
         Assert.True(provided.Top < paths.Top, "the provider section must be drawn above the paths section");
 
         // The provider section is selected by default and its body renders in the right pane.
-        var provider = Assert.IsType<ProviderSettingsSectionViewModel>(
-            shell.ViewModel.Settings.Sections.Items[0].ViewModel);
+        var providerSection = shell.ViewModel.Settings.Sections.Items[0];
+        Assert.Equal(SettingsSectionIds.Provider, providerSection.Id);
+        var providerModel = Assert.IsType<ProvidersSettingsViewModel>(providerSection.ViewModel);
         var providerTexts = await session.Dispatch(() => PanelShell.SelectedTexts(shell.Window), token);
-        Assert.Contains(provider.Detail, providerTexts);
-        Assert.Contains(provider.Hint, providerTexts);
+        Assert.Contains(providerModel.Intro, providerTexts);
+        Assert.Contains(providerModel.ConnectedTitle, providerTexts);
 
         // Selecting the paths section swaps its body into the right pane.
         await session.Dispatch(
@@ -66,16 +68,21 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     }
 
     [Fact]
-    public async Task The_settings_panel_shows_exactly_the_registered_sections()
+    public async Task The_settings_window_groups_sections_agent_then_interface_then_system()
     {
         var session = fixture.Session;
         await using var shell = await OpensAsync(session);
         var token = new CancellationTokenSource(StepBudget).Token;
 
         var rendered = await session.Dispatch(() => PanelShell.RenderedSectionIds(shell.Window), token);
+        var groups = await session.Dispatch(() => PanelShell.GroupOrder(shell.Window), token);
 
+        // The left column follows SettingsGroups.All, not the flat registry order. The rendered column carries the
+        // group titles (they follow the language), so the ids come from the page model and the titles pin the order.
+        Assert.Equal(["agent", "interface", "system"], shell.ViewModel.Settings.NavGroups.Select(static group => group.Id));
+        Assert.Equal(shell.ViewModel.Settings.NavGroups.Select(static group => group.Title), groups);
         Assert.Equal(
-            shell.ViewModel.Settings.Sections.Items.Select(static section => section.Id),
+            shell.ViewModel.Settings.NavGroups.SelectMany(static group => group.Items.Select(static item => item.Id)),
             rendered);
         // Features add their own sections in parallel; the shell's two stay at both ends.
         Assert.Equal(SettingsSectionIds.Provider, rendered[0]);
@@ -84,7 +91,47 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     }
 
     [Fact]
-    public async Task Switching_the_language_refreshes_the_open_panel()
+    public async Task A_narrow_column_folds_itself_and_the_toggle_overrides_the_width()
+    {
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        var result = await session.Dispatch(
+            () =>
+            {
+                var page = shell.ViewModel.Settings;
+
+                page.UpdateAvailableWidth(SettingsViewModel.AutoCollapseWidth - 120);
+                var folded = page.IsNavCollapsed;
+                var foldedWidth = page.NavWidth.Value;
+                var titlesHidden = !page.ShowNavTitles;
+
+                // The manual toggle wins over the width rule in both directions: in a narrow window it expands the rail.
+                page.ToggleNav();
+                var expandedWhileNarrow = !page.IsNavCollapsed;
+
+                // Widening keeps a manual choice: the user asked for this state.
+                page.UpdateAvailableWidth(1400);
+                var stillExpanded = !page.IsNavCollapsed;
+
+                // Toggling again folds it, and the fold survives widening too.
+                page.ToggleNav();
+                page.UpdateAvailableWidth(1600);
+                return (folded, foldedWidth, titlesHidden, expandedWhileNarrow, stillExpanded, FoldedAgain: page.IsNavCollapsed);
+            },
+            token);
+
+        Assert.True(result.folded, "a column narrower than the threshold folds itself");
+        Assert.Equal(SettingsViewModel.CollapsedNavWidth, result.foldedWidth);
+        Assert.True(result.titlesHidden, "the rail hides the section titles");
+        Assert.True(result.expandedWhileNarrow, "the toggle expands the column even in a narrow window");
+        Assert.True(result.stillExpanded, "widening does not overrule a manual choice");
+        Assert.True(result.FoldedAgain, "the second toggle folds it again");
+    }
+
+    [Fact]
+    public async Task Switching_the_language_refreshes_the_open_window()
     {
         var session = fixture.Session;
         await using var shell = await OpensAsync(session);
@@ -108,9 +155,11 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             var chinese = await session.Dispatch(
                 () => PanelShell.Read(shell.Window),
                 token);
-            Assert.Equal("模型提供方", chinese.ProviderTitle);
+            Assert.Equal("提供方", chinese.ProviderTitle);
             Assert.Equal("路径与服务", chinese.PathsTitle);
-            Assert.Contains("重新加载设置", chinese.Buttons);
+            Assert.Contains("AGENT", chinese.Groups);
+            Assert.Contains("界面", chinese.Groups);
+            Assert.Contains("系统", chinese.Groups);
             Assert.Contains("数据目录", chinese.Texts);
 
             await SwitchAsync(session, shell.Window, UiLanguage.English, token);
@@ -118,9 +167,11 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             var english = await session.Dispatch(
                 () => PanelShell.Read(shell.Window),
                 token);
-            Assert.Equal("Model provider", english.ProviderTitle);
+            Assert.Equal("Providers", english.ProviderTitle);
             Assert.Equal("Paths and services", english.PathsTitle);
-            Assert.Contains("Reload settings", english.Buttons);
+            Assert.Contains("AGENT", english.Groups);
+            Assert.Contains("INTERFACE", english.Groups);
+            Assert.Contains("SYSTEM", english.Groups);
             Assert.Contains("Data directory", english.Texts);
         }
         finally
@@ -153,7 +204,6 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         await session.Dispatch(
             () =>
             {
-                shell.ViewModel.Settings.IsOpen = true;
                 for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
                 {
                     PanelShell.Settle(shell.Window);
@@ -171,8 +221,8 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     }
 
     /// <summary>
-    /// The real shell over a throw-away data root: the environment variables are set for its lifetime and restored
-    /// afterwards, and teardown closes the window before the composition root releases its handles.
+    /// The standalone settings window over a throw-away data root: the environment variables are set for its lifetime
+    /// and restored afterwards, and teardown closes the window before the composition root releases its handles.
     /// </summary>
     private sealed class PanelShell : IAsyncDisposable
     {
@@ -188,7 +238,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             (string? Data, string? General, string? Workspace) saved,
             AppComposition composition,
             MainWindowViewModel viewModel,
-            MainWindow window)
+            SettingsWindow window)
         {
             this.session = session;
             this.root = root;
@@ -202,7 +252,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
 
         public MainWindowViewModel ViewModel { get; }
 
-        public MainWindow Window { get; }
+        public SettingsWindow Window { get; }
 
         public static async Task<PanelShell> OpenAsync(HeadlessUnitTestSession session)
         {
@@ -223,10 +273,10 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                     {
                         var composed = AppComposition.Create();
                         var model = new MainWindowViewModel(composed);
-                        var shell = new MainWindow { DataContext = model };
-                        shell.Show();
-                        Settle(shell);
-                        return (composed, model, shell);
+                        var settings = new SettingsWindow(model.Settings);
+                        settings.Show();
+                        Settle(settings);
+                        return (composed, model, settings);
                     },
                     new CancellationTokenSource(StepBudget).Token);
 
@@ -262,12 +312,13 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                 token);
         }
 
-        /// <summary>One nav entry: its heading and where it sits in the left column.</summary>
+        /// <summary>One nav entry: its title and where it sits in the left column.</summary>
         public static (string? Title, double Top) Section(Window window, string id)
         {
-            var heading = Heading(window, id);
-            var origin = heading?.TranslatePoint(new Point(0, 0), window);
-            return (heading?.Text, origin?.Y ?? double.NaN);
+            var button = NavButton(window, id);
+            var title = (button?.DataContext as SettingsNavItemViewModel)?.Title;
+            var origin = button?.TranslatePoint(new Point(0, 0), window);
+            return (title, origin?.Y ?? double.NaN);
         }
 
         /// <summary>The text lines of the section body shown in the right pane (the selected section).</summary>
@@ -283,25 +334,28 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                     .ToList();
         }
 
-        /// <summary>Everything the open panel shows, read in one UI dispatch.</summary>
-        public static (string? ProviderTitle, string? PathsTitle, IReadOnlyList<string> Buttons, IReadOnlyList<string> Texts) Read(Window window) =>
+        /// <summary>Everything the open window shows, read in one UI dispatch.</summary>
+        public static (string? ProviderTitle, string? PathsTitle, IReadOnlyList<string> Groups, IReadOnlyList<string> Texts) Read(Window window) =>
             (
                 Section(window, SettingsSectionIds.Provider).Title,
                 Section(window, SettingsSectionIds.Paths).Title,
-                window.GetVisualDescendants()
-                    .OfType<Button>()
-                    .Select(static button => button.Content as string)
-                    .Where(static text => !string.IsNullOrEmpty(text))
-                    .Select(static text => text!)
-                    .ToList(),
+                GroupOrder(window),
                 SelectedTexts(window));
 
         public static IReadOnlyList<string> RenderedSectionIds(Window window) =>
             window.GetVisualDescendants()
+                .OfType<Button>()
+                .Where(static button => AutomationProperties.GetAutomationId(button) is { } id && KnownSectionIds.Contains(id))
+                .OrderBy(button => button.TranslatePoint(new Point(0, 0), window)?.Y ?? 0)
+                .Select(static button => AutomationProperties.GetAutomationId(button)!)
+                .ToList();
+
+        public static IReadOnlyList<string> GroupOrder(Window window) =>
+            window.GetVisualDescendants()
                 .OfType<TextBlock>()
-                .Where(static block => AutomationProperties.GetAutomationId(block) is { } id && KnownSectionIds.Contains(id))
-                .OrderBy(block => block.TranslatePoint(new Point(0, 0), window)?.Y ?? 0)
-                .Select(static block => AutomationProperties.GetAutomationId(block)!)
+                .Select(static block => block.Text ?? string.Empty)
+                .Where(static text => text is "AGENT" or "界面" or "INTERFACE" or "系统" or "SYSTEM")
+                .Distinct()
                 .ToList();
 
         /// <summary>Drains the dispatcher and renders, twice: layout can post follow-up work that only exists after a pass.</summary>
@@ -357,13 +411,14 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Skills,
             SettingsSectionIds.Mcp,
             SettingsSectionIds.Tools,
+            SettingsSectionIds.Notifications,
             SettingsSectionIds.Paths,
         ];
 
-        private static TextBlock? Heading(Window window, string id) =>
+        private static Button? NavButton(Window window, string id) =>
             window.GetVisualDescendants()
-                .OfType<TextBlock>()
-                .FirstOrDefault(block => string.Equals(AutomationProperties.GetAutomationId(block), id, StringComparison.Ordinal));
+                .OfType<Button>()
+                .FirstOrDefault(button => string.Equals(AutomationProperties.GetAutomationId(button), id, StringComparison.Ordinal));
 
         private static void Restore((string? Data, string? General, string? Workspace) saved)
         {

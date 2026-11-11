@@ -52,6 +52,40 @@ public sealed class StorageSchemaV5To9MigrationTests
     }
 
     [Fact]
+    public async Task A_v5_failure_after_the_archives_rolls_the_whole_step_back_to_v4()
+    {
+        using var directory = new TempDirectory();
+        await CreateAsVersion4Async(directory);
+        var repo = directory.Combine("repo");
+        await InsertSessionAsync(directory, "older", repo, null, "Active", null, 100);
+        await InsertSessionAsync(directory, "newer", repo, null, "Active", null, 200);
+
+        // A mismatched storage_notices table lets v5 get past the column add, the dedupe and the index, then fails on the
+        // notice insert (no `kind` column) - i.e. after the duplicates were already archived, inside the same transaction.
+        await TodoSchemaRaw.ExecuteAsync(
+            directory,
+            "CREATE TABLE storage_notices (id INTEGER PRIMARY KEY AUTOINCREMENT, payload_json TEXT NOT NULL, "
+            + "created_at TEXT NOT NULL, acknowledged_at TEXT NULL);");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => OpenAsync(directory));
+
+        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal("Active", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'older'"));
+        Assert.Equal("Active", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'newer'"));
+        Assert.DoesNotContain("occupancy_key", await TodoSchemaRaw.ColumnsAsync(directory, "sessions"));
+
+        // Removing the obstacle lets the same step run again from v4 and finish the whole ladder.
+        await TodoSchemaRaw.ExecuteAsync(directory, "DROP TABLE storage_notices;");
+        SqliteConnection.ClearAllPools();
+        await OpenAsync(directory);
+
+        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal("Archived", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'older'"));
+        Assert.Equal("Active", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'newer'"));
+        Assert.Equal(OccupancyKey.Compute(null, repo), await TextAsync(directory, "SELECT occupancy_key FROM sessions WHERE id = 'older'"));
+    }
+
+    [Fact]
     public async Task Duplicate_active_roots_are_archived_except_the_most_recent_and_reported_in_a_notice()
     {
         using var directory = new TempDirectory();

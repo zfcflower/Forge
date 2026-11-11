@@ -10,6 +10,7 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.Core.Agents;
 using Forge.Workspace;
@@ -98,7 +99,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         SessionRuntime? runtime,
         TurnCheckpointService? checkpoints,
         ISessionStore? store,
-        ProviderSettings provider,
+        ProviderServices providers,
         Action<SubAgentViewModel>? subAgentOpened = null,
         ComposerPreferences? composerPreferences = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
@@ -113,7 +114,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         this.store = store;
         this.notifications = notifications;
         this.subAgentOpened = subAgentOpened;
-        providerModel = provider.Provider?.Model ?? string.Empty;
+        providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
         coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
         SubAgents = new ReadOnlyObservableCollection<SubAgentViewModel>(subAgents);
@@ -125,11 +126,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         RedirectCommand = new RelayCommand(Redirect, CanSendWhileRunning);
         Queued = new ReadOnlyObservableCollection<QueuedMessageViewModel>(queued);
         Composer = new ComposerViewModel(
-            provider,
+            providers,
             ApplyRootDefinition,
             composerPreferences ?? ComposerPreferences.Shared,
             session.WorkspacePath,
-            () => ProviderSettings.Load(AppPaths.Create().SettingsPath),
             fileSource,
             skillSource);
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
@@ -137,14 +137,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             session,
             instrumentSources ?? EmptySessionInstrumentSources.Instance,
             ToolNames,
-            () => Composer.Model);
-        if (!provider.IsConfigured)
+            () => Composer.Model,
+            () => Composer.ProviderId);
+        if (!providers.IsConfigured)
         {
-            Transcript.AddNotice(SessionStrings.ProviderMissing(provider.Status), isError: true);
+            var missing = SessionStrings.ProviderMissing(providers.StatusText.Resolve());
+            Transcript.AddNotice(missing, isError: true);
             notifications.Notify(
                 NotificationLevel.Error,
                 NotificationsStrings.ProviderMissingTitle,
-                SessionStrings.ProviderMissing(provider.Status),
+                missing,
                 "provider-missing:" + Info.Id);
         }
 

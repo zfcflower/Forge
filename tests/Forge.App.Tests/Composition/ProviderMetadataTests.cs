@@ -1,20 +1,24 @@
 using System.Net;
 using Forge.Abstractions;
-using Forge.App.Composition;
+using Forge.App.Providers;
+using Forge.Core.Providers;
 using Xunit;
 
 namespace Forge.App.Tests.Composition;
 
 /// <summary>
-/// Pins the two provider-side sources of the metadata chain (task spec "Forge.App" / "未确认假设", <c>provider.modelMeta</c>):
-/// the user's override, which is the strongest source, and what a provider reports for its own models on <c>/models</c>,
-/// which sits between it and the built-in table. Both merge field by field, so a window from one source can sit next to a
-/// price from another, and an entry that only carries a cache price must not invent a whole price record.
+/// Pins the two provider-side sources of the metadata chain: the user's override, which is the strongest source, and
+/// what a provider reports for its own models on <c>/models</c>, which sits between it and the built-in table. Both
+/// merge field by field, so a window from one source can sit next to a price from another, and an entry that only
+/// carries a cache price must not invent a whole price record.
+/// Ported from the single-provider snapshot to the multi-provider catalogue: overrides live on
+/// <c>ProviderDefinition</c>, reported metadata in <c>ProviderModelCache</c>, resolution on
+/// <c>ConnectedProvider.MetadataFor</c> / <c>ProviderCatalog.MetadataFor</c>.
 /// </summary>
 public sealed class ProviderMetadataTests
 {
     [Fact]
-    public void A_settings_file_with_model_meta_produces_metadata_through_the_snapshot()
+    public void A_settings_file_with_model_meta_produces_metadata_through_the_catalogue()
     {
         var root = Path.Combine(Path.GetTempPath(), "forge-provider-meta-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -23,24 +27,34 @@ public sealed class ProviderMetadataTests
             path,
             """
             {
-              "provider": {
-                "kind": "openai-compatible",
-                "baseUrl": "https://api.example.com",
-                "model": "house-model",
-                "apiKey": "test-key-not-a-credential",
-                "modelMeta": {
-                  "house-model": { "contextWindow": 262144, "input": 0.5, "output": 1.5, "cacheRead": 0.05, "cacheWrite": 0.75 }
-                }
+              "providers": {
+                "version": 1,
+                "defaultId": "house",
+                "items": [
+                  {
+                    "id": "house",
+                    "preset": "custom-openai",
+                    "name": "House",
+                    "protocol": "openai-compatible",
+                    "baseUrl": "https://api.example.com",
+                    "auth": { "kind": "api-key" },
+                    "models": ["house-model"],
+                    "defaultModel": "house-model",
+                    "modelMeta": {
+                      "house-model": { "contextWindow": 262144, "input": 0.5, "output": 1.5, "cacheRead": 0.05, "cacheWrite": 0.75 }
+                    }
+                  }
+                ]
               }
             }
             """);
 
         try
         {
-            var settings = ProviderSettings.Load(path);
+            var catalog = Load(path);
 
-            Assert.True(settings.IsConfigured);
-            var metadata = settings.MetadataFor("house-model");
+            Assert.True(catalog.IsConfigured);
+            var metadata = catalog.MetadataFor("house-model");
             Assert.Equal(262_144, metadata.ContextWindow);
             Assert.Equal(new ModelPricing(0.5, 1.5, 0.05, 0.75), metadata.Pricing);
         }
@@ -53,53 +67,38 @@ public sealed class ProviderMetadataTests
     [Fact]
     public void A_model_the_settings_do_not_list_falls_back_to_the_built_in_table()
     {
-        var settings = Settings(new ProviderSection
-        {
-            Kind = "openai-compatible",
-            BaseUrl = "https://api.example.com",
-            Model = "gpt-4o",
-            ModelMeta = new Dictionary<string, ModelMetadataSection>
+        var provider = Provider(
+            new Dictionary<string, ModelMetadataSection>
             {
                 ["house-model"] = new() { ContextWindow = 262_144 },
-            },
-        });
+            });
 
-        Assert.Equal(262_144, settings.MetadataFor("house-model").ContextWindow);
-        Assert.Equal(128_000, settings.MetadataFor("gpt-4o").ContextWindow);
-        Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), settings.MetadataFor("gpt-4o").Pricing);
+        Assert.Equal(262_144, provider.MetadataFor("house-model").ContextWindow);
+        Assert.Equal(128_000, provider.MetadataFor("gpt-4o").ContextWindow);
+        Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), provider.MetadataFor("gpt-4o").Pricing);
     }
 
     [Fact]
     public void The_user_override_wins_over_the_built_in_table_field_by_field()
     {
-        var settings = Settings(new ProviderSection
-        {
-            Kind = "openai-compatible",
-            BaseUrl = "https://api.example.com",
-            Model = "gpt-4o",
-            ModelMeta = new Dictionary<string, ModelMetadataSection>
+        var provider = Provider(
+            new Dictionary<string, ModelMetadataSection>
             {
                 // Only the window: the prices must stay the table's.
                 ["gpt-4o"] = new() { ContextWindow = 64_000 },
-            },
-        });
+            });
 
-        var windowed = settings.MetadataFor("gpt-4o");
+        var windowed = provider.MetadataFor("gpt-4o");
         Assert.Equal(64_000, windowed.ContextWindow);
         Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), windowed.Pricing);
 
-        var priced = Settings(new ProviderSection
-        {
-            Kind = "openai-compatible",
-            BaseUrl = "https://api.example.com",
-            Model = "gpt-4o",
-            ModelMeta = new Dictionary<string, ModelMetadataSection>
+        var priced = Provider(
+            new Dictionary<string, ModelMetadataSection>
             {
                 // Only the prices: the window must stay the table's. A price record replaces the whole record, so the
                 // cache paths the table knew about are the ones this entry states (zero when it states none).
                 ["gpt-4o"] = new() { Input = 1.00, Output = 2.00 },
-            },
-        });
+            });
 
         var repriced = priced.MetadataFor("gpt-4o");
         Assert.Equal(128_000, repriced.ContextWindow);
@@ -109,52 +108,37 @@ public sealed class ProviderMetadataTests
     [Fact]
     public void An_override_with_only_a_cache_price_invents_nothing()
     {
-        var settings = Settings(new ProviderSection
-        {
-            Kind = "openai-compatible",
-            BaseUrl = "https://api.example.com",
-            Model = "house-model",
-            ModelMeta = new Dictionary<string, ModelMetadataSection>
+        var provider = Provider(
+            new Dictionary<string, ModelMetadataSection>
             {
                 // A cache price without an input or an output price is not a price record.
                 ["house-model"] = new() { CacheRead = 0.25 },
                 ["gpt-4o"] = new() { CacheWrite = 0.25 },
-            },
-        });
+            });
 
-        Assert.Same(ModelMetadata.Unknown, settings.MetadataFor("house-model"));
-        Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), settings.MetadataFor("gpt-4o").Pricing);
+        Assert.Same(ModelMetadata.Unknown, provider.MetadataFor("house-model"));
+        Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), provider.MetadataFor("gpt-4o").Pricing);
     }
 
     [Fact]
     public void A_non_positive_window_in_the_settings_is_not_a_window()
     {
-        var settings = Settings(new ProviderSection
-        {
-            Kind = "openai-compatible",
-            BaseUrl = "https://api.example.com",
-            Model = "house-model",
-            ModelMeta = new Dictionary<string, ModelMetadataSection>
+        var provider = Provider(
+            new Dictionary<string, ModelMetadataSection>
             {
                 ["house-model"] = new() { ContextWindow = 0 },
-            },
-        });
+            });
 
-        Assert.Same(ModelMetadata.Unknown, settings.MetadataFor("house-model"));
+        Assert.Same(ModelMetadata.Unknown, provider.MetadataFor("house-model"));
     }
 
     [Fact]
     public void An_entry_with_no_values_at_all_is_ignored()
     {
-        var settings = Settings(new ProviderSection
-        {
-            Kind = "openai-compatible",
-            BaseUrl = "https://api.example.com",
-            Model = "gpt-4o",
-            ModelMeta = new Dictionary<string, ModelMetadataSection> { ["gpt-4o"] = new() },
-        });
+        var provider = Provider(
+            new Dictionary<string, ModelMetadataSection> { ["gpt-4o"] = new() });
 
-        var metadata = settings.MetadataFor("gpt-4o");
+        var metadata = provider.MetadataFor("gpt-4o");
         Assert.Equal(128_000, metadata.ContextWindow);
         Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), metadata.Pricing);
     }
@@ -162,7 +146,8 @@ public sealed class ProviderMetadataTests
     [Fact]
     public async Task The_model_list_metadata_maps_a_reported_window_and_per_token_prices()
     {
-        var snapshot = Snapshot();
+        var cache = new ProviderModelCache();
+        var provider = Provider(cache: cache);
         var handler = new ModelListHandler(
             """
             {
@@ -188,12 +173,12 @@ public sealed class ProviderMetadataTests
             """);
         using var httpClient = new HttpClient(handler);
 
-        var models = await snapshot.FetchModelsAsync(httpClient, CancellationToken.None);
-
-        Assert.Equal(["vendor/model-a", "model-b", "model-c"], models);
+        var list = await ProviderModelListing.FetchAsync("https://api.example.com", headers: null, httpClient, CancellationToken.None);
+        Assert.Equal(["vendor/model-a", "model-b", "model-c"], list.Ids);
+        cache.Set(provider.Id, list);
 
         // Per-token prices in the response become the per-million unit the table and the strip use.
-        var routed = snapshot.MetadataFor("vendor/model-a");
+        var routed = provider.MetadataFor("vendor/model-a");
         Assert.Equal(200_000, routed.ContextWindow);
         Assert.NotNull(routed.Pricing);
         Assert.Equal(0.5, routed.Pricing!.Input, 9);
@@ -202,7 +187,7 @@ public sealed class ProviderMetadataTests
         Assert.Equal(3.0, routed.Pricing.CacheWrite, 9);
 
         // A window can also sit under top_provider, and an absent cache price is billed as zero.
-        var nested = snapshot.MetadataFor("model-b");
+        var nested = provider.MetadataFor("model-b");
         Assert.Equal(32_000, nested.ContextWindow);
         Assert.NotNull(nested.Pricing);
         Assert.Equal(2.0, nested.Pricing!.Input, 9);
@@ -210,18 +195,20 @@ public sealed class ProviderMetadataTests
         Assert.Equal(0d, nested.Pricing.CacheRead, 9);
 
         // A model that reports nothing keeps whatever the built-in table knows and invents no window.
-        Assert.Same(ModelMetadata.Unknown, snapshot.MetadataFor("model-c"));
+        Assert.Same(ModelMetadata.Unknown, provider.MetadataFor("model-c"));
     }
 
     [Fact]
     public async Task The_provider_window_beats_the_table_while_the_user_override_beats_the_provider()
     {
-        var reported = Snapshot();
+        var cache = new ProviderModelCache();
+        var reported = Provider(cache: cache);
         var handler = new ModelListHandler(
             """{"data":[{"id":"gpt-4o","context_length":65536,"pricing":{"prompt":0.000001}}]}""");
         using var httpClient = new HttpClient(handler);
 
-        await reported.FetchModelsAsync(httpClient, CancellationToken.None);
+        var list = await ProviderModelListing.FetchAsync("https://api.example.com", headers: null, httpClient, CancellationToken.None);
+        cache.Set(reported.Id, list);
 
         var fromProvider = reported.MetadataFor("gpt-4o");
         Assert.Equal(65_536, fromProvider.ContextWindow);
@@ -230,11 +217,15 @@ public sealed class ProviderMetadataTests
         Assert.Equal(0d, fromProvider.Pricing.Output, 9);
 
         // The same response, with the user's window in settings.json: the override wins, the provider's price stays.
-        var overridden = Snapshot(new Dictionary<string, ModelMetadataSection> { ["gpt-4o"] = new() { ContextWindow = 1_000 } });
+        var overriddenCache = new ProviderModelCache();
+        var overridden = Provider(
+            new Dictionary<string, ModelMetadataSection> { ["gpt-4o"] = new() { ContextWindow = 1_000 } },
+            overriddenCache);
         var overriddenHandler = new ModelListHandler(
             """{"data":[{"id":"gpt-4o","context_length":65536,"pricing":{"prompt":0.000001}}]}""");
         using var overriddenClient = new HttpClient(overriddenHandler);
-        await overridden.FetchModelsAsync(overriddenClient, CancellationToken.None);
+        var overriddenList = await ProviderModelListing.FetchAsync("https://api.example.com", headers: null, overriddenClient, CancellationToken.None);
+        overriddenCache.Set(overridden.Id, overriddenList);
 
         var resolved = overridden.MetadataFor("gpt-4o");
         Assert.Equal(1_000, resolved.ContextWindow);
@@ -245,55 +236,103 @@ public sealed class ProviderMetadataTests
     [Fact]
     public async Task A_model_the_provider_reports_without_prices_takes_the_table_prices()
     {
-        var snapshot = Snapshot();
+        var cache = new ProviderModelCache();
+        var provider = Provider(cache: cache);
         var handler = new ModelListHandler("""{"data":[{"id":"gpt-4o","context_length":65536}]}""");
         using var httpClient = new HttpClient(handler);
 
-        await snapshot.FetchModelsAsync(httpClient, CancellationToken.None);
+        var list = await ProviderModelListing.FetchAsync("https://api.example.com", headers: null, httpClient, CancellationToken.None);
+        cache.Set(provider.Id, list);
 
-        var metadata = snapshot.MetadataFor("gpt-4o");
+        var metadata = provider.MetadataFor("gpt-4o");
         Assert.Equal(65_536, metadata.ContextWindow);
         Assert.Equal(new ModelPricing(2.50, 10.00, 1.25, 0), metadata.Pricing);
     }
 
     [Fact]
-    public async Task The_reported_metadata_belongs_to_the_snapshot_that_fetched_it()
+    public async Task The_reported_metadata_belongs_to_the_provider_that_fetched_it()
     {
-        var reported = Snapshot();
-        var unrelated = Snapshot();
+        var cache = new ProviderModelCache();
+        var reported = Provider(cache: cache, id: "reported");
+        var unrelated = Provider(cache: cache, id: "unrelated");
         var handler = new ModelListHandler("""{"data":[{"id":"house-model","context_length":8192}]}""");
         using var httpClient = new HttpClient(handler);
 
-        await reported.FetchModelsAsync(httpClient, CancellationToken.None);
+        var list = await ProviderModelListing.FetchAsync("https://api.example.com", headers: null, httpClient, CancellationToken.None);
+        cache.Set(reported.Id, list);
 
         Assert.Equal(8_192, reported.MetadataFor("house-model").ContextWindow);
         Assert.Same(ModelMetadata.Unknown, unrelated.MetadataFor("house-model"));
     }
 
     [Fact]
-    public void A_settings_document_without_a_provider_is_not_configured_and_knows_nothing()
+    public void A_missing_settings_file_seeds_one_anthropic_entry_that_is_never_ready()
     {
-        var missing = ProviderSettings.Load(
-            Path.Combine(Path.GetTempPath(), "forge-missing-" + Guid.NewGuid().ToString("N"), "settings.json"));
+        // Rewritten for the multi-provider behavior: the old build reported "not configured" when the file was
+        // missing; the new build seeds one Anthropic entry so the settings page opens on something fillable.
+        var root = Path.Combine(Path.GetTempPath(), "forge-missing-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var catalog = Load(Path.Combine(root, "settings.json"));
 
-        Assert.False(missing.IsConfigured);
-        Assert.Same(ModelMetadata.Unknown, missing.MetadataFor("gpt-4o"));
+            Assert.True(catalog.IsConfigured);
+            var single = Assert.Single(catalog.Providers);
+            Assert.Equal(ProviderPresets.AnthropicId, single.Definition.PresetId);
+            Assert.Equal(ProviderPresets.AnthropicId, single.Id);
+            Assert.NotEqual(ProviderStatusKind.Ready, single.Status.Kind);
+            Assert.True(
+                single.Status.Kind is ProviderStatusKind.NeedsKey or ProviderStatusKind.NeedsSignIn,
+                "a seeded entry must say a key or sign-in is missing, got " + single.Status.Kind);
+            // The table still resolves through the seeded catalogue.
+            Assert.Equal(128_000, catalog.MetadataFor("gpt-4o").ContextWindow);
+            Assert.Same(ModelMetadata.Unknown, catalog.MetadataFor("house-model-that-exists-nowhere"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
-    private static ProviderSettings Settings(ProviderSection section) =>
-        new(ProviderSnapshot.FromSection(section), "ready");
+    private static ProviderCatalog Load(string settingsPath)
+    {
+        // A directory that stays empty: no secret file, no key file, and a credentials path that cannot exist, so
+        // the seeded entry's status never depends on the machine running the test.
+        var probeDir = Path.Combine(Path.GetTempPath(), "forge-provider-meta-data-" + Guid.NewGuid().ToString("N"));
+        var secrets = new ProviderSecretStore(probeDir);
+        using var http = new HttpClient(new ModelListHandler("""{"data":[]}"""));
+        var credentials = new ProviderCredentials(http, secrets, claudeCredentialsPath: Path.Combine(probeDir, "credentials.json"));
+        return new ProviderStore(settingsPath).Load(secrets, credentials);
+    }
 
-    private static ProviderSnapshot Snapshot(Dictionary<string, ModelMetadataSection>? modelMeta = null) =>
-        ProviderSnapshot.FromSection(new ProviderSection
+    private static ConnectedProvider Provider(
+        Dictionary<string, ModelMetadataSection>? modelMeta = null,
+        ProviderModelCache? cache = null,
+        string id = "house")
+    {
+        var entry = new ProviderEntryDocument
         {
-            Kind = "openai-compatible",
+            Id = id,
+            Preset = ProviderPresets.CustomId,
+            Name = "House",
+            Protocol = "openai-compatible",
             BaseUrl = "https://api.example.com",
-            Model = "house-model",
-            ApiKey = "test-key-not-a-credential",
+            Auth = new ProviderAuthDocument { Kind = "api-key" },
+            Models = ["house-model"],
+            DefaultModel = "house-model",
             ModelMeta = modelMeta,
-        });
+        };
+        var definition = ProviderDefinition.FromDocument(entry, id);
+        // A path that is never created: nothing is stored, so nothing is written and nothing needs cleanup.
+        var probeDir = Path.Combine(Path.GetTempPath(), "forge-provider-meta-store-" + Guid.NewGuid().ToString("N"));
+        var secrets = new ProviderSecretStore(probeDir);
+        var sharedCache = cache ?? new ProviderModelCache();
+        using var http = new HttpClient(new ModelListHandler("""{"data":[]}"""));
+        var credentials = new ProviderCredentials(http, secrets, claudeCredentialsPath: Path.Combine(probeDir, "credentials.json"));
+        return new ConnectedProvider(definition, secrets, sharedCache, credentials);
+    }
 
-    /// <summary>Answers <c>/models</c> with one fixed document; the snapshot only reads that response here.</summary>
+    /// <summary>Answers <c>/models</c> with one fixed document; the listing parser only reads that response here.</summary>
     private sealed class ModelListHandler(string json) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

@@ -562,13 +562,3 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 }
 
 /// <summary>Stands in for a provider when none is configured, so a turn fails with one clear sentence instead of a null.</summary>
-internal sealed class UnconfiguredChatProvider : IChatProvider
-{
-    public static UnconfiguredChatProvider Instance { get; } = new();
-
-    public string Id => "unconfigured";
-
-    public IAsyncEnumerable<ChatStreamEvent> StreamAsync(ChatRequest request, CancellationToken ct) =>
-        throw new ProviderException(
-            "No model provider is configured. Add a provider section to settings.json and reload the app.", retryable: false);
-}

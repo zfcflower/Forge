@@ -1,64 +1,102 @@
 using System.Collections.ObjectModel;
+using Avalonia.Controls;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Settings;
 
 namespace Forge.App.ViewModels;
 
 /// <summary>
-/// The settings surface. It is deliberately read-only: it shows where the settings file lives, what was read from it and
-/// what the extension host reported, and it can reload. Nothing here edits a secret or invents a working model call.
-/// <para>The page body is a list of sections (<see cref="SettingsSections"/>): this class contributes the two the shell
-/// owns today (<c>provider</c> and <c>paths</c>), and the page renders every section through the app-level DataTemplate
-/// for its view model, so a feature adds its settings without editing the page. Section headings and the page's own
-/// labels are <see cref="Loc"/> keys and refresh on <see cref="Loc.LanguageChanged"/>.</para>
+/// The settings surface: the registry of sections (<see cref="SettingsSections"/>) and the left column that lists them,
+/// grouped into <c>AGENT</c> / <c>界面</c> / <c>系统</c>. The window itself is <see cref="SettingsWindow"/>, opened by the
+/// shell; this type owns what a page owns — the selection, the navigation's collapsed state and the reload of the shell's
+/// own diagnostics rows.
+/// <para>Section bodies are rendered by the app-level DataTemplate for their view model type, so a feature adds its
+/// settings without editing the window. Section headings are <see cref="Loc"/> keys and refresh on
+/// <see cref="Loc.LanguageChanged"/>.</para>
 /// </summary>
 internal sealed class SettingsViewModel : ObservableObject, IDisposable
 {
+    /// <summary>Below this window width the section column folds into an icon rail; the user can also fold it by hand.</summary>
+    public const double AutoCollapseWidth = 880;
+
+    /// <summary>Width of the full section column, in DIPs.</summary>
+    public const double ExpandedNavWidth = 240;
+
+    /// <summary>Width of the collapsed icon rail, in DIPs.</summary>
+    public const double CollapsedNavWidth = 48;
+
     private readonly AppComposition composition;
-    private readonly ProviderSettingsSectionViewModel provider;
     private readonly PathsSettingsSectionViewModel paths;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool isOpen;
+    private bool autoCollapsed;
+
+    /// <summary>The user's own choice: <c>null</c> follows the window width, otherwise it wins over it.</summary>
+    private bool? manualCollapsed;
     private SettingsSection? selectedSection;
 
     public SettingsViewModel(AppComposition composition)
     {
         this.composition = composition;
 
-        provider = new ProviderSettingsSectionViewModel();
         paths = new PathsSettingsSectionViewModel();
 
-        // The registry belongs to the composition root (that is where features append their sections); this view model
-        // contributes the two the shell owns today, unless a test or a feature already put them there.
+        // The registry belongs to the composition root (that is where features append their sections); the shell only
+        // guarantees that its own diagnostics section is there.
         Sections = composition.Settings;
-        if (!Sections.Items.Any(static section => string.Equals(section.Id, SettingsSectionIds.Provider, StringComparison.Ordinal)))
+        if (!Sections.Items.Any(static section => string.Equals(section.Id, SettingsSectionIds.Paths, StringComparison.Ordinal)))
         {
-            Sections.Add(new SettingsSection(SettingsSectionIds.Provider, CoreStrings.SettingsSectionProvider, SettingsSectionIds.ProviderOrder, provider));
-            Sections.Add(new SettingsSection(SettingsSectionIds.Paths, CoreStrings.SettingsSectionPaths, SettingsSectionIds.PathsOrder, paths));
+            Sections.Add(new SettingsSection(
+                SettingsSectionIds.Paths,
+                CoreStrings.SettingsSectionPaths,
+                SettingsSectionIds.PathsOrder,
+                paths,
+                SettingsGroups.System,
+                "IconFolder"));
         }
 
+        NavGroups = [];
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        RebuildNav();
         SelectedSection = Sections.Items.FirstOrDefault();
         Rebuild();
     }
 
-    /// <summary>The page body, ordered by each section's <see cref="SettingsSection.Order"/>.</summary>
+    /// <summary>Every registered section, ordered by each section's <see cref="SettingsSection.Order"/>.</summary>
     public SettingsSections Sections { get; }
 
-    /// <summary>The section shown in the right-hand pane; the left nav highlights it.</summary>
+    /// <summary>The left column: one group per <see cref="SettingsGroups"/> entry that has sections.</summary>
+    public ObservableCollection<SettingsNavGroupViewModel> NavGroups { get; }
+
+    /// <summary>The section shown in the right-hand pane; the left column highlights it.</summary>
     public SettingsSection? SelectedSection
     {
         get => selectedSection;
         set
         {
-            if (Set(ref selectedSection, value) && isOpen)
+            if (!Set(ref selectedSection, value))
+            {
+                return;
+            }
+
+            foreach (var group in NavGroups)
+            {
+                foreach (var item in group.Items)
+                {
+                    item.IsSelected = ReferenceEquals(item.Section, value);
+                }
+            }
+
+            if (isOpen)
             {
                 RevealSelected();
             }
         }
     }
 
+    /// <summary>Whether the settings window is on screen; the shell keeps it in step with the window's lifetime.</summary>
     public bool IsOpen
     {
         get => isOpen;
@@ -69,6 +107,80 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
                 RevealSelected();
             }
         }
+    }
+
+    /// <summary>
+    /// The section column folded into an icon rail. A narrowed window folds it by itself; <see cref="ToggleNav"/> records an
+    /// explicit choice that then wins in both directions, so the toggle can also expand the rail inside a narrow window
+    /// instead of offering a button that does nothing.
+    /// </summary>
+    public bool IsNavCollapsed => manualCollapsed ?? autoCollapsed;
+
+    /// <summary>The left column's width as a grid length, so the window can bind a column definition to it.</summary>
+    public GridLength NavWidth => new(IsNavCollapsed ? CollapsedNavWidth : ExpandedNavWidth);
+
+    /// <summary>Headings are meaningless in the rail and are hidden there.</summary>
+    public bool ShowNavTitles => !IsNavCollapsed;
+
+    /// <summary>The expanded mirror, so the title row can show the icon of the direction the button goes.</summary>
+    public bool IsNavExpanded => !IsNavCollapsed;
+
+    public string NavToggleTip => Loc.Instance[IsNavCollapsed ? CoreStrings.SettingsExpandNav : CoreStrings.SettingsCollapseNav];
+
+    public string Title => Loc.Instance[CoreStrings.SettingsTitle];
+
+    public string ReloadText => Loc.Instance[CoreStrings.SettingsReload];
+
+    public string CloseText => Loc.Instance[CoreStrings.SettingsClose];
+
+    /// <summary>Raised when the window's close affordance is used; the window closes itself and clears <see cref="IsOpen"/>.</summary>
+    public event EventHandler? CloseRequested;
+
+    public void RequestClose() => CloseRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>
+    /// The title row's refresh: re-read <c>settings.json</c> and rebuild the shell's rows, so a file edited by hand is
+    /// picked up without restarting. The read runs on the pool — the click is on the UI thread.
+    /// </summary>
+    public async Task ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        await composition.ReloadProviderAsync(cancellationToken).ConfigureAwait(true);
+        RevealSelected();
+    }
+
+    /// <summary>
+    /// The window's client width changed: fold the column below <see cref="AutoCollapseWidth"/> and unfold it above, without
+    /// disturbing a fold the user asked for.
+    /// </summary>
+    public void UpdateAvailableWidth(double width)
+    {
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        var collapsed = width < AutoCollapseWidth;
+        if (collapsed == autoCollapsed)
+        {
+            return;
+        }
+
+        var wasCollapsed = IsNavCollapsed;
+        autoCollapsed = collapsed;
+        if (IsNavCollapsed != wasCollapsed)
+        {
+            RaiseNavState();
+        }
+    }
+
+    /// <summary>
+    /// The title row's toggle: records the user's choice for the column's state. It flips whatever is on screen, so in a
+    /// narrow window it can expand the rail as well as fold it.
+    /// </summary>
+    public void ToggleNav()
+    {
+        manualCollapsed = !IsNavCollapsed;
+        RaiseNavState();
     }
 
     /// <summary>
@@ -92,12 +204,6 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string Title => Loc.Instance[CoreStrings.SettingsTitle];
-
-    public string ReloadText => Loc.Instance[CoreStrings.SettingsReload];
-
-    public string CloseText => Loc.Instance[CoreStrings.SettingsClose];
-
     public void Rebuild()
     {
         paths.Paths.Clear();
@@ -107,14 +213,6 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathGeneralWorkspace], composition.Paths.GeneralWorkspaceDirectory));
         paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathHostData], composition.Paths.HostDataDirectory));
         paths.Paths.Add(new SettingLine(Loc.Instance[CoreStrings.SettingsPathPlugins], composition.Paths.PluginsDirectory));
-
-        var providerSettings = composition.Provider;
-        provider.Detail = providerSettings.Provider is { } snapshot
-            ? ShellStrings.ProviderDetail(snapshot.Summary, snapshot.HasApiKey, snapshot.KeyFromEnvironment)
-            : providerSettings.StatusText.Resolve();
-        provider.Status = providerSettings.StatusText.IsEmpty
-            ? ShellStrings.ProviderUnknown
-            : ShellStrings.ProviderText(providerSettings.StatusText);
 
         if (composition.PreferencesProblem is { Length: > 0 } preferencesProblem)
         {
@@ -143,26 +241,68 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Drops the language subscription; the window view model disposes the settings page with itself.</summary>
+    /// <summary>Drops the language subscription; the window disposes the settings page with itself.</summary>
     public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
 
     /// <summary>
-    /// Something is about to be looked at: rebuild the shell's own rows (the provider's status is live) and let a section
-    /// whose content is a read-only list go and read its source. Reloading here rather than on every counter click keeps the
-    /// database and directory reads off the page except when it is actually shown.
+    /// Rebuilds the left column from the registry, keeping the selection. Called at construction and on every language
+    /// switch (the headings and titles come from <see cref="Loc"/>).
+    /// </summary>
+    private void RebuildNav()
+    {
+        var selectedId = selectedSection?.Id;
+        NavGroups.Clear();
+        foreach (var groupId in SettingsGroups.All)
+        {
+            var group = new SettingsNavGroupViewModel(groupId, ShowNavTitles);
+            foreach (var section in Sections.Items)
+            {
+                if (string.Equals(section.Group, groupId, StringComparison.Ordinal))
+                {
+                    var item = new SettingsNavItemViewModel(section, ShowNavTitles)
+                    {
+                        IsSelected = string.Equals(section.Id, selectedId, StringComparison.Ordinal),
+                    };
+                    group.Items.Add(item);
+                }
+            }
+
+            if (group.Items.Count > 0)
+            {
+                NavGroups.Add(group);
+            }
+        }
+    }
+
+    private void RaiseNavState()
+    {
+        OnPropertyChanged(nameof(IsNavCollapsed));
+        OnPropertyChanged(nameof(IsNavExpanded));
+        OnPropertyChanged(nameof(NavWidth));
+        OnPropertyChanged(nameof(ShowNavTitles));
+        OnPropertyChanged(nameof(NavToggleTip));
+
+        // The headings are part of the column's items, so the rail rebuilds them rather than hiding each one by binding.
+        RebuildNav();
+    }
+
+    /// <summary>
+    /// Something is about to be looked at: rebuild the shell's own rows and let a section whose content is a read-only list
+    /// go and read its source. Reloading here rather than on every counter click keeps the database and directory reads off
+    /// the page except when it is actually shown.
     /// </summary>
     private void RevealSelected()
     {
         Rebuild();
-        if (SelectedSection?.ViewModel is ViewModels.Settings.InstrumentSettingsSectionViewModel instrument)
+        if (SelectedSection?.ViewModel is IReloadableSettingsSection reloadable)
         {
-            instrument.Reload();
+            reloadable.Reload();
         }
     }
 
     /// <summary>
     /// Text that caches a language-dependent value has to re-read it: the headings through <see cref="SettingsSection.Title"/>,
-    /// the provider section's hint, and the path rows' labels (rebuilt by <see cref="Rebuild"/>).
+    /// the column's group titles and the path rows' labels (rebuilt by <see cref="Rebuild"/>).
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
@@ -176,51 +316,20 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(ReloadText));
         OnPropertyChanged(nameof(CloseText));
+        OnPropertyChanged(nameof(NavToggleTip));
 
         foreach (var section in Sections.Items)
         {
             section.RaiseTitle();
         }
 
-        provider.RefreshText();
+        RebuildNav();
         Rebuild();
     }
 }
 
-/// <summary>The <c>provider</c> section: which model provider the app uses, or the sentence that says why there is none.</summary>
-internal sealed class ProviderSettingsSectionViewModel : ObservableObject
-{
-    private string detail = string.Empty;
-    private string status = string.Empty;
-
-    public string Detail
-    {
-        get => detail;
-        set => Set(ref detail, value);
-    }
-
-    /// <summary>
-    /// The provider's live status sentence. It used to live only in the window status bar; that bar is gone, so the section
-    /// that owns the provider is where the sentence belongs.
-    /// </summary>
-    public string Status
-    {
-        get => status;
-        set => Set(ref status, value);
-    }
-
-    public string Hint => Loc.Instance[CoreStrings.SettingsProviderHint];
-
-    /// <summary>Re-reads the strings that come from <see cref="Loc"/> after a language switch.</summary>
-    internal void RefreshText()
-    {
-        OnPropertyChanged(nameof(Hint));
-        OnPropertyChanged(nameof(Status));
-    }
-}
-
 /// <summary>The <c>paths</c> section: the data root, the workspace and the services the shell found.</summary>
-internal sealed class PathsSettingsSectionViewModel : ObservableObject
+internal sealed class PathsSettingsSectionViewModel
 {
     public ObservableCollection<SettingLine> Paths { get; } = [];
 }

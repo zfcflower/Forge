@@ -18,7 +18,7 @@ public sealed class StringTableTests
     /// <summary>Every feature prefix the product tables use; a key with another first segment fails the test.</summary>
     private static readonly HashSet<string> KnownPrefixes = new(StringComparer.Ordinal)
     {
-        "shell", "window", "workbench", "status", "provider", "diag", "dialog",
+        "shell", "window", "workbench", "status", "provider", "providers", "diag", "dialog",
         "project", "session", "turn", "subagent", "files", "changes", "todo",
         "review", "spec", "language", "settings", "format", "terminal", "appearance", "Extensions", "git", "editor", "lifecycle", "notifications",
     };

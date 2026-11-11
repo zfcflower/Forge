@@ -188,13 +188,14 @@ public sealed class MinorRegressionTests
 
     /// <summary>
     /// Orientation responsibility split: no window-wide <c>Selector="StackPanel"</c> style may set Orientation (the
-    /// generic StackPanel keeps its vertical default), and each of the five rows that must run horizontally declares
-    /// <c>Orientation="Horizontal"</c> locally: the title-bar logo/wordmark lockup, the search-plus-host outer row, the
-    /// host-state inner row, the title-bar button group, and the settings-page bottom action row. Each row is located
-    /// by the children it already owns (names, automation ids, command bindings), not by counting StackPanels.
+    /// generic StackPanel keeps its vertical default), and each of the four rows of the shell window that must run
+    /// horizontally declares <c>Orientation="Horizontal"</c> locally: the title-bar logo/wordmark lockup, the
+    /// search-plus-host outer row, the host-state inner row and the title-bar button group. Each row is located by the
+    /// children it already owns (names, automation ids), not by counting StackPanels. The settings page's own rows live in
+    /// its window now and follow the same rule there.
     /// </summary>
     [Fact]
-    public void StackPanel_orientation_is_declared_locally_on_the_five_horizontal_rows()
+    public void StackPanel_orientation_is_declared_locally_on_the_four_horizontal_rows()
     {
         var document = LoadMainWindow();
 
@@ -225,8 +226,6 @@ public sealed class MinorRegressionTests
             panels,
             "the title-bar button group",
             static panel => HasDescendantAutomationId(panel, "terminal-open") && HasDescendantAutomationId(panel, "window-close"));
-        // Settings-page bottom action row: owns the reload/close actions.
-        AssertHorizontalRow(panels, "the settings-page bottom action row", static panel => HasDescendantCommand(panel, "ReloadSettingsCommand"));
     }
 
     private static void AssertHorizontalRow(IReadOnlyList<XElement> panels, string row, Func<XElement, bool> match)

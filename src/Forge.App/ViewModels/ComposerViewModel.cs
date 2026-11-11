@@ -4,6 +4,8 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Providers;
+using Forge.Core.Providers;
 using Forge.App.Services;
 using Forge.Core.Prompts;
 using Forge.Workspace;
@@ -56,15 +58,28 @@ internal sealed class ComposerModelOption : ObservableObject
     private bool isPinned;
     private bool isSelected;
 
-    public ComposerModelOption(string name, bool pinned)
+    public ComposerModelOption(string name, string providerId, string providerName, bool pinned)
     {
         Name = name;
+        ProviderId = providerId;
+        ProviderName = providerName;
         isPinned = pinned;
         SelectCommand = new RelayCommand(() => Selected?.Invoke(this));
         TogglePinCommand = new RelayCommand(() => PinToggled?.Invoke(this));
     }
 
     public string Name { get; }
+
+    /// <summary>The provider that serves this model, so picking a row also picks where it runs.</summary>
+    public string ProviderId { get; }
+
+    public string ProviderName { get; }
+
+    /// <summary>The provider name shown after the model when more than one provider is connected; empty otherwise.</summary>
+    public string Caption => ShowProviderCaption ? ProviderName : string.Empty;
+
+    /// <summary>Set by the composer: a single-provider setup does not repeat the provider on every row.</summary>
+    public bool ShowProviderCaption { get; init; }
 
     public bool IsPinned
     {
@@ -162,13 +177,13 @@ internal sealed class ComposerViewModel : ObservableObject
     private readonly Action<AgentDefinition?> apply;
     private readonly ComposerPreferences preferences;
     private readonly string workspace;
-    private readonly Func<ProviderSettings>? reloadSettings;
+    private readonly ProviderServices services;
+    private ProviderCatalog catalog;
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
-    private readonly Func<CancellationToken, Task<IReadOnlyList<string>>>? modelSource;
+    private readonly Func<CancellationToken, Task>? modelRefresh;
     private readonly List<ComposerModelOption> allModels = [];
-    private readonly ProviderSnapshot? snapshot;
-    private IReadOnlyList<string> modelNames;
+    private string providerId = string.Empty;
     private ComposerAgentOption selectedAgent;
     private string model = string.Empty;
     private ThinkingEffort effort;
@@ -187,27 +202,25 @@ internal sealed class ComposerViewModel : ObservableObject
     private ComposerToken dismissed = ComposerToken.None;
 
     public ComposerViewModel(
-        ProviderSettings provider,
+        ProviderServices providers,
         Action<AgentDefinition?> apply,
         ComposerPreferences preferences,
         string workspace,
-        Func<ProviderSettings>? reloadSettings = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
-        Func<CancellationToken, Task<IReadOnlyList<string>>>? modelSource = null)
+        Func<CancellationToken, Task>? modelRefresh = null)
     {
-        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
         ArgumentNullException.ThrowIfNull(preferences);
+        services = providers;
+        catalog = providers.Catalog;
         this.apply = apply;
         this.preferences = preferences;
         this.workspace = workspace ?? string.Empty;
-        this.reloadSettings = reloadSettings;
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
         this.skillSource = skillSource ?? DiscoverSkills;
-        snapshot = provider.Provider;
-        this.modelSource = modelSource ?? (snapshot?.SupportsModelDiscovery == true ? snapshot.FetchModelsAsync : null);
-        modelNames = snapshot?.Models ?? [];
+        this.modelRefresh = modelRefresh;
 
         var agents = new List<ComposerAgentOption> { new(null) };
         agents.AddRange(BuiltInAgents.All.Select(definition => new ComposerAgentOption(definition)));
@@ -221,13 +234,16 @@ internal sealed class ComposerViewModel : ObservableObject
                         agents[0];
         selectedAgent.IsSelected = true;
 
-        model = snapshot?.Model ?? string.Empty;
-        effort = snapshot?.Thinking ?? ThinkingEffort.Off;
-        if (snapshot is not null)
+        var defaultProvider = catalog.Default;
+        providerId = defaultProvider?.Id ?? string.Empty;
+        model = defaultProvider?.DefaultModel ?? string.Empty;
+        effort = defaultProvider?.Definition.Thinking ?? ThinkingEffort.Off;
+        if (defaultProvider is not null)
         {
             if (!string.IsNullOrWhiteSpace(preferences.DefaultModel))
             {
                 model = preferences.DefaultModel!;
+                providerId = ResolveProviderFor(model) ?? providerId;
             }
 
             effort = preferences.DefaultEffort ?? effort;
@@ -236,7 +252,7 @@ internal sealed class ComposerViewModel : ObservableObject
         Suggestions = [];
         Models = [];
         RebuildModels();
-        SaveDefaultsCommand = new RelayCommand(SaveDefaults, () => snapshot is not null);
+        SaveDefaultsCommand = new RelayCommand(SaveDefaults, () => catalog.IsConfigured);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, onError: OnRefreshFailed);
         Apply();
     }
@@ -265,7 +281,7 @@ internal sealed class ComposerViewModel : ObservableObject
 
     public string AgentLabel => selectedAgent.Name;
 
-    public bool HasModel => snapshot is not null;
+    public bool HasModel => catalog.IsConfigured;
 
     /// <summary>The visible model rows: the search filter applied, pinned ones first.</summary>
     public ObservableCollection<ComposerModelOption> Models { get; }
@@ -278,20 +294,19 @@ internal sealed class ComposerViewModel : ObservableObject
         set
         {
             value = (value ?? string.Empty).Trim();
-            if (snapshot is null || value.Length == 0 || !Set(ref model, value))
+            if (!catalog.IsConfigured || value.Length == 0 || !Set(ref model, value))
             {
                 return;
             }
 
-            foreach (var option in allModels)
-            {
-                option.IsSelected = string.Equals(option.Name, model, StringComparison.Ordinal);
-            }
-
+            MarkSelectedOption();
             OnPropertyChanged(nameof(ModelLabel));
             Apply();
         }
     }
+
+    /// <summary>The provider of the current model; the session readout prices tokens with it.</summary>
+    public string ProviderId => providerId;
 
     public string ModelLabel => model.Length == 0 ? "—" : model;
 
@@ -365,40 +380,36 @@ internal sealed class ComposerViewModel : ObservableObject
         Status = null;
         skills = null;
         files = null;
-        if (reloadSettings is not null)
+        if (modelRefresh is null)
         {
-            // Only the list is refreshed: the provider of this session was built from the settings at start-up.
-            if (reloadSettings().Provider is { } reloaded)
-            {
-                modelNames = reloaded.Models;
-            }
-        }
-
-        RebuildModels();
-        if (modelSource is null)
-        {
+            RebuildModels();
             return;
         }
 
-        modelNames = await modelSource(cancellationToken).ConfigureAwait(true);
+        await modelRefresh(cancellationToken).ConfigureAwait(true);
+        catalog = services.Catalog;
         RebuildModels();
-        Status = SessionStrings.ComposerModelsFetched(modelNames.Count);
+        Status = SessionStrings.ComposerModelsFetched(allModels.Count);
     }
 
     /// <summary>The definition the root agent should run with, or null for the untouched default.</summary>
     public AgentDefinition? CurrentDefinition()
     {
-        if (snapshot is null)
+        var provider = catalog.Find(providerId);
+        if (provider is null)
         {
             return null;
         }
 
-        if (selectedAgent.IsDefault && string.Equals(model, snapshot.Model, StringComparison.Ordinal) && effort == snapshot.Thinking)
+        if (selectedAgent.IsDefault &&
+            string.Equals(model, provider.DefaultModel, StringComparison.Ordinal) &&
+            effort == provider.Definition.Thinking &&
+            string.Equals(provider.Id, catalog.Default?.Id, StringComparison.Ordinal))
         {
             return null;
         }
 
-        var settings = new ModelSettings(model, effort, snapshot.MaxOutputTokens);
+        var settings = new ModelSettings(model, effort, provider.Definition.MaxOutputTokens, provider.Id);
         return selectedAgent.Definition is { } definition
             ? definition with { Model = settings }
             : new AgentDefinition("Root", "Main coding agent.", string.Empty, settings);
@@ -602,7 +613,32 @@ internal sealed class ComposerViewModel : ObservableObject
 
     private void OnAgentSelected(ComposerAgentOption option) => SelectedAgent = option;
 
-    private void OnModelSelected(ComposerModelOption option) => Model = option.Name;
+    private void OnModelSelected(ComposerModelOption option)
+    {
+        var providerChanged = !string.Equals(providerId, option.ProviderId, StringComparison.Ordinal);
+        providerId = option.ProviderId;
+
+        // Two providers can serve a model with the same id: the name alone does not change, but the selection did, so the
+        // rows and the next turn's definition still have to follow it.
+        if (!Set(ref model, option.Name) && !providerChanged)
+        {
+            return;
+        }
+
+        MarkSelectedOption();
+        OnPropertyChanged(nameof(ModelLabel));
+        Apply();
+    }
+
+    /// <summary>Puts the check mark on the one row that matches both the model and its provider.</summary>
+    private void MarkSelectedOption()
+    {
+        foreach (var option in allModels)
+        {
+            option.IsSelected = string.Equals(option.Name, model, StringComparison.Ordinal) &&
+                                (providerId.Length == 0 || string.Equals(option.ProviderId, providerId, StringComparison.Ordinal));
+        }
+    }
 
     private void OnPinToggled(ComposerModelOption option)
     {
@@ -620,31 +656,39 @@ internal sealed class ComposerViewModel : ObservableObject
         }
 
         allModels.Clear();
-        if (snapshot is not null)
+        if (catalog.IsConfigured)
         {
-            var names = new List<string>(modelNames);
-            foreach (var pinned in preferences.PinnedModels)
+            var showProvider = catalog.Providers.Count > 1;
+            foreach (var provider in catalog.Providers)
             {
-                if (!names.Contains(pinned, StringComparer.Ordinal))
+                foreach (var name in provider.Models)
                 {
-                    names.Add(pinned);
+                    var option = new ComposerModelOption(name, provider.Id, provider.DisplayName, preferences.IsPinned(name))
+                    {
+                        ShowProviderCaption = showProvider,
+                        IsSelected = string.Equals(name, model, StringComparison.Ordinal) &&
+                                     string.Equals(provider.Id, providerId, StringComparison.Ordinal),
+                    };
+                    option.Selected += OnModelSelected;
+                    option.PinToggled += OnPinToggled;
+                    allModels.Add(option);
                 }
             }
 
-            if (model.Length > 0 && !names.Contains(model, StringComparer.Ordinal))
+            // A pinned model that no connected provider lists any more still shows, so a pin is not silently lost.
+            foreach (var pinned in preferences.PinnedModels)
             {
-                names.Add(model);
-            }
-
-            foreach (var name in names)
-            {
-                var option = new ComposerModelOption(name, preferences.IsPinned(name))
+                if (!allModels.Exists(option => string.Equals(option.Name, pinned, StringComparison.Ordinal)))
                 {
-                    IsSelected = string.Equals(name, model, StringComparison.Ordinal),
-                };
-                option.Selected += OnModelSelected;
-                option.PinToggled += OnPinToggled;
-                allModels.Add(option);
+                    var option = new ComposerModelOption(pinned, providerId, string.Empty, pinned: true)
+                    {
+                        ShowProviderCaption = false,
+                        IsSelected = string.Equals(pinned, model, StringComparison.Ordinal),
+                    };
+                    option.Selected += OnModelSelected;
+                    option.PinToggled += OnPinToggled;
+                    allModels.Add(option);
+                }
             }
         }
 
@@ -655,7 +699,9 @@ internal sealed class ComposerViewModel : ObservableObject
     {
         var query = modelSearch.Trim();
         var visible = allModels
-            .Where(option => query.Length == 0 || option.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Where(option => query.Length == 0 ||
+                             option.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                             option.ProviderName.Contains(query, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(option => option.IsPinned)
             .ToList();
         Models.Clear();
@@ -671,6 +717,51 @@ internal sealed class ComposerViewModel : ObservableObject
     {
         preferences.SetDefaults(selectedAgent.IsDefault ? null : selectedAgent.Key, model, effort);
         Status = SessionStrings.ComposerDefaultsSaved;
+    }
+
+    /// <summary>
+    /// The picker's refresh: asks every connected provider that can list models for its current list. One provider failing
+    /// does not stop the others; the first failure is reported (and announced, like any other model-fetch failure), and the
+    /// lists that did come back are already in the cache.
+    /// </summary>
+    private async Task RefreshAllProvidersAsync(CancellationToken cancellationToken)
+    {
+        Exception? failure = null;
+        foreach (var provider in catalog.Providers)
+        {
+            if (!provider.Definition.Preset.SupportsModelListing)
+            {
+                continue;
+            }
+
+            try
+            {
+                await services.RefreshModelsAsync(provider, cancellationToken).ConfigureAwait(true);
+            }
+            catch (Exception exception) when (exception is ProviderException or HttpRequestException or TimeoutException)
+            {
+                failure ??= exception;
+            }
+        }
+
+        if (failure is not null)
+        {
+            OnRefreshFailed(failure);
+        }
+    }
+
+    /// <summary>The first connected provider that offers this model, for a default chosen before the picker was built.</summary>
+    private string? ResolveProviderFor(string modelName)
+    {
+        foreach (var provider in catalog.Providers)
+        {
+            if (provider.Models.Contains(modelName, StringComparer.Ordinal))
+            {
+                return provider.Id;
+            }
+        }
+
+        return null;
     }
 
     private void OnRefreshFailed(Exception exception)

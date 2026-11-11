@@ -14,6 +14,8 @@ using Forge.App.Preferences;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
+using Forge.App.Providers;
+using Forge.App.Settings;
 using Forge.Core.Agents;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
@@ -62,7 +64,7 @@ internal sealed class AppComposition : IAsyncDisposable
         LocText mcpProblem,
         EditorServices? editor,
         LocText editorProblem,
-        ProviderSettings provider,
+        ProviderServices providers,
         GitCli git,
         SqliteSessionStore sessions,
         SqliteProjectRegistry projects,
@@ -89,7 +91,7 @@ internal sealed class AppComposition : IAsyncDisposable
         McpProblem = mcpProblem;
         this.editor = editor;
         EditorProblem = editorProblem;
-        Provider = provider;
+        Providers = providers;
         Git = git;
         ApprovalsCounter = new ApprovalDatabaseCounter(approvalsDatabasePath);
         this.sessions = sessions;
@@ -120,7 +122,11 @@ internal sealed class AppComposition : IAsyncDisposable
     /// </summary>
     public SettingsSections Settings => settings;
 
-    public ProviderSettings Provider { get; private set; }
+    /// <summary>
+    /// The connected providers and their secrets. One instance for the process: the runtime factory reads its live catalogue
+    /// on every turn, so a provider added in the settings window is usable by the next message without a restart.
+    /// </summary>
+    public ProviderServices Providers { get; }
 
     /// <summary>Why the extension host is not running (it could not be located), or empty. Resolved when it is shown.</summary>
     public LocText HostProblem { get; }
@@ -263,7 +269,9 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsSectionIds.Editor,
             EditorStrings.SectionTitle,
             SettingsSectionIds.EditorOrder,
-            EditorSettings.Current));
+            EditorSettings.Current,
+            SettingsGroups.Interface,
+            "IconEdit"));
 
         // The language section edits AppPreferences.Language only: OnPreferencesChanged pushes the value into Loc and
         // PreferencesStore persists it, so it needs nothing but the preferences.
@@ -271,12 +279,20 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsSectionIds.Language,
             LanguageStrings.SectionTitle,
             SettingsSectionIds.LanguageOrder,
-            new LanguageSettingsViewModel(preferences.Current)));
+            new LanguageSettingsViewModel(preferences.Current),
+            SettingsGroups.Interface,
+            "IconLanguage"));
 
         // 0b. Git: the settings section edits the live preferences, so it exists as soon as they do; the section is
         //     registered here (id and order from SettingsSectionIds) like every other feature's.
         var gitSettings = new GitSettingsSectionViewModel(preferences.Current);
-        settings.Add(new SettingsSection(SettingsSectionIds.Git, GitStrings.SettingsSectionTitle, SettingsSectionIds.GitOrder, gitSettings));
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Git,
+            GitStrings.SettingsSectionTitle,
+            SettingsSectionIds.GitOrder,
+            gitSettings,
+            SettingsGroups.Interface,
+            "IconBranch"));
 
         // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
         //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
@@ -288,7 +304,9 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsSectionIds.Notifications,
             NotificationsStrings.SectionTitle,
             SettingsSectionIds.NotificationsOrder,
-            new NotificationsSettingsViewModel(preferences.Current)));
+            new NotificationsSettingsViewModel(preferences.Current),
+            SettingsGroups.System,
+            "IconBell"));
 
         // 1. The approval database is owned by the extension host; the shell only reads its record count.
         var approvalsDatabasePath = Path.Combine(paths.HostDataDirectory, ApprovalStore.FileName);
@@ -348,9 +366,16 @@ internal sealed class AppComposition : IAsyncDisposable
             editorProblem = ShellStrings.EditorServiceProblem(exception.Message);
         }
 
-        // 6. Provider settings.
-        var provider = ProviderSettings.Load(paths.SettingsPath);
+        // 6. Providers: the stored definitions, the encrypted secret store behind them and the credential resolvers.
         var httpClient = ProviderHttpClient.Create();
+        var providers = new ProviderServices(paths.SettingsPath, paths.UserDataDirectory, httpClient);
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Provider,
+            ProviderStrings.SectionTitleKey,
+            SettingsSectionIds.ProviderOrder,
+            new ProvidersSettingsViewModel(providers),
+            SettingsGroups.Agent,
+            "IconPlug"));
 
         // 7. Workbench storage: one forge.db under the data root for sessions, projects, todos, UI state and checkpoints.
         //    Every store runs the StorageSchema migration on its first use, so there is no separate initialize step.
@@ -387,15 +412,17 @@ internal sealed class AppComposition : IAsyncDisposable
             .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
         ];
         var runtimeServices = new AgentRuntimeServices(
-            BuildProviderFactory(provider, httpClient),
+            providers.CreateProvider,
             host?.Client,
             sessions,
             sessions,
             todos,
-            provider.Provider?.ModelSettings ?? new ModelSettings(string.Empty),
+            providers.Catalog.DefaultModelSettings,
             Git: gitTools);
+        // `promptCacheTtl` is stored per provider but deliberately not wired: it is one value per runtime in AgentOptions,
+        // which cannot describe a per-provider setting, and the Anthropic adapter does not send it yet. When it does, the
+        // loop has to take the TTL from the selected provider's ModelSettings instead.
         runtimeServices.Approvals = approvals;
-        runtimeServices.MessageCacheTtl = provider.Provider?.PromptCacheTtl;
         runtimeServices.PullRequestTools = pullRequestTools;
         // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
         // options are read through a factory, so a preference change (ripgrep path, shell, bash timeout) applies to the
@@ -420,7 +447,9 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsSectionIds.Extensions,
             ExtensionsStrings.SettingsSectionTitle,
             SettingsSectionIds.ExtensionsOrder,
-            approvals.SettingsSection));
+            approvals.SettingsSection,
+            SettingsGroups.System,
+            "IconSparkle"));
 
         var composition = new AppComposition(
             paths,
@@ -437,7 +466,7 @@ internal sealed class AppComposition : IAsyncDisposable
             mcpProblem,
             editor,
             editorProblem,
-            provider,
+            providers,
             git,
             sessions,
             projects,
@@ -486,28 +515,41 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsSectionIds.Approvals,
             InstrumentsStrings.ApprovalsSectionTitleKey,
             SettingsSectionIds.ApprovalsOrder,
-            new ApprovalsSettingsSectionViewModel(composition)));
+            new ApprovalsSettingsSectionViewModel(composition),
+            SettingsGroups.Agent,
+            "IconShieldCheck"));
         settings.Add(new SettingsSection(
             SettingsSectionIds.Skills,
             InstrumentsStrings.SkillsSectionTitleKey,
             SettingsSectionIds.SkillsOrder,
-            new SkillsSettingsSectionViewModel(composition)));
+            new SkillsSettingsSectionViewModel(composition),
+            SettingsGroups.Agent,
+            "IconBook"));
         settings.Add(new SettingsSection(
             SettingsSectionIds.Mcp,
             InstrumentsStrings.McpSectionTitleKey,
             SettingsSectionIds.McpOrder,
-            new McpSettingsSectionViewModel(composition)));
+            new McpSettingsSectionViewModel(composition),
+            SettingsGroups.Agent,
+            "IconServer"));
         settings.Add(new SettingsSection(
             SettingsSectionIds.Tools,
             InstrumentsStrings.ToolsSectionTitleKey,
             SettingsSectionIds.ToolsOrder,
-            new ToolsSettingsSectionViewModel(composition)));
+            new ToolsSettingsSectionViewModel(composition),
+            SettingsGroups.Agent,
+            "IconWrench"));
 
         return composition;
     }
 
     /// <summary>Re-reads <c>settings.json</c>; the running runtime keeps its provider until the next launch.</summary>
-    public ProviderSettings ReloadProvider() => Provider = ProviderSettings.Load(Paths.SettingsPath);
+    /// <summary>Re-reads <c>settings.json</c>; running sessions keep the catalogue they captured until their next turn.</summary>
+    public ProviderCatalog ReloadProvider() => Providers.Reload();
+
+    /// <summary>The same reload off the UI thread, for the settings page's refresh button.</summary>
+    public Task<ProviderCatalog> ReloadProviderAsync(CancellationToken cancellationToken = default) =>
+        Providers.ReloadAsync(cancellationToken);
 
     /// <summary>
     /// What a purge removes besides the catalog rows (7.5): the session's artifacts (their <c>artifacts</c> rows and its
@@ -597,29 +639,23 @@ internal sealed class AppComposition : IAsyncDisposable
     }
 
     /// <summary>
-    /// The handover summary over the provider configured right now (a reload in settings applies to the next handover),
-    /// with its default model. No provider configured is a summary failure the dialog reports.
+    /// The handover summary over the provider configured right now (a reload in settings applies to the next handover), with
+    /// that provider's default model. No provider configured is a summary failure the dialog reports.
     /// </summary>
     private Task<string> SummarizeHandoverAsync(IReadOnlyList<ChatMessage> history, string? tree, CancellationToken ct)
     {
-        if (Provider.Provider is not { } snapshot)
+        if (Providers.Catalog.Default is not { } provider)
         {
-            throw new HandoverSummaryException(Provider.Status);
+            throw new HandoverSummaryException(Providers.StatusText.Resolve());
         }
 
-        return HandoverSummary.GenerateAsync(snapshot.CreateProvider(httpClient), snapshot.ModelSettings, history, tree, ct);
+        return HandoverSummary.GenerateAsync(
+            provider.CreateProvider(httpClient),
+            provider.Definition.DefaultModelSettings,
+            history,
+            tree,
+            ct);
     }
-
-    private static Func<ModelSettings, IChatProvider> BuildProviderFactory(ProviderSettings settings, HttpClient httpClient)
-    {
-        if (settings.Provider is not { } snapshot)
-        {
-            return static _ => UnconfiguredChatProvider.Instance;
-        }
-
-        return _ => snapshot.CreateProvider(httpClient);
-    }
-
     /// <summary>
     /// Shuts the graph down in reverse construction order. The host client kills and waits for the child process tree
     /// here, and the shell never held a writable approval connection that could outlive it.
@@ -728,7 +764,13 @@ internal sealed class AppComposition : IAsyncDisposable
         public static AppearanceFeature Create(AppPreferences preferences, SettingsSections settings)
         {
             var section = new AppearanceSettingsViewModel(preferences, SystemFontCatalog.CreateDefault());
-            settings.Add(new SettingsSection(SettingsSectionIds.Appearance, AppearanceStrings.SectionTitle, SettingsSectionIds.AppearanceOrder, section));
+            settings.Add(new SettingsSection(
+                SettingsSectionIds.Appearance,
+                AppearanceStrings.SectionTitle,
+                SettingsSectionIds.AppearanceOrder,
+                section,
+                SettingsGroups.Interface,
+                "IconColor"));
 
             // AvaloniaObject.CheckAccess, not Dispatcher.UIThread: reading the latter off the UI thread creates a dispatcher there.
             if (Application.Current is { } app && app.CheckAccess())
