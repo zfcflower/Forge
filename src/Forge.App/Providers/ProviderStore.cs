@@ -39,7 +39,7 @@ internal sealed class ProviderStore
 
         if (!File.Exists(settingsPath))
         {
-            return Seed(secrets, credentials, cache, defaultContextWindow: null, ProviderStrings.SettingsMissingText());
+            return ProviderCatalog.Empty(ProviderStrings.SettingsMissingText());
         }
 
         SettingsDocument? document;
@@ -70,7 +70,8 @@ internal sealed class ProviderStore
                     : ProviderCatalog.Create([migrated], migrated.Id, secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow);
             }
 
-            return Seed(secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow, ProviderStrings.SectionMissingText());
+            // Nothing connected yet: an empty catalogue, still carrying the page's global context window.
+            return ProviderCatalog.Create([], null, secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow);
         }
 
         var definitions = new List<ProviderDefinition>(entries.Count);
@@ -100,24 +101,6 @@ internal sealed class ProviderStore
             credentials,
             cache,
             document.ModelCatalog?.DefaultContextWindow);
-    }
-
-    /// <summary>
-    /// A catalogue with the product's default provider when nothing is configured yet: one Anthropic entry, unsaved, so the
-    /// provider section opens on something the user can fill in rather than on an empty list. The entry carries no
-    /// credential, so its row honestly says a key (or the CLI login) is still missing.
-    /// </summary>
-    private static ProviderCatalog Seed(
-        ProviderSecretStore secrets,
-        ProviderCredentials credentials,
-        ProviderModelCache? cache,
-        int? defaultContextWindow,
-        LocText status)
-    {
-        var preset = ProviderPresets.Default;
-        var definition = ProviderDefinition.FromPreset(preset, preset.Id);
-        var catalog = ProviderCatalog.Create([definition], definition.Id, secrets, credentials, cache, defaultContextWindow);
-        return catalog.Providers.Count > 0 ? catalog : ProviderCatalog.Empty(status);
     }
 
     /// <summary>

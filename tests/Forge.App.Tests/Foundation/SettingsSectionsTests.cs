@@ -84,7 +84,7 @@ public sealed class SettingsSectionsTests : IDisposable
         Loc.Instance.Language = UiLanguage.Chinese;
         section.RaiseTitle();
 
-        Assert.Equal("模型提供方", section.Title);
+        Assert.Equal("模型提供商", section.Title);
         Assert.Equal([nameof(SettingsSection.Title)], raised);
     }
 

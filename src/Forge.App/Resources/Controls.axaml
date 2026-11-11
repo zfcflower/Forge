@@ -42,7 +42,8 @@
 
   <Style Selector="TextBlock.section-title">
     <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <!-- Bold, not SemiBold: the CJK fallback faces have no 600 weight, so SemiBold renders as regular here. -->
+    <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     <Setter Property="TextWrapping" Value="NoWrap" />
   </Style>

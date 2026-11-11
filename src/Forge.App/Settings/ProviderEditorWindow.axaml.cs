@@ -1,29 +1,16 @@
 using Avalonia.Controls;
-using Avalonia.Interactivity;
-using Forge.App.Localization;
 using Forge.App.Providers;
 
 namespace Forge.App.Settings;
 
 /// <summary>
-/// What the editor closes with: a validated definition plus the key the user typed (committed by the caller only after the
-/// definition itself is saved), a confirmed deletion, or neither (cancel).
-/// </summary>
-internal sealed record ProviderEditorResult(
-    ProviderDefinition? Definition,
-    string? DeletedId,
-    bool MakeDefault,
-    string? Secret = null,
-    bool ClearSecret = false);
-
-/// <summary>
-/// The add/edit provider dialog. It owns the dialog protocol only: Esc/Esc-like cancel closes with nothing, Save closes
-/// with the validated definition, and Delete needs a second click because the row it removes carries a credential.
+/// The shared add/edit provider dialog. It owns only the dialog protocol: Save (after a passing test) closes with the
+/// definition, Cancel or Esc closes with nothing. The window is shared by the custom entry and the built-in API-key rows.
 /// </summary>
 internal sealed partial class ProviderEditorWindow : Window
 {
     private readonly ProviderEditorViewModel? model;
-    private bool deleteConfirmed;
+    private bool saved;
 
     /// <summary>Designer/loader constructor.</summary>
     public ProviderEditorWindow()
@@ -39,8 +26,6 @@ internal sealed partial class ProviderEditorWindow : Window
         DataContext = viewModel;
         viewModel.Saved += OnSaved;
         viewModel.Cancelled += OnCancelled;
-        viewModel.DeleteRequested += OnDeleteRequested;
-        viewModel.OpenBrowser += OnOpenBrowser;
     }
 
     protected override void OnClosed(EventArgs e)
@@ -49,80 +34,21 @@ internal sealed partial class ProviderEditorWindow : Window
         {
             model.Saved -= OnSaved;
             model.Cancelled -= OnCancelled;
-            model.DeleteRequested -= OnDeleteRequested;
-            model.OpenBrowser -= OnOpenBrowser;
-            model.Dispose();
+            if (!saved)
+            {
+                // Cancel, Esc and the close button all end here: stop a running test and drop its draft key.
+                _ = model.AbandonAsync();
+            }
         }
 
         base.OnClosed(e);
     }
 
-    private void OnSaved(object? sender, ProviderDefinition definition) =>
-        Close(new ProviderEditorResult(
-            definition,
-            DeletedId: null,
-            model?.MakeDefault ?? false,
-            model?.PendingSecret,
-            model?.PendingClearSecret ?? false));
-
-    private void OnCancelled(object? sender, EventArgs e) => Close((ProviderEditorResult?)null);
-
-    private void OnDeleteRequested(object? sender, string id) =>
-        Close(new ProviderEditorResult(Definition: null, DeletedId: id, MakeDefault: false));
-
-    private void OnCancelClick(object? sender, RoutedEventArgs e) => Close((ProviderEditorResult?)null);
-
-    private void OnAddModelClick(object? sender, RoutedEventArgs e)
+    private void OnSaved(object? sender, ProviderDefinition definition)
     {
-        if (model is null)
-        {
-            return;
-        }
-
-        var text = NewModelBox.Text;
-        model.AddModel(text ?? string.Empty);
-        NewModelBox.Text = string.Empty;
+        saved = true;
+        Close(definition);
     }
 
-    private void OnRemoveModelClick(object? sender, RoutedEventArgs e)
-    {
-        if (model is not null && sender is Button { DataContext: string id })
-        {
-            model.RemoveModel(id);
-        }
-    }
-
-    /// <summary>
-    /// Delete takes two clicks: the first turns the button into the confirmation sentence, the second deletes. A destructive
-    /// action on a row that holds a credential should not be one stray click away, and a modal confirmation on top of a modal
-    /// dialog is worse than an inline one.
-    /// </summary>
-    private void OnDeleteClick(object? sender, RoutedEventArgs e)
-    {
-        if (model is null || !model.CanDelete)
-        {
-            return;
-        }
-
-        if (!deleteConfirmed)
-        {
-            deleteConfirmed = true;
-            if (sender is Button button)
-            {
-                button.Content = Loc.Instance[Localization.ProviderStrings.EditorDeleteConfirmKey];
-            }
-
-            return;
-        }
-
-        model.RequestDelete();
-    }
-
-    private void OnOpenBrowser(object? sender, string uri)
-    {
-        if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
-        {
-            _ = Launcher.LaunchUriAsync(parsed);
-        }
-    }
+    private void OnCancelled(object? sender, EventArgs e) => Close((ProviderDefinition?)null);
 }

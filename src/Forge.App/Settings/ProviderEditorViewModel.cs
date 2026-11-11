@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+using System.Text.Json;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Providers;
@@ -7,120 +7,154 @@ using Forge.Core.Providers;
 
 namespace Forge.App.Settings;
 
-/// <summary>One choice of the "authentication" picker, carrying the credential kind it selects.</summary>
-internal sealed record ProviderAuthOption(ProviderCredentialKind Kind, string Label);
+/// <summary>Where the add/edit dialog is in its test-then-save flow. Saving is only offered once a test has passed.</summary>
+internal enum ProviderTestState
+{
+    /// <summary>Nothing tested since the last change to the URL or the key; the button tests.</summary>
+    Untested,
+
+    /// <summary>A test is running; the button is disabled.</summary>
+    Testing,
+
+    /// <summary>The last test passed; the button now saves.</summary>
+    Passed,
+}
 
 /// <summary>
-/// The add/edit provider dialog's state. It never opens a window itself: the window calls
-/// <see cref="TryBuild"/> on Save and <see cref="PersistSecretAsync"/> before the definition is handed back, so the same
-/// model is testable without an Avalonia application.
+/// The shared add/edit dialog: name, base URL and an optional key (or the name of the environment variable it lives in).
+/// It owns no window. A test writes a typed key under a <em>draft</em> reference, so the provider's real key is untouched
+/// until its settings are saved; the save hands the definition to <c>persist</c> (the page's settings write) and, only when
+/// that succeeds, moves the typed key under the real reference. Cancel, Esc and close remove the draft.
 /// </summary>
-internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
+/// <remarks>
+/// Models, default model, thinking effort and output limit are not edited here: a provider's models come from its
+/// <c>/models</c> answer, and the default model and effort belong to the agents, not to the provider.
+/// </remarks>
+internal sealed class ProviderEditorViewModel : ObservableObject
 {
+    /// <summary>The thinking effort a provider's definition carries when the dialog creates it; the agents override it.</summary>
+    private const ThinkingEffort DefaultThinking = ThinkingEffort.Medium;
+
+    /// <summary>Prefix of the temporary reference a test writes its typed key under; never a real provider's reference.</summary>
+    private const string DraftReferencePrefix = "provider-draft:";
+
     private readonly ProviderServices services;
     private readonly ProviderDefinition? original;
     private readonly IReadOnlyCollection<string> existingIds;
-    private readonly int uiThread = Environment.CurrentManagedThreadId;
-    private ProviderPreset? preset;
-    private ProviderAuthOption? auth;
+    private readonly ProviderPreset preset;
+    private readonly Func<ProviderDefinition, Task<string?>>? persist;
     private string name = string.Empty;
     private string baseUrl = string.Empty;
-    private string environmentVariable = string.Empty;
-    private string secret = string.Empty;
-    private bool clearSecret;
-    private string defaultModel = string.Empty;
-    private string maxTokens = string.Empty;
+    private bool keyIsSecret = true;
+    private string keyText = string.Empty;
+    private ProviderTestState testState;
+    private IReadOnlyList<string>? testedModels;
+    private string? draftId;
+    private string? draftReference;
+    private int inputVersion;
+    private bool abandoned;
+    private CancellationTokenSource? testCancellation;
     private string? error;
     private string? status;
-    private bool makeDefault;
-    private string? deviceCode;
-    private string? verificationUri;
-    private string? loginState;
-    private CancellationTokenSource? loginCancellation;
+    private bool isBusy;
 
+    /// <summary>
+    /// Opens the dialog for a new provider (<paramref name="startPreset"/> is the built-in vendor, or the custom entry) or for an
+    /// existing one (<paramref name="definition"/>). <paramref name="existingProviderIds"/> keeps a new id unique.
+    /// <paramref name="persist"/> writes the definition to the settings and returns the failure to show, or <c>null</c> on
+    /// success; without it a save only raises <see cref="Saved"/> (tests use that).
+    /// </summary>
     public ProviderEditorViewModel(
         ProviderServices services,
         ProviderDefinition? definition,
-        bool isDefault,
         ProviderPreset? startPreset = null,
-        IReadOnlyCollection<string>? existingProviderIds = null)
+        IReadOnlyCollection<string>? existingProviderIds = null,
+        Func<ProviderDefinition, Task<string?>>? persist = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         original = definition;
         existingIds = existingProviderIds ?? [];
-        MakeDefault = isDefault || definition is null;
+        this.persist = persist;
 
         if (definition is null)
         {
-            preset = startPreset ?? ProviderPresets.All[0];
+            preset = startPreset ?? ProviderPresets.Custom;
+            name = IsCustom ? string.Empty : preset.DisplayName;
+            baseUrl = preset.BaseUrl;
+            keyIsSecret = true;
+            testState = ProviderTestState.Untested;
         }
         else
         {
             preset = ProviderPresets.FindOrDefault(definition.PresetId);
             name = definition.DisplayName;
             baseUrl = definition.BaseUrl;
-            environmentVariable = definition.EnvironmentVariable ?? string.Empty;
-            defaultModel = definition.DefaultModel;
-            maxTokens = definition.MaxOutputTokens?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            foreach (var model in definition.Models)
-            {
-                Models.Add(model);
-            }
-
-            SelectedThinking = ThinkingNames.FirstOrDefault(
-                option => string.Equals(option, definition.Thinking.ToString(), StringComparison.OrdinalIgnoreCase)) ?? ThinkingNames[0];
-            auth = AuthOptionsFor(preset).FirstOrDefault(option => option.Kind == definition.CredentialKind) ?? AuthOptions[0];
-            ApplyPresetDefaults(preset, keepIdentity: true);
+            // An environment variable on the definition means the key lives there; otherwise it is the stored secret.
+            keyIsSecret = definition.EnvironmentVariable is null;
+            keyText = definition.EnvironmentVariable ?? string.Empty;
+            testedModels = definition.Models;
+            // Editing a provider that already works: saving needs no re-test until the URL or the key changes.
+            testState = ProviderTestState.Passed;
         }
 
-        if (definition is null)
-        {
-            ApplyPresetDefaults(preset!, keepIdentity: false);
-            auth = AuthOptions[0];
-            SelectedThinking = ThinkingNames[0];
-        }
-
-        SaveCommand = new AsyncRelayCommand(_ => SaveAsync(), () => !IsSaving);
-        RefreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsBusy);
-        SignInCommand = new AsyncRelayCommand(_ => SignInAsync(), () => !IsBusy);
-        SignOutCommand = new AsyncRelayCommand(_ => SignOutAsync(), () => !IsBusy);
+        TestOrSaveCommand = new AsyncRelayCommand(_ => TestOrSaveAsync(), () => !IsBusy);
         CancelCommand = new RelayCommand(() => Cancelled?.Invoke(this, EventArgs.Empty));
     }
 
-    /// <summary>Raised with the validated definition when the user saves; the window closes with it.</summary>
+    /// <summary>Raised when the definition has been persisted (or there is no persister); the window closes with it.</summary>
     public event EventHandler<ProviderDefinition>? Saved;
 
-    /// <summary>Raised when the user cancels or closes the dialog.</summary>
+    /// <summary>Raised when the user cancels; the window closes with nothing.</summary>
     public event EventHandler? Cancelled;
 
     public bool IsNew => original is null;
 
+    public bool IsCustom => preset.Id == ProviderPresets.CustomId;
+
+    /// <summary>Only a custom provider's address is typed; a built-in one comes from its preset and is shown read-only.</summary>
+    public bool CanEditBaseUrl => IsCustom;
+
+    /// <summary>Whether the dialog asks for a key at all: a sign-in provider has none to type.</summary>
+    public bool ShowsKey => (original?.CredentialKind ?? ProviderCredentialKind.ApiKey) == ProviderCredentialKind.ApiKey;
+
     public string Title => Loc.Instance[IsNew ? ProviderStrings.EditorNewKey : ProviderStrings.EditorEditKey];
 
-    /// <summary>Everything the picker offers, including the free-form entry, so a preset can be turned into a custom one.</summary>
-    public IReadOnlyList<ProviderPreset> Presets { get; } = [.. ProviderPresets.All, ProviderPresets.Custom];
+    public string NameLabel => Loc.Instance[ProviderStrings.EditorNameKey];
 
-    public ProviderPreset? SelectedPreset
+    public string BaseUrlLabel => Loc.Instance[ProviderStrings.EditorBaseUrlKey];
+
+    public string KeyLabel => Loc.Instance[ProviderStrings.EditorSecretKey];
+
+    public string KeyAsSecretText => Loc.Instance[ProviderStrings.EditorKeyAsSecretKey];
+
+    public string KeyVariableLabel => Loc.Instance[ProviderStrings.EditorKeyVariableKey];
+
+    public string KeyHint => Loc.Instance[keyIsSecret ? ProviderStrings.EditorKeyHintSecretKey : ProviderStrings.EditorKeyHintVariableKey];
+
+    public string KeyPlaceholder => HasStoredKey && keyIsSecret
+        ? Loc.Instance[ProviderStrings.EditorSecretStoredKey]
+        : string.Empty;
+
+    public string CancelText => Loc.Instance[ProviderStrings.EditorCancelKey];
+
+    public string SaveText => Loc.Instance[ProviderStrings.EditorSaveKey];
+
+    public string TestText => Loc.Instance[ProviderStrings.EditorTestKey];
+
+    public string TestingText => Loc.Instance[ProviderStrings.EditorTestingKey];
+
+    /// <summary>The footer's right-hand button: the test before a pass, the save after it.</summary>
+    public string TestOrSaveText => testState switch
     {
-        get => preset;
-        set
-        {
-            if (!Set(ref preset, value) || value is null || !IsNew)
-            {
-                return;
-            }
+        ProviderTestState.Passed => SaveText,
+        ProviderTestState.Testing => TestingText,
+        _ => TestText,
+    };
 
-            ApplyPresetDefaults(value, keepIdentity: false);
-            auth = AuthOptions[0];
-            OnPropertyChanged(nameof(SelectedAuth));
-            OnPropertyChanged(nameof(AuthOptions));
-            OnPropertyChanged(nameof(ShowsEnvironmentVariable));
-            OnPropertyChanged(nameof(ShowsSecret));
-            OnPropertyChanged(nameof(CanRefreshModels));
-            RaisePresetText();
-        }
-    }
+    public AsyncRelayCommand TestOrSaveCommand { get; }
+
+    public RelayCommand CancelCommand { get; }
 
     public string Name
     {
@@ -128,115 +162,62 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
         set => Set(ref name, value ?? string.Empty);
     }
 
+    /// <summary>Changing the address invalidates a passing test: the answer was for the old endpoint.</summary>
     public string BaseUrl
     {
         get => baseUrl;
-        set => Set(ref baseUrl, value ?? string.Empty);
-    }
-
-    public IReadOnlyList<ProviderAuthOption> AuthOptions => AuthOptionsFor(preset);
-
-    public ProviderAuthOption? SelectedAuth
-    {
-        get => auth;
         set
         {
-            if (Set(ref auth, value))
+            if (Set(ref baseUrl, value ?? string.Empty))
             {
-                OnPropertyChanged(nameof(ShowsEnvironmentVariable));
-                OnPropertyChanged(nameof(ShowsSecret));
-                OnPropertyChanged(nameof(ShowsSignIn));
-                OnPropertyChanged(nameof(ShowsClaudeHint));
-                OnPropertyChanged(nameof(ShowsCopilotHint));
-                RaiseStatus();
+                MarkUntested();
             }
         }
     }
 
     /// <summary>
-    /// Anthropic's Messages API has no <c>/models</c> endpoint, so the refresh button is hidden for such a preset: a button
-    /// that always fails is worse than no button, and the model ids can still be typed by hand.
+    /// True when the key box holds the key itself (stored encrypted); false when it holds an environment variable's name.
+    /// Switching the mode clears the box, except that the variable name starts from the vendor's own variable.
     /// </summary>
-    public bool CanRefreshModels => preset?.SupportsModelListing == true;
-
-    public bool ShowsEnvironmentVariable => SelectedAuth?.Kind == ProviderCredentialKind.ApiKey;
-
-    public bool ShowsSecret => SelectedAuth?.Kind == ProviderCredentialKind.ApiKey;
-
-    public bool ShowsSignIn => SelectedAuth?.Kind is ProviderCredentialKind.ClaudeSubscription or ProviderCredentialKind.GitHubCopilot;
-
-    public bool ShowsClaudeHint => SelectedAuth?.Kind == ProviderCredentialKind.ClaudeSubscription;
-
-    public bool ShowsCopilotHint => SelectedAuth?.Kind == ProviderCredentialKind.GitHubCopilot;
-
-    public string EnvironmentVariableLabel => Loc.Instance[ProviderStrings.EditorEnvironmentVariableKey];
-
-    public string EnvironmentVariable
+    public bool KeyIsSecret
     {
-        get => environmentVariable;
-        set => Set(ref environmentVariable, value ?? string.Empty);
-    }
-
-    public string Secret
-    {
-        get => secret;
-        set => Set(ref secret, value ?? string.Empty);
-    }
-
-    public bool HasStoredSecret => original?.SecretReference is { Length: > 0 } reference && services.Secrets.Has(reference);
-
-    public string SecretHint => HasStoredSecret
-        ? Loc.Instance[ProviderStrings.EditorSecretStoredKey]
-        : Loc.Instance[ProviderStrings.EditorSecretPlaceholderKey];
-
-    public bool ClearSecret
-    {
-        get => clearSecret;
-        set => Set(ref clearSecret, value);
-    }
-
-    public ObservableCollection<string> Models { get; } = [];
-
-    public string? SelectedModel { get; set; }
-
-    public string DefaultModel
-    {
-        get => defaultModel;
-        set => Set(ref defaultModel, value ?? string.Empty);
-    }
-
-    public static IReadOnlyList<string> ThinkingNames { get; } = ["Off", "Low", "Medium", "High"];
-
-    public string SelectedThinking { get; set; } = "Off";
-
-    public string MaxTokens
-    {
-        get => maxTokens;
-        set => Set(ref maxTokens, value ?? string.Empty);
-    }
-
-    public bool MakeDefault
-    {
-        get => makeDefault;
-        set => Set(ref makeDefault, value);
-    }
-
-    /// <summary>The validation failure, shown under the fields; <c>null</c> when the form is fine.</summary>
-    public string? Error
-    {
-        get => error;
-        private set
+        get => keyIsSecret;
+        set
         {
-            if (Set(ref error, value))
+            if (!Set(ref keyIsSecret, value))
             {
-                OnPropertyChanged(nameof(HasError));
+                return;
+            }
+
+            keyText = value ? string.Empty : preset.EnvironmentVariable ?? string.Empty;
+            OnPropertyChanged(nameof(KeyText));
+            OnPropertyChanged(nameof(KeyHint));
+            OnPropertyChanged(nameof(KeyPlaceholder));
+            MarkUntested();
+        }
+    }
+
+    /// <summary>The key itself in secret mode, or the environment variable's name otherwise; both are the same box.</summary>
+    public string KeyText
+    {
+        get => keyText;
+        set
+        {
+            if (Set(ref keyText, value ?? string.Empty))
+            {
+                MarkUntested();
             }
         }
     }
 
-    public bool HasError => Error is { Length: > 0 };
+    /// <summary>Whether a key is already stored for this provider (the box then keeps the old key when left empty).</summary>
+    public bool HasStoredKey => original?.SecretReference is { Length: > 0 } reference && services.Secrets.Has(reference);
 
-    /// <summary>The sign-in state line ("signed in", "not signed in", the device code).</summary>
+    public bool IsBusy => isBusy;
+
+    public ProviderTestState TestState => testState;
+
+    /// <summary>The line under the fields: the test's success and the model count it fetched, or nothing.</summary>
     public string? Status
     {
         get => status;
@@ -251,108 +232,24 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
 
     public bool HasStatus => Status is { Length: > 0 };
 
-    public string? DeviceCode
+    /// <summary>The validation, test or save failure, shown above the footer.</summary>
+    public string? Error
     {
-        get => deviceCode;
-        private set => Set(ref deviceCode, value);
-    }
-
-    public string? VerificationUri
-    {
-        get => verificationUri;
-        private set => Set(ref verificationUri, value);
-    }
-
-    public string? LoginState
-    {
-        get => loginState;
+        get => error;
         private set
         {
-            if (Set(ref loginState, value))
+            if (Set(ref error, value))
             {
-                OnPropertyChanged(nameof(HasLoginState));
+                OnPropertyChanged(nameof(HasError));
             }
         }
     }
 
-    public bool HasLoginState => LoginState is { Length: > 0 };
-
-    public bool IsSaving { get; private set; }
-
-    public bool IsBusy => isBusy;
-
-    private bool isBusy;
-
-    public AsyncRelayCommand SaveCommand { get; }
-
-    public AsyncRelayCommand RefreshModelsCommand { get; }
-
-    public AsyncRelayCommand SignInCommand { get; }
-
-    public AsyncRelayCommand SignOutCommand { get; }
-
-    public RelayCommand CancelCommand { get; }
-
-
-    /// <summary>Delete is only offered for a provider that already exists; a new one is cancelled instead.</summary>
-    public bool CanDelete => !IsNew;
-
-    public string DeleteText => Loc.Instance[ProviderStrings.EditorDeleteKey];
-
-    public string ClearSecretText => Loc.Instance[ProviderStrings.EditorSecretClearKey];
-
-    /// <summary>Raised when the user confirms deleting this provider (the window asks twice, then closes with this).</summary>
-    public event EventHandler<string>? DeleteRequested;
-
-    public void RequestDelete()
-    {
-        if (original is not null)
-        {
-            DeleteRequested?.Invoke(this, original.Id);
-        }
-    }
-
-    public string SaveText => Loc.Instance[ProviderStrings.EditorSaveKey];
-
-    public string CancelText => Loc.Instance[ProviderStrings.EditorCancelKey];
-
-    public string RefreshModelsText => Loc.Instance[ProviderStrings.EditorModelsFetchKey];
-
-    public string SignInText => Loc.Instance[ProviderStrings.EditorSignInKey];
-
-    public string SignOutText => Loc.Instance[ProviderStrings.EditorSignOutKey];
-
-    public string DeviceCodeText => DeviceCode is null
-        ? string.Empty
-        : Loc.Instance.Format(ProviderStrings.EditorDeviceCodeKey, DeviceCode);
-
-    public string DeviceCodeHint => Loc.Instance[ProviderStrings.EditorDeviceCodeHintKey];
-
-    public string ClaudeHint => Loc.Instance[ProviderStrings.EditorClaudeHintKey];
-
-    public string CopilotHint => Loc.Instance[ProviderStrings.EditorCopilotHintKey];
-
-    public string NameLabel => Loc.Instance[ProviderStrings.EditorNameKey];
-
-    public string BaseUrlLabel => Loc.Instance[ProviderStrings.EditorBaseUrlKey];
-
-    public string PresetLabel => Loc.Instance[ProviderStrings.EditorPresetKey];
-
-    public string AuthLabel => Loc.Instance[ProviderStrings.EditorAuthKey];
-
-    public string ModelsLabel => Loc.Instance[ProviderStrings.EditorModelsKey];
-
-    public string DefaultModelLabel => Loc.Instance[ProviderStrings.EditorDefaultModelKey];
-
-    public string ThinkingLabel => Loc.Instance[ProviderStrings.EditorThinkingKey];
-
-    public string MaxTokensLabel => Loc.Instance[ProviderStrings.EditorMaxTokensKey];
-
-    public string SecretLabel => Loc.Instance[ProviderStrings.EditorSecretKey];
+    public bool HasError => Error is { Length: > 0 };
 
     /// <summary>
-    /// Validates the form and builds the definition; <c>null</c> when something is wrong (and <see cref="Error"/> explains
-    /// what). The secret itself is not part of the definition — only its store reference.
+    /// Validates the form and builds the definition; <c>null</c> when something is wrong (<see cref="Error"/> says what).
+    /// The key itself is never part of the definition — only the reference it is stored under.
     /// </summary>
     public ProviderDefinition? TryBuild()
     {
@@ -370,383 +267,246 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
             return null;
         }
 
-        var models = Models.Where(model => !string.IsNullOrWhiteSpace(model)).Distinct(StringComparer.Ordinal).ToList();
-        if (models.Count == 0 && DefaultModel.Trim().Length > 0)
+        var variable = KeyText.Trim();
+        if (ShowsKey && !KeyIsSecret && variable.Length == 0)
         {
-            models.Add(DefaultModel.Trim());
-        }
-
-        if (models.Count == 0)
-        {
-            Error = Loc.Instance[ProviderStrings.EditorNeedsModelKey];
+            Error = Loc.Instance[ProviderStrings.EditorNeedsVariableKey];
             return null;
         }
 
-        var chosenDefault = DefaultModel.Trim();
-        if (chosenDefault.Length == 0)
-        {
-            chosenDefault = models[0];
-        }
-        else if (!models.Contains(chosenDefault, StringComparer.Ordinal))
-        {
-            models.Insert(0, chosenDefault);
-        }
-
-        var kind = SelectedAuth?.Kind ?? ProviderCredentialKind.ApiKey;
-        // A new provider's id must not collide with a connected one: saving matches by id, so a duplicate would silently
-        // replace the other provider (and its credential reference) instead of adding a second one.
-        var id = original?.Id ?? UniqueId(Slug(trimmedName), currentId: null);
-        var reference = kind == ProviderCredentialKind.ApiKey ? "provider:" + id : original?.SecretReference;
-
         Error = null;
+        // The id is fixed at the first build: the key is stored under it, so a later rename must not orphan that key.
+        var id = original?.Id ?? (draftId ??= ProviderIdentity.Unique(ProviderIdentity.Slug(trimmedName), existingIds));
+        var kind = original?.CredentialKind ?? ProviderCredentialKind.ApiKey;
+        var models = testedModels ?? original?.Models ?? preset.SeedModels;
+        var remembered = original?.DefaultModel ?? string.Empty;
+        var defaultModel = remembered.Length > 0 && models.Contains(remembered, StringComparer.Ordinal)
+            ? remembered
+            : models.FirstOrDefault() ?? string.Empty;
+
         return new ProviderDefinition
         {
             Id = id,
-            PresetId = preset?.Id ?? ProviderPresets.CustomId,
+            PresetId = original?.PresetId ?? preset.Id,
             DisplayName = trimmedName,
-            Protocol = preset?.Protocol ?? ProviderProtocol.OpenAiCompatible,
+            Protocol = original?.Protocol ?? preset.Protocol,
             BaseUrl = url,
             CredentialKind = kind,
-            EnvironmentVariable = environmentVariable.Trim().Length == 0 ? null : environmentVariable.Trim(),
-            SecretReference = reference,
-            Models = models,
-            DefaultModel = chosenDefault,
-            Thinking = SelectedThinking switch
-            {
-                "Low" => ThinkingEffort.Low,
-                "Medium" => ThinkingEffort.Medium,
-                "High" => ThinkingEffort.High,
-                _ => ThinkingEffort.Off,
-            },
-            MaxOutputTokens = int.TryParse(MaxTokens, out var max) && max > 0 ? max : null,
+            EnvironmentVariable = ShowsKey ? (KeyIsSecret ? null : variable) : original?.EnvironmentVariable,
+            SecretReference = kind == ProviderCredentialKind.ApiKey ? "provider:" + id : original?.SecretReference,
+            Models = [.. models],
+            DefaultModel = defaultModel,
+            Thinking = original?.Thinking ?? DefaultThinking,
+            MaxOutputTokens = original?.MaxOutputTokens,
             Overrides = original?.Overrides ?? new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
             Headers = original?.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            SendPromptCacheKey = original?.SendPromptCacheKey ?? false,
+            PromptCacheTtl = original?.PromptCacheTtl,
         };
     }
 
-    /// <summary>The key the user typed but has not committed yet; the view writes it after the definition is saved.</summary>
-    public string? PendingSecret => Secret.Trim().Length > 0 ? Secret.Trim() : null;
-
-    public bool PendingClearSecret => ClearSecret && PendingSecret is null;
-
-    /// <summary>
-    /// Writes the pasted or cleared key into the encrypted store. Runs on the pool: this is a file write, and the dialog is
-    /// not allowed to stall the UI thread for it. The save path does not call this (the caller commits the definition
-    /// first, so a refused settings write cannot leave a new secret behind an old configuration); refreshing the model list
-    /// does, because that request needs the key.
-    /// </summary>
-    public async Task PersistSecretAsync(ProviderDefinition definition, CancellationToken cancellationToken = default)
+    /// <summary>The first button: test when nothing has passed, save when the last test passed.</summary>
+    internal async Task TestOrSaveAsync()
     {
-        ArgumentNullException.ThrowIfNull(definition);
-        var reference = definition.SecretReference;
-        if (string.IsNullOrWhiteSpace(reference))
+        if (testState != ProviderTestState.Passed)
+        {
+            await TestAsync().ConfigureAwait(true);
+            return;
+        }
+
+        if (TryBuild() is not { } definition)
         {
             return;
         }
 
-        var pasted = Secret.Trim();
-        if (pasted.Length > 0)
+        var typed = KeyText.Trim();
+        isBusy = true;
+        RaiseTestState();
+        try
         {
-            await Task.Run(() => services.Secrets.Set(reference, pasted), cancellationToken).ConfigureAwait(true);
-            Secret = string.Empty;
-        }
-        else if (ClearSecret)
-        {
-            await Task.Run(() => services.Secrets.Remove(reference), cancellationToken).ConfigureAwait(true);
-            ClearSecret = false;
-        }
-    }
-
-    /// <summary>Adds a model id typed by hand (a model the server does not list yet, or a private one).</summary>
-    public void AddModel(string model)
-    {
-        var trimmed = (model ?? string.Empty).Trim();
-        if (trimmed.Length == 0 || Models.Contains(trimmed, StringComparer.Ordinal))
-        {
-            return;
-        }
-
-        Models.Add(trimmed);
-        if (DefaultModel.Length == 0)
-        {
-            DefaultModel = trimmed;
-        }
-    }
-
-    /// <summary>Removes one model id, moving the default off it when it was the default.</summary>
-    public void RemoveModel(string model)
-    {
-        var trimmed = (model ?? string.Empty).Trim();
-        if (trimmed.Length == 0)
-        {
-            return;
-        }
-
-        Models.Remove(trimmed);
-        if (string.Equals(DefaultModel, trimmed, StringComparison.Ordinal))
-        {
-            DefaultModel = Models.Count > 0 ? Models[0] : string.Empty;
-        }
-    }
-
-    public void Dispose()
-    {
-        loginCancellation?.Cancel();
-        loginCancellation?.Dispose();
-        loginCancellation = null;
-    }
-
-    private void ApplyPresetDefaults(ProviderPreset value, bool keepIdentity)
-    {
-        if (!keepIdentity)
-        {
-            BaseUrl = value.BaseUrl;
-            EnvironmentVariable = value.EnvironmentVariable ?? string.Empty;
-            name = value.DisplayName;
-            OnPropertyChanged(nameof(Name));
-            Models.Clear();
-            foreach (var model in value.SeedModels)
+            // Settings first: only a definition that was written may receive the key, so a refused write keeps the old one.
+            var failure = persist is null ? null : await persist(definition).ConfigureAwait(true);
+            if (failure is not null)
             {
-                Models.Add(model);
+                Error = failure;
+                return;
             }
 
-            DefaultModel = value.SeedModels.Count > 0 ? value.SeedModels[0] : string.Empty;
-        }
-    }
-
-    private IReadOnlyList<ProviderAuthOption> AuthOptionsFor(ProviderPreset? value)
-    {
-        var options = new List<ProviderAuthOption>();
-        if (value is null || value.Auth.HasFlag(ProviderAuthOptions.ApiKey))
-        {
-            options.Add(new ProviderAuthOption(ProviderCredentialKind.ApiKey, Loc.Instance[ProviderStrings.EditorAuthApiKeyKey]));
-        }
-
-        if (value?.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription) == true)
-        {
-            options.Add(new ProviderAuthOption(ProviderCredentialKind.ClaudeSubscription, Loc.Instance[ProviderStrings.EditorAuthClaudeKey]));
-        }
-
-        if (value?.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot) == true)
-        {
-            options.Add(new ProviderAuthOption(ProviderCredentialKind.GitHubCopilot, Loc.Instance[ProviderStrings.EditorAuthCopilotKey]));
-        }
-
-        return options;
-    }
-
-    private void RaisePresetText()
-    {
-        OnPropertyChanged(nameof(Status));
-        RaiseStatus();
-    }
-
-    private void RaiseStatus()
-    {
-        if (SelectedAuth?.Kind == ProviderCredentialKind.ClaudeSubscription)
-        {
-            Status = services.Credentials.HasClaudeLogin()
-                ? Loc.Instance[ProviderStrings.EditorSignedInClaudeKey]
-                : Loc.Instance[ProviderStrings.NeedsClaudeSignInKey];
-        }
-        else if (SelectedAuth?.Kind == ProviderCredentialKind.GitHubCopilot)
-        {
-            var id = original?.Id;
-            Status = id is not null && services.Credentials.HasCopilotLogin(id)
-                ? Loc.Instance[ProviderStrings.ReadyCopilotKey]
-                : Loc.Instance[ProviderStrings.NeedsCopilotSignInKey];
-        }
-        else
-        {
-            Status = null;
-        }
-    }
-
-    private Task SaveAsync()
-    {
-        // The definition goes first: the window commits it, and only a committed definition receives the typed key. A
-        // settings write that is refused therefore leaves the old key (and the old configuration) untouched.
-        if (TryBuild() is { } definition)
-        {
+            await CommitKeyAsync(definition, typed).ConfigureAwait(true);
             Saved?.Invoke(this, definition);
         }
-
-        return Task.CompletedTask;
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = exception.Message;
+        }
+        finally
+        {
+            isBusy = false;
+            RaiseTestState();
+        }
     }
 
-    private async Task RefreshModelsAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the connection test against the typed values: <c>GET /models</c> where the preset can list models, otherwise one
+    /// tiny turn (Anthropic-protocol vendors have no listing this app can rely on). A pass records the fetched models. A result
+    /// that arrives after the URL or the key changed, or after the dialog closed, is discarded.
+    /// </summary>
+    private async Task TestAsync()
     {
         if (TryBuild() is not { } definition)
         {
             return;
         }
 
+        var version = inputVersion;
+        testCancellation?.Cancel();
+        testCancellation = new CancellationTokenSource();
+        var token = testCancellation.Token;
         isBusy = true;
-        OnPropertyChanged(nameof(IsBusy));
+        testState = ProviderTestState.Testing;
+        RaiseTestState();
         Error = null;
+        Status = null;
         try
         {
-            await PersistSecretAsync(definition).ConfigureAwait(true);
-            var transient = services.CreateTransient(definition);
-            var list = await services.RefreshModelsAsync(transient).ConfigureAwait(true);
-            if (Environment.CurrentManagedThreadId != uiThread)
+            var testReference = await WriteDraftKeyAsync(definition).ConfigureAwait(true);
+            var transient = services.CreateTransient(definition with { SecretReference = testReference });
+            if (preset.SupportsModelListing)
             {
-                return;
-            }
-
-            foreach (var model in list.Ids)
-            {
-                if (!Models.Contains(model, StringComparer.Ordinal))
+                var list = await services.RefreshModelsAsync(transient, token).ConfigureAwait(true);
+                if (version == inputVersion && !abandoned)
                 {
-                    Models.Add(model);
+                    testedModels = list.Ids;
+                    Status = Loc.Instance.Format(ProviderStrings.EditorTestPassedKey, TextFormat.Number(list.Ids.Count));
+                    testState = ProviderTestState.Passed;
                 }
             }
-
-            if (DefaultModel.Length == 0 && list.Ids.Count > 0)
+            else
             {
-                DefaultModel = list.Ids[0];
-            }
-
-            Status = Loc.Instance.Format(ProviderStrings.EditorModelsFetchedKey, TextFormat.Number(list.Ids.Count));
-        }
-        catch (Exception exception) when (exception is ProviderException or HttpRequestException or IOException or TimeoutException)
-        {
-            Error = exception.Message;
-        }
-        finally
-        {
-            isBusy = false;
-            OnPropertyChanged(nameof(IsBusy));
-        }
-    }
-
-    /// <summary>
-    /// Starts the GitHub device-code login and polls until the user authorizes, cancels, or the code expires. The code and
-    /// link appear as soon as GitHub returns them; the browser is opened by the view, not from here.
-    /// </summary>
-    private async Task SignInAsync()
-    {
-        if (SelectedAuth?.Kind == ProviderCredentialKind.ClaudeSubscription)
-        {
-            // The subscription is the CLI's own login; there is nothing to authorize from here.
-            RaiseStatus();
-            return;
-        }
-
-        if (SelectedAuth?.Kind != ProviderCredentialKind.GitHubCopilot)
-        {
-            return;
-        }
-
-        var definition = TryBuild();
-        if (definition is null)
-        {
-            return;
-        }
-
-        loginCancellation?.Cancel();
-        loginCancellation?.Dispose();
-        loginCancellation = new CancellationTokenSource();
-        var token = loginCancellation.Token;
-        isBusy = true;
-        OnPropertyChanged(nameof(IsBusy));
-        LoginState = Loc.Instance[ProviderStrings.EditorDeviceCodeWaitingKey];
-        try
-        {
-            var code = await services.Credentials.StartCopilotLoginAsync(host: null, token).ConfigureAwait(true);
-            DeviceCode = code.UserCode;
-            VerificationUri = code.VerificationUri;
-            OnPropertyChanged(nameof(DeviceCodeText));
-            OpenBrowser?.Invoke(this, code.VerificationUri);
-
-            var interval = TimeSpan.FromSeconds(Math.Clamp(code.IntervalSeconds, 1, 30));
-            while (!token.IsCancellationRequested)
-            {
-                await Task.Delay(interval, token).ConfigureAwait(true);
-                var session = await services.Credentials.PollCopilotLoginAsync(definition.Id, code, host: null, token).ConfigureAwait(true);
-                if (session is not null)
+                await services.VerifyChatAsync(transient, token).ConfigureAwait(true);
+                if (version == inputVersion && !abandoned)
                 {
-                    Status = Loc.Instance[ProviderStrings.ReadyCopilotKey];
-                    LoginState = Loc.Instance[ProviderStrings.EditorSignedInKey];
-                    DeviceCode = null;
-                    VerificationUri = null;
-                    return;
+                    testedModels = definition.Models;
+                    Status = Loc.Instance[ProviderStrings.EditorTestPassedNoListKey];
+                    testState = ProviderTestState.Passed;
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            LoginState = null;
+            // Closed or superseded by a newer test: nothing to report.
         }
-        catch (Exception exception) when (exception is ProviderException or HttpRequestException or IOException)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Error = exception.Message;
-            LoginState = null;
+            if (version == inputVersion && !abandoned)
+            {
+                Error = exception.Message;
+            }
         }
         finally
         {
+            if (version == inputVersion && testState == ProviderTestState.Testing)
+            {
+                testState = ProviderTestState.Untested;
+            }
+
+            testCancellation?.Dispose();
+            testCancellation = null;
             isBusy = false;
-            OnPropertyChanged(nameof(IsBusy));
+            RaiseTestState();
+            if (abandoned)
+            {
+                _ = RemoveDraftAsync();
+            }
         }
-    }
-
-    /// <summary>The view opens the device page; the model asks, the window does.</summary>
-    internal event EventHandler<string>? OpenBrowser;
-
-    private async Task SignOutAsync()
-    {
-        if (original is { } definition)
-        {
-            await services.Credentials.ForgetCopilotAsync(definition.Id).ConfigureAwait(true);
-        }
-
-        RaiseStatus();
     }
 
     /// <summary>
-    /// The id this provider would get: its own id when editing, otherwise a slug of the name made unique against the
-    /// connected ones. <paramref name="currentId"/> is the id being edited (never a collision with itself).
+    /// Called when the dialog closes without a save (Cancel, Esc, the title-bar close button): an in-flight test is cancelled
+    /// and the draft key is removed. A real key is never touched, because a draft is the only thing a test writes.
     /// </summary>
-    private string UniqueId(string slug, string? currentId)
+    public async Task AbandonAsync()
     {
-        var taken = new HashSet<string>(existingIds, StringComparer.Ordinal);
-        if (currentId is not null)
+        abandoned = true;
+        try
         {
-            taken.Remove(currentId);
+            testCancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The test finished and disposed its source between the read and the cancel.
         }
 
-        if (!taken.Contains(slug))
+        await RemoveDraftAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Writes the typed key under a draft reference for the test to read. Empty or variable mode writes nothing; the test then
+    /// uses the provider's own reference (its stored key, if any).
+    /// </summary>
+    private async Task<string?> WriteDraftKeyAsync(ProviderDefinition definition)
+    {
+        var typed = KeyText.Trim();
+        if (!ShowsKey || !KeyIsSecret || typed.Length == 0 || definition.SecretReference is null)
         {
-            return slug;
+            return definition.SecretReference;
         }
 
-        for (var suffix = 2; ; suffix++)
+        var reference = DraftReferencePrefix + definition.Id;
+        await Task.Run(() => services.Secrets.Set(reference, typed)).ConfigureAwait(true);
+        draftReference = reference;
+        return reference;
+    }
+
+    /// <summary>After a successful save: the typed key moves under the provider's real reference, and the draft is removed.</summary>
+    private async Task CommitKeyAsync(ProviderDefinition saved, string typed)
+    {
+        if (ShowsKey && KeyIsSecret && typed.Length > 0 && saved.SecretReference is { Length: > 0 } reference)
         {
-            var candidate = slug + "-" + suffix;
-            if (!taken.Contains(candidate))
-            {
-                return candidate;
-            }
+            await Task.Run(() => services.Secrets.Set(reference, typed)).ConfigureAwait(true);
+        }
+
+        await RemoveDraftAsync().ConfigureAwait(true);
+    }
+
+    private async Task RemoveDraftAsync()
+    {
+        if (draftReference is not { } reference)
+        {
+            return;
+        }
+
+        draftReference = null;
+        try
+        {
+            await Task.Run(() => services.Secrets.Remove(reference)).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Error = exception.Message;
         }
     }
 
-    /// <summary>A stable, readable id: the display name reduced to its slug.</summary>
-    private static string Slug(string name)
+    /// <summary>Any change to the address or the key makes the last test's answer stale, so the save is offered again only after a new test.</summary>
+    private void MarkUntested()
     {
-        var builder = new System.Text.StringBuilder(name.Length);
-        foreach (var character in name.ToLowerInvariant())
+        inputVersion++;
+        if (testState == ProviderTestState.Untested)
         {
-            if (char.IsLetterOrDigit(character))
-            {
-                builder.Append(character);
-            }
-            else if (builder.Length > 0 && builder[^1] != '-')
-            {
-                builder.Append('-');
-            }
+            return;
         }
 
-        var slug = builder.ToString().Trim('-');
-        return slug.Length > 0 ? slug : "provider";
+        testState = ProviderTestState.Untested;
+        testedModels = original?.Models;
+        Status = null;
+        RaiseTestState();
+    }
+
+    private void RaiseTestState()
+    {
+        OnPropertyChanged(nameof(TestState));
+        OnPropertyChanged(nameof(TestOrSaveText));
+        OnPropertyChanged(nameof(IsBusy));
+        TestOrSaveCommand.NotifyCanExecuteChanged();
     }
 }

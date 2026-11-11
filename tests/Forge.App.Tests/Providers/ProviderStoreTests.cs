@@ -152,17 +152,18 @@ public sealed class ProviderStoreTests : IDisposable
     }
 
     [Fact]
-    public void Nothing_configured_seeds_one_unsaved_anthropic_entry()
+    public void Nothing_configured_loads_no_provider_and_writes_nothing()
     {
+        // No placeholder provider: an unsaved "fake" row would read as a connection the user never made.
         var path = Path.Combine(root, "settings.json");
         var (store, secrets, credentials) = CreateStack(path);
 
         var catalog = store.Load(secrets, credentials);
 
-        var provider = Assert.Single(catalog.Providers);
-        Assert.Equal("anthropic", provider.Id);
-        Assert.False(File.Exists(path), "the seed is not written until the user saves");
-        Assert.NotEqual(ProviderStatusKind.Ready, provider.Status.Kind);
+        Assert.Empty(catalog.Providers);
+        Assert.Null(catalog.Default);
+        Assert.False(catalog.IsConfigured);
+        Assert.False(File.Exists(path), "nothing is written until the user saves a provider");
     }
 
     [Fact]

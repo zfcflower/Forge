@@ -125,8 +125,8 @@ public static class ProviderPresets
         new(
             KimiId,
             "Kimi For Coding",
-            ProviderProtocol.Anthropic,
-            "https://api.kimi.com/coding",
+            ProviderProtocol.OpenAiCompatible,
+            "https://api.kimi.com/coding/v1",
             ProviderAuthOptions.ApiKey,
             "KIMI_API_KEY",
             "https://www.kimi.com/code",

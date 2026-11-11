@@ -115,7 +115,7 @@ internal static class NotificationsStrings
 
         Loc.Register(ApprovalWaitingTitleKey, "等待你的审批", "Waiting for your approval");
         Loc.Register(TurnFailedTitleKey, "回合失败", "Turn failed");
-        Loc.Register(ProviderMissingTitleKey, "提供方不可用", "Provider unavailable");
+        Loc.Register(ProviderMissingTitleKey, "提供商不可用", "Provider unavailable");
         Loc.Register(SubAgentFinishedTitleKey, "子 Agent 结束", "Sub-agent finished");
         Loc.Register(StepCommitFailedTitleKey, "步骤提交失败", "Step commit failed");
         Loc.Register(GitOperationFailedTitleKey, "Git 操作失败", "Git operation failed");

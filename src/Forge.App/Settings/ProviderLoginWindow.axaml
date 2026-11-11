@@ -1,0 +1,83 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:settings="using:Forge.App.Settings"
+        x:Class="Forge.App.Settings.ProviderLoginWindow"
+        x:DataType="settings:ProviderLoginViewModel"
+        Title="{Binding Title}"
+        Width="480"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}">
+  <Grid RowDefinitions="Auto,Auto" Margin="18,16">
+    <StackPanel Grid.Row="0" Spacing="12">
+
+      <!-- Claude Code is missing: say what to install and where. -->
+      <StackPanel Spacing="8" IsVisible="{Binding ClaudeNotInstalled}">
+        <TextBlock Text="{Binding ClaudeNotInstalledText}" TextWrapping="Wrap" />
+        <TextBlock Classes="caption" Text="{Binding ClaudeStepsText}" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Classes="primary"
+                  Command="{Binding InstallCommand}"
+                  Content="{Binding InstallText}"
+                  AutomationProperties.AutomationId="provider-login-install" />
+          <Button Classes="ghost"
+                  Command="{Binding RecheckCommand}"
+                  Content="{Binding RecheckText}"
+                  AutomationProperties.AutomationId="provider-login-recheck" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- Installed but not signed in: the CLI's own login is the only way in. -->
+      <StackPanel Spacing="8" IsVisible="{Binding ClaudeNotSignedIn}">
+        <TextBlock Text="{Binding ClaudeNotSignedInText}" TextWrapping="Wrap" />
+        <Button Classes="ghost"
+                HorizontalAlignment="Left"
+                Command="{Binding RecheckCommand}"
+                Content="{Binding RecheckText}"
+                AutomationProperties.AutomationId="provider-login-recheck" />
+      </StackPanel>
+
+      <!-- Signed in: the definition is the subscription, so it carries no key. -->
+      <StackPanel Spacing="8" IsVisible="{Binding ClaudeReady}">
+        <TextBlock Text="{Binding ClaudeReadyText}" TextWrapping="Wrap" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding UseClaudeCommand}"
+                Content="{Binding UseText}"
+                AutomationProperties.AutomationId="provider-login-use" />
+      </StackPanel>
+
+      <!-- GitHub Copilot: device-code sign-in. -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsCopilot}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding CopilotHint}" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding StartCopilotCommand}"
+                Content="{Binding StartCopilotText}"
+                AutomationProperties.AutomationId="provider-login-copilot-start" />
+        <StackPanel Spacing="4" IsVisible="{Binding HasDeviceCode}">
+          <TextBlock Classes="h2" Text="{Binding DeviceCodeText}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DeviceCodeHint}" />
+        </StackPanel>
+        <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
+      </StackPanel>
+
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding HasError}"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource DangerBrush}"
+                 Text="{Binding Error}"
+                 AutomationProperties.AutomationId="provider-login-error" />
+    </StackPanel>
+
+    <Grid Grid.Row="1" Margin="0,16,0,0">
+      <Button Classes="ghost"
+              HorizontalAlignment="Left"
+              Command="{Binding CancelCommand}"
+              Content="{Binding CancelText}"
+              AutomationProperties.AutomationId="provider-login-cancel" />
+    </Grid>
+  </Grid>
+</Window>

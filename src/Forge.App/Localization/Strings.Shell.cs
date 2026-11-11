@@ -214,7 +214,7 @@ internal static class ShellStrings
 
     public static string ProviderUnknown => Loc.Instance[ProviderUnknownKey];
 
-    /// <summary>"提供方：…" around the provider status; the status may itself be a <see cref="LocText"/>.</summary>
+    /// <summary>"提供商：…" around the provider status; the status may itself be a <see cref="LocText"/>.</summary>
     public static string ProviderText(object status) => Loc.Instance.Format(ProviderTextKey, status);
 
     public static string ProcessId(int id) => Loc.Instance.Format(ProcessIdKey, TextFormat.Id(id));
@@ -366,16 +366,16 @@ internal static class ShellStrings
         Loc.Register(McpStateKey, "MCP：{0} 个配置 · {1} 个就绪", "MCP: {0} configured · {1} ready");
         Loc.Register(ApprovalsUnknownKey, "审批：不可用", "Approvals: unavailable");
         Loc.Register(ApprovalsKey, "审批 {0} 条", "Approvals {0}");
-        Loc.Register(ProviderUnknownKey, "提供方：未知", "Provider: unknown");
-        Loc.Register(ProviderTextKey, "提供方：{0}", "Provider: {0}");
+        Loc.Register(ProviderUnknownKey, "提供商：未知", "Provider: unknown");
+        Loc.Register(ProviderTextKey, "提供商：{0}", "Provider: {0}");
         Loc.Register(ProcessIdKey, "进程 {0}", "Process {0}");
 
         Loc.Register(ProviderReadyKey, "已就绪：{0}", "Ready: {0}");
         Loc.Register(ProviderNoKeyKey, "已配置但没有 API 密钥：{0}", "Configured without an API key: {0}");
-        Loc.Register(ProviderSettingsMissingKey, "未配置提供方（找不到 settings.json）", "No provider configured (settings.json not found)");
-        Loc.Register(ProviderSettingsUnreadableKey, "未配置提供方（settings.json 无法读取：{0}）", "No provider configured (settings.json cannot be read: {0})");
-        Loc.Register(ProviderSectionMissingKey, "未配置提供方（settings.json 没有 provider 段）", "No provider configured (the provider section is missing from settings.json)");
-        Loc.Register(ProviderInvalidKey, "未配置提供方（{0}）", "No provider configured ({0})");
+        Loc.Register(ProviderSettingsMissingKey, "未配置提供商（找不到 settings.json）", "No provider configured (settings.json not found)");
+        Loc.Register(ProviderSettingsUnreadableKey, "未配置提供商（settings.json 无法读取：{0}）", "No provider configured (settings.json cannot be read: {0})");
+        Loc.Register(ProviderSectionMissingKey, "未配置提供商（settings.json 没有 provider 段）", "No provider configured (the provider section is missing from settings.json)");
+        Loc.Register(ProviderInvalidKey, "未配置提供商（{0}）", "No provider configured ({0})");
         Loc.Register(ProviderDetailKey, "{0} · 密钥：{1}", "{0} · API key: {1}");
         Loc.Register(KeyFromEnvironmentKey, "来自环境变量", "from the environment");
         Loc.Register(KeyFromFileKey, "来自 settings.json", "from settings.json");

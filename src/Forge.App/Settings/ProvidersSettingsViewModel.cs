@@ -8,9 +8,9 @@ using Forge.Core.Providers;
 namespace Forge.App.Settings;
 
 /// <summary>
-/// The <c>provider</c> section: what is connected, what each one can do, and the two actions per row — edit it, or open its
-/// model metadata. It owns no window: the view's code-behind opens the dialogs and calls back into
-/// <see cref="SaveAsync"/>, so the page model stays testable without an Avalonia application.
+/// The <c>provider</c> section: the connected providers, the custom entry, and the built-in vendors with their two row
+/// actions. It owns no window: the view's code-behind opens the dialogs and calls back into <see cref="SaveAsync"/>, so the
+/// page model stays testable without an Avalonia application.
 /// </summary>
 internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
 {
@@ -19,6 +19,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     private bool saving;
     private string? problem;
     private string defaultContextWindowText = string.Empty;
+    private bool showsNeedProviderBanner;
 
     public ProvidersSettingsViewModel(ProviderServices services)
     {
@@ -29,17 +30,28 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsSaving);
     }
 
-    /// <summary>The provider services, so the view can build the editor and metadata windows from the same store.</summary>
+    /// <summary>The provider services, so the view can build the editor, login and metadata windows from the same store.</summary>
     internal ProviderServices Services => services;
 
     public AsyncRelayCommand RefreshCommand { get; }
 
+    /// <summary>The connected providers, in stored order.</summary>
     public ObservableCollection<ProviderRowViewModel> Rows { get; } = [];
+
+    /// <summary>The built-in vendors, one row each; their buttons depend on what the vendor offers.</summary>
+    public ObservableCollection<BuiltInProviderRowViewModel> BuiltInRows { get; } = [];
 
     /// <summary>The default provider's id, so a row can show which one new sessions start on.</summary>
     public string? DefaultId => services.Catalog.Default?.Id;
 
-    public string Intro => Loc.Instance[ProviderStrings.SectionIntroKey];
+    /// <summary>The top banner: shown while no connected provider can run an agent.</summary>
+    public bool ShowsNeedProviderBanner
+    {
+        get => showsNeedProviderBanner;
+        private set => Set(ref showsNeedProviderBanner, value);
+    }
+
+    public string BannerText => Loc.Instance[ProviderStrings.BannerNeedProviderKey];
 
     public string ConnectedTitle => Loc.Instance[ProviderStrings.SectionConnectedKey];
 
@@ -48,6 +60,10 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     public string CustomTitle => Loc.Instance[ProviderStrings.SectionCustomTitleKey];
 
     public string CustomHint => Loc.Instance[ProviderStrings.SectionCustomHintKey];
+
+    public string BuiltInTitle => Loc.Instance[ProviderStrings.SectionBuiltInKey];
+
+    public string BuiltInHint => Loc.Instance[ProviderStrings.SectionBuiltInHintKey];
 
     public string RefreshText => Loc.Instance[ProviderStrings.SectionRefreshKey];
 
@@ -65,7 +81,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         set => Set(ref defaultContextWindowText, value ?? string.Empty);
     }
 
-    /// <summary>Why the list is empty or incomplete (a damaged settings file), or <c>null</c> when it is fine.</summary>
+    /// <summary>Why the list is incomplete (a damaged settings file or secret store), or <c>null</c> when it is fine.</summary>
     public string? Problem
     {
         get => problem;
@@ -90,11 +106,18 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
             Rows.Add(new ProviderRowViewModel(provider, string.Equals(provider.Id, catalog.Default?.Id, StringComparison.Ordinal)));
         }
 
+        BuiltInRows.Clear();
+        foreach (var preset in ProviderPresets.All)
+        {
+            BuiltInRows.Add(new BuiltInProviderRowViewModel(preset));
+        }
+
         // A damaged secret store is a different problem from "no provider configured": it says the keys cannot be read,
         // which is exactly the case where a row must not claim a missing key.
         DefaultContextWindowText = catalog.DefaultContextWindow?.ToString(System.Globalization.CultureInfo.InvariantCulture)
                                   ?? string.Empty;
         Problem = services.Secrets.Problem ?? (catalog.IsConfigured ? null : catalog.StatusText.Resolve());
+        ShowsNeedProviderBanner = !Rows.Any(row => row.IsReady);
         OnPropertyChanged(nameof(HasProblem));
         OnPropertyChanged(nameof(DefaultId));
     }
@@ -154,53 +177,11 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>
-    /// Stores one typed key for an already-saved definition, on the pool. Kept separate from <see cref="SaveAsync"/> so the
-    /// settings write is the thing that can fail: a refused write never replaces the key an existing provider still uses.
-    /// </summary>
-    public async Task SetSecretAsync(ProviderDefinition definition, string secret, CancellationToken cancellationToken = default)
+    /// <summary>Removes a connected provider; the caller has already asked the user twice.</summary>
+    public Task<bool> DeleteAsync(ProviderRowViewModel row, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(definition);
-        if (string.IsNullOrWhiteSpace(definition.SecretReference))
-        {
-            return;
-        }
-
-        var reference = definition.SecretReference;
-        try
-        {
-            await Task.Run(() => services.Secrets.Set(reference, secret), cancellationToken).ConfigureAwait(true);
-            Problem = services.Secrets.Problem;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            Problem = exception.Message;
-        }
-
-        OnPropertyChanged(nameof(HasProblem));
-    }
-
-    /// <summary>The "clear key" half of <see cref="SetSecretAsync"/>.</summary>
-    public async Task ClearSecretAsync(ProviderDefinition definition, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(definition);
-        if (string.IsNullOrWhiteSpace(definition.SecretReference))
-        {
-            return;
-        }
-
-        var reference = definition.SecretReference;
-        try
-        {
-            await Task.Run(() => services.Secrets.Remove(reference), cancellationToken).ConfigureAwait(true);
-            Problem = services.Secrets.Problem;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Problem = exception.Message;
-        }
-
-        OnPropertyChanged(nameof(HasProblem));
+        ArgumentNullException.ThrowIfNull(row);
+        return SaveAsync(edited: null, removedId: row.Id, cancellationToken: cancellationToken);
     }
 
     /// <summary>Re-reads <c>settings.json</c> and rebuilds the rows: a hand edit or a key exported since startup shows up.</summary>
@@ -288,11 +269,13 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
             return;
         }
 
-        OnPropertyChanged(nameof(Intro));
+        OnPropertyChanged(nameof(BannerText));
         OnPropertyChanged(nameof(ConnectedTitle));
         OnPropertyChanged(nameof(AddServerText));
         OnPropertyChanged(nameof(CustomTitle));
         OnPropertyChanged(nameof(CustomHint));
+        OnPropertyChanged(nameof(BuiltInTitle));
+        OnPropertyChanged(nameof(BuiltInHint));
         OnPropertyChanged(nameof(RefreshText));
         OnPropertyChanged(nameof(DefaultContextWindowLabel));
         OnPropertyChanged(nameof(DefaultContextWindowHint));
@@ -300,9 +283,38 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     }
 }
 
-/// <summary>One connected provider as the section lists it: name, credential line, status and the two row actions.</summary>
+/// <summary>
+/// One built-in vendor row: its name and the two actions it offers. A vendor offers "登录" only when it has a sign-in this app
+/// can perform, and "API 密钥" only when it takes a key, so a row never shows a button that cannot work.
+/// </summary>
+internal sealed class BuiltInProviderRowViewModel
+{
+    public BuiltInProviderRowViewModel(ProviderPreset preset)
+    {
+        ArgumentNullException.ThrowIfNull(preset);
+        Preset = preset;
+        ShowsLogin = preset.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription) || preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot);
+        ShowsApiKey = preset.Auth.HasFlag(ProviderAuthOptions.ApiKey);
+    }
+
+    public ProviderPreset Preset { get; }
+
+    public string Name => Preset.DisplayName;
+
+    public bool ShowsLogin { get; }
+
+    public bool ShowsApiKey { get; }
+
+    public string LoginText => Localization.Loc.Instance[ProviderStrings.LoginButtonKey];
+
+    public string ApiKeyText => Localization.Loc.Instance[ProviderStrings.ApiKeyButtonKey];
+}
+
+/// <summary>One connected provider as the section lists it: name, credential line, status, and the row actions.</summary>
 internal sealed class ProviderRowViewModel : ObservableObject
 {
+    private bool deleteArmed;
+
     public ProviderRowViewModel(ConnectedProvider provider, bool isDefault)
     {
         ArgumentNullException.ThrowIfNull(provider);
@@ -352,6 +364,25 @@ internal sealed class ProviderRowViewModel : ObservableObject
     public string DefaultText => Localization.Loc.Instance[ProviderStrings.RowDefaultKey];
 
     public string MakeDefaultText => Localization.Loc.Instance[ProviderStrings.RowMakeDefaultKey];
+
+    /// <summary>"删除" first; after one click the same button reads "再次点击删除" until the second click or a reload.</summary>
+    public string DeleteText => Localization.Loc.Instance[deleteArmed ? ProviderStrings.RowDeleteArmedKey : ProviderStrings.RowDeleteKey];
+
+    /// <summary>
+    /// The first click arms the delete, the second confirms it. Returns <c>true</c> only for the confirming click, so a stray
+    /// click on a row that holds a credential cannot remove it.
+    /// </summary>
+    public bool ConfirmDelete()
+    {
+        if (deleteArmed)
+        {
+            return true;
+        }
+
+        deleteArmed = true;
+        OnPropertyChanged(nameof(DeleteText));
+        return false;
+    }
 
     /// <summary>
     /// The sentence next to the name: where the key comes from, or which sign-in is in use. It never contains a key, only

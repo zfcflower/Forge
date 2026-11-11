@@ -266,25 +266,17 @@ public sealed class ProviderMetadataTests
     }
 
     [Fact]
-    public void A_missing_settings_file_seeds_one_anthropic_entry_that_is_never_ready()
+    public void A_missing_settings_file_connects_nothing_and_still_resolves_the_metadata_table()
     {
-        // Rewritten for the multi-provider behavior: the old build reported "not configured" when the file was
-        // missing; the new build seeds one Anthropic entry so the settings page opens on something fillable.
+        // No placeholder provider: a missing file means nothing is connected, and the built-in table still answers.
         var root = Path.Combine(Path.GetTempPath(), "forge-missing-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
             var catalog = Load(Path.Combine(root, "settings.json"));
 
-            Assert.True(catalog.IsConfigured);
-            var single = Assert.Single(catalog.Providers);
-            Assert.Equal(ProviderPresets.AnthropicId, single.Definition.PresetId);
-            Assert.Equal(ProviderPresets.AnthropicId, single.Id);
-            Assert.NotEqual(ProviderStatusKind.Ready, single.Status.Kind);
-            Assert.True(
-                single.Status.Kind is ProviderStatusKind.NeedsKey or ProviderStatusKind.NeedsSignIn,
-                "a seeded entry must say a key or sign-in is missing, got " + single.Status.Kind);
-            // The table still resolves through the seeded catalogue.
+            Assert.False(catalog.IsConfigured);
+            Assert.Empty(catalog.Providers);
             Assert.Equal(128_000, catalog.MetadataFor("gpt-4o").ContextWindow);
             Assert.Same(ModelMetadata.Unknown, catalog.MetadataFor("house-model-that-exists-nowhere"));
         }

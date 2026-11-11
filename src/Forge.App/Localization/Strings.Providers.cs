@@ -12,7 +12,17 @@ internal static class ProviderStrings
     // ---------------------------------------------------------------- section
     public const string SectionTitleKey = "providers.section.title";
 
-    public const string SectionIntroKey = "providers.section.intro";
+    public const string BannerNeedProviderKey = "providers.banner.needProvider";
+
+    public const string SectionBuiltInKey = "providers.section.builtIn";
+
+    public const string SectionBuiltInHintKey = "providers.section.builtInHint";
+
+    public const string LoginButtonKey = "providers.row.login";
+
+    public const string ApiKeyButtonKey = "providers.row.apiKey";
+
+    public const string RowDeleteArmedKey = "providers.row.deleteArmed";
 
     public const string SectionConnectedKey = "providers.section.connected";
 
@@ -64,6 +74,10 @@ internal static class ProviderStrings
 
     public const string ManagedKey = "providers.status.managed";
 
+    public const string NoModelForTestKey = "providers.status.noModelForTest";
+
+    public const string SaveFailedKey = "providers.store.saveFailed";
+
     // ---------------------------------------------------------------- row
     public const string RowModelsKey = "providers.row.models";
 
@@ -90,61 +104,55 @@ internal static class ProviderStrings
 
     public const string EditorEditKey = "providers.editor.edit";
 
-    public const string EditorPresetKey = "providers.editor.preset";
-
     public const string EditorNameKey = "providers.editor.name";
 
     public const string EditorBaseUrlKey = "providers.editor.baseUrl";
 
-    public const string EditorProtocolKey = "providers.editor.protocol";
-
-    public const string EditorAuthKey = "providers.editor.auth";
-
-    public const string EditorAuthApiKeyKey = "providers.editor.authApiKey";
-
-    public const string EditorAuthClaudeKey = "providers.editor.authClaude";
-
-    public const string EditorAuthCopilotKey = "providers.editor.authCopilot";
-
-    public const string EditorEnvironmentVariableKey = "providers.editor.envVar";
-
     public const string EditorSecretKey = "providers.editor.secret";
 
-    public const string EditorSecretPlaceholderKey = "providers.editor.secretPlaceholder";
+    public const string EditorKeyAsSecretKey = "providers.editor.keyAsSecret";
+
+    public const string EditorKeyVariableKey = "providers.editor.keyVariable";
+
+    public const string EditorKeyHintSecretKey = "providers.editor.keyHintSecret";
+
+    public const string EditorKeyHintVariableKey = "providers.editor.keyHintVariable";
+
+    public const string EditorTestKey = "providers.editor.test";
+
+    public const string EditorTestingKey = "providers.editor.testing";
+
+    public const string EditorTestPassedKey = "providers.editor.testPassed";
+
+    public const string EditorTestPassedNoListKey = "providers.editor.testPassedNoList";
+
+    public const string EditorNeedsVariableKey = "providers.editor.needsVariable";
+
+    public const string LoginTitleKey = "providers.login.title";
+
+    public const string LoginClaudeNotInstalledKey = "providers.login.claudeNotInstalled";
+
+    public const string LoginClaudeStepsKey = "providers.login.claudeSteps";
+
+    public const string LoginClaudeInstallKey = "providers.login.claudeInstall";
+
+    public const string LoginClaudeDocsKey = "providers.login.claudeDocs";
+
+    public const string LoginClaudeRecheckKey = "providers.login.claudeRecheck";
+
+    public const string LoginClaudeUseKey = "providers.login.claudeUse";
+
+    public const string LoginCopilotStartKey = "providers.login.copilotStart";
 
     public const string EditorSecretStoredKey = "providers.editor.secretStored";
 
-    public const string EditorSecretClearKey = "providers.editor.secretClear";
-
-    public const string EditorModelsKey = "providers.editor.models";
-
-    public const string EditorModelsFetchKey = "providers.editor.modelsFetch";
-
     public const string EditorModelsFetchedKey = "providers.editor.modelsFetched";
-
-    public const string EditorModelAddKey = "providers.editor.modelAdd";
-
-    public const string EditorDefaultModelKey = "providers.editor.defaultModel";
-
-    public const string EditorThinkingKey = "providers.editor.thinking";
-
-    public const string EditorMaxTokensKey = "providers.editor.maxTokens";
 
     public const string EditorSaveKey = "providers.editor.save";
 
     public const string EditorCancelKey = "providers.editor.cancel";
 
-    public const string EditorDeleteKey = "providers.editor.delete";
-
-    public const string EditorDeleteConfirmKey = "providers.editor.deleteConfirm";
-
-    public const string EditorSignInKey = "providers.editor.signIn";
-
-    public const string EditorSignOutKey = "providers.editor.signOut";
-
     public const string EditorSignedInKey = "providers.editor.signedIn";
-
-    public const string EditorClaudeHintKey = "providers.editor.claudeHint";
 
     public const string EditorCopilotHintKey = "providers.editor.copilotHint";
 
@@ -154,17 +162,9 @@ internal static class ProviderStrings
 
     public const string EditorDeviceCodeWaitingKey = "providers.editor.deviceCodeWaiting";
 
-    public const string EditorOpenBrowserKey = "providers.editor.openBrowser";
-
-    public const string EditorCopyCodeKey = "providers.editor.copyCode";
-
     public const string EditorNeedsNameKey = "providers.editor.needsName";
 
     public const string EditorNeedsBaseUrlKey = "providers.editor.needsBaseUrl";
-
-    public const string EditorNeedsModelKey = "providers.editor.needsModel";
-
-    public const string EditorSignedInClaudeKey = "providers.editor.signedInClaude";
 
     // ---------------------------------------------------------------- model metadata window
     public const string MetadataTitleKey = "providers.meta.title";
@@ -205,18 +205,23 @@ internal static class ProviderStrings
 
     internal static void Register()
     {
-        Loc.Register(SectionTitleKey, "提供方", "Providers");
-        Loc.Register(
-            SectionIntroKey,
-            "至少连接一个提供方才能运行 agent，可以是订阅或 API 密钥。",
-            "Connect at least one provider to run an agent — a subscription or an API key.");
+        Loc.Register(SectionTitleKey, "提供商", "Providers");
+        Loc.Register(BannerNeedProviderKey, "至少连接一个提供商才能运行 agent", "Connect at least one provider to run an agent");
         Loc.Register(SectionConnectedKey, "已连接", "Connected");
-        Loc.Register(SectionAddServerKey, "添加服务器", "Add server");
-        Loc.Register(SectionCustomTitleKey, "自定义服务器", "Custom server");
+        Loc.Register(SectionAddServerKey, "添加提供商", "Add provider");
+        Loc.Register(SectionCustomTitleKey, "自定义提供商", "Custom providers");
         Loc.Register(
             SectionCustomHintKey,
-            "公司大模型网关或本机上的模型——任何兼容 OpenAI 的服务器。",
-            "A company gateway or a model on this machine — any OpenAI-compatible server.");
+            "任何兼容 OpenAI 协议的提供商或者服务器",
+            "Any provider or server that speaks the OpenAI protocol");
+        Loc.Register(SectionBuiltInKey, "内置提供商", "Built-in providers");
+        Loc.Register(
+            SectionBuiltInHintKey,
+            "可使用您现有的 Claude、ChatGPT 或 Copilot 套餐，无需 API 密钥。",
+            "Use your existing Claude, ChatGPT or Copilot plan — no API key needed.");
+        Loc.Register(LoginButtonKey, "登录", "Sign in");
+        Loc.Register(ApiKeyButtonKey, "API 密钥", "API key");
+        Loc.Register(RowDeleteArmedKey, "再次点击删除", "Click again to delete");
         Loc.Register(SectionRefreshKey, "刷新", "Refresh");
         Loc.Register(DefaultContextWindowKey, "默认上下文窗口", "Default context window");
         Loc.Register(
@@ -230,8 +235,8 @@ internal static class ProviderStrings
 
         Loc.Register(SettingsMissingKey, "找不到 settings.json", "settings.json was not found");
         Loc.Register(SettingsUnreadableKey, "settings.json 无法读取：{0}", "settings.json cannot be read: {0}");
-        Loc.Register(SectionMissingKey, "还没有配置任何提供方", "No provider is configured yet");
-        Loc.Register(InvalidKey, "提供方配置无效：{0}", "The provider configuration is invalid: {0}");
+        Loc.Register(SectionMissingKey, "还没有配置任何提供商", "No provider is configured yet");
+        Loc.Register(InvalidKey, "提供商配置无效：{0}", "The provider configuration is invalid: {0}");
         Loc.Register(ReadyKey, "已就绪：{0}", "Ready: {0}");
 
         Loc.Register(ReadyEnvironmentKey, "环境变量 key · {0} · {1}", "Environment key · {0} · {1}");
@@ -248,52 +253,57 @@ internal static class ProviderStrings
         Loc.Register(ErrorNoBaseUrlKey, "缺少 Base URL", "No base URL");
         Loc.Register(ErrorNoCredentialKey, "没有选择认证方式", "No authentication method");
         Loc.Register(ManagedKey, "托管中", "ManagedKey");
+        Loc.Register(NoModelForTestKey, "没有可用于测试的模型", "No model to test with");
+        Loc.Register(SaveFailedKey, "无法保存提供商配置，未做任何改动", "Could not save the provider settings; nothing was changed");
 
         Loc.Register(RowModelsKey, "{0} 个模型", "{0} models");
         Loc.Register(RowModelsNoneKey, "0 个模型", "0 models");
-        Loc.Register(RowEditKey, "编辑提供方", "Edit provider");
+        Loc.Register(RowEditKey, "编辑提供商", "Edit provider");
         Loc.Register(RowDefaultKey, "默认", "Default");
         Loc.Register(RowMakeDefaultKey, "设为默认", "Set as default");
-        Loc.Register(RowDeleteKey, "删除提供方", "Delete provider");
+        Loc.Register(RowDeleteKey, "删除提供商", "Delete provider");
         Loc.Register(RowStatusReadyKey, "已连接", "Connected");
         Loc.Register(RowStatusNeedsKeyKey, "缺少密钥", "Missing key");
         Loc.Register(RowStatusNeedsSignInKey, "待登录", "Sign-in required");
         Loc.Register(RowStatusErrorKey, "配置有误", "Configuration error");
 
-        Loc.Register(EditorNewKey, "添加提供方", "Add provider");
-        Loc.Register(EditorEditKey, "编辑提供方", "Edit provider");
-        Loc.Register(EditorPresetKey, "预设", "Preset");
+        Loc.Register(EditorNewKey, "添加提供商", "Add provider");
+        Loc.Register(EditorEditKey, "编辑提供商", "Edit provider");
         Loc.Register(EditorNameKey, "名称", "Name");
         Loc.Register(EditorBaseUrlKey, "Base URL", "Base URL");
-        Loc.Register(EditorProtocolKey, "协议", "Protocol");
-        Loc.Register(EditorAuthKey, "认证方式", "Authentication");
-        Loc.Register(EditorAuthApiKeyKey, "API 密钥", "API key");
-        Loc.Register(EditorAuthClaudeKey, "Claude 订阅登录", "Claude subscription");
-        Loc.Register(EditorAuthCopilotKey, "GitHub Copilot 登录", "GitHub Copilot sign-in");
-        Loc.Register(EditorEnvironmentVariableKey, "环境变量", "Environment variable");
         Loc.Register(EditorSecretKey, "密钥", "Key");
-        Loc.Register(EditorSecretPlaceholderKey, "粘贴密钥（保存在加密密钥库，不写入 settings.json）",
-            "Paste the key (kept in the encrypted store, never in settings.json)");
         Loc.Register(EditorSecretStoredKey, "已保存，留空则不修改", "Stored — leave empty to keep it");
-        Loc.Register(EditorSecretClearKey, "清除密钥", "Clear key");
-        Loc.Register(EditorModelsKey, "模型", "Models");
-        Loc.Register(EditorModelsFetchKey, "从服务端刷新", "Refresh from server");
+        Loc.Register(EditorKeyAsSecretKey, "以密钥粘贴（不勾选则填写环境变量名）", "Paste the key itself (untick to enter an environment variable name)");
+        Loc.Register(EditorKeyVariableKey, "环境变量名", "Environment variable name");
+        Loc.Register(
+            EditorKeyHintSecretKey,
+            "这里是密钥本身，加密保存在本机，不写入 settings.json。",
+            "The key itself, stored encrypted on this machine and never written to settings.json.");
+        Loc.Register(
+            EditorKeyHintVariableKey,
+            "这里是环境变量名，运行时从该变量读取密钥。",
+            "The name of an environment variable; the key is read from it at run time.");
+        Loc.Register(EditorTestKey, "测试连接", "Test connection");
+        Loc.Register(EditorTestingKey, "测试中…", "Testing…");
+        Loc.Register(EditorTestPassedKey, "连接成功，已获取 {0} 个模型", "Connected — {0} models fetched");
+        Loc.Register(EditorTestPassedNoListKey, "连接成功", "Connected");
+        Loc.Register(EditorNeedsVariableKey, "请填写环境变量名", "Enter the environment variable name");
+        Loc.Register(LoginTitleKey, "登录 {0}", "Sign in to {0}");
+        Loc.Register(
+            LoginClaudeNotInstalledKey,
+            "没有检测到 Claude Code（本机 claude 命令）",
+            "Claude Code (the local claude command) was not found");
+        Loc.Register(LoginClaudeStepsKey, "1. 运行安装命令（PowerShell）：irm https://claude.ai/install.ps1 | iex\n2. 打开新的终端，运行 claude 并完成登录\n3. 回到这里点击「重新检查」",
+            "1. Run the installer in PowerShell: irm https://claude.ai/install.ps1 | iex\n2. Open a new terminal, run claude and sign in\n3. Come back here and click Re-check");
+        Loc.Register(LoginClaudeInstallKey, "安装 Claude Code", "Install Claude Code");
+        Loc.Register(LoginClaudeDocsKey, "查看安装说明", "Installation guide");
+        Loc.Register(LoginClaudeRecheckKey, "重新检查", "Re-check");
+        Loc.Register(LoginClaudeUseKey, "使用此登录", "Use this sign-in");
+        Loc.Register(LoginCopilotStartKey, "开始设备码登录", "Start device-code sign-in");
         Loc.Register(EditorModelsFetchedKey, "已获取 {0} 个模型", "Fetched {0} models");
-        Loc.Register(EditorModelAddKey, "添加模型 id", "Add a model id");
-        Loc.Register(EditorDefaultModelKey, "默认模型", "Default model");
-        Loc.Register(EditorThinkingKey, "思考强度", "Thinking effort");
-        Loc.Register(EditorMaxTokensKey, "最大输出 token", "Max output tokens");
         Loc.Register(EditorSaveKey, "保存", "Save");
         Loc.Register(EditorCancelKey, "取消", "Cancel");
-        Loc.Register(EditorDeleteKey, "删除", "Delete");
-        Loc.Register(EditorDeleteConfirmKey, "再次点击以删除这个提供方", "Click again to delete this provider");
-        Loc.Register(EditorSignInKey, "登录", "Sign in");
-        Loc.Register(EditorSignOutKey, "退出登录", "Sign out");
         Loc.Register(EditorSignedInKey, "已登录", "Signed in");
-        Loc.Register(
-            EditorClaudeHintKey,
-            "复用本机 claude 已登录的订阅额度；需要先运行 claude 完成登录。",
-            "Uses the subscription the local claude CLI is signed in to; sign in with claude first.");
         Loc.Register(
             EditorCopilotHintKey,
             "用 GitHub 设备码登录 Copilot；这是非官方客户端用法，可能随 GitHub 变化。",
@@ -304,12 +314,8 @@ internal static class ProviderStrings
             "浏览器会打开一次；授权后这里会自动变成已登录。",
             "The browser opens once; this switches to signed in after you authorize.");
         Loc.Register(EditorDeviceCodeWaitingKey, "等待授权…", "Waiting for authorization…");
-        Loc.Register(EditorOpenBrowserKey, "打开页面", "Open page");
-        Loc.Register(EditorCopyCodeKey, "复制代码", "Copy code");
         Loc.Register(EditorNeedsNameKey, "名称不能为空", "The name cannot be empty");
         Loc.Register(EditorNeedsBaseUrlKey, "Base URL 必须是绝对地址", "The base URL must be absolute");
-        Loc.Register(EditorNeedsModelKey, "至少需要一个模型", "At least one model is required");
-        Loc.Register(EditorSignedInClaudeKey, "已登录 Claude Code", "Signed in to Claude Code");
 
         Loc.Register(MetadataTitleKey, "模型 · {0}", "Models · {0}");
         Loc.Register(
@@ -328,7 +334,7 @@ internal static class ProviderStrings
         Loc.Register(MetadataRefreshKey, "从服务端刷新模型", "Refresh models from the server");
         Loc.Register(MetadataResetKey, "恢复默认", "Restore defaults");
         Loc.Register(MetadataCloseKey, "关闭", "Close");
-        Loc.Register(MetadataEmptyKey, "这个提供方还没有模型；先在编辑界面刷新一次。",
+        Loc.Register(MetadataEmptyKey, "这个提供商还没有模型；先在编辑界面刷新一次。",
             "This provider has no models yet; refresh once in the editor.");
         Loc.Register(MetadataUnknownKey, "未知", "Unknown");
     }
@@ -356,6 +362,10 @@ internal static class ProviderStrings
     public static Localization.LocText NoBaseUrlText() => new(ErrorNoBaseUrlKey);
 
     public static Localization.LocText NoCredentialText() => new(ErrorNoCredentialKey);
+
+    public static Localization.LocText NoModelForTestText() => new(NoModelForTestKey);
+
+    public static Localization.LocText SaveFailedText() => new(SaveFailedKey);
 
     public static Localization.LocText ClaudeSignedInText() => new(ReadyClaudeKey);
 

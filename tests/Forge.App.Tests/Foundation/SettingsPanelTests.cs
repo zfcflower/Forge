@@ -17,7 +17,7 @@ namespace Forge.App.Tests.Foundation;
 /// Headless render of the standalone settings window: the left column is the grouped registry
 /// (<c>AGENT</c> / <c>界面</c> / <c>系统</c>) and every section's view model is drawn by its app-level data template.
 /// Rewritten for the multi-provider window: the provider row is <c>ProvidersSettingsViewModel</c> (title
-/// "提供方"/"Providers"), the window is separate from the main shell, and the nav order is grouped rather than flat.
+/// "提供商"/"Providers"), the window is separate from the main shell, and the nav order is grouped rather than flat.
 /// </summary>
 [Collection("forge-app-ui")]
 public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
@@ -50,7 +50,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Equal(SettingsSectionIds.Provider, providerSection.Id);
         var providerModel = Assert.IsType<ProvidersSettingsViewModel>(providerSection.ViewModel);
         var providerTexts = await session.Dispatch(() => PanelShell.SelectedTexts(shell.Window), token);
-        Assert.Contains(providerModel.Intro, providerTexts);
+        Assert.Contains(providerModel.BuiltInTitle, providerTexts);
         Assert.Contains(providerModel.ConnectedTitle, providerTexts);
 
         // Selecting the paths section swaps its body into the right pane.
@@ -155,7 +155,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             var chinese = await session.Dispatch(
                 () => PanelShell.Read(shell.Window),
                 token);
-            Assert.Equal("提供方", chinese.ProviderTitle);
+            Assert.Equal("提供商", chinese.ProviderTitle);
             Assert.Equal("路径与服务", chinese.PathsTitle);
             Assert.Contains("AGENT", chinese.Groups);
             Assert.Contains("界面", chinese.Groups);

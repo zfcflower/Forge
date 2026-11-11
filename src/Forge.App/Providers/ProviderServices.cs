@@ -109,6 +109,31 @@ internal sealed class ProviderServices
     }
 
     /// <summary>
+    /// The connection test for a preset that cannot list its models (Anthropic-protocol vendors): one tiny turn through the
+    /// provider's own chat path. The first stream event proves the endpoint, the credential and the model id together; the
+    /// reply text is discarded.
+    /// </summary>
+    public async Task VerifyChatAsync(ConnectedProvider provider, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (string.IsNullOrWhiteSpace(provider.DefaultModel))
+        {
+            throw new ProviderException(ProviderStrings.NoModelForTestText().Resolve(), retryable: false);
+        }
+
+        var chat = provider.CreateProvider(http);
+        var request = new ChatRequest(
+            string.Empty,
+            [],
+            [ChatMessage.User("ping")],
+            new ModelSettings(provider.DefaultModel, ThinkingEffort.Off, MaxOutputTokens: 16, ProviderId: provider.Id));
+        await foreach (var _ in chat.StreamAsync(request, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+    }
+
+    /// <summary>
     /// Asks one provider for its model list and stores the answer in the in-memory cache (ids and any metadata the server
     /// reports). The headers are the provider's own credentials, built exactly the way a chat request builds them.
     /// </summary>

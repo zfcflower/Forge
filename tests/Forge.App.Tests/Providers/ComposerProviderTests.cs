@@ -120,10 +120,9 @@ public sealed class ComposerProviderTests : IDisposable
     }
 
     [Fact]
-    public void An_empty_providers_section_still_offers_the_seeded_default_entry()
+    public void An_empty_providers_section_offers_no_model_rather_than_a_placeholder()
     {
-        // "Nothing configured" is not an empty menu: the store seeds the product's default provider (unsaved), so the user
-        // has a row to fill in instead of an empty picker that explains nothing.
+        // Nothing connected means nothing to pick: the picker is empty and the settings banner says why.
         var services = Services(
             """{ "providers": { "version": 1, "defaultId": null, "items": [] } }""");
         var composer = new ComposerViewModel(
@@ -133,8 +132,8 @@ public sealed class ComposerProviderTests : IDisposable
             string.Empty,
             skillSource: static () => []);
 
-        Assert.True(composer.HasModel);
-        Assert.Equal(services.Catalog.Default!.Definition.Models, composer.Models.Select(static model => model.Name));
+        Assert.False(services.Catalog.IsConfigured);
+        Assert.Empty(composer.Models);
     }
 
     public void Dispose()

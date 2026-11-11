@@ -2,7 +2,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:settings="using:Forge.App.Settings"
-             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Settings.ProvidersSettingsView"
              x:DataType="settings:ProvidersSettingsViewModel">
   <UserControl.Styles>
@@ -45,22 +44,16 @@
   </UserControl.Styles>
 
   <StackPanel Spacing="14">
-    <!-- Intro line and the refresh affordance, mirroring the reference layout. -->
-    <Grid ColumnDefinitions="*,Auto">
-      <TextBlock Text="{Binding Intro}"
+    <!-- Top banner: no connected provider means no agent can run. -->
+    <Border IsVisible="{Binding ShowsNeedProviderBanner}"
+            Background="{DynamicResource AccentSubtleBrush}"
+            CornerRadius="6"
+            Padding="12,8"
+            AutomationProperties.AutomationId="providers-banner">
+      <TextBlock Text="{Binding BannerText}"
                  TextWrapping="Wrap"
-                 Foreground="{DynamicResource TextSecondaryBrush}"
-                 VerticalAlignment="Center" />
-      <Button Grid.Column="1"
-              Classes="provider-action"
-              Command="{Binding RefreshCommand}"
-              AutomationProperties.AutomationId="providers-refresh">
-        <StackPanel Orientation="Horizontal" Spacing="6">
-          <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
-          <TextBlock Text="{Binding RefreshText}" VerticalAlignment="Center" />
-        </StackPanel>
-      </Button>
-    </Grid>
+                 Foreground="{DynamicResource WarningBrush}" />
+    </Border>
 
     <!-- Model metadata that is not per provider: the window every model uses unless it has its own. -->
     <StackPanel Spacing="3">
@@ -83,13 +76,25 @@
                  Text="{Binding DefaultContextWindowHint}" />
     </StackPanel>
 
-    <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" Margin="0,6,0,0" />
+    <!-- 1. Connected: what is already set up. -->
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" VerticalAlignment="Center" />
+      <Button Grid.Column="1"
+              Classes="provider-action"
+              Command="{Binding RefreshCommand}"
+              AutomationProperties.AutomationId="providers-refresh">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
+          <TextBlock Text="{Binding RefreshText}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+    </Grid>
 
     <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="providers-connected">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="settings:ProviderRowViewModel">
           <Border Classes="provider-row">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
                 <Border IsVisible="{Binding IsDefault}"
@@ -140,6 +145,19 @@
                   <TextBlock Text="{Binding ModelsLabel}" VerticalAlignment="Center" />
                 </StackPanel>
               </Button>
+
+              <Button Grid.Column="5"
+                      Classes="provider-action"
+                      IsVisible="{Binding !IsDefault}"
+                      Click="OnMakeDefaultClick"
+                      Content="{Binding MakeDefaultText}"
+                      AutomationProperties.AutomationId="{Binding Id, StringFormat=provider-default-{0}}" />
+
+              <Button Grid.Column="6"
+                      Classes="provider-action"
+                      Click="OnDeleteClick"
+                      Content="{Binding DeleteText}"
+                      AutomationProperties.AutomationId="{Binding Id, StringFormat=provider-delete-{0}}" />
             </Grid>
           </Border>
         </DataTemplate>
@@ -151,25 +169,66 @@
                TextWrapping="Wrap"
                Text="{Binding Problem}" />
 
-    <!-- Custom servers: the free-form entry of the same list. -->
+    <!-- 2. Custom: any OpenAI-compatible server, typed by hand. -->
+    <Border Classes="divider" Margin="0,6" />
+
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <StackPanel Spacing="4" VerticalAlignment="Center">
+        <TextBlock Classes="section-title" Text="{Binding CustomTitle}" />
+        <TextBlock Text="{Binding CustomHint}"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextSecondaryBrush}"
+                   FontSize="{DynamicResource FontSizeSm}" />
+      </StackPanel>
+      <Button Grid.Column="1"
+              Classes="primary"
+              Click="OnAddClick"
+              VerticalAlignment="Center"
+              AutomationProperties.AutomationId="providers-add">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <wc:FluentIcon Data="{StaticResource IconPlus}" Width="14" Height="14" />
+          <TextBlock Text="{Binding AddServerText}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+    </Grid>
+
+    <!-- 3. Built-in: the vendors this app knows, each with the ways it can be reached. -->
     <Border Classes="divider" Margin="0,6" />
 
     <StackPanel Spacing="4">
-      <TextBlock Classes="section-title" Text="{Binding CustomTitle}" />
-      <TextBlock Text="{Binding CustomHint}"
+      <TextBlock Classes="section-title" Text="{Binding BuiltInTitle}" />
+      <TextBlock Text="{Binding BuiltInHint}"
                  TextWrapping="Wrap"
                  Foreground="{DynamicResource TextSecondaryBrush}"
                  FontSize="{DynamicResource FontSizeSm}" />
     </StackPanel>
 
-    <Button Classes="primary"
-            Click="OnAddClick"
-            HorizontalAlignment="Left"
-            AutomationProperties.AutomationId="providers-add">
-      <StackPanel Orientation="Horizontal" Spacing="6">
-        <wc:FluentIcon Data="{StaticResource IconPlus}" Width="14" Height="14" />
-        <TextBlock Text="{Binding AddServerText}" VerticalAlignment="Center" />
-      </StackPanel>
-    </Button>
+    <ItemsControl ItemsSource="{Binding BuiltInRows}" AutomationProperties.AutomationId="providers-builtin">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="settings:BuiltInProviderRowViewModel">
+          <Border Classes="provider-row">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+              <TextBlock Text="{Binding Name}"
+                         FontSize="{DynamicResource FontSizeMd}"
+                         VerticalAlignment="Center" />
+
+              <Button Grid.Column="1"
+                      Classes="provider-action"
+                      IsVisible="{Binding ShowsLogin}"
+                      Click="OnLoginClick"
+                      Content="{Binding LoginText}"
+                      AutomationProperties.AutomationId="{Binding Preset.Id, StringFormat=provider-login-{0}}" />
+
+              <Button Grid.Column="2"
+                      Classes="provider-action"
+                      IsVisible="{Binding ShowsApiKey}"
+                      Click="OnApiKeyClick"
+                      Content="{Binding ApiKeyText}"
+                      AutomationProperties.AutomationId="{Binding Preset.Id, StringFormat=provider-apikey-{0}}" />
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
   </StackPanel>
 </UserControl>

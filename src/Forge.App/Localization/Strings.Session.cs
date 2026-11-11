@@ -379,7 +379,7 @@ internal static class SessionStrings
         Loc.Register(ComposerCommandKey, "命令", "Command");
         Loc.Register(ComposerNoMatchesKey, "没有匹配项", "No matches");        Loc.Register(StoppedKey, "已停止", "Stopped");
         Loc.Register(ReadFailedKey, "读取会话失败：{0}", "Could not read the session: {0}");
-        Loc.Register(ProviderMissingKey, "尚未配置模型提供方：{0}", "No model provider is configured: {0}");
+        Loc.Register(ProviderMissingKey, "尚未配置模型提供商：{0}", "No model provider is configured: {0}");
 
         // turn card and its notices
         Loc.Register(TurnHeaderKey, "第 {0} 轮 · {1} · {2} · 输入 {3} · 输出 {4}", "Turn {0} · {1} · {2} · in {3} · out {4}");

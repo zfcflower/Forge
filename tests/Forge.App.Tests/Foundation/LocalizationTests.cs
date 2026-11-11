@@ -136,7 +136,7 @@ public sealed class LocalizationTests : IDisposable
     [Fact]
     public void The_shell_section_titles_are_translated()
     {
-        Assert.Equal("模型提供方", Text(CoreStrings.SettingsSectionProvider, UiLanguage.Chinese));
+        Assert.Equal("模型提供商", Text(CoreStrings.SettingsSectionProvider, UiLanguage.Chinese));
         Assert.Equal("Model provider", Text(CoreStrings.SettingsSectionProvider, UiLanguage.English));
         Assert.Equal("路径与服务", Text(CoreStrings.SettingsSectionPaths, UiLanguage.Chinese));
         Assert.Equal("Paths and services", Text(CoreStrings.SettingsSectionPaths, UiLanguage.English));

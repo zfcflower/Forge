@@ -61,12 +61,12 @@ internal static class CoreStrings
         Loc.Register(SettingsCollapseNav, "收起左栏", "Collapse the section list");
         Loc.Register(SettingsExpandNav, "展开左栏", "Expand the section list");
 
-        Loc.Register(SettingsSectionProvider, "模型提供方", "Model provider");
+        Loc.Register(SettingsSectionProvider, "模型提供商", "Model provider");
         Loc.Register(SettingsSectionPaths, "路径与服务", "Paths and services");
 
         Loc.Register(
             SettingsProviderHint,
-            "提供方来自 settings.json，启动时与点击重新加载时读取；密钥可来自该文件指定的环境变量。",
+            "提供商来自 settings.json，启动时与点击重新加载时读取；密钥可来自该文件指定的环境变量。",
             "The provider comes from settings.json and is read at startup and on reload; the key may come from the environment variable named there.");
 
         Loc.Register(SettingsPathFile, "settings.json", "settings.json");

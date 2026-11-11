@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.App.Localization;
@@ -251,7 +252,7 @@ public sealed class ProviderEditorTests : IDisposable
     public void An_incomplete_form_reports_why_it_cannot_be_saved()
     {
         var services = Services();
-        var editor = new ProviderEditorViewModel(services, definition: null, isDefault: false, ProviderPresets.Custom);
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom);
 
         editor.Name = "  ";
         Assert.Null(editor.TryBuild());
@@ -263,38 +264,55 @@ public sealed class ProviderEditorTests : IDisposable
         Assert.NotNull(editor.Error);
 
         editor.BaseUrl = "https://example.invalid/v1";
-        editor.Models.Clear();
-        editor.DefaultModel = string.Empty;
+        Assert.NotNull(editor.TryBuild());
+        Assert.Null(editor.Error);
+
+        // The environment-variable mode needs a name to read from; an empty box is a mistake, not "no key".
+        editor.KeyIsSecret = false;
+        editor.KeyText = " ";
         Assert.Null(editor.TryBuild());
         Assert.NotNull(editor.Error);
-
-        editor.AddModel("gpt-x");
-        var definition = editor.TryBuild();
-        Assert.NotNull(definition);
-        Assert.Equal("gpt-x", definition!.DefaultModel);
-        Assert.Null(editor.Error);
     }
 
     [Fact]
     public void A_valid_form_carries_only_a_reference_and_never_the_secret()
     {
         var services = Services();
-        var editor = new ProviderEditorViewModel(services, definition: null, isDefault: true, ProviderPresets.Custom)
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
         {
             Name = "Company gateway",
             BaseUrl = "https://gateway.invalid/v1",
-            Secret = "sk-live-not-a-real-key",
+            KeyText = "sk-live-not-a-real-key",
         };
-        editor.AddModel("internal-model");
 
         var definition = editor.TryBuild();
 
         Assert.NotNull(definition);
         Assert.Equal("provider:company-gateway", definition!.SecretReference);
+        Assert.Null(definition.EnvironmentVariable);
+        Assert.Equal(ThinkingEffort.Medium, definition.Thinking);
         var stored = JsonSerializer.Serialize(
             definition.ToDocument(),
             ProvidersJsonContext.Default.ProviderEntryDocument);
         Assert.DoesNotContain("sk-live-not-a-real-key", stored, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Environment_mode_stores_the_variable_name_and_switching_back_clears_it()
+    {
+        var services = Services();
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Find(ProviderPresets.OpenAiId));
+        editor.Name = "OpenAI";
+
+        editor.KeyIsSecret = false;
+        Assert.Equal("OPENAI_API_KEY", editor.KeyText);
+
+        var definition = editor.TryBuild();
+        Assert.NotNull(definition);
+        Assert.Equal("OPENAI_API_KEY", definition!.EnvironmentVariable);
+
+        editor.KeyIsSecret = true;
+        Assert.Equal(string.Empty, editor.KeyText);
     }
 
     [Fact]
@@ -306,14 +324,11 @@ public sealed class ProviderEditorTests : IDisposable
         var editor = new ProviderEditorViewModel(
             services,
             definition: null,
-            isDefault: false,
             ProviderPresets.Find(ProviderPresets.OpenAiId),
             existing)
         {
             Name = "OpenAI",
-            BaseUrl = "https://api.openai.com/v1",
         };
-        editor.AddModel("gpt-x");
 
         var definition = editor.TryBuild();
 
@@ -322,20 +337,137 @@ public sealed class ProviderEditorTests : IDisposable
     }
 
     [Fact]
-    public void Removing_the_default_model_moves_the_default_to_the_next_one()
+    public async Task A_passing_test_fetches_the_models_and_the_save_writes_them()
+    {
+        var services = ServicesWith(new FixedHandler(HttpStatusCode.OK, """{"data":[{"id":"m1"},{"id":"m2"}]}"""));
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
+        {
+            Name = "Gateway",
+            BaseUrl = "https://gateway.invalid/v1",
+            KeyText = "sk-test",
+        };
+        ProviderDefinition? saved = null;
+        editor.Saved += (_, definition) => saved = definition;
+        Assert.Equal(ProviderTestState.Untested, editor.TestState);
+
+        await editor.TestOrSaveAsync();
+
+        Assert.Equal(ProviderTestState.Passed, editor.TestState);
+        Assert.Equal("保存", editor.TestOrSaveText);
+        Assert.Null(saved);
+
+        await editor.TestOrSaveAsync();
+
+        Assert.NotNull(saved);
+        Assert.Equal(["m1", "m2"], saved!.Models);
+        Assert.Equal("m1", saved.DefaultModel);
+        Assert.Equal("sk-test", services.Secrets.Get(saved.SecretReference!));
+    }
+
+    [Fact]
+    public async Task A_failed_test_keeps_the_test_button_and_reports_the_reason()
+    {
+        var services = ServicesWith(new FixedHandler(HttpStatusCode.Unauthorized, """{"error":"bad key"}"""));
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
+        {
+            Name = "Gateway",
+            BaseUrl = "https://gateway.invalid/v1",
+            KeyText = "sk-wrong",
+        };
+
+        await editor.TestOrSaveAsync();
+
+        Assert.Equal(ProviderTestState.Untested, editor.TestState);
+        Assert.Equal("测试连接", editor.TestOrSaveText);
+        Assert.True(editor.HasError);
+    }
+
+    [Fact]
+    public async Task Cancelling_after_a_test_removes_the_draft_key_and_never_writes_the_real_one()
+    {
+        var services = ServicesWith(new FixedHandler(HttpStatusCode.OK, """{"data":[]}"""));
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
+        {
+            Name = "Throwaway",
+            BaseUrl = "https://gateway.invalid/v1",
+            KeyText = "sk-orphan-candidate",
+        };
+        await editor.TestOrSaveAsync();
+
+        Assert.True(services.Secrets.Has("provider-draft:throwaway"), "the test reads the typed key from a draft reference");
+        Assert.False(services.Secrets.Has("provider:throwaway"), "a test never writes the provider's real reference");
+
+        await editor.AbandonAsync();
+
+        Assert.False(services.Secrets.Has("provider-draft:throwaway"));
+        Assert.False(services.Secrets.Has("provider:throwaway"));
+    }
+
+    [Fact]
+    public async Task A_test_on_an_existing_provider_leaves_its_stored_key_until_the_save_succeeds()
+    {
+        var services = ServicesWith(new FixedHandler(HttpStatusCode.OK, """{"data":[{"id":"m1"}]}"""));
+        services.Secrets.Set("provider:gateway", "sk-old");
+        var definition = OpenAICompatible() with { EnvironmentVariable = null };
+        var editor = new ProviderEditorViewModel(services, definition, persist: _ => Task.FromResult<string?>(null));
+        editor.KeyText = "sk-new";
+        ProviderDefinition? saved = null;
+        editor.Saved += (_, value) => saved = value;
+
+        await editor.TestOrSaveAsync();
+        Assert.Equal("sk-old", services.Secrets.Get("provider:gateway"));
+        Assert.Equal(ProviderTestState.Passed, editor.TestState);
+
+        await editor.TestOrSaveAsync();
+        Assert.NotNull(saved);
+        Assert.Equal("sk-new", services.Secrets.Get("provider:gateway"));
+        Assert.False(services.Secrets.Has("provider-draft:gateway"));
+    }
+
+    [Fact]
+    public async Task A_refused_settings_write_keeps_the_dialog_open_and_the_old_key()
+    {
+        var services = ServicesWith(new FixedHandler(HttpStatusCode.OK, """{"data":[{"id":"m1"}]}"""));
+        services.Secrets.Set("provider:gateway", "sk-old");
+        var editor = new ProviderEditorViewModel(
+            services,
+            OpenAICompatible() with { EnvironmentVariable = null },
+            persist: _ => Task.FromResult<string?>("settings.json is read-only"));
+        editor.KeyText = "sk-new";
+        ProviderDefinition? saved = null;
+        editor.Saved += (_, value) => saved = value;
+
+        await editor.TestOrSaveAsync();
+        await editor.TestOrSaveAsync();
+
+        Assert.Null(saved);
+        Assert.Equal("settings.json is read-only", editor.Error);
+        Assert.Equal(ProviderTestState.Passed, editor.TestState);
+        Assert.Equal("sk-old", services.Secrets.Get("provider:gateway"));
+    }
+
+    [Fact]
+    public void Editing_a_passing_provider_saves_directly_until_the_address_changes()
     {
         var services = Services();
-        var editor = new ProviderEditorViewModel(services, definition: null, isDefault: true, ProviderPresets.Custom);
-        editor.Name = "Gateway";
-        editor.BaseUrl = "https://example.invalid/v1";
-        editor.AddModel("first");
-        editor.AddModel("second");
-        editor.DefaultModel = "first";
+        var definition = OpenAICompatible();
+        var editor = new ProviderEditorViewModel(services, definition);
+        ProviderDefinition? saved = null;
+        editor.Saved += (_, value) => saved = value;
 
-        editor.RemoveModel("first");
+        Assert.Equal(ProviderTestState.Passed, editor.TestState);
+        Assert.Equal("保存", editor.TestOrSaveText);
 
-        Assert.Equal(["second"], editor.Models);
-        Assert.Equal("second", editor.DefaultModel);
+        editor.Name = "Renamed";
+        editor.TestOrSaveCommand.Execute(null);
+        Assert.Equal("Renamed", saved?.DisplayName);
+
+        saved = null;
+        editor.BaseUrl = "https://elsewhere.invalid/v1";
+        Assert.Equal(ProviderTestState.Untested, editor.TestState);
+        Assert.Equal("测试连接", editor.TestOrSaveText);
+        editor.TestOrSaveCommand.Execute(null);
+        Assert.Null(saved);
     }
 
     [Fact]
@@ -413,6 +545,16 @@ public sealed class ProviderEditorTests : IDisposable
 
     private ProviderServices Services() =>
         new(Path.Combine(root, "settings.json"), root, new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
+
+    private ProviderServices ServicesWith(HttpMessageHandler handler) =>
+        new(Path.Combine(root, "settings.json"), root, new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan });
+
+    /// <summary>Answers every request with one status and body; the test connection only ever asks <c>/models</c>.</summary>
+    private sealed class FixedHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") });
+    }
 
     private static ProviderDefinition OpenAICompatible() => new()
     {
