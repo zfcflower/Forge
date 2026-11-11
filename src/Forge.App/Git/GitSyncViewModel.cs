@@ -741,12 +741,17 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         }
 
         var fastForward = await git.MergeAsync(root, branch, noFastForward: false, ct).ConfigureAwait(false);
-        if (fastForward.Success || fastForward.Failure != GitRemoteFailureKind.NonFastForward)
+        if (fastForward.Success)
         {
             return (null, fastForward, false);
         }
 
-        return (null, null, true);
+        // A conflict or a dirty tree is a real refusal to report; anything else from `--ff-only` means the branches
+        // diverged, which is exactly the case the user is asked about. (Git's own wording for that varies, so the failure
+        // kind is not a reliable test here.)
+        return fastForward.Failure is GitRemoteFailureKind.Conflict or GitRemoteFailureKind.DirtyWorkTree
+            ? (null, fastForward, false)
+            : (null, null, true);
     }
 
     /// <summary>The merge commit half, re-checking the checkout first: the question may have sat open while nothing else moved.</summary>
