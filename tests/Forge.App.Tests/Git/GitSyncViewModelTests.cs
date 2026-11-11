@@ -691,6 +691,76 @@ public sealed class GitSyncViewModelTests
     }
 
     [Fact]
+    public async Task Merging_into_the_default_branch_refuses_a_dirty_root_checkout()
+    {
+        using var sandbox = GitSandbox.Create();
+        var (root, sessionDirectory) = MergeFixture(sandbox, "dirty-root");
+        File.WriteAllText(Path.Combine(root, "root-dirty.txt"), "not committed");
+
+        await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(confirm: (_, _) => Task.FromResult(true));
+        try
+        {
+            await ui.Dispatch(
+                async () =>
+                {
+                    panel.Attach(new PanelContext("s1", sessionDirectory, root));
+                    await WaitIdleOnUiAsync(panel);
+                    return 0;
+                },
+                CancellationToken.None);
+
+            await ExecuteAndWaitAsync(ui, panel, panel.MergeLocallyCommand);
+
+            var state = await ui.Dispatch(
+                () => new { panel.MessageIsError, Message = panel.MessageText },
+                CancellationToken.None);
+
+            Assert.True(state.MessageIsError);
+            Assert.Contains("未提交", state.Message);
+        }
+        finally
+        {
+            await ui.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task Merging_into_the_default_branch_refuses_a_root_checkout_on_another_branch()
+    {
+        using var sandbox = GitSandbox.Create();
+        var (root, sessionDirectory) = MergeFixture(sandbox, "wrong-checkout");
+        GitShell.RunChecked(root, "checkout", "-q", "-b", "somewhere-else");
+
+        await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(confirm: (_, _) => Task.FromResult(true));
+        try
+        {
+            await ui.Dispatch(
+                async () =>
+                {
+                    panel.Attach(new PanelContext("s1", sessionDirectory, root));
+                    await WaitIdleOnUiAsync(panel);
+                    return 0;
+                },
+                CancellationToken.None);
+
+            await ExecuteAndWaitAsync(ui, panel, panel.MergeLocallyCommand);
+
+            var state = await ui.Dispatch(
+                () => new { panel.MessageIsError, Message = panel.MessageText },
+                CancellationToken.None);
+
+            Assert.True(state.MessageIsError);
+            Assert.Contains("somewhere-else", state.Message);
+        }
+        finally
+        {
+            await ui.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task The_merge_pull_request_row_follows_the_platform_merge_state()
     {
         using var sandbox = GitSandbox.Create();
@@ -1195,6 +1265,23 @@ public sealed class GitSyncViewModelTests
     }
 
     /// <summary>A bare <c>origin.git</c> plus clones with pinned local identity.</summary>
+    /// <summary>
+    /// The topology the local merge assumes: a root checkout on <c>main</c> and a session directory that is a linked
+    /// worktree of it (refs shared, like a Forge session), with one commit on the session branch.
+    /// </summary>
+    private static (string Root, string Session) MergeFixture(GitSandbox sandbox, string name)
+    {
+        var seed = sandbox.Clone(name + "-seed");
+        sandbox.CommitFile(seed, "readme.txt", "seed\n", "seed");
+        GitShell.RunChecked(seed, "push", "-q", "-u", "origin", "main");
+
+        var root = sandbox.Clone(name + "-root");
+        var session = Path.Combine(sandbox.Root, name + "-session");
+        GitShell.RunChecked(root, "worktree", "add", "-q", "-b", "session-x", session);
+        sandbox.CommitFile(session, "feature.txt", "f\n", "feature");
+        return (root, session);
+    }
+
     /// <summary>
     /// The smallest pull-request platform the ship row talks to: availability and the branch's pull request are answered,
     /// every write throws so a test that accidentally creates something fails loudly.

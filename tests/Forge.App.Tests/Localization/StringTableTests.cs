@@ -28,8 +28,13 @@ public sealed class StringTableTests
     private static readonly Regex Placeholders =
         new("\\{(\\d+)(:[^}]*)?\\}", RegexOptions.Compiled);
 
+    /// <summary>
+    /// Any <c>{Binding [key], Source={x:Static loc:Loc.Instance}}</c>. The Source value is itself wrapped in braces, so the
+    /// match may not stop at the first <c>}</c> — it runs to the end of the binding. Without that, every binding written
+    /// in this codebase's usual form escaped the check entirely.
+    /// </summary>
     private static readonly Regex AxamlLocBinding =
-        new("\\{Binding\\s+\\[([A-Za-z0-9_.]+)\\][^\\{\\}]*loc:Loc\\.Instance", RegexOptions.Compiled);
+        new("\\{Binding\\s+\\[([A-Za-z0-9_.]+)\\][^}]*?loc:Loc\\.Instance", RegexOptions.Compiled);
 
     private static bool IsTestKey(string key) =>
         key.StartsWith("test.", StringComparison.Ordinal);
