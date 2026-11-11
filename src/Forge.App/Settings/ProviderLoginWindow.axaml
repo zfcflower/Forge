@@ -64,6 +64,66 @@
         <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
       </StackPanel>
 
+      <!-- Kimi For Coding: device-code sign-in, same presentation as Copilot. -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsKimi}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding KimiHint}" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding StartKimiCommand}"
+                Content="{Binding StartKimiText}"
+                AutomationProperties.AutomationId="provider-login-kimi-start" />
+        <StackPanel Spacing="4" IsVisible="{Binding HasDeviceCode}">
+          <TextBlock Classes="h2" Text="{Binding DeviceCodeText}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DeviceCodeHint}" />
+        </StackPanel>
+        <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
+      </StackPanel>
+
+      <!-- xAI: device-code sign-in, same presentation as Kimi. -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsXAi}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding XAiHint}" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding StartXAiCommand}"
+                Content="{Binding StartXAiText}"
+                AutomationProperties.AutomationId="provider-login-xai-start" />
+        <StackPanel Spacing="4" IsVisible="{Binding HasDeviceCode}">
+          <TextBlock Classes="h2" Text="{Binding DeviceCodeText}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DeviceCodeHint}" />
+        </StackPanel>
+        <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
+      </StackPanel>
+
+      <!-- Meta: device-code sign-in, then the key mint that enables access; same presentation as Kimi. -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsMeta}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding MetaHint}" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding StartMetaCommand}"
+                Content="{Binding StartMetaText}"
+                AutomationProperties.AutomationId="provider-login-meta-start" />
+        <StackPanel Spacing="4" IsVisible="{Binding HasDeviceCode}">
+          <TextBlock Classes="h2" Text="{Binding DeviceCodeText}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DeviceCodeHint}" />
+        </StackPanel>
+        <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
+      </StackPanel>
+
+      <!-- ChatGPT: device-code sign-in for a plan rather than a platform key. -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsChatGpt}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding ChatGptHint}" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding StartChatGptCommand}"
+                Content="{Binding StartChatGptText}"
+                AutomationProperties.AutomationId="provider-login-chatgpt-start" />
+        <StackPanel Spacing="4" IsVisible="{Binding HasDeviceCode}">
+          <TextBlock Classes="h2" Text="{Binding DeviceCodeText}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DeviceCodeHint}" />
+        </StackPanel>
+        <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
+      </StackPanel>
+
       <TextBlock Classes="caption"
                  IsVisible="{Binding HasError}"
                  TextWrapping="Wrap"

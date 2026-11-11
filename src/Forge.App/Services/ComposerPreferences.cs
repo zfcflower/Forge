@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Forge.Abstractions;
 using Forge.App.Composition;
+using Forge.App.Providers;
 
 namespace Forge.App.Services;
 
@@ -140,22 +141,10 @@ internal sealed class ComposerPreferences
         Save();
     }
 
-    internal static string EffortName(ThinkingEffort effort) => effort switch
-    {
-        ThinkingEffort.Low => "low",
-        ThinkingEffort.Medium => "medium",
-        ThinkingEffort.High => "high",
-        _ => "off",
-    };
+    internal static string EffortName(ThinkingEffort effort) => ThinkingEfforts.Name(effort);
 
-    internal static ThinkingEffort? ParseEffort(string? text) => (text ?? string.Empty).Trim().ToLowerInvariant() switch
-    {
-        "off" => ThinkingEffort.Off,
-        "low" => ThinkingEffort.Low,
-        "medium" => ThinkingEffort.Medium,
-        "high" => ThinkingEffort.High,
-        _ => null,
-    };
+    internal static ThinkingEffort? ParseEffort(string? text) =>
+        ThinkingEfforts.TryParse(text, out var effort) ? effort : null;
 
     private static ComposerPreferences CreateShared()
     {

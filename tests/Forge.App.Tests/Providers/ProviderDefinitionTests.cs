@@ -119,6 +119,98 @@ public sealed class ProviderDefinitionTests
     }
 
     [Fact]
+    public void Every_protocol_maps_to_its_kind_and_back_from_the_stored_name()
+    {
+        Assert.Equal("anthropic", Round(ProviderProtocol.Anthropic).stored);
+        Assert.Equal("openai-compatible", Round(ProviderProtocol.OpenAiCompatible).stored);
+        // The item-based protocol is a stored name of its own, not a variant of the Chat Completions one.
+        Assert.Equal(ProviderFactory.OpenAiResponsesKind, Round(ProviderProtocol.OpenAiResponses).stored);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, Round(ProviderProtocol.OpenAiResponses).restored);
+    }
+
+    [Fact]
+    public void An_unrecognised_protocol_name_falls_back_to_the_preset_instead_of_a_binary_guess()
+    {
+        // A Meta entry is Responses-only, so neither a missing nor a garbled protocol may silently make it Chat Completions.
+        var meta = new ProviderEntryDocument
+        {
+            Id = "meta",
+            Preset = ProviderPresets.MetaId,
+            Protocol = "openai-responses-legacy",
+            BaseUrl = "https://api.meta.ai/v1",
+            Models = ["m"],
+        };
+        var missing = new ProviderEntryDocument { Id = "meta", Preset = ProviderPresets.MetaId, Models = ["m"] };
+
+        Assert.Equal(ProviderProtocol.OpenAiResponses, ProviderDefinition.FromDocument(meta, "fallback").Protocol);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, ProviderDefinition.FromDocument(missing, "fallback").Protocol);
+    }
+
+    /// <summary>The stored protocol name of one definition and the protocol it reads back as.</summary>
+    private static (string stored, ProviderProtocol restored) Round(ProviderProtocol protocol)
+    {
+        var definition = new ProviderDefinition
+        {
+            Id = "p",
+            PresetId = ProviderPresets.CustomId,
+            DisplayName = "P",
+            Protocol = protocol,
+            BaseUrl = "https://example.invalid/v1",
+            CredentialKind = ProviderCredentialKind.ApiKey,
+            Models = ["m"],
+            DefaultModel = "m",
+            Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
+        };
+
+        var stored = definition.ToDocument();
+        return (stored.Protocol!, ProviderDefinition.FromDocument(stored, "fallback").Protocol);
+    }
+
+    [Theory]
+    [InlineData("off", ThinkingEffort.Off)]
+    [InlineData("minimal", ThinkingEffort.Minimal)]
+    [InlineData("low", ThinkingEffort.Low)]
+    [InlineData("medium", ThinkingEffort.Medium)]
+    [InlineData("high", ThinkingEffort.High)]
+    [InlineData("xhigh", ThinkingEffort.XHigh)]
+    [InlineData("max", ThinkingEffort.Max)]
+    public void Every_thinking_name_round_trips_through_the_stored_document(string stored, ThinkingEffort expected)
+    {
+        var document = new ProviderEntryDocument
+        {
+            Id = "p",
+            Preset = ProviderPresets.CustomId,
+            Protocol = "openai-compatible",
+            BaseUrl = "https://example.invalid/v1",
+            Models = ["m"],
+            Thinking = stored,
+        };
+
+        var definition = ProviderDefinition.FromDocument(document, "fallback");
+
+        Assert.Equal(expected, definition.Thinking);
+        Assert.Equal(stored, definition.ToDocument().Thinking);
+    }
+
+    [Fact]
+    public void An_unknown_thinking_name_still_falls_back_to_off_and_is_written_as_off()
+    {
+        var document = new ProviderEntryDocument
+        {
+            Id = "p",
+            Preset = ProviderPresets.CustomId,
+            BaseUrl = "https://example.invalid/v1",
+            Models = ["m"],
+            Thinking = "ultra",
+        };
+
+        var definition = ProviderDefinition.FromDocument(document, "fallback");
+
+        Assert.Equal(ThinkingEffort.Off, definition.Thinking);
+        Assert.Equal("off", definition.ToDocument().Thinking);
+    }
+
+    [Fact]
     public void Metadata_overrides_never_invent_a_zero()
     {
         var document = new Dictionary<string, ModelMetadataSection>(StringComparer.Ordinal)

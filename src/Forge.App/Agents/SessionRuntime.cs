@@ -27,6 +27,9 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public ApprovalServices? Approvals { get; set; }
 
+    /// <summary>Agent defaults resolved from settings.json; null when the runtime has no store (a unit test).</summary>
+    public Func<string, ModelSettings?>? AgentDefaults { get; set; }
+
     /// <summary>
     /// Commits a TODO step when the agent marks it done (handed to <c>AgentHostOptions.StepCommitter</c>). Null when the
     /// runtime was assembled without the composition root, as in a unit test: marking an item done then commits nothing.
@@ -353,13 +356,44 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
                 Artifacts = services.Artifacts,
-                Options = new AgentOptions { DefaultModel = services.Model, MessageCacheTtl = services.MessageCacheTtl },
+                Agents = ResolveAgentDefaults(),
+                Options = new AgentOptions
+                {
+                    DefaultModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model,
+                    MessageCacheTtl = services.MessageCacheTtl,
+                },
             });
 
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
         builtHost = built;
         services.ToolRouter?.Register(SessionId, this);
         return built;
+    }
+
+    /// <summary>
+    /// The built-in agent kinds with their <c>settings.json</c> defaults substituted for the placeholder
+    /// <c>ModelSettings("default", …)</c> they ship with. Null when nothing was resolved, so a runtime without the store (a
+    /// test) keeps Core's definitions exactly as they are.
+    /// </summary>
+    private IReadOnlyList<AgentDefinition>? ResolveAgentDefaults()
+    {
+        if (services.AgentDefaults is not { } resolve)
+        {
+            return null;
+        }
+
+        List<AgentDefinition>? resolved = null;
+        foreach (var definition in BuiltInAgents.All)
+        {
+            if (AgentIds.FromBuiltInName(definition.Name) is not { } id || resolve(id) is not { } model)
+            {
+                continue;
+            }
+
+            (resolved ??= []).Add(definition with { Model = model });
+        }
+
+        return resolved;
     }
 
     /// <summary>

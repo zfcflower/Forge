@@ -116,29 +116,7 @@ internal sealed class ProviderStore
         // earlier writer's section (the replace is atomic, the merge is not).
         using var lease = Composition.SettingsFileMutex.Acquire(settingsPath);
 
-        JsonObject root;
-        if (File.Exists(settingsPath))
-        {
-            JsonNode? parsed;
-            try
-            {
-                parsed = JsonNode.Parse(File.ReadAllText(settingsPath));
-            }
-            catch (JsonException)
-            {
-                // A file we cannot parse is never overwritten: that would destroy a hand-edited configuration.
-                throw new InvalidOperationException("settings.json is not valid JSON; fix or remove it before saving providers.");
-            }
-
-            // Valid JSON is not enough: an array or a scalar root is somebody else's document, and turning it into an
-            // object would delete everything it held.
-            root = parsed as JsonObject ?? throw new InvalidOperationException(
-                "settings.json must be a JSON object; refusing to replace a document with a different root shape.");
-        }
-        else
-        {
-            root = [];
-        }
+        var root = ReadRootForEdit(settingsPath);
 
         var section = new ProvidersSectionDocument
         {
@@ -173,6 +151,33 @@ internal sealed class ProviderStore
 
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         AtomicFile.WriteAllBytes(settingsPath, System.Text.Encoding.UTF8.GetBytes(json));
+    }
+
+    /// <summary>
+    /// The whole file as an object for one section to edit, or an empty object when the file does not exist yet. A file
+    /// that is not valid JSON, or whose root is not an object, is refused instead of overwritten: it is a hand-edited
+    /// configuration or somebody else's document, and replacing it would delete what it held. Shared with the agent
+    /// defaults store, so both sections fail exactly the same way.
+    /// </summary>
+    internal static JsonObject ReadRootForEdit(string settingsPath)
+    {
+        if (!File.Exists(settingsPath))
+        {
+            return [];
+        }
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(File.ReadAllText(settingsPath));
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("settings.json is not valid JSON; fix or remove it before saving settings.");
+        }
+
+        return parsed as JsonObject ?? throw new InvalidOperationException(
+            "settings.json must be a JSON object; refusing to replace a document with a different root shape.");
     }
 
     /// <summary>

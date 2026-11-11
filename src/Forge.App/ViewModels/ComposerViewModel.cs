@@ -102,6 +102,35 @@ internal sealed class ComposerModelOption : ObservableObject
     internal event Action<ComposerModelOption>? PinToggled;
 }
 
+/// <summary>One bar of the composer's effort readout: the accepted steps of the current model, filled up to the chosen one.</summary>
+internal sealed class ComposerEffortBarViewModel : ObservableObject
+{
+    private bool isActive;
+
+    public ComposerEffortBarViewModel(double height, bool isActive)
+    {
+        Height = height;
+        this.isActive = isActive;
+    }
+
+    /// <summary>The bar's height: a ramp from the lowest accepted step to the highest.</summary>
+    public double Height { get; }
+
+    public bool IsActive
+    {
+        get => isActive;
+        set
+        {
+            if (Set(ref isActive, value))
+            {
+                OnPropertyChanged(nameof(Opacity));
+            }
+        }
+    }
+
+    public double Opacity => isActive ? 1 : 0.3;
+}
+
 /// <summary>A message waiting above the input: queued for after the running turn, or interjected and not yet delivered.</summary>
 internal sealed class QueuedMessageViewModel : ObservableObject
 {
@@ -182,7 +211,9 @@ internal sealed class ComposerViewModel : ObservableObject
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
     private readonly Func<CancellationToken, Task>? modelRefresh;
+    private readonly Func<string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
+    private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
     private string providerId = string.Empty;
     private ComposerAgentOption selectedAgent;
     private string model = string.Empty;
@@ -208,7 +239,8 @@ internal sealed class ComposerViewModel : ObservableObject
         string workspace,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
-        Func<CancellationToken, Task>? modelRefresh = null)
+        Func<CancellationToken, Task>? modelRefresh = null,
+        Func<string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
@@ -221,6 +253,7 @@ internal sealed class ComposerViewModel : ObservableObject
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
         this.skillSource = skillSource ?? DiscoverSkills;
         this.modelRefresh = modelRefresh;
+        this.thinkingLevels = thinkingLevels ?? ThinkingLevels.For;
 
         var agents = new List<ComposerAgentOption> { new(null) };
         agents.AddRange(BuiltInAgents.All.Select(definition => new ComposerAgentOption(definition)));
@@ -249,6 +282,7 @@ internal sealed class ComposerViewModel : ObservableObject
             effort = preferences.DefaultEffort ?? effort;
         }
 
+        RefreshEffortSteps();
         Suggestions = [];
         Models = [];
         RebuildModels();
@@ -301,6 +335,7 @@ internal sealed class ComposerViewModel : ObservableObject
 
             MarkSelectedOption();
             OnPropertyChanged(nameof(ModelLabel));
+            RefreshEffortSteps();
             Apply();
         }
     }
@@ -327,34 +362,47 @@ internal sealed class ComposerViewModel : ObservableObject
         get => effort;
         set
         {
-            if (!Set(ref effort, value))
+            // The dial never offers a step the model does not accept, and a value set from code is clamped the same way.
+            var accepted = ThinkingEfforts.Clamp(value, effortSteps);
+            if (!Set(ref effort, accepted))
             {
                 return;
             }
 
+            UpdateEffortBars();
             OnPropertyChanged(nameof(EffortValue));
             OnPropertyChanged(nameof(EffortName));
-            OnPropertyChanged(nameof(EffortBar1));
-            OnPropertyChanged(nameof(EffortBar2));
-            OnPropertyChanged(nameof(EffortBar3));
             Apply();
         }
     }
 
-    /// <summary>The slider's position, 0 (off) to 3 (high).</summary>
+    /// <summary>The steps the current model accepts, ascending and always starting with off.</summary>
+    public IReadOnlyList<ThinkingEffort> EffortSteps => effortSteps;
+
+    /// <summary>The slider's top position: the last accepted step's index.</summary>
+    public double EffortMaximum => Math.Max(0, effortSteps.Count - 1);
+
+    /// <summary>The slider's position: the accepted step list's index, never the enum value, so a model with gaps still
+    /// lands on a step it takes.</summary>
     public double EffortValue
     {
-        get => (double)effort;
-        set => Effort = (ThinkingEffort)Math.Clamp((int)Math.Round(value), (int)ThinkingEffort.Off, (int)ThinkingEffort.High);
+        get => ThinkingEfforts.IndexOf(effort, effortSteps);
+        set
+        {
+            if (effortSteps.Count == 0)
+            {
+                return;
+            }
+
+            var index = Math.Clamp((int)Math.Round(value), 0, effortSteps.Count - 1);
+            Effort = effortSteps[index];
+        }
     }
 
     public string EffortName => SessionStrings.ComposerEffortName(effort);
 
-    public double EffortBar1 => effort >= ThinkingEffort.Low ? 1 : 0.3;
-
-    public double EffortBar2 => effort >= ThinkingEffort.Medium ? 1 : 0.3;
-
-    public double EffortBar3 => effort >= ThinkingEffort.High ? 1 : 0.3;
+    /// <summary>The small bars on the model chip: one per accepted step, lit up to the chosen one.</summary>
+    public ObservableCollection<ComposerEffortBarViewModel> EffortBars { get; } = [];
 
     /// <summary>A short confirmation under the model list ("saved as defaults"); empty when there is none.</summary>
     public string? Status
@@ -383,12 +431,14 @@ internal sealed class ComposerViewModel : ObservableObject
         if (modelRefresh is null)
         {
             RebuildModels();
+            RefreshEffortSteps();
             return;
         }
 
         await modelRefresh(cancellationToken).ConfigureAwait(true);
         catalog = services.Catalog;
         RebuildModels();
+        RefreshEffortSteps();
         Status = SessionStrings.ComposerModelsFetched(allModels.Count);
     }
 
@@ -627,7 +677,44 @@ internal sealed class ComposerViewModel : ObservableObject
 
         MarkSelectedOption();
         OnPropertyChanged(nameof(ModelLabel));
+        RefreshEffortSteps();
         Apply();
+    }
+
+    /// <summary>
+    /// Re-reads the current model's accepted steps and clamps the chosen effort to them. Called whenever the model or the
+    /// catalogue changes: the dial must never keep a step the new model rejects.
+    /// </summary>
+    private void RefreshEffortSteps()
+    {
+        var accepted = thinkingLevels(model);
+        effortSteps = accepted is { Count: > 0 } ? accepted : [ThinkingEffort.Off];
+        effort = ThinkingEfforts.Clamp(effort, effortSteps);
+        RebuildEffortBars();
+        UpdateEffortBars();
+        OnPropertyChanged(nameof(EffortSteps));
+        OnPropertyChanged(nameof(EffortMaximum));
+        OnPropertyChanged(nameof(EffortValue));
+        OnPropertyChanged(nameof(EffortName));
+    }
+
+    private void RebuildEffortBars()
+    {
+        EffortBars.Clear();
+        for (var index = 0; index < effortSteps.Count; index++)
+        {
+            var height = effortSteps.Count == 1 ? 10 : 4 + (6.0 * index / (effortSteps.Count - 1));
+            EffortBars.Add(new ComposerEffortBarViewModel(height, isActive: false));
+        }
+    }
+
+    private void UpdateEffortBars()
+    {
+        var selected = ThinkingEfforts.IndexOf(effort, effortSteps);
+        for (var index = 0; index < EffortBars.Count; index++)
+        {
+            EffortBars[index].IsActive = index <= selected;
+        }
     }
 
     /// <summary>Puts the check mark on the one row that matches both the model and its provider.</summary>

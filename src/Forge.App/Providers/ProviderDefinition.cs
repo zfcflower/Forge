@@ -17,6 +17,18 @@ internal enum ProviderCredentialKind
 
     /// <summary>GitHub device-code login, exchanged for a short-lived Copilot session token.</summary>
     GitHubCopilot,
+
+    /// <summary>Kimi For Coding device-code login; the access token is a bearer token on the coding API.</summary>
+    KimiCode,
+
+    /// <summary>xAI device-code login; the access token is the bearer token the grok API takes.</summary>
+    XAiSubscription,
+
+    /// <summary>A Meta subscription rather than a key; its models are reachable through the Responses protocol only.</summary>
+    MetaSubscription,
+
+    /// <summary>A ChatGPT plan: the model list and the account header both come from the subscription.</summary>
+    ChatGptSubscription,
 }
 
 /// <summary>
@@ -77,7 +89,12 @@ internal sealed record ProviderDefinition
         Id = Id,
         Preset = PresetId,
         Name = DisplayName,
-        Protocol = Protocol == ProviderProtocol.Anthropic ? "anthropic" : "openai-compatible",
+        Protocol = Protocol switch
+        {
+            ProviderProtocol.Anthropic => ProviderFactory.AnthropicKind,
+            ProviderProtocol.OpenAiResponses => ProviderFactory.OpenAiResponsesKind,
+            _ => ProviderFactory.OpenAiCompatibleKind,
+        },
         BaseUrl = BaseUrl,
         Auth = new ProviderAuthDocument
         {
@@ -86,6 +103,10 @@ internal sealed record ProviderDefinition
                 ProviderCredentialKind.ApiKey => "api-key",
                 ProviderCredentialKind.ClaudeSubscription => "claude-subscription",
                 ProviderCredentialKind.GitHubCopilot => "github-copilot",
+                ProviderCredentialKind.KimiCode => "kimi-code",
+                ProviderCredentialKind.XAiSubscription => "xai-subscription",
+                ProviderCredentialKind.MetaSubscription => "meta-subscription",
+                ProviderCredentialKind.ChatGptSubscription => "chatgpt-subscription",
                 _ => "none",
             },
             EnvironmentVariable = EnvironmentVariable,
@@ -93,13 +114,7 @@ internal sealed record ProviderDefinition
         },
         Models = [.. Models],
         DefaultModel = DefaultModel,
-        Thinking = Thinking switch
-        {
-            ThinkingEffort.Low => "low",
-            ThinkingEffort.Medium => "medium",
-            ThinkingEffort.High => "high",
-            _ => "off",
-        },
+        Thinking = ThinkingEfforts.Name(Thinking),
         MaxOutputTokens = MaxOutputTokens,
         ModelMeta = Overrides.Count == 0 ? null : ToMetadataDocument(Overrides),
         SendPromptCacheKey = SendPromptCacheKey ? true : null,
@@ -107,15 +122,26 @@ internal sealed record ProviderDefinition
         Headers = Headers.Count == 0 ? null : new Dictionary<string, string>(Headers, StringComparer.OrdinalIgnoreCase),
     };
 
+    /// <summary>
+    /// The credential a fresh entry starts with: the first sign-in the preset offers, which is what makes a subscription the
+    /// default path for a vendor that also takes a key (Anthropic, Kimi For Coding, Meta and xAI all work that way).
+    /// </summary>
+    private static ProviderCredentialKind PresetCredentialKind(ProviderAuthOptions auth) => auth switch
+    {
+        var value when value.HasFlag(ProviderAuthOptions.ClaudeSubscription) => ProviderCredentialKind.ClaudeSubscription,
+        var value when value.HasFlag(ProviderAuthOptions.GitHubCopilot) => ProviderCredentialKind.GitHubCopilot,
+        var value when value.HasFlag(ProviderAuthOptions.KimiCode) => ProviderCredentialKind.KimiCode,
+        var value when value.HasFlag(ProviderAuthOptions.XAiSubscription) => ProviderCredentialKind.XAiSubscription,
+        var value when value.HasFlag(ProviderAuthOptions.MetaSubscription) => ProviderCredentialKind.MetaSubscription,
+        var value when value.HasFlag(ProviderAuthOptions.ChatGptSubscription) => ProviderCredentialKind.ChatGptSubscription,
+        _ => ProviderCredentialKind.ApiKey,
+    };
+
     /// <summary>A fresh entry for one preset, with the preset's protocol, URL, environment variable and seed models.</summary>
     public static ProviderDefinition FromPreset(ProviderPreset preset, string id, string? displayName = null)
     {
         ArgumentNullException.ThrowIfNull(preset);
-        var kind = preset.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription)
-            ? ProviderCredentialKind.ClaudeSubscription
-            : preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot)
-                ? ProviderCredentialKind.GitHubCopilot
-                : ProviderCredentialKind.ApiKey;
+        var kind = PresetCredentialKind(preset.Auth);
         var models = preset.SeedModels.Count > 0 ? preset.SeedModels : [];
         return new ProviderDefinition
         {
@@ -143,8 +169,9 @@ internal sealed record ProviderDefinition
         var id = string.IsNullOrWhiteSpace(entry.Id) ? fallbackId : entry.Id!.Trim();
         var protocol = (entry.Protocol ?? string.Empty).Trim().ToLowerInvariant() switch
         {
-            "anthropic" => ProviderProtocol.Anthropic,
-            "openai-compatible" or "openai" or "" => preset.Protocol,
+            ProviderFactory.AnthropicKind => ProviderProtocol.Anthropic,
+            ProviderFactory.OpenAiResponsesKind => ProviderProtocol.OpenAiResponses,
+            ProviderFactory.OpenAiCompatibleKind or "openai" or "" => preset.Protocol,
             _ => preset.Protocol,
         };
 
@@ -159,13 +186,12 @@ internal sealed record ProviderDefinition
             "api-key" or "apikey" or "env" or "secret" => ProviderCredentialKind.ApiKey,
             "claude-subscription" => ProviderCredentialKind.ClaudeSubscription,
             "github-copilot" => ProviderCredentialKind.GitHubCopilot,
+            "kimi-code" => ProviderCredentialKind.KimiCode,
+            "xai-subscription" => ProviderCredentialKind.XAiSubscription,
+            "meta-subscription" => ProviderCredentialKind.MetaSubscription,
+            "chatgpt-subscription" => ProviderCredentialKind.ChatGptSubscription,
             "none" => ProviderCredentialKind.None,
-            _ => preset.Auth switch
-            {
-                var auth when auth.HasFlag(ProviderAuthOptions.ClaudeSubscription) => ProviderCredentialKind.ClaudeSubscription,
-                var auth when auth.HasFlag(ProviderAuthOptions.GitHubCopilot) => ProviderCredentialKind.GitHubCopilot,
-                _ => ProviderCredentialKind.ApiKey,
-            },
+            _ => PresetCredentialKind(preset.Auth),
         };
 
         var models = new List<string>();
@@ -218,13 +244,7 @@ internal sealed record ProviderDefinition
                 : entry.Auth!.SecretReference!.Trim(),
             Models = models,
             DefaultModel = defaultModel,
-            Thinking = (entry.Thinking ?? string.Empty).Trim().ToLowerInvariant() switch
-            {
-                "low" => ThinkingEffort.Low,
-                "medium" => ThinkingEffort.Medium,
-                "high" => ThinkingEffort.High,
-                _ => ThinkingEffort.Off,
-            },
+            Thinking = ThinkingEfforts.TryParse(entry.Thinking, out var thinking) ? thinking : ThinkingEffort.Off,
             MaxOutputTokens = entry.MaxOutputTokens is > 0 ? entry.MaxOutputTokens : null,
             Overrides = FromMetadataDocument(entry.ModelMeta),
             Headers = headers,

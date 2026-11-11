@@ -105,7 +105,7 @@ internal sealed class ProviderEntryDocument
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
-    /// <summary><c>openai-compatible</c> or <c>anthropic</c>.</summary>
+    /// <summary><c>openai-compatible</c>, <c>anthropic</c> or <c>openai-responses</c>.</summary>
     [JsonPropertyName("protocol")]
     public string? Protocol { get; set; }
 
@@ -148,8 +148,10 @@ internal sealed class ProviderEntryDocument
 
 /// <summary>
 /// How this provider authenticates. <c>api-key</c> uses <see cref="SecretReference"/> when present and otherwise reads
-/// <see cref="EnvironmentVariable"/>; <c>claude-subscription</c> reuses the local Claude Code login and
-/// <c>github-copilot</c> the GitHub device-flow login the app stored.
+/// <see cref="EnvironmentVariable"/>; the sign-in kinds carry no secret reference at all, because their bundles live in the
+/// encrypted secret store keyed by provider: <c>claude-subscription</c> reuses the local Claude Code login,
+/// <c>github-copilot</c> the GitHub device-flow login the app stored, <c>kimi-code</c>, <c>xai-subscription</c>,
+/// <c>meta-subscription</c> and <c>chatgpt-subscription</c> the device-code logins the app stored.
 /// </summary>
 internal sealed class ProviderAuthDocument
 {
@@ -197,6 +199,86 @@ internal sealed class SecretsDocument
     public Dictionary<string, SecretEntryDocument>? Entries { get; set; }
 }
 
+/// <summary>
+/// A Kimi For Coding sign-in as the secret store holds it: one JSON value under the reference
+/// <c>kimi:&lt;providerId&gt;</c>, encrypted at rest like any pasted key. Every field is a credential, so nothing here is ever
+/// written to <c>settings.json</c> or logged.
+/// </summary>
+internal sealed class KimiTokenDocument
+{
+    [JsonPropertyName("accessToken")]
+    public string? AccessToken { get; set; }
+
+    /// <summary>The rotating refresh token; using it makes the stored one stale, so the store is rewritten on every refresh.</summary>
+    [JsonPropertyName("refreshToken")]
+    public string? RefreshToken { get; set; }
+
+    /// <summary>Absolute expiry of the access token, so a restart keeps whatever lifetime is left.</summary>
+    [JsonPropertyName("expiresAt")]
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
+/// <summary>
+/// An xAI sign-in as the secret store holds it: one JSON value under the reference <c>xai:&lt;providerId&gt;</c>, encrypted at
+/// rest like any pasted key. Every field is a credential, so nothing here is ever written to <c>settings.json</c> or logged.
+/// </summary>
+internal sealed class XAiTokenDocument
+{
+    [JsonPropertyName("accessToken")]
+    public string? AccessToken { get; set; }
+
+    /// <summary>The refresh token; a refresh that rotates it rewrites the store, and one that omits it keeps this value.</summary>
+    [JsonPropertyName("refreshToken")]
+    public string? RefreshToken { get; set; }
+
+    /// <summary>Absolute expiry of the access token, so a restart keeps whatever lifetime is left.</summary>
+    [JsonPropertyName("expiresAt")]
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
+/// <summary>
+/// A Meta sign-in as the secret store holds it: one JSON value under the reference <c>meta:&lt;providerId&gt;</c>, encrypted
+/// at rest like any pasted key. The minted key is what the model requests use; the identity token is kept beside it so an
+/// expired key is re-minted without asking the user to sign in again. Nothing here is ever written to <c>settings.json</c>.
+/// </summary>
+internal sealed class MetaTokenDocument
+{
+    /// <summary>The API key minted for this sign-in; from then on it is the bearer token every request carries.</summary>
+    [JsonPropertyName("apiKey")]
+    public string? ApiKey { get; set; }
+
+    /// <summary>The OIDC identity token the key was minted from; re-minting uses it instead of a new device login.</summary>
+    [JsonPropertyName("identityToken")]
+    public string? IdentityToken { get; set; }
+
+    /// <summary>Absolute expiry of the minted key, so a restart keeps whatever lifetime is left.</summary>
+    [JsonPropertyName("expiresAt")]
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
+/// <summary>
+/// A ChatGPT plan sign-in as the secret store holds it: one JSON value under the reference <c>chatgpt:&lt;providerId&gt;</c>,
+/// encrypted at rest like any pasted key. The account id is not a secret but it belongs to the credential bundle — every
+/// request has to name it — so it is stored here and never in <c>settings.json</c>.
+/// </summary>
+internal sealed class ChatGptTokenDocument
+{
+    [JsonPropertyName("accessToken")]
+    public string? AccessToken { get; set; }
+
+    /// <summary>The refresh token; using it rotates the stored one, so the store is rewritten on every refresh.</summary>
+    [JsonPropertyName("refreshToken")]
+    public string? RefreshToken { get; set; }
+
+    /// <summary>The ChatGPT account the plan is drawn from; read from the access token's <c>chatgpt_account_id</c> claim.</summary>
+    [JsonPropertyName("accountId")]
+    public string? AccountId { get; set; }
+
+    /// <summary>Absolute expiry of the access token, so a restart keeps whatever lifetime is left.</summary>
+    [JsonPropertyName("expiresAt")]
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
 /// <summary>One AES-GCM payload: base64 nonce, tag and ciphertext.</summary>
 internal sealed class SecretEntryDocument
 {
@@ -215,6 +297,10 @@ internal sealed class SecretEntryDocument
 [JsonSerializable(typeof(ProvidersSectionDocument))]
 [JsonSerializable(typeof(ProviderEntryDocument))]
 [JsonSerializable(typeof(SecretsDocument))]
+[JsonSerializable(typeof(KimiTokenDocument))]
+[JsonSerializable(typeof(XAiTokenDocument))]
+[JsonSerializable(typeof(MetaTokenDocument))]
+[JsonSerializable(typeof(ChatGptTokenDocument))]
 internal sealed partial class ProvidersJsonContext : JsonSerializerContext
 {
 }
