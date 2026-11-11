@@ -137,3 +137,48 @@ public sealed class SqliteSessionCatalogTests
         await Assert.ThrowsAsync<InvalidDataException>(() => store.GetSessionAsync(session.Id, default));
     }
 }
+
+public sealed class SqliteSessionCatalogAutomationTests
+{
+    [Fact]
+    public async Task Automation_ids_round_trip_through_create_get_list_and_query()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteSessionStore(directory.Path);
+        ISessionCatalog catalog = store;
+
+        var plain = await catalog.CreateAsync(new SessionCreate("D:/ws", "plain") { WorktreePath = "w-plain" }, default);
+        var created = await catalog.CreateAsync(
+            new SessionCreate("D:/ws", "auto") { WorktreePath = "w-auto", AutomationId = "auto-a", AutomationRunId = "run-1" },
+            default);
+
+        Assert.Equal("auto-a", created.AutomationId);
+        Assert.Equal("run-1", created.AutomationRunId);
+        Assert.Null(plain.AutomationId);
+
+        var loaded = await store.GetSessionAsync(created.Id, default);
+        Assert.Equal(created, loaded);
+        Assert.Equal("auto-a", loaded!.AutomationId);
+        Assert.Equal("run-1", loaded.AutomationRunId);
+
+        var listed = await store.ListSessionsAsync(null, default);
+        Assert.Equal("run-1", listed.Single(s => s.Id == created.Id).AutomationRunId);
+        Assert.Null(listed.Single(s => s.Id == plain.Id).AutomationRunId);
+
+        var queried = await catalog.QueryAsync(new SessionQuery(), default);
+        Assert.Equal("auto-a", queried.Single(s => s.Id == created.Id).AutomationId);
+    }
+
+    [Fact]
+    public async Task A_child_session_can_carry_automation_ids_too()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteSessionStore(directory.Path);
+        ISessionCatalog catalog = store;
+        var parent = await catalog.CreateAsync(new SessionCreate("D:/ws", "p") { WorktreePath = "w" }, default);
+        var child = await catalog.CreateAsync(
+            new SessionCreate("D:/ws", "c") { ParentSessionId = parent.Id, AutomationId = "a", AutomationRunId = "r" },
+            default);
+        Assert.Equal("r", (await store.GetSessionAsync(child.Id, default))!.AutomationRunId);
+    }
+}

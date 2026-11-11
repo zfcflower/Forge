@@ -26,13 +26,13 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
     private const string SessionColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
         "last_active_at, deleted_at, fork_of_branch, fork_base_sha, inherits_from_session_id, inherits_up_to_seq, " +
-        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint";
+        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint, automation_id, automation_run_id";
 
     /// <summary>Columns a new session row is written with; <c>occupancy_key</c> is always computed by the store.</summary>
     private const string InsertColumns =
         "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
         "last_active_at, last_active_ticks, occupancy_key, fork_of_branch, fork_base_sha, inherits_from_session_id, " +
-        "inherits_up_to_seq, lineage_root_id, origin_kind";
+        "inherits_up_to_seq, lineage_root_id, origin_kind, automation_id, automation_run_id";
 
     /// <summary>Name of the savepoint each occupancy-changing / lifecycle write runs under inside a writer batch.</summary>
     private const string OperationSavepoint = "forge_op";
@@ -412,6 +412,8 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
             LineageRootId = StorageDb.ReadText(reader, 17, "lineage_root_id", _databasePath, row),
             Origin = ParseOrigin(StorageDb.ReadOptionalText(reader, 18, "origin_kind", _databasePath, row), _databasePath, row),
             PrefixFingerprint = StorageDb.ReadOptionalText(reader, 19, "prefix_fingerprint", _databasePath, row),
+            AutomationId = StorageDb.ReadOptionalText(reader, 20, "automation_id", _databasePath, row),
+            AutomationRunId = StorageDb.ReadOptionalText(reader, 21, "automation_run_id", _databasePath, row),
         };
     }
 

@@ -19,7 +19,7 @@ public sealed class StorageSchemaV5To9MigrationTests
     private static readonly string[] LifecycleSessionColumns =
     [
         "occupancy_key", "deleted_at", "fork_of_branch", "fork_base_sha", "inherits_from_session_id",
-        "inherits_up_to_seq", "lineage_root_id", "origin_kind", "prefix_fingerprint",
+        "inherits_up_to_seq", "lineage_root_id", "origin_kind", "prefix_fingerprint", "automation_id", "automation_run_id",
     ];
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class StorageSchemaV5To9MigrationTests
 
         await OpenAsync(directory);
 
-        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
         var sessionColumns = await TodoSchemaRaw.ColumnsAsync(directory, "sessions");
         foreach (var column in LifecycleSessionColumns)
         {
@@ -79,7 +79,7 @@ public sealed class StorageSchemaV5To9MigrationTests
         SqliteConnection.ClearAllPools();
         await OpenAsync(directory);
 
-        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal("Archived", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'older'"));
         Assert.Equal("Active", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'newer'"));
         Assert.Equal(OccupancyKey.Compute(null, repo), await TextAsync(directory, "SELECT occupancy_key FROM sessions WHERE id = 'older'"));
@@ -151,7 +151,7 @@ public sealed class StorageSchemaV5To9MigrationTests
         SqliteConnection.ClearAllPools();
         await OpenAsync(directory);
 
-        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(schema, await TodoSchemaRaw.SchemaSnapshotAsync(directory));
         Assert.Equal(1L, await TodoSchemaRaw.ScalarAsync<long>(directory, "SELECT count(*) FROM storage_notices"));
         Assert.Equal("Archived", await StatusAsync(directory, "x-1"));
@@ -239,6 +239,8 @@ public sealed class StorageSchemaV5To9MigrationTests
             + "DROP INDEX IF EXISTS ux_sessions_occupancy;\n"
             + "DROP INDEX IF EXISTS ix_sessions_inherits;\n"
             + "DROP TABLE IF EXISTS storage_notices;\n"
+            + "DROP TABLE IF EXISTS automation_runs;\n"
+            + "DROP TABLE IF EXISTS automation_state;\n"
             + string.Concat(LifecycleSessionColumns.Select(static column => $"ALTER TABLE sessions DROP COLUMN {column};\n"))
             + "ALTER TABLE projects DROP COLUMN closed_at;\n"
             + "PRAGMA user_version = 4;";

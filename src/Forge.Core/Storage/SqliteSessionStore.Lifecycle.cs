@@ -244,6 +244,8 @@ public sealed partial class SqliteSessionStore
             InheritsUpToSeq = request.InheritsUpToSeq,
             LineageRootId = request.LineageRootId ?? id,
             Origin = request.Origin,
+            AutomationId = request.AutomationId,
+            AutomationRunId = request.AutomationRunId,
         };
         return (session, key);
     }
@@ -377,7 +379,7 @@ public sealed partial class SqliteSessionStore
         var sql = $"""
             INSERT INTO sessions ({InsertColumns})
             SELECT $id, $ws, $title, $at, $project, $worktree, $branch, $parent, $kind, $task, 'Active', $active, $ticks, $key,
-                   $fork, $forkSha, $inherits, $inheritsSeq, $lineage, $origin
+                   $fork, $forkSha, $inherits, $inheritsSeq, $lineage, $origin, $automation, $automationRun
             {(root ? "WHERE " + KeyFreeSql : string.Empty)}
             """;
         await using var command = Command(connection, transaction, sql);
@@ -400,6 +402,8 @@ public sealed partial class SqliteSessionStore
         BindNullable(command, "$inheritsSeq", session.InheritsUpToSeq);
         command.Parameters.AddWithValue("$lineage", session.LineageRootId ?? session.Id);
         command.Parameters.AddWithValue("$origin", OriginName(session.Origin));
+        BindNullable(command, "$automation", session.AutomationId);
+        BindNullable(command, "$automationRun", session.AutomationRunId);
         var changed = await ExecuteOccupyingAsync(command, connection, transaction, key, zeroRowsMeansOccupied: root).ConfigureAwait(false);
         if (changed != 1)
         {

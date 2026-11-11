@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 9;
+    public const int Version = 10;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -170,6 +170,7 @@ internal static class StorageSchema
         ("plan_summaries", ["session_id"], ["updated_at"]),
         ("todo_groups", ["id"], ["updated_at"]),
         ("storage_notices", ["id"], ["created_at", "acknowledged_at"]),
+        ("automation_runs", ["id"], ["started_at", "ended_at", "resume_at"]),
     ];
 
     private const string StorageNoticesSql = """
@@ -287,6 +288,9 @@ internal static class StorageSchema
                 break;
             case 8:
                 await MigrateToV9Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 9:
+                await MigrateToV10Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
@@ -535,6 +539,57 @@ internal static class StorageSchema
             """,
             ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The v10 step, automations: the <c>automation_runs</c> table (unique <c>occurrence</c>, <c>started_ticks</c> for
+    /// ordering across offsets), the <c>automation_state</c> key/value table, and the two session columns that mark a
+    /// session an automation created. Existing sessions keep null in both. The timestamp guards are installed once more
+    /// so the new table's timestamp columns are covered.
+    /// </summary>
+    private static async Task MigrateToV10Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "automation_id", "TEXT NULL", ct).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "automation_run_id", "TEXT NULL", ct).ConfigureAwait(false);
+        await ExecuteAsync(connection, transaction, V10SchemaSql, ct).ConfigureAwait(false);
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
+    private const string V10SchemaSql = """
+        CREATE TABLE IF NOT EXISTS automation_runs (
+            id                 TEXT PRIMARY KEY,
+            automation_id      TEXT NOT NULL,
+            automation_name    TEXT NOT NULL,
+            source             TEXT NOT NULL,
+            occurrence         TEXT NOT NULL,
+            status             TEXT NOT NULL,
+            started_at         TEXT NOT NULL,
+            started_ticks      INTEGER NOT NULL,
+            ended_at           TEXT NULL,
+            detail             TEXT NULL,
+            session_id         TEXT NULL,
+            target_session_id  TEXT NULL,
+            cause_run_id       TEXT NULL,
+            chain_depth        INTEGER NOT NULL DEFAULT 0,
+            target_key         TEXT NULL,
+            resume_at          TEXT NULL,
+            input_tokens       INTEGER NULL,
+            output_tokens      INTEGER NULL,
+            cache_read_tokens  INTEGER NULL,
+            cache_write_tokens INTEGER NULL,
+            message            TEXT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_automation_runs_occurrence ON automation_runs (occurrence);
+        CREATE INDEX IF NOT EXISTS ix_automation_runs_automation ON automation_runs (automation_id, started_ticks DESC);
+        CREATE INDEX IF NOT EXISTS ix_automation_runs_status ON automation_runs (status);
+
+        CREATE TABLE IF NOT EXISTS automation_state (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        """;
 
     /// <summary>The key of a stored row; a path <see cref="Path.GetFullPath(string)"/> refuses keeps its raw text so the step never fails on it.</summary>
     private static string ComputeKeyOrRaw(string? worktreePath, string workspacePath)

@@ -40,7 +40,7 @@ public sealed class StorageSchemaV3MigrationTests
 
         // The step rewrote the stored text itself; the read that used to fail works without any repair on the read path.
         Assert.Equal(CanonicalTimestamp, await TextAsync(directory, "SELECT added_at FROM projects"));
-        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class StorageSchemaV3MigrationTests
 
         // Repairing it would have to invent an instant, so the value stays exactly as the other tool wrote it.
         Assert.Equal("2026-11-04 07:44:28", await TextAsync(directory, "SELECT added_at FROM projects"));
-        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
     }
 
     [Fact]
@@ -90,6 +90,9 @@ public sealed class StorageSchemaV3MigrationTests
 
         Assert.Equal(
             [
+                "trg_automation_runs_ended_at_insert", "trg_automation_runs_ended_at_update",
+                "trg_automation_runs_resume_at_insert", "trg_automation_runs_resume_at_update",
+                "trg_automation_runs_started_at_insert", "trg_automation_runs_started_at_update",
                 "trg_messages_at_insert", "trg_messages_at_update",
                 "trg_plan_summaries_updated_at_insert", "trg_plan_summaries_updated_at_update",
                 "trg_projects_added_at_insert", "trg_projects_added_at_update",

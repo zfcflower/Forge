@@ -71,7 +71,7 @@ public sealed class StorageSchemaMigrationTests
             Assert.Equal(1, hits[0].Seq);
         }
 
-        Assert.Equal(9, await ReadUserVersionAsync(directory));
+        Assert.Equal(10, await ReadUserVersionAsync(directory));
         foreach (var table in new[] { "projects", "todos", "ui_state", "turn_checkpoints" })
         {
             Assert.True(await TableExistsAsync(directory, table), $"table {table} should exist after migration");
@@ -125,7 +125,7 @@ public sealed class StorageSchemaMigrationTests
         await uiTask;
         await checkpointTask;
 
-        Assert.Equal(9, await ReadUserVersionAsync(directory));
+        Assert.Equal(10, await ReadUserVersionAsync(directory));
 
         Assert.Equal(session.Id, (await sessions.GetSessionAsync(session.Id, default))?.Id);
         Assert.Contains(await projects.ListAsync(default), p => p.Id == project.Id);
