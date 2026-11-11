@@ -27,7 +27,8 @@ internal interface ISessionInstrumentSources
     IReadOnlyList<SlashEntry> Skills(string workspacePath);
 
     /// <summary>What the metadata chain (local table → provider → user override) knows about one model.</summary>
-    ModelMetadata ModelMetadata(string modelId);
+    /// <summary>What is known about the model the composer shows, in the context of the provider that serves it.</summary>
+    ModelMetadata ModelMetadata(string modelId, string? providerId = null);
 
     /// <summary>True when a VS Code executable could be resolved, so the menu item is only offered when it works.</summary>
     bool HasVsCode { get; }
@@ -73,7 +74,8 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
     public IReadOnlyList<SlashEntry> Skills(string workspacePath) =>
         SkillCatalog.Discover(workspacePath, AgentRuntimeServices.UserDirectory());
 
-    public ModelMetadata ModelMetadata(string modelId) => composition.Providers.Catalog.MetadataFor(modelId);
+    public ModelMetadata ModelMetadata(string modelId, string? providerId = null) =>
+        composition.Providers.Catalog.MetadataFor(modelId, providerId);
 
     public void OpenInVsCode(string path)
     {
@@ -180,7 +182,7 @@ internal sealed class EmptySessionInstrumentSources : ISessionInstrumentSources
 
     public IReadOnlyList<SlashEntry> Skills(string workspacePath) => [];
 
-    public ModelMetadata ModelMetadata(string modelId) => Abstractions.ModelMetadata.Unknown;
+    public ModelMetadata ModelMetadata(string modelId, string? providerId = null) => Abstractions.ModelMetadata.Unknown;
 
     public void OpenInVsCode(string path)
     {

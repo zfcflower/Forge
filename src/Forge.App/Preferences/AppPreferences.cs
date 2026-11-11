@@ -533,7 +533,7 @@ internal sealed partial class PreferencesJsonContext : JsonSerializerContext
 
 /// <summary>
 /// Loads and saves <see cref="AppPreferences"/> as the <c>preferences</c> section of <c>settings.json</c>, preserving every
-/// other section byte-for-byte in meaning (the provider section is still read by <c>ProviderSettings</c>). Reads and writes
+/// other section byte-for-byte in meaning (the provider section is read by <c>ProviderStore</c>). Reads and writes
 /// run on a background thread; a corrupt or missing section yields defaults and is reported through <see cref="LoadProblem"/>.
 /// </summary>
 internal sealed class PreferencesStore : IAsyncDisposable
@@ -705,6 +705,9 @@ internal sealed class PreferencesStore : IAsyncDisposable
     /// <summary>The one write path: keep every other section, back up an unreadable file once, then replace atomically.</summary>
     private void SaveCore(CancellationToken ct)
     {
+        // The provider store rewrites the same file: both merges have to see each other's writes.
+        using var lease = Composition.SettingsFileMutex.Acquire(settingsPath);
+
         var section = current.ToSection();
         int snapshot;
         bool shouldBackUp;

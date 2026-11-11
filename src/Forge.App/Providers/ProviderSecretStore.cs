@@ -69,6 +69,13 @@ internal sealed class ProviderSecretStore
 
     public bool Has(string? reference) => Get(reference) is not null;
 
+    /// <summary>
+    /// Loads and decrypts the store on the caller's thread, which should be the pool. Reading is lazy, and the first reader
+    /// would otherwise be the settings page (UI thread) or a provider status line; warming it up front keeps both off disk.
+    /// </summary>
+    public Task WarmAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(EnsureLoaded, cancellationToken);
+
     /// <summary>Stores (or replaces) one secret. Runs on the caller's thread — call it from a background path.</summary>
     public void Set(string reference, string secret)
     {
@@ -225,6 +232,8 @@ internal sealed class ProviderSecretStore
 
     private void Persist()
     {
+        // A store that has never written anything has no key file yet; create it before the first payload.
+        key ??= LoadOrCreateKey();
         var entries = new Dictionary<string, SecretEntryDocument>(StringComparer.Ordinal);
         foreach (var (reference, secret) in cached!)
         {

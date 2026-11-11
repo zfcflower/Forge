@@ -29,6 +29,8 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 - **三种认证。** `api-key`(库或环境变量)、`claude-subscription`(复用本机 `~/.claude/.credentials.json`,距过期 5 分钟内自动刷新并写回;推理请求带 `anthropic-beta` 与 Claude Code 身份 system 首块)、`github-copilot`(设备码 → `ghu_` token → 会话 token,`Copilot-Integration-Id: copilot-chat` 必须与铸 token 时一致,base URL 取响应里的 `endpoints.api`)。凭据在首次流读取时才解析(`CredentialedChatProvider`),首事件之前收到 401 会刷新后重试一次;第二个事件之后不重试,否则会重复输出。
 - **模型元数据。** provider `/models` 返回的上下文窗口与价格折算成每百万 token 存进进程内缓存(`ProviderModelCache`),与内置表、用户 `modelMeta` 组成「内置 → 上报 → 用户」的合并链,未知的一半保持未知。刷新是显式动作,启动时不访问网络。
 - **运行时。** `ProviderServices.CreateProvider(ModelSettings)` 按 `ModelSettings.ProviderId`(空 = 默认)构造,未知名回落默认;`Forge.Core/Providers/Internal/ChatProviderPipeline` 把重试作为中间件套在端点上。composer 的模型弹层列所有已连接提供方的并集,多于一家时每行右侧显示提供方名,选中行同时决定 `ProviderId`,新会话默认值仍只有模型与强度。
+- **两个写者共用一个闸门。** `preferences` 与 `providers` 都会把整份 `settings.json` 读—合并—原子写;`SettingsFileMutex` 按路径互斥,否则后写者会把先写者的分区合并丢(`AtomicFile` 只保证文件完整,不保证合并正确)。文件根不是对象或 JSON 无效时拒绝保存,原文件保持不动。
+- **先提交配置、再写密钥。** 编辑提供方时先把定义写进 `settings.json`,成功后才把用户输入的密钥写进密钥库:配置保存被拒(无效 JSON、写失败)时,已有提供方的旧密钥保持原样。只有"从服务端刷新模型"会先落密钥,因为那次请求本身要用它。新建提供方的 id 对已连接列表去重(同名加序号),保存按 id 匹配,所以两个同名提供方不会互相覆盖。
 - **设置分区 `provider` 与两个窗口。** 分区列出已连接提供方:名称、凭据摘要、状态点(已连接/缺密钥/待登录/配置有误)、「编辑提供方」按钮、「(眼睛)N 个模型」按钮(打开模型元数据窗口),末尾是「+ 添加服务器」。编辑对话框(模态)有预设、名称、base URL、认证方式、环境变量、粘贴密钥/清除密钥、模型清单(可手加、可从服务端刷新)、默认模型、思考强度、最大输出、`设为默认`、删除(两次点击);Claude 与 Copilot 在这一页做登录(前者只显示本机 CLI 的登录状态,后者走设备码并显示代码与链接)。模型元数据窗口(同一提供方单实例、非模态)按模型编辑上下文窗口与四档单价,保存写回 `modelMeta`,空值不写 0。文案在 `Localization/Strings.Providers.cs`(`providers.` 前缀)。
 
 ## 关键决策

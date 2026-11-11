@@ -72,15 +72,15 @@ internal sealed class ProviderModelCache
         lock (gate)
         {
             var models = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal);
+            // Server order first: the menu must read the way the provider listed it, metadata or not.
+            foreach (var id in list.Ids)
+            {
+                models[id] = ModelMetadata.Unknown;
+            }
+
             foreach (var (modelId, metadata) in list.Metadata)
             {
                 models[modelId] = metadata;
-            }
-
-            // Keep the ids even when the server reported no metadata for them, so "N models" matches the fetched list.
-            foreach (var id in list.Ids)
-            {
-                models.TryAdd(id, ModelMetadata.Unknown);
             }
 
             byProvider[providerId] = models;
@@ -134,27 +134,27 @@ internal sealed class ConnectedProvider
         }
     }
 
-    /// <summary>The API key from the secret store, or the environment variable; <c>null</c> when neither has one.</summary>
+    /// <summary>
+    /// The API key: the environment variable wins over the stored secret, so rotating a key through the environment takes
+    /// effect without editing the app, and an exported variable cannot be shadowed by an old pasted key.
+    /// </summary>
     public string? ResolveApiKey()
     {
+        if (!string.IsNullOrWhiteSpace(Definition.EnvironmentVariable))
+        {
+            var fromEnvironment = Environment.GetEnvironmentVariable(Definition.EnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(fromEnvironment))
+            {
+                return fromEnvironment;
+            }
+        }
+
         var stored = secrets.Get(Definition.SecretReference);
-        if (!string.IsNullOrWhiteSpace(stored))
-        {
-            return stored;
-        }
-
-        if (string.IsNullOrWhiteSpace(Definition.EnvironmentVariable))
-        {
-            return null;
-        }
-
-        var fromEnvironment = Environment.GetEnvironmentVariable(Definition.EnvironmentVariable);
-        return string.IsNullOrWhiteSpace(fromEnvironment) ? null : fromEnvironment;
+        return string.IsNullOrWhiteSpace(stored) ? null : stored;
     }
 
-    /// <summary>Where the key would come from, for the row's summary; <c>null</c> when the provider uses a sign-in.</summary>
+    /// <summary>True when the key comes from the environment, which is what the row's summary says.</summary>
     public bool KeyComesFromEnvironment =>
-        string.IsNullOrWhiteSpace(secrets.Get(Definition.SecretReference)) &&
         !string.IsNullOrWhiteSpace(Definition.EnvironmentVariable) &&
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(Definition.EnvironmentVariable));
 
@@ -384,14 +384,20 @@ internal sealed class ProviderCatalog
     public ModelSettings DefaultModelSettings => Default?.Definition.DefaultModelSettings ?? new ModelSettings(string.Empty);
 
     /// <summary>
-    /// Metadata for a model without naming a provider: the default provider's chain first, then the first provider that
-    /// serves it. The session readout only has a model name, and a name is unique enough for a display estimate.
+    /// Metadata for a model in the context of the provider that serves it. The session readout knows both, so the same
+    /// model id on two providers is not priced with the wrong provider's prices; without a provider id the default one is
+    /// asked first, then the first provider whose chain knows the model.
     /// </summary>
-    public ModelMetadata MetadataFor(string? modelId)
+    public ModelMetadata MetadataFor(string? modelId, string? providerId = null)
     {
         if (string.IsNullOrEmpty(modelId))
         {
             return ModelMetadata.Unknown;
+        }
+
+        if (!string.IsNullOrWhiteSpace(providerId) && Find(providerId) is { } chosen)
+        {
+            return chosen.MetadataFor(modelId);
         }
 
         if (Default is { } defaultProvider)

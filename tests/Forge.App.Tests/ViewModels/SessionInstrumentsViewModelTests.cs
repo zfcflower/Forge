@@ -995,7 +995,7 @@ public sealed class SessionInstrumentsViewModelTests
             return SkillList;
         }
 
-        public ModelMetadata ModelMetadata(string modelId) => Metadata(modelId);
+        public ModelMetadata ModelMetadata(string modelId, string? providerId = null) => Metadata(modelId);
 
         public void OpenInVsCode(string path) => OpenedIn.Add(path);
 

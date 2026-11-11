@@ -5,6 +5,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Providers;
 using Forge.App.ViewModels;
 using Forge.Workspace;
 using Xunit;
@@ -128,7 +129,7 @@ public sealed class SessionTurnFailureTests
                         runtime,
                         new TurnCheckpointService(git, checkpoints),
                         store,
-                        new ProviderSettings(null, "no provider configured"));
+                        UnconfiguredProviders(repository));
 
                     var completed = 0;
                     workspace.TurnCompleted += _ => completed++;
@@ -152,6 +153,23 @@ public sealed class SessionTurnFailureTests
 
     private static SessionInfo Info(string workingDirectory) =>
         new(SessionId, workingDirectory, "demo session", new DateTimeOffset(2025, 6, 1, 12, 0, 0, TimeSpan.Zero));
+
+    /// <summary>An empty catalogue under the test root (deleted with it); the turn itself runs on the scripted runtime provider.</summary>
+    private static ProviderServices UnconfiguredProviders(string root)
+    {
+        var settingsPath = Path.Combine(root, "providers-settings.json");
+        File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
+        var dataDir = Path.Combine(root, "provider-data");
+        Directory.CreateDirectory(dataDir);
+        // Fake handler, never used for network here; the workspace does not own it so it is left for reclamation.
+        return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("no network in this test");
+    }
 
     private static string NewRoot()
     {

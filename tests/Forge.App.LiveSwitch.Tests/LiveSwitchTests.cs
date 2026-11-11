@@ -10,6 +10,8 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Providers;
+using Forge.App.Settings;
 using Forge.App.ViewModels;
 using Forge.App.Workbench;
 using Forge.App.Workbench.Controls;
@@ -382,7 +384,7 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
             info,
             new SessionRuntime(
                 new AgentRuntimeServices(
-                    static _ => UnconfiguredChatProvider.Instance,
+                    static _ => new MissingCredentialProvider("test", ProviderStrings.SectionMissingText()),
                     HostClient: null,
                     store,
                     new LeakCatalog(),
@@ -391,7 +393,7 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
                 info),
             checkpoints: null,
             store,
-            new ProviderSettings(null, "no provider configured"));
+            TestProviders.Service());
     }
 
     /// <summary>
@@ -427,6 +429,12 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
         public MainWindowViewModel ViewModel { get; }
 
         public MainWindow Window { get; }
+
+        /// <summary>
+        /// The settings surface lives in its own window since the settings page moved out of the shell; a test that reads a
+        /// section body has to look there instead of into <see cref="Window"/>.
+        /// </summary>
+        public Window? SettingsWindow { get; private set; }
 
         public static async Task<LiveShell> OpenAsync(HeadlessUnitTestSession session)
         {
@@ -498,11 +506,14 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
             await session.Dispatch(
                 () =>
                 {
-                    ViewModel.Settings.IsOpen = true;
+                    // The gear opens a window now: the command is the same entry point the user has.
+                    ViewModel.ToggleSettingsCommand.Execute(null);
+                    SettingsWindow = FindSettingsWindow();
+                    Assert.NotNull(SettingsWindow);
                     for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
                     {
-                        Settle(Window);
-                        if (FindHeading(Window, SettingsSectionIds.Language) is not null)
+                        Settle(SettingsWindow!);
+                        if (FindHeading(SettingsWindow!, SettingsSectionIds.Language) is not null)
                         {
                             break;
                         }
@@ -511,25 +522,28 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
                     // The language section body (its three radio choices) only renders once selected.
                     ViewModel.Settings.SelectedSection = ViewModel.Settings.Sections.Items.Single(
                         static item => string.Equals(item.Id, SettingsSectionIds.Language, StringComparison.Ordinal));
-                    Settle(Window);
+                    Settle(SettingsWindow!);
                     return 0;
                 },
                 token);
         }
 
+        /// <summary>The settings window the shell created (the view model keeps the one instance).</summary>
+        private Window? FindSettingsWindow() => ViewModel.SettingsWindow;
+
         public async Task WaitForSectionAsync(string id, CancellationToken token) =>
             await session.Dispatch(
                 () =>
                 {
+                    var target = SettingsWindow ?? Window;
                     for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
                     {
-                        Settle(Window);
-                        if (FindHeading(Window, id) is not null)
+                        Settle(target);
+                        if (FindHeading(target, id) is not null)
                         {
                             break;
                         }
                     }
-
                     return 0;
                 },
                 token);
@@ -573,8 +587,9 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
             {
                 last = await shell.session.Dispatch(() =>
                 {
-                    Settle(shell.Window);
-                    return ReadLanguageSection(shell.Window);
+                    var target = shell.SettingsWindow ?? shell.Window;
+                    Settle(target);
+                    return ReadLanguageSection(target);
                 }, token);
                 if (string.Equals(last.Heading, heading, StringComparison.Ordinal) &&
                     last.Options.SequenceEqual(options))
@@ -659,7 +674,7 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
                 .Select(static radio => radio.Content as string)
                 .ToArray();
             Assert.All(options, static option => Assert.NotNull(option));
-            return (heading.Text, options.Select(static option => option!).ToArray());
+            return (HeadingText(heading), options.Select(static option => option!).ToArray());
         }
 
         /// <summary>A finished third turn card, built the way the transcript builds one; the header derives its text on read.</summary>
@@ -725,10 +740,23 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
             }
         }
 
-        private static Avalonia.Controls.TextBlock? FindHeading(Window window, string id) =>
+        /// <summary>
+        /// The nav row of one section. It is a <see cref="Button"/> since the settings page grew a grouped column, so the
+        /// heading text comes from the row's view model rather than from a <see cref="TextBlock"/> (which the collapsed rail
+        /// hides anyway).
+        /// </summary>
+        private static Control? FindHeading(Window window, string id) =>
             window.GetVisualDescendants()
-                .OfType<Avalonia.Controls.TextBlock>()
-                .FirstOrDefault(block => string.Equals(AutomationProperties.GetAutomationId(block), id, StringComparison.Ordinal));
+                .OfType<Control>()
+                .FirstOrDefault(control =>
+                    string.Equals(AutomationProperties.GetAutomationId(control), id, StringComparison.Ordinal));
+
+        private static string? HeadingText(Control control) => control switch
+        {
+            Avalonia.Controls.TextBlock block => block.Text,
+            Button { DataContext: SettingsNavItemViewModel item } => item.Title,
+            _ => null,
+        };
 
         private static void Restore((string? Data, string? General, string? Workspace) saved)
         {

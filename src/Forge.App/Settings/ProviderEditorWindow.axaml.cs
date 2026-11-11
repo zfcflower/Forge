@@ -5,8 +5,16 @@ using Forge.App.Providers;
 
 namespace Forge.App.Settings;
 
-/// <summary>What the editor closes with: a saved definition, a confirmed deletion, or neither (cancel).</summary>
-internal sealed record ProviderEditorResult(ProviderDefinition? Definition, string? DeletedId, bool MakeDefault);
+/// <summary>
+/// What the editor closes with: a validated definition plus the key the user typed (committed by the caller only after the
+/// definition itself is saved), a confirmed deletion, or neither (cancel).
+/// </summary>
+internal sealed record ProviderEditorResult(
+    ProviderDefinition? Definition,
+    string? DeletedId,
+    bool MakeDefault,
+    string? Secret = null,
+    bool ClearSecret = false);
 
 /// <summary>
 /// The add/edit provider dialog. It owns the dialog protocol only: Esc/Esc-like cancel closes with nothing, Save closes
@@ -50,7 +58,12 @@ internal sealed partial class ProviderEditorWindow : Window
     }
 
     private void OnSaved(object? sender, ProviderDefinition definition) =>
-        Close(new ProviderEditorResult(definition, DeletedId: null, model?.MakeDefault ?? false));
+        Close(new ProviderEditorResult(
+            definition,
+            DeletedId: null,
+            model?.MakeDefault ?? false,
+            model?.PendingSecret,
+            model?.PendingClearSecret ?? false));
 
     private void OnCancelled(object? sender, EventArgs e) => Close((ProviderEditorResult?)null);
 

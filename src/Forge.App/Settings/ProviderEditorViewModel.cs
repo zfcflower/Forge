@@ -19,6 +19,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
 {
     private readonly ProviderServices services;
     private readonly ProviderDefinition? original;
+    private readonly IReadOnlyCollection<string> existingIds;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private ProviderPreset? preset;
     private ProviderAuthOption? auth;
@@ -37,16 +38,22 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
     private string? loginState;
     private CancellationTokenSource? loginCancellation;
 
-    public ProviderEditorViewModel(ProviderServices services, ProviderDefinition? definition, bool isDefault)
+    public ProviderEditorViewModel(
+        ProviderServices services,
+        ProviderDefinition? definition,
+        bool isDefault,
+        ProviderPreset? startPreset = null,
+        IReadOnlyCollection<string>? existingProviderIds = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         original = definition;
+        existingIds = existingProviderIds ?? [];
         MakeDefault = isDefault || definition is null;
 
         if (definition is null)
         {
-            preset = ProviderPresets.All[0];
+            preset = startPreset ?? ProviderPresets.All[0];
         }
         else
         {
@@ -77,7 +84,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
         SaveCommand = new AsyncRelayCommand(_ => SaveAsync(), () => !IsSaving);
         RefreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsBusy);
         SignInCommand = new AsyncRelayCommand(_ => SignInAsync(), () => !IsBusy);
-        SignOutCommand = new RelayCommand(SignOut);
+        SignOutCommand = new AsyncRelayCommand(_ => SignOutAsync(), () => !IsBusy);
         CancelCommand = new RelayCommand(() => Cancelled?.Invoke(this, EventArgs.Empty));
     }
 
@@ -91,7 +98,8 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
 
     public string Title => Loc.Instance[IsNew ? ProviderStrings.EditorNewKey : ProviderStrings.EditorEditKey];
 
-    public IReadOnlyList<ProviderPreset> Presets => ProviderPresets.All;
+    /// <summary>Everything the picker offers, including the free-form entry, so a preset can be turned into a custom one.</summary>
+    public IReadOnlyList<ProviderPreset> Presets { get; } = [.. ProviderPresets.All, ProviderPresets.Custom];
 
     public ProviderPreset? SelectedPreset
     {
@@ -109,6 +117,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(AuthOptions));
             OnPropertyChanged(nameof(ShowsEnvironmentVariable));
             OnPropertyChanged(nameof(ShowsSecret));
+            OnPropertyChanged(nameof(CanRefreshModels));
             RaisePresetText();
         }
     }
@@ -143,6 +152,12 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Anthropic's Messages API has no <c>/models</c> endpoint, so the refresh button is hidden for such a preset: a button
+    /// that always fails is worse than no button, and the model ids can still be typed by hand.
+    /// </summary>
+    public bool CanRefreshModels => preset?.SupportsModelListing == true;
 
     public bool ShowsEnvironmentVariable => SelectedAuth?.Kind == ProviderCredentialKind.ApiKey;
 
@@ -274,7 +289,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
 
     public AsyncRelayCommand SignInCommand { get; }
 
-    public RelayCommand SignOutCommand { get; }
+    public AsyncRelayCommand SignOutCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -378,7 +393,9 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
         }
 
         var kind = SelectedAuth?.Kind ?? ProviderCredentialKind.ApiKey;
-        var id = original?.Id ?? Slug(trimmedName, models);
+        // A new provider's id must not collide with a connected one: saving matches by id, so a duplicate would silently
+        // replace the other provider (and its credential reference) instead of adding a second one.
+        var id = original?.Id ?? UniqueId(Slug(trimmedName), currentId: null);
         var reference = kind == ProviderCredentialKind.ApiKey ? "provider:" + id : original?.SecretReference;
 
         Error = null;
@@ -407,9 +424,16 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
         };
     }
 
+    /// <summary>The key the user typed but has not committed yet; the view writes it after the definition is saved.</summary>
+    public string? PendingSecret => Secret.Trim().Length > 0 ? Secret.Trim() : null;
+
+    public bool PendingClearSecret => ClearSecret && PendingSecret is null;
+
     /// <summary>
     /// Writes the pasted or cleared key into the encrypted store. Runs on the pool: this is a file write, and the dialog is
-    /// not allowed to stall the UI thread for it.
+    /// not allowed to stall the UI thread for it. The save path does not call this (the caller commits the definition
+    /// first, so a refused settings write cannot leave a new secret behind an old configuration); refreshing the model list
+    /// does, because that request needs the key.
     /// </summary>
     public async Task PersistSecretAsync(ProviderDefinition definition, CancellationToken cancellationToken = default)
     {
@@ -538,24 +562,16 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task SaveAsync()
+    private Task SaveAsync()
     {
-        if (TryBuild() is not { } definition)
+        // The definition goes first: the window commits it, and only a committed definition receives the typed key. A
+        // settings write that is refused therefore leaves the old key (and the old configuration) untouched.
+        if (TryBuild() is { } definition)
         {
-            return;
+            Saved?.Invoke(this, definition);
         }
 
-        try
-        {
-            await PersistSecretAsync(definition).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            Error = exception.Message;
-            return;
-        }
-
-        Saved?.Invoke(this, definition);
+        return Task.CompletedTask;
     }
 
     private async Task RefreshModelsAsync(CancellationToken cancellationToken)
@@ -677,18 +693,45 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
     /// <summary>The view opens the device page; the model asks, the window does.</summary>
     internal event EventHandler<string>? OpenBrowser;
 
-    private void SignOut()
+    private async Task SignOutAsync()
     {
         if (original is { } definition)
         {
-            services.Credentials.ForgetCopilot(definition.Id);
+            await services.Credentials.ForgetCopilotAsync(definition.Id).ConfigureAwait(true);
         }
 
         RaiseStatus();
     }
 
-    /// <summary>A stable, readable id: the display name reduced to its slug, with a numeric suffix on a collision.</summary>
-    private static string Slug(string name, IReadOnlyList<string> models)
+    /// <summary>
+    /// The id this provider would get: its own id when editing, otherwise a slug of the name made unique against the
+    /// connected ones. <paramref name="currentId"/> is the id being edited (never a collision with itself).
+    /// </summary>
+    private string UniqueId(string slug, string? currentId)
+    {
+        var taken = new HashSet<string>(existingIds, StringComparer.Ordinal);
+        if (currentId is not null)
+        {
+            taken.Remove(currentId);
+        }
+
+        if (!taken.Contains(slug))
+        {
+            return slug;
+        }
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = slug + "-" + suffix;
+            if (!taken.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>A stable, readable id: the display name reduced to its slug.</summary>
+    private static string Slug(string name)
     {
         var builder = new System.Text.StringBuilder(name.Length);
         foreach (var character in name.ToLowerInvariant())
@@ -704,6 +747,6 @@ internal sealed class ProviderEditorViewModel : ObservableObject, IDisposable
         }
 
         var slug = builder.ToString().Trim('-');
-        return slug.Length > 0 ? slug : "provider-" + Math.Abs(models.Count);
+        return slug.Length > 0 ? slug : "provider";
     }
 }

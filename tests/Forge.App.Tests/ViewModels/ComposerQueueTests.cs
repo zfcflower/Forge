@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.App.ViewModels;
 using Xunit;
@@ -222,14 +223,14 @@ public sealed class ComposerQueueTests
             var definition = composer.CurrentDefinition();
             Assert.NotNull(definition);
             Assert.Equal("Plan", definition.Name);
-            Assert.Equal(new ModelSettings("scripted-model", ThinkingEffort.High), definition.Model);
+            Assert.Equal(new ModelSettings("scripted-model", ThinkingEffort.High, ProviderId: "test"), definition.Model);
             Assert.Equal(1.0, composer.EffortBar3);
 
             workspace.Draft = "plan it";
             workspace.SendCommand.Execute(null);
             provider.Release();
             Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && !workspace.IsRunning));
-            Assert.Equal(new ModelSettings("scripted-model", ThinkingEffort.High), provider.Models[0]);
+            Assert.Equal(new ModelSettings("scripted-model", ThinkingEffort.High, ProviderId: "test"), provider.Models[0]);
 
             composer.SelectedAgent = composer.Agents[0];
             composer.Effort = ThinkingEffort.Off;
@@ -262,18 +263,12 @@ public sealed class ComposerQueueTests
                             new FakeTodoStore(),
                             new ModelSettings("scripted-model")),
                         info);
-                    var snapshot = ProviderSnapshot.FromSection(new ProviderSection
-                    {
-                        Kind = "anthropic",
-                        BaseUrl = "https://example.invalid",
-                        Model = "scripted-model",
-                    });
                     using var workspace = new SessionWorkspaceViewModel(
                         info,
                         runtime,
                         checkpoints: null,
                         store,
-                        new ProviderSettings(snapshot, "ready"),
+                        ConfiguredProviders(root),
                         composerPreferences: new ComposerPreferences(),
                         fileSource: _ => Task.FromResult<IReadOnlyList<string>>([]),
                         skillSource: () => []);
@@ -292,6 +287,44 @@ public sealed class ComposerQueueTests
             {
             }
         }
+    }
+
+    /// <summary>One configured provider serving the scripted model, so the composer has a model and no missing-provider notice.</summary>
+    private static ProviderServices ConfiguredProviders(string root)
+    {
+        var settingsPath = Path.Combine(root, "composer-providers.json");
+        File.WriteAllText(
+            settingsPath,
+            """
+            {
+              "providers": {
+                "version": 1,
+                "defaultId": "test",
+                "items": [
+                  {
+                    "id": "test",
+                    "preset": "custom-openai",
+                    "name": "Test",
+                    "protocol": "openai-compatible",
+                    "baseUrl": "https://example.invalid",
+                    "auth": { "kind": "api-key" },
+                    "models": ["scripted-model"],
+                    "defaultModel": "scripted-model"
+                  }
+                ]
+              }
+            }
+            """);
+        var dataDir = Path.Combine(root, "provider-data");
+        Directory.CreateDirectory(dataDir);
+        // Fake handler, never used for network here; the workspace does not own it so it is left for reclamation.
+        return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("no network in this test");
     }
 
     private static async Task<bool> PumpUntilAsync(Func<bool> condition)

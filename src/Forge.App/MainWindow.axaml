@@ -4,7 +4,6 @@
         xmlns:ap="using:Forge.App.Approval"
         xmlns:vm="using:Forge.App.ViewModels"
         xmlns:wb="using:Forge.App.Workbench.Controls"
-        xmlns:prefs="using:Forge.App.Preferences"
         xmlns:loc="using:Forge.App.Localization"
         x:Class="Forge.App.MainWindow"
         x:DataType="vm:MainWindowViewModel"

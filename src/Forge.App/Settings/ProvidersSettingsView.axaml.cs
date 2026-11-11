@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Forge.Core.Providers;
 
 namespace Forge.App.Settings;
 
@@ -15,7 +16,11 @@ internal sealed partial class ProvidersSettingsView : UserControl
 
     private ProvidersSettingsViewModel? Model => DataContext as ProvidersSettingsViewModel;
 
-    private void OnAddClick(object? sender, RoutedEventArgs e) => _ = OpenEditorAsync(null);
+    /// <summary>
+    /// "Add server" is the free-form entry: it starts on the custom preset (no URL, OpenAI-compatible) instead of a vendor,
+    /// because a button that sits under "custom server" must not pre-fill someone else's endpoint.
+    /// </summary>
+    private void OnAddClick(object? sender, RoutedEventArgs e) => _ = OpenEditorAsync(null, ProviderPresets.Custom);
 
     private void OnEditClick(object? sender, RoutedEventArgs e)
     {
@@ -52,14 +57,19 @@ internal sealed partial class ProvidersSettingsView : UserControl
         }
     }
 
-    private async Task OpenEditorAsync(ProviderRowViewModel? row)
+    private async Task OpenEditorAsync(ProviderRowViewModel? row, ProviderPreset? startPreset = null)
     {
         if (Model is not { } page || TopLevel.GetTopLevel(this) is not Window owner)
         {
             return;
         }
 
-        var editor = new ProviderEditorViewModel(page.Services, row?.Provider.Definition, row?.IsDefault ?? false);
+        var editor = new ProviderEditorViewModel(
+            page.Services,
+            row?.Provider.Definition,
+            row?.IsDefault ?? false,
+            startPreset,
+            [.. page.Services.Catalog.Providers.Select(static provider => provider.Id)]);
         var window = new ProviderEditorWindow(editor);
         var result = await window.ShowDialog<ProviderEditorResult?>(owner);
         if (result is null)
@@ -78,6 +88,20 @@ internal sealed partial class ProvidersSettingsView : UserControl
             return;
         }
 
-        await page.SaveAsync(definition, makeDefaultId: result.MakeDefault ? definition.Id : null);
+        // Definition first, key second: if the settings write is refused the existing key stays exactly as it was.
+        var saved = await page.SaveAsync(definition, makeDefaultId: result.MakeDefault ? definition.Id : null);
+        if (!saved)
+        {
+            return;
+        }
+
+        if (result.Secret is { Length: > 0 } secret)
+        {
+            await page.SetSecretAsync(definition, secret);
+        }
+        else if (result.ClearSecret)
+        {
+            await page.ClearSecretAsync(definition);
+        }
     }
 }

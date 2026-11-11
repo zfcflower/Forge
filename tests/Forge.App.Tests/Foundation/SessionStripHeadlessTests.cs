@@ -8,6 +8,7 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.App.Tests.Localization;
 using Forge.App.ViewModels;
@@ -138,7 +139,7 @@ public sealed class SessionStripHeadlessTests
             info,
             new SessionRuntime(
                 new AgentRuntimeServices(
-                    static _ => UnconfiguredChatProvider.Instance,
+                    static _ => new MissingCredentialProvider("unconfigured", ProviderStrings.SectionMissingText()),
                     HostClient: null,
                     store,
                     new EmptyCatalog(),
@@ -147,8 +148,25 @@ public sealed class SessionStripHeadlessTests
                 info),
             checkpoints: null,
             store,
-            new ProviderSettings(null, "no provider configured"),
+            UnconfiguredProviders(root),
             instrumentSources: sources);
+    }
+
+    /// <summary>An empty catalogue (a legacy section with no usable fields) so the strip test keeps its "no provider" shape.</summary>
+    private static ProviderServices UnconfiguredProviders(string root)
+    {
+        var settingsPath = Path.Combine(root, "providers-settings.json");
+        File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
+        var dataDir = Path.Combine(root, "provider-data");
+        Directory.CreateDirectory(dataDir);
+        // Fake handler, never used for network here; the workspace does not own it so it is left for reclamation.
+        return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("no network in this test");
     }
 
     private static List<string> AutomationIds(Window window, bool onlyVisible = false) =>
@@ -291,7 +309,7 @@ public sealed class SessionStripHeadlessTests
 
         public IReadOnlyList<SlashEntry> Skills(string workspacePath) => [new SlashEntry("review", "review skill", true)];
 
-        public ModelMetadata ModelMetadata(string modelId) => new(200_000, new ModelPricing(3.00, 15.00, 0.30, 3.75));
+        public ModelMetadata ModelMetadata(string modelId, string? providerId = null) => new(200_000, new ModelPricing(3.00, 15.00, 0.30, 3.75));
 
         public void OpenInVsCode(string path)
         {

@@ -31,7 +31,10 @@ internal sealed class ProviderServices
         Secrets = new ProviderSecretStore(dataDirectory);
         Cache = new ProviderModelCache();
         Credentials = new ProviderCredentials(http, Secrets, time: time);
-        catalog = Store.Load(Secrets, Credentials);
+        // Warm the encrypted store on the pool: the first reader would otherwise be the settings page (UI thread) or the
+        // first provider status line, and decrypting on the UI thread is exactly what the shell must not do.
+        _ = Secrets.WarmAsync();
+        catalog = Store.Load(Secrets, Credentials, Cache);
     }
 
     public ProviderStore Store { get; }
@@ -51,7 +54,25 @@ internal sealed class ProviderServices
     /// <summary>Re-reads <c>settings.json</c>; the running sessions keep the catalogue they already captured.</summary>
     public ProviderCatalog Reload()
     {
-        catalog = Store.Load(Secrets, Credentials);
+        catalog = Store.Load(Secrets, Credentials, Cache);
+        Changed?.Invoke(this, EventArgs.Empty);
+        return catalog;
+    }
+
+    /// <summary>
+    /// The same reload, off the caller's thread: the settings page's refresh is a user action, and reading the file plus
+    /// building the catalogue is file work the UI thread must not do.
+    /// </summary>
+    public async Task<ProviderCatalog> ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        var loaded = await Task.Run(
+            () =>
+            {
+                Secrets.WarmAsync(CancellationToken.None).GetAwaiter().GetResult();
+                return Store.Load(Secrets, Credentials, Cache);
+            },
+            cancellationToken).ConfigureAwait(true);
+        catalog = loaded;
         Changed?.Invoke(this, EventArgs.Empty);
         return catalog;
     }

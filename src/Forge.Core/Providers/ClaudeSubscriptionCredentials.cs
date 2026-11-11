@@ -74,6 +74,34 @@ public sealed class ClaudeSubscriptionCredentials
     private readonly HttpClient _http;
     private readonly TimeProvider _time;
 
+    /// <summary>
+    /// Whether the file on this machine holds a non-empty access token, without refreshing or touching the network. The
+    /// settings row uses it so a present-but-empty or damaged credentials file reads as "not signed in" instead of
+    /// "signed in" followed by a failing turn.
+    /// </summary>
+    public static bool LooksSignedIn(string credentialsPath)
+    {
+        if (string.IsNullOrWhiteSpace(credentialsPath) || !File.Exists(credentialsPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(credentialsPath));
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("claudeAiOauth", out var oauth) &&
+                   oauth.ValueKind == JsonValueKind.Object &&
+                   oauth.TryGetProperty("accessToken", out var token) &&
+                   token.ValueKind == JsonValueKind.String &&
+                   !string.IsNullOrWhiteSpace(token.GetString());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
+
     public ClaudeSubscriptionCredentials(string credentialsPath, HttpClient http, TimeProvider? time = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(credentialsPath);

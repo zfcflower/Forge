@@ -8,6 +8,7 @@ using Forge.App.Composition;
 using Forge.App.Git;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Settings;
 using Forge.App.ViewModels;
 using Forge.Workspace;
 using Xunit;
@@ -248,27 +249,33 @@ public sealed class GitSettingsSectionTests
         }
     }
 
-    /// <summary>A real main window with the settings overlay opened, read on the UI thread.</summary>
+    /// <summary>
+    /// The settings window the shell opens, read on the UI thread. Since the settings page moved out of the main window
+    /// this harness shows the real window through the shell's own command, so the registration, the grouped nav and the
+    /// section bodies are all exercised the way the user sees them.
+    /// </summary>
     private sealed class SettingsShell : IDisposable
     {
+        private readonly MainWindow main;
         private readonly MainWindowViewModel viewModel;
         private bool disposed;
 
         public SettingsShell(AppComposition composition)
         {
             viewModel = new MainWindowViewModel(composition);
-            Window = new MainWindow { DataContext = viewModel };
-            Window.Show();
-            Settle(Window);
+            main = new MainWindow { DataContext = viewModel };
+            main.Show();
+            Settle(main);
+            viewModel.ToggleSettingsCommand.Execute(null);
+            Window = Assert.IsType<SettingsWindow>(viewModel.SettingsWindow);
         }
 
         public MainWindowViewModel ViewModel => viewModel;
 
-        public MainWindow Window { get; }
+        public SettingsWindow Window { get; }
 
         public void OpenSettings()
         {
-            viewModel.Settings.IsOpen = true;
             for (var attempt = 0; attempt < 200; attempt++)
             {
                 Settle(Window);
@@ -285,7 +292,7 @@ public sealed class GitSettingsSectionTests
             Settle(Window);
         }
 
-        /// <summary>All three section headings are laid out at distinct heights, so order assertions are stable.</summary>
+        /// <summary>All three nav rows are laid out at distinct heights, so order assertions are stable.</summary>
         private bool HeadingsSettled()
         {
             var tops = new[] { Heading("git"), Heading(SettingsSectionIds.Provider), Heading(SettingsSectionIds.Paths) }
@@ -304,7 +311,7 @@ public sealed class GitSettingsSectionTests
                 : new List<string>();
             return (
                 heading is null ? null : AutomationProperties.GetAutomationId(heading),
-                heading?.Text,
+                heading?.DataContext is SettingsNavItemViewModel item ? item.Title : null,
                 TopOf(heading),
                 TopOf(provider),
                 TopOf(paths),
@@ -315,10 +322,10 @@ public sealed class GitSettingsSectionTests
 
         public IReadOnlyList<string> RenderedSectionIds() =>
             Window.GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Where(static block => AutomationProperties.GetAutomationId(block) is "provider" or "git" or "paths")
-                .OrderBy(block => TopOf(block))
-                .Select(static block => AutomationProperties.GetAutomationId(block)!)
+                .OfType<Button>()
+                .Where(static button => AutomationProperties.GetAutomationId(button) is "provider" or "git" or "paths")
+                .OrderBy(TopOf)
+                .Select(static button => AutomationProperties.GetAutomationId(button)!)
                 .ToList();
 
         public void Dispose()
@@ -330,6 +337,7 @@ public sealed class GitSettingsSectionTests
 
             disposed = true;
             Window.Close();
+            main.Close();
             viewModel.Dispose();
         }
 
@@ -344,10 +352,14 @@ public sealed class GitSettingsSectionTests
             Dispatcher.UIThread.RunJobs();
         }
 
-        private TextBlock? Heading(string id) =>
+        /// <summary>
+        /// One nav row. The grouped column draws every section as a button (a heading that cannot be selected was the
+        /// reason the earlier control was a plain TextBlock); its title comes from the row's view model.
+        /// </summary>
+        private Button? Heading(string id) =>
             Window.GetVisualDescendants()
-                .OfType<TextBlock>()
-                .FirstOrDefault(block => string.Equals(AutomationProperties.GetAutomationId(block), id, StringComparison.Ordinal));
+                .OfType<Button>()
+                .FirstOrDefault(button => string.Equals(AutomationProperties.GetAutomationId(button), id, StringComparison.Ordinal));
 
         private T? ControlOf<T>(string automationId)
             where T : Control =>
@@ -356,7 +368,7 @@ public sealed class GitSettingsSectionTests
                 .FirstOrDefault(control =>
                     string.Equals(AutomationProperties.GetAutomationId(control), automationId, StringComparison.Ordinal));
 
-        private double TopOf(TextBlock? block) =>
-            block?.TranslatePoint(new Point(0, 0), Window)?.Y ?? double.NaN;
+        private double TopOf(Control? control) =>
+            control?.TranslatePoint(new Point(0, 0), Window)?.Y ?? double.NaN;
     }
 }

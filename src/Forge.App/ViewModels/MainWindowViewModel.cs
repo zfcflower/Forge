@@ -252,6 +252,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// </summary>
     public Func<Avalonia.Controls.Window?>? SettingsOwner { get; set; }
 
+    /// <summary>
+    /// The settings window the shell created, or <c>null</c> while none is open. A test seam: a headless test has no way to
+    /// observe the window otherwise, and the alternative (a test-only public API on the window) would be worse.
+    /// </summary>
+    internal Avalonia.Controls.Window? SettingsWindow => settingsWindow;
+
     public ProjectTreeViewModel Projects { get; }
 
     /// <summary>The general-chats tree of the panel above the projects.</summary>

@@ -29,14 +29,17 @@ internal sealed class ProviderStore
     /// Loads the connected providers. Never throws for file problems: the returned catalogue carries the sentence that says
     /// what is wrong, and the settings page shows it instead of an empty list.
     /// </summary>
-    public ProviderCatalog Load(ProviderSecretStore secrets, ProviderCredentials credentials)
+    public ProviderCatalog Load(
+        ProviderSecretStore secrets,
+        ProviderCredentials credentials,
+        ProviderModelCache? cache = null)
     {
         ArgumentNullException.ThrowIfNull(secrets);
         ArgumentNullException.ThrowIfNull(credentials);
 
         if (!File.Exists(settingsPath))
         {
-            return Seed(secrets, credentials, ProviderStrings.SettingsMissingText());
+            return Seed(secrets, credentials, cache, ProviderStrings.SettingsMissingText());
         }
 
         SettingsDocument? document;
@@ -61,13 +64,13 @@ internal sealed class ProviderStore
             // No multi-provider section yet: an older file's single `provider` becomes the first connected provider.
             if (document.Provider is { } legacy)
             {
-                var migrated = Migrate(legacy);
+                var migrated = Migrate(legacy, secrets);
                 return migrated is null
                     ? ProviderCatalog.Empty(ProviderStrings.InvalidText("the provider section is unusable"))
-                    : ProviderCatalog.Create([migrated], migrated.Id, secrets, credentials);
+                    : ProviderCatalog.Create([migrated], migrated.Id, secrets, credentials, cache);
             }
 
-            return Seed(secrets, credentials, ProviderStrings.SectionMissingText());
+            return Seed(secrets, credentials, cache, ProviderStrings.SectionMissingText());
         }
 
         var definitions = new List<ProviderDefinition>(entries.Count);
@@ -90,7 +93,7 @@ internal sealed class ProviderStore
             return ProviderCatalog.Empty(ProviderStrings.SectionMissingText());
         }
 
-        return ProviderCatalog.Create(definitions, document.Providers!.DefaultId, secrets, credentials);
+        return ProviderCatalog.Create(definitions, document.Providers!.DefaultId, secrets, credentials, cache);
     }
 
     /// <summary>
@@ -98,11 +101,15 @@ internal sealed class ProviderStore
     /// provider section opens on something the user can fill in rather than on an empty list. The entry carries no
     /// credential, so its row honestly says a key (or the CLI login) is still missing.
     /// </summary>
-    private static ProviderCatalog Seed(ProviderSecretStore secrets, ProviderCredentials credentials, LocText status)
+    private static ProviderCatalog Seed(
+        ProviderSecretStore secrets,
+        ProviderCredentials credentials,
+        ProviderModelCache? cache,
+        LocText status)
     {
         var preset = ProviderPresets.Default;
         var definition = ProviderDefinition.FromPreset(preset, preset.Id);
-        var catalog = ProviderCatalog.Create([definition], definition.Id, secrets, credentials);
+        var catalog = ProviderCatalog.Create([definition], definition.Id, secrets, credentials, cache);
         return catalog.Providers.Count > 0 ? catalog : ProviderCatalog.Empty(status);
     }
 
@@ -115,18 +122,28 @@ internal sealed class ProviderStore
     {
         ArgumentNullException.ThrowIfNull(definitions);
 
+        // The preferences store rewrites the same file; without a shared gate the later writer's merge would drop the
+        // earlier writer's section (the replace is atomic, the merge is not).
+        using var lease = Composition.SettingsFileMutex.Acquire(settingsPath);
+
         JsonObject root;
         if (File.Exists(settingsPath))
         {
+            JsonNode? parsed;
             try
             {
-                root = JsonNode.Parse(File.ReadAllText(settingsPath)) as JsonObject ?? [];
+                parsed = JsonNode.Parse(File.ReadAllText(settingsPath));
             }
             catch (JsonException)
             {
                 // A file we cannot parse is never overwritten: that would destroy a hand-edited configuration.
                 throw new InvalidOperationException("settings.json is not valid JSON; fix or remove it before saving providers.");
             }
+
+            // Valid JSON is not enough: an array or a scalar root is somebody else's document, and turning it into an
+            // object would delete everything it held.
+            root = parsed as JsonObject ?? throw new InvalidOperationException(
+                "settings.json must be a JSON object; refusing to replace a document with a different root shape.");
         }
         else
         {
@@ -150,7 +167,7 @@ internal sealed class ProviderStore
     /// The old single-provider section as one connected provider. The preset is guessed from the protocol: an Anthropic
     /// line becomes the Anthropic preset, anything else a custom OpenAI-compatible entry that keeps its own URL.
     /// </summary>
-    private static ProviderDefinition? Migrate(LegacyProviderSection legacy)
+    private static ProviderDefinition? Migrate(LegacyProviderSection legacy, ProviderSecretStore secrets)
     {
         var kind = (legacy.Kind ?? string.Empty).Trim().ToLowerInvariant();
         var baseUrl = (legacy.BaseUrl ?? string.Empty).Trim();
@@ -179,7 +196,10 @@ internal sealed class ProviderStore
             }
         }
 
-        return new ProviderDefinition
+        // The old file could hold a literal key. It moves into the encrypted store before the definition that points at it
+        // is handed out, so the first save (which drops the legacy section) cannot lose the credential.
+        var reference = string.IsNullOrWhiteSpace(legacy.ApiKey) ? null : preset.Id + "-key";
+        var definition = new ProviderDefinition
         {
             Id = preset.Id,
             PresetId = preset.Id,
@@ -190,7 +210,7 @@ internal sealed class ProviderStore
             BaseUrl = baseUrl,
             CredentialKind = ProviderCredentialKind.ApiKey,
             EnvironmentVariable = string.IsNullOrWhiteSpace(legacy.ApiKeyEnv) ? null : legacy.ApiKeyEnv!.Trim(),
-            SecretReference = null,
+            SecretReference = reference,
             Models = models,
             DefaultModel = model,
             Thinking = (legacy.Thinking ?? string.Empty).Trim().ToLowerInvariant() switch
@@ -203,6 +223,13 @@ internal sealed class ProviderStore
             MaxOutputTokens = legacy.MaxOutputTokens is > 0 ? legacy.MaxOutputTokens : null,
             Overrides = ProviderDefinition.FromMetadataDocument(legacy.ModelMeta),
         };
+
+        if (reference is not null)
+        {
+            AdoptLegacyLiterals(secrets, reference, legacy.ApiKey);
+        }
+
+        return definition;
     }
 
     private static string UniqueId(string candidate, HashSet<string> taken)

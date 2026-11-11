@@ -40,8 +40,11 @@ internal sealed class ProviderCredentials
         copilot = new CopilotAuthentication(http);
     }
 
-    /// <summary>True when a Claude Code login exists on this machine (it may still need a refresh before it is used).</summary>
-    public bool HasClaudeLogin() => File.Exists(claudeCredentialsPath);
+    /// <summary>
+    /// True when the Claude Code credentials file holds a usable access token (it may still need a refresh before it is
+    /// used). A file that exists but has no token reads as "not signed in": the row must not promise what the turn cannot do.
+    /// </summary>
+    public bool HasClaudeLogin() => ClaudeSubscriptionCredentials.LooksSignedIn(claudeCredentialsPath);
 
     public LocText ClaudeLoginSummary() => ProviderStrings.ClaudeSignedInText();
 
@@ -96,21 +99,19 @@ internal sealed class ProviderCredentials
             return null;
         }
 
-        secrets.Set(CopilotUserTokenReference(providerId), userToken);
+        var reference = CopilotUserTokenReference(providerId);
+        await Task.Run(() => secrets.Set(reference, userToken), ct).ConfigureAwait(false);
         var session = await copilot.ExchangeAsync(userToken, ct).ConfigureAwait(false);
         StoreSession(providerId, session);
         return session;
     }
 
     /// <summary>Drops the stored login and the cached session, so the row goes back to "needs sign-in".</summary>
-    public void ForgetCopilot(string providerId)
+    public async Task ForgetCopilotAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        lock (gate)
-        {
-            copilotSessions.Remove(providerId);
-        }
-
-        secrets.Remove(CopilotUserTokenReference(providerId));
+        InvalidateCopilot(providerId);
+        var reference = CopilotUserTokenReference(providerId);
+        await Task.Run(() => secrets.Remove(reference), cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>Forgets a cached session after a 401 so the next attempt exchanges a fresh one.</summary>

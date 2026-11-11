@@ -25,13 +25,13 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         this.services = services;
         services.Changed += OnProvidersChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
-        RefreshCommand = new RelayCommand(Refresh);
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsSaving);
     }
 
     /// <summary>The provider services, so the view can build the editor and metadata windows from the same store.</summary>
     internal ProviderServices Services => services;
 
-    public RelayCommand RefreshCommand { get; }
+    public AsyncRelayCommand RefreshCommand { get; }
 
     public ObservableCollection<ProviderRowViewModel> Rows { get; } = [];
 
@@ -75,7 +75,9 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
             Rows.Add(new ProviderRowViewModel(provider, string.Equals(provider.Id, catalog.Default?.Id, StringComparison.Ordinal)));
         }
 
-        Problem = catalog.IsConfigured ? null : catalog.StatusText.Resolve();
+        // A damaged secret store is a different problem from "no provider configured": it says the keys cannot be read,
+        // which is exactly the case where a row must not claim a missing key.
+        Problem = services.Secrets.Problem ?? (catalog.IsConfigured ? null : catalog.StatusText.Resolve());
         OnPropertyChanged(nameof(HasProblem));
         OnPropertyChanged(nameof(DefaultId));
     }
@@ -85,7 +87,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     /// <paramref name="removedId"/> is set) drops it. Failure leaves the file and the live catalogue untouched and surfaces as
     /// the section's problem line.
     /// </summary>
-    public async Task SaveAsync(
+    public async Task<bool> SaveAsync(
         ProviderDefinition? edited,
         string? removedId = null,
         string? makeDefaultId = null,
@@ -120,11 +122,13 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         try
         {
             await services.SaveAsync(current, defaultId, cancellationToken).ConfigureAwait(true);
-            Problem = null;
+            Problem = services.Secrets.Problem;
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             Problem = exception.Message;
+            return false;
         }
         finally
         {
@@ -133,10 +137,59 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Re-reads <c>settings.json</c> and rebuilds the rows: a hand edit or a key exported since startup shows up.</summary>
-    public void Refresh()
+    /// <summary>
+    /// Stores one typed key for an already-saved definition, on the pool. Kept separate from <see cref="SaveAsync"/> so the
+    /// settings write is the thing that can fail: a refused write never replaces the key an existing provider still uses.
+    /// </summary>
+    public async Task SetSecretAsync(ProviderDefinition definition, string secret, CancellationToken cancellationToken = default)
     {
-        services.Reload();
+        ArgumentNullException.ThrowIfNull(definition);
+        if (string.IsNullOrWhiteSpace(definition.SecretReference))
+        {
+            return;
+        }
+
+        var reference = definition.SecretReference;
+        try
+        {
+            await Task.Run(() => services.Secrets.Set(reference, secret), cancellationToken).ConfigureAwait(true);
+            Problem = services.Secrets.Problem;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Problem = exception.Message;
+        }
+
+        OnPropertyChanged(nameof(HasProblem));
+    }
+
+    /// <summary>The "clear key" half of <see cref="SetSecretAsync"/>.</summary>
+    public async Task ClearSecretAsync(ProviderDefinition definition, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (string.IsNullOrWhiteSpace(definition.SecretReference))
+        {
+            return;
+        }
+
+        var reference = definition.SecretReference;
+        try
+        {
+            await Task.Run(() => services.Secrets.Remove(reference), cancellationToken).ConfigureAwait(true);
+            Problem = services.Secrets.Problem;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Problem = exception.Message;
+        }
+
+        OnPropertyChanged(nameof(HasProblem));
+    }
+
+    /// <summary>Re-reads <c>settings.json</c> and rebuilds the rows: a hand edit or a key exported since startup shows up.</summary>
+    public async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        await services.ReloadAsync(cancellationToken).ConfigureAwait(true);
         Reload();
     }
 

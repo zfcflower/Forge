@@ -177,7 +177,7 @@ internal sealed class ComposerViewModel : ObservableObject
     private readonly ComposerPreferences preferences;
     private readonly string workspace;
     private readonly ProviderServices services;
-    private readonly ProviderCatalog catalog;
+    private ProviderCatalog catalog;
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
     private readonly Func<CancellationToken, Task>? modelRefresh;
@@ -298,16 +298,14 @@ internal sealed class ComposerViewModel : ObservableObject
                 return;
             }
 
-            foreach (var option in allModels)
-            {
-                option.IsSelected = string.Equals(option.Name, model, StringComparison.Ordinal) &&
-                                    (providerId.Length == 0 || string.Equals(option.ProviderId, providerId, StringComparison.Ordinal));
-            }
-
+            MarkSelectedOption();
             OnPropertyChanged(nameof(ModelLabel));
             Apply();
         }
     }
+
+    /// <summary>The provider of the current model; the session readout prices tokens with it.</summary>
+    public string ProviderId => providerId;
 
     public string ModelLabel => model.Length == 0 ? "—" : model;
 
@@ -388,6 +386,7 @@ internal sealed class ComposerViewModel : ObservableObject
         }
 
         await modelRefresh(cancellationToken).ConfigureAwait(true);
+        catalog = services.Catalog;
         RebuildModels();
         Status = SessionStrings.ComposerModelsFetched(allModels.Count);
     }
@@ -403,7 +402,8 @@ internal sealed class ComposerViewModel : ObservableObject
 
         if (selectedAgent.IsDefault &&
             string.Equals(model, provider.DefaultModel, StringComparison.Ordinal) &&
-            effort == provider.Definition.Thinking)
+            effort == provider.Definition.Thinking &&
+            string.Equals(provider.Id, catalog.Default?.Id, StringComparison.Ordinal))
         {
             return null;
         }
@@ -614,8 +614,29 @@ internal sealed class ComposerViewModel : ObservableObject
 
     private void OnModelSelected(ComposerModelOption option)
     {
+        var providerChanged = !string.Equals(providerId, option.ProviderId, StringComparison.Ordinal);
         providerId = option.ProviderId;
-        Model = option.Name;
+
+        // Two providers can serve a model with the same id: the name alone does not change, but the selection did, so the
+        // rows and the next turn's definition still have to follow it.
+        if (!Set(ref model, option.Name) && !providerChanged)
+        {
+            return;
+        }
+
+        MarkSelectedOption();
+        OnPropertyChanged(nameof(ModelLabel));
+        Apply();
+    }
+
+    /// <summary>Puts the check mark on the one row that matches both the model and its provider.</summary>
+    private void MarkSelectedOption()
+    {
+        foreach (var option in allModels)
+        {
+            option.IsSelected = string.Equals(option.Name, model, StringComparison.Ordinal) &&
+                                (providerId.Length == 0 || string.Equals(option.ProviderId, providerId, StringComparison.Ordinal));
+        }
     }
 
     private void OnPinToggled(ComposerModelOption option)

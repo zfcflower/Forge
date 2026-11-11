@@ -3,6 +3,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Providers;
 using Forge.App.ViewModels;
 using Xunit;
 
@@ -200,7 +201,7 @@ public sealed class SessionEventRoutingTests
             info,
             new SessionRuntime(
                 new AgentRuntimeServices(
-                    static _ => UnconfiguredChatProvider.Instance,
+                    static _ => new MissingCredentialProvider("unconfigured", Forge.App.Localization.ProviderStrings.SectionMissingText()),
                     HostClient: null,
                     store,
                     new EmptyCatalog(),
@@ -209,7 +210,7 @@ public sealed class SessionEventRoutingTests
                 info),
             checkpoints: null,
             store,
-            new ProviderSettings(null, "no provider configured"));
+            UnconfiguredProviders());
     }
 
     /// <summary>Every text of the one live sub-agent; empty until its start event reached the dispatcher.</summary>
@@ -245,6 +246,31 @@ public sealed class SessionEventRoutingTests
         }
 
         return texts;
+    }
+
+    /// <summary>An empty catalogue for tests that never touch providers; self-cleaning because the catalogue is in memory after load.</summary>
+    private static ProviderServices UnconfiguredProviders()
+    {
+        var probe = Path.Combine(Path.GetTempPath(), "forge-unconfigured-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(probe);
+        try
+        {
+            var settingsPath = Path.Combine(probe, "settings.json");
+            File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
+            var dataDir = Path.Combine(probe, "data");
+            Directory.CreateDirectory(dataDir);
+            return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
+        }
+        finally
+        {
+            Directory.Delete(probe, recursive: true);
+        }
+    }
+
+    private sealed class ThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("no network in this test");
     }
 
     private static async Task<bool> PumpUntilAsync(Func<bool> condition)

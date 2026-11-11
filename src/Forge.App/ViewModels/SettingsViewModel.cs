@@ -32,7 +32,9 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool isOpen;
     private bool autoCollapsed;
-    private bool manualCollapsed;
+
+    /// <summary>The user's own choice: <c>null</c> follows the window width, otherwise it wins over it.</summary>
+    private bool? manualCollapsed;
     private SettingsSection? selectedSection;
 
     public SettingsViewModel(AppComposition composition)
@@ -108,16 +110,20 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// The section column folded into an icon rail. A narrowed window folds it without touching the user's own choice;
-    /// <see cref="ToggleNav"/> records that choice, and the rail stays until it is toggled back.
+    /// The section column folded into an icon rail. A narrowed window folds it by itself; <see cref="ToggleNav"/> records an
+    /// explicit choice that then wins in both directions, so the toggle can also expand the rail inside a narrow window
+    /// instead of offering a button that does nothing.
     /// </summary>
-    public bool IsNavCollapsed => autoCollapsed || manualCollapsed;
+    public bool IsNavCollapsed => manualCollapsed ?? autoCollapsed;
 
     /// <summary>The left column's width as a grid length, so the window can bind a column definition to it.</summary>
     public GridLength NavWidth => new(IsNavCollapsed ? CollapsedNavWidth : ExpandedNavWidth);
 
     /// <summary>Headings are meaningless in the rail and are hidden there.</summary>
     public bool ShowNavTitles => !IsNavCollapsed;
+
+    /// <summary>The expanded mirror, so the title row can show the icon of the direction the button goes.</summary>
+    public bool IsNavExpanded => !IsNavCollapsed;
 
     public string NavToggleTip => Loc.Instance[IsNavCollapsed ? CoreStrings.SettingsExpandNav : CoreStrings.SettingsCollapseNav];
 
@@ -134,11 +140,11 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// The title row's refresh: re-read <c>settings.json</c> and rebuild the shell's rows, so a file edited by hand is
-    /// picked up without restarting.
+    /// picked up without restarting. The read runs on the pool — the click is on the UI thread.
     /// </summary>
-    public void Reload()
+    public async Task ReloadAsync(CancellationToken cancellationToken = default)
     {
-        composition.ReloadProvider();
+        await composition.ReloadProviderAsync(cancellationToken).ConfigureAwait(true);
         RevealSelected();
     }
 
@@ -159,14 +165,21 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var wasCollapsed = IsNavCollapsed;
         autoCollapsed = collapsed;
-        RaiseNavState();
+        if (IsNavCollapsed != wasCollapsed)
+        {
+            RaiseNavState();
+        }
     }
 
-    /// <summary>The title row's toggle: flips the user's own choice for the column's collapsed state.</summary>
+    /// <summary>
+    /// The title row's toggle: records the user's choice for the column's state. It flips whatever is on screen, so in a
+    /// narrow window it can expand the rail as well as fold it.
+    /// </summary>
     public void ToggleNav()
     {
-        manualCollapsed = !manualCollapsed;
+        manualCollapsed = !IsNavCollapsed;
         RaiseNavState();
     }
 
@@ -264,6 +277,7 @@ internal sealed class SettingsViewModel : ObservableObject, IDisposable
     private void RaiseNavState()
     {
         OnPropertyChanged(nameof(IsNavCollapsed));
+        OnPropertyChanged(nameof(IsNavExpanded));
         OnPropertyChanged(nameof(NavWidth));
         OnPropertyChanged(nameof(ShowNavTitles));
         OnPropertyChanged(nameof(NavToggleTip));

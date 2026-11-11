@@ -3,6 +3,7 @@ using Avalonia.Headless;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
+using Forge.App.Providers;
 using Forge.App.ViewModels;
 using Forge.App.Workbench;
 using Xunit;
@@ -163,7 +164,7 @@ public sealed class AgentRuntimeReleaseTests
 
     private static AgentRuntimeServices Services() =>
         new(
-            static _ => UnconfiguredChatProvider.Instance,
+            static _ => new MissingCredentialProvider("unconfigured", Forge.App.Localization.ProviderStrings.SectionMissingText()),
             HostClient: null,
             new EmptyStore(),
             new EmptyCatalog(),

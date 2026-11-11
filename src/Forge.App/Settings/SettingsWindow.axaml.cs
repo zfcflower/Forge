@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -75,7 +76,23 @@ internal sealed partial class SettingsWindow : Window
 
     private void OnToggleNavClick(object? sender, RoutedEventArgs e) => page?.ToggleNav();
 
-    private void OnReloadClick(object? sender, RoutedEventArgs e) => page?.Reload();
+    /// <summary>The refresh is a file read: it goes to the pool and comes back to this thread before the rows rebuild.</summary>
+    private async void OnReloadClick(object? sender, RoutedEventArgs e)
+    {
+        if (page is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await page.ReloadAsync();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning("[settings] reload failed: " + exception.GetType().Name);
+        }
+    }
 
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Close();
 }

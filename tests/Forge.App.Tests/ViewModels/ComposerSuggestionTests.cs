@@ -1,5 +1,5 @@
 using Forge.Abstractions;
-using Forge.App.Composition;
+using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.App.ViewModels;
 using Xunit;
@@ -125,70 +125,95 @@ public sealed class ComposerSuggestionTests
     [Fact]
     public void The_composer_picker_suggests_skills_and_files_and_inserts_the_choice()
     {
-        var composer = NewComposer(out _);
+        var root = Path.Combine(Path.GetTempPath(), "forge-composer-picker-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var composer = NewComposer(root, out _, out var holder);
+            using (holder)
+            {
+                composer.UpdateSuggestions("/be", 3);
+                Assert.True(composer.IsSuggestionOpen);
+                Assert.Equal(["/beta"], composer.Suggestions.Select(item => item.Title));
+                Assert.Equal(("/beta ", 6), composer.Accept());
+                Assert.False(composer.IsSuggestionOpen);
 
-        composer.UpdateSuggestions("/be", 3);
-        Assert.True(composer.IsSuggestionOpen);
-        Assert.Equal(["/beta"], composer.Suggestions.Select(item => item.Title));
-        Assert.Equal(("/beta ", 6), composer.Accept());
-        Assert.False(composer.IsSuggestionOpen);
+                composer.UpdateSuggestions("@", 1);
+                Assert.True(composer.IsSuggestionOpen);
+                Assert.Equal(2, composer.Suggestions.Count);
+                composer.MoveSelection(1);
+                Assert.Equal(1, composer.SelectedSuggestionIndex);
+                composer.MoveSelection(1);
+                Assert.Equal(0, composer.SelectedSuggestionIndex);
 
-        composer.UpdateSuggestions("@", 1);
-        Assert.True(composer.IsSuggestionOpen);
-        Assert.Equal(2, composer.Suggestions.Count);
-        composer.MoveSelection(1);
-        Assert.Equal(1, composer.SelectedSuggestionIndex);
-        composer.MoveSelection(1);
-        Assert.Equal(0, composer.SelectedSuggestionIndex);
+                composer.UpdateSuggestions("@view", 5);
+                Assert.Equal(("@src/View.axaml ", 16), composer.Accept());
 
-        composer.UpdateSuggestions("@view", 5);
-        Assert.Equal(("@src/View.axaml ", 16), composer.Accept());
-
-        // Escape keeps the token closed until the caret leaves it.
-        composer.UpdateSuggestions("/a", 2);
-        Assert.True(composer.IsSuggestionOpen);
-        composer.CloseSuggestions(dismissed: true);
-        composer.UpdateSuggestions("/al", 3);
-        Assert.False(composer.IsSuggestionOpen);
-        composer.UpdateSuggestions("/al x /a", 8);
-        Assert.True(composer.IsSuggestionOpen);
+                // Escape keeps the token closed until the caret leaves it.
+                composer.UpdateSuggestions("/a", 2);
+                Assert.True(composer.IsSuggestionOpen);
+                composer.CloseSuggestions(dismissed: true);
+                composer.UpdateSuggestions("/al", 3);
+                Assert.False(composer.IsSuggestionOpen);
+                composer.UpdateSuggestions("/al x /a", 8);
+                Assert.True(composer.IsSuggestionOpen);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
     public void Models_list_the_configured_and_extra_models_with_pinned_first()
     {
-        var composer = NewComposer(out var preferences);
+        // Rewritten for multi-provider: the old single-provider build sorted the default model first even when it
+        // was listed second; the new catalogue keeps the stored order (trimmed), so the fixture lists the default
+        // first explicitly. Trimming (" model-c ") is still verified.
+        var root = Path.Combine(Path.GetTempPath(), "forge-composer-models-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var composer = NewComposer(root, out var preferences, out var services);
+            using var _ = services;
 
-        Assert.Equal(["model-a", "model-b", "model-c"], composer.Models.Select(model => model.Name));
-        Assert.True(composer.Models[0].IsSelected);
+            Assert.Equal(["model-a", "model-b", "model-c"], composer.Models.Select(model => model.Name));
+            Assert.True(composer.Models[0].IsSelected);
 
-        composer.Models[2].TogglePinCommand.Execute(null);
-        Assert.Equal(["model-c", "model-a", "model-b"], composer.Models.Select(model => model.Name));
-        Assert.True(preferences.IsPinned("model-c"));
+            composer.Models[2].TogglePinCommand.Execute(null);
+            Assert.Equal(["model-c", "model-a", "model-b"], composer.Models.Select(model => model.Name));
+            Assert.True(preferences.IsPinned("model-c"));
 
-        composer.ModelSearch = "B";
-        Assert.Equal(["model-b"], composer.Models.Select(model => model.Name));
-        composer.Models[0].SelectCommand.Execute(null);
-        Assert.Equal("model-b", composer.Model);
-        Assert.Equal("model-b", composer.CurrentDefinition()?.Model.Model);
+            composer.ModelSearch = "B";
+            Assert.Equal(["model-b"], composer.Models.Select(model => model.Name));
+            composer.Models[0].SelectCommand.Execute(null);
+            Assert.Equal("model-b", composer.Model);
+            Assert.Equal("model-b", composer.CurrentDefinition()?.Model.Model);
 
-        composer.EffortValue = 2;
-        Assert.Equal(ThinkingEffort.Medium, composer.Effort);
-        composer.SaveDefaultsCommand.Execute(null);
-        Assert.Equal("model-b", preferences.DefaultModel);
-        Assert.Equal(ThinkingEffort.Medium, preferences.DefaultEffort);
+            composer.EffortValue = 2;
+            Assert.Equal(ThinkingEffort.Medium, composer.Effort);
+            composer.SaveDefaultsCommand.Execute(null);
+            Assert.Equal("model-b", preferences.DefaultModel);
+            Assert.Equal(ThinkingEffort.Medium, preferences.DefaultEffort);
 
-        // A new session starts from the saved defaults.
-        var next = new ComposerViewModel(Settings(), _ => { }, preferences, string.Empty, skillSource: () => []);
-        Assert.Equal("model-b", next.Model);
-        Assert.Equal(ThinkingEffort.Medium, next.Effort);
+            // A new session starts from the saved defaults.
+            var next = new ComposerViewModel(services.Services, _ => { }, preferences, string.Empty, skillSource: () => []);
+            Assert.Equal("model-b", next.Model);
+            Assert.Equal(ThinkingEffort.Medium, next.Effort);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
-    private static ComposerViewModel NewComposer(out ComposerPreferences preferences)
+    private static ComposerViewModel NewComposer(string root, out ComposerPreferences preferences, out TestServices services)
     {
         preferences = new ComposerPreferences();
+        services = TestServices.Create(root);
         return new ComposerViewModel(
-            Settings(),
+            services.Services,
             _ => { },
             preferences,
             string.Empty,
@@ -196,16 +221,54 @@ public sealed class ComposerSuggestionTests
             skillSource: () => [new SlashEntry("alpha", "a", true), new SlashEntry("beta", "b", true)]);
     }
 
-    private static ProviderSettings Settings() =>
-        new(
-            ProviderSnapshot.FromSection(new ProviderSection
-            {
-                Kind = "anthropic",
-                BaseUrl = "https://example.invalid",
-                Model = "model-a",
-                Models = ["model-b", "model-a", " model-c "],
-            }),
-            "ready");
+    /// <summary>One connected provider behind a temp <c>settings.json</c>; owns its <c>HttpClient</c> for the test.</summary>
+    private sealed class TestServices : IDisposable
+    {
+        private TestServices(ProviderServices inner, HttpClient http) { Services = inner; Http = http; }
+
+        public ProviderServices Services { get; }
+
+        private HttpClient Http { get; }
+
+        public static TestServices Create(string root)
+        {
+            var settingsPath = Path.Combine(root, "settings.json");
+            File.WriteAllText(
+                settingsPath,
+                """
+                {
+                  "providers": {
+                    "version": 1,
+                    "defaultId": "test",
+                    "items": [
+                      {
+                        "id": "test",
+                        "preset": "anthropic",
+                        "name": "Test",
+                        "protocol": "anthropic",
+                        "baseUrl": "https://example.invalid",
+                        "auth": { "kind": "api-key" },
+                        "models": ["model-a", "model-b", " model-c "],
+                        "defaultModel": "model-a"
+                      }
+                    ]
+                  }
+                }
+                """);
+            var dataDir = Path.Combine(root, "data");
+            Directory.CreateDirectory(dataDir);
+            var http = new HttpClient(new ThrowingHandler());
+            return new TestServices(new ProviderServices(settingsPath, dataDir, http), http);
+        }
+
+        public void Dispose() => Http.Dispose();
+
+        private sealed class ThrowingHandler : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("no network in this test");
+        }
+    }
 
     private static void Write(string path, string text)
     {

@@ -110,6 +110,7 @@
             <TextBlock Grid.Column="0" Classes="field-label" Text="{Binding ModelsLabel}" VerticalAlignment="Center" />
             <Button Grid.Column="1"
                     Classes="link"
+                    IsVisible="{Binding CanRefreshModels}"
                     Command="{Binding RefreshModelsCommand}"
                     Content="{Binding RefreshModelsText}"
                     AutomationProperties.AutomationId="provider-editor-refresh-models" />

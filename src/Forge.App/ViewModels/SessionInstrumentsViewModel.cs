@@ -40,6 +40,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private readonly ISessionInstrumentSources sources;
     private readonly Func<IReadOnlyList<string>> availableTools;
     private readonly Func<string> currentModel;
+    private readonly Func<string?> currentProvider;
     private readonly HashSet<string> usedTools = new(StringComparer.Ordinal);
     private readonly HashSet<string> usedSkills = new(StringComparer.OrdinalIgnoreCase);
     private readonly int uiThread = Environment.CurrentManagedThreadId;
@@ -64,13 +65,15 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         SessionInfo session,
         ISessionInstrumentSources sources,
         Func<IReadOnlyList<string>> availableTools,
-        Func<string> currentModel)
+        Func<string> currentModel,
+        Func<string?>? currentProvider = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         this.session = session;
         this.sources = sources ?? EmptySessionInstrumentSources.Instance;
         this.availableTools = availableTools ?? (static () => []);
         this.currentModel = currentModel ?? (static () => string.Empty);
+        this.currentProvider = currentProvider ?? (static () => null);
 
         OpenApprovalsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Approvals));
         OpenSkillsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Skills));
@@ -274,7 +277,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         }
     }
 
-    private ModelMetadata Metadata => sources.ModelMetadata(currentModel());
+    private ModelMetadata Metadata => sources.ModelMetadata(currentModel(), currentProvider());
 
     /// <summary>
     /// One turn's delta, from the same <see cref="AgentTurnCompleted"/> arithmetic the turn card uses. Only the root agent

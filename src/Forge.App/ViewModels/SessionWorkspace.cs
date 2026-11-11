@@ -101,7 +101,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             session,
             instrumentSources ?? EmptySessionInstrumentSources.Instance,
             runtime.ToolNames,
-            () => Composer.Model);
+            () => Composer.Model,
+            () => Composer.ProviderId);
         if (!providers.IsConfigured)
         {
             Transcript.AddNotice(SessionStrings.ProviderMissing(providers.StatusText.Resolve()), isError: true);

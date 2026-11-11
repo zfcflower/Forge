@@ -476,6 +476,10 @@ internal sealed class AppComposition : IAsyncDisposable
     /// <summary>Re-reads <c>settings.json</c>; running sessions keep the catalogue they captured until their next turn.</summary>
     public ProviderCatalog ReloadProvider() => Providers.Reload();
 
+    /// <summary>The same reload off the UI thread, for the settings page's refresh button.</summary>
+    public Task<ProviderCatalog> ReloadProviderAsync(CancellationToken cancellationToken = default) =>
+        Providers.ReloadAsync(cancellationToken);
+
     /// <summary>
     /// Startup work the window waits for: the preferences are read on the pool and then applied here, and the general
     /// workspace is registered. The first await has no <c>ConfigureAwait(false)</c> on purpose - the caller is the UI
