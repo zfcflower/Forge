@@ -16,6 +16,24 @@ internal sealed class SettingsDocument
 
     [JsonPropertyName("providers")]
     public ProvidersSectionDocument? Providers { get; set; }
+
+    [JsonPropertyName("modelCatalog")]
+    public ModelCatalogSectionDocument? ModelCatalog { get; set; }
+}
+
+/// <summary>
+/// The model-metadata settings that are not per provider. Only the global context window lives here today; a fetched catalog
+/// snapshot (<c>sourceUrl</c>/<c>generatedAt</c>) will join it when that work starts, which is why the section is separate
+/// from <c>providers</c> and is edited through <c>JsonNode</c> so unknown fields survive.
+/// </summary>
+internal sealed class ModelCatalogSectionDocument
+{
+    /// <summary>
+    /// The context window every model uses unless it has its own override; absent means "use the catalog value". It may be
+    /// smaller than the catalog window (to save cost or quota) or larger where the provider allows it.
+    /// </summary>
+    [JsonPropertyName("defaultContextWindow")]
+    public int? DefaultContextWindow { get; set; }
 }
 
 /// <summary>

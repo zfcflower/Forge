@@ -17,6 +17,7 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
 {
     private readonly ProviderServices services;
     private readonly string providerId;
+    private readonly bool billsCacheWrite;
     private string? status;
     private bool isBusy;
     private int uiThread = Environment.CurrentManagedThreadId;
@@ -28,6 +29,10 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
         this.services = services;
         providerId = provider.Id;
         ProviderName = provider.DisplayName;
+        // The fourth price is a real Anthropic number (cache writes cost 1.25x/2x input); for the others it is always zero,
+        // so the column would be an empty box pretending to be a missing value.
+        billsCacheWrite = provider.Protocol == ProviderProtocol.Anthropic ||
+                          provider.Definition.Overrides.Values.Any(static metadata => metadata.Pricing is { CacheWrite: > 0 });
         Reload(provider);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsBusy);
         SaveCommand = new AsyncRelayCommand(_ => SaveAsync(), () => !IsBusy);
@@ -52,6 +57,10 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
     public string CacheReadHeader => Loc.Instance[ProviderStrings.MetadataCacheReadKey];
 
     public string CacheWriteHeader => Loc.Instance[ProviderStrings.MetadataCacheWriteKey];
+
+    /// <summary>Whether the cache-write price column is shown at all (protocol-billed or already set on a model).</summary>
+    public bool ShowsCacheWriteColumn => billsCacheWrite ||
+                                        Rows.Any(static row => row.ToSection()?.CacheWrite is > 0);
 
     public string PerMillion => Loc.Instance[ProviderStrings.MetadataPerMillionKey];
 
@@ -97,6 +106,9 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
 
     public void RequestClose() => CloseRequested?.Invoke(this, EventArgs.Empty);
 
+    private bool ShowsCacheWriteFor(ModelMetadata metadata) =>
+        billsCacheWrite || metadata.Pricing is { CacheWrite: > 0 };
+
     public void Reload(ConnectedProvider provider)
     {
         Rows.Clear();
@@ -105,10 +117,11 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
             var metadata = provider.Definition.Overrides.TryGetValue(model, out var overridden)
                 ? overridden
                 : ModelMetadata.Unknown;
-            Rows.Add(new ModelMetadataRowViewModel(model, metadata));
+            Rows.Add(new ModelMetadataRowViewModel(model, metadata, ShowsCacheWriteFor(metadata)));
         }
 
         OnPropertyChanged(nameof(HasRows));
+        OnPropertyChanged(nameof(ShowsCacheWriteColumn));
     }
 
     public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
@@ -153,7 +166,7 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
                 var metadata = provider.Definition.Overrides.TryGetValue(model, out var overridden)
                     ? overridden
                     : provider.MetadataFor(model);
-                Rows.Add(new ModelMetadataRowViewModel(model, metadata));
+                Rows.Add(new ModelMetadataRowViewModel(model, metadata, ShowsCacheWriteFor(metadata)));
             }
 
             OnPropertyChanged(nameof(HasRows));
@@ -191,7 +204,8 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsBusy));
         try
         {
-            await services.SaveAsync(definitions, services.Catalog.Default?.Id).ConfigureAwait(true);
+            await services.SaveAsync(definitions, services.Catalog.Default?.Id, services.Catalog.DefaultContextWindow)
+                .ConfigureAwait(true);
             Status = Loc.Instance[ProviderStrings.MetadataSavedKey];
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -251,9 +265,10 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     private string cacheRead;
     private string cacheWrite;
 
-    public ModelMetadataRowViewModel(string model, ModelMetadata metadata)
+    public ModelMetadataRowViewModel(string model, ModelMetadata metadata, bool showCacheWrite = true)
     {
         Model = model;
+        ShowCacheWrite = showCacheWrite;
         contextWindow = Format(metadata.ContextWindow);
         input = Format(metadata.Pricing?.Input);
         output = Format(metadata.Pricing?.Output);
@@ -262,6 +277,9 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     }
 
     public string Model { get; }
+
+    /// <summary>Whether this row shows the cache-write price; hidden for providers that never bill it.</summary>
+    public bool ShowCacheWrite { get; }
 
     public string ContextWindow
     {

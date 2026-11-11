@@ -18,6 +18,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool saving;
     private string? problem;
+    private string defaultContextWindowText = string.Empty;
 
     public ProvidersSettingsViewModel(ProviderServices services)
     {
@@ -50,6 +51,20 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
 
     public string RefreshText => Loc.Instance[ProviderStrings.SectionRefreshKey];
 
+    public string DefaultContextWindowLabel => Loc.Instance[ProviderStrings.DefaultContextWindowKey];
+
+    public string DefaultContextWindowHint => Loc.Instance[ProviderStrings.DefaultContextWindowHintKey];
+
+    /// <summary>
+    /// The global context window, as text while it is being typed. Empty means "use each model's catalog value"; the
+    /// commit parses it and re-saves the section, so an invalid entry is reported instead of clearing the setting.
+    /// </summary>
+    public string DefaultContextWindowText
+    {
+        get => defaultContextWindowText;
+        set => Set(ref defaultContextWindowText, value ?? string.Empty);
+    }
+
     /// <summary>Why the list is empty or incomplete (a damaged settings file), or <c>null</c> when it is fine.</summary>
     public string? Problem
     {
@@ -77,6 +92,8 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
 
         // A damaged secret store is a different problem from "no provider configured": it says the keys cannot be read,
         // which is exactly the case where a row must not claim a missing key.
+        DefaultContextWindowText = catalog.DefaultContextWindow?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                  ?? string.Empty;
         Problem = services.Secrets.Problem ?? (catalog.IsConfigured ? null : catalog.StatusText.Resolve());
         OnPropertyChanged(nameof(HasProblem));
         OnPropertyChanged(nameof(DefaultId));
@@ -121,7 +138,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         IsSaving = true;
         try
         {
-            await services.SaveAsync(current, defaultId, cancellationToken).ConfigureAwait(true);
+            await services.SaveAsync(current, defaultId, ParseDefaultContextWindow(), cancellationToken).ConfigureAwait(true);
             Problem = services.Secrets.Problem;
             return true;
         }
@@ -193,6 +210,44 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         Reload();
     }
 
+    /// <summary>
+    /// Commits the global context window typed in the section. An entry that is neither empty nor a positive number is
+    /// reported and not saved — clearing the setting has to be an explicit empty box, not a typo.
+    /// </summary>
+    public async Task CommitDefaultContextWindowAsync(CancellationToken cancellationToken = default)
+    {
+        if (!TryParseDefaultContextWindow(out _))
+        {
+            Problem = Loc.Instance[ProviderStrings.DefaultContextWindowInvalidKey];
+            OnPropertyChanged(nameof(HasProblem));
+            return;
+        }
+
+        await SaveAsync(edited: null, cancellationToken: cancellationToken).ConfigureAwait(true);
+    }
+
+    private bool TryParseDefaultContextWindow(out int? window)
+    {
+        var text = DefaultContextWindowText.Trim();
+        if (text.Length == 0)
+        {
+            window = null;
+            return true;
+        }
+
+        if (int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed) &&
+            parsed > 0)
+        {
+            window = parsed;
+            return true;
+        }
+
+        window = null;
+        return false;
+    }
+
+    private int? ParseDefaultContextWindow() => TryParseDefaultContextWindow(out var window) ? window : services.Catalog.DefaultContextWindow;
+
     /// <summary>Makes one provider the default new sessions start on.</summary>
     public Task MakeDefaultAsync(ProviderRowViewModel row, CancellationToken cancellationToken = default)
     {
@@ -239,6 +294,8 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CustomTitle));
         OnPropertyChanged(nameof(CustomHint));
         OnPropertyChanged(nameof(RefreshText));
+        OnPropertyChanged(nameof(DefaultContextWindowLabel));
+        OnPropertyChanged(nameof(DefaultContextWindowHint));
         Reload();
     }
 }

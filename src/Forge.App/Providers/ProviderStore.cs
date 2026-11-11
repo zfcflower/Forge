@@ -39,7 +39,7 @@ internal sealed class ProviderStore
 
         if (!File.Exists(settingsPath))
         {
-            return Seed(secrets, credentials, cache, ProviderStrings.SettingsMissingText());
+            return Seed(secrets, credentials, cache, defaultContextWindow: null, ProviderStrings.SettingsMissingText());
         }
 
         SettingsDocument? document;
@@ -67,10 +67,10 @@ internal sealed class ProviderStore
                 var migrated = Migrate(legacy, secrets);
                 return migrated is null
                     ? ProviderCatalog.Empty(ProviderStrings.InvalidText("the provider section is unusable"))
-                    : ProviderCatalog.Create([migrated], migrated.Id, secrets, credentials, cache);
+                    : ProviderCatalog.Create([migrated], migrated.Id, secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow);
             }
 
-            return Seed(secrets, credentials, cache, ProviderStrings.SectionMissingText());
+            return Seed(secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow, ProviderStrings.SectionMissingText());
         }
 
         var definitions = new List<ProviderDefinition>(entries.Count);
@@ -93,7 +93,13 @@ internal sealed class ProviderStore
             return ProviderCatalog.Empty(ProviderStrings.SectionMissingText());
         }
 
-        return ProviderCatalog.Create(definitions, document.Providers!.DefaultId, secrets, credentials, cache);
+        return ProviderCatalog.Create(
+            definitions,
+            document.Providers!.DefaultId,
+            secrets,
+            credentials,
+            cache,
+            document.ModelCatalog?.DefaultContextWindow);
     }
 
     /// <summary>
@@ -105,11 +111,12 @@ internal sealed class ProviderStore
         ProviderSecretStore secrets,
         ProviderCredentials credentials,
         ProviderModelCache? cache,
+        int? defaultContextWindow,
         LocText status)
     {
         var preset = ProviderPresets.Default;
         var definition = ProviderDefinition.FromPreset(preset, preset.Id);
-        var catalog = ProviderCatalog.Create([definition], definition.Id, secrets, credentials, cache);
+        var catalog = ProviderCatalog.Create([definition], definition.Id, secrets, credentials, cache, defaultContextWindow);
         return catalog.Providers.Count > 0 ? catalog : ProviderCatalog.Empty(status);
     }
 
@@ -118,7 +125,7 @@ internal sealed class ProviderStore
     /// only <c>providers</c> and <c>provider</c> are touched, everything else (including sections this build does not know)
     /// stays byte-for-byte in place.
     /// </summary>
-    public void Save(IReadOnlyList<ProviderDefinition> definitions, string? defaultId)
+    public void Save(IReadOnlyList<ProviderDefinition> definitions, string? defaultId, int? defaultContextWindow)
     {
         ArgumentNullException.ThrowIfNull(definitions);
 
@@ -158,6 +165,28 @@ internal sealed class ProviderStore
         };
         root["providers"] = JsonSerializer.SerializeToNode(section, ProvidersJsonContext.Default.ProvidersSectionDocument);
         root.Remove("provider");
+
+        // The catalog section keeps any field this build does not know (a fetched snapshot will live here); only the one
+        // value the page edits is written, and an empty value removes just that property.
+        if (root["modelCatalog"] is not JsonObject catalog)
+        {
+            catalog = [];
+            root["modelCatalog"] = catalog;
+        }
+
+        if (defaultContextWindow is > 0)
+        {
+            catalog["defaultContextWindow"] = defaultContextWindow.Value;
+        }
+        else
+        {
+            catalog.Remove("defaultContextWindow");
+        }
+
+        if (catalog.Count == 0)
+        {
+            root.Remove("modelCatalog");
+        }
 
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         AtomicFile.WriteAllBytes(settingsPath, System.Text.Encoding.UTF8.GetBytes(json));

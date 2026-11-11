@@ -87,6 +87,38 @@ public sealed class ProviderCatalogTests : IDisposable
     }
 
     [Fact]
+    public void The_global_window_overrides_the_catalog_and_a_per_model_window_still_wins()
+    {
+        var provider = Definition("windowed", ProviderCredentialKind.ApiKey) with
+        {
+            Models = ["with-window", "with-prices-only", "plain"],
+            Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+            {
+                ["with-window"] = new(300_000, null),
+                ["with-prices-only"] = new(null, new ModelPricing(1, 2, 0.1, 0)),
+            },
+        };
+        var catalog = ProviderCatalog.Create([provider], "windowed", secrets, credentials, cache: null, defaultContextWindow: 64_000);
+
+        Assert.Equal(300_000, catalog.MetadataFor("with-window", "windowed").ContextWindow);
+        // A prices-only override must not drop the global limit.
+        Assert.Equal(64_000, catalog.MetadataFor("with-prices-only", "windowed").ContextWindow);
+        Assert.Equal(new ModelPricing(1, 2, 0.1, 0), catalog.MetadataFor("with-prices-only", "windowed").Pricing);
+        // No override at all: the global value replaces whatever the table knows.
+        Assert.Equal(64_000, catalog.MetadataFor("plain", "windowed").ContextWindow);
+    }
+
+    [Fact]
+    public void Without_a_global_window_the_catalog_value_is_used()
+    {
+        var provider = Definition("plain", ProviderCredentialKind.ApiKey);
+        var catalog = ProviderCatalog.Create([provider], "plain", secrets, credentials);
+
+        Assert.Null(catalog.DefaultContextWindow);
+        Assert.Equal(ModelMetadataResolver.Resolve("plain", null, null).ContextWindow, catalog.MetadataFor("plain").ContextWindow);
+    }
+
+    [Fact]
     public void Metadata_asked_with_a_provider_id_uses_that_provider()
     {
         var alpha = Definition("alpha", ProviderCredentialKind.ApiKey) with
@@ -307,6 +339,48 @@ public sealed class ProviderEditorTests : IDisposable
     }
 
     [Fact]
+    public void The_cache_write_column_only_appears_where_it_is_billed()
+    {
+        var services = Services();
+        var openAi = OpenAICompatible();
+        var anthropic = AnthropicCompatible();
+
+        Assert.False(new ModelMetadataViewModel(services, services.CreateTransient(openAi)).ShowsCacheWriteColumn);
+        Assert.True(new ModelMetadataViewModel(services, services.CreateTransient(anthropic)).ShowsCacheWriteColumn);
+
+        // An OpenAI-compatible gateway that does bill cache writes keeps the column once a value exists.
+        var withWritePrice = openAi with
+        {
+            Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+            {
+                ["m"] = new(null, new ModelPricing(1, 2, 0.1, 0.5)),
+            },
+        };
+        Assert.True(new ModelMetadataViewModel(services, services.CreateTransient(withWritePrice)).ShowsCacheWriteColumn);
+    }
+
+    [Fact]
+    public async Task An_invalid_global_window_is_reported_and_not_saved()
+    {
+        var services = Services();
+        using var section = new ProvidersSettingsViewModel(services);
+        section.Reload();
+        section.DefaultContextWindowText = "not a number";
+
+        await section.CommitDefaultContextWindowAsync();
+
+        Assert.True(section.HasProblem);
+        Assert.Null(services.Catalog.DefaultContextWindow);
+        Assert.False(File.Exists(Path.Combine(root, "settings.json")), "nothing is written for an invalid value");
+
+        section.DefaultContextWindowText = "64000";
+        await section.CommitDefaultContextWindowAsync();
+
+        Assert.Equal(64_000, services.Catalog.DefaultContextWindow);
+        Assert.Contains("64000", File.ReadAllText(Path.Combine(root, "settings.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Metadata_rows_never_write_a_zero_for_an_unknown_half()
     {
         var rows = new[]
@@ -339,4 +413,26 @@ public sealed class ProviderEditorTests : IDisposable
 
     private ProviderServices Services() =>
         new(Path.Combine(root, "settings.json"), root, new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
+
+    private static ProviderDefinition OpenAICompatible() => new()
+    {
+        Id = "gateway",
+        PresetId = ProviderPresets.CustomId,
+        DisplayName = "Gateway",
+        Protocol = ProviderProtocol.OpenAiCompatible,
+        BaseUrl = "https://gateway.invalid/v1",
+        CredentialKind = ProviderCredentialKind.ApiKey,
+        SecretReference = "provider:gateway",
+        Models = ["m"],
+        DefaultModel = "m",
+        Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
+    };
+
+    private static ProviderDefinition AnthropicCompatible() => OpenAICompatible() with
+    {
+        Id = "claude-gateway",
+        Protocol = ProviderProtocol.Anthropic,
+        BaseUrl = "https://claude.invalid",
+        SecretReference = "provider:claude-gateway",
+    };
 }

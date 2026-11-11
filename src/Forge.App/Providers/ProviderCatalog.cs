@@ -309,12 +309,14 @@ internal sealed class ProviderCatalog
         IReadOnlyList<ConnectedProvider> providers,
         ConnectedProvider? defaultProvider,
         LocText status,
-        ProviderModelCache cache)
+        ProviderModelCache cache,
+        int? defaultContextWindow)
     {
         Providers = providers;
         Default = defaultProvider;
         StatusText = status;
         this.cache = cache;
+        DefaultContextWindow = defaultContextWindow is > 0 ? defaultContextWindow : null;
     }
 
     /// <summary>The connected providers in stored order.</summary>
@@ -330,15 +332,23 @@ internal sealed class ProviderCatalog
 
     public ProviderModelCache Models => cache;
 
+    /// <summary>
+    /// The context window every model uses when it has no per-model override, or <c>null</c> to use the catalog value.
+    /// It sits above the catalog (and what the provider reports) and below a per-model override, matching the reference
+    /// product's "default uses the catalog limit, a global value overrides it, each model can still differ".
+    /// </summary>
+    public int? DefaultContextWindow { get; }
+
     public static ProviderCatalog Empty(LocText status) =>
-        new([], null, status, new ProviderModelCache());
+        new([], null, status, new ProviderModelCache(), defaultContextWindow: null);
 
     public static ProviderCatalog Create(
         IReadOnlyList<ProviderDefinition> definitions,
         string? defaultId,
         ProviderSecretStore secrets,
         ProviderCredentials credentials,
-        ProviderModelCache? cache = null)
+        ProviderModelCache? cache = null,
+        int? defaultContextWindow = null)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         ArgumentNullException.ThrowIfNull(secrets);
@@ -358,7 +368,7 @@ internal sealed class ProviderCatalog
         var status = defaultProvider is null
             ? ProviderStrings.SectionMissingText()
             : ProviderStrings.StoreReady(defaultProvider.DisplayName + " · " + defaultProvider.DefaultModel);
-        return new ProviderCatalog(providers, defaultProvider, status, sharedCache);
+        return new ProviderCatalog(providers, defaultProvider, status, sharedCache, defaultContextWindow);
     }
 
     /// <summary>The provider with this id, or <c>null</c>; a missing id means the caller wants the default.</summary>
@@ -397,12 +407,12 @@ internal sealed class ProviderCatalog
 
         if (!string.IsNullOrWhiteSpace(providerId) && Find(providerId) is { } chosen)
         {
-            return chosen.MetadataFor(modelId);
+            return WithDefaultWindow(chosen, chosen.MetadataFor(modelId), modelId);
         }
 
         if (Default is { } defaultProvider)
         {
-            var resolved = defaultProvider.MetadataFor(modelId);
+            var resolved = WithDefaultWindow(defaultProvider, defaultProvider.MetadataFor(modelId), modelId);
             if (resolved.IsKnown)
             {
                 return resolved;
@@ -411,14 +421,32 @@ internal sealed class ProviderCatalog
 
         foreach (var provider in Providers)
         {
-            var resolved = provider.MetadataFor(modelId);
+            var resolved = WithDefaultWindow(provider, provider.MetadataFor(modelId), modelId);
             if (resolved.IsKnown)
             {
                 return resolved;
             }
         }
 
-        return ModelMetadataResolver.Resolve(modelId, providerMetadata: null, userOverride: null);
+        var table = ModelMetadataResolver.Resolve(modelId, providerMetadata: null, userOverride: null);
+        return DefaultContextWindow is { } window ? table with { ContextWindow = window } : table;
+    }
+
+    /// <summary>
+    /// Applies the global context window over the resolved metadata. A per-model override that names a window wins; one that
+    /// only carries prices does not, so setting prices does not silently drop the global limit.
+    /// </summary>
+    private ModelMetadata WithDefaultWindow(ConnectedProvider provider, ModelMetadata resolved, string modelId)
+    {
+        if (DefaultContextWindow is not { } window)
+        {
+            return resolved;
+        }
+
+        var overriddenWindow = provider.Definition.Overrides.TryGetValue(modelId, out var overridden)
+            ? overridden.ContextWindow
+            : null;
+        return overriddenWindow is > 0 ? resolved : resolved with { ContextWindow = window };
     }
 
     /// <summary>The provider behind a model request: its own <see cref="ModelSettings.ProviderId"/>, else the default.</summary>

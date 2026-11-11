@@ -56,7 +56,7 @@ public sealed class ProviderStoreTests : IDisposable
         var (store, secrets, credentials) = CreateStack(path);
         var catalog = store.Load(secrets, credentials);
 
-        store.Save([.. catalog.Providers.Select(provider => provider.Definition)], catalog.Default?.Id);
+        store.Save([.. catalog.Providers.Select(provider => provider.Definition)], catalog.Default?.Id, defaultContextWindow: null);
 
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         Assert.False(document.RootElement.TryGetProperty("provider", out _), "the migrated section is gone after the first save");
@@ -75,8 +75,39 @@ public sealed class ProviderStoreTests : IDisposable
         var path = WriteSettings(broken);
         var (store, _, _) = CreateStack(path);
 
-        Assert.Throws<InvalidOperationException>(() => store.Save([], defaultId: null));
+        Assert.Throws<InvalidOperationException>(() => store.Save([], defaultId: null, defaultContextWindow: null));
         Assert.Equal(broken, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void The_global_context_window_round_trips_and_leaves_unknown_catalog_fields_alone()
+    {
+        var path = WriteSettings(
+            """
+            {
+              "providers": { "version": 1, "defaultId": "only", "items": [
+                { "id": "only", "preset": "openai", "baseUrl": "https://api.openai.com/v1", "auth": { "kind": "api-key" },
+                  "models": ["gpt"], "defaultModel": "gpt" } ] },
+              "modelCatalog": { "generatedAt": "2026-11-01T00:00:00Z", "defaultContextWindow": 128000 }
+            }
+            """);
+        var (store, secrets, credentials) = CreateStack(path);
+
+        var catalog = store.Load(secrets, credentials);
+        Assert.Equal(128_000, catalog.DefaultContextWindow);
+
+        store.Save([.. catalog.Providers.Select(provider => provider.Definition)], "only", defaultContextWindow: 200_000);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var section = document.RootElement.GetProperty("modelCatalog");
+        Assert.Equal(200_000, section.GetProperty("defaultContextWindow").GetInt32());
+        Assert.Equal("2026-11-01T00:00:00Z", section.GetProperty("generatedAt").GetString());
+
+        // Clearing the value removes only that property; the section and its other fields stay.
+        store.Save([.. catalog.Providers.Select(provider => provider.Definition)], "only", defaultContextWindow: null);
+        using var cleared = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.False(cleared.RootElement.GetProperty("modelCatalog").TryGetProperty("defaultContextWindow", out _));
+        Assert.True(cleared.RootElement.GetProperty("modelCatalog").TryGetProperty("generatedAt", out _));
     }
 
     [Fact]
@@ -104,7 +135,7 @@ public sealed class ProviderStoreTests : IDisposable
         Assert.Equal(ProviderStatusKind.Ready, provider.Status.Kind);
 
         // The first save drops the legacy section; the key must already be in the encrypted store by then.
-        store.Save([provider.Definition], provider.Id);
+        store.Save([provider.Definition], provider.Id, defaultContextWindow: null);
         Assert.Equal("sk-legacy-literal-key", secrets.Get("custom-openai-key"));
         Assert.DoesNotContain("sk-legacy-literal-key", File.ReadAllText(path), StringComparison.Ordinal);
     }
@@ -116,7 +147,7 @@ public sealed class ProviderStoreTests : IDisposable
         var path = WriteSettings(arrayRoot);
         var (store, _, _) = CreateStack(path);
 
-        Assert.Throws<InvalidOperationException>(() => store.Save([], defaultId: null));
+        Assert.Throws<InvalidOperationException>(() => store.Save([], defaultId: null, defaultContextWindow: null));
         Assert.Equal(arrayRoot, File.ReadAllText(path));
     }
 

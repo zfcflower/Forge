@@ -84,12 +84,13 @@ internal sealed class ProviderServices
     public async Task SaveAsync(
         IReadOnlyList<ProviderDefinition> definitions,
         string? defaultId,
+        int? defaultContextWindow,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         IReadOnlyList<ProviderDefinition> frozen = [.. definitions];
-        await Task.Run(() => Store.Save(frozen, defaultId), cancellationToken).ConfigureAwait(true);
-        catalog = ProviderCatalog.Create(frozen, defaultId, Secrets, Credentials, Cache);
+        await Task.Run(() => Store.Save(frozen, defaultId, defaultContextWindow), cancellationToken).ConfigureAwait(true);
+        catalog = ProviderCatalog.Create(frozen, defaultId, Secrets, Credentials, Cache, defaultContextWindow);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

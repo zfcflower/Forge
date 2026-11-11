@@ -62,6 +62,27 @@
       </Button>
     </Grid>
 
+    <!-- Model metadata that is not per provider: the window every model uses unless it has its own. -->
+    <StackPanel Spacing="3">
+      <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
+        <TextBlock Grid.Column="0"
+                   Text="{Binding DefaultContextWindowLabel}"
+                   Foreground="{DynamicResource TextSecondaryBrush}"
+                   FontSize="{DynamicResource FontSizeSm}"
+                   VerticalAlignment="Center" />
+        <TextBox Grid.Column="1"
+                 Width="120"
+                 Text="{Binding DefaultContextWindowText, Mode=TwoWay}"
+                 LostFocus="OnDefaultWindowCommit"
+                 KeyDown="OnDefaultWindowKeyDown"
+                 AutomationProperties.AutomationId="providers-default-context"
+                 AutomationProperties.Name="{Binding DefaultContextWindowLabel}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding DefaultContextWindowHint}" />
+    </StackPanel>
+
     <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" Margin="0,6,0,0" />
 
     <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="providers-connected">

@@ -22,6 +22,21 @@ internal sealed partial class ProvidersSettingsView : UserControl
     /// </summary>
     private void OnAddClick(object? sender, RoutedEventArgs e) => _ = OpenEditorAsync(null, ProviderPresets.Custom);
 
+    /// <summary>
+    /// The global context window is committed on focus loss (and on Enter) rather than per keystroke: it re-saves the
+    /// section, and a half-typed number must not become a saved limit.
+    /// </summary>
+    private void OnDefaultWindowCommit(object? sender, RoutedEventArgs e) => _ = Model?.CommitDefaultContextWindowAsync();
+
+    private void OnDefaultWindowKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.Enter)
+        {
+            e.Handled = true;
+            _ = Model?.CommitDefaultContextWindowAsync();
+        }
+    }
+
     private void OnEditClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: ProviderRowViewModel row })

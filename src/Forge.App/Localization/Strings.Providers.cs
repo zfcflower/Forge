@@ -24,6 +24,12 @@ internal static class ProviderStrings
 
     public const string SectionRefreshKey = "providers.section.refresh";
 
+    public const string DefaultContextWindowKey = "providers.defaults.contextWindow";
+
+    public const string DefaultContextWindowHintKey = "providers.defaults.contextWindowHint";
+
+    public const string DefaultContextWindowInvalidKey = "providers.defaults.contextWindowInvalid";
+
     // ---------------------------------------------------------------- load / store
     public const string SettingsMissingKey = "providers.store.settingsMissing";
 
@@ -212,6 +218,15 @@ internal static class ProviderStrings
             "公司大模型网关或本机上的模型——任何兼容 OpenAI 的服务器。",
             "A company gateway or a model on this machine — any OpenAI-compatible server.");
         Loc.Register(SectionRefreshKey, "刷新", "Refresh");
+        Loc.Register(DefaultContextWindowKey, "默认上下文窗口", "Default context window");
+        Loc.Register(
+            DefaultContextWindowHintKey,
+            "tokens，留空 = 用各模型的目录值；它只覆盖没有单独设置的模型。",
+            "tokens; empty uses each model's catalog value. It only applies to models without their own setting.");
+        Loc.Register(
+            DefaultContextWindowInvalidKey,
+            "默认上下文窗口必须是正整数，或留空表示使用模型目录值。",
+            "The default context window must be a positive whole number, or empty to use the catalog value.");
 
         Loc.Register(SettingsMissingKey, "找不到 settings.json", "settings.json was not found");
         Loc.Register(SettingsUnreadableKey, "settings.json 无法读取：{0}", "settings.json cannot be read: {0}");
