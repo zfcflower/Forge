@@ -7,7 +7,8 @@ namespace Forge.Core.Storage;
 /// Project registry stored in <c>forge.db</c>. Roots are stored as full paths with the trailing separator trimmed and
 /// a separate key column for uniqueness: the key folds case on Windows and keeps case elsewhere, so the same folder
 /// opened as <c>D:\Repo</c> and <c>d:\repo</c> is one project on Windows and two projects on Linux. A partial unique
-/// index allows at most one <see cref="ProjectKind.General"/> row.
+/// index allows at most one <see cref="ProjectKind.General"/> row. A closed project (<c>closed_at</c> set) keeps its row,
+/// so its id - and with it every session's <c>project_id</c> - survives a close / re-add round trip.
 /// </summary>
 public sealed class SqliteProjectRegistry : IProjectRegistry, IAsyncDisposable, IDisposable
 {
@@ -44,7 +45,7 @@ public sealed class SqliteProjectRegistry : IProjectRegistry, IAsyncDisposable, 
             async connection =>
             {
                 await using var command = connection.CreateCommand();
-                command.CommandText = $"SELECT {Columns} FROM projects ORDER BY sort_order, added_at, id";
+                command.CommandText = $"SELECT {Columns} FROM projects WHERE closed_at IS NULL ORDER BY sort_order, added_at, id";
                 var projects = new List<ProjectInfo>();
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -59,7 +60,8 @@ public sealed class SqliteProjectRegistry : IProjectRegistry, IAsyncDisposable, 
     /// <summary>
     /// Registers <paramref name="rootPath"/>, or returns the project already registered at that path. Registering a
     /// second <see cref="ProjectKind.General"/> project re-points the existing one at <paramref name="rootPath"/>,
-    /// because the general workspace is a singleton whose location is user-configurable.
+    /// because the general workspace is a singleton whose location is user-configurable. A closed project at the same
+    /// root is reopened (its <c>closed_at</c> cleared) and returned with its original id.
     /// </summary>
     public Task<ProjectInfo> AddAsync(string rootPath, string name, ProjectKind kind, CancellationToken ct)
     {
@@ -75,6 +77,12 @@ public sealed class SqliteProjectRegistry : IProjectRegistry, IAsyncDisposable, 
                 {
                     if (existing.Kind == kind)
                     {
+                        await ExecuteAsync(
+                            connection,
+                            transaction,
+                            "UPDATE projects SET closed_at = NULL WHERE id = $id AND closed_at IS NOT NULL",
+                            ct,
+                            ("$id", existing.Id)).ConfigureAwait(false);
                         return existing;
                     }
 
@@ -91,7 +99,7 @@ public sealed class SqliteProjectRegistry : IProjectRegistry, IAsyncDisposable, 
                         await ExecuteAsync(
                             connection,
                             transaction,
-                            "UPDATE projects SET name = $name, root_path = $path, root_key = $key WHERE id = $id",
+                            "UPDATE projects SET name = $name, root_path = $path, root_key = $key, closed_at = NULL WHERE id = $id",
                             ct,
                             ("$name", name),
                             ("$path", normalized),
@@ -136,6 +144,22 @@ public sealed class SqliteProjectRegistry : IProjectRegistry, IAsyncDisposable, 
                     transaction,
                     "DELETE FROM projects WHERE id = $id",
                     ct,
+                    ("$id", projectId)).ConfigureAwait(false) > 0,
+            ct);
+    }
+
+    /// <summary>Soft close: stamps <c>closed_at</c> (kept when already closed); true when the project exists.</summary>
+    public Task<bool> CloseAsync(string projectId, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(projectId, nameof(projectId));
+        return _writer.WriteAsync(
+            async (connection, transaction) =>
+                await ExecuteAsync(
+                    connection,
+                    transaction,
+                    "UPDATE projects SET closed_at = COALESCE(closed_at, $at) WHERE id = $id",
+                    ct,
+                    ("$at", StorageDb.FormatTimestamp(DateTimeOffset.UtcNow)),
                     ("$id", projectId)).ConfigureAwait(false) > 0,
             ct);
     }

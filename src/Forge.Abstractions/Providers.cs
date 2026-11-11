@@ -13,7 +13,11 @@ public sealed record ModelSettings(
     string? ProviderId = null);
 
 /// <summary>Tells the provider where the stable, cacheable prefix ends.</summary>
-public sealed record CacheHint(bool CacheSystemAndTools, int? CacheThroughMessageIndex = null);
+/// <summary>
+/// Prompt-cache placement. <paramref name="MessageTtl"/> applies to the message breakpoint only: null = the provider
+/// default (5 minutes), <c>"1h"</c> = the one-hour cache; tool and system breakpoints keep the default.
+/// </summary>
+public sealed record CacheHint(bool CacheSystemAndTools, int? CacheThroughMessageIndex = null, string? MessageTtl = null);
 
 public sealed record ToolDefinition(string Name, string Description, string InputSchemaJson);
 
@@ -22,7 +26,14 @@ public sealed record ChatRequest(
     IReadOnlyList<ToolDefinition> Tools,
     IReadOnlyList<ChatMessage> Messages,
     ModelSettings Model,
-    CacheHint? Cache = null);
+    CacheHint? Cache = null)
+{
+    /// <summary>
+    /// Provider-side cache routing key (OpenAI-compatible <c>prompt_cache_key</c>); the session's lineage root id.
+    /// Null = do not send. Providers that do not support it ignore it.
+    /// </summary>
+    public string? CacheRoutingKey { get; init; }
+}
 
 public enum StopReason { EndTurn, ToolUse, MaxTokens, Other }
 

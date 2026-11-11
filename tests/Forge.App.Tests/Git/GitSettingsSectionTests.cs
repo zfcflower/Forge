@@ -63,7 +63,7 @@ public sealed class GitSettingsSectionTests
     [Fact]
     public async Task Picker_labels_are_re_read_after_a_language_switch()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var previous = await session.Dispatch(() => Loc.Instance.Language, CancellationToken.None);
         try
         {
@@ -99,7 +99,7 @@ public sealed class GitSettingsSectionTests
     [Fact]
     public async Task The_section_is_registered_with_id_git_at_order_500()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var section = await session.Dispatch(
             async () =>
             {
@@ -127,7 +127,7 @@ public sealed class GitSettingsSectionTests
     [Fact]
     public async Task The_section_renders_between_provider_and_paths_with_its_picker()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var previous = await session.Dispatch(() => Loc.Instance.Language, CancellationToken.None);
         try
         {

@@ -2,6 +2,7 @@
         xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:git="using:Forge.App.Git"
              xmlns:loc="using:Forge.App.Localization"
              xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.FilesToolView"
@@ -141,7 +142,7 @@
     </DataTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,Auto,*" Background="Transparent">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Background="Transparent">
     <Border Classes="toolbar">
       <Grid ColumnDefinitions="*,Auto">
         <!-- Each tab carries its own count: the panel no longer spells both numbers out in a summary after the buttons. A
@@ -395,8 +396,52 @@
       </Grid>
     </Border>
 
+    <!-- A stopped rebase/merge is the one blocking state this panel owns: it says what stopped and opens the files it
+         stopped on (the same files carry U in the 已改动 tree). Continue/Abort are the only writes here besides sync. -->
+    <Border Grid.Row="2"
+            Classes="git-banner"
+            IsVisible="{Binding Git.HasOperation}"
+            AutomationProperties.AutomationId="git-operation">
+      <StackPanel Spacing="4">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+          <TextBlock Classes="git-banner-title"
+                     VerticalAlignment="Center"
+                     Text="{Binding Git.OperationText}"
+                     AutomationProperties.AutomationId="git-operation-title" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+            <Button Classes="ghost"
+                    MinHeight="22"
+                    Padding="8,2"
+                    Content="{Binding [git.button.continue], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding Git.ContinueOperationCommand}"
+                    AutomationProperties.AutomationId="git-continue" />
+            <Button Classes="ghost"
+                    MinHeight="22"
+                    Padding="8,2"
+                    Content="{Binding [git.button.abort], Source={x:Static loc:Loc.Instance}}"
+                    Command="{Binding Git.AbortOperationCommand}"
+                    AutomationProperties.AutomationId="git-abort" />
+          </StackPanel>
+        </Grid>
+        <ItemsControl ItemsSource="{Binding Git.ConflictedFiles}"
+                      AutomationProperties.AutomationId="git-conflicts">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="git:ConflictedFileItem">
+              <Button Classes="git-banner-file"
+                      Command="{Binding OpenCommand}"
+                      ToolTip.Tip="{Binding Path}"
+                      AutomationProperties.AutomationId="git-conflict-file"
+                      AutomationProperties.Name="{Binding Path}">
+                <TextBlock Classes="mono" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+
     <ListBox x:Name="TreeList"
-             Grid.Row="2"
+             Grid.Row="3"
              IsVisible="{Binding IsAllTab}"
              ItemsSource="{Binding Rows}"
              ItemTemplate="{StaticResource FileNodeTemplate}"
@@ -412,7 +457,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedDiffList"
-             Grid.Row="2"
+             Grid.Row="3"
              IsVisible="{Binding ShowSharedChanges}"
              ItemsSource="{Binding ChangedRows}"
              ItemTemplate="{StaticResource ChangedNodeTemplate}"
@@ -428,7 +473,7 @@
     </ListBox>
 
     <ListBox x:Name="ChangedList"
-             Grid.Row="2"
+             Grid.Row="3"
              IsVisible="{Binding ShowFallbackChanges}"
              ItemsSource="{Binding Changes}"
              SelectionChanged="OnChangedSelection"
@@ -456,5 +501,137 @@
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>
+
+    <!-- The git row: the branch of the active session at the left, the three sync verbs at the right, and the numbers on
+         the two verbs that change something. Fetch carries no number because it only makes the others current. -->
+    <Border Grid.Row="4"
+            Classes="git-row"
+            Classes.bad="{Binding Git.MessageIsError}"
+            IsVisible="{Binding Git.HasRepository}"
+            ToolTip.Tip="{Binding Git.BranchTooltip}"
+            ClipToBounds="True"
+            AutomationProperties.AutomationId="git-status-row"
+            AutomationProperties.Name="{Binding Git.RowAutomationName}">
+      <!-- Layout rule: the three verbs and the details link are docked to the right edge first, so they are never
+           clipped; the message is docked next (bounded), and the branch name fills whatever is left and truncates. At the
+           inspector's 200px minimum the branch (then the message) gives way — the verbs always stay clickable. -->
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Classes="git-row-action"
+                  Command="{Binding Git.FetchCommand}"
+                  ToolTip.Tip="{Binding Git.FetchTooltip}"
+                  AutomationProperties.AutomationId="git-fetch"
+                  AutomationProperties.Name="{Binding Git.FetchTooltip}">
+            <Panel Width="12" Height="12">
+              <wc:FluentIcon Data="{StaticResource IconGitFetch}"
+                             Width="12"
+                             Height="12"
+                             IsVisible="{Binding !Git.IsFetchRunning}" />
+              <Ellipse Width="6"
+                       Height="6"
+                       Fill="{DynamicResource AccentBrush}"
+                       IsVisible="{Binding Git.IsFetchRunning}"
+                       AutomationProperties.AccessibilityView="Raw" />
+            </Panel>
+          </Button>
+
+          <Button Classes="git-row-action"
+                  Command="{Binding Git.PullCommand}"
+                  ToolTip.Tip="{Binding Git.PullTooltip}"
+                  AutomationProperties.AutomationId="git-pull"
+                  AutomationProperties.Name="{Binding Git.PullTooltip}">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Panel Width="12" Height="12">
+                <wc:FluentIcon Data="{StaticResource IconGitPull}"
+                               Width="12"
+                               Height="12"
+                               IsVisible="{Binding !Git.IsPullRunning}" />
+                <Ellipse Width="6"
+                         Height="6"
+                         Fill="{DynamicResource AccentBrush}"
+                         IsVisible="{Binding Git.IsPullRunning}"
+                         AutomationProperties.AccessibilityView="Raw" />
+              </Panel>
+              <TextBlock Classes="git-row-count down"
+                         IsVisible="{Binding Git.HasBehind}"
+                         Text="{Binding Git.BehindText}"
+                         AutomationProperties.AccessibilityView="Raw" />
+            </StackPanel>
+          </Button>
+
+          <Button Classes="git-row-action"
+                  Command="{Binding Git.PushCommand}"
+                  ToolTip.Tip="{Binding Git.PushTooltip}"
+                  AutomationProperties.AutomationId="git-push"
+                  AutomationProperties.Name="{Binding Git.PushTooltip}">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Panel Width="12" Height="12">
+                <wc:FluentIcon Data="{StaticResource IconGitPush}"
+                               Width="12"
+                               Height="12"
+                               IsVisible="{Binding !Git.IsPushRunning}" />
+                <Ellipse Width="6"
+                         Height="6"
+                         Fill="{DynamicResource AccentBrush}"
+                         IsVisible="{Binding Git.IsPushRunning}"
+                         AutomationProperties.AccessibilityView="Raw" />
+              </Panel>
+              <TextBlock Classes="git-row-count up"
+                         IsVisible="{Binding Git.HasAhead}"
+                         Text="{Binding Git.AheadText}"
+                         AutomationProperties.AccessibilityView="Raw" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+
+        <Button DockPanel.Dock="Right"
+                Classes="git-row-details"
+                Margin="4,0,0,0"
+                IsVisible="{Binding Git.HasMessageDetail}"
+                VerticalAlignment="Center"
+                Content="{Binding [git.row.details], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="git-message-details">
+          <Button.Flyout>
+            <Flyout Placement="TopEdgeAlignedLeft">
+              <StackPanel MaxWidth="420" Spacing="6">
+                <SelectableTextBlock Classes="mono"
+                                     MaxHeight="220"
+                                     TextWrapping="Wrap"
+                                     Text="{Binding Git.MessageDetail}" />
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding Git.HasHint}"
+                           TextWrapping="Wrap"
+                           Text="{Binding Git.HintText}" />
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+
+        <!-- The last operation's outcome, or the last re-read's failure; one line, bounded so it can never push the
+             verbs out. Its full text stays available in the branch tooltip's row (the row's own name carries the state). -->
+        <StackPanel DockPanel.Dock="Right"
+                    Orientation="Horizontal"
+                    Margin="6,0,0,0"
+                    MaxWidth="150"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding Git.HasMessage}">
+          <TextBlock Classes="git-row-message"
+                     Text="{Binding Git.MessageText}"
+                     ToolTip.Tip="{Binding Git.MessageText}" />
+        </StackPanel>
+
+        <wc:FluentIcon DockPanel.Dock="Left"
+                       Classes="git-row-branch-icon"
+                       Data="{StaticResource IconBranch}"
+                       Width="11"
+                       Height="11"
+                       Margin="0,0,5,0"
+                       VerticalAlignment="Center" />
+        <TextBlock Classes="git-row-branch"
+                   Text="{Binding Git.BranchLabel}"
+                   AutomationProperties.AutomationId="git-branch"
+                   AutomationProperties.Name="{Binding Git.BranchLabel}" />
+      </DockPanel>
+    </Border>
   </Grid>
 </UserControl>

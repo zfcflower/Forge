@@ -362,7 +362,7 @@ public sealed class StepCommitterSessionRuntimeTests
     [Fact]
     public async Task The_composition_commits_into_the_session_worktree_and_follows_the_preference()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = StepCommitRepo.NewRoot();
         try
         {

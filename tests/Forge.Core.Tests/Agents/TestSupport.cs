@@ -398,6 +398,20 @@ internal sealed class InMemoryArtifactStore : IArtifactStore
         }
     }
 
+    public Task<int> DeleteSessionAsync(string sessionId, CancellationToken ct)
+    {
+        lock (gate)
+        {
+            var ids = items.Where(pair => pair.Value.Info.SessionId == sessionId).Select(static pair => pair.Key).ToList();
+            foreach (var id in ids)
+            {
+                items.Remove(id);
+            }
+
+            return Task.FromResult(ids.Count);
+        }
+    }
+
     public Task<ReadOnlyMemory<byte>> ReadAsync(string artifactId, long offset, int? length, CancellationToken ct)
     {
         lock (gate)

@@ -5,6 +5,7 @@
         xmlns:vm="using:Forge.App.ViewModels"
         xmlns:wb="using:Forge.App.Workbench.Controls"
         xmlns:loc="using:Forge.App.Localization"
+        xmlns:views="using:Forge.App.Views"
         x:Class="Forge.App.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Forge"
@@ -146,5 +147,9 @@
     the CI marker moved into the session composer's strip, the project path into that strip's project button, and the
     provider's status into the provider section of the settings page. -->
 
+    <!-- In-window toasts: the last child of the root grid, so they draw above the workbench. It sits in the workbench row
+    (below the 40 px title bar) so a toast never covers the title. The overlay resolves the shell's NotificationCenter from
+    its own constructor, and it takes no pointer: the cards are display only. -->
+    <views:NotificationOverlay Grid.Row="1" />
   </Grid>
 </Window>

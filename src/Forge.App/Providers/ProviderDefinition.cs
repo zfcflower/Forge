@@ -55,6 +55,12 @@ internal sealed record ProviderDefinition
     /// <summary>The user's per-model metadata override, the strongest source in the metadata chain.</summary>
     public required IReadOnlyDictionary<string, ModelMetadata> Overrides { get; init; }
 
+    /// <summary>OpenAI-compatible: send <c>prompt_cache_key</c>; never for DeepSeek (the provider itself refuses it).</summary>
+    public bool SendPromptCacheKey { get; init; }
+
+    /// <summary>Anthropic message-breakpoint cache TTL, <c>"5m"</c> or <c>"1h"</c>; null = the provider default.</summary>
+    public string? PromptCacheTtl { get; init; }
+
     /// <summary>Extra request headers for a gateway with its own scheme (never a credential).</summary>
     public IReadOnlyDictionary<string, string> Headers { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -96,6 +102,8 @@ internal sealed record ProviderDefinition
         },
         MaxOutputTokens = MaxOutputTokens,
         ModelMeta = Overrides.Count == 0 ? null : ToMetadataDocument(Overrides),
+        SendPromptCacheKey = SendPromptCacheKey ? true : null,
+        PromptCacheTtl = PromptCacheTtl,
         Headers = Headers.Count == 0 ? null : new Dictionary<string, string>(Headers, StringComparer.OrdinalIgnoreCase),
     };
 
@@ -220,6 +228,13 @@ internal sealed record ProviderDefinition
             MaxOutputTokens = entry.MaxOutputTokens is > 0 ? entry.MaxOutputTokens : null,
             Overrides = FromMetadataDocument(entry.ModelMeta),
             Headers = headers,
+            SendPromptCacheKey = entry.SendPromptCacheKey ?? false,
+            PromptCacheTtl = (entry.PromptCacheTtl ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "5m" => "5m",
+                "1h" => "1h",
+                _ => null,
+            },
         };
     }
 

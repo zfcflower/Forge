@@ -230,7 +230,7 @@ internal sealed class ConnectedProvider
                     Definition.BaseUrl,
                     credentials,
                     (key, baseUrl, style, preamble) => ChatProviderPipeline.Build(
-                        ProviderFactory.Create(BuildConfig(key, baseUrl, style, preamble), http),
+                        ProviderFactory.Create(BuildConfig(key, baseUrl, style, preamble), http, Options),
                         new RetryMiddleware()));
 
             default:
@@ -240,11 +240,15 @@ internal sealed class ConnectedProvider
         IChatProvider Build(string apiKey) => ChatProviderPipeline.Build(
             ProviderFactory.Create(
                 BuildConfig(apiKey, Definition.BaseUrl, ProviderAuthStyle.Default, preamble: null),
-                http),
+                http,
+                Options),
             new RetryMiddleware());
 
         IChatProvider Missing(LocText reason) => new MissingCredentialProvider(Id, reason);
     }
+
+    /// <summary>The per-provider wire switches that are not part of the credential or the URL.</summary>
+    internal ProviderOptions Options => new() { SendPromptCacheKey = Definition.SendPromptCacheKey };
 
     /// <summary>
     /// The wire config this definition produces once a credential is known. Shared with the credentialed provider so the

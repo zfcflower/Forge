@@ -768,17 +768,24 @@ public sealed partial class GitCli
         return GitWorktreeParser.Parse(output);
     }
 
-    /// <summary>Creates a worktree on a new branch (<c>git worktree add -b</c>).</summary>
+    /// <summary>
+    /// Creates a worktree on a new branch (<c>git worktree add -b</c>). <paramref name="noCheckout"/> leaves the worktree
+    /// empty (<c>--no-checkout</c>) so a sparse checkout can be configured before the first checkout.
+    /// </summary>
     public async Task<GitWorktree> AddWorktreeAsync(
         string workingDirectory,
         string worktreePath,
         string branch,
         string? startPoint = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool noCheckout = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(worktreePath);
         Reference(branch, nameof(branch));
-        var arguments = Args("worktree", "add", "-b", branch, "--end-of-options", worktreePath);
+        var arguments = noCheckout
+            ? Args("worktree", "add", "--no-checkout", "-b", branch, "--end-of-options", worktreePath)
+            : Args("worktree", "add", "-b", branch, "--end-of-options", worktreePath);
+
         if (!string.IsNullOrWhiteSpace(startPoint))
         {
             arguments.Add(Reference(startPoint, nameof(startPoint)));

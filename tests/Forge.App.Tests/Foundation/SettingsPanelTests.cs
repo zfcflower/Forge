@@ -411,6 +411,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Skills,
             SettingsSectionIds.Mcp,
             SettingsSectionIds.Tools,
+            SettingsSectionIds.Notifications,
             SettingsSectionIds.Paths,
         ];
 
@@ -451,31 +452,16 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
 }
 
 /// <summary>
-/// One headless session for the whole test class. Every session sets up its own headless platform and render loop, and
-/// starting one per test multiplies the exposure to the platform's cross-session startup race; sharing it also keeps every
-/// window on one UI thread, so a closed window cannot be notified from another thread.
+/// The settings-panel class runs on the process-wide session owned by the <c>forge-app-ui</c> collection, the same
+/// one every other UI class uses. Its own per-assembly session would keep a second <see cref="Application"/> alive
+/// on a second UI thread next to the collection's, and a control created under either one is then notified from the
+/// other thread (<c>VerifyAccess</c> failures in <c>KeyBinding</c>/transitions).
 /// </summary>
 public sealed class SettingsPanelFixture : IAsyncLifetime
 {
-    private HeadlessUnitTestSession? session;
+    public HeadlessUnitTestSession Session => SharedUi.Session;
 
-    public HeadlessUnitTestSession Session =>
-        session ?? throw new InvalidOperationException("the headless session is not running");
+    public Task InitializeAsync() => Task.CompletedTask;
 
-    public Task InitializeAsync()
-    {
-        // Per-assembly isolation: the class shares one session, so the headless application is built once instead of
-        // once per dispatch (the per-dispatch app builder is where the headless compositor and render loop race).
-        session = HeadlessUnitTestSession.StartNew(typeof(App), AvaloniaTestIsolationLevel.PerAssembly);
-        return Task.CompletedTask;
-    }
-
-    public async Task DisposeAsync()
-    {
-        if (session is not null)
-        {
-            await session.DisposeAsync();
-            session = null;
-        }
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 }

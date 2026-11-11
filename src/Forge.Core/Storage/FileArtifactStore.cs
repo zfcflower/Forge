@@ -181,6 +181,101 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The rows go first, by <c>session_id</c> only, in one statement; then the session's own folder
+    /// <c>&lt;directory&gt;/&lt;sessionId&gt;</c>, whose name is a single validated path segment, so nothing outside it
+    /// can be reached. The <c>artifacts</c> table is not created here: a database that never stored an artifact has no
+    /// rows to delete. The in-memory metadata of the session is dropped whatever happens, so a later read goes back to
+    /// the database instead of serving a deleted artifact from the cache.
+    /// </remarks>
+    public async Task<int> DeleteSessionAsync(string sessionId, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        ct.ThrowIfCancellationRequested();
+        var failures = new List<Exception>(2);
+        var deleted = 0;
+        try
+        {
+            deleted = await DeleteRowsAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // Any database failure: the folder is still deleted below, and the failure is reported with it.
+            failures.Add(exception);
+        }
+        finally
+        {
+            foreach (var (id, info) in _infoCache)
+            {
+                if (string.Equals(info.SessionId, sessionId, StringComparison.Ordinal))
+                {
+                    _infoCache.TryRemove(id, out _);
+                }
+            }
+        }
+
+        try
+        {
+            DeleteFolder(Path.Combine(_directory, sessionId));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            failures.Add(exception);
+        }
+
+        return failures.Count switch
+        {
+            0 => deleted,
+            1 => throw new IOException(failures[0].Message, failures[0]),
+            _ => throw new IOException(string.Join("; ", failures.Select(static f => f.Message)), new AggregateException(failures)),
+        };
+    }
+
+    private async Task<int> DeleteRowsAsync(string sessionId, CancellationToken ct)
+    {
+        await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
+        await using (var probe = connection.CreateCommand())
+        {
+            probe.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'artifacts'";
+            if (await probe.ExecuteScalarAsync(ct).ConfigureAwait(false) is null)
+            {
+                return 0;
+            }
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM artifacts WHERE session_id = $session";
+        command.Parameters.AddWithValue("$session", sessionId);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Deletes the session folder. A link in its place is removed as a link, never followed: the content behind it does not
+    /// belong to the session. A folder already gone is not an error.
+    /// </summary>
+    private static void DeleteFolder(string folder)
+    {
+        var info = new DirectoryInfo(folder);
+        if (!info.Exists)
+        {
+            if (File.Exists(folder))
+            {
+                throw new IOException($"'{folder}' is a file, not an artifact folder.");
+            }
+
+            return;
+        }
+
+        if (info.LinkTarget is not null)
+        {
+            info.Delete();
+            return;
+        }
+
+        info.Delete(recursive: true);
+    }
+
     public ValueTask DisposeAsync()
     {
         Dispose();

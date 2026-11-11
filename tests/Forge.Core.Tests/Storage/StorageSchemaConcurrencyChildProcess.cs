@@ -82,7 +82,7 @@ internal static class StorageSchemaConcurrencyChildProcess
         Console.Out.WriteLine(ReadyLine);
         Console.Out.Flush();
         using var store = new SqliteSessionStore(directory);
-        store.CreateSessionAsync("schema-child", "child session", CancellationToken.None).GetAwaiter().GetResult();
+        store.CreateSessionAsync("schema-child-" + Environment.ProcessId, "child session", CancellationToken.None).GetAwaiter().GetResult();
         Console.Out.WriteLine(DoneLine);
         Console.Out.Flush();
         return 0;

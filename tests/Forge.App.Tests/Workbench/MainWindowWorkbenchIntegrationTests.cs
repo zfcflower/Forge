@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Avalonia.Headless;
+using Forge.Abstractions;
 using Forge.App.Composition;
 using Forge.App.ViewModels;
 using Forge.App.Workbench;
@@ -550,10 +551,21 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
             var composition = AppComposition.Create();
             var sessionIds = new List<string>(scenario.SessionCount);
+            // One workspace has at most one Active root session: every session is archived right after it is created
+            // (so the next one can be), then the first is made Active again. The others open as read-only views,
+            // which is all these scenarios need of "another session of the same workspace".
+            var catalog = composition.Catalog;
             for (var i = 0; i < scenario.SessionCount; i++)
             {
                 var info = await Task.Run(() => composition.Sessions.CreateSessionAsync(work, "session " + i, CancellationToken.None));
+                await Task.Run(() => catalog.SetStatusAsync(info.Id, SessionStatus.Archived, CancellationToken.None));
                 sessionIds.Add(info.Id);
+            }
+
+            if (sessionIds.Count > 0)
+            {
+                var firstId = sessionIds[0];
+                Assert.True(await Task.Run(() => catalog.ActivateAsync(firstId, CancellationToken.None)));
             }
 
             if (scenario.Layout is { } layout)

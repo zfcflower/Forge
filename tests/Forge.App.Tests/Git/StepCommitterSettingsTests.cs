@@ -262,7 +262,7 @@ public sealed class StepCommitterSettingsViewTests
     [Fact]
     public async Task The_checkbox_shows_the_preference_and_writes_it_back_when_clicked()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var observed = await session.Dispatch(
             () =>
@@ -308,7 +308,7 @@ public sealed class StepCommitterSettingsViewTests
     [Fact]
     public async Task The_checkbox_starts_unchecked_when_the_preference_is_off()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var isChecked = await session.Dispatch(
             () =>

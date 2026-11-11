@@ -43,6 +43,39 @@
   <BoxShadows x:Key="ShadowSm">0 1 2 0 #20000000</BoxShadows>
   <BoxShadows x:Key="ShadowMd">0 8 24 -8 #33000000</BoxShadows>
 
+  <!-- Built-in form controls: one tier of geometry, expressed in Fluent's own resource keys. Avalonia 12.1.6 drives every one of
+       these through DynamicResource (TextBox/NumericUpDown/AutoCompleteBox take the TextControl* heights, ComboBox has its
+       own pair, CheckBox/RadioButton their row height, and none of them carries a FontSize of its own), so this block is
+       the single place an input box, a spinner, a dropdown and a tick box get their height and corner radius. Application
+       resources are searched before the theme's style resources; the dictionary AppearanceApplier merges later still wins
+       over these static defaults, so the interface-font preference keeps reaching built-in controls.
+
+       Two knobs deliberately stay with Fluent: ButtonPadding, because the clear button inside a TextBox template is sized
+       from it (a wider value clips its 12 px glyph), and the TextControl* brushes, because state colour belongs to the
+       theme (see SPEC: built-in borders do not take Forge's hover tokens). -->
+  <!-- The smallest radius the system has: Fluent's own default for a control. Spelled out rather than dropped, because
+       OverlayCornerRadius defaults to 5 and the two must not drift apart, and because Forge's button classes bind this same
+       key (see Controls.axaml) — so an input box, the button beside it and the flyout they open share one radius, and a
+       future change is one literal. Surfaces keep their own tokens: RadiusSm for chips and rows, RadiusMd for the
+       transcript bubbles and turn cards, RadiusLg for a page card. -->
+  <CornerRadius x:Key="ControlCornerRadius">3</CornerRadius>
+  <CornerRadius x:Key="OverlayCornerRadius">3</CornerRadius>
+  <!-- Buttons are deliberately one step rounder than the fields beside them: 3 keeps an input box crisp, 5 keeps a button
+       from reading as a square block, and neither is the 8 that made a 28 px control look like a pill. Forge's own button
+       classes bind this key, so `Button.primary`/`ghost`/`icon`/`tab`/`link`, `change-picker` and the git row's action
+       buttons all move together; the framework's plain buttons keep `ControlCornerRadius`. -->
+  <CornerRadius x:Key="ButtonCornerRadius">5</CornerRadius>
+  <sys:Double x:Key="TextControlThemeMinHeight">28</sys:Double>
+  <Thickness x:Key="TextControlThemePadding">10,4,6,4</Thickness>
+  <sys:Double x:Key="ComboBoxMinHeight">28</sys:Double>
+  <Thickness x:Key="ComboBoxPadding">12,4,0,4</Thickness>
+  <!-- 24 leaves the 20 px tick box itself alone (Fluent pins the box, not the row) while keeping the row on the same
+       baseline as a 28 px input beside it. -->
+  <sys:Double x:Key="CheckBoxMinHeight">24</sys:Double>
+  <sys:Double x:Key="RadioButtonMinHeight">24</sys:Double>
+  <!-- The default interface size. AppearanceApplier replaces it at runtime with the scaled preference. -->
+  <sys:Double x:Key="ControlContentThemeFontSize">13</sys:Double>
+
   <!-- Layer 2: semantic tokens, one dictionary per theme variant. -->
   <ResourceDictionary.ThemeDictionaries>
 
@@ -102,6 +135,7 @@
       <SolidColorBrush x:Key="DangerBrush" Color="#B3261E" />
       <SolidColorBrush x:Key="SuccessBrush" Color="#2F7449" />
       <SolidColorBrush x:Key="WarningBrush" Color="#8A5A00" />
+      <SolidColorBrush x:Key="InfoBrush" Color="#1F6FEB" />
       <SolidColorBrush x:Key="SyntaxKeywordBrush" Color="#0000FF" />
       <SolidColorBrush x:Key="SyntaxStringBrush" Color="#A31515" />
       <SolidColorBrush x:Key="SyntaxCommentBrush" Color="#008000" />
@@ -181,6 +215,7 @@
       <SolidColorBrush x:Key="DangerBrush" Color="#F2857C" />
       <SolidColorBrush x:Key="SuccessBrush" Color="#79CC9A" />
       <SolidColorBrush x:Key="WarningBrush" Color="#E0B15A" />
+      <SolidColorBrush x:Key="InfoBrush" Color="#6BA7FF" />
       <SolidColorBrush x:Key="SyntaxKeywordBrush" Color="#569CD6" />
       <SolidColorBrush x:Key="SyntaxStringBrush" Color="#CE9178" />
       <SolidColorBrush x:Key="SyntaxCommentBrush" Color="#6A9955" />

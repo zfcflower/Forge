@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace Forge.Workflows;
@@ -13,17 +14,10 @@ public static class WorkflowJson
     public static WorkflowDefinition Parse(string json)
     {
         ArgumentNullException.ThrowIfNull(json);
-        WorkflowDefinition? definition;
-        try
-        {
-            definition = JsonSerializer.Deserialize(json, WorkflowJsonContext.Default.WorkflowDefinition);
-        }
-        catch (JsonException ex)
-        {
-            throw Convert(ex);
-        }
 
-        return Normalize(definition);
+        // The reader consumes UTF-8 anyway, so transcode once here and reuse those bytes for the
+        // "is `steps` present" scan instead of materializing the document twice.
+        return Parse(Encoding.UTF8.GetBytes(json));
     }
 
     /// <summary>Parses a UTF-8 workflow document.</summary>
@@ -40,7 +34,52 @@ public static class WorkflowJson
             throw Convert(ex);
         }
 
+        if (definition is null)
+        {
+            throw new WorkflowFormatException("invalid workflow JSON: the document must be a JSON object, not null.");
+        }
+
+        if (!HasStepsProperty(utf8Json))
+        {
+            throw new WorkflowFormatException("invalid workflow JSON: 'steps' must be an array", "$.steps");
+        }
+
         return Normalize(definition);
+    }
+
+    /// <summary>
+    /// Reports whether the top-level object carries a <c>steps</c> property. Property initializers on the
+    /// target type survive deserialization of an absent property, so <see cref="WorkflowDefinition.Steps"/> is
+    /// an empty list for <c>{}</c> and cannot by itself tell "absent" from "explicitly empty". Only the
+    /// document can, hence this scan. Runs after deserialization, so the JSON is known well formed.
+    /// </summary>
+    private static bool HasStepsProperty(ReadOnlySpan<byte> utf8Json)
+    {
+        // Same reader options as WorkflowJsonContext, otherwise a comment or a trailing comma the
+        // deserializer accepts would throw here instead.
+        var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            return false;
+        }
+
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            var isSteps = reader.ValueIsEscaped ? reader.GetString() == "steps" : reader.ValueTextEquals("steps"u8);
+            reader.Read();
+            if (isSteps)
+            {
+                return true;
+            }
+
+            reader.Skip();
+        }
+
+        return false;
     }
 
     /// <summary>Serializes a definition back to JSON in the canonical form <see cref="Parse(string)"/> accepts.</summary>
@@ -50,15 +89,9 @@ public static class WorkflowJson
         return JsonSerializer.Serialize(definition, WorkflowJsonContext.Default.WorkflowDefinition);
     }
 
-    private static WorkflowDefinition Normalize(WorkflowDefinition? definition)
+    private static WorkflowDefinition Normalize(WorkflowDefinition definition)
     {
-        if (definition is null)
-        {
-            throw new WorkflowFormatException("invalid workflow JSON: the document must be a JSON object, not null.");
-        }
-
-        // The source-generated deserializer assigns default(T) to every property absent from the document, so
-        // defaults declared as property initializers do not survive a parse and have to be restored here.
+        // A property present as JSON null still lands here as null, which the presence scan cannot see.
         var steps = definition.Steps;
         if (steps is null)
         {

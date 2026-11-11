@@ -12,10 +12,16 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 4;
+    public const int Version = 9;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
+    public const string StatusDeleted = "Deleted";
+    public const string OriginCold = "cold";
+    public const string OriginFull = "full";
+    public const string OriginSummary = "summary";
+    public const string OriginBlank = "blank";
+    public const string OriginResume = "resume";
     public const string KindRepository = "Repository";
     public const string KindGeneral = "General";
     public const string TodoPending = "Pending";
@@ -154,16 +160,32 @@ internal static class StorageSchema
     /// </summary>
     private static readonly (string Table, string[] Key, string[] Columns)[] TimestampColumns =
     [
-        ("sessions", ["id"], ["created_at", "last_active_at"]),
+        ("sessions", ["id"], ["created_at", "last_active_at", "deleted_at"]),
         ("messages", ["session_id", "seq"], ["at"]),
         ("summaries", ["id"], ["at"]),
-        ("projects", ["id"], ["added_at"]),
+        ("projects", ["id"], ["added_at", "closed_at"]),
         ("todos", ["id"], ["updated_at"]),
         ("ui_state", ["key"], ["updated_at"]),
         ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
         ("plan_summaries", ["session_id"], ["updated_at"]),
         ("todo_groups", ["id"], ["updated_at"]),
+        ("storage_notices", ["id"], ["created_at", "acknowledged_at"]),
     ];
+
+    private const string StorageNoticesSql = """
+        CREATE TABLE IF NOT EXISTS storage_notices (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind            TEXT NOT NULL,
+            payload_json    TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            acknowledged_at TEXT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_storage_notices_pending ON storage_notices (id) WHERE acknowledged_at IS NULL;
+        """;
+
+    private const string OccupancyIndexSql =
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_sessions_occupancy ON sessions (occupancy_key) " +
+        "WHERE status = 'Active' AND parent_session_id IS NULL";
 
     private const string FtsSchemaSql =
         "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(session_id UNINDEXED, seq UNINDEXED, text, tokenize='unicode61 remove_diacritics 2')";
@@ -251,6 +273,21 @@ internal static class StorageSchema
             case 3:
                 await MigrateToV4Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
+            case 4:
+                await MigrateToV5Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 5:
+                await MigrateToV6Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 6:
+                await MigrateToV7Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 7:
+                await MigrateToV8Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 8:
+                await MigrateToV9Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
         }
@@ -319,17 +356,20 @@ internal static class StorageSchema
         SqliteTransaction transaction,
         CancellationToken ct)
     {
-        var tables = await ExistingTablesAsync(connection, transaction, ct).ConfigureAwait(false);
+        var tables = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
         foreach (var (table, key, columns) in TimestampColumns)
         {
-            if (!tables.Contains(table))
+            if (!tables.TryGetValue(table, out var existing))
             {
                 continue;
             }
 
             foreach (var column in columns)
             {
-                await NormalizeTimestampColumnAsync(connection, transaction, table, key, column, ct).ConfigureAwait(false);
+                if (existing.Contains(column))
+                {
+                    await NormalizeTimestampColumnAsync(connection, transaction, table, key, column, ct).ConfigureAwait(false);
+                }
             }
         }
 
@@ -350,6 +390,247 @@ internal static class StorageSchema
     {
         await ExecuteAsync(connection, transaction, V4SchemaSql, ct).ConfigureAwait(false);
         await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The v5 step, occupancy: <c>sessions.occupancy_key</c> is computed in C# for every row (the same
+    /// <see cref="OccupancyKey.Compute"/> the runtime writes use, never a SQL expression), duplicate Active root sessions
+    /// of one key are reduced to the most recently active one (tie: the larger id, ordinal) by archiving the others -
+    /// only their status changes - and then the unique partial index is created. The archived ids are recorded in
+    /// <c>storage_notices</c> so the app can tell the user. Every part is re-runnable: the column is added only when
+    /// missing, the key is recomputed, a second pass finds no duplicates and writes no notice.
+    /// </summary>
+    private static async Task MigrateToV5Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "occupancy_key", "TEXT", ct).ConfigureAwait(false);
+        await ExecuteAsync(connection, transaction, StorageNoticesSql, ct).ConfigureAwait(false);
+
+        var rows = new List<(string Id, string Key)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = "SELECT id, worktree_path, workspace_path FROM sessions";
+            await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var worktree = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var workspace = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                rows.Add((reader.GetString(0), ComputeKeyOrRaw(worktree, workspace)));
+            }
+        }
+
+        foreach (var (id, key) in rows)
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE sessions SET occupancy_key = $key WHERE id = $id";
+            update.Parameters.AddWithValue("$key", key);
+            update.Parameters.AddWithValue("$id", id);
+            await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var active = new List<(string Id, string Key, long Ticks)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText =
+                "SELECT id, occupancy_key, last_active_ticks FROM sessions WHERE status = 'Active' AND parent_session_id IS NULL";
+            await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                active.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2)));
+            }
+        }
+
+        var archived = new List<string>();
+        foreach (var group in active.GroupBy(static row => row.Key, StringComparer.Ordinal))
+        {
+            var keep = group
+                .OrderByDescending(static row => row.Ticks)
+                .ThenByDescending(static row => row.Id, StringComparer.Ordinal)
+                .First();
+            foreach (var row in group)
+            {
+                if (!string.Equals(row.Id, keep.Id, StringComparison.Ordinal))
+                {
+                    archived.Add(row.Id);
+                }
+            }
+        }
+
+        archived.Sort(StringComparer.Ordinal);
+        foreach (var id in archived)
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE sessions SET status = 'Archived' WHERE id = $id";
+            update.Parameters.AddWithValue("$id", id);
+            await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(connection, transaction, OccupancyIndexSql, ct).ConfigureAwait(false);
+        if (archived.Count > 0)
+        {
+            await InsertNoticeAsync(connection, transaction, Forge.Abstractions.StorageNoticeKinds.DedupeArchived, archived, ct).ConfigureAwait(false);
+        }
+
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The v6 step, soft delete: <c>sessions.deleted_at</c>. No backfill.</summary>
+    private static async Task MigrateToV6Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "deleted_at", "TEXT NULL", ct).ConfigureAwait(false);
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The v7 step, soft close of projects: <c>projects.closed_at</c>. No backfill.</summary>
+    private static async Task MigrateToV7Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, transaction, "projects", "closed_at", "TEXT NULL", ct).ConfigureAwait(false);
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The v8 step, parallel forks: <c>fork_of_branch</c> and <c>fork_base_sha</c>. No backfill.</summary>
+    private static async Task MigrateToV8Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "fork_of_branch", "TEXT NULL", ct).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "fork_base_sha", "TEXT NULL", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The v9 step, inheritance and prompt-cache bookkeeping. Every existing session is its own lineage root and began
+    /// cold.
+    /// </summary>
+    private static async Task MigrateToV9Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "inherits_from_session_id", "TEXT NULL", ct).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "inherits_up_to_seq", "INTEGER NULL", ct).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "lineage_root_id", "TEXT NULL", ct).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "origin_kind", "TEXT NULL", ct).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, transaction, "sessions", "prefix_fingerprint", "TEXT NULL", ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE sessions SET lineage_root_id = id WHERE lineage_root_id IS NULL;
+            UPDATE sessions SET origin_kind = 'cold' WHERE origin_kind IS NULL;
+            CREATE INDEX IF NOT EXISTS ix_sessions_inherits ON sessions (inherits_from_session_id)
+                WHERE inherits_from_session_id IS NOT NULL;
+            """,
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The key of a stored row; a path <see cref="Path.GetFullPath(string)"/> refuses keeps its raw text so the step never fails on it.</summary>
+    private static string ComputeKeyOrRaw(string? worktreePath, string workspacePath)
+    {
+        try
+        {
+            return OccupancyKey.Compute(worktreePath, workspacePath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.IsNullOrWhiteSpace(worktreePath) ? workspacePath : worktreePath;
+        }
+    }
+
+    /// <summary>Writes one <c>storage_notices</c> row whose payload is <c>{"sessionIds":[...]}</c>.</summary>
+    internal static async Task InsertNoticeAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string kind,
+        IReadOnlyList<string> sessionIds,
+        CancellationToken ct)
+    {
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT INTO storage_notices (kind, payload_json, created_at) VALUES ($kind, $payload, $at)";
+        insert.Parameters.AddWithValue("$kind", kind);
+        insert.Parameters.AddWithValue("$payload", NoticePayload(sessionIds));
+        insert.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(DateTimeOffset.UtcNow));
+        await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary><c>{"sessionIds":[...]}</c>, written without reflection.</summary>
+    internal static string NoticePayload(IReadOnlyList<string> sessionIds)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray("sessionIds");
+            foreach (var id in sessionIds)
+            {
+                writer.WriteStringValue(id);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+    }
+
+    /// <summary>Parses <see cref="NoticePayload"/>; an unreadable payload yields an empty list rather than failing the read.</summary>
+    internal static IReadOnlyList<string> ParseNoticePayload(string payload)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("sessionIds", out var ids) ||
+                ids.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var list = new List<string>(ids.GetArrayLength());
+            foreach (var id in ids.EnumerateArray())
+            {
+                if (id.ValueKind == System.Text.Json.JsonValueKind.String && id.GetString() is { } value)
+                {
+                    list.Add(value);
+                }
+            }
+
+            return list;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static async Task AddColumnIfMissingAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string table,
+        string column,
+        string definition,
+        CancellationToken ct)
+    {
+        var columns = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
+        if (columns.TryGetValue(table, out var existing) && existing.Contains(column))
+        {
+            return;
+        }
+
+        await ExecuteAsync(connection, transaction, $"ALTER TABLE {table} ADD COLUMN {column} {definition}", ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -418,7 +699,7 @@ internal static class StorageSchema
         SqliteTransaction transaction,
         CancellationToken ct)
     {
-        var tables = await ExistingTablesAsync(connection, transaction, ct).ConfigureAwait(false);
+        var tables = await ExistingColumnsAsync(connection, transaction, ct).ConfigureAwait(false);
         var sql = TimestampGuardSql(tables);
         if (sql.Length > 0)
         {
@@ -426,19 +707,35 @@ internal static class StorageSchema
         }
     }
 
-    private static async Task<HashSet<string>> ExistingTablesAsync(
+    /// <summary>Existing tables with their column names; a column a later step adds is absent until that step ran.</summary>
+    private static async Task<Dictionary<string, HashSet<string>>> ExistingColumnsAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         CancellationToken ct)
     {
-        var tables = new HashSet<string>(StringComparer.Ordinal);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table'";
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        var tables = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        await using (var command = connection.CreateCommand())
         {
-            tables.Add(reader.GetString(0));
+            command.Transaction = transaction;
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table'";
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                tables[reader.GetString(0)] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        foreach (var (table, columns) in tables)
+        {
+            await using var info = connection.CreateCommand();
+            info.Transaction = transaction;
+            info.CommandText = "SELECT name FROM pragma_table_info($table)";
+            info.Parameters.AddWithValue("$table", table);
+            await using var reader = await info.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                columns.Add(reader.GetString(0));
+            }
         }
 
         return tables;
@@ -450,18 +747,23 @@ internal static class StorageSchema
     /// enforces the shape the readers require, so neither a newer build nor a script that opens <c>forge.db</c> on its
     /// own can store a value every later read would refuse; a nullable column still accepts NULL.
     /// </summary>
-    private static string TimestampGuardSql(IReadOnlySet<string> tables)
+    private static string TimestampGuardSql(IReadOnlyDictionary<string, HashSet<string>> tables)
     {
         var sql = new System.Text.StringBuilder();
         foreach (var (table, _, columns) in TimestampColumns)
         {
-            if (!tables.Contains(table))
+            if (!tables.TryGetValue(table, out var existing))
             {
                 continue;
             }
 
             foreach (var column in columns)
             {
+                if (!existing.Contains(column))
+                {
+                    continue;
+                }
+
                 var condition =
                     $"NEW.{column} IS NOT NULL AND NOT (NEW.{column} GLOB '{StorageDb.TimestampGlobPattern}')";
                 var message = $"{table}.{column} must hold the canonical forge.db timestamp (yyyy-MM-ddTHH:mm:ss.fffffff+HH:mm)";

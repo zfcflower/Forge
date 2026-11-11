@@ -18,6 +18,7 @@ namespace Forge.App.Tests.Appearance;
 /// size at once, the composition root wires the applier and the settings section, and a stored font preference reaches the
 /// editors even though the load raises no change notification.
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class AppearanceHeadlessTests
 {
     private static readonly TimeSpan StepBudget = TimeSpan.FromSeconds(60);
@@ -25,7 +26,7 @@ public sealed class AppearanceHeadlessTests
     [Fact]
     public async Task A_preference_change_restyles_plain_and_mono_text_at_once()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var token = new CancellationTokenSource(StepBudget).Token;
 
         var result = await session.Dispatch(
@@ -74,7 +75,7 @@ public sealed class AppearanceHeadlessTests
     [Fact]
     public async Task A_second_change_after_the_first_is_picked_up_again()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var token = new CancellationTokenSource(StepBudget).Token;
 
         var sizes = await session.Dispatch(
@@ -111,7 +112,7 @@ public sealed class AppearanceHeadlessTests
     [Fact]
     public async Task Families_reach_the_groups_on_the_ui_thread()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var token = new CancellationTokenSource(StepBudget).Token;
 
         var offThread = await session.Dispatch(
@@ -172,7 +173,7 @@ public sealed class AppearanceHeadlessTests
 
     private async Task<Seen> ComposeWithStoredFontsAsync()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var token = new CancellationTokenSource(StepBudget).Token;
         var root = Path.Combine(Path.GetTempPath(), "forge-appearance-" + Guid.NewGuid().ToString("N"));
         var data = Path.Combine(root, "data");

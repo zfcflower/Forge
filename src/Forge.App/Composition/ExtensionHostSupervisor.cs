@@ -1,4 +1,5 @@
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.HostClient;
 
 namespace Forge.App.Composition;
@@ -17,15 +18,19 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
 
     private readonly ExtensionHostClient client;
     private readonly Lock gate = new();
+    /// <summary>The shell's notification entry; a host failure is otherwise only a dot in the title row.</summary>
+    private readonly INotifications? notifications;
+
     private CancellationTokenSource? lifetime;
     private Task? restart;
     private int failures;
     private bool stopping;
     private bool disposed;
 
-    private ExtensionHostSupervisor(ExtensionHostClient client)
+    private ExtensionHostSupervisor(ExtensionHostClient client, INotifications? notifications)
     {
         this.client = client;
+        this.notifications = notifications;
         client.StatusChanged += OnStatusChanged;
         client.ToolsChanged += OnSurfaceChanged;
         client.ContributionsChanged += OnSurfaceChanged;
@@ -55,7 +60,11 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     /// Creates the supervisor for a resolved JIT layout. The host is started with explicit worker and executor paths so
     /// discovery inside the host cannot pick up an unrelated build.
     /// </summary>
-    public static ExtensionHostSupervisor Create(JitHostLayout layout, AppPaths paths, IHostToolCallRouter? toolRouter = null)
+    public static ExtensionHostSupervisor Create(
+        JitHostLayout layout,
+        AppPaths paths,
+        IHostToolCallRouter? toolRouter = null,
+        INotifications? notifications = null)
     {
         var connection = new HostConnection
         {
@@ -74,7 +83,7 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
             ProcessExitTimeout = TimeSpan.FromSeconds(10),
         };
 
-        return new ExtensionHostSupervisor(new ExtensionHostClient(connection, toolRouter, options));
+        return new ExtensionHostSupervisor(new ExtensionHostClient(connection, toolRouter, options), notifications);
     }
 
     /// <summary>Starts the host in the background; returns immediately so the window is up before the pipe is open.</summary>
@@ -177,6 +186,11 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
 
         if (status == HostStatus.Failed)
         {
+            notifications.Notify(
+                NotificationLevel.Error,
+                NotificationsStrings.HostUnavailableTitle,
+                StatusDetail ?? ShellStrings.HostStartFailed(string.Empty),
+                "host:failed");
             ScheduleRestart();
         }
     }
@@ -210,6 +224,14 @@ internal sealed class ExtensionHostSupervisor : IAsyncDisposable
     {
         StatusDetail = detail;
         StatusChanged?.Invoke(status, detail);
+        if (status == HostStatus.Failed)
+        {
+            notifications.Notify(
+                NotificationLevel.Error,
+                NotificationsStrings.HostUnavailableTitle,
+                detail ?? ShellStrings.HostStartFailed(string.Empty),
+                "host:failed");
+        }
     }
 
     private static string FirstLine(string text)

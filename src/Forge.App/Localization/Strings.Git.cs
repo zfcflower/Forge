@@ -27,8 +27,6 @@ internal static class GitStrings
     public const string SettingsChecksPoll = "git.settings.checksPoll";
     public const string SettingsChecksMaxWait = "git.settings.checksMaxWait";
     public const string SettingsChecksHint = "git.settings.checksHint";
-    public const string SettingsNotifications = "git.settings.notifications";
-    public const string SettingsNotificationsHint = "git.settings.notificationsHint";
     public const string SettingsGhPath = "git.settings.ghPath";
     public const string SettingsGhPathHint = "git.settings.ghPathHint";
 
@@ -127,116 +125,42 @@ internal static class GitStrings
     /// <summary>The retry button of a failed step commit (visible text, tooltip and accessible name).</summary>
     public const string TodoCommitRetry = "git.todo.commitRetry";
 
-    // ---------------------------------------------------------------- the branch's pull request
+    // ---------------------------------------------------------------- the files panel's git row
 
-    /// <summary>Format: <c>{0}</c> is the pull request number, <c>{1}</c> its title.</summary>
-    public const string PullRequestHeader = "git.pr.header";
+    /// <summary>Tooltip of the fetch button: the read-only verb.</summary>
+    public const string RowFetchHint = "git.row.fetchHint";
 
-    public const string PullRequestStateOpen = "git.pr.state.open";
-    public const string PullRequestStateDraft = "git.pr.state.draft";
-    public const string PullRequestStateClosed = "git.pr.state.closed";
-    public const string PullRequestStateMerged = "git.pr.state.merged";
-    public const string PullRequestNone = "git.pr.none";
-    public const string PullRequestLoading = "git.pr.loading";
+    /// <summary>Format: <c>{0}</c> is the pull strategy, <c>{1}</c> the upstream it integrates.</summary>
+    public const string RowPullHint = "git.row.pullHint";
 
-    /// <summary>"Install and sign in to gh"; the platform's own detail is shown under it.</summary>
-    public const string PullRequestGhNotReady = "git.pr.ghNotReady";
+    /// <summary>Format: <c>{0}</c> strategy, <c>{1}</c> upstream, <c>{2}</c> how many commits behind.</summary>
+    public const string RowPullHintBehind = "git.row.pullHintBehind";
 
-    /// <summary>Format: <c>{0}</c> is the reason the platform gave.</summary>
-    public const string PullRequestReadFailed = "git.pr.readFailed";
+    /// <summary>Format: <c>{0}</c> how many commits ahead, <c>{1}</c> the branch name the push lands on.</summary>
+    public const string RowPushHint = "git.row.pushHint";
 
-    // ---------------------------------------------------------------- screenshots of the change
+    /// <summary>Format: <c>{0}</c> is the same-named remote branch the first push creates.</summary>
+    public const string RowPushHintFirst = "git.row.pushHintFirst";
 
-    public const string LabelScreenshots = "git.label.screenshots";
+    public const string RowNoRemote = "git.row.noRemote";
 
-    /// <summary>The button that captures the before/after images and puts them into the pull request description.</summary>
-    public const string ButtonScreenshots = "git.button.screenshots";
+    /// <summary>
+    /// Tooltip of the branch label: format <c>{0}</c> branch, <c>{1}</c> the same-named branch a push lands on, <c>{2}</c> upstream,
+    /// <c>{3}</c> the short head commit. The one place "pushes to" and "upstream" are visible side by side.)
+    /// </summary>
+    public const string RowBranchHint = "git.row.branchHint";
 
-    /// <summary>Format: <c>{0}</c> is the command the project declared in <c>.forge/screenshots.json</c>.</summary>
-    public const string ScreenshotCommand = "git.screenshot.command";
+    /// <summary>
+    /// Accessible name of the whole row: format <c>{0}</c> branch, <c>{1}</c> upstream, <c>{2}</c> ahead, <c>{3}</c>
+    /// behind. The arrows and colours are not read out, so the numbers have to be in the name.
+    /// </summary>
+    public const string RowAutomationName = "git.row.automationName";
 
-    /// <summary>Shown instead of the command when this branch declares none, so nothing can be captured.</summary>
-    public const string ScreenshotNoCommand = "git.screenshot.noCommand";
+    /// <summary>Opens the failure's raw git output (stderr) under the row.</summary>
+    public const string RowDetails = "git.row.details";
 
-    /// <summary>Format: <c>{0}</c> is why <c>.forge/screenshots.json</c> cannot be used.</summary>
-    public const string ScreenshotConfigProblem = "git.screenshot.configProblem";
-
-    public const string ErrorScreenshotNoPullRequest = "git.error.screenshot.noPullRequest";
-    public const string ErrorScreenshotNoCommand = "git.error.screenshot.noCommand";
-
-    // ---------------------------------------------------------------- waiting for the checks
-
-    public const string WatchWaiting = "git.watch.waiting";
-
-    /// <summary>Format: <c>{0}</c> checks passed, <c>{1}</c> failed or cancelled, <c>{2}</c> still pending.</summary>
-    public const string WatchProgress = "git.watch.progress";
-
-    public const string WatchNoChecksYet = "git.watch.noChecksYet";
-
-    /// <summary>Format: <c>{0}</c> is the platform's raw merge state text (CLEAN, BEHIND, ...).</summary>
-    public const string WatchMergeState = "git.watch.mergeState";
-
-    public const string WatchCancelled = "git.watch.cancelled";
-
-    public const string OutcomeReady = "git.watch.outcome.ready";
-    public const string OutcomeReadyWithHooks = "git.watch.outcome.readyWithHooks";
-
-    /// <summary>Format: <c>{0}</c> is the number of failed checks, <c>{1}</c> their names.</summary>
-    public const string OutcomeChecksFailed = "git.watch.outcome.checksFailed";
-
-    public const string OutcomeBehind = "git.watch.outcome.behind";
-    public const string OutcomeDirty = "git.watch.outcome.dirty";
-    public const string OutcomeBlocked = "git.watch.outcome.blocked";
-    public const string OutcomeUnstable = "git.watch.outcome.unstable";
-    public const string OutcomeDraft = "git.watch.outcome.draft";
-    public const string OutcomeNoCi = "git.watch.outcome.noCi";
-    public const string OutcomeNotOpen = "git.watch.outcome.notOpen";
-
-    /// <summary>Format: <c>{0}</c> is how many minutes the wait lasted.</summary>
-    public const string OutcomeTimedOut = "git.watch.outcome.timedOut";
-
-    /// <summary>Format: <c>{0}</c> is the reason the platform gave.</summary>
-    public const string OutcomeFailed = "git.watch.outcome.failed";
-
-    /// <summary>Title of the system notification; format: <c>{0}</c> is the pull request number.</summary>
-    public const string NotifyTitle = "git.notify.title";
-
-    // ---------------------------------------------------------------- status bar indicator of the checks
-
-    public const string ChecksRunning = "git.checks.running";
-    public const string ChecksPassed = "git.checks.passed";
-    public const string ChecksFailed = "git.checks.failed";
-    public const string ChecksAttention = "git.checks.attention";
-    public const string ChecksNone = "git.checks.none";
-
-    // ---------------------------------------------------------------- review threads of the pull request
-
-    /// <summary>Format: <c>{0}</c> is the number of threads, <c>{1}</c> how many of them are unresolved.</summary>
-    public const string ReviewSummary = "git.review.summary";
-
-    public const string ReviewLoading = "git.review.loading";
-    public const string ReviewEmpty = "git.review.empty";
-
-    /// <summary>Format: <c>{0}</c> is the reason the platform gave.</summary>
-    public const string ReviewReadFailed = "git.review.readFailed";
-
-    public const string ReviewResolved = "git.review.resolved";
-    public const string ReviewUnresolved = "git.review.unresolved";
-    public const string ReviewOutdated = "git.review.outdated";
-
-    /// <summary>Format: <c>{0}</c> is the number of replies after the first comment.</summary>
-    public const string ReviewReplies = "git.review.replies";
-
-    /// <summary>A thread that is anchored to no file (a comment on the pull request as a whole).</summary>
-    public const string ReviewNoFile = "git.review.noFile";
-
-    public const string ReviewUnknownAuthor = "git.review.unknownAuthor";
-
-    /// <summary>Format: <c>{0}</c> is the commit the agent cited.</summary>
-    public const string ReviewVerdictApply = "git.review.verdict.apply";
-
-    public const string ReviewVerdictPushBack = "git.review.verdict.pushBack";
-    public const string ReviewVerdictClarify = "git.review.verdict.clarify";
+    /// <summary>Why a detached head cannot be pushed.</summary>
+    public const string PushDetached = "git.push.detached";
 
     // ---------------------------------------------------------------- recovery hints, one per failure kind
 
@@ -281,11 +205,6 @@ internal static class GitStrings
             SettingsChecksHint,
             "“等待检查”每隔多少秒向 GitHub 查询一次（10–300 秒），最长等待多少分钟（1–180 分钟）；改动对下一次等待生效。",
             "How often waiting for checks asks GitHub (10–300 seconds) and the longest it keeps waiting (1–180 minutes); a change applies to the next wait.");
-        Loc.Register(SettingsNotifications, "系统通知", "System notifications");
-        Loc.Register(
-            SettingsNotificationsHint,
-            "等待检查结束时发出一条系统通知。Windows 上通知的发送方显示为 Windows PowerShell（未打包的程序没有自己的应用标识）。",
-            "Raise one system notification when waiting for checks ends. On Windows the sender shows as Windows PowerShell (an unpackaged program has no application identity of its own).");
         Loc.Register(SettingsGhPath, "gh 可执行文件", "gh executable");
         Loc.Register(
             SettingsGhPathHint,
@@ -356,98 +275,31 @@ internal static class GitStrings
         Loc.Register(TodoCommitFailed, "提交失败", "Commit failed");
         Loc.Register(TodoCommitRetry, "重试提交", "Retry commit");
 
-        Loc.Register(PullRequestHeader, "#{0} {1}", "#{0} {1}");
-        Loc.Register(PullRequestStateOpen, "打开", "Open");
-        Loc.Register(PullRequestStateDraft, "草稿", "Draft");
-        Loc.Register(PullRequestStateClosed, "已关闭", "Closed");
-        Loc.Register(PullRequestStateMerged, "已合并", "Merged");
-        Loc.Register(PullRequestNone, "当前分支还没有拉取请求。", "This branch has no pull request yet.");
-        Loc.Register(PullRequestLoading, "正在读取拉取请求…", "Reading the pull request…");
-        Loc.Register(PullRequestGhNotReady, "需要安装并登录 gh", "Install and sign in to gh");
-        Loc.Register(PullRequestReadFailed, "读取拉取请求失败：{0}", "Could not read the pull request: {0}");
-
-        Loc.Register(LabelScreenshots, "截图", "Screenshots");
-        Loc.Register(ButtonScreenshots, "截图", "Take screenshots");
-        Loc.Register(ScreenshotCommand, "将执行：{0}", "Will run: {0}");
+        Loc.Register(RowFetchHint, "抓取：只看远端，不动本地分支", "Fetch: read the remote only, never touch the local branch");
         Loc.Register(
-            ScreenshotNoCommand,
-            "本分支没有声明 .forge/screenshots.json，无法自动截图。",
-            "This branch declares no .forge/screenshots.json, so nothing can be captured automatically.");
-        Loc.Register(ScreenshotConfigProblem, ".forge/screenshots.json 不可用：{0}", ".forge/screenshots.json cannot be used: {0}");
+            RowPullHint,
+            "拉取：按{0}并入 {1}",
+            "Pull: integrate {1} with {0}");
         Loc.Register(
-            ErrorScreenshotNoPullRequest,
-            "当前分支还没有拉取请求：截图要写进拉取请求的正文。",
-            "This branch has no pull request yet; the screenshots belong in the pull request description.");
+            RowPullHintBehind,
+            "拉取：按{0}并入 {1}（落后 {2} 个提交）",
+            "Pull: integrate {1} with {0} ({2} commit(s) behind)");
+        Loc.Register(RowPushHint, "推送：把 {0} 个提交推到同名远端分支 {1}", "Push: send {0} commit(s) to the same-named remote branch {1}");
         Loc.Register(
-            ErrorScreenshotNoCommand,
-            "没有可执行的截图命令：先在本分支写 .forge/screenshots.json。",
-            "There is no screenshot command to run: declare .forge/screenshots.json on this branch first.");
-
-        Loc.Register(WatchWaiting, "正在等待检查…", "Waiting for checks…");
-        Loc.Register(WatchProgress, "通过 {0} · 失败 {1} · 进行中 {2}", "{0} passed · {1} failed · {2} pending");
-        Loc.Register(WatchNoChecksYet, "尚未报告任何检查。", "No checks reported yet.");
-        Loc.Register(WatchMergeState, "合并状态：{0}", "Merge state: {0}");
-        Loc.Register(WatchCancelled, "已取消等待。", "Waiting was cancelled.");
+            RowPushHintFirst,
+            "推送：首次推送会创建同名远端分支 {0} 并设为上游",
+            "Push: the first push creates the same-named remote branch {0} and sets it as the upstream");
+        Loc.Register(RowNoRemote, "没有配置远程", "No remote is configured");
         Loc.Register(
-            OutcomeReady,
-            "检查全部通过，可以合并（Forge 不会替你合并）。",
-            "All checks passed; the pull request is ready to merge (Forge never merges for you).");
+            RowBranchHint,
+            "分支 {0} · 推送到同名远端分支 {1} · 上游 {2} · HEAD {3}",
+            "Branch {0} · pushes to the same-named remote branch {1} · upstream {2} · HEAD {3}");
         Loc.Register(
-            OutcomeReadyWithHooks,
-            "检查全部通过，但合并时仍会运行服务端钩子，可能被拒绝。",
-            "All checks passed, but server-side hooks still run when merging and can reject it.");
-        Loc.Register(OutcomeChecksFailed, "{0} 个检查失败：{1}", "{0} check(s) failed: {1}");
-        Loc.Register(
-            OutcomeBehind,
-            "检查已结束，但基础分支有本分支缺少的提交，需要先同步。",
-            "The checks finished, but the base branch has commits this branch lacks; sync it first.");
-        Loc.Register(
-            OutcomeDirty,
-            "分支与基础分支有冲突，需要先解决冲突。",
-            "The branch conflicts with its base branch; resolve the conflicts first.");
-        Loc.Register(
-            OutcomeBlocked,
-            "检查已结束，但仍有未满足的合并要求（例如必需的评审）。",
-            "The checks finished, but a merge requirement is unmet (for example a required review).");
-        Loc.Register(
-            OutcomeUnstable,
-            "可以合并，但有非必需的状态未通过。",
-            "Mergeable, but a non-required status is not passing.");
-        Loc.Register(
-            OutcomeDraft,
-            "检查已结束，但拉取请求仍是草稿。",
-            "The checks finished, but the pull request is still a draft.");
-        Loc.Register(
-            OutcomeNoCi,
-            "多次读取都没有任何检查：该拉取请求没有 CI。",
-            "No checks were reported on several polls in a row: this pull request has no CI.");
-        Loc.Register(
-            OutcomeNotOpen,
-            "拉取请求已合并或关闭，无需再等待。",
-            "The pull request was merged or closed; there is nothing left to wait for.");
-        Loc.Register(OutcomeTimedOut, "等待了 {0} 分钟，检查仍未结束。", "Still not settled after waiting {0} minute(s).");
-        Loc.Register(OutcomeFailed, "无法读取检查：{0}", "Could not read the checks: {0}");
-        Loc.Register(NotifyTitle, "Forge：拉取请求 #{0}", "Forge: pull request #{0}");
-
-        Loc.Register(ChecksRunning, "CI …", "CI …");
-        Loc.Register(ChecksPassed, "CI ✓", "CI ✓");
-        Loc.Register(ChecksFailed, "CI ✗", "CI ✗");
-        Loc.Register(ChecksAttention, "CI !", "CI !");
-        Loc.Register(ChecksNone, "CI –", "CI –");
-
-        Loc.Register(ReviewSummary, "{0} 条评审线程，{1} 条未解决", "{0} thread(s), {1} unresolved");
-        Loc.Register(ReviewLoading, "正在读取评审线程…", "Reading the review threads…");
-        Loc.Register(ReviewEmpty, "没有评审线程。", "No review threads.");
-        Loc.Register(ReviewReadFailed, "读取评审线程失败：{0}", "Could not read the review threads: {0}");
-        Loc.Register(ReviewResolved, "已解决", "Resolved");
-        Loc.Register(ReviewUnresolved, "未解决", "Unresolved");
-        Loc.Register(ReviewOutdated, "已过时", "Outdated");
-        Loc.Register(ReviewReplies, "回复 {0}", "Replies {0}");
-        Loc.Register(ReviewNoFile, "（整个拉取请求）", "(whole pull request)");
-        Loc.Register(ReviewUnknownAuthor, "（未知）", "(unknown)");
-        Loc.Register(ReviewVerdictApply, "结论：已采纳（{0}）", "Verdict: applied ({0})");
-        Loc.Register(ReviewVerdictPushBack, "结论：已反驳", "Verdict: pushed back");
-        Loc.Register(ReviewVerdictClarify, "结论：待澄清", "Verdict: needs clarification");
+            RowAutomationName,
+            "分支 {0}，上游 {1}，领先 {2}，落后 {3}",
+            "Branch {0}, upstream {1}, {2} ahead, {3} behind");
+        Loc.Register(RowDetails, "详情", "Details");
+        Loc.Register(PushDetached, "分离 HEAD 上不能推送", "A detached head cannot be pushed");
 
         Loc.Register(
             HintAuthentication,
@@ -467,8 +319,8 @@ internal static class GitStrings
             "The remote does not exist: check its URL or add a remote first.");
         Loc.Register(
             HintNoUpstream,
-            "当前分支没有上游：设置上游，或用推送（首次推送会自动设置）。",
-            "The branch has no upstream: set one, or push (the first push sets it).");
+            "当前分支没有上游：推送一次即可建立跟踪（首次推送会自动设置上游）。",
+            "The branch has no upstream: push once and tracking is created (the first push sets it).");
         Loc.Register(
             HintDirtyWorkTree,
             "工作树有未提交改动：先提交或暂存。",

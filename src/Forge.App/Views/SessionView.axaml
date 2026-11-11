@@ -354,7 +354,38 @@
     </Panel>
 
     <Grid Grid.Row="1" Margin="12,6,12,8">
+      <!-- A session that is not the active one of its workspace is a read-only view: no composer, only the way back. -->
+      <Border x:Name="ReadOnlyBar"
+              Classes="composer-card"
+              IsVisible="{Binding IsReadOnlyView}"
+              Padding="12,8">
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+            <TextBlock TextWrapping="Wrap" Text="{Binding ReadOnlyBanner}" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding HasPendingComposer}"
+                       Text="{Binding PendingComposerNote}"
+                       AutomationProperties.AutomationId="read-only-pending" />
+          </StackPanel>
+          <Button Grid.Column="1"
+                  Classes="primary"
+                  Margin="8,0,0,0"
+                  IsVisible="{Binding HasContinue}"
+                  Command="{Binding ContinueCommand}"
+                  Content="{Binding ContinueLabel}"
+                  AutomationProperties.Name="{Binding [lifecycle.continueSession], Source={x:Static loc:Loc.Instance}}" />
+          <Button Grid.Column="2"
+                  Classes="ghost"
+                  Margin="8,0,0,0"
+                  IsVisible="{Binding HasRestore}"
+                  Command="{Binding RestoreCommand}"
+                  Content="{Binding [lifecycle.restoreSession], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.Name="{Binding [lifecycle.restoreSession], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+      </Border>
       <Border x:Name="ComposerCard"
+              IsVisible="{Binding !IsReadOnlyView}"
               Classes="composer-card"
               Classes.focused="{Binding #Input.IsKeyboardFocusWithin}">
         <Grid RowDefinitions="Auto,Auto">
@@ -376,10 +407,6 @@
                              Text="{Binding Instruments.AheadBehindText}"
                              IsVisible="{Binding Instruments.HasAheadBehind}"
                              AutomationProperties.AutomationId="strip-ahead-behind" />
-                  <TextBlock Classes="instrument-meta"
-                             Text="{Binding Instruments.ChecksText}"
-                             IsVisible="{Binding Instruments.HasChecks}"
-                             AutomationProperties.AutomationId="strip-checks" />
                 </StackPanel>
 
                 <!-- One button for the four counters: the strip stays short, and the four readings live in its menu.

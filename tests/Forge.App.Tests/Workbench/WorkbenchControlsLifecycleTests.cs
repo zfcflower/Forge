@@ -24,7 +24,7 @@ public sealed class WorkbenchControlsLifecycleTests
     [Fact]
     public async Task Splitter_drag_synchronous_chain_allocates_zero_after_warmup()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var allocated = await session.Dispatch(() =>
         {
@@ -59,7 +59,7 @@ public sealed class WorkbenchControlsLifecycleTests
     [Fact]
     public async Task Replacing_layout_closes_old_floating_windows_and_ignores_old_model()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var result = await session.Dispatch(() =>
         {
@@ -103,7 +103,7 @@ public sealed class WorkbenchControlsLifecycleTests
     [Fact]
     public async Task Floating_files_window_renders_the_files_open_changes_header_tool()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var found = await session.Dispatch(() =>
         {
@@ -128,7 +128,7 @@ public sealed class WorkbenchControlsLifecycleTests
     [Fact]
     public async Task Minimized_floating_window_does_not_write_its_geometry()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var result = await session.Dispatch(() =>
         {

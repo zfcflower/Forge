@@ -60,6 +60,12 @@ internal sealed class LegacyProviderSection
     [JsonPropertyName("maxOutputTokens")]
     public int? MaxOutputTokens { get; set; }
 
+    [JsonPropertyName("sendPromptCacheKey")]
+    public bool? SendPromptCacheKey { get; set; }
+
+    [JsonPropertyName("promptCacheTtl")]
+    public string? PromptCacheTtl { get; set; }
+
     [JsonPropertyName("apiKeyEnv")]
     public string? ApiKeyEnv { get; set; }
 
@@ -123,6 +129,17 @@ internal sealed class ProviderEntryDocument
 
     [JsonPropertyName("modelMeta")]
     public Dictionary<string, ModelMetadataSection>? ModelMeta { get; set; }
+
+    /// <summary>
+    /// OpenAI-compatible endpoints: send <c>prompt_cache_key</c> (the session lineage id). Off by default because strict
+    /// endpoints reject unknown fields; never sent to DeepSeek.
+    /// </summary>
+    [JsonPropertyName("sendPromptCacheKey")]
+    public bool? SendPromptCacheKey { get; set; }
+
+    /// <summary>Anthropic: message-breakpoint cache TTL, <c>"5m"</c> (default) or <c>"1h"</c>; config file only.</summary>
+    [JsonPropertyName("promptCacheTtl")]
+    public string? PromptCacheTtl { get; set; }
 
     /// <summary>Extra request headers for a gateway that needs them (never a credential; those live in <see cref="Auth"/>).</summary>
     [JsonPropertyName("headers")]

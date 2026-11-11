@@ -9,12 +9,31 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.Core.Agents;
 using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
+
+/// <summary>Why the turn-start check refused a turn; <see cref="None"/> lets it start.</summary>
+internal enum TurnRejection
+{
+    None,
+
+    /// <summary>The store no longer has the session as active: it was taken over (or archived) elsewhere.</summary>
+    TakenOver,
+
+    /// <summary>The store has the session as removed (<see cref="SessionStatus.Deleted"/>) or no longer has it at all.</summary>
+    Removed,
+
+    /// <summary>The session's workspace has a merge in progress (<c>MERGE_HEAD</c>).</summary>
+    MergeConflict,
+
+    /// <summary>The session's workspace is in the "operation in progress" state (a merge back / sync is running in it).</summary>
+    WorkspaceOperating,
+}
 
 /// <summary>
 /// One open main session: its transcript, its sub-agent tabs, the turn loop and the turn checkpoints. All agent events
@@ -28,7 +47,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     /// <summary>How much text of a child agent is parked while its start event is still in flight.</summary>
     private const int EarlyDeltaLimit = 8192;
 
-    private readonly SessionRuntime runtime;
+    /// <summary>Null for a read-only view (a non-active session, or one that was taken over): no turn can start.</summary>
+    private SessionRuntime? runtime;
     private readonly TurnCheckpointService? checkpoints;
     private readonly ISessionStore? store;
     private readonly Action<SubAgentViewModel>? subAgentOpened;
@@ -61,9 +81,22 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private DateTimeOffset turnStartedAt;
     private bool disposed;
 
+    /// <summary>The shell's notification entry; null (a test, a standalone session) means the session says nothing outside its own transcript.</summary>
+    private readonly INotifications? notifications;
+
+    /// <summary>Set while the turn-start check reads the store, so a second send cannot slip in before the turn starts.</summary>
+    private bool gating;
+    private bool isReadOnlyView;
+    private bool isHandingOver;
+    private AsyncRelayCommand? continueCommand;
+    private AsyncRelayCommand? restoreCommand;
+    private string? continueBlockedReason;
+
+    /// <param name="runtime">The live runtime, or <see langword="null"/> for a read-only view of a session that is not
+    /// <see cref="SessionStatus.Active"/>: the transcript is replayed from the store and nothing can be sent.</param>
     public SessionWorkspaceViewModel(
         SessionInfo session,
-        SessionRuntime runtime,
+        SessionRuntime? runtime,
         TurnCheckpointService? checkpoints,
         ISessionStore? store,
         ProviderServices providers,
@@ -71,12 +104,15 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         ComposerPreferences? composerPreferences = null,
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
-        ISessionInstrumentSources? instrumentSources = null)
+        ISessionInstrumentSources? instrumentSources = null,
+        INotifications? notifications = null)
     {
         Info = session;
         this.runtime = runtime;
+        isReadOnlyView = runtime is null;
         this.checkpoints = checkpoints;
         this.store = store;
+        this.notifications = notifications;
         this.subAgentOpened = subAgentOpened;
         providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
@@ -100,12 +136,18 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         Instruments = new SessionInstrumentsViewModel(
             session,
             instrumentSources ?? EmptySessionInstrumentSources.Instance,
-            runtime.ToolNames,
+            ToolNames,
             () => Composer.Model,
             () => Composer.ProviderId);
         if (!providers.IsConfigured)
         {
-            Transcript.AddNotice(SessionStrings.ProviderMissing(providers.StatusText.Resolve()), isError: true);
+            var missing = SessionStrings.ProviderMissing(providers.StatusText.Resolve());
+            Transcript.AddNotice(missing, isError: true);
+            notifications.Notify(
+                NotificationLevel.Error,
+                NotificationsStrings.ProviderMissingTitle,
+                missing,
+                "provider-missing:" + Info.Id);
         }
 
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -165,7 +207,153 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     public SessionInstrumentsViewModel Instruments { get; }
 
     /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
-    internal IReadOnlyList<string> ToolNames() => runtime.ToolNames();
+    internal IReadOnlyList<string> ToolNames() => runtime?.ToolNames() ?? [];
+
+    /// <summary>
+    /// True for a session that is not the active session of its workspace: opened from history or the recycled rows, or
+    /// turned read-only when the turn-start check found it taken over. Nothing can be sent; the tab offers "continue"
+    /// (archived) or "restore" (deleted) instead.
+    /// </summary>
+    public bool IsReadOnlyView => isReadOnlyView;
+
+    /// <summary>The banner of the read-only view; empty for a live session.</summary>
+    public string ReadOnlyBanner => !isReadOnlyView
+        ? string.Empty
+        : Info.Status == SessionStatus.Deleted ? LifecycleStrings.ReadOnlyDeleted : LifecycleStrings.ReadOnlyArchived;
+
+    /// <summary>"Continue this session" of an archived read-only view; null (hidden) otherwise. Set by the shell.</summary>
+    public AsyncRelayCommand? ContinueCommand
+    {
+        get => continueCommand;
+        set
+        {
+            if (Set(ref continueCommand, value))
+            {
+                OnPropertyChanged(nameof(HasContinue));
+            }
+        }
+    }
+
+    public bool HasContinue => isReadOnlyView && continueCommand is not null && Info.Status != SessionStatus.Deleted;
+
+    /// <summary>"Restore…" of a removed (deleted) read-only view; null (hidden) until the restore flow exists. Set by the shell.</summary>
+    public AsyncRelayCommand? RestoreCommand
+    {
+        get => restoreCommand;
+        set
+        {
+            if (Set(ref restoreCommand, value))
+            {
+                OnPropertyChanged(nameof(HasRestore));
+            }
+        }
+    }
+
+    public bool HasRestore => isReadOnlyView && restoreCommand is not null && Info.Status == SessionStatus.Deleted;
+
+    /// <summary>
+    /// A read-only view that still holds an unsent draft or queued messages (a turn rejected at its start, R6): the bar
+    /// says so, because the composer is hidden; "continue" carries them into the live view.
+    /// </summary>
+    public bool HasPendingComposer => isReadOnlyView && (!string.IsNullOrWhiteSpace(draft) || queued.Count > 0);
+
+    public string PendingComposerNote => HasPendingComposer
+        ? LifecycleStrings.PendingComposer(queued.Count + (string.IsNullOrWhiteSpace(draft) ? 0 : 1))
+        : string.Empty;
+
+    /// <summary>
+    /// Takes the unsent draft and the queued (not interjected) messages out of this view, for the live view that replaces
+    /// it ("continue"). Interjections of a read-only view were already turned into queued messages when its turn ended.
+    /// </summary>
+    internal (string Draft, IReadOnlyList<string> Queued) TakeComposerState()
+    {
+        var taken = (draft, (IReadOnlyList<string>)[.. queued.Select(static message => message.Text)]);
+        queued.Clear();
+        reviewWithdrawn.Clear();
+        Draft = string.Empty;
+        OnQueueChanged();
+        return taken;
+    }
+
+    /// <summary>Puts a carried draft and queue back (the counterpart of <see cref="TakeComposerState"/>); the queue stays paused.</summary>
+    internal void RestoreComposerState((string Draft, IReadOnlyList<string> Queued) state)
+    {
+        if (!string.IsNullOrWhiteSpace(state.Draft))
+        {
+            Draft = state.Draft;
+        }
+
+        foreach (var text in state.Queued)
+        {
+            queued.Add(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued));
+        }
+
+        if (state.Queued.Count > 0)
+        {
+            queuePaused = true;
+        }
+
+        OnQueueChanged();
+    }
+
+    /// <summary>
+    /// Set by the shell when the session cannot continue where it is (6.3): its workspace folder is gone, or git marks the
+    /// worktree prunable or does not list it. "Continue" is then disabled and its label carries this reason; null enables it.
+    /// </summary>
+    public string? ContinueBlockedReason
+    {
+        get => continueBlockedReason;
+        set
+        {
+            if (Set(ref continueBlockedReason, value))
+            {
+                OnPropertyChanged(nameof(ContinueLabel));
+                continueCommand?.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>Label of the continue button: carries the reason when it is disabled.</summary>
+    public string ContinueLabel => continueBlockedReason is { } reason
+        ? LifecycleStrings.ContinueBlocked(reason)
+        : LifecycleStrings.ContinueSession;
+
+    /// <summary>
+    /// Read before every turn starts (6.3): the store still has this session as <see cref="SessionStatus.Active"/>, and its
+    /// workspace is not in a merge conflict. Null (a headless host, a test) lets every turn start.
+    /// </summary>
+    internal Func<CancellationToken, Task<TurnRejection>>? TurnGate { get; set; }
+
+    /// <summary>Children of a stored session for the read-only view, which has no runtime to ask; null means none.</summary>
+    internal Func<string, CancellationToken, Task<IReadOnlyList<SessionInfo>>>? ChildQuery { get; init; }
+
+    /// <summary>Raised once when a live session turns read-only (taken over): the owner releases its runtime.</summary>
+    public event Action<SessionWorkspaceViewModel>? BecameReadOnly;
+
+    /// <summary>
+    /// Turns a live session into a read-only view in place: the transcript and the draft stay, the runtime is dropped
+    /// (its owner releases it on <see cref="BecameReadOnly"/>) and nothing can be sent any more.
+    /// </summary>
+    internal void EnterReadOnly(SessionInfo current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        if (isReadOnlyView || disposed)
+        {
+            return;
+        }
+
+        Info = current;
+        isReadOnlyView = true;
+        runtime = null;
+        OnPropertyChanged(nameof(IsReadOnlyView));
+        OnPropertyChanged(nameof(ReadOnlyBanner));
+        OnPropertyChanged(nameof(HasContinue));
+        OnPropertyChanged(nameof(HasRestore));
+        RefreshCanSend();
+        OnPropertyChanged(nameof(HasPendingComposer));
+        OnPropertyChanged(nameof(PendingComposerNote));
+        BecameReadOnly?.Invoke(this);
+    }
 
     public RelayCommand ToggleSubAgentsCommand { get; }
 
@@ -186,6 +374,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             if (Set(ref draft, value))
             {
                 RefreshCanSend();
+                OnPropertyChanged(nameof(HasPendingComposer));
+                OnPropertyChanged(nameof(PendingComposerNote));
             }
         }
     }
@@ -372,7 +562,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     /// </summary>
     private async Task RestoreSubAgentsAsync(string parentSessionId, string parentAgentId, CancellationToken ct)
     {
-        var children = await BackgroundRead.RunAsync(token => runtime.QueryChildrenAsync(parentSessionId, token), ct)
+        var live = runtime;
+        var query = ChildQuery;
+        if (live is null && query is null)
+        {
+            return;
+        }
+
+        var children = await BackgroundRead.RunAsync(
+                token => live is not null ? live.QueryChildrenAsync(parentSessionId, token) : query!(parentSessionId, token),
+                ct)
             .ConfigureAwait(true);
         foreach (var child in children)
         {
@@ -486,7 +685,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     public void StopSubAgent(string agentId)
     {
-        runtime.SubAgentControl?.Stop(agentId, SessionStrings.SubAgentStoppedByUser);
+        runtime?.SubAgentControl?.Stop(agentId, SessionStrings.SubAgentStoppedByUser);
     }
 
     /// <summary>
@@ -528,11 +727,68 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Idle with a draft to send, or with queued messages waiting (an empty send resumes the queue).</summary>
-    private bool EvaluateCanSend() => !isRunning && (!string.IsNullOrWhiteSpace(draft) || HasSendableQueue());
+    private bool EvaluateCanSend() =>
+        !isReadOnlyView && !isHandingOver && !isRunning && !gating && (!string.IsNullOrWhiteSpace(draft) || HasSendableQueue());
 
     private bool HasSendableQueue() => queued.Any(message => !message.IsInterjection);
 
-    private bool CanSendWhileRunning() => isRunning && !string.IsNullOrWhiteSpace(draft);
+    private bool CanSendWhileRunning() => !isReadOnlyView && !isHandingOver && isRunning && !string.IsNullOrWhiteSpace(draft);
+
+    /// <summary>
+    /// "Handing over" (lifecycle section 2): set once the handover check passed, cleared when the handover finishes,
+    /// fails or is cancelled. While set, nothing can be sent or queued; the draft stays where it is.
+    /// </summary>
+    public bool IsHandingOver
+    {
+        get => isHandingOver;
+        internal set
+        {
+            if (isHandingOver == value)
+            {
+                return;
+            }
+
+            isHandingOver = value;
+            OnPropertyChanged();
+            RefreshCanSend();
+        }
+    }
+
+    /// <summary>
+    /// Why the session is busy (lifecycle section 2): a running turn, sub-agents running or waiting for a slot, queued
+    /// composer messages, undelivered interjections, or a handover already under way. Empty = not busy. Derived, never
+    /// stored; reading it takes nothing out of the queue.
+    /// </summary>
+    internal IReadOnlyList<string> BusyReasons()
+    {
+        var reasons = new List<string>(5);
+        if (isRunning)
+        {
+            reasons.Add(HandoverStrings.BusyTurn);
+        }
+
+        if (subAgents.Any(static agent => agent.Status is SubAgentStatus.Running or SubAgentStatus.Queued))
+        {
+            reasons.Add(HandoverStrings.BusySubAgents);
+        }
+
+        if (queued.Count > 0)
+        {
+            reasons.Add(HandoverStrings.BusyQueued);
+        }
+
+        if (runtime?.HasUndeliveredInterjections == true)
+        {
+            reasons.Add(HandoverStrings.BusyInterjections);
+        }
+
+        if (isHandingOver)
+        {
+            reasons.Add(HandoverStrings.BusyHandingOver);
+        }
+
+        return reasons;
+    }
 
     private void RefreshCanSend()
     {
@@ -611,7 +867,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
 
         Draft = string.Empty;
-        var delivered = isRunning && runtime.TryInterject(text);
+        var delivered = isRunning && runtime is { } live && live.TryInterject(text);
         var front = queued.TakeWhile(message => message.IsInterjection).Count();
         AddQueued(new QueuedMessageViewModel(text, delivered, RemoveQueued), delivered ? front : 0);
         if (!isRunning)
@@ -676,6 +932,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     private void OnQueueChanged()
     {
         OnPropertyChanged(nameof(HasQueued));
+        OnPropertyChanged(nameof(HasPendingComposer));
+        OnPropertyChanged(nameof(PendingComposerNote));
         RefreshCanSend();
     }
 
@@ -702,7 +960,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     {
         if (!isRunning)
         {
-            var undelivered = runtime.TakeUndeliveredInterjections();
+            var undelivered = runtime?.TakeUndeliveredInterjections() ?? [];
             foreach (var leftover in queued.Where(message => message.IsInterjection).ToList())
             {
                 queued.Remove(leftover);
@@ -716,7 +974,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
             OnQueueChanged();
         }
 
-        if (disposed || isRunning)
+        if (disposed || isRunning || isReadOnlyView)
         {
             return;
         }
@@ -767,7 +1025,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     private void ApplyRootDefinition(AgentDefinition? definition)
     {
-        if (runtime.SetRootDefinition(definition))
+        if (runtime?.SetRootDefinition(definition) == true)
         {
             rootRebuilt = true;
         }
@@ -775,6 +1033,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
     private async Task RunTurnAsync(string text)
     {
+        if (!await PassesTurnGateAsync(text).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        var live = runtime!;
         if (rootRebuilt)
         {
             rootRebuilt = false;
@@ -812,10 +1076,15 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                 catch (Exception exception) when (IsCheckpointFailure(exception))
                 {
                     Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
+                    notifications.Notify(
+                        NotificationLevel.Warning,
+                        NotificationsStrings.TurnFailedTitle,
+                        SessionStrings.CheckpointFailed(exception.Message),
+                        "checkpoint:" + SessionId);
                 }
             }
 
-            await runtime.RunTurnAsync(text, OnAgentEvent, token).ConfigureAwait(true);
+            await live.RunTurnAsync(text, OnAgentEvent, token).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -829,6 +1098,13 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         {
             try
             {
+                // A turn that ended by itself is worth interrupting the user for; the transcript line alone is missed
+                // as soon as another session (or another window) has the focus. A cancellation is the user's own doing.
+                if (error is { IsEmpty: false } failure && !failure.Equals(SessionStrings.Stopped))
+                {
+                    notifications.Notify(NotificationLevel.Error, NotificationsStrings.TurnFailedTitle, failure, "turn-failed:" + SessionId);
+                }
+
                 Transcript.EndTurn(DateTimeOffset.Now - turnStartedAt, error);
                 if (checkpoints is not null)
                 {
@@ -840,6 +1116,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
                     catch (Exception exception) when (IsCheckpointFailure(exception))
                     {
                         Transcript.AddNotice(SessionStrings.CheckpointFailed(exception.Message), isError: true);
+                        notifications.Notify(
+                            NotificationLevel.Warning,
+                            NotificationsStrings.TurnFailedTitle,
+                            SessionStrings.CheckpointFailed(exception.Message),
+                            "checkpoint:" + SessionId);
+                    notifications.Notify(
+                        NotificationLevel.Warning,
+                        NotificationsStrings.TurnFailedTitle,
+                        SessionStrings.CheckpointFailed(exception.Message),
+                        "checkpoint:" + SessionId);
                     }
                 }
             }
@@ -854,13 +1140,94 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// The turn-start check (6.3). A rejected text is never lost: it goes back into an empty draft, else to the front of
+    /// the queue. A session the store no longer has as active turns read-only in place; a merge conflict pauses the queue.
+    /// </summary>
+    private async Task<bool> PassesTurnGateAsync(string text)
+    {
+        if (isReadOnlyView || runtime is null)
+        {
+            Restore(text);
+            return false;
+        }
+
+        var gate = TurnGate;
+        if (gate is null)
+        {
+            return true;
+        }
+
+        gating = true;
+        RefreshCanSend();
+        TurnRejection rejection;
+        try
+        {
+            rejection = await gate(CancellationToken.None).ConfigureAwait(true);
+        }
+        finally
+        {
+            gating = false;
+            RefreshCanSend();
+        }
+
+        if (disposed)
+        {
+            return false;
+        }
+
+        if (rejection == TurnRejection.None)
+        {
+            return true;
+        }
+
+        Restore(text);
+        if (rejection is TurnRejection.TakenOver or TurnRejection.Removed)
+        {
+            Transcript.AddNotice(LifecycleStrings.TakenOver, isError: true);
+            EnterReadOnly(Info with
+            {
+                Status = rejection == TurnRejection.Removed ? SessionStatus.Deleted : SessionStatus.Archived,
+            });
+        }
+        else
+        {
+            queuePaused = true;
+            Transcript.AddNotice(
+                rejection == TurnRejection.WorkspaceOperating ? LifecycleStrings.WorkspaceOperating : LifecycleStrings.MergeConflictPending,
+                isError: true);
+            OnQueueChanged();
+        }
+
+        return false;
+
+        void Restore(string rejected)
+        {
+            if (string.IsNullOrWhiteSpace(draft))
+            {
+                Draft = rejected;
+            }
+            else
+            {
+                AddQueued(new QueuedMessageViewModel(rejected, isInterjection: false, RemoveQueued), 0);
+            }
+        }
+    }
+
     /// <summary>Failures of the git snapshot or of the checkpoint store; the turn continues and the card says so.</summary>
     private static bool IsCheckpointFailure(Exception exception) =>
         exception is GitException or InvalidOperationException or IOException or InvalidDataException or ArgumentException or
         DbException or UnauthorizedAccessException;
 
-    private void OnSendFailed(Exception exception) =>
+    private void OnSendFailed(Exception exception)
+    {
         Transcript.AddNotice(SessionStrings.TurnFailed(exception.Message), isError: true);
+        notifications.Notify(
+            NotificationLevel.Error,
+            NotificationsStrings.TurnFailedTitle,
+            SessionStrings.TurnFailed(exception.Message),
+            "turn-failed:" + SessionId);
+    }
 
     /// <summary>Worker-thread event sink; text is merged off-thread, everything else is queued to the frame coalescer.</summary>
     private void OnAgentEvent(AgentEvent value)
@@ -1109,6 +1476,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
 
         agent.ApplyUsageIfMissing(finishedEvent.Usage);
         agent.Finish(finishedEvent.Status, finishedEvent.Usage, finishedEvent.Elapsed, finishedEvent.Error);
+
+        // A clean finish is already visible in the sub-agent tab; a failure or a stop is what the user has to hear about.
+        if (finishedEvent.Status is SubAgentStatus.Failed or SubAgentStatus.Stopped)
+        {
+            notifications.Notify(
+                finishedEvent.Status == SubAgentStatus.Failed ? NotificationLevel.Error : NotificationLevel.Warning,
+                NotificationsStrings.SubAgentFinishedTitle,
+                NotificationsStrings.SubAgentFinished(agent.Kind, agent.StatusText),
+                "subagent:" + finishedEvent.AgentId);
+        }
         subAgentById.TryRemove(finishedEvent.AgentId, out _);
         agentUsage.Remove(finishedEvent.AgentId);
         subAgents.Remove(agent);
@@ -1151,6 +1528,8 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable
     /// </summary>
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        OnPropertyChanged(nameof(ReadOnlyBanner));
+        OnPropertyChanged(nameof(ContinueLabel));
         OnPropertyChanged(nameof(SubAgentLabel));
         OnPropertyChanged(nameof(SubAgentToggleName));
         OnPropertyChanged(nameof(SubAgentToggleTooltip));

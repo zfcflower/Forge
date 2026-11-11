@@ -208,7 +208,7 @@ public sealed class WorkbenchInteractionRegressionTests
     public Task Every_panel_title_bar_uses_one_chrome_colour_that_differs_from_its_body(bool dark, bool swapped) => Ui(() =>
     {
         var o = new object();
-        var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o, o), Wide);
+        var scene = WorkbenchUi.Open(new WorkbenchLayout(o, o, o, o, o, o), Wide);
         WorkbenchUi.OpenPreviewTab(scene);
         WorkbenchUi.OpenBottomTab(scene);
         if (swapped)
@@ -220,7 +220,7 @@ public sealed class WorkbenchInteractionRegressionTests
         WorkbenchUi.Settle(scene.Window);
         var titles = new List<Color>();
         // Side panels, the main region and its bottom group: one chrome colour, whichever region a panel lives in.
-        foreach (var id in new[] { "projects", "general-chats", "git-panel", "main", "bottom", "files", "inspector-tools", "preview" })
+        foreach (var id in new[] { "projects", "general-chats", "main", "bottom", "files", "inspector-tools", "preview" })
         {
             var chrome = Chrome(scene, id);
             var bar = chrome.GetVisualDescendants().OfType<Border>().First(b => b.Name == "PART_TitleBar");
@@ -288,7 +288,7 @@ public sealed class WorkbenchInteractionRegressionTests
 
     private static async Task Ui(Action body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await WorkbenchUi.RunAsync(session, body);
     }
 

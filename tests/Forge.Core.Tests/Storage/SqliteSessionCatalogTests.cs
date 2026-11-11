@@ -53,11 +53,12 @@ public sealed class SqliteSessionCatalogTests
         await using var store = new SqliteSessionStore(directory.Path);
         ISessionCatalog catalog = store;
 
+        // main2 shares main1's worktree, so it is archived before main1 takes the occupancy key.
+        var main2 = await catalog.CreateAsync(new SessionCreate("D:/ws", "m2") { ProjectId = "p2", WorktreePath = "w1" }, default);
+        Assert.True(await catalog.SetStatusAsync(main2.Id, SessionStatus.Archived, default));
         var main1 = await catalog.CreateAsync(new SessionCreate("D:/ws", "m1") { ProjectId = "p1", WorktreePath = "w1" }, default);
         var child = await catalog.CreateAsync(
             new SessionCreate("D:/ws", "c1") { ProjectId = "p1", WorktreePath = "w2", ParentSessionId = main1.Id }, default);
-        var main2 = await catalog.CreateAsync(new SessionCreate("D:/ws", "m2") { ProjectId = "p2", WorktreePath = "w1" }, default);
-        Assert.True(await catalog.SetStatusAsync(main2.Id, SessionStatus.Archived, default));
 
         Assert.Equal(
             new[] { child.Id, main1.Id }.OrderBy(static id => id),
@@ -90,8 +91,8 @@ public sealed class SqliteSessionCatalogTests
         await using var store = new SqliteSessionStore(directory.Path);
         ISessionCatalog catalog = store;
 
-        var first = await catalog.CreateAsync(new SessionCreate("D:/ws", "first"), default);
-        var second = await catalog.CreateAsync(new SessionCreate("D:/ws", "second"), default);
+        var first = await catalog.CreateAsync(new SessionCreate("D:/ws/first", "first"), default);
+        var second = await catalog.CreateAsync(new SessionCreate("D:/ws/second", "second"), default);
         Assert.Equal(second.Id, (await catalog.QueryAsync(new SessionQuery(), default))[0].Id);
 
         var later = DateTimeOffset.UtcNow.AddHours(1);

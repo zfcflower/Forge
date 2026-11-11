@@ -436,7 +436,7 @@ public sealed class SessionInstrumentsViewModelTests
     // ---------------------------------------------------------------- git, project and the counters' commands
 
     [Fact]
-    public async Task SetGit_raises_the_ahead_behind_and_checks_markers()
+    public async Task SetGit_raises_the_ahead_behind_marker()
     {
         var session = SharedUi.Session;
 
@@ -445,43 +445,33 @@ public sealed class SessionInstrumentsViewModelTests
             {
                 using var instruments = Create(new FakeSources());
                 var raised = Watch(instruments);
-                var before = (instruments.HasAheadBehind, instruments.HasChecks);
+                var before = instruments.HasAheadBehind;
 
-                instruments.SetGit("↑1 ↓2", "CI ✓");
-                var after = (
-                    instruments.AheadBehindText,
-                    instruments.HasAheadBehind,
-                    instruments.ChecksText,
-                    instruments.HasChecks);
+                instruments.SetGit("↑1 ↓2");
+                var after = (instruments.AheadBehindText, instruments.HasAheadBehind);
                 var names = string.Join(",", raised);
 
                 raised.Clear();
-                instruments.SetGit(null, null);
-                var cleared = (instruments.HasAheadBehind, instruments.HasChecks);
+                instruments.SetGit(null);
+                var cleared = instruments.HasAheadBehind;
                 var clearedNames = string.Join(",", raised);
                 return (Before: before, After: after, Names: names, Cleared: cleared, ClearedNames: clearedNames);
             },
             new CancellationTokenSource(StepBudget).Token);
 
-        Assert.False(state.Before.HasAheadBehind);
-        Assert.False(state.Before.HasChecks);
+        Assert.False(state.Before);
         Assert.Equal("↑1 ↓2", state.After.AheadBehindText);
         Assert.True(state.After.HasAheadBehind);
-        Assert.Equal("CI ✓", state.After.ChecksText);
-        Assert.True(state.After.HasChecks);
         foreach (var name in new[]
                  {
                      nameof(SessionInstrumentsViewModel.AheadBehindText),
                      nameof(SessionInstrumentsViewModel.HasAheadBehind),
-                     nameof(SessionInstrumentsViewModel.ChecksText),
-                     nameof(SessionInstrumentsViewModel.HasChecks),
                  })
         {
             Assert.Contains(name, state.Names);
         }
 
-        Assert.False(state.Cleared.HasAheadBehind);
-        Assert.False(state.Cleared.HasChecks);
+        Assert.False(state.Cleared);
         Assert.Contains(nameof(SessionInstrumentsViewModel.HasAheadBehind), state.ClearedNames);
     }
 

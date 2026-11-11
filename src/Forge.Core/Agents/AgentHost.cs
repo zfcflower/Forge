@@ -55,6 +55,12 @@ public sealed record AgentHostOptions
 
     /// <summary>Registers read_artifact, search_history and read_history when their store is available.</summary>
     public bool IncludeRetrievalTools { get; init; } = true;
+
+    /// <summary>
+    /// Receives the usage of each instance's first model request in this process (section 8.3.5). Null writes
+    /// <see cref="FirstRequestCacheReport.ToString"/> to <see cref="System.Diagnostics.Trace"/>, the host's diagnostics channel.
+    /// </summary>
+    public Action<FirstRequestCacheReport>? CacheDiagnostics { get; init; }
 }
 
 /// <summary>
@@ -126,7 +132,8 @@ public sealed class AgentHost
             options.TokenCounter,
             this.options,
             SubAgentTools.Names,
-            options.DynamicContext));
+            options.DynamicContext,
+            options.CacheDiagnostics));
         scheduler.Runner = loop.RunAsync;
     }
 
@@ -148,6 +155,22 @@ public sealed class AgentHost
     /// cache once. Same-named external tools never shadow a built-in tool.
     /// </summary>
     public void ReplaceExternalTools(IEnumerable<ITool> tools) => toolSurface.ReplaceExternal(tools);
+
+    /// <summary>
+    /// <c>prefix_fingerprint</c> of what <paramref name="instance"/>'s next request would send ahead of its messages: its
+    /// stable system prompt and the tool definitions it sees right now. Equal fingerprints mean the prompt cache of one
+    /// session can serve the other; the loop writes the same value back to the session whenever it changes.
+    /// </summary>
+    public string PrefixFingerprint(AgentInstance instance)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        var registry = toolSurface.Tools.Select(
+            instance.Definition.ToolNames,
+            instance.Depth < options.MaxSubAgentDepth,
+            SubAgentTools.Names,
+            instance.Depth == 0);
+        return PromptFingerprint.Compute(instance.Prompt.StablePrefix, registry.Definitions);
+    }
 
     /// <summary>Root agent of a session: no depth limit in practice, every tool its definition allows.</summary>
     public AgentInstance CreateRoot(string sessionId, string workingDirectory, AgentDefinition? definition = null, string id = "root")
@@ -174,6 +197,7 @@ public sealed class AgentHost
     /// <summary>
     /// Root agent of a stored session, with its history rebuilt from the store the way the compactor leaves it
     /// (summary view plus the unsummarized tail), so a conversation continues with its context after a restart.
+    /// A session created with full inheritance starts with its ancestors' context cut at their inheritance points.
     /// </summary>
     public async Task<AgentInstance> ResumeRootAsync(
         string sessionId,

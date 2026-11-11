@@ -60,10 +60,26 @@ internal sealed class WorktreeService
         worktrees.CreateAsync(repositoryRoot, title, branchName, startPoint, ct);
 
     /// <summary>
+    /// As above, as a cone-mode sparse checkout of <paramref name="sparse"/>'s top-level directories when it is not null
+    /// (7.9): <c>worktree add --no-checkout</c>, <c>sparse-checkout set --cone</c>, then the checkout; a failed step
+    /// removes the unfinished worktree and the branch it created before the error is thrown.
+    /// </summary>
+    public Task<WorktreeSession> CreateAsync(
+        string repositoryRoot,
+        string title,
+        string? branchName,
+        string startPoint,
+        SparseCheckout? sparse,
+        CancellationToken ct) =>
+        worktrees.CreateAsync(repositoryRoot, title, branchName, startPoint, ct, sparse);
+
+    /// <summary>
     /// Best-effort cleanup of a worktree this app created a moment ago for a session whose row could not be written: the
-    /// worktree is removed first, then the branch that <c>git worktree add</c> created for it. Neither step is forced - a
-    /// worktree that holds anything (only a concurrent edit could have put it there) stays, and with it its branch, which
-    /// is checked out there; a branch that git does not consider merged (<c>branch -d</c>, never <c>-D</c>) stays too.
+    /// worktree is removed first, then the branch that <c>git worktree add -b</c> created for it
+    /// (<see cref="WorktreeManager.TryDeleteCreatedBranchAsync"/>: only while the branch is still at its start commit).
+    /// Neither step is forced - a worktree that holds anything (only a concurrent edit could have put it there) stays, and
+    /// with it its branch, which is checked out there; a branch that moved, or that git does not consider merged
+    /// (<c>branch -d</c>, never <c>-D</c>), stays too.
     /// Failures are traced and never thrown, because the caller is already reporting the original error; only an
     /// out-of-memory condition escapes.
     /// </summary>
@@ -82,14 +98,8 @@ internal sealed class WorktreeService
             return;
         }
 
-        try
-        {
-            await git.DeleteBranchAsync(worktree.RepositoryRoot, worktree.Branch, force: false, ct).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            Trace.WriteLine($"[worktree] could not delete the branch '{worktree.Branch}' of the removed worktree '{worktree.Path}': {exception.Message}");
-        }
+        // Only the branch this creation made, and only while it is still at its start commit (12.4, rollback).
+        await worktrees.TryDeleteCreatedBranchAsync(worktree, ct).ConfigureAwait(false);
     }
 
     /// <summary>Worktree path this app would use for <paramref name="slug"/>; shown in the project tree.</summary>

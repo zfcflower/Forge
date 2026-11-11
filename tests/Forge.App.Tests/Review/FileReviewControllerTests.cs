@@ -260,7 +260,7 @@ public sealed class FileReviewControllerTests
 
     private static async Task Ui(Func<Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
     }

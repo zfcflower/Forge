@@ -238,7 +238,7 @@ public sealed class TerminalLifecycleTests
         bool noHost = false,
         Action<FakeTerminalHost>? configure = null)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         return await TerminalUi.RunTestAsync(
             session,
             async () =>

@@ -17,7 +17,7 @@ internal sealed record JitHostLayout(string HostPath, string WorkerPath, string 
 
     private const string ExecutorAssembly = "Forge.ScriptExecutor";
 
-    private const string TargetFramework = "net10.0";
+    private const string TargetFramework = "net11.0";
 
     private const int ProbeDepth = 8;
 

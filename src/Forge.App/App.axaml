@@ -7,6 +7,7 @@
              xmlns:loc="using:Forge.App.Localization"
              xmlns:term="using:Forge.App.Terminal"
              xmlns:git="using:Forge.App.Git"
+             xmlns:notif="using:Forge.App.Notifications"
              xmlns:editing="using:Forge.App.Editing"
              xmlns:set="using:Forge.App.ViewModels.Settings"
              xmlns:settings="using:Forge.App.Settings"
@@ -53,9 +54,6 @@
     </DataTemplate>
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
-    </DataTemplate>
-    <DataTemplate DataType="git:GitPanelViewModel" x:DataType="git:GitPanelViewModel">
-      <views:GitToolView />
     </DataTemplate>
 
     <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
@@ -165,6 +163,19 @@
       </Grid>
     </DataTemplate>
 
+    <!-- The notification section: the one switch that decides whether anything is shown at all, in the window or on the desktop. -->
+    <DataTemplate DataType="notif:NotificationsSettingsViewModel" x:DataType="notif:NotificationsSettingsViewModel">
+      <StackPanel Spacing="6">
+        <CheckBox Content="{Binding [notifications.enabled], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding Enabled, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="notifications-enabled"
+                  AutomationProperties.Name="{Binding [notifications.enabled], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [notifications.enabledHint], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+    </DataTemplate>
+
     <!-- The extensions section: installed extensions, staged drafts and the remembered approval rules. -->
     <DataTemplate DataType="ap:ExtensionsSettingsSectionViewModel" x:DataType="ap:ExtensionsSettingsSectionViewModel">
       <ap:ExtensionsSettingsView />
@@ -256,7 +267,7 @@
       </StackPanel>
     </DataTemplate>
 
-    <!-- The git section: pull strategy, network timeout, step commits, the checks wait timing, system notifications and the gh path, edited live on the preferences they belong to. -->
+    <!-- The git section: pull strategy, network timeout, step commits, the checks wait timing and the gh path, edited live on the preferences they belong to. Notifications are not a git preference any more; the notification section owns that switch. -->
     <DataTemplate DataType="git:GitSettingsSectionViewModel" x:DataType="git:GitSettingsSectionViewModel">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="150,*" Margin="0,3">
@@ -340,18 +351,6 @@
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
                    Text="{Binding [git.settings.checksHint], Source={x:Static loc:Loc.Instance}}" />
-        <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
-          <TextBlock Classes="label"
-                     VerticalAlignment="Center"
-                     Text="{Binding [git.settings.notifications], Source={x:Static loc:Loc.Instance}}" />
-          <CheckBox Grid.Column="1"
-                    IsChecked="{Binding Notifications, Mode=TwoWay}"
-                    AutomationProperties.AutomationId="git-notifications"
-                    AutomationProperties.Name="{Binding [git.settings.notifications], Source={x:Static loc:Loc.Instance}}" />
-        </Grid>
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [git.settings.notificationsHint], Source={x:Static loc:Loc.Instance}}" />
         <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
           <TextBlock Classes="label"
                      VerticalAlignment="Center"

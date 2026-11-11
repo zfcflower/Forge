@@ -1,4 +1,6 @@
 using Forge.Abstractions;
+using Forge.App.Localization;
+using Forge.App.Notifications;
 
 namespace Forge.App.Approval;
 
@@ -57,7 +59,7 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
     private readonly string projectId;
     private bool disposed;
 
-    public SessionApprovalHandler(ApprovalQueue queue, ApprovalRules rules, SessionInfo session)
+    public SessionApprovalHandler(ApprovalQueue queue, ApprovalRules rules, SessionInfo session, INotifications? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         this.queue = queue ?? throw new ArgumentNullException(nameof(queue));
@@ -68,7 +70,11 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
         // The general workspace's sessions carry the General project id; a session without one disables "remember for this
         // project" instead of guessing a project.
         projectId = session.ProjectId ?? string.Empty;
+        this.notifications = notifications;
     }
+
+    /// <summary>The shell's notification entry; null in a handler built on its own.</summary>
+    private readonly INotifications? notifications;
 
     public string SessionId { get; }
 
@@ -135,6 +141,11 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             queue.Dispatcher);
 
         await queue.EnqueueAsync(card, ct).ConfigureAwait(false);
+        notifications.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.ApprovalWaitingTitle,
+            NotificationsStrings.ApprovalWaiting(SessionTitle, request.ToolName),
+            "approval:" + card.Id);
         try
         {
             var outcome = await card.Decision.WaitAsync(ct).ConfigureAwait(false);

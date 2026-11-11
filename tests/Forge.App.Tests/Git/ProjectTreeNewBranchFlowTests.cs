@@ -26,7 +26,7 @@ public sealed class ProjectTreeNewBranchFlowTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var request = await session.Dispatch(
             async () =>
             {
@@ -48,7 +48,7 @@ public sealed class ProjectTreeNewBranchFlowTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var state = await session.Dispatch(
             async () =>
             {
@@ -81,7 +81,7 @@ public sealed class ProjectTreeNewBranchFlowTests
         GitTestShell.RunChecked(repo, "switch", "main");
         var devCommit = GitTestShell.RunChecked(repo, "rev-parse", "dev").Trim();
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var created = await session.Dispatch(
             async () =>
             {
@@ -111,7 +111,7 @@ public sealed class ProjectTreeNewBranchFlowTests
         var repo = sandbox.CloneTracked("repo");
         GitTestShell.RunChecked(repo, "branch", "taken");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var state = await session.Dispatch(
             async () =>
             {
@@ -146,7 +146,7 @@ public sealed class ProjectTreeNewBranchFlowTests
     public async Task General_session_never_asks()
     {
         var generalRoot = GitTestFiles.NewTempDir("forge-new-branch-general-");
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         try
         {
             var state = await session.Dispatch(
@@ -176,7 +176,7 @@ public sealed class ProjectTreeNewBranchFlowTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
         var worktreeDir = Directory.CreateDirectory(Path.Combine(repo, "linked")).FullName;
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {

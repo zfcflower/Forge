@@ -52,6 +52,12 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **工作台存储。** `projects` / `todo_groups` / `todos` / `ui_state` / `turn_checkpoints` 与会话同库:每个 store 一条长连接 + `SemaphoreSlim` 串行 + 每写一个 `BEGIN IMMEDIATE`(deferred 读后升级会静默丢更新),读用池化短连接。`ITodoStore.Changed` 在提交后、写锁外触发,订阅者异常被吞,一次写入只抬一次。路径唯一性靠 `root_key`(Windows 大写)唯一索引,General 项目由部分唯一索引保证单例,再次注册即改指向。TODO 序号**层内**致密:`(session_id, group_id)` 是一层(`group_id` 为 NULL 就是待排区),插入、删除、`MoveAsync` 只重排本层,层与层互不牵连;分组顺序在会话内致密且只增不减(没有分组删除入口,面板侧也不提供)。同会话只能有一步行进中:写事务里把某条目写成 `InProgress` 时,同事务把该会话其余 `InProgress` 改回 `Pending`。检查点以 (session, turn) 为主键,已完成轮次不被再次 Begin 改写。`synchronous=NORMAL`:这些是体验数据,丢失不影响安全(审批库用 FULL)。
 
+**会话生命周期与工作区占用(v5–v9)。** 状态 `Active`/`Archived`/`Deleted`。占用键 `occupancy_key` = `OccupancyKey.Compute(worktree_path, workspace_path)`(`Path.GetFullPath` + 去尾分隔符,Windows 再大写;与 `WorkspacePath.Normalize` 同语义),由存储层在每次写路径时计算,调用方不传;部分唯一索引 `ux_sessions_occupancy`(`status='Active' AND parent_session_id IS NULL`)保证一个工作区同一时刻一个活动根会话,冲突映射为 `WorktreeOccupiedException(HolderSessionId)`。App 内把会话置 `Active` 只走条件插入、`ActivateAsync`、`HandoverAsync`;`SetStatusAsync` 是只受索引把关的原始写入。v5 迁移逐行在 C# 回填键,按键去重(保留 `last_active_ticks` 最大者,平局按 id 大者),被归档者写进 `storage_notices`(`dedupe-archived`);v6 `deleted_at`,v7 `projects.closed_at`(软关闭,`AddAsync` 同路径复活原 id),v8 `fork_of_branch`/`fork_base_sha`,v9 `inherits_from_session_id`/`inherits_up_to_seq`/`lineage_root_id`(回填为自身)/`origin_kind`(回填 `cold`)/`prefix_fingerprint`。
+
+**写入不连坐。** 写队列一个批次一个 `BEGIN IMMEDIATE` 事务,每个操作包在 `SAVEPOINT forge_op` 里:单个操作冲突只回滚到自己的保存点并以异常交还调用方,同批其它操作照常提交。`HandoverAsync` 单事务:先条件归档旧会话(受影响行 ≠ 1 抛 `SessionNotActiveException`),再条件插入新会话(继承 `fork_*`/`lineage_root_id`,同事务写 `InitialMessages`,按开关复制 todos / todo_groups / plan_summaries)或恢复目标会话(只改状态);任一步失败整体回滚。`SoftDeleteAsync` 级联子会话;`PurgeAsync` 只删 `Deleted` 会话及其子会话在 forge.db 内所有以 `session_id` 为键的行(含 FTS),被 `inherits_from_session_id` 指向时抛 `SessionPurgeRefusedException`。常规查询排除 `Deleted`,`ListHistoryAsync` 包含之。`HealMissingDirectoriesAsync` 把目录缺失而项目根仍在的 `Active`/`Archived` 根会话(级联)置 `Deleted`,写 `heal-deleted` 通知(只列根 id);`ReadNoticesAsync`/`AcknowledgeNoticesAsync` 供 App 启动时通知一次。
+
+**完整继承与提供方缓存。** 完整继承是父指针而非复制:`SessionHistory.LoadAsync` 先递归装入父会话截至 `inherits_up_to_seq` 的“摘要视图 + 尾部”(与 `ResumeRootAsync` 同一裁剪函数,标记 `AgentMessage.Inherited`),再接自己的消息;首个请求的消息前缀与父会话最后一次请求逐字节相同(测试断言)。压缩时继承部分作为整体前缀原样保留,只摘要本会话自己的消息,预算扣除继承部分(不清父指针)。`HandoverSummary.GenerateAsync` 是交接专用摘要入口(专用提示词,不复用压缩器),`InheritanceNote` 构造继承说明消息(`Build` 用于接手,`BuildFork` 用于并行分叉:写明源分支、分叉分支、起点 sha 与可能的先提交 sha,并说明源会话另行继续)。每次合成后计算 system + tools 的 `PromptFingerprint`,仅变化时写回 `prefix_fingerprint`。`ChatRequest.CacheRoutingKey` = `lineage_root_id`:OpenAI 兼容按 `ProviderOptions.SendPromptCacheKey`(`settings.json` 的 `provider.sendPromptCacheKey`,默认关)发 `prompt_cache_key`,DeepSeek 一律不发;DeepSeek 用量 `prompt_cache_hit_tokens` 计缓存读取(与 `cached_tokens` 同时出现时以后者为准)。每会话首个请求的缓存用量连同 `origin_kind`、提供方、模型写一条诊断日志。`AgentOptions.MessageCacheTtl`(`provider.promptCacheTtl`)填进 `CacheHint.MessageTtl`,Anthropic 适配器目前忽略它(见未决)。
+
 **压缩触发。** 阈值是用户设置的绝对 token 数,而非窗口百分比;压缩目标为阈值的一半。无会话存储时压缩不生效。
 
 **提供方。** OpenAI 兼容与 Anthropic。重试只发生在首个事件之前;`HttpClient` 必须是无限超时,改由每次读取的空闲超时(默认 120 秒)判定停滞。`ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。OpenAI 兼容适配器在写 wire 消息时合并相邻的同角色 `user`/`assistant` 消息:文本按序拼接、段落间空一行,`tool_calls` 保持顺序;`tool` 角色消息不合并,`system` 保持现状(系统提示词在最前,历史中的 system 消息按原位置逐条写出)。内部历史不变,序列化结果对同一历史字节稳定。
@@ -72,3 +78,6 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 - `MaxTurns` 计入后续指令续跑;不响应取消的工具要等其返回才真正停止。
 - 内置 Agent 的工具白名单未含 `todo`(加入会改动其可缓存工具集),目前只有根 Agent 可用。
 - Artifact 转存阈值与三层摘要的保留量使用默认值,未经使用验证。
+- Anthropic `promptCacheTtl: "1h"` 未接线:官方文档要求 1 小时缓存条目排在任何 5 分钟条目之前,与“只给最后一个消息断点加 1h、工具与 system 保持 5 分钟”的设计冲突,待定(三个断点都 1h,或只留消息断点)。
+- 完整继承跨不同前缀(换模型 / 推理档位)时 `ThinkingBlock` 可能被拒;`search_history`/`read_history` 不沿继承链回溯。
+- 压缩应在上下文窗口用量达到配置阈值时才触发。完整继承且继承前缀本身已超过阈值时,当前实现会因同一段未变的继承历史每回合重复压缩——这是设计缺陷,不是预期行为。长期解法是持久化压缩后的表示或历史边界(新的存储契约,归 T0),本阶段不做。

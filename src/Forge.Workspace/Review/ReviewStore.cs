@@ -319,6 +319,65 @@ public sealed partial class ReviewStore
         return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Copies every comment and mark of <paramref name="fromSessionId"/> in the workspace to <paramref name="toSessionId"/>
+    /// in one transaction. Only <c>session_id</c> changes: <c>workspace_path</c> and all other columns stay as they were,
+    /// copied comments get new ids, and the source rows are left in place. Returns the number of comments copied.
+    /// </summary>
+    public async Task<int> CopySessionAsync(string workspacePath, string fromSessionId, string toSessionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspacePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toSessionId);
+        if (string.Equals(fromSessionId, toSessionId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The source and target session must differ.", nameof(toSessionId));
+        }
+
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO review_comments
+                (workspace_path, session_id, file_path, new_line_start, new_line_end, body, status, is_resolved,
+                 created_at, updated_at, sent_at, base_commit, anchor_json)
+            SELECT workspace_path, $to, file_path, new_line_start, new_line_end, body, status, is_resolved,
+                   created_at, updated_at, sent_at, base_commit, anchor_json
+            FROM review_comments WHERE workspace_path = $workspace AND session_id = $from ORDER BY id;
+            """;
+        command.Parameters.AddWithValue("$workspace", workspacePath);
+        command.Parameters.AddWithValue("$from", fromSessionId);
+        command.Parameters.AddWithValue("$to", toSessionId);
+        var copied = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+        command.CommandText = """
+            INSERT OR IGNORE INTO review_marks (workspace_path, session_id, kind, file_path, item_hash, created_at)
+            SELECT workspace_path, $to, kind, file_path, item_hash, created_at
+            FROM review_marks WHERE workspace_path = $workspace AND session_id = $from;
+            """;
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return copied;
+    }
+
+    /// <summary>Deletes every comment and mark of a session across all workspaces; returns the number of comments removed.</summary>
+    public async Task<int> DeleteSessionAsync(string sessionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$session", sessionId);
+        command.CommandText = "DELETE FROM review_comments WHERE session_id = $session";
+        var removed = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        command.CommandText = "DELETE FROM review_marks WHERE session_id = $session";
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return removed;
+    }
+
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
         await EnsureInitializedAsync(ct).ConfigureAwait(false);

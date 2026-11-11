@@ -251,6 +251,15 @@ internal sealed class ProviderStore
             },
             MaxOutputTokens = legacy.MaxOutputTokens is > 0 ? legacy.MaxOutputTokens : null,
             Overrides = ProviderDefinition.FromMetadataDocument(legacy.ModelMeta),
+            // The single-provider section carried these two; dropping them on migration would silently change how prompts
+            // are cached on the first save.
+            SendPromptCacheKey = legacy.SendPromptCacheKey ?? false,
+            PromptCacheTtl = (legacy.PromptCacheTtl ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "5m" => "5m",
+                "1h" => "1h",
+                _ => null,
+            },
         };
 
         if (reference is not null)

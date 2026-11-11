@@ -398,29 +398,16 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
 }
 
 /// <summary>
-/// One headless session for the approval UI class: the headless application is built once for the class instead
-/// of once per test, and every window stays on one UI thread. Default isolation (a fresh Application), never
-/// per-assembly: that level would share the application with the settings panel fixture's session.
+/// The approval UI class runs on the process-wide session owned by the <c>forge-app-ui</c> collection.
+/// A class-level session of its own would keep a second <see cref="Application"/> alive on a second UI thread
+/// next to the collection's, and a control that outlives its own session would then be notified from that other
+/// thread (<c>VerifyAccess</c> failures in <c>KeyBinding</c>/transitions).
 /// </summary>
 public sealed class ApprovalHeadlessFixture : IAsyncLifetime
 {
-    private HeadlessUnitTestSession? session;
+    public HeadlessUnitTestSession Session => SharedUi.Session;
 
-    public HeadlessUnitTestSession Session =>
-        session ?? throw new InvalidOperationException("the headless session is not running");
+    public Task InitializeAsync() => Task.CompletedTask;
 
-    public Task InitializeAsync()
-    {
-        session = HeadlessUnitTestSession.StartNew(typeof(App));
-        return Task.CompletedTask;
-    }
-
-    public async Task DisposeAsync()
-    {
-        if (session is not null)
-        {
-            await session.DisposeAsync();
-            session = null;
-        }
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 }

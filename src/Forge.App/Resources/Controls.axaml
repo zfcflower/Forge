@@ -59,7 +59,7 @@
   <Style Selector="Button.primary">
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="Padding" Value="{StaticResource PaddingControl}" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Cursor" Value="Hand" />
@@ -74,7 +74,7 @@
   <Style Selector="Button.ghost, Button.link, Button.tab, Button.icon">
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="Padding" Value="{StaticResource PaddingControl}" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
     <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Cursor" Value="Hand" />
@@ -215,12 +215,9 @@
     <Setter Property="Padding" Value="8,4" />
   </Style>
 
-  <!-- Text input. -->
-  <Style Selector="TextBox">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
-    <Setter Property="MinHeight" Value="28" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
-  </Style>
+  <!-- Built-in inputs (TextBox, ComboBox, CheckBox, RadioButton, NumericUpDown, AutoCompleteBox) carry no type style:
+       their height, padding, corner radius and font size come from the Fluent keys in `Tokens.axaml`, which is also the
+       one place a template-child TextBox (inside a spinner or an auto-complete box) picks them up. -->
 
   <!-- Transcript. -->
   <Style Selector="Border.user-bubble">
@@ -277,6 +274,134 @@
 
   <Style Selector="Border.notice.error">
     <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <!-- The files panel's git row: a 24 px status line. One place answers "which branch, how far from the remote, and what
+       can I do about it". Numbers ride on the two verbs that change something; the fetch verb has none because it only
+       makes them current. -->
+  <Style Selector="Border.git-row">
+    <Setter Property="Height" Value="24" />
+    <Setter Property="Padding" Value="8,0,4,0" />
+    <Setter Property="Background" Value="{DynamicResource SidebarBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+  </Style>
+
+  <Style Selector="Border.git-row.bad">
+    <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.git-row-branch-icon">
+    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="TextBlock.git-row-branch">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="TextBlock.git-row-message">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Border.git-row.bad TextBlock.git-row-message">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="Button.git-row-details">
+    <Setter Property="MinHeight" Value="18" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Padding" Value="2,0" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />    
+    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.git-row-action">
+    <Setter Property="MinWidth" Value="22" />
+    <Setter Property="Height" Value="20" />
+    <Setter Property="Padding" Value="3,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="Button.git-row-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.git-row-action:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource IconButtonPressedBrush}" />
+  </Style>
+
+  <Style Selector="Button.git-row-action:disabled">
+    <Setter Property="Opacity" Value="0.45" />
+    <Setter Property="Cursor" Value="Arrow" />
+  </Style>
+
+  <!-- A count is the information, so it keeps its colour only while its verb is usable. -->
+  <Style Selector="TextBlock.git-row-count">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="TextBlock.git-row-count.up">
+    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.git-row-count.down">
+    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+  </Style>
+
+  <Style Selector="Button.git-row-action:disabled TextBlock.git-row-count">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <!-- A stopped rebase/merge: the only blocking state the panel shows, so it is the only place the danger bar is used. -->
+  <Style Selector="Border.git-banner">
+    <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="BorderThickness" Value="2,0,0,0" />
+    <Setter Property="Padding" Value="6,4,6,6" />
+  </Style>
+
+  <Style Selector="TextBlock.git-banner-title">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style Selector="Button.git-banner-file">
+    <Setter Property="MinHeight" Value="18" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="Cursor" Value="Hand" />
   </Style>
 
   <!-- Tree rows (project tree, file tree, spec tree). Rows touch vertically so the 1 px indent guides line up. -->
@@ -558,22 +683,12 @@
     <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
   </Style>
 
-  <Style Selector="ComboBox">
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    <Setter Property="MinHeight" Value="26" />
-  </Style>
-
-  <Style Selector="CheckBox">
-    <Setter Property="MinHeight" Value="20" />
-    <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
-  </Style>
-
   <!-- ============================ 改动范围 / 基准分支选择器 ============================
        picker 按钮:无边框、透明底,只在悬停/按下时出灰色圆角底;内容是 图标 + 文字 + 箭头。 -->
   <Style Selector="Button.change-picker">
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Padding" Value="6,2" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ButtonCornerRadius}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
@@ -597,14 +712,14 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
     <Setter Property="MinWidth" Value="0" />
   </Style>
   <Style Selector="Border.change-menu">
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
     <Setter Property="Padding" Value="4" />
     <Setter Property="BoxShadow" Value="{StaticResource ShadowMd}" />
   </Style>
@@ -666,7 +781,7 @@
   <!-- 分段开关:Border.segmented 里放 Button.segment,选中的那段是抬起的浅色药丸(拆分|内联、堆叠|单文件、预览|Source)。 -->
   <Style Selector="Border.segmented">
     <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
-    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
     <Setter Property="Padding" Value="2" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
@@ -723,6 +838,118 @@
   <Style Selector="wc|PanelChrome:sidebar TextBlock">
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <!-- In-window notifications (toast): one notification as a fixed-width card (Views/NotificationOverlay). A 3 px level
+       bar down the left edge, the level word, the title, up to four lines of body text and the xN badge of a merged
+       repeated notification. The card keeps its width, so a long text wraps (or is cut) instead of pushing the stack
+       around. -->
+  <Style Selector="Border.toast">
+    <Setter Property="Width" Value="380" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="BoxShadow" Value="{StaticResource ShadowMd}" />
+    <!-- The level bar runs into the rounded corners; the card clips it. -->
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <!-- The level bar and the level word: one colour per severity, taken from the semantic tokens. The base rule is the
+       neutral information blue; the four level classes below are the ones the template actually selects. -->
+  <Style Selector="Border.toast-level">
+    <Setter Property="Width" Value="3" />
+    <Setter Property="Background" Value="{DynamicResource InfoBrush}" />
+  </Style>
+  <Style Selector="Border.toast.info Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource InfoBrush}" />
+  </Style>
+  <Style Selector="Border.toast.success Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+  </Style>
+  <Style Selector="Border.toast.warning Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+  </Style>
+  <Style Selector="Border.toast.error Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.toast-level-text">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.4" />
+    <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="Border.toast.info TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+  </Style>
+  <Style Selector="Border.toast.success TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+  </Style>
+  <Style Selector="Border.toast.warning TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+  </Style>
+  <Style Selector="Border.toast.error TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.toast-title">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style Selector="TextBlock.toast-body">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- The ×N badge of a notification that arrived again while it was already on screen. -->
+  <Style Selector="Border.toast-count">
+    <Setter Property="MinWidth" Value="18" />
+    <Setter Property="MinHeight" Value="15" />
+    <Setter Property="Padding" Value="5,0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="{DynamicResource CountBadgeBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.toast-count > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Enter and exit. `entering` is on while the toast is not leaving (so a repeat that claims a leaving toast brings
+       it back), `leaving` is the center's IsLeaving flag: 160 ms, inside the 180 ms the center waits before it drops the
+       item from the list, so the fade is always finished before the toast disappears. -->
+  <Style Selector="Border.toast.entering">
+    <Style.Animations>
+      <Animation Duration="0:0:0.16" Easing="CubicEaseOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+  <Style Selector="Border.toast.leaving">
+    <Style.Animations>
+      <Animation Duration="0:0:0.16" Easing="CubicEaseIn">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
   </Style>
 
 </Styles>

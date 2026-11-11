@@ -6,6 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Forge.HostClient/Forge.HostClient.csproj" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.*" />
   </ItemGroup>
 </Project>

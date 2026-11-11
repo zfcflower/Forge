@@ -67,7 +67,7 @@ public sealed class MinorRegressionTests
     [Fact]
     public async Task A_refresh_requested_during_a_refresh_is_merged_into_one_follow_up_refresh()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var passes = await session.Dispatch(
             async () =>
             {
@@ -97,7 +97,7 @@ public sealed class MinorRegressionTests
     [Fact]
     public async Task Choosing_the_same_finished_sub_agent_twice_opens_it_twice()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {

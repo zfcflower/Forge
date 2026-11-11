@@ -52,7 +52,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Three_regions_render_in_default_order()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var roles = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.RegionsByPosition(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window));
@@ -63,7 +63,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Docked_regions_are_separated_by_the_one_pixel_region_gap()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var gaps = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -80,7 +80,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Regions_gaps_and_edge_strips_fill_the_window_width_so_the_splitter_hit_areas_take_no_layout_space()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var total = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.TotalDockedWidth(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window));
@@ -91,7 +91,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Region_splitter_hit_area_is_six_pixels_wide()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var hitWidth = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -105,7 +105,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Region_splitter_line_is_one_pixel_wide()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var lineWidth = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -119,7 +119,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Panels_inside_a_region_are_separated_by_a_one_pixel_gap()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var gap = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -137,7 +137,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Panel_splitter_hit_area_is_six_pixels_high()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var hitHeight = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -152,7 +152,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Panel_splitter_line_is_one_pixel_high()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var lineHeight = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -169,7 +169,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Panel_titles_are_bold_at_the_emphasis_size()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var title = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -190,7 +190,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task A_panel_title_bar_is_as_high_as_the_title_bar_constant()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var height = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -205,7 +205,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Tab_labels_are_regular_at_the_body_size()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var tab = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -234,7 +234,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task A_floating_panel_title_is_bold_at_the_emphasis_size()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var title = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -260,7 +260,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Pin_button_is_shown_on_a_side_panel()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.PinId(ProjectPanelId)).IsVisible);
@@ -271,7 +271,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Pin_button_is_hidden_on_the_main_tab_group()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.PinId(MainPanelId)).IsVisible);
@@ -282,7 +282,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Panel_title_bars_have_no_maximize_button()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         // The inspector shows two panels, which is the case that used to put a maximize button on both title bars.
         var found = await WorkbenchUi.QueryAsync(session, () =>
@@ -298,7 +298,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Float_button_is_hidden_on_the_project_panel()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.FloatPanelId(ProjectPanelId)).IsVisible);
@@ -309,7 +309,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Float_button_is_shown_on_a_tab_group_with_an_active_tab()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.FloatPanelId(ToolsPanelId)).IsVisible);
@@ -320,7 +320,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Float_button_is_shown_on_the_files_panel()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.FloatPanelId(FilesPanelId)).IsVisible);
@@ -331,7 +331,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Cover_button_is_hidden_while_the_preview_group_is_closed()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.CoverId(PreviewPanelId)).IsVisible);
@@ -342,7 +342,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Cover_button_appears_once_the_preview_group_opens()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -357,7 +357,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Close_button_is_hidden_while_the_preview_group_is_closed()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<Control>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.CloseId(PreviewPanelId)).IsVisible);
@@ -368,7 +368,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Close_button_appears_once_the_preview_group_opens()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var visible = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -383,7 +383,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Close_button_closes_the_preview_group_and_returns_its_width_to_main()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -414,12 +414,62 @@ public sealed class WorkbenchControlsTests
         Assert.Equal(state.mainBefore + WorkbenchMetrics.DefaultPreviewWidth, state.Main, Precision);
     }
 
+    // ---------------------------------------------------------------- the inspector column's panel splitter
+
+    /// <summary>
+    /// The inspector stack is files over the tools group, so it has exactly one panel splitter; nothing else in the
+    /// application exercises "a height stored for a panel under the files slot is restored".
+    /// </summary>
+    [Fact]
+    public async Task The_inspector_has_one_panel_splitter_between_files_and_tools_and_restores_a_stored_height()
+    {
+        var session = SharedUi.Session;
+
+        var measured = await WorkbenchUi.QueryAsync(session, () =>
+        {
+            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
+
+            // The panel line of a column is the horizontal one: its hit band is tall, a region splitter's is wide.
+            var panelLines = scene.Window.GetVisualDescendants()
+                .OfType<Control>()
+                .Where(control =>
+                {
+                    var id = Avalonia.Automation.AutomationProperties.GetAutomationId(control);
+                    return id is { Length: > 0 }
+                        && id.StartsWith("panel-splitter-", StringComparison.Ordinal)
+                        && control.Bounds.Height > 0;
+                })
+                .ToList();
+
+            var files = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(WorkbenchIds.FilesPanel));
+            var tools = WorkbenchUi.Find<PanelChrome>(scene.Window, WorkbenchUi.PanelId(WorkbenchIds.InspectorTools));
+
+            scene.Layout.Apply(new LayoutSnapshot { BelowHeights = { [WorkbenchIds.InspectorTools] = 240 } });
+            WorkbenchUi.Settle(scene.Window);
+
+            return (
+                PanelLines: panelLines.Count,
+                HitHeight: panelLines.Count > 0 ? panelLines[0].Bounds.Height : 0,
+                FilesHeight: files.Bounds.Height,
+                ToolsHeight: tools.Bounds.Height,
+                RestoredToolsHeight: scene.Layout.BelowPanelHeight(WorkbenchIds.InspectorTools));
+        });
+
+        // Files over the tools group: exactly one draggable line, and it carries the shared hit band.
+        Assert.Equal(1, measured.PanelLines);
+        Assert.Equal(WorkbenchMetrics.SplitterHitWidth, measured.HitHeight);
+        Assert.True(measured.FilesHeight > 0 && measured.ToolsHeight > 0);
+
+        // A height stored for the panel under the files slot is restored (the old inspector-stack test's only survivor).
+        Assert.Equal(240, measured.RestoredToolsHeight);
+    }
+
     // ---------------------------------------------------------------- preview column splitter
 
     [Fact]
     public async Task Preview_splitter_hit_band_straddles_the_preview_files_gap_when_the_preview_is_left_of_files()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var straddles = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -439,7 +489,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Preview_splitter_hit_band_straddles_the_preview_files_gap_when_the_preview_is_right_of_files()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var straddles = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -461,7 +511,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_preview_splitter_right_widens_the_preview_when_it_is_left_of_files()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -486,7 +536,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_preview_splitter_right_narrows_the_preview_when_it_is_right_of_files()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -515,7 +565,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Cover_spreads_the_preview_over_main_and_its_own_column()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var cover = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -549,7 +599,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Cover_spreads_the_preview_over_main_and_its_own_column_when_it_is_right_of_files()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var cover = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -585,7 +635,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Clicking_cover_again_returns_the_preview_to_its_column()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var restored = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -614,7 +664,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Pinning_a_side_panel_auto_hides_its_region()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var hidden = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -629,7 +679,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Auto_hidden_region_leaves_a_strip_of_strip_width_on_its_window_edge()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var strip = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -644,7 +694,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Docked_region_has_no_edge_strip_until_it_is_auto_hidden()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var bounds = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -662,7 +712,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Strip_indicator_uses_accent_when_closed_and_idle_color_when_open()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var colors = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -689,7 +739,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Strip_button_opens_the_drawer_over_main()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var open = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -705,7 +755,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Escape_closes_the_open_drawer()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var open = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -722,7 +772,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Press_outside_the_drawer_closes_it()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var open = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -739,7 +789,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Pinning_from_the_drawer_docks_the_region_again()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var hidden = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -756,7 +806,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Two_auto_hidden_regions_on_the_same_edge_sit_side_by_side()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var offsets = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -775,7 +825,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Auto_hide_strip_follows_its_region_to_the_new_edge_after_a_swap()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var stripX = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -791,7 +841,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Open_drawer_overlays_main_without_resizing_it()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var overlay = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -811,7 +861,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Empty_bottom_group_gives_its_space_back_to_main()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var mainHeight = await WorkbenchUi.QueryAsync(session, () =>
             WorkbenchUi.Find<PanelChrome>(WorkbenchUi.Open(WorkbenchUi.NewLayout()).Window, WorkbenchUi.PanelId(MainPanelId)).Bounds.Height);
@@ -822,7 +872,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Minimizing_the_bottom_group_leaves_its_title_bar_on_the_bottom_edge_of_main()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var titleBar = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -842,7 +892,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task A_stacked_region_draws_a_separator_above_the_lower_panel_title_bar()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var geometry = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -871,7 +921,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task The_bottom_group_title_bar_has_no_pin()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         // The pin's "collapse into a strip" is what 缩小/还原 already does for the tabs the user wants to keep in place.
         var visible = await WorkbenchUi.QueryAsync(session, () =>
@@ -887,7 +937,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task The_pin_shows_its_state_solid_when_docked_and_outline_when_auto_hidden()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -912,7 +962,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Hovering_an_icon_button_paints_it_with_the_button_brush()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var colours = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -932,7 +982,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task A_tool_tab_without_a_close_box_centres_its_label()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var label = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -955,7 +1005,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Narrowing_the_window_shrinks_main_before_the_side_regions()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -972,7 +1022,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_left_splitter_right_grows_the_project_region_by_the_drag_distance()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -988,7 +1038,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_left_splitter_right_takes_the_width_from_main()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1004,7 +1054,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_left_splitter_right_leaves_the_inspector_alone_while_main_can_shrink()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1020,7 +1070,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_right_splitter_left_grows_the_inspector_region()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1036,7 +1086,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_a_side_splitter_past_the_minimum_auto_hides_that_side_region()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var hidden = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1051,7 +1101,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_a_side_splitter_short_of_the_minimum_keeps_the_region_docked_at_its_dragged_width()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1067,7 +1117,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_the_bottom_splitter_up_grows_the_bottom_group()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var heights = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1086,7 +1136,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_a_title_bar_across_another_region_swaps_the_two_regions()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var order = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1101,7 +1151,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Escape_cancels_a_region_swap_that_is_in_progress()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var order = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1116,7 +1166,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Swapped_regions_keep_their_own_widths()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var widths = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1132,7 +1182,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Auto_hidden_region_cannot_start_a_swap_from_its_drawer()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var order = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1149,7 +1199,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Drawer_opens_on_the_edge_of_its_new_position_after_a_swap()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var drawerRight = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1169,7 +1219,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Clicking_a_tab_activates_it()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var active = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1186,7 +1236,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Close_button_on_a_tab_closes_that_tab()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var remaining = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1203,7 +1253,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Middle_click_on_a_tab_closes_it()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var remaining = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1220,7 +1270,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_a_tab_along_its_strip_reorders_the_group()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var order = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1238,7 +1288,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dragging_a_tab_out_of_the_strip_floats_it()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var floating = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1255,7 +1305,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Each_tab_header_has_its_own_context_menu_instance()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var distinct = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1273,7 +1323,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Floating_a_tab_opens_its_own_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var opened = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1289,7 +1339,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Removing_a_floating_item_closes_its_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var stillOpen = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1306,7 +1356,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Closing_a_floating_window_docks_its_tab_back_into_its_slot()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1329,7 +1379,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Dock_button_in_a_floating_window_docks_its_tab_back()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var floating = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1346,7 +1396,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Closing_the_window_during_shutdown_keeps_its_tab_floating()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1365,7 +1415,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Closing_a_floating_tab_closes_its_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var stillOpen = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1384,7 +1434,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Floating_the_files_panel_takes_the_preview_group_into_its_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var carriesPreview = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1403,7 +1453,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Floating_tab_window_opens_at_its_default_size()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var size = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1421,7 +1471,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Floating_files_window_opens_at_its_default_size()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var size = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1439,7 +1489,7 @@ public sealed class WorkbenchControlsTests
     [Fact]
     public async Task Floating_files_panel_opens_its_window()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var opened = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -1466,7 +1516,7 @@ public sealed class MainWindowSmokeTests
     [Fact]
     public async Task Main_window_exposes_the_workbench_host_and_its_three_regions()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await using var shell = await ShellFixture.OpenAsync(session);
 
         var found = await WorkbenchUi.QueryAsync(session, () => ShellFixture.FoundWorkbenchIds(shell.Window));
@@ -1479,7 +1529,7 @@ public sealed class MainWindowSmokeTests
     [Fact]
     public async Task Finished_subagents_menu_is_at_most_28_pixels_high_with_a_finished_sub_agent()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await using var shell = await ShellFixture.OpenAsync(session);
         await WorkbenchUi.RunAsync(session, () => shell.ShowFinishedSubAgent());
 
@@ -1493,7 +1543,7 @@ public sealed class MainWindowSmokeTests
     [InlineData(true)]
     public async Task Window_header_uses_the_same_chrome_colour_as_a_panel_title_bar(bool dark)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await using var shell = await ShellFixture.OpenAsync(session);
 
         var colours = await WorkbenchUi.QueryAsync(session, () =>
@@ -1512,7 +1562,7 @@ public sealed class MainWindowSmokeTests
     [Fact]
     public async Task Window_header_replaces_the_search_box_with_the_magnifier_and_the_host_state()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await using var shell = await ShellFixture.OpenAsync(session);
 
         var header = await WorkbenchUi.QueryAsync(session, () =>

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Avalonia.Threading;
 using Forge.App.Editing;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
@@ -81,7 +82,18 @@ internal sealed partial class FileDocumentViewModel
         editorDiagnostics = EditorLspDiagnosticSet.Empty;
     }
 
-    internal void ReportEditorLspNotice(LocText notice) => SetLspStatus(notice);
+    internal void ReportEditorLspNotice(LocText notice)
+    {
+        SetLspStatus(notice);
+        if (!notice.IsEmpty)
+        {
+            NotificationCenter.Current?.Notify(
+                NotificationLevel.Warning,
+                NotificationsStrings.EditorFailedTitle,
+                notice,
+                "editor-lsp:" + path);
+        }
+    }
     internal void OpenDefinition(EditorLspDefinitionTarget target) => DefinitionRequested?.Invoke(this, target);
 
     internal void RevealEditorPosition(EditorLspDefinitionTarget target)

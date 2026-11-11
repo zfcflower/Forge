@@ -60,7 +60,9 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinGitChecksMaxWaitMinutes = 1;
     public const int MaxGitChecksMaxWaitMinutes = 180;
     public const int DefaultGitChecksMaxWaitMinutes = 30;
-    public const bool DefaultGitNotifications = true;
+
+    /// <summary>Whether any notification is shown at all (toast in the window, desktop notification in the background).</summary>
+    public const bool DefaultNotifications = true;
 
     /// <summary>Longest a <c>bash</c> call may run unless the model asks for less; clamped to [<see cref=MinToolBashTimeoutSeconds/>, <see cref=MaxToolBashTimeoutSeconds/>].</summary>
     public const int MinToolBashTimeoutSeconds = 1;
@@ -94,7 +96,7 @@ internal sealed class AppPreferences : ObservableObject
     private bool gitStepCommits = DefaultGitStepCommits;
     private int gitChecksPollSeconds = DefaultGitChecksPollSeconds;
     private int gitChecksMaxWaitMinutes = DefaultGitChecksMaxWaitMinutes;
-    private bool gitNotifications = DefaultGitNotifications;
+    private bool notifications = DefaultNotifications;
     private string gitGhPath = string.Empty;
     private string toolsShellPath = string.Empty;
     private string toolsRipgrepPath = string.Empty;
@@ -171,8 +173,11 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref gitChecksMaxWaitMinutes, Math.Clamp(value, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes));
     }
 
-    /// <summary>Whether the end of a checks wait raises a system notification (default on).</summary>
-    public bool GitNotifications { get => gitNotifications; set => Set(ref gitNotifications, value); }
+    /// <summary>
+    /// Whether the user wants to be told about things at all: off means neither a toast in the window nor a desktop
+    /// notification. Read at the start of every notification, so a change applies without a restart.
+    /// </summary>
+    public bool Notifications { get => notifications; set => Set(ref notifications, value); }
 
     /// <summary>
     /// The GitHub CLI executable; empty (default) means <c>gh</c> from PATH. Trimmed. Read at the start of every <c>gh</c>
@@ -277,7 +282,7 @@ internal sealed class AppPreferences : ObservableObject
         gitChecksMaxWaitMinutes = section.GitChecksMaxWaitMinutes is { } waitMinutes
             ? Math.Clamp(waitMinutes, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes)
             : DefaultGitChecksMaxWaitMinutes;
-        gitNotifications = section.GitNotifications ?? DefaultGitNotifications;
+        notifications = section.Notifications ?? section.LegacyGitNotifications ?? DefaultNotifications;
         gitGhPath = (section.GitGhPath ?? string.Empty).Trim();
         toolsShellPath = (section.ToolsShellPath ?? string.Empty).Trim();
         toolsRipgrepPath = (section.ToolsRipgrepPath ?? string.Empty).Trim();
@@ -319,7 +324,7 @@ internal sealed class AppPreferences : ObservableObject
             GitStepCommits = gitStepCommits,
             GitChecksPollSeconds = gitChecksPollSeconds,
             GitChecksMaxWaitMinutes = gitChecksMaxWaitMinutes,
-            GitNotifications = gitNotifications,
+            Notifications = notifications,
             GitGhPath = gitGhPath,
             ToolsShellPath = toolsShellPath,
             ToolsRipgrepPath = toolsRipgrepPath,
@@ -466,8 +471,16 @@ internal sealed class PreferencesSection
     [JsonPropertyName("gitChecksMaxWaitMinutes")]
     public int? GitChecksMaxWaitMinutes { get; set; }
 
+    [JsonPropertyName("notifications")]
+    public bool? Notifications { get; set; }
+
+    /// <summary>
+    /// The key this one switch used when it only covered the end of a checks wait. Still read so an older settings file does
+    /// not lose the choice; never written back.
+    /// </summary>
     [JsonPropertyName("gitNotifications")]
-    public bool? GitNotifications { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? LegacyGitNotifications { get; set; }
 
     [JsonPropertyName("gitGhPath")]
     public string? GitGhPath { get; set; }

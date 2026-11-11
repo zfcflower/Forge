@@ -154,7 +154,7 @@ public sealed class TerminalSelectionTests
 
     private static async Task<T> RunAsync<T>(Func<Scene, Task<T>> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         return await TerminalUi.RunTestAsync(
             session,
             async () =>

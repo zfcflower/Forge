@@ -34,6 +34,12 @@ internal sealed record AgentRuntimeServices(
     public IStepCommitter? StepCommitter { get; set; }
 
     /// <summary>
+    /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
+    /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
+    /// </summary>
+    public IArtifactStore? Artifacts { get; set; }
+
+    /// <summary>
     /// The pull request tools (<c>pr_*</c>, <c>pr_screenshots</c>, <c>review_comments</c>, <c>review_comment_resolve</c>),
     /// registered after the git tools. Stateless across sessions like <see cref="Git"/>; empty in a unit test. Read-only ones
     /// pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>, the write ones always ask, and
@@ -57,6 +63,9 @@ internal sealed record AgentRuntimeServices(
     /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
     /// </summary>
     public SessionToolCallRouter? ToolRouter { get; set; }
+
+    /// <summary>The message-breakpoint prompt-cache TTL (<c>provider.promptCacheTtl</c>) handed to <see cref="AgentOptions.MessageCacheTtl"/>; null = provider default.</summary>
+    public string? MessageCacheTtl { get; set; }
 
     public static string? UserDirectory()
     {
@@ -217,6 +226,18 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    /// <summary>Whether interjections wait to be taken (a busy reason of the handover check); does not take them.</summary>
+    public bool HasUndeliveredInterjections
+    {
+        get
+        {
+            lock (gate)
+            {
+                return undelivered is { Count: > 0 };
+            }
+        }
+    }
+
     /// <summary>Interjections the last turn ended without delivering, oldest first; each is returned once.</summary>
     public IReadOnlyList<string> TakeUndeliveredInterjections()
     {
@@ -331,7 +352,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Store = services.Store,
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
-                Options = new AgentOptions { DefaultModel = services.Model },
+                Artifacts = services.Artifacts,
+                Options = new AgentOptions { DefaultModel = services.Model, MessageCacheTtl = services.MessageCacheTtl },
             });
 
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.

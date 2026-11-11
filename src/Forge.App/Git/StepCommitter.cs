@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.Workspace;
 
 namespace Forge.App.Git;
@@ -53,6 +55,7 @@ internal sealed class StepCommitter : IStepCommitter
     private readonly ITodoStore store;
     private readonly Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree;
     private readonly Func<bool> isEnabled;
+    private readonly INotifications? notifications;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> gates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <param name="git">The git wrapper every command goes through.</param>
@@ -63,7 +66,8 @@ internal sealed class StepCommitter : IStepCommitter
         GitCli git,
         ITodoStore store,
         Func<string, CancellationToken, Task<WorktreeResolution>> resolveWorktree,
-        Func<bool> isEnabled)
+        Func<bool> isEnabled,
+        INotifications? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(store);
@@ -73,6 +77,7 @@ internal sealed class StepCommitter : IStepCommitter
         this.store = store;
         this.resolveWorktree = resolveWorktree;
         this.isEnabled = isEnabled;
+        this.notifications = notifications;
     }
 
     /// <summary>
@@ -160,6 +165,117 @@ internal sealed class StepCommitter : IStepCommitter
         finally
         {
             gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The handover commit (lifecycle 6.2 step 4): everything uncommitted in <paramref name="directory"/>, untracked
+    /// files included, committed with <paramref name="message"/>. It takes the same per-worktree gate as step commits, so
+    /// it never interleaves with a "retry commit", and applies the same guards (not a repository / nothing to commit /
+    /// an operation in progress / detached HEAD) and the same unstage-on-failure and late-cancellation recovery. It is
+    /// the user's explicit choice, so the <c>gitStepCommits</c> preference does not apply, and nothing is persisted on a
+    /// TODO row. Expected failures are results; only cancellation before a commit exists throws.
+    /// </summary>
+    public async Task<StepCommitResult> CommitHandoverAsync(string directory, string message, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        ct.ThrowIfCancellationRequested();
+
+        string key;
+        try
+        {
+            directory = Path.GetFullPath(directory);
+            key = Path.TrimEndingDirectorySeparator(directory);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return new StepCommitResult(StepCommitOutcome.Failed, null, "The workspace path is not valid.");
+        }
+
+        if (!Directory.Exists(directory))
+        {
+            return new StepCommitResult(StepCommitOutcome.Failed, null, "The workspace folder no longer exists.");
+        }
+
+        var gate = gates.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await CommitHandoverLockedAsync(directory, message.Trim(), ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<StepCommitResult> CommitHandoverLockedAsync(string directory, string message, CancellationToken ct)
+    {
+        var commitAttempted = false;
+        try
+        {
+            if (!await git.IsRepositoryAsync(directory, ct).ConfigureAwait(false))
+            {
+                return new StepCommitResult(StepCommitOutcome.Skipped, null, "The workspace is not a git repository.");
+            }
+
+            var changes = await git.GetStatusAsync(directory, includeUntracked: true, ct).ConfigureAwait(false);
+            if (changes.Count == 0)
+            {
+                return new StepCommitResult(StepCommitOutcome.NoChanges, null, "No uncommitted changes to commit.");
+            }
+
+            var operation = await git.GetConflictStateAsync(directory, ct).ConfigureAwait(false);
+            if (operation.InProgress)
+            {
+                return new StepCommitResult(
+                    StepCommitOutcome.Failed,
+                    null,
+                    $"A {OperationName(operation.Operation)} is in progress in the workspace; finish or abort it first.");
+            }
+
+            var branch = await git.GetBranchStatusAsync(directory, ct).ConfigureAwait(false);
+            if (branch.IsDetached)
+            {
+                return new StepCommitResult(StepCommitOutcome.Failed, null, "HEAD is detached; check out a branch for the handover commit to land on.");
+            }
+
+            var previousHead = branch.HeadCommit ?? await git.RevParseAsync(directory, "HEAD", ct).ConfigureAwait(false);
+            commitAttempted = true;
+            try
+            {
+                var commit = await git.CommitAsync(directory, [], message, ct).ConfigureAwait(false);
+                return new StepCommitResult(StepCommitOutcome.Committed, commit.Id, "Committed " + commit.Id);
+            }
+            catch (OperationCanceledException) when (!string.IsNullOrWhiteSpace(previousHead))
+            {
+                var head = await ReadHeadAsync(directory).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(head) || string.Equals(head, previousHead, StringComparison.Ordinal))
+                {
+                    throw;
+                }
+
+                return new StepCommitResult(StepCommitOutcome.Committed, head, "Committed " + head);
+            }
+        }
+        catch (GitException exception)
+        {
+            if (commitAttempted)
+            {
+                await UnstageAsync(directory).ConfigureAwait(false);
+            }
+
+            return new StepCommitResult(StepCommitOutcome.Failed, null, "git commit failed: " + FailureText(exception));
+        }
+        catch (Exception exception) when (IsExpected(exception))
+        {
+            if (commitAttempted)
+            {
+                await UnstageAsync(directory).ConfigureAwait(false);
+            }
+
+            return new StepCommitResult(StepCommitOutcome.Failed, null, "The handover could not be committed: " + exception.Message);
         }
     }
 
@@ -340,6 +456,13 @@ internal sealed class StepCommitter : IStepCommitter
     private async Task<StepCommitResult> FailAsync(TodoItem item, string reason)
     {
         await PersistAsync(item.Id, null, reason, CancellationToken.None).ConfigureAwait(false);
+        // The TODO row carries the reason, but a refused commit is exactly the kind of thing the user misses while
+        // looking at another session, so it is announced too.
+        notifications.Notify(
+            NotificationLevel.Error,
+            NotificationsStrings.StepCommitFailedTitle,
+            LocText.Literal(reason),
+            "step-commit:" + item.Id);
         return new StepCommitResult(StepCommitOutcome.Failed, null, reason);
     }
 

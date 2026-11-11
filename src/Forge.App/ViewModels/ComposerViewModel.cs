@@ -3,6 +3,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Providers;
 using Forge.Core.Providers;
 using Forge.App.Services;
@@ -720,7 +721,8 @@ internal sealed class ComposerViewModel : ObservableObject
 
     /// <summary>
     /// The picker's refresh: asks every connected provider that can list models for its current list. One provider failing
-    /// does not stop the others; the first failure is reported, and the lists that did come back are already in the cache.
+    /// does not stop the others; the first failure is reported (and announced, like any other model-fetch failure), and the
+    /// lists that did come back are already in the cache.
     /// </summary>
     private async Task RefreshAllProvidersAsync(CancellationToken cancellationToken)
     {
@@ -744,7 +746,7 @@ internal sealed class ComposerViewModel : ObservableObject
 
         if (failure is not null)
         {
-            Status = SessionStrings.ComposerModelFetchFailed(failure.Message);
+            OnRefreshFailed(failure);
         }
     }
 
@@ -762,7 +764,16 @@ internal sealed class ComposerViewModel : ObservableObject
         return null;
     }
 
-    private void OnRefreshFailed(Exception exception) => Status = SessionStrings.ComposerModelFetchFailed(exception.Message);
+    private void OnRefreshFailed(Exception exception)
+    {
+        var failure = SessionStrings.ComposerModelFetchFailed(exception.Message);
+        Status = failure;
+        NotificationCenter.Current?.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.ProviderMissingTitle,
+            LocText.Literal(failure),
+            "model-fetch");
+    }
 
     private void Apply() => apply(CurrentDefinition());
 }

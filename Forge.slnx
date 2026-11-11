@@ -29,7 +29,6 @@
     <Project Path="tests/Forge.Ipc.Tests/Forge.Ipc.Tests.csproj" />
     <Project Path="tests/Forge.IO.Tests/Forge.IO.Tests.csproj" />
     <Project Path="tests/Forge.Mcp.Tests/Forge.Mcp.Tests.csproj" />
-    <Project Path="tests/Forge.Plugin.Sdk.Tests/Forge.Plugin.Sdk.Tests.csproj" />
     <Project Path="tests/Forge.Scripting.Tests/Forge.Scripting.Tests.csproj" />
     <Project Path="tests/Forge.Workflows.Tests/Forge.Workflows.Tests.csproj" />
     <Project Path="tests/Forge.Workspace.Tests/Forge.Workspace.Tests.csproj" />

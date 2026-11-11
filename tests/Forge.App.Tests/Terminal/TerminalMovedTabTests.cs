@@ -18,7 +18,7 @@ public sealed class TerminalMovedTabTests
 
     private static async Task<T> RunAsync<T>(Func<WorkbenchLayout, TerminalWorkbench, FakeTerminalHost, Window, Task<T>> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         return await TerminalUi.RunTestAsync(
             session,
             async () =>

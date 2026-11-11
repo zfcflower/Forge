@@ -2,6 +2,7 @@ using System.Diagnostics;
 using AvaloniaEdit.Document;
 using Forge.App.Changes;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.Workspace;
 
 namespace Forge.App.Review;
@@ -607,7 +608,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
         {
             Trace.WriteLine("[review] operation failed: " + exception.Message);
-            SetMessage(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
+            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
             return false;
         }
         finally
@@ -693,7 +694,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
         {
             Trace.WriteLine("[review] loading drafts failed: " + exception.Message);
-            SetMessage(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
+            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
         }
         finally
         {
@@ -789,6 +790,18 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         infos.Clear();
     }
 
+
+    /// <summary>Shows the failure in the panel and announces it: a review that could not be saved is missed otherwise.</summary>
+    private void SetFailure(LocText value)
+    {
+        SetMessage(value);
+        NotificationCenter.Current?.Notify(
+            NotificationLevel.Error,
+            NotificationsStrings.EditorFailedTitle,
+            value,
+            "review-diff");
+    }
+
     private void SetMessage(LocText value)
     {
         message = value;
@@ -815,7 +828,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         catch (Exception exception)
         {
             Trace.WriteLine("[review] background work failed: " + exception);
-            SetMessage(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
+            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
         }
     }
 

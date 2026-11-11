@@ -46,7 +46,6 @@ internal static class WorkbenchIds
     public const string ProjectPanel = "projects";
     public const string GeneralPanel = "general-chats";
     public const string FilesPanel = "files";
-    public const string GitPanel = "git-panel";
     public const string MainTabs = "main";
     public const string BottomTabs = "bottom";
     public const string PreviewTabs = "preview";

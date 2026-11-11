@@ -262,7 +262,7 @@ internal static class RunCodeDescription
 
         text.Append("  The last expression, or a top-level `return`, is serialized as the result; `await` and `var` work at top level.\n");
         text.Append("  Awaiting calls one by one serializes them; use Task.WhenAll(...) to overlap independent calls.\n\n");
-        text.Append("Language: C# 14 on .NET 10 - async/await, LINQ, collections, Task.WhenAll, System.Text.Json, System.Text.RegularExpressions, string/Math/DateTime/Guid/CultureInfo.\n");
+        text.Append("Language: C# 15 on .NET 11 - async/await, LINQ, collections, Task.WhenAll, System.Text.Json, System.Text.RegularExpressions, string/Math/DateTime/Guid/CultureInfo.\n");
         text.Append("Refused at compile time (the error names the line and column): file and network access, processes, reflection, Environment/AppContext, AppDomain, assembly loading, Console, explicit threads, P/Invoke, unsafe code, #r and #load.\n");
         text.Append("Limits: default timeout ")
             .Append(Seconds(options.DefaultTimeout))

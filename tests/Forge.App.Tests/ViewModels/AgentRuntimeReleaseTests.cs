@@ -143,7 +143,7 @@ public sealed class AgentRuntimeReleaseTests
     [Fact]
     public async Task A_second_release_is_a_no_op()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var released = await session.Dispatch(
             () =>
             {
@@ -173,7 +173,7 @@ public sealed class AgentRuntimeReleaseTests
 
     private static async Task RunAsync(Func<Harness, Task> body)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {
@@ -270,13 +270,16 @@ public sealed class AgentRuntimeReleaseTests
         /// Sends a message so the session turns running. This runs no provider: without <c>settings.json</c> the turn fails
         /// on the first stream event, which is enough to hold the session running until the turn ends.
         /// </summary>
-        public Task<SessionWorkspaceViewModel> StartTurnAsync(SessionInfo info)
+        /// <summary>Sends a message and waits until the turn runs: the turn-start check reads the store first, so the
+        /// turn no longer starts synchronously inside <c>Execute</c>.</summary>
+        public async Task<SessionWorkspaceViewModel> StartTurnAsync(SessionInfo info)
         {
             var session = Assert.IsType<SessionWorkspaceViewModel>(ViewModel.ActiveSession);
             Assert.Equal(info.Id, session.SessionId);
             session.Draft = "hello";
             session.SendCommand.Execute(null);
-            return Task.FromResult(session);
+            await PumpUntilAsync(() => session.IsRunning);
+            return session;
         }
 
         public async ValueTask DisposeAsync()

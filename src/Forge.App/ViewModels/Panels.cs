@@ -247,6 +247,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     private DispatcherTimer? watcherTimer;
     private CountsSnapshot? countsSnapshot;
     private readonly Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory;
+    private readonly Git.GitSyncViewModel? gitSync;
     private LocText error;
     private bool isLoading;
     private int selectedTab;
@@ -263,9 +264,11 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         Action<string> openFileInNewTab,
         Action<string> openChanges,
         Func<string, CancellationToken, Task<Dictionary<string, LineCount>>>? lineCountsFactory,
-        ChangesViewModel? changeReview = null)
+        ChangesViewModel? changeReview = null,
+        Git.GitSyncViewModel? gitSync = null)
     {
         this.git = git;
+        this.gitSync = gitSync;
         this.openFile = openFile;
         this.openFileInNewTab = openFileInNewTab;
         this.openChanges = openChanges;
@@ -310,6 +313,12 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
     public ObservableCollection<ChangedFileViewModel> Changes { get; } = [];
 
     public ChangesViewModel? ChangeReview => changeReview;
+
+    /// <summary>
+    /// The git row at the bottom of the panel: branch, ahead/behind and the three sync verbs for the active session's
+    /// worktree. It sits here because the 已改动 tree compares against a local ref, and only a fetch makes that ref current.
+    /// </summary>
+    public Git.GitSyncViewModel? Git => gitSync;
 
     /// <summary>The 已改动 tab's rows: the shared change set as a folder tree (virtualized flat list).</summary>
     public RangeObservableCollection<ChangedTreeNodeViewModel> ChangedRows => changedTree.Rows;

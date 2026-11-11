@@ -247,7 +247,7 @@ public sealed class ComposerQueueTests
         Directory.CreateDirectory(root);
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             await session.Dispatch(
                 async () =>
                 {

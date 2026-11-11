@@ -39,7 +39,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {
@@ -75,7 +75,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         var repo = sandbox.CloneTracked("repo");
         GitTestShell.RunChecked(repo, "branch", "taken");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {
@@ -107,7 +107,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {
@@ -146,7 +146,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {
@@ -177,7 +177,7 @@ public sealed class ProjectTreeWorktreeSessionTests
         using var sandbox = GitTestSandbox.Create();
         var repo = sandbox.CloneTracked("repo");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var outcome = await session.Dispatch(
             async () =>
             {
