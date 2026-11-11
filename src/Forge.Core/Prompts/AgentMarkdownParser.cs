@@ -158,6 +158,11 @@ internal static class AgentMarkdownParser
 
     private static ThinkingEffort ParseThinking(string value)
     {
+        if (value.Equals("minimal", StringComparison.OrdinalIgnoreCase))
+        {
+            return ThinkingEffort.Minimal;
+        }
+
         if (value.Equals("low", StringComparison.OrdinalIgnoreCase))
         {
             return ThinkingEffort.Low;
@@ -173,6 +178,17 @@ internal static class AgentMarkdownParser
             return ThinkingEffort.High;
         }
 
+        if (value.Equals("xhigh", StringComparison.OrdinalIgnoreCase))
+        {
+            return ThinkingEffort.XHigh;
+        }
+
+        if (value.Equals("max", StringComparison.OrdinalIgnoreCase))
+        {
+            return ThinkingEffort.Max;
+        }
+
+        // "off", an empty value and anything unrecognised all mean the same thing: do not think.
         return ThinkingEffort.Off;
     }
 

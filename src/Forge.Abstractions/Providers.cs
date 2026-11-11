@@ -1,6 +1,7 @@
 namespace Forge.Abstractions;
 
-public enum ThinkingEffort { Off, Low, Medium, High }
+/// <summary>Reasoning effort, seven steps. Which steps a model accepts is decided per model, not by this enum.</summary>
+public enum ThinkingEffort { Off, Minimal, Low, Medium, High, XHigh, Max }
 
 /// <summary>Which model to use and how hard it should think; set per agent kind.</summary>
 /// <param name="ProviderId">Which connected provider serves <paramref name="Model"/>; <c>null</c> means the default one.

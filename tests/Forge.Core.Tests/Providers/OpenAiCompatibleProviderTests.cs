@@ -168,10 +168,31 @@ public class OpenAiCompatibleProviderTests
         Assert.False(root.TryGetProperty("tools", out _));
     }
 
+    [Fact]
+    public async Task Max_clamps_to_xhigh_because_the_wire_has_no_higher_step()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueSse(TestData.Sse("[DONE]"))
+            .EnqueueSse(TestData.Sse("[DONE]"));
+        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+
+        await provider.CollectAsync(TestData.Request(model: new ModelSettings("gpt-test", ThinkingEffort.XHigh)));
+        var xhigh = handler.Last.Root.GetProperty("reasoning_effort").GetString();
+
+        await provider.CollectAsync(TestData.Request(model: new ModelSettings("gpt-test", ThinkingEffort.Max)));
+        var max = handler.Last.Root.GetProperty("reasoning_effort").GetString();
+
+        Assert.Equal("xhigh", xhigh);
+        Assert.Equal(xhigh, max);
+    }
+
     [Theory]
+    [InlineData(ThinkingEffort.Minimal, "minimal")]
     [InlineData(ThinkingEffort.Low, "low")]
     [InlineData(ThinkingEffort.Medium, "medium")]
     [InlineData(ThinkingEffort.High, "high")]
+    [InlineData(ThinkingEffort.XHigh, "xhigh")]
+    [InlineData(ThinkingEffort.Max, "xhigh")]
     public async Task Maps_thinking_effort_to_reasoning_effort(ThinkingEffort effort, string expected)
     {
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));

@@ -174,6 +174,32 @@ public class AnthropicProviderTests
     }
 
     [Fact]
+    public async Task Maps_the_outer_thinking_steps_to_budgets_above_the_existing_ones()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""))
+            .EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""))
+            .EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
+
+        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+
+        await provider.CollectAsync(TestData.Request(model: new ModelSettings("claude", ThinkingEffort.Minimal)));
+        var minimal = handler.Last.Root;
+        Assert.Equal(1024, minimal.GetProperty("thinking").GetProperty("budget_tokens").GetInt32());
+        Assert.True(minimal.GetProperty("max_tokens").GetInt32() > 1024);
+
+        await provider.CollectAsync(TestData.Request(model: new ModelSettings("claude", ThinkingEffort.XHigh)));
+        var xhigh = handler.Last.Root;
+        Assert.Equal(32768, xhigh.GetProperty("thinking").GetProperty("budget_tokens").GetInt32());
+        Assert.True(xhigh.GetProperty("max_tokens").GetInt32() > 32768);
+
+        await provider.CollectAsync(TestData.Request(model: new ModelSettings("claude", ThinkingEffort.Max)));
+        var max = handler.Last.Root;
+        Assert.Equal(49152, max.GetProperty("thinking").GetProperty("budget_tokens").GetInt32());
+        Assert.True(max.GetProperty("max_tokens").GetInt32() > 49152);
+    }
+
+    [Fact]
     public async Task Does_not_send_unsigned_thinking_blocks_back()
     {
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));

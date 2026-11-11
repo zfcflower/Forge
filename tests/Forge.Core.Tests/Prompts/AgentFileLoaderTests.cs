@@ -120,11 +120,17 @@ public class AgentFileLoaderTests
 
     [Theory]
     [InlineData("off", ThinkingEffort.Off)]
+    [InlineData("minimal", ThinkingEffort.Minimal)]
     [InlineData("low", ThinkingEffort.Low)]
     [InlineData("medium", ThinkingEffort.Medium)]
     [InlineData("high", ThinkingEffort.High)]
     [InlineData("HIGH", ThinkingEffort.High)]
+    [InlineData("xhigh", ThinkingEffort.XHigh)]
+    [InlineData("XHigh", ThinkingEffort.XHigh)]
+    [InlineData("max", ThinkingEffort.Max)]
+    [InlineData("MAX", ThinkingEffort.Max)]
     [InlineData("maximum", ThinkingEffort.Off)]
+    [InlineData("maxed", ThinkingEffort.Off)]
     [InlineData("", ThinkingEffort.Off)]
     public void Parse_maps_thinking_effort(string value, ThinkingEffort expected)
     {

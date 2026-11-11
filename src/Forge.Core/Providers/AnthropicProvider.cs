@@ -353,11 +353,16 @@ public sealed class AnthropicProvider : HttpChatProvider
         writer.WriteEndObject();
     }
 
+    // The extended-thinking budget per step: 1k, 2k, 8k, 24k, 32k and 48k tokens, each still under the output ceiling
+    // Anthropic allows (see the ThinkingHeadroom clamp above, which lifts max_tokens whenever the budget would exceed it).
     private static int ThinkingBudget(ThinkingEffort effort) => effort switch
     {
+        ThinkingEffort.Minimal => 1024,
         ThinkingEffort.Low => 2048,
         ThinkingEffort.Medium => 8192,
         ThinkingEffort.High => 24576,
+        ThinkingEffort.XHigh => 32768,
+        ThinkingEffort.Max => 49152,
         _ => 0,
     };
 

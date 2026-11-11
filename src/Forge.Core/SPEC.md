@@ -60,7 +60,7 @@ Agent 循环、模型提供方、提示词合成、SubAgent 调度与会话存�
 
 **压缩触发。** 阈值是用户设置的绝对 token 数,而非窗口百分比;压缩目标为阈值的一半。无会话存储时压缩不生效。
 
-**提供方。** OpenAI 兼容与 Anthropic。重试只发生在首个事件之前;`HttpClient` 必须是无限超时,改由每次读取的空闲超时(默认 120 秒)判定停滞。`ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。OpenAI 兼容适配器在写 wire 消息时合并相邻的同角色 `user`/`assistant` 消息:文本按序拼接、段落间空一行,`tool_calls` 保持顺序;`tool` 角色消息不合并,`system` 保持现状(系统提示词在最前,历史中的 system 消息按原位置逐条写出)。内部历史不变,序列化结果对同一历史字节稳定。
+**提供方。** OpenAI 兼容、Anthropic 与 OpenAI Responses(`POST {baseUrl}/responses`,只在提供方模型只走 Responses 时使用:Meta 与 ChatGPT 订阅;请求用 `instructions` 承载系统提示、`input` 承载消息与工具调用、`reasoning.effort` 承载推理档、`store:false`;流按 `output_text.delta`/`function_call_arguments.delta`/`response.completed` 解析,七档里 `Max` 与 OpenAI 兼容一样夹到 `xhigh`)。重试只发生在首个事件之前;`HttpClient` 必须是无限超时,改由每次读取的空闲超时(默认 120 秒)判定停滞。`ProviderException` 的 Retry-After 暂存于 `Exception.Data`(契约缺口,未确认是否正式化)。OpenAI 兼容适配器在写 wire 消息时合并相邻的同角色 `user`/`assistant` 消息:文本按序拼接、段落间空一行,`tool_calls` 保持顺序;`tool` 角色消息不合并,`system` 保持现状(系统提示词在最前,历史中的 system 消息按原位置逐条写出)。内部历史不变,序列化结果对同一历史字节稳定。
 
 **提供方认证与端点。** `ProviderConfig.AuthStyle` 决定凭据怎么走:`Default`(各协议自己的约定:Anthropic `x-api-key`,OpenAI 兼容 bearer)、`BearerOnly`(OAuth 与 Copilot 用的 `Authorization: Bearer`,Anthropic 走这条时另加一个逗号连接的 `anthropic-beta: claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14`)、`None`(不写凭据头,凭据全部由调用方放进 `Headers`)。`Headers` 在 `ApplyAuth` 之后逐个覆盖同名头,所以网关能用自定义方案而不是被内置方案绑死。`SystemPromptPreamble` 非空时 Anthropic 的 `system` 数组**第一块**必须是它(单独一块文本),cache 断点仍在最后一块——非 Haiku 的订阅请求缺这一块会被服务端以 400 拒绝。
 

@@ -26,6 +26,18 @@ public class ProviderFactoryTests
         Assert.Equal("anthropic", provider.Id);
     }
 
+    [Fact]
+    public void Creates_openai_responses_provider()
+    {
+        using var http = ProviderHttpClient.Create();
+        var provider = ProviderFactory.Create(
+            new ProviderConfig("responses", ProviderFactory.OpenAiResponsesKind, "https://example.test/v1", "sk-test"),
+            http);
+
+        Assert.IsType<OpenAiResponsesProvider>(provider);
+        Assert.Equal("responses", provider.Id);
+    }
+
     [Theory]
     [InlineData("OpenAI-Compatible")]
     [InlineData("openai-compatible")]
@@ -43,7 +55,11 @@ public class ProviderFactoryTests
     {
         using var http = ProviderHttpClient.Create();
 
-        Assert.Throws<ArgumentException>(
+        var exception = Assert.Throws<ArgumentException>(
             () => ProviderFactory.Create(new ProviderConfig("x", "gemini", "https://example.test", null), http));
+
+        Assert.Contains(ProviderFactory.OpenAiCompatibleKind, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(ProviderFactory.AnthropicKind, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(ProviderFactory.OpenAiResponsesKind, exception.Message, StringComparison.Ordinal);
     }
 }
