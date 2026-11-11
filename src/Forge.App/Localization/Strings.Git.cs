@@ -27,8 +27,6 @@ internal static class GitStrings
     public const string SettingsChecksPoll = "git.settings.checksPoll";
     public const string SettingsChecksMaxWait = "git.settings.checksMaxWait";
     public const string SettingsChecksHint = "git.settings.checksHint";
-    public const string SettingsNotifications = "git.settings.notifications";
-    public const string SettingsNotificationsHint = "git.settings.notificationsHint";
     public const string SettingsGhPath = "git.settings.ghPath";
     public const string SettingsGhPathHint = "git.settings.ghPathHint";
 
@@ -207,11 +205,6 @@ internal static class GitStrings
             SettingsChecksHint,
             "“等待检查”每隔多少秒向 GitHub 查询一次（10–300 秒），最长等待多少分钟（1–180 分钟）；改动对下一次等待生效。",
             "How often waiting for checks asks GitHub (10–300 seconds) and the longest it keeps waiting (1–180 minutes); a change applies to the next wait.");
-        Loc.Register(SettingsNotifications, "系统通知", "System notifications");
-        Loc.Register(
-            SettingsNotificationsHint,
-            "等待检查结束时发出一条系统通知。Windows 上通知的发送方显示为 Windows PowerShell（未打包的程序没有自己的应用标识）。",
-            "Raise one system notification when waiting for checks ends. On Windows the sender shows as Windows PowerShell (an unpackaged program has no application identity of its own).");
         Loc.Register(SettingsGhPath, "gh 可执行文件", "gh executable");
         Loc.Register(
             SettingsGhPathHint,

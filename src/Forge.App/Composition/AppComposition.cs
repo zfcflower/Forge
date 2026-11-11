@@ -9,6 +9,7 @@ using Forge.App.Editing;
 using Forge.App.Git;
 using Forge.App.Lifecycle;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
@@ -199,6 +200,13 @@ internal sealed class AppComposition : IAsyncDisposable
     public ApprovalServices? Approvals { get; private set; }
 
     /// <summary>
+    /// The one notification entry (toasts in the window, desktop notifications in the background). Created before the window
+    /// so the notification overlay can resolve it from its own constructor; every feature that tells the user something
+    /// goes through it.
+    /// </summary>
+    public NotificationCenter Notifications { get; private set; } = null!;
+
+    /// <summary>
     /// Commits a finished TODO step into the session's worktree. The agent's <c>todo</c> tool reaches it through the
     /// runtime services; the TODO panel calls it when the user ticks an item or retries a failed commit.
     /// </summary>
@@ -270,6 +278,18 @@ internal sealed class AppComposition : IAsyncDisposable
         var gitSettings = new GitSettingsSectionViewModel(preferences.Current);
         settings.Add(new SettingsSection(SettingsSectionIds.Git, GitStrings.SettingsSectionTitle, SettingsSectionIds.GitOrder, gitSettings));
 
+        // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
+        //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
+        //     window; the overlay in MainWindow resolves it from NotificationCenter.Current.
+        var notifications = new NotificationCenter(
+            () => preferences.Current.Notifications,
+            new SystemNotifier());
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Notifications,
+            NotificationsStrings.SectionTitle,
+            SettingsSectionIds.NotificationsOrder,
+            new NotificationsSettingsViewModel(preferences.Current)));
+
         // 1. The approval database is owned by the extension host; the shell only reads its record count.
         var approvalsDatabasePath = Path.Combine(paths.HostDataDirectory, ApprovalStore.FileName);
 
@@ -284,13 +304,13 @@ internal sealed class AppComposition : IAsyncDisposable
         }
         else
         {
-            host = ExtensionHostSupervisor.Create(layout, paths, toolRouter);
+            host = ExtensionHostSupervisor.Create(layout, paths, toolRouter, notifications);
         }
 
         // 2b. Approvals: the remembered rules, the queue and the host adapter that turns a plugin draft into an approval
         //     card. Created before the agent runtimes because every session handler and the extension tools come from it,
         //     and before the window so the queue overlay finds it.
-        var approvals = ApprovalServices.Create(paths, host, hostProblem);
+        var approvals = ApprovalServices.Create(paths, host, hostProblem, notifications);
 
         // 3. Workspace.
         WorkspaceServices? workspace = null;
@@ -309,7 +329,7 @@ internal sealed class AppComposition : IAsyncDisposable
         var mcpProblem = default(LocText);
         try
         {
-            mcp = McpServices.Create(paths);
+            mcp = McpServices.Create(paths, notifications);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -386,7 +406,8 @@ internal sealed class AppComposition : IAsyncDisposable
             git,
             todos,
             StepCommitter.WorktreeOf(sessions),
-            () => preferences.Current.GitStepCommits);
+            () => preferences.Current.GitStepCommits,
+            notifications);
         runtimeServices.StepCommitter = stepCommitter;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;
@@ -456,6 +477,7 @@ internal sealed class AppComposition : IAsyncDisposable
             new RemovalGit(git, worktrees.Manager),
             (directory, ct) => composition.Trash.MoveToTrashAsync(directory, ct),
             composition.PurgeCleanup.CleanUpAsync);
+        composition.Notifications = notifications;
 
         // The four instrument sections: the click target of each counter in the session strip. They read the composition
         // lazily (on the settings page opening), so they are registered here, still inside the composition root, once the
@@ -653,6 +675,12 @@ internal sealed class AppComposition : IAsyncDisposable
         }
 
         httpClient.Dispose();
+
+        // Last of the services: a session may still have been finishing a turn while everything above was released.
+        if (Notifications is { } notifications)
+        {
+            notifications.Dispose();
+        }
 
         preferences.Current.PropertyChanged -= OnPreferencesChanged;
         await preferences.DisposeAsync().ConfigureAwait(false);

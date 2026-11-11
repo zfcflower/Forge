@@ -9,7 +9,7 @@ namespace Forge.App.Tests.Git;
 
 /// <summary>
 /// Pins the settings the pull request and wait features add to the <c>git</c> section: <c>gitGhPath</c> (an executable
-/// path, trimmed, empty meaning <c>gh</c> from PATH), <c>gitNotifications</c>, <c>gitChecksPollSeconds</c> (clamped to
+/// path, trimmed, empty meaning <c>gh</c> from PATH), <c>gitChecksPollSeconds</c> (clamped to
 /// 10..300), <c>gitChecksMaxWaitMinutes</c> (clamped to 1..180) and <c>gitStepCommits</c> - their defaults, their
 /// <see cref="AppPreferences"/> setters, the section view model that edits them (including the one property that
 /// deliberately raises no change notification), their round trip through <see cref="PreferencesStore"/>, and the mapping
@@ -54,7 +54,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         Assert.True(preferences.GitStepCommits);
         Assert.Equal(30, preferences.GitChecksPollSeconds);
         Assert.Equal(30, preferences.GitChecksMaxWaitMinutes);
-        Assert.True(preferences.GitNotifications);
+        Assert.True(preferences.Notifications);
         Assert.Equal(string.Empty, preferences.GitGhPath);
     }
 
@@ -72,7 +72,6 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         Assert.True(section.StepCommits);
         Assert.Equal(30, section.ChecksPollSeconds);
         Assert.Equal(30, section.ChecksMaxWaitMinutes);
-        Assert.True(section.Notifications);
         Assert.Equal(string.Empty, section.GhPath);
     }
 
@@ -156,22 +155,16 @@ public sealed class GitSettingsSectionGitTests : IDisposable
     }
 
     [Fact]
-    public void The_switches_round_trip()
+    public void The_step_commits_switch_round_trips()
     {
         var preferences = new AppPreferences();
         using var section = new GitSettingsSectionViewModel(preferences);
-
-        section.Notifications = false;
-        Assert.False(preferences.GitNotifications);
-        Assert.False(section.Notifications);
 
         section.StepCommits = false;
         Assert.False(preferences.GitStepCommits);
         Assert.False(section.StepCommits);
 
-        section.Notifications = true;
         section.StepCommits = true;
-        Assert.True(preferences.GitNotifications);
         Assert.True(preferences.GitStepCommits);
     }
 
@@ -218,7 +211,6 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         section.NetworkTimeoutSeconds = 45;
         section.ChecksPollSeconds = 45;
         section.ChecksMaxWaitMinutes = 5;
-        section.Notifications = false;
         section.StepCommits = false;
 
         Assert.Equal(
@@ -227,7 +219,6 @@ public sealed class GitSettingsSectionGitTests : IDisposable
                 nameof(GitSettingsSectionViewModel.NetworkTimeoutSeconds),
                 nameof(GitSettingsSectionViewModel.ChecksPollSeconds),
                 nameof(GitSettingsSectionViewModel.ChecksMaxWaitMinutes),
-                nameof(GitSettingsSectionViewModel.Notifications),
                 nameof(GitSettingsSectionViewModel.StepCommits),
             ],
             raised);
@@ -280,7 +271,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
 
         // The values stay readable after the disposal; only the language subscription is gone.
         Assert.Equal(30, section.ChecksPollSeconds);
-        Assert.True(section.Notifications);
+        Assert.True(section.StepCommits);
     }
 
     // ------------------------------------------------------------ the file
@@ -294,7 +285,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
             {
               "preferences": {
                 "gitGhPath": "  /opt/homebrew/bin/gh  ",
-                "gitNotifications": false,
+                "notifications": false,
                 "gitChecksPollSeconds": 45,
                 "gitChecksMaxWaitMinutes": 5,
                 "gitStepCommits": false
@@ -307,7 +298,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
             await store.LoadAsync(CancellationToken.None);
             Assert.Null(store.LoadProblem);
             Assert.Equal("/opt/homebrew/bin/gh", store.Current.GitGhPath);
-            Assert.False(store.Current.GitNotifications);
+            Assert.False(store.Current.Notifications);
             Assert.Equal(45, store.Current.GitChecksPollSeconds);
             Assert.Equal(5, store.Current.GitChecksMaxWaitMinutes);
             Assert.False(store.Current.GitStepCommits);
@@ -315,7 +306,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
             // An edit in the section is what the store persists on its next save.
             using var section = new GitSettingsSectionViewModel(store.Current);
             section.GhPath = "  C:\\tools\\gh.exe ";
-            section.Notifications = true;
+            store.Current.Notifications = true;
             section.ChecksPollSeconds = 20;
             section.ChecksMaxWaitMinutes = 120;
             section.StepCommits = true;
@@ -325,7 +316,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         var document = Assert.IsType<JsonObject>(JsonNode.Parse(await File.ReadAllTextAsync(settingsPath)));
         var preferences = Assert.IsType<JsonObject>(document["preferences"]);
         Assert.Equal(@"C:\tools\gh.exe", preferences["gitGhPath"]?.GetValue<string>());
-        Assert.True(preferences["gitNotifications"]?.GetValue<bool>());
+        Assert.True(preferences["notifications"]?.GetValue<bool>());
         Assert.Equal(20, preferences["gitChecksPollSeconds"]?.GetValue<int>());
         Assert.Equal(120, preferences["gitChecksMaxWaitMinutes"]?.GetValue<int>());
         Assert.True(preferences["gitStepCommits"]?.GetValue<bool>());
@@ -351,8 +342,36 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         Assert.Null(store.LoadProblem);
         Assert.Equal(AppPreferences.MinGitChecksPollSeconds, store.Current.GitChecksPollSeconds);
         Assert.Equal(AppPreferences.MaxGitChecksMaxWaitMinutes, store.Current.GitChecksMaxWaitMinutes);
-        Assert.True(store.Current.GitNotifications);
+        Assert.True(store.Current.Notifications);
         Assert.Equal(string.Empty, store.Current.GitGhPath);
+    }
+
+    [Fact]
+    public async Task A_file_carrying_only_the_legacy_gitNotifications_key_loads_and_rewrites_as_notifications()
+    {
+        await File.WriteAllTextAsync(
+            settingsPath,
+            """
+            {
+              "preferences": {
+                "gitNotifications": false
+              }
+            }
+            """);
+
+        await using (var store = new PreferencesStore(settingsPath))
+        {
+            await store.LoadAsync(CancellationToken.None);
+            Assert.Null(store.LoadProblem);
+            Assert.False(store.Current.Notifications);
+
+            await store.SaveAsync(CancellationToken.None);
+        }
+
+        var document = Assert.IsType<JsonObject>(JsonNode.Parse(await File.ReadAllTextAsync(settingsPath)));
+        var preferences = Assert.IsType<JsonObject>(document["preferences"]);
+        Assert.False(preferences["notifications"]?.GetValue<bool>());
+        Assert.False(preferences.ContainsKey("gitNotifications"));
     }
 
     // ------------------------------------------------------------ what the tools and the panel read

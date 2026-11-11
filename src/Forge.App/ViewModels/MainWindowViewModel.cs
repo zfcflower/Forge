@@ -8,6 +8,7 @@ using Forge.App.Agents;
 using Forge.App.Approval;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Services;
 using Forge.App.Terminal;
 using Forge.App.Git;
@@ -226,7 +227,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         GitSync = new GitSyncViewModel(
             composition.Git,
             composition.GitPanelSettings,
-            path => OpenFile(path, newTab: false));
+            path => OpenFile(path, newTab: false),
+            composition.Notifications);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -398,7 +400,23 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
         {
             Status.SetWorkspaceProblem(ShellStrings.DatabaseProblem(exception.Message));
+            composition.Notifications.Notify(
+                NotificationLevel.Error,
+                NotificationsStrings.StartupProblemTitle,
+                ShellStrings.DatabaseProblem(exception.Message),
+                "startup-failed");
             return;
+        }
+
+        // The settings file falling back to defaults is silent everywhere else (the settings page shows it, but only to a
+        // user who opens it), and losing every preference without a word is worse than one toast.
+        if (composition.PreferencesProblem is { Length: > 0 } preferencesProblem)
+        {
+            composition.Notifications.Notify(
+                NotificationLevel.Warning,
+                NotificationsStrings.PreferencesProblemTitle,
+                LocText.Literal(preferencesProblem),
+                "preferences-problem");
         }
 
         await RunStartupLifecycleAsync().ConfigureAwait(true);
@@ -632,7 +650,16 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or IOException)
                 {
-                    Dispatcher.UIThread.Post(() => Status.SetWorkspaceProblem(ShellStrings.ProjectsProblem(exception.Message)));
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        var problem = ShellStrings.ProjectsProblem(exception.Message);
+                        Status.SetWorkspaceProblem(problem);
+                        composition.Notifications.Notify(
+                            NotificationLevel.Warning,
+                            NotificationsStrings.StartupProblemTitle,
+                            problem,
+                            "projects-problem");
+                    });
                 }
             });
 
@@ -1772,7 +1799,13 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         if (failures.Count > 0)
         {
-            Status.SetWorkspaceProblem(LocText.Literal(RemovalStrings.PurgeRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal)))));
+            var problem = LocText.Literal(RemovalStrings.PurgeRetryFailed(string.Join("; ", failures.Distinct(StringComparer.Ordinal))));
+            Status.SetWorkspaceProblem(problem);
+            composition.Notifications.Notify(
+                NotificationLevel.Warning,
+                NotificationsStrings.StartupProblemTitle,
+                problem,
+                "purge-cleanup");
         }
     }
 

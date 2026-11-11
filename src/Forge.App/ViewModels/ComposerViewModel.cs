@@ -3,6 +3,7 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Services;
 using Forge.Core.Prompts;
 using Forge.Workspace;
@@ -672,7 +673,16 @@ internal sealed class ComposerViewModel : ObservableObject
         Status = SessionStrings.ComposerDefaultsSaved;
     }
 
-    private void OnRefreshFailed(Exception exception) => Status = SessionStrings.ComposerModelFetchFailed(exception.Message);
+    private void OnRefreshFailed(Exception exception)
+    {
+        var failure = SessionStrings.ComposerModelFetchFailed(exception.Message);
+        Status = failure;
+        NotificationCenter.Current?.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.ProviderMissingTitle,
+            LocText.Literal(failure),
+            "model-fetch");
+    }
 
     private void Apply() => apply(CurrentDefinition());
 }

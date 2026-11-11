@@ -1,0 +1,72 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:notif="using:Forge.App.Notifications"
+             x:Class="Forge.App.Views.NotificationOverlay"
+             x:DataType="notif:NotificationCenter"
+             Width="380"
+             HorizontalAlignment="Center"
+             VerticalAlignment="Top"
+             Margin="0,12,0,0"
+             IsVisible="False"
+             IsHitTestVisible="False"
+             AutomationProperties.AutomationId="notification-overlay">
+
+  <!-- The toasts of the shell: a fixed-width card per notification, stacked by ToastStackPanel (which animates a toast to
+       its new place when the ones above it come and go). The cards are pure display: the overlay does not take a pointer,
+       and everything the user needs to act on lives in the workbench. -->
+  <ItemsControl x:Name="Toasts"
+                ItemsSource="{Binding Items}"
+                AutomationProperties.AutomationId="notification-toasts">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <notif:ToastStackPanel />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate x:DataType="notif:NotificationItemViewModel">
+
+        <!-- One toast. The level classes colour the bar and the level word; `entering`/`leaving` carry the two animations
+             (a toast that is claimed back by a repeat of its notification enters again). -->
+        <Border Classes="toast"
+                Classes.info="{Binding IsInfo}"
+                Classes.success="{Binding IsSuccess}"
+                Classes.warning="{Binding IsWarning}"
+                Classes.error="{Binding IsError}"
+                Classes.entering="{Binding !IsLeaving}"
+                Classes.leaving="{Binding IsLeaving}"
+                AutomationProperties.AutomationId="notification-toast">
+          <Grid ColumnDefinitions="3,*">
+            <!-- The level bar: full height of the card, so the severity reads before the text does. -->
+            <Border Classes="toast-level" AutomationProperties.AutomationId="notification-level-bar" />
+
+            <StackPanel Grid.Column="1" Margin="10,8" Spacing="2">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Classes="toast-level-text"
+                           Text="{Binding LevelText}"
+                           AutomationProperties.AutomationId="notification-level" />
+                <Border Grid.Column="1"
+                        Classes="toast-count"
+                        Margin="8,0,0,0"
+                        IsVisible="{Binding HasCount}"
+                        AutomationProperties.AutomationId="notification-count">
+                  <TextBlock Text="{Binding CountText}"
+                             HorizontalAlignment="Center"
+                             AutomationProperties.AutomationId="notification-count-text" />
+                </Border>
+              </Grid>
+
+              <TextBlock Classes="toast-title"
+                         Text="{Binding Title}"
+                         AutomationProperties.AutomationId="notification-title" />
+              <TextBlock Classes="toast-body"
+                         Text="{Binding Body}"
+                         MaxLines="4"
+                         TextTrimming="CharacterEllipsis"
+                         AutomationProperties.AutomationId="notification-body" />
+            </StackPanel>
+          </Grid>
+        </Border>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

@@ -840,4 +840,116 @@
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <!-- In-window notifications (toast): one notification as a fixed-width card (Views/NotificationOverlay). A 3 px level
+       bar down the left edge, the level word, the title, up to four lines of body text and the xN badge of a merged
+       repeated notification. The card keeps its width, so a long text wraps (or is cut) instead of pushing the stack
+       around. -->
+  <Style Selector="Border.toast">
+    <Setter Property="Width" Value="380" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+    <Setter Property="BoxShadow" Value="{StaticResource ShadowMd}" />
+    <!-- The level bar runs into the rounded corners; the card clips it. -->
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <!-- The level bar and the level word: one colour per severity, taken from the semantic tokens. The base rule is the
+       neutral information blue; the four level classes below are the ones the template actually selects. -->
+  <Style Selector="Border.toast-level">
+    <Setter Property="Width" Value="3" />
+    <Setter Property="Background" Value="{DynamicResource InfoBrush}" />
+  </Style>
+  <Style Selector="Border.toast.info Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource InfoBrush}" />
+  </Style>
+  <Style Selector="Border.toast.success Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+  </Style>
+  <Style Selector="Border.toast.warning Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+  </Style>
+  <Style Selector="Border.toast.error Border.toast-level">
+    <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.toast-level-text">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.4" />
+    <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="Border.toast.info TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+  </Style>
+  <Style Selector="Border.toast.success TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+  </Style>
+  <Style Selector="Border.toast.warning TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+  </Style>
+  <Style Selector="Border.toast.error TextBlock.toast-level-text">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.toast-title">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style Selector="TextBlock.toast-body">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- The ×N badge of a notification that arrived again while it was already on screen. -->
+  <Style Selector="Border.toast-count">
+    <Setter Property="MinWidth" Value="18" />
+    <Setter Property="MinHeight" Value="15" />
+    <Setter Property="Padding" Value="5,0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="{DynamicResource CountBadgeBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.toast-count > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Enter and exit. `entering` is on while the toast is not leaving (so a repeat that claims a leaving toast brings
+       it back), `leaving` is the center's IsLeaving flag: 160 ms, inside the 180 ms the center waits before it drops the
+       item from the list, so the fade is always finished before the toast disappears. -->
+  <Style Selector="Border.toast.entering">
+    <Style.Animations>
+      <Animation Duration="0:0:0.16" Easing="CubicEaseOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+  <Style Selector="Border.toast.leaving">
+    <Style.Animations>
+      <Animation Duration="0:0:0.16" Easing="CubicEaseIn">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="0" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
 </Styles>

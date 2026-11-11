@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Forge.Abstractions;
+using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.Core.Tools;
 using Forge.HostClient;
 using Forge.Ipc;
@@ -68,7 +70,8 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         Func<string, IReadOnlyList<string>> pluginToolNames,
         ApprovalQueue queue,
         ApprovalRules rules,
-        ApprovalSessionDirectory sessions)
+        ApprovalSessionDirectory sessions,
+        INotifications? notifications = null)
     {
         this.authoring = authoring ?? throw new ArgumentNullException(nameof(authoring));
         this.contributions = contributions ?? throw new ArgumentNullException(nameof(contributions));
@@ -76,7 +79,11 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         this.queue = queue ?? throw new ArgumentNullException(nameof(queue));
         this.rules = rules ?? throw new ArgumentNullException(nameof(rules));
         this.sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
+        this.notifications = notifications;
     }
+
+    /// <summary>The shell's notification entry; null in an authoring service built on its own.</summary>
+    private readonly INotifications? notifications;
 
     // ---------------------------------------------------------------- agent-facing (IExtensionAuthoring)
 
@@ -221,6 +228,11 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
                 return Invalid($"another approval for extension '{pluginId}' is already on screen.");
             }
 
+            notifications.Notify(
+                NotificationLevel.Warning,
+                NotificationsStrings.ApprovalWaitingTitle,
+                NotificationsStrings.ApprovalWaiting(sessions.TitleOf(context.SessionId), pluginId),
+                "approval:" + card.Id);
             try
             {
                 var outcome = await card.Decision.WaitAsync(ct).ConfigureAwait(false);
@@ -371,6 +383,11 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
             return false;
         }
 
+        notifications.Notify(
+            NotificationLevel.Warning,
+            NotificationsStrings.ApprovalWaitingTitle,
+            NotificationsStrings.ApprovalWaitingRestored(staged.PluginId),
+            "approval:" + card.Id);
         _ = CompleteRestoredCardAsync(card);
         return true;
     }

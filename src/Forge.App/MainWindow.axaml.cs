@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.ViewModels;
 using Forge.App.Views;
 using Forge.App.Workbench.Controls;
@@ -203,7 +204,15 @@ public partial class MainWindow : Window
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             Console.Error.WriteLine("[shell] initialization failed: " + exception);
-            Dispatcher.UIThread.Post(() => model.Status.SetWorkspaceProblem(ShellStrings.InitializationFailed(exception.Message)));
+            Dispatcher.UIThread.Post(() =>
+            {
+                model.Status.SetWorkspaceProblem(ShellStrings.InitializationFailed(exception.Message));
+                NotificationCenter.Current?.Notify(
+                    NotificationLevel.Error,
+                    NotificationsStrings.StartupProblemTitle,
+                    ShellStrings.InitializationFailed(exception.Message),
+                    "startup-failed");
+            });
         }
     }
 }
