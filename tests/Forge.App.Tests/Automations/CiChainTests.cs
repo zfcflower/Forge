@@ -281,7 +281,7 @@ public sealed class CiChainTests
         var outcome = await r.RunAsync();
         Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
         Assert.Equal([(Worktree, "feature")], r.Git.Pushes);
-        Assert.Equal("build, test", await r.State.GetStateAsync("ci.lastFix:ci:s1#7", CancellationToken.None));
+        Assert.Equal("h2|build, test", await r.State.GetStateAsync("ci.lastFix:ci:s1#7", CancellationToken.None));
         Assert.Contains(r.Notes.Calls, c => c.Level == NotificationLevel.Success && c.Body == AutomationStrings.CiPushedBody("feature").Resolve());
 
         var message = Assert.Single(r.Mailbox.Messages);
@@ -303,19 +303,72 @@ public sealed class CiChainTests
     }
 
     [Fact]
-    public async Task Runner_does_not_push_the_same_failure_twice()
+    public async Task Runner_stops_before_scout_when_the_failing_head_is_the_commit_it_pushed()
     {
         var r = new RunnerHarness();
-        await r.State.SetStateAsync("ci.lastFix:ci:s1#7", "build, test", CancellationToken.None);
+        await r.State.SetStateAsync("ci.lastFix:ci:s1#7", "abc123|build, test", CancellationToken.None);
         var outcome = await r.RunAsync();
         Assert.Equal(AutomationRunStatus.Failed, outcome.Status);
         Assert.Equal(AutomationStrings.CiStoppedSameFailure, outcome.Message);
+        Assert.Empty(r.Launcher.Requests);
+        Assert.Empty(r.Mailbox.Messages);
         Assert.Empty(r.Git.Pushes);
+        Assert.Contains(r.Notes.Calls, c => c.Title == AutomationStrings.CiStoppedTitle.Resolve());
 
-        var other = new RunnerHarness();
-        await other.State.SetStateAsync("ci.lastFix:ci:s1#7", "lint", CancellationToken.None);
-        Assert.Equal(AutomationRunStatus.Completed, (await other.RunAsync()).Status);
-        Assert.Single(other.Git.Pushes);
+        // Other checks, or another commit, are not "the same failure after our fix".
+        var otherChecks = new RunnerHarness();
+        await otherChecks.State.SetStateAsync("ci.lastFix:ci:s1#7", "abc123|lint", CancellationToken.None);
+        Assert.Equal(AutomationRunStatus.Completed, (await otherChecks.RunAsync()).Status);
+        Assert.Single(otherChecks.Git.Pushes);
+
+        var otherCommit = new RunnerHarness();
+        await otherCommit.State.SetStateAsync("ci.lastFix:ci:s1#7", "zzz999|build, test", CancellationToken.None);
+        Assert.Equal(AutomationRunStatus.Completed, (await otherCommit.RunAsync()).Status);
+        Assert.Single(otherCommit.Git.Pushes);
+    }
+
+    [Fact]
+    public async Task Runner_records_the_pushed_commit_with_the_checks_and_passes_the_guards()
+    {
+        var r = new RunnerHarness();
+        await r.RunAsync();
+        Assert.Equal("h2|build, test", await r.State.GetStateAsync("ci.lastFix:ci:s1#7", CancellationToken.None));
+        Assert.Equal([("main", "abc123")], r.Git.PushGuards);
+    }
+
+    [Theory]
+    [InlineData(CiPushRefusal.DetachedHead)]
+    [InlineData(CiPushRefusal.BranchMismatch)]
+    [InlineData(CiPushRefusal.NotDescended)]
+    [InlineData(CiPushRefusal.ProtectedBranch)]
+    [InlineData(CiPushRefusal.HeadUnreadable)]
+    public async Task Runner_ends_with_a_localized_reason_and_notification_when_the_push_is_refused(CiPushRefusal refusal)
+    {
+        var r = new RunnerHarness();
+        r.Git.PushResult = new CiPushResult(false, null, refusal);
+        var outcome = await r.RunAsync();
+        var expected = AutomationStrings.CiStoppedUnsafePush(AutomationStrings.CiRefusal(refusal, "feature"));
+        Assert.Equal(AutomationRunStatus.Failed, outcome.Status);
+        Assert.Equal(expected, outcome.Message);
+        Assert.Null(await r.State.GetStateAsync("ci.lastFix:ci:s1#7", CancellationToken.None));
+        Assert.Contains(r.Notes.Calls, c => c.Title == AutomationStrings.CiStoppedTitle.Resolve() && c.Body == expected);
+    }
+
+    [Fact]
+    public async Task Fail_fix_green_then_the_same_check_failing_again_runs_again()
+    {
+        var h = new Harness();
+        await h.Watcher.PollOnceAsync(CancellationToken.None);
+        await h.State.SetStateAsync("ci.lastFix:ci:s1#7", "abc123|build, test", CancellationToken.None);
+
+        h.Pr.Checks = [Check("build", PrCheckBucket.Pass), Check("test", PrCheckBucket.Pass)];
+        await h.Watcher.PollOnceAsync(CancellationToken.None);
+        Assert.Null(await h.State.GetStateAsync("ci.lastFix:ci:s1#7", CancellationToken.None));
+
+        // Same state store, same check names, the pushed commit is no longer the failing head.
+        var r = new RunnerHarness { State = h.State };
+        Assert.Equal(AutomationRunStatus.Completed, (await r.RunAsync()).Status);
+        Assert.Single(r.Launcher.Requests);
     }
 
     [Fact]
@@ -445,7 +498,7 @@ public sealed class CiChainTests
 
         public CiFakeNotes Notes { get; } = new();
 
-        public CiFakeState State { get; } = new();
+        public CiFakeState State { get; init; } = new();
 
         public CiFakeContext Context => context ??= new CiFakeContext(
             new AutomationRun("run1", BuiltInAutomations.CiChain, "ci", AutomationTriggerSource.Event, "occ", AutomationRunStatus.Running, DateTimeOffset.UnixEpoch)

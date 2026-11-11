@@ -89,7 +89,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     private bool gating;
 
     // Automation turns (see RunAutomationTurnAsync): set only on the UI thread.
-    private bool automationTurn;
+    private volatile bool automationTurn;
+
+    // Root failure of the running turn as the worker thread saw it: the coalesced UI copy can land after the turn's await.
+    private volatile string? turnRootFailure;
+    private bool turnRan;
+    private volatile ProviderQuotaExhausted? turnRootQuota;
     private string? automationBanner;
     private Action? cancelAutomation;
     private RelayCommand? cancelAutomationCommand;
@@ -913,7 +918,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     /// Runs <paramref name="text"/> as a turn on behalf of an automation; the caller checked <see cref="IsAutomationIdle"/>.
     /// A rejected turn never lands in the user's draft or queue: it is reported as withdrawn instead.
     /// </summary>
-    public async Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin)
+    public async Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin, AgentDefinition? agent)
     {
         if (!IsAutomationIdle)
         {
@@ -923,7 +928,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         automationTurn = true;
         automationRejected = false;
         rootFailure = null;
+        lastTurnError = null;
+        turnRootFailure = null;
+        turnRootQuota = null;
+        turnRan = false;
         Transcript.AddNotice(origin);
+        if (agent is not null)
+        {
+            ApplyRootDefinition(agent);
+        }
+
         try
         {
             await RunTurnAsync(text).ConfigureAwait(true);
@@ -931,6 +945,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         finally
         {
             automationTurn = false;
+            if (agent is not null && !disposed)
+            {
+                // The override was for this turn only: the session goes back to the agent its composer has selected.
+                ApplyRootDefinition(Composer.CurrentDefinition());
+            }
         }
 
         if (automationRejected)
@@ -938,16 +957,28 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
             return new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.SessionUnavailableText);
         }
 
+        if (disposed && !turnRan)
+        {
+            return new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.SessionClosedText);
+        }
+
         if (lastTurnError is { IsEmpty: false } failure)
         {
             return failure.Equals(SessionStrings.Stopped)
                 ? new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.TurnStoppedText)
-                : new MailboxResult(MailboxStatus.TurnFailed, failure.Resolve());
+                : new MailboxResult(MailboxStatus.TurnFailed, failure.Resolve()) { Quota = turnRootQuota };
         }
 
-        return rootFailure is { } error
+        if (turnRootQuota is { } quota)
+        {
+            return new MailboxResult(MailboxStatus.TurnFailed, turnRootFailure ?? quota.Message) { Quota = quota };
+        }
+
+        return (turnRootFailure ?? rootFailure) is { } error
             ? new MailboxResult(MailboxStatus.TurnFailed, error)
-            : new MailboxResult(MailboxStatus.Completed);
+            : turnRan
+                ? new MailboxResult(MailboxStatus.Completed)
+                : new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.SessionUnavailableText);
     }
 
     /// <summary>Starts a sub-agent under this session outside a turn (automations); its tab appears like a tool-spawned one.</summary>
@@ -1124,9 +1155,6 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     /// <summary>Last agent event of the running turn, or the turn start (written off the UI thread).</summary>
     public DateTimeOffset LastActivityAt => new(Interlocked.Read(ref lastActivityTicks), TimeSpan.Zero);
 
-    /// <summary>An automation-owned session runs with this agent (a read-only scout, a model override); null restores the main agent.</summary>
-    public void UseAutomationAgent(AgentDefinition? definition) => ApplyRootDefinition(definition);
-
     private void ApplyRootDefinition(AgentDefinition? definition)
     {
         if (runtime?.SetRootDefinition(definition) == true)
@@ -1143,6 +1171,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
 
         var live = runtime!;
+        turnRan = true;
         if (rootRebuilt)
         {
             rootRebuilt = false;
@@ -1351,6 +1380,20 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         Interlocked.Exchange(ref lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
         switch (value)
         {
+            case AgentFailed failed when string.Equals(failed.AgentId, "root", StringComparison.Ordinal):
+                turnRootFailure = failed.Error;
+                coalescer.Enqueue(value);
+                break;
+            case AgentQuotaExhausted quota when string.Equals(quota.AgentId, "root", StringComparison.Ordinal):
+                turnRootQuota = quota.Quota;
+                // An automation's own turn gets the quota back in its mailbox result and decides itself (the resume run
+                // waits again, others fail); only a user's turn starts a resume run.
+                if (!automationTurn)
+                {
+                    coalescer.Enqueue(value);
+                }
+
+                break;
             case AgentTextDelta delta:
                 RouteDelta(delta);
                 break;

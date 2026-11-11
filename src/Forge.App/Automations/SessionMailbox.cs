@@ -97,7 +97,7 @@ internal sealed class SessionMailbox : ISessionMailbox
             return new MailboxResult(MailboxStatus.Cancelled);
         }
 
-        return await session.RunAutomationTurnAsync(message.Text, AutomationStrings.OriginNotice(message.Origin)).ConfigureAwait(true);
+        return await session.RunAutomationTurnAsync(message.Text, AutomationStrings.OriginNotice(message.Origin), message.Agent).ConfigureAwait(true);
     }
 }
 

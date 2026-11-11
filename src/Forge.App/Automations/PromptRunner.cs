@@ -108,19 +108,28 @@ internal sealed class PromptRunner(
         }
 
         await context.UpdateAsync(run => run with { SessionId = session.Id }, ct).ConfigureAwait(false);
-        await ui.InvokeAsync(async () =>
+        var opened = await ui.InvokeAsync(async () =>
         {
             await host.RefreshTreesAsync().ConfigureAwait(true);
-            var live = host.FindOpen(session.Id) ?? await host.OpenAsync(session.Id, ct).ConfigureAwait(true);
-            live?.UseAutomationAgent(AgentFor(context.Definition, defaultModel()));
-            return live is not null;
+            return (host.FindOpen(session.Id) ?? await host.OpenAsync(session.Id, ct).ConfigureAwait(true)) is not null;
         }).ConfigureAwait(false);
+        if (!opened)
+        {
+            return Finish(context, name, session.Title, new MailboxResult(MailboxStatus.Withdrawn, AutomationStrings.SessionUnavailableText));
+        }
 
+        // The agent (read-only tools, model) travels with the message: it applies to this one turn only, so a reused
+        // branch session goes back to its own agent for the user's turns.
+        var progress = new WaitingProgress(context);
         var result = await mailbox.DeliverAsync(
-                new MailboxMessage(session.Id, context.Definition.Prompt ?? string.Empty, context.Run.Id, name),
-                new WaitingProgress(context),
+                new MailboxMessage(session.Id, context.Definition.Prompt ?? string.Empty, context.Run.Id, name)
+                {
+                    Agent = AgentFor(context.Definition, defaultModel()),
+                },
+                progress,
                 ct)
             .ConfigureAwait(false);
+        await progress.DrainAsync().ConfigureAwait(false);
         return Finish(context, name, session.Title, result);
     }
 
@@ -191,13 +200,31 @@ internal sealed class PromptRunner(
     }
 }
 
-/// <summary>Mirrors the mailbox's "waiting for the session to be idle" onto the run's status.</summary>
+/// <summary>
+/// Mirrors the mailbox's "waiting for the session to be idle" onto the run's status. Reports are written in order, and a
+/// runner awaits <see cref="DrainAsync"/> before its own next update, so a late report never overwrites it.
+/// </summary>
 internal sealed class WaitingProgress(IAutomationRunContext context) : IProgress<bool>
 {
+    private readonly object gate = new();
+    private Task last = Task.CompletedTask;
+
     public void Report(bool value)
     {
         var status = value ? AutomationRunStatus.WaitingIdle : AutomationRunStatus.Running;
-        _ = UpdateAsync(status);
+        lock (gate)
+        {
+            last = last.ContinueWith(_ => UpdateAsync(status), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+        }
+    }
+
+    /// <summary>Completes once every report so far is written.</summary>
+    public Task DrainAsync()
+    {
+        lock (gate)
+        {
+            return last;
+        }
     }
 
     private async Task UpdateAsync(AutomationRunStatus status)

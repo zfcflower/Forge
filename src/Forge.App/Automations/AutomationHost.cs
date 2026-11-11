@@ -25,11 +25,11 @@ internal interface IAutomationSession
     /// <summary>Taken over, archived, removed or closed: an automation must not deliver here any more.</summary>
     bool IsAutomationClosed { get; }
 
-    /// <summary>Runs <paramref name="text"/> as a turn; completes when the turn ends.</summary>
-    Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin);
-
-    /// <summary>The agent the next turns run with: null = the configured main agent (see <c>SessionRuntime.SetRootDefinition</c>).</summary>
-    void UseAutomationAgent(AgentDefinition? definition);
+    /// <summary>
+    /// Runs <paramref name="text"/> as a turn, with <paramref name="agent"/> for this turn only when given; completes when the
+    /// turn ends.
+    /// </summary>
+    Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin, AgentDefinition? agent);
 
     /// <summary>Starts a sub-agent under the session's root; the returned task completes off the UI thread.</summary>
     Task<ChildAgentResult> LaunchChildAsync(string kind, string task, CancellationToken ct);

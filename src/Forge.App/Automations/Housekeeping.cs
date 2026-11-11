@@ -13,11 +13,15 @@ internal sealed class HousekeepingRunner(
     IProjectRegistry projects,
     ISessionCatalog catalog,
     IAutomationRunStore runs,
+    IAutomationDefinitionStore definitions,
     Func<string, CancellationToken, Task> pruneWorktrees,
     Func<IReadOnlySet<string>> openSessions,
     TimeProvider time) : IAutomationRunner
 {
     public static readonly TimeSpan ArchiveAfter = TimeSpan.FromDays(7);
+
+    /// <summary>A scratch folder younger than this is never removed: a run that just created it may not have its catalog row yet.</summary>
+    public static readonly TimeSpan ScratchMinAge = TimeSpan.FromHours(1);
 
     public const int RunsPerAutomation = 200;
 
@@ -49,7 +53,7 @@ internal sealed class HousekeepingRunner(
         var folders = 0;
         if (all.FirstOrDefault(static p => p.Kind == ProjectKind.General) is { } general)
         {
-            folders = RemoveEmptyScratchFolders(general.RootPath, sessions);
+            folders = await RemoveEmptyScratchAsync(general.RootPath, sessions, ct).ConfigureAwait(false);
         }
 
         var trimmed = await runs.TrimAsync(RunsPerAutomation, RunsTotal, ct).ConfigureAwait(false);
@@ -61,28 +65,85 @@ internal sealed class HousekeepingRunner(
             archived.ToString(CultureInfo.InvariantCulture)));
     }
 
-    /// <summary>Deletes <c>scratch/*</c> folders that are empty and that no stored session (of any status) points at.</summary>
-    internal static int RemoveEmptyScratchFolders(string generalRoot, IReadOnlyList<SessionInfo> sessions)
+    /// <summary>
+    /// Finds empty, old, unused scratch folders, then re-reads the catalog and deletes only those still unused: a scratch run
+    /// that started during the scan gets its catalog row after our first snapshot.
+    /// </summary>
+    private async Task<int> RemoveEmptyScratchAsync(string generalRoot, IReadOnlyList<SessionInfo> sessions, CancellationToken ct)
     {
-        var scratchRoot = Path.Combine(generalRoot, "scratch");
-        if (!Directory.Exists(scratchRoot))
+        var candidates = FindEmptyScratchFolders(generalRoot, sessions, time.GetUtcNow());
+        if (candidates.Count == 0)
         {
             return 0;
         }
 
+        var fresh = await catalog.QueryAsync(new SessionQuery(), ct).ConfigureAwait(false);
+        return DeleteUnusedFolders(candidates, fresh, time.GetUtcNow());
+    }
+
+    /// <summary>Deletes <c>scratch/*</c> folders that are empty, older than <see cref="ScratchMinAge"/>, and that no stored session (of any status) points at.</summary>
+    internal static int RemoveEmptyScratchFolders(string generalRoot, IReadOnlyList<SessionInfo> sessions, DateTimeOffset now) =>
+        DeleteUnusedFolders(FindEmptyScratchFolders(generalRoot, sessions, now), sessions, now);
+
+    private static HashSet<string> UsedPaths(IReadOnlyList<SessionInfo> sessions)
+    {
         var used = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         foreach (var session in sessions)
         {
             used.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(session.WorkspacePath)));
         }
 
-        var removed = 0;
+        return used;
+    }
+
+    private static bool IsYoung(string folder, DateTimeOffset now)
+    {
+        var newest = new DateTimeOffset(
+            DateTime.SpecifyKind(
+                Directory.GetCreationTimeUtc(folder) > Directory.GetLastWriteTimeUtc(folder) ? Directory.GetCreationTimeUtc(folder) : Directory.GetLastWriteTimeUtc(folder),
+                DateTimeKind.Utc));
+        return now - newest < ScratchMinAge;
+    }
+
+    private static List<string> FindEmptyScratchFolders(string generalRoot, IReadOnlyList<SessionInfo> sessions, DateTimeOffset now)
+    {
+        var found = new List<string>();
+        var scratchRoot = Path.Combine(generalRoot, "scratch");
+        if (!Directory.Exists(scratchRoot))
+        {
+            return found;
+        }
+
+        var used = UsedPaths(sessions);
         foreach (var folder in Directory.EnumerateDirectories(scratchRoot))
         {
             try
             {
                 var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
-                if (used.Contains(full) || Directory.EnumerateFileSystemEntries(full).Any())
+                if (!used.Contains(full) && !IsYoung(full, now) && !Directory.EnumerateFileSystemEntries(full).Any())
+                {
+                    found.Add(full);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Trace.WriteLine("[housekeeping] scratch folder kept: " + exception.Message);
+            }
+        }
+
+        return found;
+    }
+
+    private static int DeleteUnusedFolders(List<string> candidates, IReadOnlyList<SessionInfo> sessions, DateTimeOffset now)
+    {
+        var used = UsedPaths(sessions);
+        var removed = 0;
+        foreach (var full in candidates)
+        {
+            try
+            {
+                // Re-checked right before the delete; Directory.Delete(recursive: false) still refuses a folder that gained content.
+                if (used.Contains(full) || IsYoung(full, now) || Directory.EnumerateFileSystemEntries(full).Any())
                 {
                     continue;
                 }
@@ -99,20 +160,53 @@ internal sealed class HousekeepingRunner(
         return removed;
     }
 
+    /// <summary>Session ids that weekly (fixed-fork) automations reuse: <c>fork.session:&lt;definition id&gt;</c> state of every configured definition.</summary>
+    private async Task<HashSet<string>?> ReferencedForkSessionsAsync(CancellationToken ct)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            // The run store cannot list keys by prefix, so look up each configured definition's key.
+            var load = await definitions.LoadAsync(ct).ConfigureAwait(false);
+            foreach (var definition in load.Config.Definitions)
+            {
+                if (await runs.GetStateAsync(CatalogAutomationSessions.ForkStatePrefix + definition.Id, ct).ConfigureAwait(false) is { Length: > 0 } id)
+                {
+                    ids.Add(id);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+        {
+            System.Diagnostics.Trace.WriteLine("[housekeeping] fork references unreadable: " + exception.Message);
+            return null;
+        }
+
+        return ids;
+    }
+
     private async Task<int> ArchiveIdleAsync(IReadOnlyList<SessionInfo> sessions, CancellationToken ct)
     {
         var cutoff = time.GetUtcNow() - ArchiveAfter;
         var open = openSessions();
+        if (await ReferencedForkSessionsAsync(ct).ConfigureAwait(false) is not { } forks)
+        {
+            return 0; // cannot tell which sessions a weekly automation reuses: archive nothing rather than abandon its branch
+        }
+
         var archived = 0;
         foreach (var session in sessions)
         {
             if (session is not { Status: SessionStatus.Active, ParentSessionId: null, AutomationId: not null } ||
                 session.LastActiveAt > cutoff ||
-                open.Contains(session.Id))
+                open.Contains(session.Id) ||
+                forks.Contains(session.Id))
             {
                 continue;
             }
 
+            // Plain catalog status change on purpose: the UI archive path lives in MainWindowViewModel/ProjectTree (terminal and view
+            // cleanup, UI thread), and these sessions are not open, so there is no runtime state to release.
             if (await catalog.SetStatusAsync(session.Id, SessionStatus.Archived, ct).ConfigureAwait(false))
             {
                 archived++;

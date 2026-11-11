@@ -51,13 +51,12 @@ internal sealed class RunnerSession(string id, string title = "Session") : IAuto
 
     public List<(string Kind, string Task)> Children { get; } = [];
 
-    public Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin)
+    public Task<MailboxResult> RunAutomationTurnAsync(string text, LocText origin, AgentDefinition? agent)
     {
         Turns.Add((text, origin.Resolve()));
+        Agents.Add(agent);
         return Task.FromResult(TurnResult);
     }
-
-    public void UseAutomationAgent(AgentDefinition? definition) => Agents.Add(definition);
 
     public Task<ChildAgentResult> LaunchChildAsync(string kind, string task, CancellationToken ct)
     {
@@ -79,6 +78,9 @@ internal sealed class RunnerHost : IAutomationHost
 
     public int Opens { get; private set; }
 
+    /// <summary>When set, <see cref="OpenAsync"/> opens any id it is not scripted for as a fresh idle session.</summary>
+    public bool OpensAnything { get; set; }
+
     /// <summary>Runs inside <see cref="OpenAsync"/>, e.g. to cancel a token at the moment the session is opened.</summary>
     public Action? OnOpen { get; set; }
 
@@ -98,6 +100,13 @@ internal sealed class RunnerHost : IAutomationHost
         {
             open[sessionId] = session;
             return Task.FromResult<IAutomationSession?>(session);
+        }
+
+        if (OpensAnything)
+        {
+            var fresh = new RunnerSession(sessionId);
+            open[sessionId] = fresh;
+            return Task.FromResult<IAutomationSession?>(fresh);
         }
 
         return Task.FromResult<IAutomationSession?>(null);

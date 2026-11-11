@@ -62,6 +62,12 @@ internal static class AutomationStrings
     public const string CiStoppedPushFailedKey = "automations.ci.stoppedPushFailed";
     public const string CiStoppedBudgetKey = "automations.ci.stoppedBudget";
     public const string CiStoppedBaseBranchKey = "automations.ci.stoppedBaseBranch";
+    public const string CiStoppedUnsafePushKey = "automations.ci.stoppedUnsafePush";
+    public const string CiRefuseDetachedKey = "automations.ci.refuseDetached";
+    public const string CiRefuseMismatchKey = "automations.ci.refuseMismatch";
+    public const string CiRefuseNotDescendedKey = "automations.ci.refuseNotDescended";
+    public const string CiRefuseProtectedKey = "automations.ci.refuseProtected";
+    public const string CiRefuseHeadKey = "automations.ci.refuseHead";
     public const string CiChecksGoneKey = "automations.ci.checksGone";
     public const string CiScoutTaskKey = "automations.ci.scoutTask";
     public const string CiFixPromptKey = "automations.ci.fixPrompt";
@@ -173,6 +179,17 @@ internal static class AutomationStrings
 
     public static string CiStoppedBaseBranch(string branch) => Loc.Instance.Format(CiStoppedBaseBranchKey, branch);
 
+    public static string CiStoppedUnsafePush(string reason) => Loc.Instance.Format(CiStoppedUnsafePushKey, reason);
+
+    public static string CiRefusal(Forge.App.Automations.CiPushRefusal refusal, string branch) => refusal switch
+    {
+        Forge.App.Automations.CiPushRefusal.DetachedHead => Loc.Instance[CiRefuseDetachedKey],
+        Forge.App.Automations.CiPushRefusal.BranchMismatch => Loc.Instance.Format(CiRefuseMismatchKey, branch),
+        Forge.App.Automations.CiPushRefusal.NotDescended => Loc.Instance.Format(CiRefuseNotDescendedKey, branch),
+        Forge.App.Automations.CiPushRefusal.ProtectedBranch => Loc.Instance.Format(CiRefuseProtectedKey, branch),
+        _ => Loc.Instance[CiRefuseHeadKey],
+    };
+
     public static string CiChecksGone => Loc.Instance[CiChecksGoneKey];
 
     public static string CiScoutTask(string pr, string branch, string failures) => Loc.Instance.Format(CiScoutTaskKey, pr, branch, failures);
@@ -273,6 +290,12 @@ internal static class AutomationStrings
         Loc.Register(CiStoppedPushFailedKey, "推送失败：{0}", "Push failed: {0}");
         Loc.Register(CiStoppedBudgetKey, "已达到 {0} 次自动修复上限", "Reached the limit of {0} automatic fixes");
         Loc.Register(CiStoppedBaseBranchKey, "PR 分支与基线分支 {0} 相同，不自动推送", "The PR branch is the base branch {0}; not pushing");
+        Loc.Register(CiStoppedUnsafePushKey, "为避免推错分支，未自动推送：{0}", "Not pushing, to avoid pushing the wrong branch: {0}");
+        Loc.Register(CiRefuseDetachedKey, "会话处于游离 HEAD", "the session is on a detached HEAD");
+        Loc.Register(CiRefuseMismatchKey, "会话当前分支不是 PR 分支 {0}，也未跟踪 origin/{0}", "the session branch is not the PR branch {0} and does not track origin/{0}");
+        Loc.Register(CiRefuseNotDescendedKey, "当前提交不是 PR 分支 {0} 头部提交的后代", "the current commit does not descend from the head of PR branch {0}");
+        Loc.Register(CiRefuseProtectedKey, "{0} 是基线分支或仓库默认分支", "{0} is the base or the default branch of the repository");
+        Loc.Register(CiRefuseHeadKey, "无法读取当前提交", "the current commit cannot be read");
         Loc.Register(CiChecksGoneKey, "失败的检查已不存在（可能已重跑或 PR 已更新）", "The failed checks are gone (re-run, or the PR moved on)");
         Loc.Register(
             CiScoutTaskKey,

@@ -69,6 +69,7 @@ internal sealed class AutomationService : IAsyncDisposable
                 projects,
                 catalog,
                 runs,
+                Definitions,
                 (root, ct) => worktrees.Manager.PruneAsync(root, ct),
                 () => OpenSessionIdsSnapshot,
                 this.time));

@@ -208,9 +208,12 @@ internal sealed class CiFakeGit : Forge.App.Automations.ICiGit
     public Task<string?> HeadAsync(string worktree, CancellationToken ct) =>
         Task.FromResult<string?>(Heads[Math.Min(headCalls++, Heads.Length - 1)]);
 
-    public Task<Forge.App.Automations.CiPushResult> PushAsync(string worktree, string branch, CancellationToken ct)
+    public List<(string BaseBranch, string HeadOid)> PushGuards { get; } = [];
+
+    public Task<Forge.App.Automations.CiPushResult> PushAsync(string worktree, string branch, string baseBranch, string headOid, CancellationToken ct)
     {
         Pushes.Add((worktree, branch));
+        PushGuards.Add((baseBranch, headOid));
         return Task.FromResult(PushResult);
     }
 }

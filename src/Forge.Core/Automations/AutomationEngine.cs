@@ -140,6 +140,18 @@ public sealed class AutomationEngine : IAutomationEngine, IAsyncDisposable
             Rebuild(now, aliveAt ?? now, preserve: false);
         }
 
+        // A run that only waited for its session to become idle has not sent anything yet; the runners named in
+        // ResumableWhileIdle pick it up again (as waiting with no resume time) instead of losing it to "interrupted".
+        var idle = await _runs.QueryAsync(
+            new AutomationRunQuery { Statuses = [AutomationRunStatus.WaitingIdle], Limit = 1000 }, ct).ConfigureAwait(false);
+        foreach (var run in idle)
+        {
+            if (ResumableWhileIdle.Contains(run.AutomationId))
+            {
+                await _runs.UpdateAsync(run with { Status = AutomationRunStatus.WaitingQuota, ResumeAt = null }, ct).ConfigureAwait(false);
+            }
+        }
+
         await _runs.MarkInterruptedAsync(aliveAt ?? now, "Forge closed while this run was in progress.", ct).ConfigureAwait(false);
 
         var waiting = await _runs.QueryAsync(
@@ -151,6 +163,9 @@ public sealed class AutomationEngine : IAutomationEngine, IAsyncDisposable
         Wake();
         RaiseChanged();
     }
+
+    /// <summary>Automations whose runs waiting for an idle session survive a restart (they re-check before sending).</summary>
+    public static readonly IReadOnlySet<string> ResumableWhileIdle = new HashSet<string>(StringComparer.Ordinal) { BuiltInAutomations.QuotaResume };
 
     private void ResumeWaiting(AutomationRun run)
     {
@@ -753,6 +768,9 @@ public sealed class AutomationEngine : IAutomationEngine, IAsyncDisposable
 
         public CancellationTokenSource Cts { get; } = new();
 
+        /// <summary>Serializes run updates: a progress report and the runner's own update must not overwrite each other.</summary>
+        public SemaphoreSlim Updates { get; } = new(1, 1);
+
         public string? CancelReason { get; set; }
     }
 
@@ -770,19 +788,28 @@ public sealed class AutomationEngine : IAutomationEngine, IAsyncDisposable
         public async Task UpdateAsync(Func<AutomationRun, AutomationRun> change, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(change);
-            var updated = change(Run);
-            if (!AutomationRunStatuses.IsActive(updated.Status))
+            await active.Updates.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                throw new InvalidOperationException("A runner ends a run by returning its outcome, not through UpdateAsync.");
+                var updated = change(Run);
+                if (!AutomationRunStatuses.IsActive(updated.Status))
+                {
+                    throw new InvalidOperationException("A runner ends a run by returning its outcome, not through UpdateAsync.");
+                }
+
+                if (updated.Id != active.Run.Id || updated.AutomationId != active.Run.AutomationId)
+                {
+                    throw new InvalidOperationException("A run update cannot change the run's identity.");
+                }
+
+                await engine._runs.UpdateAsync(updated, ct).ConfigureAwait(false);
+                lock (engine._gate) active.Run = updated;
+            }
+            finally
+            {
+                active.Updates.Release();
             }
 
-            if (updated.Id != active.Run.Id || updated.AutomationId != active.Run.AutomationId)
-            {
-                throw new InvalidOperationException("A run update cannot change the run's identity.");
-            }
-
-            await engine._runs.UpdateAsync(updated, ct).ConfigureAwait(false);
-            lock (engine._gate) active.Run = updated;
             engine.RaiseChanged();
         }
     }

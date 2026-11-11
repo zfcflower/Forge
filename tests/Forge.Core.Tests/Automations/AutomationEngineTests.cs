@@ -282,6 +282,61 @@ public class AutomationEngineTests
     }
 
     [Fact]
+    public async Task Quota_runs_waiting_for_an_idle_session_survive_a_restart_others_are_interrupted()
+    {
+        var store = new FakeRunStore();
+        store.Seed(new AutomationRun("q1", BuiltInAutomations.QuotaResume, "Q", AutomationTriggerSource.Event, "e1", AutomationRunStatus.WaitingIdle, At(8))
+        {
+            TargetSessionId = "s1",
+        });
+        store.Seed(new AutomationRun("u1", "user-1", "U", AutomationTriggerSource.Schedule, "e2", AutomationRunStatus.WaitingIdle, At(8))
+        {
+            TargetSessionId = "s2",
+        });
+        var seen = new TaskCompletionSource<AutomationRun>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new DelegateRunner((ctx, _) =>
+        {
+            seen.TrySetResult(ctx.Run);
+            return Task.FromResult(AutomationRunOutcome.Completed("resumed"));
+        });
+        await using var engine = new AutomationEngine(new FakeDefinitionStore(), store, new ManualTimeProvider(At(12)), TimeZoneInfo.Utc, DelegateRunner.Completing());
+        engine.RegisterRunner(BuiltInAutomations.QuotaResume, runner);
+
+        await engine.StartupAsync(CancellationToken.None);
+
+        var resumed = await seen.Task.WaitAsync(Timeout);
+        Assert.Equal("q1", resumed.Id);
+        Assert.Equal(AutomationRunStatus.WaitingQuota, resumed.Status);
+        Assert.Null(resumed.ResumeAt);
+        Assert.Equal(AutomationRunStatus.Interrupted, store.Get("u1").Status);
+    }
+
+    [Fact]
+    public async Task Concurrent_run_updates_are_applied_one_after_another()
+    {
+        var store = new FakeRunStore();
+        var done = new TaskCompletionSource<AutomationRun>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new DelegateRunner(async (ctx, ct) =>
+        {
+            // Each update reads the run and adds one to its message counter; unserialized, updates read the same base.
+            var updates = Enumerable.Range(0, 50).Select(_ => Task.Run(() => ctx.UpdateAsync(
+                run => run with { Message = ((int.TryParse(run.Message, out var n) ? n : 0) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                ct)));
+            await Task.WhenAll(updates);
+            done.TrySetResult(ctx.Run);
+            return AutomationRunOutcome.Completed();
+        });
+        await using var engine = new AutomationEngine(new FakeDefinitionStore(), store, new ManualTimeProvider(At(12)), TimeZoneInfo.Utc, DelegateRunner.Completing());
+        engine.RegisterRunner(BuiltInAutomations.QuotaResume, runner);
+        await engine.StartupAsync(CancellationToken.None);
+
+        await engine.StartAsync(new AutomationRunRequest(BuiltInAutomations.QuotaResume, AutomationTriggerSource.Event) { TargetSessionId = "s1" }, CancellationToken.None);
+
+        var final = await done.Task.WaitAsync(Timeout);
+        Assert.Equal("50", final.Message);
+    }
+
+    [Fact]
     public async Task Bad_definitions_are_reported_and_the_others_still_work()
     {
         var store = new FakeRunStore();

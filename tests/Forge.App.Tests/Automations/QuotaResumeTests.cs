@@ -305,17 +305,14 @@ public sealed class QuotaResumeTests
     }
 
     [Fact]
-    public async Task A_fresh_quota_note_written_after_the_send_puts_the_run_back_to_waiting_and_it_resumes_later()
+    public async Task A_quota_failure_of_the_continue_turn_puts_the_run_back_to_waiting_and_it_resumes_later()
     {
         var h = new Harness(random: () => 0.5);
         h.Note(title: "Original title");
         var reset = h.Time.GetUtcNow() + TimeSpan.FromMinutes(5);
         h.Mailbox.Results.Clear();
-        h.Mailbox.Results.Add(new MailboxResult(MailboxStatus.TurnFailed, "quota"));
+        h.Mailbox.Results.Add(new MailboxResult(MailboxStatus.TurnFailed, "quota") { Quota = new ProviderQuotaExhausted("prov", "m2", reset, "limit again") });
         h.Mailbox.Results.Add(new MailboxResult(MailboxStatus.Completed));
-        h.Mailbox.OnDeliver = call => call == 1
-            ? h.WriteLatest("s1", new QuotaNote("prov", "m2", reset, h.Time.GetUtcNow(), "latest title", "limit again"))
-            : Task.CompletedTask;
         var context = h.Context(resumeAt: h.Time.GetUtcNow());
 
         var task = h.Runner.RunAsync(context, CancellationToken.None);
@@ -342,12 +339,12 @@ public sealed class QuotaResumeTests
     }
 
     [Fact]
-    public async Task A_quota_note_that_is_older_than_the_send_is_not_a_new_quota_failure()
+    public async Task A_quota_note_in_shared_state_does_not_make_a_failure_a_quota_failure()
     {
         var h = new Harness();
         h.Note();
         h.Mailbox.Results[0] = new MailboxResult(MailboxStatus.TurnFailed, "other error");
-        await h.WriteLatest("s1", new QuotaNote("prov", "m", null, h.Time.GetUtcNow() - TimeSpan.FromHours(1), "t", "old"));
+        h.Mailbox.OnDeliver = _ => h.WriteLatest("s1", new QuotaNote("prov", "m", null, h.Time.GetUtcNow(), "t", "written by someone else"));
 
         var outcome = await h.Runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None).Within();
 
@@ -357,16 +354,13 @@ public sealed class QuotaResumeTests
     }
 
     [Fact]
-    public async Task A_quota_note_written_at_the_exact_send_time_counts_as_new()
+    public async Task A_quota_failure_with_a_reset_time_already_passed_resumes_after_the_stagger_gap()
     {
         var h = new Harness(random: () => 0);
         h.Note();
         h.Mailbox.Results.Clear();
-        h.Mailbox.Results.Add(new MailboxResult(MailboxStatus.TurnFailed, "q"));
+        h.Mailbox.Results.Add(new MailboxResult(MailboxStatus.TurnFailed, "q") { Quota = new ProviderQuotaExhausted("prov", "m", h.Time.GetUtcNow(), "again") });
         h.Mailbox.Results.Add(new MailboxResult(MailboxStatus.Completed));
-        h.Mailbox.OnDeliver = call => call == 1
-            ? h.WriteLatest("s1", new QuotaNote("prov", "m", h.Time.GetUtcNow(), h.Time.GetUtcNow(), "t", "again"))
-            : Task.CompletedTask;
 
         var task = h.Runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None);
         await h.Time.WaitForTimerAsync(); // the stagger gap of the second send
@@ -381,8 +375,7 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness(random: () => 0);
         h.Note();
-        h.Mailbox.Results[0] = new MailboxResult(MailboxStatus.TurnFailed, "quota");
-        h.Mailbox.OnDeliver = _ => h.WriteLatest("s1", new QuotaNote("prov", "m", h.Time.GetUtcNow(), h.Time.GetUtcNow(), "t", "still empty"));
+        h.Mailbox.Results[0] = new MailboxResult(MailboxStatus.TurnFailed, "quota") { Quota = new ProviderQuotaExhausted("prov", "m", h.Time.GetUtcNow(), "still empty") };
         var context = h.Context(resumeAt: h.Time.GetUtcNow());
 
         var task = h.Runner.RunAsync(context, CancellationToken.None);

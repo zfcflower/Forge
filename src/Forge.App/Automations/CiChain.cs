@@ -9,8 +9,19 @@ using Forge.Workspace;
 
 namespace Forge.App.Automations;
 
+/// <summary>Why a push was refused before git was asked to push anything.</summary>
+public enum CiPushRefusal
+{
+    None,
+    DetachedHead,
+    BranchMismatch,
+    NotDescended,
+    ProtectedBranch,
+    HeadUnreadable,
+}
+
 /// <summary>Outcome of pushing a fix.</summary>
-internal sealed record CiPushResult(bool Success, string? Error);
+internal sealed record CiPushResult(bool Success, string? Error, CiPushRefusal Refusal = CiPushRefusal.None);
 
 /// <summary>The two git operations the CI chain needs; a seam so tests need no repository.</summary>
 internal interface ICiGit
@@ -18,8 +29,13 @@ internal interface ICiGit
     /// <summary>The commit HEAD points at, or null when it cannot be read.</summary>
     Task<string?> HeadAsync(string worktree, CancellationToken ct);
 
-    /// <summary>Pushes local <paramref name="branch"/> to <c>origin</c>; never forces.</summary>
-    Task<CiPushResult> PushAsync(string worktree, string branch, CancellationToken ct);
+    /// <summary>
+    /// Pushes the worktree's HEAD to <c>refs/heads/&lt;branch&gt;</c> on <c>origin</c>; never forces. Refuses (without
+    /// touching the network) when HEAD is detached or does not belong to <paramref name="branch"/>, when it does not
+    /// descend from <paramref name="headOid"/> (if known), or when <paramref name="branch"/> is the PR base or the
+    /// repository's default branch.
+    /// </summary>
+    Task<CiPushResult> PushAsync(string worktree, string branch, string baseBranch, string headOid, CancellationToken ct);
 }
 
 internal sealed class GitCliCiGit : ICiGit
@@ -33,11 +49,76 @@ internal sealed class GitCliCiGit : ICiGit
 
     public Task<string?> HeadAsync(string worktree, CancellationToken ct) => git.RevParseAsync(worktree, "HEAD", ct);
 
-    public async Task<CiPushResult> PushAsync(string worktree, string branch, CancellationToken ct)
+    // Limitation: the PR record (PullRequestInfo) carries no head-repository / cross-repository flag, so a fork PR cannot be
+    // recognised directly. The guards below make it harmless in practice: a fork head is not what the session branch tracks
+    // (upstream/name check), its commit is normally not an ancestor of the local HEAD, and the push is never forced.
+    public async Task<CiPushResult> PushAsync(string worktree, string branch, string baseBranch, string headOid, CancellationToken ct)
     {
-        var result = await git.PushAsync(worktree, new GitPushOptions { Remote = "origin", Branch = branch }, ct: ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(branch) || string.Equals(branch, baseBranch, StringComparison.Ordinal))
+        {
+            return Refuse(CiPushRefusal.ProtectedBranch);
+        }
+
+        var current = await git.GetCurrentBranchAsync(worktree, ct).ConfigureAwait(false);
+        if (current is null)
+        {
+            return Refuse(CiPushRefusal.DetachedHead);
+        }
+
+        var defaultBranch = await git.GetDefaultBranchAsync(worktree, ct).ConfigureAwait(false);
+        if (defaultBranch is not null)
+        {
+            const string prefix = "origin/";
+            var name = defaultBranch.StartsWith(prefix, StringComparison.Ordinal) ? defaultBranch[prefix.Length..] : defaultBranch;
+            if (string.Equals(name, branch, StringComparison.Ordinal))
+            {
+                return Refuse(CiPushRefusal.ProtectedBranch);
+            }
+        }
+
+        if (!string.Equals(current, branch, StringComparison.Ordinal))
+        {
+            var upstream = await git
+                .RunAsync(worktree, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)
+                .ConfigureAwait(false);
+            if (!upstream.Success || !string.Equals(upstream.StandardOutput.Trim(), "origin/" + branch, StringComparison.Ordinal))
+            {
+                return Refuse(CiPushRefusal.BranchMismatch);
+            }
+        }
+
+        var head = await git.RevParseAsync(worktree, "HEAD", ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(head))
+        {
+            return Refuse(CiPushRefusal.HeadUnreadable);
+        }
+
+        if (!string.IsNullOrEmpty(headOid))
+        {
+            bool descends;
+            try
+            {
+                descends = await git.IsAncestorAsync(worktree, headOid, head, ct).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+            {
+                descends = false; // the PR head commit is not even known locally
+            }
+
+            if (!descends)
+            {
+                return Refuse(CiPushRefusal.NotDescended);
+            }
+        }
+
+        // SourceCommit pins the pushed content to the commit that was checked: HEAD:refs/heads/<branch>, no force.
+        var result = await git
+            .PushAsync(worktree, new GitPushOptions { Remote = "origin", Branch = branch, SourceCommit = head }, ct: ct)
+            .ConfigureAwait(false);
         return result.Success ? new CiPushResult(true, null) : new CiPushResult(false, result.Message);
     }
+
+    private static CiPushResult Refuse(CiPushRefusal refusal) => new(false, null, refusal);
 }
 
 /// <summary>What a CI chain run was started for; serialized as <c>key=value</c> lines in <see cref="AutomationRun.Detail"/>.</summary>
@@ -100,6 +181,9 @@ internal static class CiState
     public static string BudgetNotifiedKey(string targetKey) => "ci.budgetNotified:" + targetKey;
 
     public static string LastFixKey(string targetKey) => "ci.lastFix:" + targetKey;
+
+    /// <summary>The record of a pushed fix: the commit that was pushed plus the checks it was meant to fix.</summary>
+    public static string LastFixValue(string pushedCommit, string signature) => pushedCommit + "|" + signature;
 
     /// <summary>The failed checks as one sorted, comma-joined string; empty when none.</summary>
     public static string Signature(IReadOnlyList<PrCheck> failed)
@@ -256,6 +340,7 @@ internal sealed class CiFailureWatcher
             {
                 await state.SetStateAsync(seenKey, null, ct).ConfigureAwait(false);
                 await state.SetStateAsync(CiState.BudgetNotifiedKey(targetKey), null, ct).ConfigureAwait(false);
+                await state.SetStateAsync(CiState.LastFixKey(targetKey), null, ct).ConfigureAwait(false);
                 await engine.ResetTargetBudgetAsync(targetKey, ct).ConfigureAwait(false);
             }
 
@@ -375,6 +460,19 @@ internal sealed class CiChainRunner : IAutomationRunner
 
         var signature = CiState.Signature(failed);
         var prText = detail.PrNumber.ToString(CultureInfo.InvariantCulture);
+        var targetKey = run.TargetKey ?? $"ci:{session.Id}#{detail.PrNumber}";
+        var lastFixKey = CiState.LastFixKey(targetKey);
+        if (detail.HeadOid.Length > 0
+            && string.Equals(
+                await state.GetStateAsync(lastFixKey, ct).ConfigureAwait(false),
+                CiState.LastFixValue(detail.HeadOid, signature),
+                StringComparison.Ordinal))
+        {
+            // The failing head is the very commit we pushed for these checks: a second attempt would only repeat itself.
+            Stopped(run.Id, AutomationStrings.CiStoppedSameFailure);
+            return AutomationRunOutcome.Failed(AutomationStrings.CiStoppedSameFailure);
+        }
+
         var failures = await BuildFailureReportAsync(worktree, failed, ct).ConfigureAwait(false);
 
         notifications.Notify(
@@ -420,14 +518,6 @@ internal sealed class CiChainRunner : IAutomationRunner
             return AutomationRunOutcome.Completed();
         }
 
-        var targetKey = run.TargetKey ?? $"ci:{session.Id}#{detail.PrNumber}";
-        var lastFixKey = CiState.LastFixKey(targetKey);
-        if (string.Equals(await state.GetStateAsync(lastFixKey, ct).ConfigureAwait(false), signature, StringComparison.Ordinal))
-        {
-            Stopped(run.Id, AutomationStrings.CiStoppedSameFailure);
-            return AutomationRunOutcome.Failed(AutomationStrings.CiStoppedSameFailure);
-        }
-
         var branch = detail.HeadBranch;
         if (string.IsNullOrWhiteSpace(branch)
             || string.Equals(branch, detail.BaseBranch, StringComparison.Ordinal))
@@ -447,15 +537,17 @@ internal sealed class CiChainRunner : IAutomationRunner
             return AutomationRunOutcome.Completed();
         }
 
-        var push = await git.PushAsync(worktree, branch, ct).ConfigureAwait(false);
+        var push = await git.PushAsync(worktree, branch, detail.BaseBranch, detail.HeadOid, ct).ConfigureAwait(false);
         if (!push.Success)
         {
-            var text = AutomationStrings.CiStoppedPushFailed(push.Error ?? string.Empty);
+            var text = push.Refusal == CiPushRefusal.None
+                ? AutomationStrings.CiStoppedPushFailed(push.Error ?? string.Empty)
+                : AutomationStrings.CiStoppedUnsafePush(AutomationStrings.CiRefusal(push.Refusal, branch));
             Stopped(run.Id, text);
             return AutomationRunOutcome.Failed(text);
         }
 
-        await state.SetStateAsync(lastFixKey, signature, ct).ConfigureAwait(false);
+        await state.SetStateAsync(lastFixKey, CiState.LastFixValue(after ?? string.Empty, signature), ct).ConfigureAwait(false);
         notifications.Notify(
             NotificationLevel.Success,
             AutomationStrings.CiPushedTitle,

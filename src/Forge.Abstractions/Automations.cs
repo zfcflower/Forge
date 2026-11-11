@@ -332,11 +332,22 @@ public enum MailboxStatus
     Cancelled,
 }
 
-public sealed record MailboxResult(MailboxStatus Status, string? Reason = null, TokenUsage? Usage = null);
+public sealed record MailboxResult(MailboxStatus Status, string? Reason = null, TokenUsage? Usage = null)
+{
+    /// <summary>The delivered turn failed because the root agent's provider quota is spent (set with <see cref="MailboxStatus.TurnFailed"/>).</summary>
+    public ProviderQuotaExhausted? Quota { get; init; }
+}
 
 /// <summary>A message an automation sends to a root session as if the user had typed it.</summary>
 /// <param name="Origin">Short label of the sending automation, shown on the delivered message.</param>
-public sealed record MailboxMessage(string SessionId, string Text, string RunId, string Origin);
+public sealed record MailboxMessage(string SessionId, string Text, string RunId, string Origin)
+{
+    /// <summary>
+    /// The agent this one turn runs with (read-only tools, a model override); null = the session's own agent. It is applied
+    /// right before the turn and the session's own selection is restored after it.
+    /// </summary>
+    public AgentDefinition? Agent { get; init; }
+}
 
 /// <summary>
 /// Delivers automation messages to root sessions only while they are idle (red line 2). Never hands over, archives or

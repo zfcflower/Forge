@@ -127,7 +127,7 @@ public sealed class PromptRunnerTests
     }
 
     [Fact]
-    public async Task Session_is_configured_with_the_read_only_agent_before_the_prompt_is_sent()
+    public async Task The_read_only_agent_travels_with_the_message()
     {
         var h = new Harness();
         var live = new RunnerSession("s9");
@@ -137,7 +137,7 @@ public sealed class PromptRunnerTests
 
         await h.Runner.RunAsync(h.Context(definition), CancellationToken.None).Within();
 
-        var agent = Assert.Single(live.Agents);
+        var agent = h.Mailbox.Messages[0].Agent;
         Assert.NotNull(agent);
         Assert.Equal(PromptRunner.ReadOnlyTools, agent.ToolNames);
         Assert.Equal(Fallback, agent.Model);
@@ -145,7 +145,7 @@ public sealed class PromptRunnerTests
     }
 
     [Fact]
-    public async Task Session_without_overrides_is_told_to_use_the_main_agent()
+    public async Task A_message_without_overrides_carries_no_agent()
     {
         var h = new Harness();
         var live = new RunnerSession("s9");
@@ -154,20 +154,21 @@ public sealed class PromptRunnerTests
 
         await h.Runner.RunAsync(h.Context(h.Definition()), CancellationToken.None).Within();
 
-        Assert.Null(Assert.Single(live.Agents));
+        Assert.Null(h.Mailbox.Messages[0].Agent);
     }
 
     [Fact]
-    public async Task A_session_that_cannot_be_opened_still_goes_through_the_mailbox_which_decides()
+    public async Task A_session_that_cannot_be_opened_is_never_sent_the_prompt()
     {
         var h = new Harness();
+        h.Host.OpensAnything = false;
         h.Sessions.Scratch = Info("s9", "T");
-        h.Mailbox.Results[0] = new MailboxResult(MailboxStatus.Withdrawn, "gone");
 
         var outcome = await h.Runner.RunAsync(h.Context(h.Definition()), CancellationToken.None).Within();
 
         Assert.Equal(AutomationRunStatus.Cancelled, outcome.Status);
-        Assert.Single(h.Mailbox.Messages);
+        Assert.Equal(AutomationStrings.SessionUnavailableText, outcome.Message);
+        Assert.Empty(h.Mailbox.Messages);
     }
 
     [Fact]
@@ -497,6 +498,7 @@ public sealed class PromptRunnerTests
         public Harness()
         {
             Runner = RunnerWith(Notes);
+            Host.OpensAnything = true;
         }
 
         public CiFakeTime Time { get; } = new();

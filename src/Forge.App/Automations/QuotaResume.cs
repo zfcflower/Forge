@@ -124,16 +124,17 @@ internal sealed class QuotaResumeRunner(
 
                 await context.UpdateAsync(run => run with { Status = AutomationRunStatus.Running, ResumeAt = null }, ct)
                     .ConfigureAwait(false);
-                var sentAt = time.GetUtcNow();
+                var progress = new WaitingProgress(context);
                 var result = await mailbox.DeliverAsync(
                         new MailboxMessage(
                             sessionId,
                             AutomationStrings.QuotaContinuePrompt,
                             context.Run.Id,
                             AutomationStrings.DisplayName(BuiltInAutomations.QuotaResume, context.Run.AutomationName)),
-                        new WaitingProgress(context),
+                        progress,
                         ct)
                     .ConfigureAwait(false);
+                await progress.DrainAsync().ConfigureAwait(false);
                 switch (result.Status)
                 {
                     case MailboxStatus.Completed:
@@ -148,13 +149,14 @@ internal sealed class QuotaResumeRunner(
                         return AutomationRunOutcome.Cancelled(result.Reason ?? string.Empty);
                 }
 
-                // The turn failed: a fresh quota failure of this session (written after the message went out) means the
-                // quota ran out again, so the run waits once more; any other failure ends it.
-                var latest = QuotaNote.Parse(await state.GetStateAsync(QuotaNote.LatestPrefix + sessionId, ct).ConfigureAwait(false));
-                if (latest is null || latest.At < sentAt)
+                // The turn failed: the session reports a spent quota with the result (its own failure, not one read from
+                // shared state), so the run waits once more; any other failure ends it.
+                if (result.Quota is not { } spent)
                 {
                     return AutomationRunOutcome.Failed(result.Reason ?? string.Empty);
                 }
+
+                var latest = new QuotaNote(spent.ProviderId, spent.Model, spent.ResetAt, time.GetUtcNow(), note.Title, spent.Message);
 
                 if (round >= MaxRounds)
                 {
