@@ -510,12 +510,14 @@
             IsVisible="{Binding Git.HasRepository}"
             AutomationProperties.AutomationId="git-ship-row">
       <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+        <!-- The remote readout: text, never a button — the verbs stay on the branch row above. -->
         <TextBlock Grid.Column="0"
                    Classes="git-ship-hint"
-                   IsVisible="{Binding Git.HasPublishHint}"
+                   IsVisible="{Binding Git.HasRemoteState}"
                    VerticalAlignment="Center"
-                   Text="{Binding Git.PublishHint}"
-                   AutomationProperties.AutomationId="git-ship-hint" />
+                   Text="{Binding Git.RemoteStateText}"
+                   AutomationProperties.AutomationId="git-ship-remote"
+                   AutomationProperties.Name="{Binding Git.RemoteStateText}" />
 
         <Button Grid.Column="1"
                 Classes="git-pill publish"

@@ -379,10 +379,41 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     /// <summary>The 发布 pill only exists before the first push: after it, the same verb lives on the git row above.</summary>
     public bool ShowPublish => HasRepository && !HasUpstream;
 
-    /// <summary>Why publishing is impossible even though there is no upstream (no remote at all); empty otherwise.</summary>
-    public string PublishHint => ShowPublish && !HasRemote ? Loc.Instance[GitStrings.ShipNoRemote] : string.Empty;
+    /// <summary>
+    /// The 远程 readout: one line that always answers "am I on the remote?" — not published yet, N commits to push, in sync,
+    /// or behind. It is text, not a control: the verbs stay on the branch row above, so nothing here can push by accident.
+    /// </summary>
+    public string RemoteStateText
+    {
+        get
+        {
+            if (!HasRepository)
+            {
+                return string.Empty;
+            }
 
-    public bool HasPublishHint => PublishHint.Length > 0;
+            if (!HasRemote)
+            {
+                return Loc.Instance[GitStrings.ShipNoRemote];
+            }
+
+            if (!HasUpstream)
+            {
+                return Loc.Instance[GitStrings.RemoteNotPublished];
+            }
+
+            if (Ahead > 0)
+            {
+                return Loc.Instance.Format(GitStrings.RemoteToPush, Ahead);
+            }
+
+            return Behind > 0
+                ? Loc.Instance.Format(GitStrings.RemoteBehind, Behind)
+                : Loc.Instance[GitStrings.RemoteInSync];
+        }
+    }
+
+    public bool HasRemoteState => RemoteStateText.Length > 0;
 
     /// <summary>"提交目标" before a pull request exists, its state afterwards.</summary>
     public string PullRequestLabel => pullRequestPhase switch
@@ -1391,6 +1422,24 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     private async Task PushAsync()
     {
+        // Pushing straight to the branch everything else merges into is the one push that cannot be reviewed afterwards, so it
+        // is asked about first — and the question is raised here, on the UI thread, before any pool work starts.
+        if (NeedsSharedBranchConfirmation())
+        {
+            var baseBranch = defaultBranch!;
+            var confirmed = confirm is not null
+                && await confirm(
+                        Loc.Instance.Format(GitStrings.PushSharedTitle, baseBranch),
+                        HasUpstream
+                            ? Loc.Instance.Format(GitStrings.PushSharedMessage, baseBranch, Ahead)
+                            : Loc.Instance.Format(GitStrings.PushSharedMessageFirst, baseBranch))
+                    .ConfigureAwait(true);
+            if (!confirmed || disposed)
+            {
+                return;
+            }
+        }
+
         var push = new GitPushOptions { SetUpstream = !HasUpstream };
         var network = NetworkOptions();
         await RunOperationAsync((directory, token) => git.PushAsync(directory, push, network, token))
@@ -1402,6 +1451,16 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     private async Task ContinueOperationAsync() =>
         await RunOperationAsync((directory, token) => git.ContinueOperationAsync(directory, token)).ConfigureAwait(true);
+
+    /// <summary>
+    /// True when this push goes to the branch every other branch merges into, with something to send. A push that would only
+    /// report "everything up to date" is not worth a question.
+    /// </summary>
+    private bool NeedsSharedBranchConfirmation() =>
+        confirm is not null
+        && defaultBranch is { Length: > 0 } shared
+        && string.Equals(snapshot.Status?.Branch, shared, StringComparison.Ordinal)
+        && (Ahead > 0 || !HasUpstream);
 
     /// <summary>The network calls read the timeout per operation, so a settings change needs no restart.</summary>
     private GitNetworkOptions NetworkOptions() => new() { Timeout = settings.NetworkTimeout() };
@@ -1525,8 +1584,8 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(PullRequestPhase));
         OnPropertyChanged(nameof(CanComposePullRequest));
         OnPropertyChanged(nameof(ShowPublish));
-        OnPropertyChanged(nameof(PublishHint));
-        OnPropertyChanged(nameof(HasPublishHint));
+        OnPropertyChanged(nameof(RemoteStateText));
+        OnPropertyChanged(nameof(HasRemoteState));
         OnPropertyChanged(nameof(PullRequestLabel));
         OnPropertyChanged(nameof(PullRequestNumberText));
         OnPropertyChanged(nameof(HasPullRequestState));

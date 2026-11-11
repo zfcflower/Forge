@@ -209,6 +209,20 @@ internal static class GitStrings
     public const string ShipAlreadyMerged = "git.ship.alreadyMerged";
     public const string ShipRootDirty = "git.ship.rootDirty";
     public const string ShipRootElsewhere = "git.ship.rootElsewhere";
+
+    /// <summary>The remote readout on the ship row: not published yet / N to push / in sync / behind.</summary>
+    public const string RemoteNotPublished = "git.ship.remote.notPublished";
+    public const string RemoteToPush = "git.ship.remote.toPush";
+    public const string RemoteInSync = "git.ship.remote.inSync";
+    public const string RemoteBehind = "git.ship.remote.behind";
+
+    /// <summary>Format: <c>{0}</c> the shared branch the push lands on.</summary>
+    public const string PushSharedTitle = "git.ship.push.sharedTitle";
+
+    /// <summary>Format: <c>{0}</c> the shared branch, <c>{1}</c> how many commits.</summary>
+    public const string PushSharedMessage = "git.ship.push.sharedMessage";
+
+    public const string PushSharedMessageFirst = "git.ship.push.sharedMessageFirst";
     public const string ShipMergeCommitTitle = "git.ship.mergeCommitTitle";
     public const string ShipMergeCommitMessage = "git.ship.mergeCommitMessage";
     public const string ShipMergedNumber = "git.ship.mergedNumber";
@@ -369,6 +383,22 @@ internal static class GitStrings
         Loc.Register(ShipAlreadyOnBranch, "当前就在 {0} 上", "This session is already on {0}");
         Loc.Register(ShipAlreadyMerged, "{0} 已经在 {1} 里了。", "{0} is already in {1}.");
         Loc.Register(ShipRootDirty, "根检出（{0}）有 {1} 个未提交改动：先提交或暂存再合并。", "The root checkout ({0}) has {1} uncommitted change(s); commit or stash them first.");
+        Loc.Register(RemoteNotPublished, "未发布", "Not published");
+        Loc.Register(RemoteToPush, "{0} 个提交待推送", "{0} to push");
+        Loc.Register(RemoteInSync, "与 origin 同步", "In sync with origin");
+        Loc.Register(RemoteBehind, "落后 origin {0} 个提交", "{0} behind origin");
+        Loc.Register(
+            PushSharedTitle,
+            "推送到 {0}？",
+            "Push to {0}?");
+        Loc.Register(
+            PushSharedMessage,
+            "这会把这 {1} 个提交直接推到 {0}，它是共享分支——不会有拉取请求先评审。",
+            "This pushes those {1} commits straight to {0}, the shared branch — no pull request reviews them first.");
+        Loc.Register(
+            PushSharedMessageFirst,
+            "这会把当前分支直接推到 {0}，它是共享分支——不会有拉取请求先评审。",
+            "This pushes the branch straight to {0}, the shared branch — no pull request reviews them first.");
         Loc.Register(ShipRootElsewhere, "根检出（{0}）当前在 {1} 上，不是 {2}：先在根检出切到 {2} 再合并。", "The root checkout ({0}) is on {1}, not {2}: switch it to {2} before merging.");
         Loc.Register(ShipMergeCommitTitle, "合并到 {0} 需要一个合并提交", "Merging into {0} needs a merge commit");
         Loc.Register(ShipMergeCommitMessage, "{0} 与 {1} 已经分叉，无法快进：将创建一个合并提交。继续？", "{0} and {1} have diverged, so no fast-forward is possible: a merge commit will be created. Continue?");

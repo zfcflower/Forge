@@ -761,6 +761,114 @@ public sealed class GitSyncViewModelTests
     }
 
     [Fact]
+    public async Task The_remote_readout_tracks_published_pending_and_synced()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("readout");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+
+        await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel();
+        try
+        {
+            await AttachAndWaitAsync(ui, panel, "s1", work);
+
+            var unpublished = await ui.Dispatch(() => panel.RemoteStateText, CancellationToken.None);
+            Assert.Equal(Loc.Instance[GitStrings.RemoteNotPublished], unpublished);
+
+            // Publish, then read again: nothing is waiting, so the row says it is in sync.
+            await ExecuteAndWaitAsync(ui, panel, panel.PushCommand);
+            var synced = await ui.Dispatch(() => panel.RemoteStateText, CancellationToken.None);
+            Assert.Equal(Loc.Instance[GitStrings.RemoteInSync], synced);
+
+            // One local commit: the row says how much is waiting to go out.
+            sandbox.CommitFile(work, "second.txt", "v2\n", "second");
+            await ui.Dispatch(
+                async () =>
+                {
+                    panel.NotifyTurnCompleted("s1");
+                    await WaitIdleOnUiAsync(panel);
+                    return 0;
+                },
+                CancellationToken.None);
+
+            var pending = await ui.Dispatch(() => panel.RemoteStateText, CancellationToken.None);
+            Assert.Equal(Loc.Instance.Format(GitStrings.RemoteToPush, 1), pending);
+        }
+        finally
+        {
+            await ui.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task Pushing_to_the_shared_branch_asks_first_and_declining_pushes_nothing()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("shared-push");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+
+        var asked = 0;
+        await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(confirm: (_, _) =>
+        {
+            asked++;
+            return Task.FromResult(false);
+        });
+        try
+        {
+            await AttachAndWaitAsync(ui, panel, "s1", work);
+
+            // The clone is on main, which is this repository's default branch: pushing it would skip any review.
+            await ExecuteAndWaitAsync(ui, panel, panel.PushCommand);
+
+            var state = await ui.Dispatch(
+                () => new { panel.HasUpstream, panel.HasResult },
+                CancellationToken.None);
+
+            Assert.Equal(1, asked);
+            Assert.False(state.HasUpstream);
+            Assert.False(state.HasResult);
+        }
+        finally
+        {
+            await ui.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task Pushing_a_feature_branch_does_not_ask()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("feature-push");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+        GitShell.RunChecked(work, "checkout", "-q", "-b", "feature-x");
+
+        var asked = 0;
+        await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(confirm: (_, _) =>
+        {
+            asked++;
+            return Task.FromResult(true);
+        });
+        try
+        {
+            await AttachAndWaitAsync(ui, panel, "s1", work);
+            await ExecuteAndWaitAsync(ui, panel, panel.PushCommand);
+
+            var state = await ui.Dispatch(() => new { panel.HasUpstream, panel.Ahead }, CancellationToken.None);
+
+            Assert.Equal(0, asked);
+            Assert.True(state.HasUpstream);
+            Assert.Equal(0, state.Ahead);
+        }
+        finally
+        {
+            await ui.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task The_merge_pull_request_row_follows_the_platform_merge_state()
     {
         using var sandbox = GitSandbox.Create();
