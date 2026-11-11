@@ -65,6 +65,14 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 `没有远程` / `未发布` / `{n} 个提交待推送` / `与 origin 同步` / `落后 origin {n} 个提交`。动词仍在上一行,所以这格永远
 不会因为误点而推送。
 
+**描述预填与 compare 回退(抄 ThinkRail 的两点)。** 打开 PR 的对话框正文一开始就是
+`PrBodyRenderer.Render(计划摘要, 步骤, 分组)` 的结果——和 agent 的 `pr_create` 默认正文同一个来源,不需要再调一次模型;
+用户改完才创建。gh 缺失/未登录时,菜单里有 `在浏览器打开 compare 页面`(`https://github.com/<owner>/<repo>/compare/<base>...<branch>?expand=1`,
+只对 github.com 的远端生成——别的托管是另一套 URL 形状,猜一个只会开 404)。
+
+**合并队列。** 仓库启用 merge queue 时,`gh pr merge` 成功返回但 PR 仍是 OPEN:这时行里报
+`已加入合并队列 PR #n`,不谎报"已合并"(合并发生在队列要求满足之后)。
+
 **推进共享分支前必须确认。** 当推送目标就是默认分支(base)、而且确实有东西要推时,先弹一次
 `推送到 {base}？`:这是唯一"推上去就没有 PR 先评审"的推送。推功能分支不问;只为"everything up to date"的空推送更不问。
 

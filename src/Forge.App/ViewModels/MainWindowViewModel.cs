@@ -249,7 +249,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.PullRequests,
             ComposePullRequestAsync,
             ComposePullRequestMergeAsync,
-            ConfirmGitRowActionAsync);
+            ConfirmGitRowActionAsync,
+            DescribePullRequest);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -2385,6 +2386,33 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 Status.SetAheadBehind(GitSync.AheadBehindText);
                 PushGitText();
                 break;
+        }
+    }
+
+    /// <summary>
+    /// The description the 打开 PR dialog starts with: exactly what the agent's pr_create defaults to (the plan summary plus
+    /// the generated plan), rendered from this session's plan. Nothing is sent until the dialog is confirmed.
+    /// </summary>
+    private string? DescribePullRequest()
+    {
+        if (activeSession is not { } session)
+        {
+            return null;
+        }
+
+        try
+        {
+            var todos = composition.Todos;
+            var plan = todos.GetPlanSummaryAsync(session.SessionId, CancellationToken.None).GetAwaiter().GetResult();
+            var steps = todos.ListAsync(session.SessionId, CancellationToken.None).GetAwaiter().GetResult();
+            var groups = todos.ListGroupsAsync(session.SessionId, CancellationToken.None).GetAwaiter().GetResult();
+            var body = Forge.Workspace.PrBodyRenderer.Render(plan, steps, groups);
+            return body.Length > 0 ? body : null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine("[ship] could not render the plan for the pull request body: " + exception.Message);
+            return null;
         }
     }
 

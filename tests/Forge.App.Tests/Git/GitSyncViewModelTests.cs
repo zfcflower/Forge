@@ -761,6 +761,53 @@ public sealed class GitSyncViewModelTests
     }
 
     [Fact]
+    public async Task The_pull_request_dialog_opens_with_the_description_the_plan_can_already_write()
+    {
+        using var sandbox = GitSandbox.Create();
+        var work = sandbox.Clone("pr-prefill");
+        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
+        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+
+        PullRequestDraft? seen = null;
+        await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
+        var panel = NewPanel(
+            pullRequests: new StubPullRequestPlatform(PrResult<PullRequestInfo>.Fail(
+                GitRemoteFailureKind.Other, "none", reason: PrFailureReason.PullRequestNotFound)),
+            composePullRequest: draft =>
+            {
+                seen = draft;
+                return Task.FromResult<PullRequestDraft?>(null);
+            },
+            describePullRequest: () => "## Summary\n" + "planned work");
+        try
+        {
+            await AttachAndWaitAsync(ui, panel, "s1", work);
+            await ExecuteAndWaitAsync(ui, panel, panel.ComposePullRequestCommand);
+        }
+        finally
+        {
+            await ui.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+
+        Assert.NotNull(seen);
+        Assert.Equal("main", seen!.Title);
+        Assert.Contains("planned work", seen.Body);
+        Assert.False(seen.Draft);
+    }
+
+    [Theory]
+    [InlineData("https://github.com/acme/forge.git", "https://github.com/acme/forge")]
+    [InlineData("https://github.com/acme/forge", "https://github.com/acme/forge")]
+    [InlineData("git@github.com:acme/forge.git", "https://github.com/acme/forge")]
+    [InlineData("ssh://git@gitlab.com/acme/forge.git", null)]
+    [InlineData("/srv/git/forge.git", null)]
+    [InlineData("", null)]
+    public void A_remote_url_becomes_a_web_url_only_when_the_page_shape_is_known(string remote, string? expected)
+    {
+        Assert.Equal(expected, GitSyncViewModel.WebUrlOf(remote));
+    }
+
+    [Fact]
     public async Task The_remote_readout_tracks_published_pending_and_synced()
     {
         using var sandbox = GitSandbox.Create();
@@ -1181,7 +1228,8 @@ public sealed class GitSyncViewModelTests
         IPrPlatform? pullRequests = null,
         Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest = null,
         Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge = null,
-        Func<string, string, Task<bool>>? confirm = null) =>
+        Func<string, string, Task<bool>>? confirm = null,
+        Func<string?>? describePullRequest = null) =>
         new(
             new GitCli(),
             new GitPanelSettings(() => strategy, () => TimeSpan.FromSeconds(30)),
@@ -1190,7 +1238,8 @@ public sealed class GitSyncViewModelTests
             pullRequests: pullRequests,
             composePullRequest: composePullRequest,
             composeMerge: composeMerge,
-            confirm: confirm);
+            confirm: confirm,
+            describePullRequest: describePullRequest);
 
     /// <summary>
     /// Attaches and waits for the trailing refresh inside one UI dispatch: the panel's continuations only

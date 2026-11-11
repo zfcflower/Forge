@@ -210,6 +210,12 @@ internal static class GitStrings
     public const string ShipRootDirty = "git.ship.rootDirty";
     public const string ShipRootElsewhere = "git.ship.rootElsewhere";
 
+    /// <summary>The compare page of a branch that has no pull request yet — the creation path that needs no gh.</summary>
+    public const string ShipComparePage = "git.ship.comparePage";
+
+    /// <summary>Format: <c>{0}</c> is the pull request number GitHub queued for merging.</summary>
+    public const string ShipQueuedNumber = "git.ship.queuedNumber";
+
     /// <summary>The remote readout on the ship row: not published yet / N to push / in sync / behind.</summary>
     public const string RemoteNotPublished = "git.ship.remote.notPublished";
     public const string RemoteToPush = "git.ship.remote.toPush";
@@ -384,6 +390,11 @@ internal static class GitStrings
         Loc.Register(ShipAlreadyMerged, "{0} 已经在 {1} 里了。", "{0} is already in {1}.");
         Loc.Register(ShipRootDirty, "根检出（{0}）有 {1} 个未提交改动：先提交或暂存再合并。", "The root checkout ({0}) has {1} uncommitted change(s); commit or stash them first.");
         Loc.Register(RemoteNotPublished, "未发布", "Not published");
+        Loc.Register(ShipComparePage, "在浏览器打开 compare 页面", "Open the compare page in the browser");
+        Loc.Register(
+            ShipQueuedNumber,
+            "已加入合并队列 PR #{0}（GitHub 会在队列要求满足后合并）。",
+            "PR #{0} is in the merge queue (GitHub merges it once the queue's requirements pass).");
         Loc.Register(RemoteToPush, "{0} 个提交待推送", "{0} to push");
         Loc.Register(RemoteInSync, "与 origin 同步", "In sync with origin");
         Loc.Register(RemoteBehind, "落后 origin {0} 个提交", "{0} behind origin");

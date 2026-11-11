@@ -46,6 +46,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     private readonly Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest;
     private readonly Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge;
     private readonly Func<string, string, Task<bool>>? confirm;
+    private readonly Func<string?>? describePullRequest;
     private readonly RelayCommand[] commands;
 
     /// <summary>The thread the row was built on (the UI thread); a language notification from another one is not ours.</summary>
@@ -99,7 +100,8 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         IPrPlatform? pullRequests = null,
         Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest = null,
         Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge = null,
-        Func<string, string, Task<bool>>? confirm = null)
+        Func<string, string, Task<bool>>? confirm = null,
+        Func<string?>? describePullRequest = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(settings);
@@ -112,6 +114,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         this.composePullRequest = composePullRequest;
         this.composeMerge = composeMerge;
         this.confirm = confirm;
+        this.describePullRequest = describePullRequest;
         current = emptyState;
 
         RefreshCommand = new RelayCommand(() => Launch(ReadOnlyAsync), CanRead);
@@ -122,6 +125,9 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         ContinueOperationCommand = new RelayCommand(() => Launch(ContinueOperationAsync, GitAction.Continue), CanOperate);
         ComposePullRequestCommand = new RelayCommand(() => Launch(ComposePullRequestAsync), () => !busy && CanComposePullRequest);
         OpenPullRequestCommand = new RelayCommand(OpenPullRequestInBrowser, () => PullRequestUrl.Length > 0);
+        ComparePageCommand = new RelayCommand(
+            () => OpenUrl(CompareUrl),
+            () => HasCompareUrl);
         MergeLocallyCommand = new RelayCommand(() => Launch(MergeLocallyAsync), () => !busy && CanMergeLocally());
         MergePullRequestCommand = new RelayCommand(() => Launch(MergePullRequestAsync), () => !busy && CanMergePullRequest);
         DeleteRemoteBranchCommand = new RelayCommand(() => Launch(DeleteRemoteBranchAsync), () => !busy && CanDeleteRemoteBranch);
@@ -442,7 +448,75 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     public bool PullRequestIsClosed => pullRequestPhase == PullRequestPhase.Closed;
 
-    /// <summary>The pull request's address; the pill opens it in the browser when it is not empty.</summary>
+    /// <summary>
+    /// The compare page of this branch on its remote host (GitHub only), or empty. It is what a user can always fall back to
+    /// when gh is missing: the page creates the pull request with the branch already selected.
+    /// </summary>
+    public string CompareUrl
+    {
+        get
+        {
+            if (snapshot.Status?.Branch is not { Length: > 0 } branch
+                || snapshot.Status.Upstream is { Length: > 0 }
+                || defaultBranch is not { Length: > 0 } baseBranch)
+            {
+                return string.Empty;
+            }
+
+            var remote = snapshot.Remotes.FirstOrDefault(remote => string.Equals(remote.Name, "origin", StringComparison.Ordinal))
+                ?? snapshot.Remotes.FirstOrDefault();
+            if (remote is null || WebUrlOf(remote.FetchUrl) is not { Length: > 0 } web)
+            {
+                return string.Empty;
+            }
+
+            return web + "/compare/" + Uri.EscapeDataString(baseBranch) + "..." + Uri.EscapeDataString(branch) + "?expand=1";
+        }
+    }
+
+    public bool HasCompareUrl => CompareUrl.Length > 0;
+
+    /// <summary>
+    /// Turns a git remote URL into the host's web URL for GitHub ("https://github.com/o/r.git" and "git@github.com:o/r.git"
+    /// both become "https://github.com/o/r"). Anything else answers empty: the page shape is host-specific, and guessing one
+    /// would open a 404.
+    /// </summary>
+    internal static string? WebUrlOf(string? fetchUrl)
+    {
+        if (fetchUrl is not { Length: > 0 } url)
+        {
+            return null;
+        }
+
+        var trimmed = url.Trim().TrimEnd('/');
+        if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^4];
+        }
+
+        if (trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.Contains("github.com/", StringComparison.OrdinalIgnoreCase) ? trimmed : null;
+        }
+
+        // scp-like: git@github.com:owner/repo
+        var at = trimmed.IndexOf('@');
+        var colon = trimmed.IndexOf(':', at + 1);
+        if (at <= 0 || colon <= at + 1)
+        {
+            return null;
+        }
+
+        var host = trimmed[(at + 1)..colon];
+        var path = trimmed[(colon + 1)..].TrimStart('/');
+        return host.Length > 0 && path.Length > 0 && string.Equals(host, "github.com", StringComparison.OrdinalIgnoreCase)
+            ? "https://" + host + "/" + path
+            : null;
+    }
+
+    /// <summary>
+    /// The pull request's address; the pill opens it in the browser when it is not empty.</summary>
     public string PullRequestUrl => pullRequestUrl ?? string.Empty;
 
     /// <summary>Why there is no pull-request state to show (gh missing, not signed in, read failed); empty when read fine.</summary>
@@ -490,6 +564,9 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     /// <summary>Asks for a title, a body and the draft flag, then opens the pull request.</summary>
     public RelayCommand ComposePullRequestCommand { get; }
 
+    /// <summary>Opens the compare page — the creation path that needs no gh.</summary>
+    public RelayCommand ComparePageCommand { get; }
+
     public RelayCommand RefreshCommand { get; }
 
     // ---------------------------------------------------------------- the 提交目标 menu
@@ -513,6 +590,14 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             () => PullRequestUrl.Length > 0,
             () => Loc.Instance[GitStrings.ShipOpenInBrowser],
             () => PullRequestUrl.Length > 0 ? PullRequestUrl : Loc.Instance[GitStrings.ShipNoPullRequest]));
+        ShipActions.Add(new ShipActionViewModel(
+            "compare",
+            ComparePageCommand,
+            () => HasCompareUrl && !HasPullRequestState,
+            () => Loc.Instance[GitStrings.ShipComparePage],
+            () => HasCompareUrl
+                ? CompareUrl
+                : HasPullRequestState ? Loc.Instance[GitStrings.ShipAlreadyExists] : Loc.Instance[GitStrings.ShipNoRemote]));
         ShipActions.Add(new ShipActionViewModel(
             "local",
             MergeLocallyCommand,
@@ -616,7 +701,10 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
         var directory = context.WorkingDirectory;
         var branch = BranchLabel;
-        var draft = await composePullRequest(new PullRequestDraft(branch, string.Empty, false)).ConfigureAwait(true);
+        // Prefilled the way pr_create defaults its body: the plan summary plus the generated plan. The user edits from there;
+        // nothing is sent until the dialog is confirmed.
+        var described = describePullRequest?.Invoke() ?? string.Empty;
+        var draft = await composePullRequest(new PullRequestDraft(branch, described, false)).ConfigureAwait(true);
         if (draft is null || disposed || !string.Equals(context.WorkingDirectory, directory, StringComparison.Ordinal))
         {
             return;
@@ -864,6 +952,20 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
                 : ResultOf(merged.Status));
 
         await ReadAfterShipWriteAsync(state, directory).ConfigureAwait(true);
+
+        // A repository with a merge queue accepts the merge and merges later: the pull request is still open right after a
+        // successful call. Saying "merged" there would be a lie, so the row reports the queue instead.
+        if (merged.Success && IsCurrent(state) && pullRequestPhase == PullRequestPhase.Open)
+        {
+            Report(
+                state,
+                new PanelResult(
+                    GitRemoteFailureKind.None,
+                    Loc.Instance.Format(GitStrings.ShipQueuedNumber, number),
+                    string.Empty,
+                    null,
+                    null));
+        }
     }
 
     /// <summary>删除远程分支: irreversible on the platform, so it exists only after the merge and only behind a question.</summary>
@@ -919,9 +1021,11 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
 
     private string? pullRequestBaseBranch;
 
-    private void OpenPullRequestInBrowser()
+    private void OpenPullRequestInBrowser() => OpenUrl(PullRequestUrl);
+
+    private void OpenUrl(string url)
     {
-        if (PullRequestUrl is not { Length: > 0 } url)
+        if (url is not { Length: > 0 })
         {
             return;
         }
@@ -1586,6 +1690,8 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowPublish));
         OnPropertyChanged(nameof(RemoteStateText));
         OnPropertyChanged(nameof(HasRemoteState));
+        OnPropertyChanged(nameof(CompareUrl));
+        OnPropertyChanged(nameof(HasCompareUrl));
         OnPropertyChanged(nameof(PullRequestLabel));
         OnPropertyChanged(nameof(PullRequestNumberText));
         OnPropertyChanged(nameof(HasPullRequestState));
