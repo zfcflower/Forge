@@ -163,7 +163,7 @@ public sealed class SqliteTodoStoreStepCommitTests
         await check.OpenAsync();
         await using var version = check.CreateCommand();
         version.CommandText = "PRAGMA user_version";
-        Assert.Equal(4L, (long)(await version.ExecuteScalarAsync() ?? 0L));
+        Assert.Equal(9L, (long)(await version.ExecuteScalarAsync() ?? 0L));
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public sealed class SqliteTodoStoreStepCommitTests
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 5";
+            command.CommandText = "PRAGMA user_version = 10";
             await command.ExecuteNonQueryAsync();
         }
 

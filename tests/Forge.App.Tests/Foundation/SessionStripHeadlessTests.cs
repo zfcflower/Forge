@@ -54,7 +54,7 @@ public sealed class SessionStripHeadlessTests
                     // The window pushes the project and the git markers; the strip only renders them. The button itself
                     // names the workspace (the session's working directory), not the project.
                     workspace.Instruments.SetProject("forge", root);
-                    workspace.Instruments.SetGit("↑1 ↓2", "CI ✓");
+                    workspace.Instruments.SetGit("↑1 ↓2");
 
                     var view = new SessionView { DataContext = workspace };
                     var window = new Window { Width = 1200, Height = 700, Content = view };

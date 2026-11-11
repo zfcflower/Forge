@@ -341,19 +341,17 @@ internal static class GitPanelTesting
     public static readonly TimeSpan Budget = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(20);
 
-    public static GitPanelViewModel NewPanel(
-        Func<string, string, Task<bool>>? confirm = null,
+    public static GitSyncViewModel NewPanel(
         GitPullStrategy strategy = GitPullStrategy.FastForwardOnly,
         TimeSpan? networkTimeout = null) =>
         new(
             new GitCli(),
-            new GitPanelSettings(() => strategy, () => networkTimeout ?? TimeSpan.FromSeconds(30)),
-            confirm ?? ((_, _) => Task.FromResult(true)));
+            new GitPanelSettings(() => strategy, () => networkTimeout ?? TimeSpan.FromSeconds(30)));
 
     public static PanelContext Context(string sessionId, string directory) => new(sessionId, directory, null);
 
     /// <summary>Polls <c>IsBusy == false</c> with a bounded budget; awaiting on the UI thread lets the panel's continuations run.</summary>
-    public static async Task WaitIdleAsync(GitPanelViewModel panel)
+    public static async Task WaitIdleAsync(GitSyncViewModel panel)
     {
         var deadline = DateTime.UtcNow + Budget;
         while (panel.IsBusy)
@@ -390,13 +388,13 @@ internal static class GitPanelTesting
     /// <summary>The properties whose values describe the last operation result of the attached worktree.</summary>
     public static readonly string[] ResultProperties =
     [
-        nameof(GitPanelViewModel.LastResultText),
-        nameof(GitPanelViewModel.LastResultDetail),
-        nameof(GitPanelViewModel.HasLastResultDetail),
-        nameof(GitPanelViewModel.LastResultIsError),
-        nameof(GitPanelViewModel.HasResult),
-        nameof(GitPanelViewModel.HintText),
-        nameof(GitPanelViewModel.HasHint),
+        nameof(GitSyncViewModel.LastResultText),
+        nameof(GitSyncViewModel.MessageDetail),
+        nameof(GitSyncViewModel.HasMessageDetail),
+        nameof(GitSyncViewModel.MessageIsError),
+        nameof(GitSyncViewModel.HasResult),
+        nameof(GitSyncViewModel.HintText),
+        nameof(GitSyncViewModel.HasHint),
     ];
 }
 

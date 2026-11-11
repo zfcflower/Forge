@@ -123,8 +123,10 @@ segment   := '.' name | '[' 整数 ']' | '[' 引号字符串 ']'
 JSON 语法错误、类型不符、`steps` 缺失、`after` 元素为 null、`onError` 取值未知等一律 `WorkflowFormatException`，
 带上 STJ 给出的 `$.steps[1].tool` 路径与行列位置。
 
-注意：源生成反序列化对**文档中缺失的属性写 default(T)**，不会保留属性初始化器，因此解析后会归一化：
-`version` 缺失（0）视为 1，`steps` 缺失直接报格式错误。手写 `new WorkflowDefinition { ... }` 仍按属性初始化器取默认值。
+注意：这一版 STJ（.NET 11）的源生成反序列化**保留属性初始化器**，缺失属性不再被写成 default(T)。因此
+`steps` 缺失不能再靠 `Steps is null` 判定：解析后另用 `Utf8JsonReader` 扫顶层属性（与 `WorkflowJsonContext`
+相同的注释/尾随逗号选项）确认 `steps` 是否出现，缺失即报格式错误。`version` 缺失取初始化器的 1。
+手写 `new WorkflowDefinition { ... }` 与解析结果在默认值上一致。
 
 ## 结果
 

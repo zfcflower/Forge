@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text;
 using Forge.Abstractions;
+using Forge.Core.Prompts;
 
 namespace Forge.Core.Agents;
 
@@ -21,7 +23,34 @@ public sealed record AgentLoopServices(
     ITokenCounter TokenCounter,
     AgentOptions Options,
     IReadOnlyList<string> SubAgentToolNames,
-    Func<string?>? DynamicContext);
+    Func<string?>? DynamicContext,
+    Action<FirstRequestCacheReport>? CacheDiagnostics = null);
+
+/// <summary>
+/// Usage of the first model request an instance made in this process, with how its session's context began. It answers
+/// whether an inherited context really hit the provider cache and whether a proxy forwards <c>cache_control</c>.
+/// </summary>
+public sealed record FirstRequestCacheReport(
+    string SessionId,
+    string AgentId,
+    SessionOrigin? Origin,
+    string ProviderId,
+    string Model,
+    TokenUsage Usage)
+{
+    /// <summary>The line written to the diagnostics trace: a fixed tag and key=value pairs.</summary>
+    public override string ToString() =>
+        string.Concat(
+            "[cache] first-request session=", SessionId,
+            " agent=", AgentId,
+            " origin=", Origin?.ToString() ?? "unknown",
+            " provider=", ProviderId,
+            " model=", Model,
+            " input=", Usage.InputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            " cache_read=", Usage.CacheReadTokens.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            " cache_write=", Usage.CacheWriteTokens.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            " output=", Usage.OutputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
 
 /// <summary>
 /// Drives one agent: stream the model turn, emit deltas, persist the assistant message, approve and run
@@ -65,6 +94,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             instance.Depth == 0);
         var provider = services.Providers(instance.Definition.Model);
 
+        await ResolveCacheStateAsync(instance, ct).ConfigureAwait(false);
         await PersistAsync(instance, input, null, ct).ConfigureAwait(false);
 
         for (var turn = 0; turn < services.Options.MaxTurns; turn++)
@@ -72,7 +102,9 @@ public sealed class AgentLoop(AgentLoopServices services)
             ct.ThrowIfCancellationRequested();
             await CompactIfNeededAsync(instance, sink, ct).ConfigureAwait(false);
 
-            var request = BuildRequest(instance, tools.Current().Definitions);
+            var registry = tools.Current();
+            await RecordFingerprintAsync(instance, registry, ct).ConfigureAwait(false);
+            var request = BuildRequest(instance, registry.Definitions);
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
             var stop = StopReason.Other;
@@ -103,6 +135,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             }
 
             instance.Usage += usage;
+            ReportFirstRequest(instance, provider, usage);
             instance.CommitText(Text(assistant));
             await PersistAsync(instance, assistant, usage, ct).ConfigureAwait(false);
             await TouchAsync(instance, ct).ConfigureAwait(false);
@@ -251,6 +284,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var cacheThrough = messages.Count >= 2 ? messages.Count - 2 : (int?)null;
+        var messageTtl = string.Equals(services.Options.MessageCacheTtl, "1h", StringComparison.Ordinal) ? "1h" : null;
         var dynamicText = DynamicText(instance);
         if (dynamicText.Length > 0)
         {
@@ -262,7 +296,120 @@ public sealed class AgentLoop(AgentLoopServices services)
             definitions,
             messages,
             instance.Definition.Model,
-            new CacheHint(CacheSystemAndTools: true, cacheThrough));
+            new CacheHint(CacheSystemAndTools: true, cacheThrough, messageTtl))
+        {
+            CacheRoutingKey = instance.CacheState.RoutingKey ?? instance.SessionId,
+        };
+    }
+
+    /// <summary>
+    /// Reads the session row once per instance for the cache routing key (the lineage root, so a handover or fork keeps
+    /// routing to the same cache shard) and the origin for the first-request report. Best effort: a missing row or a store
+    /// failure falls back to the session id.
+    /// </summary>
+    private async ValueTask ResolveCacheStateAsync(AgentInstance instance, CancellationToken ct)
+    {
+        var state = instance.CacheState;
+        if (state.Resolved)
+        {
+            return;
+        }
+
+        if (services.Store is not { } store)
+        {
+            state.Resolved = true;
+            return;
+        }
+
+        try
+        {
+            if (await store.GetSessionAsync(instance.SessionId, ct).ConfigureAwait(false) is { } session)
+            {
+                state.RoutingKey = string.IsNullOrEmpty(session.LineageRootId) ? session.Id : session.LineageRootId;
+                state.Origin = session.Origin;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+        }
+
+        state.Resolved = true;
+    }
+
+    /// <summary>
+    /// <c>prefix_fingerprint</c> of what this request sends ahead of the messages. Recomputed only when the run's tool
+    /// registry is a different instance (a published tool change); written back only when the value changed, best effort.
+    /// </summary>
+    private async ValueTask RecordFingerprintAsync(AgentInstance instance, ToolRegistry registry, CancellationToken ct)
+    {
+        var state = instance.CacheState;
+        if (ReferenceEquals(state.FingerprintTools, registry))
+        {
+            return;
+        }
+
+        state.FingerprintTools = registry;
+        var fingerprint = PromptFingerprint.Compute(instance.Prompt.StablePrefix, registry.Definitions);
+        if (string.Equals(state.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        state.Fingerprint = fingerprint;
+        if (services.Sessions is not { } sessions)
+        {
+            return;
+        }
+
+        try
+        {
+            await sessions.SetPrefixFingerprintAsync(instance.SessionId, fingerprint, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // NotSupportedException from a catalog without the lifecycle members, or a store failure: the fingerprint
+            // only feeds a hint in the handover dialog and must not fail the turn.
+        }
+    }
+
+    private void ReportFirstRequest(AgentInstance instance, IChatProvider provider, TokenUsage usage)
+    {
+        var state = instance.CacheState;
+        if (state.FirstRequestReported)
+        {
+            return;
+        }
+
+        state.FirstRequestReported = true;
+        var report = new FirstRequestCacheReport(
+            instance.SessionId,
+            instance.Id,
+            state.Origin,
+            provider.Id,
+            instance.Definition.Model.Model,
+            usage);
+        try
+        {
+            if (services.CacheDiagnostics is { } diagnostics)
+            {
+                diagnostics(report);
+            }
+            else
+            {
+                Trace.WriteLine(report.ToString());
+            }
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private string DynamicText(AgentInstance instance)

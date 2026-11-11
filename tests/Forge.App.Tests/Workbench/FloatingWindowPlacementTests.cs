@@ -30,7 +30,7 @@ public sealed class FloatingWindowPlacementTests
     [Fact]
     public async Task A_window_whose_rectangle_misses_every_screen_is_centred_on_the_owner_screen()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var (position, expected, area) = await session.Dispatch(
             () =>
             {
@@ -52,7 +52,7 @@ public sealed class FloatingWindowPlacementTests
     [Fact]
     public async Task A_window_that_misses_every_screen_writes_the_placed_position_back_to_its_geometry()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var (geometry, expected) = await session.Dispatch(
             () =>
             {
@@ -75,7 +75,7 @@ public sealed class FloatingWindowPlacementTests
     [Fact]
     public async Task A_window_inside_the_screen_keeps_its_saved_position()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var (position, geometry) = await session.Dispatch(
             () =>
             {
@@ -96,7 +96,7 @@ public sealed class FloatingWindowPlacementTests
     [Fact]
     public async Task A_window_that_was_never_placed_is_centred_over_the_owner()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var (windowCentre, ownerCentre) = await session.Dispatch(
             () =>
             {
@@ -120,7 +120,7 @@ public sealed class FloatingWindowPlacementTests
     [Fact]
     public async Task A_window_that_was_never_placed_records_a_placed_position()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var geometry = await session.Dispatch(
             () =>
             {

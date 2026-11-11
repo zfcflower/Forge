@@ -60,6 +60,26 @@
                  AutomationProperties.AutomationId="new-branch-hint" />
     </StackPanel>
 
+    <!-- Sparse checkout (7.9): only offered from the project row; at least one top-level directory must be chosen. -->
+    <StackPanel Spacing="6" IsVisible="{Binding OfferSparse}">
+      <CheckBox IsChecked="{Binding IsSparse, Mode=TwoWay}"
+                Content="{Binding [lifecycle.sparse.option], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="new-branch-sparse" />
+      <ScrollViewer MaxHeight="180" IsVisible="{Binding IsSparse}">
+        <ItemsControl ItemsSource="{Binding SparseDirectories}"
+                      AutomationProperties.AutomationId="new-branch-sparse-directories">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:SparseDirectoryOption">
+              <CheckBox Margin="20,0,0,0"
+                        IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                        Content="{Binding Name}"
+                        AutomationProperties.Name="{Binding Name}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </StackPanel>
+
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
       <Button x:Name="CancelButton"
               Classes="ghost"

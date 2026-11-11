@@ -46,7 +46,7 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public async Task Folder_expand_swaps_to_open_folder_geometry()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "a/x.txt");
 
@@ -76,7 +76,7 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public async Task Guide_levels_track_expanded_ancestors_and_collapse_removes_the_level()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "a/b/c.txt");
         Write(root, "a/sibling.txt");
@@ -117,7 +117,7 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public async Task Hover_surface_left_edge_moves_right_with_indent()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "d1/d2/deep.txt");
         Write(root, "top.txt");
@@ -151,7 +151,7 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public async Task Child_chevron_slot_aligns_with_parent_icon_left()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "a/b/c.txt");
 
@@ -187,7 +187,7 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public async Task Spec_tree_uses_file_tree_guides_and_icons()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         WriteSpec(root, "specs/00-root.md", "root", null, "Root", "draft");
         WriteSpec(root, "specs/01-app.md", "app", "root", "App", "draft");
@@ -258,7 +258,7 @@ public sealed class TreeVisualTests : IDisposable
     [Fact]
     public async Task Agent_rows_put_chevron_after_title_and_colour_and_animate_by_state()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var result = await session.Dispatch(
             () =>

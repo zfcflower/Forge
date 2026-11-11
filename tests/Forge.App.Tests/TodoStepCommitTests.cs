@@ -548,7 +548,7 @@ public sealed class TodoStepCommitTests
         {
             var directory = Path.Combine(Path.GetTempPath(), "forge-todo-step-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
-            var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var store = new SqliteTodoStore(directory);
             var committer = new RecordingCommitter();
             var panel = await session.Dispatch(() => new TodoListViewModel(store, withCommitter ? committer : null), CancellationToken.None);
@@ -680,7 +680,6 @@ public sealed class TodoStepCommitTests
             // Let the posted refreshes of the last write run before the store goes away.
             await Task.Delay(50);
             await Ui(Panel.Dispose);
-            await session.DisposeAsync();
             await Store.DisposeAsync();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             StepCommitRepo.DeleteTree(directory);
@@ -876,7 +875,7 @@ public sealed class TodoStepCommitEndToEndTests
         public static async Task<EndToEndRig> CreateAsync()
         {
             var harness = await StepCommitHarness.CreateAsync();
-            var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var committer = new ObservingCommitter(harness.Committer);
             var panel = await session.Dispatch(() => new TodoListViewModel(harness.Store, committer), CancellationToken.None);
             return new EndToEndRig(session, harness, committer, panel);
@@ -979,7 +978,6 @@ public sealed class TodoStepCommitEndToEndTests
         {
             await Task.Delay(50);
             await Ui(() => Panel.Dispose());
-            await session.DisposeAsync();
             await Harness.DisposeAsync();
         }
     }

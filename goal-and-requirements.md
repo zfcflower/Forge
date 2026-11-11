@@ -67,7 +67,7 @@ Forge 是一个桌面应用,承载 LLM 编码 Agent 的完整工作环境:会话
 
 | Aspect | Choice | Rationale |
 |---|---|---|
-| 语言 | C# 14 / .NET 10 | 用户指定 |
+| 语言 | C# 15 / .NET 11 | 用户指定 |
 | UI | Avalonia(仅桌面) | 用户指定;跨平台 |
 | Agent 核心 | 参考 microsoft/agent-framework (dotnet) 与 microsoft/mcp | 只取必要源码并改命名空间,不引用 NuGet 包 |
 | 编辑器/Git 及其他三方 | 学习成熟开源库并内化源码 | NuGet 白名单:BCL、Avalonia、Roslyn、neuecc 的库;新增须经用户同意 |

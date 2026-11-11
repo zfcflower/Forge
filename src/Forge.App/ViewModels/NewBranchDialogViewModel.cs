@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using Forge.App.Localization;
@@ -26,6 +27,11 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
     private bool isLoadingBranches = true;
     private bool disposed;
     private int validationGeneration;
+    private bool isSparse;
+    private SparseState sparseState = SparseState.Off;
+    private string? sparseError;
+    private int sparseGeneration;
+    private CancellationTokenSource? sparseSource;
 
     /// <param name="git">The git reader; also the authority on what a legal branch name is.</param>
     /// <param name="request">The repository whose branches are the start points, and the name to prefill.</param>
@@ -87,13 +93,51 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
         ? name
         : ProjectStrings.NewBranchBasePlaceholder;
 
-    /// <summary>True only for a name git accepts that no local branch already uses, once the start point is known.</summary>
-    public bool CanCreate => !isLoadingBranches && nameState == NameState.Ok && Picker.SelectedBranch is not null;
+    /// <summary>
+    /// True only for a name git accepts that no local branch already uses, once the start point is known; with the sparse
+    /// option on, also only once the start point's top-level directories are listed and at least one is chosen (7.9).
+    /// </summary>
+    public bool CanCreate => !isLoadingBranches && nameState == NameState.Ok && Picker.SelectedBranch is not null && SparseReady;
 
     /// <summary>The answer the dialog closes with; null whenever Create must not create anything.</summary>
     public NewBranchChoice? Result => CanCreate && Picker.SelectedBranch is { } start
-        ? new NewBranchChoice(start.RefName, branchName.Trim())
+        ? new NewBranchChoice(start.RefName, branchName.Trim(), isSparse ? new SparseCheckout(SelectedDirectories()) : null)
         : null;
+
+    /// <summary>Whether the "sparse checkout" option is offered at all; only the project row's "new workspace…" asks for it.</summary>
+    public bool OfferSparse => request.OfferSparse;
+
+    /// <summary>
+    /// The "sparse checkout" option (7.9): turning it on lists the start point's top-level directories (<c>git ls-tree
+    /// -d</c>, off the UI thread); a different start point lists again. Ignored when <see cref="OfferSparse"/> is false.
+    /// </summary>
+    public bool IsSparse
+    {
+        get => isSparse;
+        set
+        {
+            var next = value && request.OfferSparse;
+            if (Set(ref isSparse, next))
+            {
+                if (next)
+                {
+                    LoadSparseDirectories();
+                }
+                else
+                {
+                    CancelSparseLoad();
+                    ClearSparseDirectories();
+                    sparseState = SparseState.Off;
+                    RefreshHint();
+                }
+            }
+        }
+    }
+
+    /// <summary>The start point's top-level directories to choose from while <see cref="IsSparse"/> is on.</summary>
+    public ObservableCollection<SparseDirectoryOption> SparseDirectories { get; } = [];
+
+    private bool SparseReady => !isSparse || (sparseState == SparseState.Loaded && SparseDirectories.Any(static option => option.IsSelected));
 
     /// <summary>
     /// Fills the start-point list, then checks the prefilled name against it: the repository may already carry that
@@ -151,9 +195,100 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
             pending.Dispose();
         }
 
+        CancelSparseLoad();
+        ClearSparseDirectories();
         lifetime.Cancel();
         lifetime.Dispose();
     }
+
+    private IReadOnlyList<string> SelectedDirectories() =>
+        SparseDirectories.Where(static option => option.IsSelected).Select(static option => option.Name).ToArray();
+
+    /// <summary>Lists the selected start point's top-level directories; a newer start point or switching the option off drops the answer.</summary>
+    private void LoadSparseDirectories()
+    {
+        CancelSparseLoad();
+        ClearSparseDirectories();
+        var generation = sparseGeneration;
+        sparseState = SparseState.Loading;
+        RefreshHint();
+        if (Picker.SelectedBranch is not { } start)
+        {
+            // No start point yet: the list follows once the picker selects one.
+            return;
+        }
+
+        var source = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        sparseSource = source;
+        _ = LoadSparseDirectoriesAsync(generation, start.RefName, source.Token);
+    }
+
+    private async Task LoadSparseDirectoriesAsync(int generation, string revision, CancellationToken ct)
+    {
+        IReadOnlyList<string> directories;
+        try
+        {
+            directories = await Task.Run(() => git.ListTopLevelDirectoriesAsync(request.RepositoryPath, revision, ct), ct)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (generation == sparseGeneration && !disposed)
+            {
+                Trace.WriteLine("[new-branch] could not list the top-level directories: " + exception.Message);
+                sparseError = exception.Message;
+                sparseState = SparseState.Failed;
+                RefreshHint();
+            }
+
+            return;
+        }
+
+        if (generation != sparseGeneration || disposed || !isSparse)
+        {
+            return;
+        }
+
+        foreach (var directory in directories)
+        {
+            var option = new SparseDirectoryOption(directory);
+            option.PropertyChanged += OnSparseOptionChanged;
+            SparseDirectories.Add(option);
+        }
+
+        sparseState = SparseState.Loaded;
+        RefreshHint();
+    }
+
+    /// <summary>Drops any listing in flight: its answer no longer matches the generation and is ignored.</summary>
+    private void CancelSparseLoad()
+    {
+        sparseGeneration++;
+        var pending = sparseSource;
+        sparseSource = null;
+        if (pending is not null)
+        {
+            pending.Cancel();
+            pending.Dispose();
+        }
+    }
+
+    private void ClearSparseDirectories()
+    {
+        foreach (var option in SparseDirectories)
+        {
+            option.PropertyChanged -= OnSparseOptionChanged;
+        }
+
+        SparseDirectories.Clear();
+        sparseError = null;
+    }
+
+    private void OnSparseOptionChanged(object? sender, PropertyChangedEventArgs e) => RefreshHint();
 
     private void ScheduleValidation(bool immediate)
     {
@@ -239,16 +374,39 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
                     NameState.Required => ProjectStrings.NewBranchNameRequired,
                     NameState.Invalid => ProjectStrings.NewBranchNameInvalid,
                     NameState.Taken => ProjectStrings.NewBranchNameTaken,
-                    _ => null,
+                    _ => SparseHint(),
                 };
         OnPropertyChanged(nameof(CanCreate));
     }
+
+    /// <summary>Why the sparse choice blocks Create, or null when it does not (option off, or at least one directory chosen).</summary>
+    private string? SparseHint() => !isSparse
+        ? null
+        : sparseState switch
+        {
+            SparseState.Loading => TreeMenuStrings.SparseLoading,
+            SparseState.Failed => TreeMenuStrings.SparseLoadFailed(sparseError ?? string.Empty),
+            SparseState.Loaded when SparseDirectories.Count == 0 => TreeMenuStrings.SparseNoDirectories,
+            SparseState.Loaded when !SparseDirectories.Any(static option => option.IsSelected) => TreeMenuStrings.SparseNoneSelected,
+            _ => null,
+        };
 
     private void OnPickerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
         {
             case nameof(BranchPickerViewModel.SelectedBranch):
+                OnPropertyChanged(nameof(BaseBranchLabel));
+                if (isSparse)
+                {
+                    LoadSparseDirectories();
+                }
+                else
+                {
+                    RefreshHint();
+                }
+
+                break;
             case nameof(BranchPickerViewModel.SelectedBranchName):
                 OnPropertyChanged(nameof(BaseBranchLabel));
                 RefreshHint();
@@ -262,6 +420,14 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(BaseBranchLabel));
     }
 
+    private enum SparseState
+    {
+        Off,
+        Loading,
+        Loaded,
+        Failed,
+    }
+
     private enum NameState
     {
         /// <summary>Not checked yet: nothing has been typed, or a check is still queued.</summary>
@@ -271,5 +437,19 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
         Taken,
         Unverified,
         Ok,
+    }
+}
+
+/// <summary>One top-level directory of the sparse-checkout choice (7.9); none is chosen at first.</summary>
+internal sealed class SparseDirectoryOption(string name) : ObservableObject
+{
+    private bool isSelected;
+
+    public string Name { get; } = name;
+
+    public bool IsSelected
+    {
+        get => isSelected;
+        set => Set(ref isSelected, value);
     }
 }

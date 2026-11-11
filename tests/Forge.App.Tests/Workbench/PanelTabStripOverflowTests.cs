@@ -24,7 +24,7 @@ public sealed class PanelTabStripOverflowTests
     [Fact]
     public async Task Ellipsis_appears_only_when_the_tabs_no_longer_fit()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -66,7 +66,7 @@ public sealed class PanelTabStripOverflowTests
     [Fact]
     public async Task Clipped_menu_lists_only_the_hidden_tabs()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var menu = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -91,7 +91,7 @@ public sealed class PanelTabStripOverflowTests
     [Fact]
     public async Task Picking_a_clipped_tab_activates_it_and_scrolls_it_into_the_strip()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var result = await WorkbenchUi.QueryAsync(session, () =>
         {
@@ -123,7 +123,7 @@ public sealed class PanelTabStripOverflowTests
     [Fact]
     public async Task The_overflow_button_wears_the_solid_dots_icon()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {

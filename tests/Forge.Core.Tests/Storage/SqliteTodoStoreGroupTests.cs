@@ -397,7 +397,7 @@ public sealed class SqliteTodoStoreGroupTests
             Assert.Equal(TodoOrigin.Agent, kept.Origin);
         }
 
-        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "todo_groups"));
         Assert.Equal(
             ["id", "session_id", "title", "order_index", "updated_at"],
@@ -436,7 +436,7 @@ public sealed class SqliteTodoStoreGroupTests
             await store.AddAsync(new TodoAddRequest("sess-a", "T"), default);
         }
 
-        Assert.Equal(4L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(9L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "todo_groups"));
         Assert.Contains("group_id", await TodoSchemaRaw.ColumnsAsync(directory, "todos"));
         Assert.Contains("origin", await TodoSchemaRaw.ColumnsAsync(directory, "todos"));

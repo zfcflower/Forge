@@ -27,7 +27,7 @@ public sealed class TerminalTextLocalizationTests
         GC.Collect();
         GC.WaitForPendingFinalizers();
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var report = await TerminalUi.RunTestAsync(
                 session,
                 async () =>

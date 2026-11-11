@@ -38,6 +38,17 @@ internal sealed class ProviderSection
     [JsonPropertyName("maxOutputTokens")]
     public int? MaxOutputTokens { get; set; }
 
+    /// <summary>
+    /// OpenAI-compatible endpoints: send <c>prompt_cache_key</c> (the session lineage id). Off by default because strict
+    /// endpoints reject unknown fields; never sent to DeepSeek.
+    /// </summary>
+    [JsonPropertyName("sendPromptCacheKey")]
+    public bool? SendPromptCacheKey { get; set; }
+
+    /// <summary>Anthropic: message-breakpoint cache TTL, <c>"5m"</c> (default) or <c>"1h"</c>. Config file only; no settings UI.</summary>
+    [JsonPropertyName("promptCacheTtl")]
+    public string? PromptCacheTtl { get; set; }
+
     /// <summary>Name of the environment variable holding the key. Preferred: the key never reaches this file.</summary>
     [JsonPropertyName("apiKeyEnv")]
     public string? ApiKeyEnv { get; set; }
@@ -109,8 +120,12 @@ internal sealed class ProviderSnapshot
         string? apiKeyEnvironmentVariable,
         bool keyFromEnvironment,
         IReadOnlyList<string> models,
-        Dictionary<string, ModelMetadata> userMetadata)
+        Dictionary<string, ModelMetadata> userMetadata,
+        bool sendPromptCacheKey,
+        string? promptCacheTtl)
     {
+        SendPromptCacheKey = sendPromptCacheKey;
+        PromptCacheTtl = promptCacheTtl;
         Kind = kind;
         Models = models;
         BaseUrl = baseUrl;
@@ -133,6 +148,12 @@ internal sealed class ProviderSnapshot
 
     public int? MaxOutputTokens { get; }
 
+    /// <summary><c>provider.sendPromptCacheKey</c>; false when absent.</summary>
+    public bool SendPromptCacheKey { get; }
+
+    /// <summary><c>provider.promptCacheTtl</c> normalised to <c>"5m"</c> or <c>"1h"</c>; null when absent (the provider default).</summary>
+    public string? PromptCacheTtl { get; }
+
     /// <summary>The configured <see cref="Model"/> first, then the extra <c>models</c> of the section, without duplicates.</summary>
     public IReadOnlyList<string> Models { get; }
 
@@ -151,7 +172,10 @@ internal sealed class ProviderSnapshot
     /// <summary>Builds the provider the agent loop streams from. The HttpClient must already have an infinite timeout.</summary>
     public IChatProvider CreateProvider(HttpClient httpClient) =>
         new RetryingChatProvider(
-            ProviderFactory.Create(new ProviderConfig("forge", Kind, BaseUrl, apiKey), httpClient));
+            ProviderFactory.Create(
+                new ProviderConfig("forge", Kind, BaseUrl, apiKey),
+                httpClient,
+                new ProviderOptions { SendPromptCacheKey = SendPromptCacheKey }));
 
     public Task<IReadOnlyList<string>> FetchModelsAsync(CancellationToken cancellationToken) =>
         FetchModelsAsync(ModelListHttpClient, cancellationToken);
@@ -346,6 +370,14 @@ internal sealed class ProviderSnapshot
             throw new FormatException("provider.maxOutputTokens must be a positive number.");
         }
 
+        var cacheTtl = (section.PromptCacheTtl ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "" => null,
+            "5m" => "5m",
+            "1h" => "1h",
+            _ => throw new FormatException("provider.promptCacheTtl must be 5m or 1h."),
+        };
+
         string? key = null;
         var fromEnvironment = false;
         var keyVariable = (section.ApiKeyEnv ?? string.Empty).Trim();
@@ -379,7 +411,9 @@ internal sealed class ProviderSnapshot
             keyVariable,
             fromEnvironment,
             models,
-            ReadUserMetadata(section.ModelMeta));
+            ReadUserMetadata(section.ModelMeta),
+            section.SendPromptCacheKey ?? false,
+            cacheTtl);
     }
 
     /// <summary>

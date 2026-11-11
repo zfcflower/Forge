@@ -81,7 +81,7 @@ public sealed class TerminalGridResizeTests
 
     private static async Task<T> RunAsync<T>(Func<Scene, Task<T>> body, Func<Scene>? open = null)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         return await TerminalUi.RunTestAsync(
             session,
             async () =>

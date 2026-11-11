@@ -28,7 +28,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-empty-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var row = await session.Dispatch(
                 async () =>
                 {
@@ -65,7 +65,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-unborn-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var title = await session.Dispatch(
                 async () =>
                 {
@@ -93,7 +93,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-detached-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var title = await session.Dispatch(
                 async () =>
                 {
@@ -122,7 +122,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-notrepo-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var state = await session.Dispatch(
                 async () =>
                 {
@@ -164,7 +164,7 @@ public sealed class ProjectTreeMainCheckoutTests
         Directory.CreateDirectory(linked);
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var state = await session.Dispatch(
                 async () =>
                 {
@@ -224,7 +224,7 @@ public sealed class ProjectTreeMainCheckoutTests
         Directory.CreateDirectory(newer);
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var subtitles = await session.Dispatch(
                 async () =>
                 {
@@ -261,7 +261,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-plus-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var outcome = await session.Dispatch(
                 async () =>
                 {
@@ -299,7 +299,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-activate-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var created = await session.Dispatch(
                 async () =>
                 {
@@ -329,7 +329,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-reread-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var titles = await session.Dispatch(
                 async () =>
                 {
@@ -364,7 +364,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var root = GitTestFiles.NewTempDir("forge-main-throw-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var state = await session.Dispatch(
                 async () =>
                 {
@@ -400,7 +400,7 @@ public sealed class ProjectTreeMainCheckoutTests
         var repoRoot = GitTestFiles.NewTempDir("forge-main-general-repo-");
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var state = await session.Dispatch(
                 async () =>
                 {

@@ -41,7 +41,7 @@ public sealed class SessionEventRoutingTests
     [Fact]
     public async Task Text_that_arrives_before_its_start_event_is_not_lost()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var texts = await session.Dispatch(
             async () =>
             {
@@ -62,7 +62,7 @@ public sealed class SessionEventRoutingTests
     [Fact]
     public async Task Text_that_races_its_start_event_is_not_lost()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var texts = await session.Dispatch(
             async () =>
             {
@@ -83,7 +83,7 @@ public sealed class SessionEventRoutingTests
     [Fact]
     public async Task A_child_agents_text_never_reaches_the_main_transcript()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var main = await session.Dispatch(
             async () =>
             {
@@ -102,7 +102,7 @@ public sealed class SessionEventRoutingTests
     [Fact]
     public async Task Text_of_the_main_agent_reaches_the_main_transcript()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var main = await session.Dispatch(
             async () =>
             {
@@ -127,7 +127,7 @@ public sealed class SessionEventRoutingTests
     {
         const string SecondAgentId = "child-agent-two";
         const string SecondSessionId = "child-session-two";
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var reading = await session.Dispatch(
             async () =>
             {

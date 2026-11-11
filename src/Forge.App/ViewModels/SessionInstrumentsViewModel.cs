@@ -51,7 +51,6 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private int approvalRecords;
     private (int Ready, int Configured) mcp;
     private string aheadBehind = string.Empty;
-    private string checks = string.Empty;
     private string projectName = string.Empty;
     private string? projectRoot;
     private string latestDraft = string.Empty;
@@ -183,22 +182,16 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     public bool HasAheadBehind => aheadBehind.Length > 0;
 
-    public string ChecksText => checks;
-
-    public bool HasChecks => checks.Length > 0;
-
     /// <summary>
-    /// The Git panel's readouts for the active session. They are pushed rather than read, because only the panel knows them
-    /// (a branch switch inside the panel never reaches the session record), and the strip shows the markers, not the branch.
+    /// The ahead/behind readout of the active session, pushed by the files panel's git row rather than read: only that row
+    /// knows the divergence, and the strip shows the marker, not the branch. The pull-request CI marker that used to sit
+    /// next to it went away with the Git panel — waiting for checks is an agent-tool flow now.
     /// </summary>
-    public void SetGit(string? aheadBehindText, string? checksText)
+    public void SetGit(string? aheadBehindText)
     {
         aheadBehind = aheadBehindText ?? string.Empty;
-        checks = checksText ?? string.Empty;
         OnPropertyChanged(nameof(AheadBehindText));
         OnPropertyChanged(nameof(HasAheadBehind));
-        OnPropertyChanged(nameof(ChecksText));
-        OnPropertyChanged(nameof(HasChecks));
     }
 
     // ---------------------------------------------------------------- usage

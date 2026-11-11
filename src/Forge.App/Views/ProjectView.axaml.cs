@@ -3,7 +3,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Automation;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.ViewModels;
@@ -20,12 +22,17 @@ public partial class ProjectView : UserControl
 
     private ProjectTreeViewModel? tree;
 
+    /// <summary>The rows' context menu, made once and refilled from the row's generated entries on every open.</summary>
+    private ContextMenu? rowMenu;
+
     public ProjectView()
     {
         InitializeComponent();
         // The whole row is the hit target, not just the chevron or the trailing buttons.
         TreeList.AddHandler(TappedEvent, OnRowTapped, RoutingStrategies.Bubble, handledEventsToo: true);
         TreeList.AddHandler(KeyDownEvent, OnRowKeyDown, RoutingStrategies.Tunnel);
+        TreeList.AddHandler(ContextRequestedEvent, OnRowContextRequested, RoutingStrategies.Bubble);
+        TreeList.AddHandler(Button.ClickEvent, OnPlusClick, RoutingStrategies.Bubble);
         TreeList.SelectionChanged += OnSelectionChanged;
         if (TreeList.Items is INotifyCollectionChanged items)
         {
@@ -155,6 +162,52 @@ public partial class ProjectView : UserControl
         if (TreeList.SelectedItem is TreeNodeViewModel node && node.Activate())
         {
             e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// The row's menu, generated now from its snapshot (lifecycle 5.4 rules 1 and 4: no git or database call here). A row
+    /// without a menu (agents, history containers) opens nothing.
+    /// </summary>
+    private void OnRowContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (e.Source is not Visual source
+            || source.FindAncestorOfType<ListBoxItem>(includeSelf: true) is not { DataContext: TreeNodeViewModel node } row)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var items = node.MenuItems();
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        rowMenu ??= new ContextMenu();
+        rowMenu.ItemsSource = TreeMenuControls.Build(items);
+        rowMenu.Open(row);
+    }
+
+    /// <summary>The trailing "+": one enabled entry runs at once, otherwise the first group opens under the button (5.3).</summary>
+    private void OnPlusClick(object? sender, RoutedEventArgs e)
+    {
+        if (e.Source is not Button { DataContext: TreeNodeViewModel node } button || !button.Classes.Contains("tree-plus"))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (node.TryRunPlus())
+        {
+            return;
+        }
+
+        var items = node.PlusItems();
+        if (items.Count > 0)
+        {
+            new MenuFlyout { ItemsSource = TreeMenuControls.Build(items), Placement = PlacementMode.BottomEdgeAlignedRight }
+                .ShowAt(button);
         }
     }
 

@@ -46,7 +46,7 @@ public sealed class BackgroundBuildTests
     [Fact]
     public async Task A_spec_tree_refresh_replaces_its_rows_with_a_single_reset()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var resets = await session.Dispatch(
             async () =>
             {
@@ -82,7 +82,7 @@ public sealed class BackgroundBuildTests
     [Fact]
     public async Task Collapsed_spec_nodes_stay_collapsed_after_a_refresh()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var rows = await session.Dispatch(
             async () =>
             {
@@ -118,7 +118,7 @@ public sealed class BackgroundBuildTests
         var root = await NewDiffRepositoryAsync();
         try
         {
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             var outcome = await session.Dispatch(
                 async () =>
                 {
@@ -153,7 +153,7 @@ public sealed class BackgroundBuildTests
     /// <summary>Runs one spec-tree build and returns what the graph factory saw: <c>true</c> means "on the UI thread".</summary>
     private static async Task<List<bool>> BuildSpecTreeAsync()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         return await session.Dispatch(
             async () =>
             {

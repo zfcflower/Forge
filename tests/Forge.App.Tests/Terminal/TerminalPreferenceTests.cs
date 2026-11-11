@@ -21,7 +21,7 @@ public sealed class TerminalPreferenceTests
     [Fact]
     public async Task Lowering_scrollback_trims_the_live_ring()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var observed = await TerminalUi.RunTestAsync(
             session,
             async () =>
@@ -76,7 +76,7 @@ public sealed class TerminalPreferenceTests
     [Fact]
     public async Task Scrollback_preference_clamps_to_1000_and_100000()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var clamped = await TerminalUi.RunTestAsync(
             session,
             async () =>
@@ -102,7 +102,7 @@ public sealed class TerminalPreferenceTests
     [Fact]
     public async Task Scrollback_section_clamps_before_reaching_the_preferences()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var clamped = await TerminalUi.RunTestAsync(
             session,
             async () =>
@@ -138,7 +138,7 @@ public sealed class TerminalPreferenceTests
     [Fact]
     public async Task New_terminals_use_the_current_shell_and_arguments()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var observed = await TerminalUi.RunTestAsync(
             session,
             async () =>

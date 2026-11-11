@@ -52,7 +52,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Stale_refresh_never_overwrites_a_newer_result()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var big = NewRoot();
         for (var i = 0; i < 1000; i++)
         {
@@ -84,7 +84,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Expanded_folders_survive_a_refresh()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "sub/a.txt");
         Write(root, "sub/b.txt");
@@ -111,7 +111,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Row_count_equals_visible_nodes_with_depth_steps_of_at_most_one()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "d1/f1.txt");
         Write(root, "d1/f2.txt");
@@ -154,7 +154,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Walk_skips_tool_folders_in_the_panel_tree()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         foreach (var skipped in new[] { "bin", "obj", ".git", "node_modules", ".vs", ".idea", ".forge" })
         {
@@ -193,7 +193,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Git_repo_panel_tree_honours_gitignore()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         var git = new GitCli();
         Assert.True((await git.RunAsync(root, ["init"], CancellationToken.None)).Success);
@@ -226,7 +226,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Tab_badges_count_the_whole_index_and_the_change_list_and_show_zero_without_a_session()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "sub/a.txt");
         Write(root, "sub/b.txt");
@@ -272,7 +272,7 @@ public sealed class FilesPanelTests : IDisposable
     [Fact]
     public async Task Toolbar_badges_render_the_counts_and_the_summary_line_is_gone()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var root = NewRoot();
         Write(root, "a.txt");
         Write(root, "b.txt");

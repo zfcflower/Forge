@@ -14,6 +14,7 @@ namespace Forge.App.Tests.Workbench;
 /// right edge ends where the files column begins, docked or in the Inspector's drawer, so no text runs under the files
 /// panel.
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class PreviewColumnBoundsTests
 {
     private const double Tolerance = 1;
@@ -23,7 +24,7 @@ public sealed class PreviewColumnBoundsTests
     [InlineData(true)]
     public async Task Wide_preview_content_ends_at_the_files_column(bool drawer)
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
 
         var bounds = await WorkbenchUi.QueryAsync(session, () =>
         {

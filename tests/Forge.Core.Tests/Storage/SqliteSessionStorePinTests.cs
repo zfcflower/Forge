@@ -53,8 +53,8 @@ public sealed class SqliteSessionStorePinTests
     {
         using var directory = new TempDirectory();
         await using var store = new SqliteSessionStore(directory.Path);
-        var first = await store.CreateSessionAsync("D:/ws", "one", default);
-        var second = await store.CreateSessionAsync("D:/ws", "two", default);
+        var first = await store.CreateSessionAsync("D:/ws/one", "one", default);
+        var second = await store.CreateSessionAsync("D:/ws/two", "two", default);
 
         for (var i = 1; i <= 3; i++)
         {
@@ -120,7 +120,7 @@ public sealed class SqliteSessionStorePinTests
             }
 
             var created = await Task.WhenAll(stores.Select((store, i) =>
-                store.CreateSessionAsync("D:/ws", "s" + i, default))).WaitAsync(TimeSpan.FromSeconds(20));
+                store.CreateSessionAsync("D:/ws/s" + i, "s" + i, default))).WaitAsync(TimeSpan.FromSeconds(20));
             Assert.Equal(5, created.Select(s => s.Id).Distinct(StringComparer.Ordinal).Count());
 
             var listed = await stores[0].ListSessionsAsync(null, default);

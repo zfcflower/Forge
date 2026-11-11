@@ -79,6 +79,14 @@ parent: forge-architecture
 - **`Resolve(root, requested)` 是唯一的入口:** `GetFullPath` → 逐段解析已存在组件的链接 → 结果必须等于 root 或在 root 之下(Windows 不区分大小写);越界抛 `WorkspacePathException`,工具转成错误结果。工具看到的根也必须是真实路径(`ToolBase.Root` 做 `ResolveRealPath`):`Resolve` 返回真实路径,混用两种拼写会让 `read`/`write`/`edit` 在工作区本身经过链接时全部失败(macOS 的 `/var`、Windows 的 junction、subst 盘)。逐段解析让 junction/符号链接无法用来跨出工作区;但它挡不住 TOCTOU(见“边界”)。
 - **同一个路径的写串行。** `PathGate` 用引用计数门,条目归零即移除,长会话不会积累百万条目;跨会话共享一个实例,因为两个会话可能指向同一个目录。
 
+### 回收站服务(`Trash/`)
+
+`ITrashService.MoveToTrashAsync(path)`,`TrashService.CreateDefault()` 按平台选实现:Windows `Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(..., UIOption.AllDialogs, SendToRecycleBin)`(`Task.Run` 包装,用户在系统对话框取消抛 `OperationCanceledException`,视为失败)。shell 只在有回收站的位置回收,别处直接永久删除,而压掉对话框(`OnlyErrorDialogs`)时这种删除是静默的,所以两道防线:UNC 路径、卷 GUID 路径与非固定盘(网络、可移动、光驱、RAM、类型读不出)先拒绝、什么都不动,路径上(含该项自身)的符号链接或联接点按其目标所在的卷同样判定(超过 16 跳按环拒绝);对话框保持开启,回收站放不下(超出配额、该盘关了回收站)时 shell 会弹“永久删除?”,用户取消即失败。回收确认框跟随用户的回收站设置(默认不弹)。对话框的所有者由该库自己取 `Process.MainWindowHandle`(即 Forge 主窗口,已从 `Microsoft.VisualBasic.Core` 的 IL 确认),所以开在 Forge 之上。`subst` 盘没有自己的回收站、却报为固定盘:先读 `%SystemRoot%\System32\subst.exe` 的映射列表(`X:\: => C:\folder`,按 OEM 代码页解码;运行失败或超时 5 秒按无映射处理),把路径换成它映射的真实目录再判定与回收,进真实盘的回收站;换出来的路径不存在而原路径存在(映射读错)时不换,仍由对话框兜底。以上都不用 P/Invoke(P/Invoke 只允许在 Host 的 `WorkerProcessOwnership`,见 `architecture.md`)。Linux 自实现 XDG trash(`$XDG_DATA_HOME/Trash/{files,info}` + `.trashinfo`,缺省 `~/.local/share`,重名加后缀);macOS 移到 `~/.Trash`,重名加后缀,跨卷失败如实报错、不退化为删除。路径不存在时抛异常,调用方先判存在。零 P/Invoke。不对仓库根检出或项目根调用(由 App 的目录归属判定保证)。
+
+### 单实例锁
+
+`SingleInstanceLock.TryAcquire(dataRoot)` 在数据根(按需创建)独占打开 `forge.instance.lock`,成功返回持有到进程结束的 `IDisposable`,已被占用返回 `null`;进程崩溃由 OS 释放句柄,不是“存在即锁”的标记文件。锁文件只放数据根,不放用户工作区。
+
 ## 实现约定
 
 上面“关键决策”已定;以下是实现时不得不自行确定、契约里没写死的细节,以本文件为准。

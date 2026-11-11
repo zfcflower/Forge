@@ -29,7 +29,7 @@ public sealed class IconGeometryTests
         var keys = DeclaredKeys();
         Assert.True(keys.Count > 0, "no icon keys were read from Resources/Icons.axaml; the check refuses to pass silently.");
 
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         var problems = await session.Dispatch(
             () =>
             {

@@ -94,7 +94,7 @@ public sealed class SessionTurnFailureTests
             Assert.True((await git.RunAsync(repository, ["init"], CancellationToken.None)).Success);
             await File.WriteAllTextAsync(Path.Combine(repository, "readme.txt"), "first");
 
-            await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+            var session = SharedUi.Session;
             return await session.Dispatch(
                 async () =>
                 {

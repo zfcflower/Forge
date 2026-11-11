@@ -105,9 +105,9 @@
             <TextBlock x:Name="ReviewComposerStatus" Classes="caption" TextWrapping="Wrap" IsVisible="False"
                        Foreground="{DynamicResource TextMutedBrush}" />
             <WrapPanel Orientation="Horizontal" ItemSpacing="6" LineSpacing="6" HorizontalAlignment="Right">
-              <Button x:Name="ReviewDeleteButton" AutomationProperties.AutomationId="review-delete" />
-              <Button x:Name="ReviewCancelButton" AutomationProperties.AutomationId="review-cancel" />
-              <Button x:Name="ReviewSaveButton" AutomationProperties.AutomationId="review-save" />
+              <Button x:Name="ReviewDeleteButton" Classes="ghost" AutomationProperties.AutomationId="review-delete" />
+              <Button x:Name="ReviewCancelButton" Classes="ghost" AutomationProperties.AutomationId="review-cancel" />
+              <Button x:Name="ReviewSaveButton" Classes="ghost" AutomationProperties.AutomationId="review-save" />
               <Button x:Name="ReviewSendButton" Classes="primary" AutomationProperties.AutomationId="review-send" />
             </WrapPanel>
           </StackPanel>

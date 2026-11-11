@@ -3,8 +3,12 @@ using Forge.Abstractions;
 
 namespace Forge.Core.Agents;
 
-/// <summary>One message of an instance's context; <see cref="Seq"/> is its session store sequence, 0 when unpersisted.</summary>
-internal readonly record struct AgentMessage(ChatMessage Message, long Seq);
+/// <summary>
+/// One message of an instance's context; <see cref="Seq"/> is its session store sequence, 0 when unpersisted.
+/// <see cref="Inherited"/> marks the prefix taken over from an ancestor session by full inheritance: its
+/// <see cref="Seq"/> belongs to that ancestor, and compaction keeps the whole inherited part as it is.
+/// </summary>
+internal readonly record struct AgentMessage(ChatMessage Message, long Seq, bool Inherited = false);
 
 /// <summary>
 /// A live agent: a definition (shared, immutable) plus the context of this instance (history, usage)
@@ -49,6 +53,9 @@ public sealed class AgentInstance
     public ComposedPrompt Prompt { get; }
 
     public TokenUsage Usage { get; internal set; } = TokenUsage.Empty;
+
+    /// <summary>Prompt-cache bookkeeping of this instance (routing key, last fingerprint, first-request report); loop-owned.</summary>
+    internal PromptCacheState CacheState { get; } = new();
 
     /// <summary>Control state of the run driving this instance right now; null for a root agent or a finished sub-agent.</summary>
     internal SubAgentRun? Control { get; set; }
@@ -123,4 +130,23 @@ public sealed class AgentInstance
         history.Clear();
         history.AddRange(messages);
     }
+}
+
+/// <summary>Per-instance prompt-cache state, touched only by the run that holds the instance.</summary>
+internal sealed class PromptCacheState
+{
+    /// <summary>True once the session row was read (successfully or not); the values below come from it.</summary>
+    public bool Resolved { get; set; }
+
+    /// <summary><see cref="ChatRequest.CacheRoutingKey"/>: the session's lineage root, else its own id.</summary>
+    public string? RoutingKey { get; set; }
+
+    public SessionOrigin? Origin { get; set; }
+
+    /// <summary>Tool registry the fingerprint was last computed for; the same reference means the same definitions.</summary>
+    public object? FingerprintTools { get; set; }
+
+    public string? Fingerprint { get; set; }
+
+    public bool FirstRequestReported { get; set; }
 }

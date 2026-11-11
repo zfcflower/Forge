@@ -16,14 +16,29 @@ namespace Forge.Core.Storage;
 /// The same file is the session catalog: project/worktree bindings, parent links, archive state and
 /// activity are columns of the <c>sessions</c> row, so there is no second place to keep in sync.
 /// </summary>
-public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncDisposable, IDisposable
+public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncDisposable, IDisposable
 {
     private const int WriterBatchLimit = 128;
     private const int WriterQueueCapacity = 4096;
     private const int LockRetryCount = 5;
 
+    /// <summary>Columns <see cref="ReadSession"/> reads, in ordinal order; a missing lineage root reads as the row's own id.</summary>
     private const string SessionColumns =
-        "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, last_active_at";
+        "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
+        "last_active_at, deleted_at, fork_of_branch, fork_base_sha, inherits_from_session_id, inherits_up_to_seq, " +
+        "COALESCE(lineage_root_id, id), origin_kind, prefix_fingerprint";
+
+    /// <summary>Columns a new session row is written with; <c>occupancy_key</c> is always computed by the store.</summary>
+    private const string InsertColumns =
+        "id, workspace_path, title, created_at, project_id, worktree_path, branch, parent_session_id, agent_kind, task, status, " +
+        "last_active_at, last_active_ticks, occupancy_key, fork_of_branch, fork_base_sha, inherits_from_session_id, " +
+        "inherits_up_to_seq, lineage_root_id, origin_kind";
+
+    /// <summary>Name of the savepoint each occupancy-changing / lifecycle write runs under inside a writer batch.</summary>
+    private const string OperationSavepoint = "forge_op";
+
+    /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c>: the extended result code of a unique-index violation.</summary>
+    private const int SqliteConstraintUnique = 2067;
 
     private const string FtsInsertSql = "INSERT INTO messages_fts (session_id, seq, text) VALUES ($s, $q, $t)";
     private const string FallbackInsertSql = "INSERT OR REPLACE INTO messages_text (session_id, seq, text) VALUES ($s, $q, $t)";
@@ -78,24 +93,14 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         return CreateAsync(new SessionCreate(workspacePath, title), ct);
     }
 
+    /// <summary>
+    /// Inserts a session. A root session (no parent) is a conditional insert: when another Active root session holds
+    /// the same occupancy key it throws <see cref="WorktreeOccupiedException"/> without failing writes batched with it.
+    /// </summary>
     public async Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspacePath);
-        ArgumentNullException.ThrowIfNull(request.Title);
-        var now = DateTimeOffset.UtcNow;
-        var session = new SessionInfo(Guid.NewGuid().ToString("n"), request.WorkspacePath, request.Title, now)
-        {
-            ProjectId = request.ProjectId,
-            WorktreePath = request.WorktreePath,
-            Branch = request.Branch,
-            ParentSessionId = request.ParentSessionId,
-            AgentKind = request.AgentKind,
-            Task = request.Task,
-            Status = SessionStatus.Active,
-            LastActiveAt = now,
-        };
-        return await EnqueueAsync(new CreateSessionOp(session, ct), ct).ConfigureAwait(false);
+        var (session, key) = PrepareCreate(request);
+        return await EnqueueAsync(new CreateSessionOp(session, key, ct), ct).ConfigureAwait(false);
     }
 
     public async Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct)
@@ -116,8 +121,8 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = workspacePath is null
-            ? $"SELECT {SessionColumns} FROM sessions ORDER BY created_at DESC, id"
-            : $"SELECT {SessionColumns} FROM sessions WHERE workspace_path = $ws ORDER BY created_at DESC, id";
+            ? $"SELECT {SessionColumns} FROM sessions WHERE status <> 'Deleted' ORDER BY created_at DESC, id"
+            : $"SELECT {SessionColumns} FROM sessions WHERE workspace_path = $ws AND status <> 'Deleted' ORDER BY created_at DESC, id";
         if (workspacePath is not null)
         {
             command.Parameters.AddWithValue("$ws", workspacePath);
@@ -133,14 +138,25 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         return sessions;
     }
 
-    /// <summary>Filters by the non-null members of <paramref name="query"/>; newest activity first.</summary>
-    public async Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
+    /// <summary>
+    /// Filters by the non-null members of <paramref name="query"/>; newest activity first. Deleted sessions are left out
+    /// unless <see cref="SessionQuery.Status"/> asks for <see cref="SessionStatus.Deleted"/> explicitly.
+    /// </summary>
+    public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);
+        var status = query.Status is { } wanted
+            ? $"status = '{StatusName(wanted)}'"
+            : "status <> 'Deleted'";
+        return QuerySessionsAsync(query, status, ct);
+    }
+
+    private async Task<IReadOnlyList<SessionInfo>> QuerySessionsAsync(SessionQuery query, string statusCondition, CancellationToken ct)
+    {
         await EnsureInitializedAsync().ConfigureAwait(false);
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        var conditions = new List<string>(4);
+        var conditions = new List<string>(4) { statusCondition };
         if (query.ProjectId is not null)
         {
             conditions.Add("project_id = $project");
@@ -151,12 +167,6 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         {
             conditions.Add("worktree_path = $worktree");
             command.Parameters.AddWithValue("$worktree", query.WorktreePath);
-        }
-
-        if (query.Status is { } status)
-        {
-            conditions.Add("status = $status");
-            command.Parameters.AddWithValue("$status", StatusName(status));
         }
 
         if (query.ParentSessionId is { } parent)
@@ -172,9 +182,8 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
             }
         }
 
-        command.CommandText = conditions.Count == 0
-            ? $"SELECT {SessionColumns} FROM sessions ORDER BY last_active_ticks DESC, id"
-            : $"SELECT {SessionColumns} FROM sessions WHERE {string.Join(" AND ", conditions)} ORDER BY last_active_ticks DESC, id";
+        command.CommandText =
+            $"SELECT {SessionColumns} FROM sessions WHERE {string.Join(" AND ", conditions)} ORDER BY last_active_ticks DESC, id";
 
         var sessions = new List<SessionInfo>();
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -186,14 +195,16 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         return sessions;
     }
 
+    /// <summary>
+    /// Raw status write (no cascade, no conditional check). Active and Archived clear <c>deleted_at</c>; Deleted stamps it
+    /// when unset. Making a root session Active while another holds its key is refused by the unique occupancy index and
+    /// surfaces as <see cref="WorktreeOccupiedException"/>; App code uses <see cref="ActivateAsync"/> instead.
+    /// </summary>
     public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct)
     {
         StoragePaths.SafeSegment(sessionId, nameof(sessionId));
-        return EnqueueAsync(new UpdateSessionOp(
-            "UPDATE sessions SET status = $value WHERE id = $id",
-            StatusName(status),
-            sessionId,
-            ct), ct);
+        _ = StatusName(status);
+        return EnqueueAsync(new SetStatusOp(sessionId, status, ct), ct);
     }
 
     public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct)
@@ -346,6 +357,7 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
     {
         SessionStatus.Active => StorageSchema.StatusActive,
         SessionStatus.Archived => StorageSchema.StatusArchived,
+        SessionStatus.Deleted => StorageSchema.StatusDeleted,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown session status."),
     };
 
@@ -353,7 +365,8 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
     {
         StorageSchema.StatusActive => SessionStatus.Active,
         StorageSchema.StatusArchived => SessionStatus.Archived,
-        _ => throw StorageDb.Malformed(databasePath, "status", row, $"'{value}' is not one of Active, Archived", null),
+        StorageSchema.StatusDeleted => SessionStatus.Deleted,
+        _ => throw StorageDb.Malformed(databasePath, "status", row, $"'{value}' is not one of Active, Archived, Deleted", null),
     };
 
     private static string ResolveDatabasePath(string dataSource) =>
@@ -389,6 +402,16 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
                 "last_active_at",
                 _databasePath,
                 row),
+            DeletedAt = StorageDb.ReadOptionalText(reader, 12, "deleted_at", _databasePath, row) is { } deletedAt
+                ? StorageDb.ParseCanonicalTimestamp(deletedAt, "deleted_at", _databasePath, row)
+                : null,
+            ForkOfBranch = StorageDb.ReadOptionalText(reader, 13, "fork_of_branch", _databasePath, row),
+            ForkBaseSha = StorageDb.ReadOptionalText(reader, 14, "fork_base_sha", _databasePath, row),
+            InheritsFromSessionId = StorageDb.ReadOptionalText(reader, 15, "inherits_from_session_id", _databasePath, row),
+            InheritsUpToSeq = reader.IsDBNull(16) ? null : StorageDb.ReadInt64(reader, 16, "inherits_up_to_seq", _databasePath, row),
+            LineageRootId = StorageDb.ReadText(reader, 17, "lineage_root_id", _databasePath, row),
+            Origin = ParseOrigin(StorageDb.ReadOptionalText(reader, 18, "origin_kind", _databasePath, row), _databasePath, row),
+            PrefixFingerprint = StorageDb.ReadOptionalText(reader, 19, "prefix_fingerprint", _databasePath, row),
         };
     }
 
@@ -460,7 +483,14 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         {
             try
             {
-                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(CancellationToken.None).ConfigureAwait(false);
+                foreach (var op in batch)
+                {
+                    op.BeginAttempt();
+                }
+
+                // BEGIN IMMEDIATE: the writer takes the write lock up front, so a busy database surfaces here (and is
+                // retried) instead of on the first write statement halfway through the batch.
+                await using var transaction = connection.BeginTransaction(deferred: false);
                 foreach (var op in batch)
                 {
                     if (op.Cancellation.IsCancellationRequested)
@@ -469,7 +499,14 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
                         continue;
                     }
 
-                    await op.RunAsync(connection, transaction, sequences).ConfigureAwait(false);
+                    if (op.UsesSavepoint)
+                    {
+                        await RunContainedAsync(transaction, op, connection, sequences).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await op.RunAsync(connection, transaction, sequences).ConfigureAwait(false);
+                    }
                 }
 
                 await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -499,6 +536,34 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         }
     }
 
+    /// <summary>
+    /// Runs one op under its own savepoint (I1): a failure of the op - an occupancy conflict, a refused handover or
+    /// purge, any statement error - rolls back only to that savepoint and fails only that op once the batch commits;
+    /// the other writes of the batch go through. A transient lock error and a failed savepoint rollback still fail the
+    /// whole batch (the transaction itself is no longer usable then).
+    /// </summary>
+    private static async Task RunContainedAsync(
+        SqliteTransaction transaction,
+        IWriteOp op,
+        SqliteConnection connection,
+        SeqAllocator sequences)
+    {
+        await transaction.SaveAsync(OperationSavepoint, CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await op.RunAsync(connection, transaction, sequences).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not SqliteException { SqliteErrorCode: 5 or 6 })
+        {
+            await transaction.RollbackAsync(OperationSavepoint, CancellationToken.None).ConfigureAwait(false);
+            await transaction.ReleaseAsync(OperationSavepoint, CancellationToken.None).ConfigureAwait(false);
+            op.Defer(exception);
+            return;
+        }
+
+        await transaction.ReleaseAsync(OperationSavepoint, CancellationToken.None).ConfigureAwait(false);
+    }
+
     private static bool IsTransient(SqliteException exception) => exception.SqliteErrorCode is 5 or 6;
 
     private async Task<T> EnqueueAsync<T>(WriteOp<T> op, CancellationToken ct)
@@ -525,6 +590,38 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         command.Parameters.AddWithValue("$id", sessionId);
         var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is long value ? value : Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    private async Task InsertMessageAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string sessionId,
+        long seq,
+        ChatMessage message,
+        TokenUsage? usage,
+        DateTimeOffset at)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO messages (session_id, seq, role, content_json, usage_json, at)
+                VALUES ($id, $seq, $role, $content, $usage, $at)
+                """;
+            command.Parameters.AddWithValue("$id", sessionId);
+            command.Parameters.AddWithValue("$seq", seq);
+            command.Parameters.AddWithValue("$role", MessageJson.RoleName(message.Role));
+            command.Parameters.AddWithValue("$content", MessageJson.Serialize(message));
+            command.Parameters.AddWithValue("$usage", (object?)MessageJson.SerializeUsage(usage) ?? DBNull.Value);
+            command.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(at));
+            await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        var text = MessageJson.ExtractSearchText(message);
+        if (text.Length > 0)
+        {
+            await InsertSearchRowAsync(connection, transaction, sessionId, seq, text).ConfigureAwait(false);
+        }
     }
 
     private async Task InsertSearchRowAsync(SqliteConnection connection, SqliteTransaction transaction, string sessionId, long seq, string text)
@@ -629,8 +726,20 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
     private interface IWriteOp
     {
         CancellationToken Cancellation { get; }
+
+        /// <summary>True for an op that must not fail the rest of its batch; it runs under <see cref="OperationSavepoint"/>.</summary>
+        bool UsesSavepoint { get; }
+
         ValueTask RunAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences);
+
+        /// <summary>Clears a failure recorded by an earlier, retried attempt of the batch.</summary>
+        void BeginAttempt();
+
+        /// <summary>Records a contained failure; reported by <see cref="Complete"/> once the batch commits.</summary>
+        void Defer(Exception exception);
+
         void Complete();
+
         void Fail(Exception exception);
     }
 
@@ -638,21 +747,45 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
     {
         private readonly TaskCompletionSource<T> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private T _result = default!;
+        private Exception? _deferred;
 
         protected WriteOp(CancellationToken cancellationToken) => Cancellation = cancellationToken;
 
         public CancellationToken Cancellation { get; }
+
+        public virtual bool UsesSavepoint => false;
 
         public Task<T> Task => _completion.Task;
 
         public async ValueTask RunAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences) =>
             _result = await ExecuteAsync(connection, transaction, sequences).ConfigureAwait(false);
 
-        public void Complete() => _completion.TrySetResult(_result);
+        public void BeginAttempt() => _deferred = null;
+
+        public void Defer(Exception exception) => _deferred = exception;
+
+        public void Complete()
+        {
+            if (_deferred is { } failure)
+            {
+                _completion.TrySetException(failure);
+                return;
+            }
+
+            if (_completion.TrySetResult(_result))
+            {
+                OnCommitted();
+            }
+        }
 
         public void Fail(Exception exception) => _completion.TrySetException(exception);
 
         protected abstract ValueTask<T> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences);
+
+        /// <summary>Runs after the op's transaction committed and its result was published.</summary>
+        protected virtual void OnCommitted()
+        {
+        }
     }
 
     private sealed class SeqAllocator(SqliteSessionStore owner)
@@ -684,47 +817,9 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         }
 
         public void Reset() => _pending.Clear();
-    }
 
-    private sealed class CreateSessionOp(SessionInfo session, CancellationToken ct) : WriteOp<SessionInfo>(ct)
-    {
-        protected override async ValueTask<SessionInfo> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
-        {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = $"""
-                INSERT INTO sessions ({SessionColumns}, last_active_ticks)
-                VALUES ($id, $ws, $title, $at, $project, $worktree, $branch, $parent, $kind, $task, $status, $active, $ticks)
-                """;
-            command.Parameters.AddWithValue("$id", session.Id);
-            command.Parameters.AddWithValue("$ws", session.WorkspacePath);
-            command.Parameters.AddWithValue("$title", session.Title);
-            command.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(session.CreatedAt));
-            command.Parameters.AddWithValue("$project", (object?)session.ProjectId ?? DBNull.Value);
-            command.Parameters.AddWithValue("$worktree", (object?)session.WorktreePath ?? DBNull.Value);
-            command.Parameters.AddWithValue("$branch", (object?)session.Branch ?? DBNull.Value);
-            command.Parameters.AddWithValue("$parent", (object?)session.ParentSessionId ?? DBNull.Value);
-            command.Parameters.AddWithValue("$kind", (object?)session.AgentKind ?? DBNull.Value);
-            command.Parameters.AddWithValue("$task", (object?)session.Task ?? DBNull.Value);
-            command.Parameters.AddWithValue("$status", StatusName(session.Status));
-            command.Parameters.AddWithValue("$active", StorageDb.FormatTimestamp(session.LastActiveAt));
-            command.Parameters.AddWithValue("$ticks", StorageDb.TimestampTicks(session.LastActiveAt));
-            await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
-            return session;
-        }
-    }
-
-    private sealed class UpdateSessionOp(string sql, string value, string sessionId, CancellationToken ct) : WriteOp<bool>(ct)
-    {
-        protected override async ValueTask<bool> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
-        {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = sql;
-            command.Parameters.AddWithValue("$value", value);
-            command.Parameters.AddWithValue("$id", sessionId);
-            return await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false) > 0;
-        }
+        /// <summary>Records the last sequence an op wrote for a session itself (the handover's initial messages).</summary>
+        public void Record(string sessionId, long lastSeq) => _pending[sessionId] = lastSeq;
     }
 
     private sealed class TouchSessionOp(string sessionId, DateTimeOffset at, CancellationToken ct) : WriteOp<bool>(ct)
@@ -752,28 +847,7 @@ public sealed class SqliteSessionStore : ISessionStore, ISessionCatalog, IAsyncD
         protected override async ValueTask<long> ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, SeqAllocator sequences)
         {
             var seq = await sequences.NextAsync(connection, transaction, sessionId).ConfigureAwait(false);
-            await using (var command = connection.CreateCommand())
-            {
-                command.Transaction = transaction;
-                command.CommandText = """
-                    INSERT INTO messages (session_id, seq, role, content_json, usage_json, at)
-                    VALUES ($id, $seq, $role, $content, $usage, $at)
-                    """;
-                command.Parameters.AddWithValue("$id", sessionId);
-                command.Parameters.AddWithValue("$seq", seq);
-                command.Parameters.AddWithValue("$role", MessageJson.RoleName(message.Role));
-                command.Parameters.AddWithValue("$content", MessageJson.Serialize(message));
-                command.Parameters.AddWithValue("$usage", (object?)MessageJson.SerializeUsage(usage) ?? DBNull.Value);
-                command.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(at));
-                await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-
-            var text = MessageJson.ExtractSearchText(message);
-            if (text.Length > 0)
-            {
-                await store.InsertSearchRowAsync(connection, transaction, sessionId, seq, text).ConfigureAwait(false);
-            }
-
+            await store.InsertMessageAsync(connection, transaction, sessionId, seq, message, usage, at).ConfigureAwait(false);
             return seq;
         }
     }

@@ -23,7 +23,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     private readonly PanelModel projectPanel;
     private readonly PanelModel? generalPanel;
     private readonly PanelModel filesPanel;
-    private readonly PanelModel? gitPanel;
     private readonly TabGroupModel mainTabs;
     private readonly TabGroupModel bottomTabs;
     private readonly TabGroupModel previewTabs;
@@ -74,9 +73,8 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <param name="todo">View model of the TODO tab of the inspector tools group.</param>
     /// <param name="review">View model of the review tab.</param>
     /// <param name="specs">View model of the spec tree tab.</param>
-    /// <param name="gitContent">View model of the Git panel, stacked under the files panel in the inspector column; null leaves the panel out.</param>
     /// <param name="generalContent">View model of the general-chats panel, stacked above the projects panel; null leaves the panel out.</param>
-    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs, object? gitContent = null, object? generalContent = null)
+    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs, object? generalContent = null)
     {
         project = new RegionModel(RegionRole.Project, WorkbenchMetrics.DefaultProjectWidth);
         main = new RegionModel(RegionRole.Main, 0);
@@ -131,16 +129,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         main.Panels.Add(bottomTabs);
         inspector.Panels.Add(previewTabs);
         inspector.Panels.Add(filesPanel);
-        if (gitContent is not null)
-        {
-            gitPanel = new PanelModel(WorkbenchIds.GitPanel, RegionRole.Inspector, "Git")
-            {
-                Content = gitContent,
-                CanPin = true,
-            };
-            inspector.Panels.Add(gitPanel);
-        }
-
         inspector.Panels.Add(inspectorTools);
 
         Order.Add(project);
@@ -469,9 +457,6 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     public PanelModel? GeneralPanel => generalPanel;
 
     public PanelModel FilesPanel => filesPanel;
-
-    /// <summary>The Git panel under the project panel; null when the layout was built without Git content.</summary>
-    public PanelModel? GitPanel => gitPanel;
 
     /// <summary>Session tabs.</summary>
     public TabGroupModel MainTabs => mainTabs;

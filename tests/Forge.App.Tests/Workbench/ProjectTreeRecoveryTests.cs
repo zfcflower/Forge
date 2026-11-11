@@ -25,7 +25,7 @@ public sealed class ProjectTreeRecoveryTests
     [Fact]
     public async Task A_project_stamped_by_another_writer_no_longer_empties_the_tree_or_reports_an_error()
     {
-        await using var session = HeadlessUnitTestSession.StartNew(typeof(App));
+        var session = SharedUi.Session;
         await session.Dispatch(
             async () =>
             {

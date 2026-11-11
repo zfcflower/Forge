@@ -92,7 +92,10 @@ public sealed class SummaryCompactor : IContextCompactor
             return null;
         }
 
-        var budget = Math.Max(1, (int)(thresholdTokens * targetRatio));
+        // Full inheritance keeps the inherited prefix whole (it is what makes the parent's prompt cache reusable), so only
+        // this session's own messages are summarized and they get the budget the inherited part leaves; when the inherited
+        // part alone fills it, compaction still bounds the own part down to its last interaction.
+        var budget = Math.Max(1, (int)(thresholdTokens * targetRatio) - InheritedTokens(instance));
         var plan = SummaryLayers.Plan(summaries, raw, lastSeq, budget, tokens.Count, maxStageSummaries);
         if (plan.IsIdle)
         {
@@ -169,12 +172,32 @@ public sealed class SummaryCompactor : IContextCompactor
         return end == index ? range : new SummaryRange(range.FromSeq, raw[end].Seq);
     }
 
+    private int InheritedTokens(AgentInstance instance)
+    {
+        List<ChatMessage>? inherited = null;
+        foreach (var entry in instance.Messages)
+        {
+            if (entry.Inherited)
+            {
+                (inherited ??= []).Add(entry.Message);
+            }
+        }
+
+        return inherited is null ? 0 : tokens.Count(inherited);
+    }
+
+    /// <summary>[inherited prefix, unchanged] + [own summary view] + [own messages after the last summarized sequence].</summary>
     private static List<AgentMessage> Rebuild(AgentInstance instance, ContextView view)
     {
+        var inherited = new List<AgentMessage>();
         var recent = new List<AgentMessage>();
         foreach (var entry in instance.Messages)
         {
-            if (entry.Seq > view.LastSummarizedSeq)
+            if (entry.Inherited)
+            {
+                inherited.Add(entry);
+            }
+            else if (entry.Seq > view.LastSummarizedSeq)
             {
                 recent.Add(entry);
             }
@@ -185,7 +208,8 @@ public sealed class SummaryCompactor : IContextCompactor
             recent.RemoveAt(0);
         }
 
-        var rebuilt = new List<AgentMessage>(recent.Count + 1);
+        var rebuilt = new List<AgentMessage>(inherited.Count + recent.Count + 1);
+        rebuilt.AddRange(inherited);
         var summaryText = SessionHistory.RenderSummaries(view);
         if (summaryText.Length > 0)
         {
