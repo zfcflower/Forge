@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Forge.Abstractions;
+using Forge.Core.Providers;
 using Forge.Core.Prompts;
 
 namespace Forge.Core.Agents;
@@ -149,6 +150,31 @@ public sealed class AgentHost
     public ToolRegistry Tools => toolSurface.Tools;
 
     /// <summary>
+    /// Host side of <c>spawn_agent</c>: starts a <paramref name="kind"/> sub-agent under <paramref name="root"/> outside a
+    /// model turn (automations). The child takes a run slot from the same per-tree pool, gets its own sub-agent session
+    /// and reports through <paramref name="sink"/> exactly like a tool-spawned child (<see cref="AgentSubAgentStarted"/>
+    /// with the root as parent, then the child's events). Returns the child's final text and its usage for this run.
+    /// </summary>
+    public async Task<ChildAgentResult> SpawnChildAsync(
+        AgentInstance root,
+        string kind,
+        string task,
+        IAgentEventSink sink,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(sink);
+        var context = new ToolContext(root.SessionId, root.WorkingDirectory, root.Depth);
+        var outcome = await scheduler.SpawnAsync(kind, task, null, context, sink, root.Id, ct).ConfigureAwait(false);
+        if (scheduler.TryGetInstance(outcome.AgentId, out var child))
+        {
+            return new ChildAgentResult(child.SessionId, outcome.Text, outcome.IsError, child.Usage);
+        }
+
+        return new ChildAgentResult(string.Empty, outcome.Text, outcome.IsError, TokenUsage.Empty);
+    }
+
+    /// <summary>
     /// Replaces the externally supplied tools (the <see cref="AgentHostOptions.Tools"/> part; built-in tools such as
     /// retrieval, <c>todo</c> and the sub-agent tools stay). Thread-safe. Running loops pick the new set up before their next
     /// model request, so a tool approved mid-turn is callable in the same turn; the changed definitions break the prompt
@@ -248,6 +274,12 @@ public sealed class AgentHost
                 }
                 catch (Exception exception)
                 {
+                    if (exception is ProviderException provider
+                        && ProviderQuota.Classify(provider, root.Definition.Model, DateTimeOffset.UtcNow) is { } quota)
+                    {
+                        sink.Emit(new AgentQuotaExhausted(root.Id, quota));
+                    }
+
                     sink.Emit(new AgentFailed(root.Id, exception.Message));
                 }
                 finally

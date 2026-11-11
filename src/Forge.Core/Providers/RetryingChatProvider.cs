@@ -94,7 +94,7 @@ public sealed class RetryingChatProvider : IChatProvider
                 await enumerator.DisposeAsync().ConfigureAwait(false);
             }
 
-            if (failure is null || yielded || attempt >= _maxAttempts || !IsRetryable(failure, ct))
+            if (failure is null || yielded || attempt >= _maxAttempts || !IsRetryable(failure, ct) || IsQuota(failure))
             {
                 throw Rethrow(failure ?? new ProviderException($"{_inner.Id}: stream ended unexpectedly.", retryable: true));
             }
@@ -102,6 +102,11 @@ public sealed class RetryingChatProvider : IChatProvider
             await _delay(ComputeDelay(attempt, failure), ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>A spent quota (not a short rate limit) never comes back within a retry; the automation flow waits for it instead.</summary>
+    private static bool IsQuota(Exception failure) =>
+        failure is ProviderException provider
+        && ProviderQuota.Classify(provider, new ModelSettings(string.Empty), DateTimeOffset.UtcNow) is not null;
 
     private static bool IsRetryable(Exception failure, CancellationToken ct) => failure switch
     {

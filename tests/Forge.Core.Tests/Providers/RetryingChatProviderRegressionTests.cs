@@ -31,7 +31,7 @@ public class RetryingChatProviderRegressionTests
     public async Task Retry_after_longer_than_the_configured_ceiling_is_capped()
     {
         var handler = new FakeHttpMessageHandler()
-            .EnqueueStatus(HttpStatusCode.TooManyRequests, "slow down", TimeSpan.FromHours(1))
+            .EnqueueStatus(HttpStatusCode.TooManyRequests, "slow down", TimeSpan.FromMinutes(4))
             .EnqueueSse("data: [DONE]\n\n");
         var delays = new List<TimeSpan>();
         var provider = new RetryingChatProvider(
