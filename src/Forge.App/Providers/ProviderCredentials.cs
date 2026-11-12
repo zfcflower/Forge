@@ -126,14 +126,6 @@ internal sealed class ProviderCredentials
         return session;
     }
 
-    /// <summary>Drops the stored login and the cached session, so the row goes back to "needs sign-in".</summary>
-    public async Task ForgetCopilotAsync(string providerId, CancellationToken cancellationToken = default)
-    {
-        InvalidateCopilot(providerId);
-        var reference = CopilotUserTokenReference(providerId);
-        await Task.Run(() => secrets.Remove(reference), cancellationToken).ConfigureAwait(true);
-    }
-
     /// <summary>Forgets a cached session after a 401 so the next attempt exchanges a fresh one.</summary>
     public void InvalidateCopilot(string providerId)
     {

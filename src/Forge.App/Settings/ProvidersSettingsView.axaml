@@ -1,7 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:wc="using:Forge.App.Workbench.Controls"
-             xmlns:loc="using:Forge.App.Localization"
              xmlns:settings="using:Forge.App.Settings"
              x:Class="Forge.App.Settings.ProvidersSettingsView"
              x:DataType="settings:ProvidersSettingsViewModel">
@@ -245,12 +244,8 @@
     </StackPanel>
 
     <Grid ColumnDefinitions="120,*,170" ColumnSpacing="8">
-      <TextBlock Grid.Column="1"
-                 Classes="caption"
-                 Text="{Binding [providers.agents.model], Source={x:Static loc:Loc.Instance}}" />
-      <TextBlock Grid.Column="2"
-                 Classes="caption"
-                 Text="{Binding [providers.agents.thinking], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding AgentsModelHeader}" />
+      <TextBlock Grid.Column="2" Classes="caption" Text="{Binding AgentsThinkingHeader}" />
     </Grid>
 
     <ItemsControl ItemsSource="{Binding AgentRows}" AutomationProperties.AutomationId="providers-agent-defaults">

@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Forge.Abstractions;
 using Forge.App.Providers;
+using Forge.Core.Providers;
 using Xunit;
 
 namespace Forge.App.Tests.Providers;
@@ -40,6 +42,52 @@ public sealed class ProviderStoreTests : IDisposable
         Assert.Equal("DEEPSEEK_API_KEY", provider.Definition.EnvironmentVariable);
         Assert.Equal(64_000, provider.Definition.Overrides["deepseek-chat"].ContextWindow);
         Assert.Same(provider, catalog.Default);
+    }
+
+    [Fact]
+    public void The_legacy_section_migrates_to_the_protocol_and_step_it_names()
+    {
+        // The migration reads the section as the current schema: the three protocols by name and every thinking step this
+        // build knows, so nothing silently degrades to a guess.
+        var path = WriteSettings(
+            """
+            {
+              "provider": {
+                "kind": "openai-responses",
+                "baseUrl": "https://api.meta.ai/v1",
+                "model": "muse-code",
+                "thinking": "xhigh"
+              }
+            }
+            """);
+        var (store, secrets, credentials) = CreateStack(path);
+
+        var provider = Assert.Single(store.Load(secrets, credentials).Providers);
+
+        Assert.Equal(ProviderProtocol.OpenAiResponses, provider.Definition.Protocol);
+        Assert.Equal(ThinkingEffort.XHigh, provider.Definition.Thinking);
+        Assert.Equal(ProviderCredentialKind.ApiKey, provider.Definition.CredentialKind);
+    }
+
+    [Fact]
+    public void A_legacy_kind_this_build_does_not_speak_is_unusable_rather_than_guessed()
+    {
+        var path = WriteSettings(
+            """
+            {
+              "provider": {
+                "kind": "grpc-stream",
+                "baseUrl": "https://example.invalid",
+                "model": "whatever"
+              }
+            }
+            """);
+        var (store, secrets, credentials) = CreateStack(path);
+
+        var catalog = store.Load(secrets, credentials);
+
+        Assert.Empty(catalog.Providers);
+        Assert.False(catalog.IsConfigured);
     }
 
     [Fact]

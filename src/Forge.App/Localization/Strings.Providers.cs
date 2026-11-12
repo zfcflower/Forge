@@ -175,8 +175,6 @@ internal static class ProviderStrings
 
     public const string LoginClaudeInstallKey = "providers.login.claudeInstall";
 
-    public const string LoginClaudeDocsKey = "providers.login.claudeDocs";
-
     public const string LoginClaudeRecheckKey = "providers.login.claudeRecheck";
 
     public const string LoginClaudeUseKey = "providers.login.claudeUse";
@@ -261,8 +259,6 @@ internal static class ProviderStrings
     public const string MetadataCloseKey = "providers.meta.close";
 
     public const string MetadataEmptyKey = "providers.meta.empty";
-
-    public const string MetadataUnknownKey = "providers.meta.unknown";
 
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
@@ -384,7 +380,6 @@ internal static class ProviderStrings
         Loc.Register(LoginClaudeStepsKey, "1. 运行安装命令（PowerShell）：irm https://claude.ai/install.ps1 | iex\n2. 打开新的终端，运行 claude 并完成登录\n3. 回到这里点击「重新检查」",
             "1. Run the installer in PowerShell: irm https://claude.ai/install.ps1 | iex\n2. Open a new terminal, run claude and sign in\n3. Come back here and click Re-check");
         Loc.Register(LoginClaudeInstallKey, "安装 Claude Code", "Install Claude Code");
-        Loc.Register(LoginClaudeDocsKey, "查看安装说明", "Installation guide");
         Loc.Register(LoginClaudeRecheckKey, "重新检查", "Re-check");
         Loc.Register(LoginClaudeUseKey, "使用此登录", "Use this sign-in");
         Loc.Register(LoginCopilotStartKey, "开始设备码登录", "Start device-code sign-in");
@@ -449,7 +444,6 @@ internal static class ProviderStrings
         Loc.Register(MetadataCloseKey, "关闭", "Close");
         Loc.Register(MetadataEmptyKey, "这个提供商还没有模型；先在编辑界面刷新一次。",
             "This provider has no models yet; refresh once in the editor.");
-        Loc.Register(MetadataUnknownKey, "未知", "Unknown");
     }
 
     // ---------------------------------------------------------------- accessors used outside this file
@@ -505,9 +499,4 @@ internal static class ProviderStrings
     public static Localization.LocText ChatGptSignedInText() => new(ReadyChatGptKey);
 
     public static string ManagedText => Localization.Loc.Instance[ManagedKey];
-
-    /// <summary>Short name of a protocol, as the editor shows it.</summary>
-    public static string ProtocolText(string protocolId) => protocolId == "anthropic"
-        ? "Anthropic Messages"
-        : "OpenAI Chat Completions";
 }

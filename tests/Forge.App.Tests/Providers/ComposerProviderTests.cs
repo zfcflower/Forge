@@ -1,3 +1,4 @@
+using System.Net;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Providers;
@@ -181,6 +182,48 @@ public sealed class ComposerProviderTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Refreshing_the_picker_asks_the_providers_for_their_current_lists()
+    {
+        // The refresh button re-fetches every provider that can list models; a provider that cannot is skipped rather than
+        // failing the whole refresh.
+        using var handler = new ListingHandler("""{"data":[{"id":"alpha-2"}]}""");
+        var composer = new ComposerViewModel(
+            Services(
+                """
+                { "providers": { "version": 1, "defaultId": "alpha", "items": [
+                  { "id": "alpha", "preset": "custom-openai", "name": "Alpha", "protocol": "openai-compatible",
+                    "baseUrl": "https://alpha.invalid/v1", "auth": { "kind": "api-key" },
+                    "models": ["alpha-1"], "defaultModel": "alpha-1" }
+                ] } }
+                """,
+                handler),
+            _ => { },
+            new ComposerPreferences(),
+            string.Empty,
+            skillSource: static () => []);
+
+        await composer.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(1, handler.Calls);
+        Assert.Contains("alpha-2", composer.Models.Select(static model => model.Name));
+    }
+
+    /// <summary>Answers every request with one model list and counts the calls.</summary>
+    private sealed class ListingHandler(string body) : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
     private ComposerViewModel CreateComposer(
         string items,
         string defaultId,
@@ -195,12 +238,15 @@ public sealed class ComposerProviderTests : IDisposable
             skillSource: static () => [],
             thinkingLevels: thinkingLevels);
 
-    private ProviderServices Services(string json)
+    private ProviderServices Services(string json, HttpMessageHandler? handler = null)
     {
         var settingsPath = Path.Combine(root, "settings.json");
         File.WriteAllText(settingsPath, json);
         var data = Path.Combine(root, "data");
         Directory.CreateDirectory(data);
-        return new ProviderServices(settingsPath, data, new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
+        var http = handler is null
+            ? new HttpClient { Timeout = Timeout.InfiniteTimeSpan }
+            : new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        return new ProviderServices(settingsPath, data, http);
     }
 }
