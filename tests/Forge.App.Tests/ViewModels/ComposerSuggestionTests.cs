@@ -191,14 +191,20 @@ public sealed class ComposerSuggestionTests
             Assert.Equal("model-b", composer.Model);
             Assert.Equal("model-b", composer.CurrentDefinition()?.Model.Model);
 
-            composer.EffortValue = 2;
+            composer.EffortValue = (double)ThinkingEffort.Medium;
             Assert.Equal(ThinkingEffort.Medium, composer.Effort);
             composer.SaveDefaultsCommand.Execute(null);
             Assert.Equal("model-b", preferences.DefaultModel);
             Assert.Equal(ThinkingEffort.Medium, preferences.DefaultEffort);
 
             // A new session starts from the saved defaults.
-            var next = new ComposerViewModel(services.Services, _ => { }, preferences, string.Empty, skillSource: () => []);
+            var next = new ComposerViewModel(
+                services.Services,
+                _ => { },
+                preferences,
+                string.Empty,
+                skillSource: () => [],
+                thinkingLevels: static _ => EveryStep);
             Assert.Equal("model-b", next.Model);
             Assert.Equal(ThinkingEffort.Medium, next.Effort);
         }
@@ -207,6 +213,10 @@ public sealed class ComposerSuggestionTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    /// <summary>Every step, for a fixture whose model ids are not in the model table.</summary>
+    private static readonly IReadOnlyList<ThinkingEffort> EveryStep =
+        [ThinkingEffort.Off, ThinkingEffort.Minimal, ThinkingEffort.Low, ThinkingEffort.Medium, ThinkingEffort.High, ThinkingEffort.XHigh, ThinkingEffort.Max];
 
     private static ComposerViewModel NewComposer(string root, out ComposerPreferences preferences, out TestServices services)
     {
@@ -218,7 +228,10 @@ public sealed class ComposerSuggestionTests
             preferences,
             string.Empty,
             fileSource: _ => Task.FromResult<IReadOnlyList<string>>(["src/View.axaml", "readme.md"]),
-            skillSource: () => [new SlashEntry("alpha", "a", true), new SlashEntry("beta", "b", true)]);
+            skillSource: () => [new SlashEntry("alpha", "a", true), new SlashEntry("beta", "b", true)],
+            // The fixture's model ids are invented, so the composer is given the steps to offer instead of asking the
+            // model table (which knows no "model-b" and would offer Off alone).
+            thinkingLevels: static _ => EveryStep);
     }
 
     /// <summary>One connected provider behind a temp <c>settings.json</c>; owns its <c>HttpClient</c> for the test.</summary>

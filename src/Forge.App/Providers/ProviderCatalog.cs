@@ -15,7 +15,7 @@ internal enum ProviderStatusKind
     /// <summary>Will authenticate with an API key, but no key is present.</summary>
     NeedsKey,
 
-    /// <summary>Uses a sign-in (Claude subscription or GitHub Copilot) that has not happened yet.</summary>
+    /// <summary>Uses a sign-in (Claude subscription, GitHub Copilot, Kimi For Coding, xAI, Meta or ChatGPT) that has not happened yet.</summary>
     NeedsSignIn,
 
     /// <summary>Configured, but something is wrong (no URL, an unreadable credential file).</summary>
@@ -190,6 +190,18 @@ internal sealed class ConnectedProvider
                 ProviderCredentialKind.GitHubCopilot => credentials.HasCopilotLogin(Id)
                     ? ProviderStatus.Ready(ProviderStrings.CopilotSignedInText())
                     : ProviderStatus.NeedsSignIn(ProviderStrings.CopilotSignInRequiredText()),
+                ProviderCredentialKind.KimiCode => credentials.HasKimiLogin(Id)
+                    ? ProviderStatus.Ready(ProviderStrings.KimiSignedInText())
+                    : ProviderStatus.NeedsSignIn(ProviderStrings.KimiSignInRequiredText()),
+                ProviderCredentialKind.XAiSubscription => credentials.HasXAiLogin(Id)
+                    ? ProviderStatus.Ready(ProviderStrings.XAiSignedInText())
+                    : ProviderStatus.NeedsSignIn(ProviderStrings.XAiSignInRequiredText()),
+                ProviderCredentialKind.MetaSubscription => credentials.HasMetaLogin(Id)
+                    ? ProviderStatus.Ready(ProviderStrings.MetaSignedInText())
+                    : ProviderStatus.NeedsSignIn(ProviderStrings.MetaSignInRequiredText()),
+                ProviderCredentialKind.ChatGptSubscription => credentials.HasChatGptLogin(Id)
+                    ? ProviderStatus.Ready(ProviderStrings.ChatGptSignedInText())
+                    : ProviderStatus.NeedsSignIn(ProviderStrings.ChatGptSignInRequiredText()),
                 _ => ProviderStatus.Error(ProviderStrings.NoCredentialText()),
             };
         }
@@ -224,13 +236,17 @@ internal sealed class ConnectedProvider
 
             case ProviderCredentialKind.ClaudeSubscription:
             case ProviderCredentialKind.GitHubCopilot:
+            case ProviderCredentialKind.KimiCode:
+            case ProviderCredentialKind.XAiSubscription:
+            case ProviderCredentialKind.MetaSubscription:
+            case ProviderCredentialKind.ChatGptSubscription:
                 return new CredentialedChatProvider(
                     Id,
                     Definition.CredentialKind,
                     Definition.BaseUrl,
                     credentials,
-                    (key, baseUrl, style, preamble) => ChatProviderPipeline.Build(
-                        ProviderFactory.Create(BuildConfig(key, baseUrl, style, preamble), http, Options),
+                    (key, baseUrl, style, preamble, extraHeaders) => ChatProviderPipeline.Build(
+                        ProviderFactory.Create(BuildConfig(key, baseUrl, style, preamble, extraHeaders), http, Options),
                         new RetryMiddleware()));
 
             default:
@@ -252,18 +268,31 @@ internal sealed class ConnectedProvider
 
     /// <summary>
     /// The wire config this definition produces once a credential is known. Shared with the credentialed provider so the
-    /// headers, protocol and preamble are decided in one place.
+    /// headers, protocol and preamble are decided in one place. <paramref name="credentialHeaders"/> carries the headers that
+    /// belong to the credential itself (a plan that has to be named on every request), which only its resolver can build.
     /// </summary>
     internal ProviderConfig BuildConfig(
         string apiKey,
         string baseUrl,
         ProviderAuthStyle style,
-        string? preamble)
+        string? preamble,
+        IReadOnlyDictionary<string, string>? credentialHeaders = null)
     {
         Dictionary<string, string>? headers = null;
         if (Definition.Headers.Count > 0)
         {
             headers = new Dictionary<string, string>(Definition.Headers, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Headers that come with the credential itself: a ChatGPT plan has to be named on every request, and the caller that
+        // resolved the token is the only one that knows the account id.
+        if (credentialHeaders is { Count: > 0 })
+        {
+            headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, value) in credentialHeaders)
+            {
+                headers[name] = value;
+            }
         }
 
         if (Definition.CredentialKind == ProviderCredentialKind.GitHubCopilot)
@@ -278,9 +307,14 @@ internal sealed class ConnectedProvider
 
         return new ProviderConfig(
             Id,
-            Definition.Protocol == ProviderProtocol.Anthropic
-                ? ProviderFactory.AnthropicKind
-                : ProviderFactory.OpenAiCompatibleKind,
+            // The protocol decides the wire format the Core factory builds; the fallback is Chat Completions, which is what a
+            // vendor that only exposes one kind of endpoint speaks.
+            Definition.Protocol switch
+            {
+                ProviderProtocol.Anthropic => ProviderFactory.AnthropicKind,
+                ProviderProtocol.OpenAiResponses => ProviderFactory.OpenAiResponsesKind,
+                _ => ProviderFactory.OpenAiCompatibleKind,
+            },
             baseUrl,
             apiKey,
             headers,

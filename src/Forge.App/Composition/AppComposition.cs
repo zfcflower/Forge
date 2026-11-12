@@ -382,11 +382,14 @@ internal sealed class AppComposition : IAsyncDisposable
         // 6. Providers: the stored definitions, the encrypted secret store behind them and the credential resolvers.
         var httpClient = ProviderHttpClient.Create();
         var providers = new ProviderServices(paths.SettingsPath, paths.UserDataDirectory, httpClient);
+        // The per-agent defaults live in the same settings.json; one instance is shared by the settings page (writes) and
+        // the session runtimes (reads), so a saved default reaches the next session without a reload.
+        var agentDefaults = new AgentDefaultsStore(paths.SettingsPath);
         settings.Add(new SettingsSection(
             SettingsSectionIds.Provider,
             ProviderStrings.SectionTitleKey,
             SettingsSectionIds.ProviderOrder,
-            new ProvidersSettingsViewModel(providers),
+            new ProvidersSettingsViewModel(providers, agentDefaults),
             SettingsGroups.Agent,
             "IconPlug"));
 
@@ -436,6 +439,7 @@ internal sealed class AppComposition : IAsyncDisposable
         // which cannot describe a per-provider setting, and the Anthropic adapter does not send it yet. When it does, the
         // loop has to take the TTL from the selected provider's ModelSettings instead.
         runtimeServices.Approvals = approvals;
+        runtimeServices.AgentDefaults = agentId => agentDefaults.Resolve(agentId, providers.Catalog);
         runtimeServices.PullRequestTools = pullRequestTools;
         // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
         // options are read through a factory, so a preference change (ripgrep path, shell, bash timeout) applies to the

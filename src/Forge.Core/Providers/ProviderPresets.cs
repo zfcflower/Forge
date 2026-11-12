@@ -1,6 +1,6 @@
 namespace Forge.Core.Providers;
 
-/// <summary>Which wire protocol a provider speaks. Everything is one of these two; a vendor is a URL and a header.</summary>
+/// <summary>Which wire protocol a provider speaks. Everything is one of these three; a vendor is a URL and a header.</summary>
 public enum ProviderProtocol
 {
     /// <summary>OpenAI Chat Completions (<c>POST {baseUrl}/chat/completions</c>), also spoken by most gateways.</summary>
@@ -8,6 +8,13 @@ public enum ProviderProtocol
 
     /// <summary>Anthropic Messages (<c>POST {baseUrl}/v1/messages</c>).</summary>
     Anthropic,
+
+    /// <summary>
+    /// OpenAI Responses (<c>POST {baseUrl}/responses</c>): the item-based protocol with server-side reasoning effort. Only
+    /// vendors whose models are reachable through nothing else use it; a vendor that also speaks Chat Completions stays on
+    /// <see cref="OpenAiCompatible"/>.
+    /// </summary>
+    OpenAiResponses,
 }
 
 /// <summary>
@@ -28,6 +35,26 @@ public enum ProviderAuthOptions
 
     /// <summary>GitHub's device-code flow, exchanged for a short-lived Copilot session token.</summary>
     GitHubCopilot = 4,
+
+    /// <summary>Kimi For Coding's OAuth device-code flow; the access token is used as a bearer token on the coding API.</summary>
+    KimiCode = 8,
+
+    /// <summary>
+    /// xAI's OAuth device-code flow (<c>auth.x.ai</c>); the resulting access token is the bearer token the grok API takes.
+    /// </summary>
+    XAiSubscription = 16,
+
+    /// <summary>
+    /// Meta's subscription sign-in: its models are reachable through the Responses protocol only, so a key alone does not
+    /// reach them.
+    /// </summary>
+    MetaSubscription = 32,
+
+    /// <summary>
+    /// A ChatGPT plan rather than a platform key: the model list comes from the subscription and every request has to name
+    /// the account it is drawn from.
+    /// </summary>
+    ChatGptSubscription = 64,
 }
 
 /// <summary>
@@ -74,6 +101,9 @@ public static class ProviderPresets
     public const string XAiId = "xai";
 
     public const string DeepSeekId = "deepseek";
+
+    /// <summary>A ChatGPT plan instead of an OpenAI platform key; the two are different products with different endpoints.</summary>
+    public const string ChatGptId = "chatgpt";
 
     public const string AnthropicBaseUrl = "https://api.anthropic.com";
 
@@ -127,21 +157,38 @@ public static class ProviderPresets
             "Kimi For Coding",
             ProviderProtocol.OpenAiCompatible,
             "https://api.kimi.com/coding/v1",
-            ProviderAuthOptions.ApiKey,
+            ProviderAuthOptions.ApiKey | ProviderAuthOptions.KimiCode,
             "KIMI_API_KEY",
             "https://www.kimi.com/code",
             SupportsModelListing: false,
             ["k3"]),
+        // Meta's models are Responses-only, so the protocol is the item-based one even though the host also answers a
+        // Chat Completions path; a vendor that also speaks Chat Completions would stay on OpenAiCompatible.
         new(
             MetaId,
             "Meta",
-            ProviderProtocol.OpenAiCompatible,
+            ProviderProtocol.OpenAiResponses,
             "https://api.meta.ai/v1",
-            ProviderAuthOptions.ApiKey,
+            ProviderAuthOptions.ApiKey | ProviderAuthOptions.MetaSubscription,
             "META_API_KEY",
             "https://dev.meta.ai",
             SupportsModelListing: true,
             []),
+        new(
+            ChatGptId,
+            "OpenAI (ChatGPT)",
+            ProviderProtocol.OpenAiResponses,
+            // The Responses adapter appends "/responses", and a plan is served at .../backend-api/codex/responses: the plain
+            // .../backend-api root answers a different, key-only API.
+            "https://chatgpt.com/backend-api/codex",
+            ProviderAuthOptions.ChatGptSubscription,
+            null,
+            "https://chatgpt.com",
+            SupportsModelListing: false,
+            // No listing endpoint exists for a subscription, so a fresh sign-in starts from these seeds; they are the ids the
+            // reference client serves, newest first, and a turn re-reads nothing until the user edits the list.
+            ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"],
+            Note: "The model list comes from the subscription, the endpoint is /backend-api/codex/responses, and every request must carry the account header it draws on."),
         new(
             OpenCodeZenId,
             "OpenCode Zen",
@@ -167,7 +214,7 @@ public static class ProviderPresets
             "xAI",
             ProviderProtocol.OpenAiCompatible,
             "https://api.x.ai/v1",
-            ProviderAuthOptions.ApiKey,
+            ProviderAuthOptions.ApiKey | ProviderAuthOptions.XAiSubscription,
             "XAI_API_KEY",
             "https://console.x.ai",
             SupportsModelListing: true,

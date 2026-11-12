@@ -38,6 +38,35 @@ public sealed class ProviderCredentialsTests : IDisposable
         Assert.False(credentials.HasCopilotLogin("copilot"));
     }
 
+    [Fact]
+    public void A_kimi_provider_is_signed_in_only_once_a_bundle_is_stored()
+    {
+        var secrets = new ProviderSecretStore(root);
+        var credentials = new ProviderCredentials(
+            new HttpClient { Timeout = Timeout.InfiniteTimeSpan },
+            secrets,
+            Path.Combine(root, "missing.json"));
+
+        Assert.False(credentials.HasKimiLogin("kimi"));
+
+        var reference = ProviderCredentials.KimiTokenReference("kimi");
+        Assert.Equal("kimi:kimi", reference);
+        Assert.Null(secrets.Get(reference));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new KimiTokenDocument
+            {
+                AccessToken = "access",
+                RefreshToken = "refresh",
+                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            },
+            ProvidersJsonContext.Default.KimiTokenDocument);
+        secrets.Set(reference, json);
+
+        Assert.True(credentials.HasKimiLogin("kimi"));
+        Assert.DoesNotContain("access", File.ReadAllText(secrets.StoragePath), StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         try

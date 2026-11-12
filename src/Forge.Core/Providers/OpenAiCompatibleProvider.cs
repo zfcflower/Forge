@@ -274,11 +274,16 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         writer.WriteEndArray();
     }
 
+    // The wire names the OpenAI protocol defines. It has no step above "xhigh", so Max is clamped down to it rather than
+    // sent as an unknown value the server would reject.
     private static string? MapReasoningEffort(ThinkingEffort effort) => effort switch
     {
+        ThinkingEffort.Minimal => "minimal",
         ThinkingEffort.Low => "low",
         ThinkingEffort.Medium => "medium",
         ThinkingEffort.High => "high",
+        ThinkingEffort.XHigh => "xhigh",
+        ThinkingEffort.Max => "xhigh",
         _ => null,
     };
 

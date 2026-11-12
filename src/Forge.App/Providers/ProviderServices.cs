@@ -191,6 +191,28 @@ internal sealed class ProviderServices
                 headers["Editor-Version"] = CopilotEditorVersion;
                 headers["Editor-Plugin-Version"] = CopilotEditorVersion;
                 break;
+
+            case ProviderCredentialKind.KimiCode:
+                var accessToken = await Credentials.GetKimiAccessTokenAsync(provider.Id, cancellationToken).ConfigureAwait(false);
+                headers["Authorization"] = "Bearer " + accessToken;
+                break;
+
+            case ProviderCredentialKind.XAiSubscription:
+                var xaiAccessToken = await Credentials.GetXAiAccessTokenAsync(provider.Id, cancellationToken).ConfigureAwait(false);
+                headers["Authorization"] = "Bearer " + xaiAccessToken;
+                break;
+
+            // Meta and ChatGPT list no models of their own kind here, but the headers are built the same way a chat request
+            // builds them, so a listing call (or a connection test that reuses it) carries the same credential.
+            case ProviderCredentialKind.MetaSubscription:
+                var metaApiKey = await Credentials.GetMetaApiKeyAsync(provider.Id, cancellationToken).ConfigureAwait(false);
+                headers["Authorization"] = "Bearer " + metaApiKey;
+                break;
+
+            case ProviderCredentialKind.ChatGptSubscription:
+                var chatGpt = await Credentials.GetChatGptTokenAsync(provider.Id, cancellationToken).ConfigureAwait(false);
+                ChatGptAuthentication.ApplyHeaders(headers, chatGpt.AccessToken, chatGpt.AccountId);
+                break;
         }
 
         foreach (var (name, value) in definition.Headers)

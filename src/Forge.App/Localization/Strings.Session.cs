@@ -41,9 +41,12 @@ internal static class SessionStrings
     public const string ComposerPinKey = "session.composer.pin";
     public const string ComposerEffortKey = "session.composer.effort";
     public const string ComposerEffortOffKey = "session.composer.effort.off";
+    public const string ComposerEffortMinimalKey = "session.composer.effort.minimal";
     public const string ComposerEffortLowKey = "session.composer.effort.low";
     public const string ComposerEffortMediumKey = "session.composer.effort.medium";
     public const string ComposerEffortHighKey = "session.composer.effort.high";
+    public const string ComposerEffortXHighKey = "session.composer.effort.xhigh";
+    public const string ComposerEffortMaxKey = "session.composer.effort.max";
     public const string ComposerSaveDefaultsKey = "session.composer.saveDefaults";
     public const string ComposerDefaultsSavedKey = "session.composer.defaultsSaved";
     public const string ComposerRefreshKey = "session.composer.refresh";
@@ -172,9 +175,12 @@ internal static class SessionStrings
 
     public static string ComposerEffortName(ThinkingEffort effort) => Loc.Instance[effort switch
     {
+        ThinkingEffort.Minimal => ComposerEffortMinimalKey,
         ThinkingEffort.Low => ComposerEffortLowKey,
         ThinkingEffort.Medium => ComposerEffortMediumKey,
         ThinkingEffort.High => ComposerEffortHighKey,
+        ThinkingEffort.XHigh => ComposerEffortXHighKey,
+        ThinkingEffort.Max => ComposerEffortMaxKey,
         _ => ComposerEffortOffKey,
     }];
 
@@ -354,9 +360,12 @@ internal static class SessionStrings
         Loc.Register(ComposerPinKey, "固定到顶部", "Pin to top");
         Loc.Register(ComposerEffortKey, "力度", "Effort");
         Loc.Register(ComposerEffortOffKey, "关闭", "Off");
+        Loc.Register(ComposerEffortMinimalKey, "极低", "Minimal");
         Loc.Register(ComposerEffortLowKey, "低", "Low");
         Loc.Register(ComposerEffortMediumKey, "中", "Medium");
         Loc.Register(ComposerEffortHighKey, "高", "High");
+        Loc.Register(ComposerEffortXHighKey, "超高", "Extra high");
+        Loc.Register(ComposerEffortMaxKey, "最高", "Max");
         Loc.Register(ComposerSaveDefaultsKey, "新会话的默认值", "Defaults for new sessions");
         Loc.Register(ComposerDefaultsSavedKey, "已保存为新会话的默认值", "Saved as defaults for new sessions");
         Loc.Register(ComposerRefreshKey, "刷新", "Refresh");

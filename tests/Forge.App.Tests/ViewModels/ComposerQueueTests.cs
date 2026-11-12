@@ -223,14 +223,15 @@ public sealed class ComposerQueueTests
             var definition = composer.CurrentDefinition();
             Assert.NotNull(definition);
             Assert.Equal("Plan", definition.Name);
-            Assert.Equal(new ModelSettings("scripted-model", ThinkingEffort.High, ProviderId: "test"), definition.Model);
-            Assert.Equal(1.0, composer.EffortBar3);
+            Assert.Equal(new ModelSettings("gpt-5.1", ThinkingEffort.High, ProviderId: "test"), definition.Model);
+            // The slider's position is the accepted step list's index, so a four-step model puts High third.
+            Assert.Equal(3.0, composer.EffortValue);
 
             workspace.Draft = "plan it";
             workspace.SendCommand.Execute(null);
             provider.Release();
             Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && !workspace.IsRunning));
-            Assert.Equal(new ModelSettings("scripted-model", ThinkingEffort.High, ProviderId: "test"), provider.Models[0]);
+            Assert.Equal(new ModelSettings("gpt-5.1", ThinkingEffort.High, ProviderId: "test"), provider.Models[0]);
 
             composer.SelectedAgent = composer.Agents[0];
             composer.Effort = ThinkingEffort.Off;
@@ -261,7 +262,7 @@ public sealed class ComposerQueueTests
                             store,
                             new FakeSessionCatalog(),
                             new FakeTodoStore(),
-                            new ModelSettings("scripted-model")),
+                            new ModelSettings("gpt-5.1")),
                         info);
                     using var workspace = new SessionWorkspaceViewModel(
                         info,
@@ -308,8 +309,8 @@ public sealed class ComposerQueueTests
                     "protocol": "openai-compatible",
                     "baseUrl": "https://example.invalid",
                     "auth": { "kind": "api-key" },
-                    "models": ["scripted-model"],
-                    "defaultModel": "scripted-model"
+                    "models": ["gpt-5.1"],
+                    "defaultModel": "gpt-5.1"
                   }
                 ]
               }

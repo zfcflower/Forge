@@ -4,7 +4,7 @@ namespace Forge.App.Localization;
 
 /// <summary>
 /// The provider feature's string table: the <c>provider</c> settings section, the four status sentences a row can show, the
-/// add/edit dialog, the model metadata window and the two sign-in flows. Keys are namespaced with <c>providers.</c> (the
+/// add/edit dialog, the model metadata window and the sign-in flows. Keys are namespaced with <c>providers.</c> (the
 /// shell's older single-provider status uses <c>provider.</c>) and every key is registered from <see cref="Initialize"/>.
 /// </summary>
 internal static class ProviderStrings
@@ -40,6 +40,29 @@ internal static class ProviderStrings
 
     public const string DefaultContextWindowInvalidKey = "providers.defaults.contextWindowInvalid";
 
+    // ---------------------------------------------------------------- built-in agent defaults
+    public const string AgentsTitleKey = "providers.agents.title";
+
+    public const string AgentsHintKey = "providers.agents.hint";
+
+    public const string AgentsNotSetKey = "providers.agents.notSet";
+
+    public const string AgentsMainKey = "providers.agents.main";
+
+    public const string AgentsScoutKey = "providers.agents.scout";
+
+    public const string AgentsWorkerKey = "providers.agents.worker";
+
+    public const string AgentsPlanKey = "providers.agents.plan";
+
+    public const string AgentsReviewerKey = "providers.agents.reviewer";
+
+    public const string AgentsModelKey = "providers.agents.model";
+
+    public const string AgentsThinkingKey = "providers.agents.thinking";
+
+    public const string AgentsSaveFailedKey = "providers.agents.saveFailed";
+
     // ---------------------------------------------------------------- load / store
     public const string SettingsMissingKey = "providers.store.settingsMissing";
 
@@ -67,6 +90,22 @@ internal static class ProviderStrings
     public const string ReadyCopilotKey = "providers.status.copilot";
 
     public const string NeedsCopilotSignInKey = "providers.status.copilotSignIn";
+
+    public const string ReadyKimiKey = "providers.status.kimi";
+
+    public const string NeedsKimiSignInKey = "providers.status.kimiSignIn";
+
+    public const string ReadyXAiKey = "providers.status.xai";
+
+    public const string NeedsXAiSignInKey = "providers.status.xaiSignIn";
+
+    public const string NeedsMetaSignInKey = "providers.status.metaSignIn";
+
+    public const string ReadyMetaKey = "providers.status.meta";
+
+    public const string NeedsChatGptSignInKey = "providers.status.chatGptSignIn";
+
+    public const string ReadyChatGptKey = "providers.status.chatGpt";
 
     public const string ErrorNoBaseUrlKey = "providers.status.noBaseUrl";
 
@@ -143,6 +182,32 @@ internal static class ProviderStrings
     public const string LoginClaudeUseKey = "providers.login.claudeUse";
 
     public const string LoginCopilotStartKey = "providers.login.copilotStart";
+
+    public const string LoginKimiStartKey = "providers.login.kimiStart";
+
+    public const string LoginKimiHintKey = "providers.login.kimiHint";
+
+    public const string LoginKimiCodeKey = "providers.login.kimiCode";
+
+    public const string LoginXAiStartKey = "providers.login.xaiStart";
+
+    public const string LoginXAiHintKey = "providers.login.xaiHint";
+
+    public const string LoginXAiCodeKey = "providers.login.xaiCode";
+
+    public const string LoginMetaStartKey = "providers.login.metaStart";
+
+    public const string LoginMetaHintKey = "providers.login.metaHint";
+
+    public const string LoginMetaCodeKey = "providers.login.metaCode";
+
+    public const string LoginMetaEnablingKey = "providers.login.metaEnabling";
+
+    public const string LoginChatGptStartKey = "providers.login.chatGptStart";
+
+    public const string LoginChatGptHintKey = "providers.login.chatGptHint";
+
+    public const string LoginChatGptCodeKey = "providers.login.chatGptCode";
 
     public const string EditorSecretStoredKey = "providers.editor.secretStored";
 
@@ -233,6 +298,21 @@ internal static class ProviderStrings
             "默认上下文窗口必须是正整数，或留空表示使用模型目录值。",
             "The default context window must be a positive whole number, or empty to use the catalog value.");
 
+        Loc.Register(AgentsTitleKey, "内置 Agent 默认", "Built-in agent defaults");
+        Loc.Register(
+            AgentsHintKey,
+            "未设置时继承 Worker 的默认；Worker 也没有时，使用第一个已连接提供商的第一个模型，思考力度为「关闭」。",
+            "An unset row inherits the Worker's defaults; when the Worker is unset too, the first model of the first connected provider runs at Off.");
+        Loc.Register(AgentsNotSetKey, "未设置（继承）", "Not set (inherit)");
+        Loc.Register(AgentsMainKey, "主 Agent", "Main");
+        Loc.Register(AgentsScoutKey, "Scout", "Scout");
+        Loc.Register(AgentsWorkerKey, "Worker", "Worker");
+        Loc.Register(AgentsPlanKey, "Plan", "Plan");
+        Loc.Register(AgentsReviewerKey, "Reviewer", "Reviewer");
+        Loc.Register(AgentsModelKey, "模型", "Model");
+        Loc.Register(AgentsThinkingKey, "思考力度", "Thinking");
+        Loc.Register(AgentsSaveFailedKey, "无法写入 settings.json：{0}", "Could not write settings.json: {0}");
+
         Loc.Register(SettingsMissingKey, "找不到 settings.json", "settings.json was not found");
         Loc.Register(SettingsUnreadableKey, "settings.json 无法读取：{0}", "settings.json cannot be read: {0}");
         Loc.Register(SectionMissingKey, "还没有配置任何提供商", "No provider is configured yet");
@@ -250,6 +330,14 @@ internal static class ProviderStrings
             "Not signed in: sign in with the local claude CLI first");
         Loc.Register(ReadyCopilotKey, "已登录 GitHub", "Signed in to GitHub");
         Loc.Register(NeedsCopilotSignInKey, "未登录 GitHub", "Not signed in to GitHub");
+        Loc.Register(ReadyKimiKey, "已登录 Kimi For Coding", "Signed in to Kimi For Coding");
+        Loc.Register(NeedsKimiSignInKey, "未登录 Kimi For Coding", "Not signed in to Kimi For Coding");
+        Loc.Register(ReadyXAiKey, "已登录 xAI", "Signed in to xAI");
+        Loc.Register(NeedsXAiSignInKey, "未登录 xAI", "Not signed in to xAI");
+        Loc.Register(NeedsMetaSignInKey, "未登录 Meta 订阅", "Not signed in to the Meta subscription");
+        Loc.Register(ReadyMetaKey, "已登录 Meta 订阅", "Signed in to the Meta subscription");
+        Loc.Register(NeedsChatGptSignInKey, "未登录 ChatGPT 订阅", "Not signed in to the ChatGPT subscription");
+        Loc.Register(ReadyChatGptKey, "已登录 ChatGPT 订阅", "Signed in to the ChatGPT subscription");
         Loc.Register(ErrorNoBaseUrlKey, "缺少 Base URL", "No base URL");
         Loc.Register(ErrorNoCredentialKey, "没有选择认证方式", "No authentication method");
         Loc.Register(ManagedKey, "托管中", "ManagedKey");
@@ -300,6 +388,31 @@ internal static class ProviderStrings
         Loc.Register(LoginClaudeRecheckKey, "重新检查", "Re-check");
         Loc.Register(LoginClaudeUseKey, "使用此登录", "Use this sign-in");
         Loc.Register(LoginCopilotStartKey, "开始设备码登录", "Start device-code sign-in");
+        Loc.Register(LoginKimiStartKey, "开始登录", "Start sign-in");
+        Loc.Register(
+            LoginKimiHintKey,
+            "用 Kimi For Coding 设备码登录，登录后直接使用该套餐；本机不保存密码。",
+            "Signs in to Kimi For Coding with a device code and uses that plan directly; no password is stored on this machine.");
+        Loc.Register(LoginKimiCodeKey, "在 Kimi 输入代码 {0}", "Enter the code {0} at Kimi");
+        Loc.Register(LoginXAiStartKey, "开始登录", "Start sign-in");
+        Loc.Register(
+            LoginXAiHintKey,
+            "用 xAI 账号的设备码登录，登录后直接使用该订阅；本机不保存密码。",
+            "Signs in with an xAI account's device code and uses that subscription directly; no password is stored on this machine.");
+        Loc.Register(LoginXAiCodeKey, "在 xAI 输入代码 {0}", "Enter the code {0} at xAI");
+        Loc.Register(LoginMetaStartKey, "开始登录", "Start sign-in");
+        Loc.Register(
+            LoginMetaHintKey,
+            "用 Meta 账号的设备码登录，登录后为这台机器开通一个 API 密钥；本机不保存密码。",
+            "Signs in with a Meta account's device code and enables an API key for this machine; no password is stored on this machine.");
+        Loc.Register(LoginMetaCodeKey, "在 Meta 输入代码 {0}", "Enter the code {0} at Meta");
+        Loc.Register(LoginMetaEnablingKey, "正在开通访问…", "Enabling access…");
+        Loc.Register(LoginChatGptStartKey, "开始登录", "Start sign-in");
+        Loc.Register(
+            LoginChatGptHintKey,
+            "用 ChatGPT 订阅的设备码登录，登录后直接使用该订阅；本机不保存密码。",
+            "Signs in with a ChatGPT plan's device code and uses that plan directly; no password is stored on this machine.");
+        Loc.Register(LoginChatGptCodeKey, "在 ChatGPT 输入代码 {0}", "Enter the code {0} at ChatGPT");
         Loc.Register(EditorModelsFetchedKey, "已获取 {0} 个模型", "Fetched {0} models");
         Loc.Register(EditorSaveKey, "保存", "Save");
         Loc.Register(EditorCancelKey, "取消", "Cancel");
@@ -374,6 +487,22 @@ internal static class ProviderStrings
     public static Localization.LocText CopilotSignedInText() => new(ReadyCopilotKey);
 
     public static Localization.LocText CopilotSignInRequiredText() => new(NeedsCopilotSignInKey);
+
+    public static Localization.LocText KimiSignedInText() => new(ReadyKimiKey);
+
+    public static Localization.LocText KimiSignInRequiredText() => new(NeedsKimiSignInKey);
+
+    public static Localization.LocText XAiSignedInText() => new(ReadyXAiKey);
+
+    public static Localization.LocText XAiSignInRequiredText() => new(NeedsXAiSignInKey);
+
+    public static Localization.LocText MetaSignInRequiredText() => new(NeedsMetaSignInKey);
+
+    public static Localization.LocText MetaSignedInText() => new(ReadyMetaKey);
+
+    public static Localization.LocText ChatGptSignInRequiredText() => new(NeedsChatGptSignInKey);
+
+    public static Localization.LocText ChatGptSignedInText() => new(ReadyChatGptKey);
 
     public static string ManagedText => Localization.Loc.Instance[ManagedKey];
 

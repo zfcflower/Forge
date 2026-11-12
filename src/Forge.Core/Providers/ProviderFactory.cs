@@ -8,6 +8,8 @@ public static class ProviderFactory
 
     public const string AnthropicKind = "anthropic";
 
+    public const string OpenAiResponsesKind = "openai-responses";
+
     public static IChatProvider Create(ProviderConfig config, HttpClient httpClient) =>
         Create(config, httpClient, ProviderOptions.Default);
 
@@ -30,8 +32,9 @@ public static class ProviderFactory
         {
             OpenAiCompatibleKind => new OpenAiCompatibleProvider(config, httpClient, options: options),
             AnthropicKind => new AnthropicProvider(config, httpClient),
+            OpenAiResponsesKind => new OpenAiResponsesProvider(config, httpClient),
             _ => throw new ArgumentException(
-                $"Unsupported provider kind '{config.Kind}'; expected '{OpenAiCompatibleKind}' or '{AnthropicKind}'.",
+                $"Unsupported provider kind '{config.Kind}'; expected '{OpenAiCompatibleKind}', '{AnthropicKind}' or '{OpenAiResponsesKind}'.",
                 nameof(config)),
         };
     }

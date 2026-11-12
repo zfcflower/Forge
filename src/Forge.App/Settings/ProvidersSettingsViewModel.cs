@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Forge.App.Agents;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Providers;
@@ -15,16 +16,20 @@ namespace Forge.App.Settings;
 internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
 {
     private readonly ProviderServices services;
+    private readonly AgentDefaultsStore agentDefaults;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool saving;
     private string? problem;
+    private string? agentsProblem;
     private string defaultContextWindowText = string.Empty;
     private bool showsNeedProviderBanner;
+    private bool disposed;
 
-    public ProvidersSettingsViewModel(ProviderServices services)
+    public ProvidersSettingsViewModel(ProviderServices services, AgentDefaultsStore? agentDefaults = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
+        this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
         services.Changed += OnProvidersChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsSaving);
@@ -70,6 +75,28 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     public string DefaultContextWindowLabel => Loc.Instance[ProviderStrings.DefaultContextWindowKey];
 
     public string DefaultContextWindowHint => Loc.Instance[ProviderStrings.DefaultContextWindowHintKey];
+
+    /// <summary>The built-in agent defaults at the bottom of the page: main plus the four built-in kinds.</summary>
+    public ObservableCollection<AgentDefaultsRowViewModel> AgentRows { get; } = [];
+
+    public string AgentsTitle => Loc.Instance[ProviderStrings.AgentsTitleKey];
+
+    public string AgentsHint => Loc.Instance[ProviderStrings.AgentsHintKey];
+
+    /// <summary>Why the last agent-defaults write was refused; null when it succeeded or nothing was written yet.</summary>
+    public string? AgentsProblem
+    {
+        get => agentsProblem;
+        private set
+        {
+            if (Set(ref agentsProblem, value))
+            {
+                OnPropertyChanged(nameof(HasAgentsProblem));
+            }
+        }
+    }
+
+    public bool HasAgentsProblem => AgentsProblem is { Length: > 0 };
 
     /// <summary>
     /// The global context window, as text while it is being typed. Empty means "use each model's catalog value"; the
@@ -118,6 +145,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
                                   ?? string.Empty;
         Problem = services.Secrets.Problem ?? (catalog.IsConfigured ? null : catalog.StatusText.Resolve());
         ShowsNeedProviderBanner = !Rows.Any(row => row.IsReady);
+        RebuildAgentRows();
         OnPropertyChanged(nameof(HasProblem));
         OnPropertyChanged(nameof(DefaultId));
     }
@@ -188,6 +216,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         await services.ReloadAsync(cancellationToken).ConfigureAwait(true);
+        agentDefaults.Reload();
         Reload();
     }
 
@@ -248,6 +277,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        disposed = true;
         services.Changed -= OnProvidersChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
     }
@@ -279,7 +309,63 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RefreshText));
         OnPropertyChanged(nameof(DefaultContextWindowLabel));
         OnPropertyChanged(nameof(DefaultContextWindowHint));
+        OnPropertyChanged(nameof(AgentsTitle));
+        OnPropertyChanged(nameof(AgentsHint));
         Reload();
+    }
+
+    /// <summary>Rebuilds the agent rows from the store and the live catalogue, keeping each stored choice selected.</summary>
+    private void RebuildAgentRows()
+    {
+        AgentRows.Clear();
+        var catalog = services.Catalog;
+        var notSet = Loc.Instance[ProviderStrings.AgentsNotSetKey];
+        foreach (var agentId in AgentIds.All)
+        {
+            AgentRows.Add(new AgentDefaultsRowViewModel(
+                agentId,
+                AgentLabel(agentId),
+                agentDefaults.Get(agentId),
+                catalog,
+                notSet,
+                changed: OnAgentChanged));
+        }
+    }
+
+    private static string AgentLabel(string agentId) => Loc.Instance[agentId switch
+    {
+        AgentIds.Main => ProviderStrings.AgentsMainKey,
+        AgentIds.Scout => ProviderStrings.AgentsScoutKey,
+        AgentIds.Worker => ProviderStrings.AgentsWorkerKey,
+        AgentIds.Plan => ProviderStrings.AgentsPlanKey,
+        _ => ProviderStrings.AgentsReviewerKey,
+    }];
+
+    private void OnAgentChanged(AgentDefaultsRowViewModel row) => _ = SaveAgentAsync(row);
+
+    /// <summary>
+    /// Writes one changed row through the store on the pool. The store takes the same settings mutex as the provider save
+    /// and only replaces the <c>agents</c> node, so a failure here cannot lose the provider section, and the refusal is shown
+    /// under the section instead of throwing through the binding.
+    /// </summary>
+    private async Task SaveAgentAsync(AgentDefaultsRowViewModel row)
+    {
+        var value = row.Current;
+        try
+        {
+            await Task.Run(() => agentDefaults.Save(row.AgentId, value)).ConfigureAwait(true);
+            if (!disposed)
+            {
+                AgentsProblem = null;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            if (!disposed)
+            {
+                AgentsProblem = Loc.Instance.Format(ProviderStrings.AgentsSaveFailedKey, exception.Message);
+            }
+        }
     }
 }
 
@@ -293,7 +379,15 @@ internal sealed class BuiltInProviderRowViewModel
     {
         ArgumentNullException.ThrowIfNull(preset);
         Preset = preset;
-        ShowsLogin = preset.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription) || preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot);
+        // A row offers 登录 only when the dialog has a flow for it, and every subscription the preset advertises now has one:
+        // Claude reuses the local CLI, Copilot, Kimi For Coding and xAI run a device code, and Meta and ChatGPT sign in to their
+        // own plan through their own device flow.
+        ShowsLogin = preset.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription) ||
+                     preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot) ||
+                     preset.Auth.HasFlag(ProviderAuthOptions.KimiCode) ||
+                     preset.Auth.HasFlag(ProviderAuthOptions.XAiSubscription) ||
+                     preset.Auth.HasFlag(ProviderAuthOptions.MetaSubscription) ||
+                     preset.Auth.HasFlag(ProviderAuthOptions.ChatGptSubscription);
         ShowsApiKey = preset.Auth.HasFlag(ProviderAuthOptions.ApiKey);
     }
 

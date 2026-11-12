@@ -1,7 +1,9 @@
 using Forge.Abstractions;
+using Forge.App.Localization;
 using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.App.ViewModels;
+using Forge.Core.Providers;
 using Xunit;
 
 namespace Forge.App.Tests.Providers;
@@ -136,6 +138,38 @@ public sealed class ComposerProviderTests : IDisposable
         Assert.Empty(composer.Models);
     }
 
+    [Fact]
+    public void Changing_to_a_model_with_fewer_steps_clamps_the_effort_to_an_accepted_one()
+    {
+        var composer = CreateComposer(
+            """
+            "items": [
+              { "id": "solo", "preset": "custom-openai", "name": "Solo", "protocol": "openai-compatible",
+                "baseUrl": "https://solo.invalid/v1", "auth": { "kind": "api-key" },
+                "models": ["gpt-5.1", "limited"], "defaultModel": "gpt-5.1" }
+            ]
+            """,
+            defaultId: "solo",
+            thinkingLevels: static model => string.Equals(model, "limited", StringComparison.Ordinal)
+                ? [ThinkingEffort.Off, ThinkingEffort.Low]
+                : ThinkingLevels.For(model));
+        composer.Effort = ThinkingEffort.High;
+        Assert.Equal(ThinkingEffort.High, composer.Effort);
+
+        composer.Models.Single(static model => model.Name == "limited").SelectCommand.Execute(null);
+
+        Assert.Equal(ThinkingEffort.Low, composer.Effort);
+        Assert.Equal([ThinkingEffort.Off, ThinkingEffort.Low], composer.EffortSteps);
+        Assert.Equal(1.0, composer.EffortMaximum);
+        Assert.Equal(1.0, composer.EffortValue);
+        Assert.Equal(SessionStrings.ComposerEffortName(ThinkingEffort.Low), composer.EffortName);
+        Assert.Equal(ThinkingEffort.Low, composer.CurrentDefinition()?.Model.Thinking);
+
+        // Even a value set from code never lands above what the model accepts.
+        composer.Effort = ThinkingEffort.Max;
+        Assert.Equal(ThinkingEffort.Low, composer.Effort);
+    }
+
     public void Dispose()
     {
         try
@@ -147,7 +181,10 @@ public sealed class ComposerProviderTests : IDisposable
         }
     }
 
-    private ComposerViewModel CreateComposer(string items, string defaultId) =>
+    private ComposerViewModel CreateComposer(
+        string items,
+        string defaultId,
+        Func<string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null) =>
         new(
             Services("""{ "providers": { "version": 1, "defaultId": "{{DEFAULT}}", {{ITEMS}} } }"""
                 .Replace("{{DEFAULT}}", defaultId, StringComparison.Ordinal)
@@ -155,7 +192,8 @@ public sealed class ComposerProviderTests : IDisposable
             _ => { },
             new ComposerPreferences(),
             string.Empty,
-            skillSource: static () => []);
+            skillSource: static () => [],
+            thinkingLevels: thinkingLevels);
 
     private ProviderServices Services(string json)
     {

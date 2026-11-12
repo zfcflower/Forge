@@ -677,11 +677,20 @@
                                MaxWidth="220"
                                TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center" />
-                    <StackPanel Orientation="Horizontal" Spacing="1.5" VerticalAlignment="Center" Height="10">
-                      <Rectangle Classes="effort-bar" Height="4" Opacity="{Binding Composer.EffortBar1}" />
-                      <Rectangle Classes="effort-bar" Height="7" Opacity="{Binding Composer.EffortBar2}" />
-                      <Rectangle Classes="effort-bar" Height="10" Opacity="{Binding Composer.EffortBar3}" />
-                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Composer.EffortBars}"
+                                  VerticalAlignment="Center"
+                                  Height="10">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <StackPanel Orientation="Horizontal" Spacing="1.5" VerticalAlignment="Bottom" />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ComposerEffortBarViewModel">
+                          <Rectangle Classes="effort-bar" Height="{Binding Height}" Opacity="{Binding Opacity}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <wc:FluentIcon Data="{DynamicResource IconChevronDown}" Width="12" Height="12" />
                   </StackPanel>
                   <Button.Flyout>
@@ -748,7 +757,7 @@
                           <Border Classes="effort-track" />
                           <Slider Classes="effort"
                                   Minimum="0"
-                                  Maximum="3"
+                                  Maximum="{Binding Composer.EffortMaximum, Mode=OneWay}"
                                   TickFrequency="1"
                                   IsSnapToTickEnabled="True"
                                   Value="{Binding Composer.EffortValue, Mode=TwoWay}"

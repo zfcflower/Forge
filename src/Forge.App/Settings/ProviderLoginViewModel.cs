@@ -9,7 +9,8 @@ namespace Forge.App.Settings;
 /// <summary>
 /// The "登录" dialog of a built-in provider that signs in instead of taking a key. Claude reuses the local Claude Code
 /// sign-in, so this dialog only checks for the command and its login and, when the command is missing, explains the install.
-/// GitHub Copilot runs its device-code flow here. Either way, the dialog closes with the connected definition it produced.
+/// GitHub Copilot, Kimi For Coding, xAI, Meta and ChatGPT run their device-code flows here. Either way, the dialog closes with
+/// the connected definition it produced.
 /// </summary>
 internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
 {
@@ -21,6 +22,10 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     private readonly string id;
     private readonly Func<ProviderDefinition, Task<string?>>? persist;
     private readonly bool isClaude;
+    private readonly bool isKimi;
+    private readonly bool isXAi;
+    private readonly bool isMeta;
+    private readonly bool isChatGpt;
     private bool cliInstalled;
     private bool claudeSignedIn;
     private bool isBusy;
@@ -45,12 +50,20 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         this.preset = preset;
         this.persist = persist;
         isClaude = preset.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription);
+        isKimi = preset.Auth.HasFlag(ProviderAuthOptions.KimiCode);
+        isXAi = preset.Auth.HasFlag(ProviderAuthOptions.XAiSubscription);
+        isMeta = preset.Auth.HasFlag(ProviderAuthOptions.MetaSubscription);
+        isChatGpt = preset.Auth.HasFlag(ProviderAuthOptions.ChatGptSubscription);
         id = ProviderIdentity.Unique(preset.Id, existingProviderIds ?? []);
 
         RecheckCommand = new AsyncRelayCommand(_ => RecheckAsync(), () => !IsBusy);
         InstallCommand = new RelayCommand(() => OpenUrl?.Invoke(this, ClaudeCodeDocsUrl));
         UseClaudeCommand = new AsyncRelayCommand(_ => UseClaudeAsync(), () => ClaudeReady && !IsBusy);
         StartCopilotCommand = new AsyncRelayCommand(_ => StartCopilotAsync(), () => !IsBusy);
+        StartKimiCommand = new AsyncRelayCommand(_ => StartKimiAsync(), () => !IsBusy);
+        StartXAiCommand = new AsyncRelayCommand(_ => StartXAiAsync(), () => !IsBusy);
+        StartMetaCommand = new AsyncRelayCommand(_ => StartMetaAsync(), () => !IsBusy);
+        StartChatGptCommand = new AsyncRelayCommand(_ => StartChatGptAsync(), () => !IsBusy);
         CancelCommand = new RelayCommand(() => Cancelled?.Invoke(this, EventArgs.Empty));
         _ = RecheckAsync();
     }
@@ -66,7 +79,15 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
 
     public bool IsClaude => isClaude;
 
-    public bool IsCopilot => !isClaude;
+    public bool IsCopilot => preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot);
+
+    public bool IsKimi => isKimi;
+
+    public bool IsXAi => isXAi;
+
+    public bool IsMeta => isMeta;
+
+    public bool IsChatGpt => isChatGpt;
 
     public string Title => Loc.Instance.Format(ProviderStrings.LoginTitleKey, preset.DisplayName);
 
@@ -94,11 +115,29 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
 
     public string StartCopilotText => Loc.Instance[ProviderStrings.LoginCopilotStartKey];
 
+    public string StartKimiText => Loc.Instance[ProviderStrings.LoginKimiStartKey];
+
+    public string KimiHint => Loc.Instance[ProviderStrings.LoginKimiHintKey];
+
+    public string StartXAiText => Loc.Instance[ProviderStrings.LoginXAiStartKey];
+
+    public string XAiHint => Loc.Instance[ProviderStrings.LoginXAiHintKey];
+
+    public string StartMetaText => Loc.Instance[ProviderStrings.LoginMetaStartKey];
+
+    public string MetaHint => Loc.Instance[ProviderStrings.LoginMetaHintKey];
+
+    public string StartChatGptText => Loc.Instance[ProviderStrings.LoginChatGptStartKey];
+
+    public string ChatGptHint => Loc.Instance[ProviderStrings.LoginChatGptHintKey];
+
     public string CancelText => Loc.Instance[ProviderStrings.EditorCancelKey];
 
     public string CopilotHint => Loc.Instance[ProviderStrings.EditorCopilotHintKey];
 
-    public string DeviceCodeText => deviceCode is null ? string.Empty : Loc.Instance.Format(ProviderStrings.EditorDeviceCodeKey, deviceCode);
+    public string DeviceCodeText => deviceCode is null
+        ? string.Empty
+        : Loc.Instance.Format(DeviceCodeLabelKey, deviceCode);
 
     public string DeviceCodeHint => Loc.Instance[ProviderStrings.EditorDeviceCodeHintKey];
 
@@ -142,6 +181,14 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand UseClaudeCommand { get; }
 
     public AsyncRelayCommand StartCopilotCommand { get; }
+
+    public AsyncRelayCommand StartKimiCommand { get; }
+
+    public AsyncRelayCommand StartXAiCommand { get; }
+
+    public AsyncRelayCommand StartMetaCommand { get; }
+
+    public AsyncRelayCommand StartChatGptCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -264,6 +311,229 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Runs the Kimi For Coding device-code flow until the user authorises, cancels or the code expires. The credential layer
+    /// owns the poll loop and hands back the user code as soon as it exists; on success the model list is fetched once, exactly
+    /// as the Copilot branch does, so the connected provider has models before the dialog closes.
+    /// </summary>
+    private async Task StartKimiAsync()
+    {
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        isBusy = true;
+        RaiseBusy();
+        Error = null;
+        LoginState = Loc.Instance[ProviderStrings.EditorDeviceCodeWaitingKey];
+        try
+        {
+            await services.Credentials
+                .SignInKimiAsync(id, ShowKimiCode, token)
+                .ConfigureAwait(true);
+            LoginState = Loc.Instance[ProviderStrings.EditorSignedInKey];
+            deviceCode = null;
+            RaiseDeviceCode();
+            var definition = Build(ProviderCredentialKind.KimiCode);
+            definition = await FetchModelsAsync(definition, token).ConfigureAwait(true);
+            await CompleteAsync(definition).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            LoginState = null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Any failure of the device flow ends the wait and says why; nothing may vanish inside the command.
+            Error = exception.Message;
+            LoginState = null;
+        }
+        finally
+        {
+            isBusy = false;
+            RaiseBusy();
+        }
+    }
+
+    /// <summary>Shows the code the user has to type and opens the page that accepts it.</summary>
+    private void ShowKimiCode(KimiDeviceCode code)
+    {
+        // The complete URL carries the code, so the user confirms instead of typing it once the browser is there.
+        deviceCode = code.UserCode;
+        RaiseDeviceCode();
+        OpenUrl?.Invoke(this, code.VerificationUriComplete);
+    }
+
+    /// <summary>
+    /// Runs the xAI device-code flow the same way the Kimi branch does: the credential layer owns the poll loop and hands back
+    /// the user code as soon as it exists; on success the model list is fetched once, best effort, so the connected provider
+    /// has models before the dialog closes.
+    /// </summary>
+    private async Task StartXAiAsync()
+    {
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        isBusy = true;
+        RaiseBusy();
+        Error = null;
+        LoginState = Loc.Instance[ProviderStrings.EditorDeviceCodeWaitingKey];
+        try
+        {
+            await services.Credentials
+                .SignInXAiAsync(id, ShowXAiCode, token)
+                .ConfigureAwait(true);
+            LoginState = Loc.Instance[ProviderStrings.EditorSignedInKey];
+            deviceCode = null;
+            RaiseDeviceCode();
+            var definition = Build(ProviderCredentialKind.XAiSubscription);
+            definition = await FetchModelsAsync(definition, token).ConfigureAwait(true);
+            await CompleteAsync(definition).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            LoginState = null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Any failure of the device flow ends the wait and says why; nothing may vanish inside the command.
+            Error = exception.Message;
+            LoginState = null;
+        }
+        finally
+        {
+            isBusy = false;
+            RaiseBusy();
+        }
+    }
+
+    /// <summary>Shows the xAI code the user has to type and opens the page that accepts it.</summary>
+    private void ShowXAiCode(XAiDeviceCode code)
+    {
+        deviceCode = code.UserCode;
+        RaiseDeviceCode();
+        OpenUrl?.Invoke(this, code.VerificationUriComplete);
+    }
+
+    /// <summary>
+    /// Runs the Meta subscription sign-in: the device flow for an identity token, then the mint that turns it into the API key
+    /// the requests use. The mint is a second round trip, so the dialog says "enabling access" while it runs instead of
+    /// looking stuck between the approval and the result. The model list is fetched once, best effort, like the other vendors.
+    /// </summary>
+    private async Task StartMetaAsync()
+    {
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        isBusy = true;
+        RaiseBusy();
+        Error = null;
+        LoginState = Loc.Instance[ProviderStrings.EditorDeviceCodeWaitingKey];
+        try
+        {
+            await services.Credentials
+                .SignInMetaAsync(id, ShowMetaCode, ShowMetaMinting, token)
+                .ConfigureAwait(true);
+            LoginState = Loc.Instance[ProviderStrings.EditorSignedInKey];
+            deviceCode = null;
+            RaiseDeviceCode();
+            var definition = Build(ProviderCredentialKind.MetaSubscription);
+            definition = await FetchModelsAsync(definition, token).ConfigureAwait(true);
+            await CompleteAsync(definition).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            LoginState = null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Any failure of the flow ends the wait and says why — including the mint's "finish the setup at <url>"; nothing
+            // may vanish inside the command.
+            Error = exception.Message;
+            LoginState = null;
+        }
+        finally
+        {
+            isBusy = false;
+            RaiseBusy();
+        }
+    }
+
+    /// <summary>Shows the Meta code and opens the page that accepts it; the complete URL is only sent when Meta gave one.</summary>
+    private void ShowMetaCode(MetaDeviceCode code)
+    {
+        deviceCode = code.UserCode;
+        RaiseDeviceCode();
+        if (code.VerificationUriComplete is { Length: > 0 } page)
+        {
+            OpenUrl?.Invoke(this, page);
+        }
+    }
+
+    /// <summary>The user approved; the key is being minted for this machine, which is not instant.</summary>
+    private void ShowMetaMinting() => LoginState = Loc.Instance[ProviderStrings.LoginMetaEnablingKey];
+
+    /// <summary>
+    /// Runs the ChatGPT plan sign-in the same way the xAI branch does. There is no model list to fetch: the ChatGPT preset has
+    /// none on the server side, so the connected provider keeps whatever models it was configured with.
+    /// </summary>
+    private async Task StartChatGptAsync()
+    {
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        isBusy = true;
+        RaiseBusy();
+        Error = null;
+        LoginState = Loc.Instance[ProviderStrings.EditorDeviceCodeWaitingKey];
+        try
+        {
+            await services.Credentials
+                .SignInChatGptAsync(id, ShowChatGptCode, token)
+                .ConfigureAwait(true);
+            LoginState = Loc.Instance[ProviderStrings.EditorSignedInKey];
+            deviceCode = null;
+            RaiseDeviceCode();
+            await CompleteAsync(Build(ProviderCredentialKind.ChatGptSubscription)).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            LoginState = null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Error = exception.Message;
+            LoginState = null;
+        }
+        finally
+        {
+            isBusy = false;
+            RaiseBusy();
+        }
+    }
+
+    /// <summary>Shows the ChatGPT code and opens the one page that accepts it.</summary>
+    private void ShowChatGptCode(ChatGptDeviceCode code)
+    {
+        deviceCode = code.UserCode;
+        RaiseDeviceCode();
+        OpenUrl?.Invoke(this, ChatGptAuthentication.VerificationUrl);
+    }
+
+    /// <summary>Which vendor's wording the code line uses; Copilot is the one that is none of the others.</summary>
+    private string DeviceCodeLabelKey => isKimi
+        ? ProviderStrings.LoginKimiCodeKey
+        : isXAi
+            ? ProviderStrings.LoginXAiCodeKey
+            : isMeta
+                ? ProviderStrings.LoginMetaCodeKey
+                : isChatGpt
+                    ? ProviderStrings.LoginChatGptCodeKey
+                    : ProviderStrings.EditorDeviceCodeKey;
+
     /// <summary>Best effort: a failed listing leaves the models empty, and the row's refresh can fetch them later.</summary>
     private async Task<ProviderDefinition> FetchModelsAsync(ProviderDefinition definition, CancellationToken token)
     {
@@ -317,5 +587,9 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         RecheckCommand.NotifyCanExecuteChanged();
         UseClaudeCommand.NotifyCanExecuteChanged();
         StartCopilotCommand.NotifyCanExecuteChanged();
+        StartKimiCommand.NotifyCanExecuteChanged();
+        StartXAiCommand.NotifyCanExecuteChanged();
+        StartMetaCommand.NotifyCanExecuteChanged();
+        StartChatGptCommand.NotifyCanExecuteChanged();
     }
 }
