@@ -38,7 +38,8 @@ internal static class AutomationComposition
         Func<ModelSettings> defaultModel,
         IPrPlatform pullRequests,
         GitCli git,
-        INotifications? notifications)
+        INotifications? notifications,
+        Providers.ModelCatalogRefreshService modelCatalogRefresh)
     {
         var service = new AutomationService(
             Path.Combine(settingsDirectory, DefinitionsFileName),
@@ -61,6 +62,34 @@ internal static class AutomationComposition
                 notifications,
                 () => service.Engine.Config,
                 service.Runs));
+        service.RegisterRunner(
+            BuiltInAutomations.ModelCatalogRefresh,
+            new ModelCatalogRefreshRunner(modelCatalogRefresh));
+        // The startup catch-up: only when today's catalog is missing, so a normal launch records nothing. It runs after
+        // attach because that is where the engine's own loop starts.
+        service.AddLoopOnAttach(async ct =>
+        {
+            // The snapshot is read on the pool at startup: judging "today's is missing" before that read lands would fetch a
+            // catalog the disk already holds (and leave a run record for it).
+            try
+            {
+                await modelCatalogRefresh.Loaded.WaitAsync(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // A read that is still not done after thirty seconds is not a reason to skip the check: the fetch itself
+                // would have taken longer.
+            }
+
+            if (modelCatalogRefresh.IsFromToday || !service.IsEnabled(BuiltInAutomations.ModelCatalogRefresh))
+            {
+                return;
+            }
+
+            await service.Engine
+                .StartAsync(new AutomationRunRequest(BuiltInAutomations.ModelCatalogRefresh, AutomationTriggerSource.Event), ct)
+                .ConfigureAwait(false);
+        });
         var watcher = new CiFailureWatcher(
             service.Engine,
             catalog,

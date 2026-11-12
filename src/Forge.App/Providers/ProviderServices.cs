@@ -29,12 +29,21 @@ internal sealed class ProviderServices
         this.http = http;
         Store = new ProviderStore(settingsPath);
         Secrets = new ProviderSecretStore(dataDirectory);
-        Cache = new ProviderModelCache();
+        // Both caches live beside settings.json and are read on the pool: a cold start shows unknown prices until they
+        // arrive instead of blocking the window on a JSON parse.
+        Cache = new ProviderModelCache(Path.Combine(dataDirectory, ProviderModelsFile.FileName));
+        ModelCatalog = new ModelCatalogStore(dataDirectory, time);
+        // One memo for the whole process: the chain's inputs all live here, so the invalidation points do too.
+        Memo = new ModelMetadataMemo();
+        ModelCatalog.Changed += (_, _) => Memo.Invalidate();
+        // The provider cache also lands asynchronously; an answer resolved before it did would be remembered as "the catalog
+        // knows nothing" until the next save, so the memo is dropped again when the file has been read.
+        _ = InvalidateMemoWhenModelListsLoadAsync();
         Credentials = new ProviderCredentials(http, Secrets, time: time);
         // Warm the encrypted store on the pool: the first reader would otherwise be the settings page (UI thread) or the
         // first provider status line, and decrypting on the UI thread is exactly what the shell must not do.
         _ = Secrets.WarmAsync();
-        catalog = Store.Load(Secrets, Credentials, Cache);
+        catalog = Store.Load(Secrets, Credentials, Cache, ModelCatalog);
     }
 
     public ProviderStore Store { get; }
@@ -42,6 +51,12 @@ internal sealed class ProviderServices
     public ProviderSecretStore Secrets { get; }
 
     public ProviderModelCache Cache { get; }
+
+    /// <summary>The fetched model catalog (<c>model-catalog.json</c>): the weakest layer of the metadata chain.</summary>
+    public ModelCatalogStore ModelCatalog { get; }
+
+    /// <summary>Resolved metadata per (provider, model); dropped whenever the catalog, a model list or settings change.</summary>
+    public ModelMetadataMemo Memo { get; }
 
     public ProviderCredentials Credentials { get; }
 
@@ -54,7 +69,8 @@ internal sealed class ProviderServices
     /// <summary>Re-reads <c>settings.json</c>; the running sessions keep the catalogue they already captured.</summary>
     public ProviderCatalog Reload()
     {
-        catalog = Store.Load(Secrets, Credentials, Cache);
+        Memo.Invalidate();
+        catalog = Store.Load(Secrets, Credentials, Cache, ModelCatalog);
         Changed?.Invoke(this, EventArgs.Empty);
         return catalog;
     }
@@ -69,9 +85,10 @@ internal sealed class ProviderServices
             () =>
             {
                 Secrets.WarmAsync(CancellationToken.None).GetAwaiter().GetResult();
-                return Store.Load(Secrets, Credentials, Cache);
+                return Store.Load(Secrets, Credentials, Cache, ModelCatalog);
             },
             cancellationToken).ConfigureAwait(true);
+        Memo.Invalidate();
         catalog = loaded;
         Changed?.Invoke(this, EventArgs.Empty);
         return catalog;
@@ -84,14 +101,39 @@ internal sealed class ProviderServices
     public async Task SaveAsync(
         IReadOnlyList<ProviderDefinition> definitions,
         string? defaultId,
-        int? defaultContextWindow,
+        ContextWindowDefault defaultContextWindow,
+        string? modelCatalogSourceUrl = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         IReadOnlyList<ProviderDefinition> frozen = [.. definitions];
-        await Task.Run(() => Store.Save(frozen, defaultId, defaultContextWindow), cancellationToken).ConfigureAwait(true);
-        catalog = ProviderCatalog.Create(frozen, defaultId, Secrets, Credentials, Cache, defaultContextWindow);
+        // Null means "the page did not touch the address"; the URL is only ever changed from the catalog row.
+        var sourceUrl = modelCatalogSourceUrl ?? catalog.ModelCatalogSourceUrl;
+        await Task.Run(() => Store.Save(frozen, defaultId, defaultContextWindow, sourceUrl), cancellationToken).ConfigureAwait(true);
+        // A saved definition can change an override, the default window or the provider list itself.
+        Memo.Invalidate();
+        catalog = ProviderCatalog.Create(
+            frozen,
+            defaultId,
+            Secrets,
+            Credentials,
+            Cache,
+            new ProviderCatalogOptions(defaultContextWindow, sourceUrl, ModelCatalog, Memo));
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task InvalidateMemoWhenModelListsLoadAsync()
+    {
+        try
+        {
+            await Cache.Loaded.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A cache that could not be read is the same as an empty one; the memo holding pre-load answers is still wrong.
+        }
+
+        Memo.Invalidate();
     }
 
     /// <summary>Builds the provider for one model request from the live catalogue.</summary>
@@ -104,8 +146,16 @@ internal sealed class ProviderServices
     public ConnectedProvider CreateTransient(ProviderDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
-        var transient = ProviderCatalog.Create([definition], definition.Id, Secrets, Credentials, Cache);
-        return transient.Default ?? new ConnectedProvider(definition, Secrets, Cache, Credentials);
+        var transient = ProviderCatalog.Create(
+            [definition],
+            definition.Id,
+            Secrets,
+            Credentials,
+            Cache,
+            // No memo: a transient definition is not saved, so a (provider, model) memo entry could not be invalidated by
+            // the normal "config saved" path and would keep answering for a definition that no longer exists.
+            new ProviderCatalogOptions(ModelCatalog: ModelCatalog));
+        return transient.Default ?? new ConnectedProvider(definition, Secrets, Cache, Credentials, ModelCatalog);
     }
 
     /// <summary>
@@ -143,6 +193,9 @@ internal sealed class ProviderServices
         var (baseUrl, headers) = await ListRequestAsync(provider, cancellationToken).ConfigureAwait(false);
         var list = await ProviderModelListing.FetchAsync(baseUrl, headers, http, cancellationToken).ConfigureAwait(false);
         Cache.Set(provider.Id, list);
+        // Awaited, not fire-and-forget: the refresh is only finished once the answers are also on disk for the next start.
+        await Cache.SaveAsync(cancellationToken).ConfigureAwait(false);
+        Memo.Invalidate();
         return list;
     }
 

@@ -91,7 +91,10 @@ public static class BuiltInAutomations
     public const string SessionWatch = "builtin.session-watch";
     public const string Housekeeping = "builtin.housekeeping";
 
-    public static IReadOnlyList<string> All { get; } = [QuotaResume, CiChain, SessionWatch, Housekeeping];
+    /// <summary>Daily 05:00: fetch the model catalog snapshot, then refresh every connected provider's model list.</summary>
+    public const string ModelCatalogRefresh = "builtin.model-catalog-refresh";
+
+    public static IReadOnlyList<string> All { get; } = [QuotaResume, CiChain, SessionWatch, Housekeeping, ModelCatalogRefresh];
 
     public static bool IsBuiltIn(string id) => id.StartsWith(Prefix, StringComparison.Ordinal);
 }

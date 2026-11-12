@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Forge.Abstractions;
 
 namespace Forge.App.Localization;
 
@@ -33,6 +34,22 @@ internal static class ProviderStrings
     public const string SectionCustomHintKey = "providers.section.customHint";
 
     public const string SectionRefreshKey = "providers.section.refresh";
+
+    public const string MetadataCapabilitiesKey = "providers.metadata.capabilities";
+
+    public const string CapabilityTextKey = "providers.metadata.capability.text";
+
+    public const string CapabilityImageKey = "providers.metadata.capability.image";
+
+    public const string CapabilityPdfKey = "providers.metadata.capability.pdf";
+
+    public const string CapabilityAudioKey = "providers.metadata.capability.audio";
+
+    public const string CapabilityVideoKey = "providers.metadata.capability.video";
+
+    public const string CapabilityReasoningKey = "providers.metadata.capability.reasoning";
+
+    public const string CapabilityReasoningUnknownStepsKey = "providers.metadata.capability.reasoningUnknownSteps";
 
     public const string DefaultContextWindowKey = "providers.defaults.contextWindow";
 
@@ -193,6 +210,16 @@ internal static class ProviderStrings
 
     public const string LoginXAiCodeKey = "providers.login.xaiCode";
 
+    public const string LoginOpenRouterStartKey = "providers.login.openRouterStart";
+
+    public const string LoginOpenRouterHintKey = "providers.login.openRouterHint";
+
+    public const string LoginOpenRouterWaitingKey = "providers.login.openRouterWaiting";
+
+    public const string LoginOpenRouterTimeoutKey = "providers.login.openRouterTimeout";
+
+    public const string LoginOpenRouterNoCodeKey = "providers.login.openRouterNoCode";
+
     public const string LoginMetaStartKey = "providers.login.metaStart";
 
     public const string LoginMetaHintKey = "providers.login.metaHint";
@@ -284,15 +311,23 @@ internal static class ProviderStrings
         Loc.Register(ApiKeyButtonKey, "API 密钥", "API key");
         Loc.Register(RowDeleteArmedKey, "再次点击删除", "Click again to delete");
         Loc.Register(SectionRefreshKey, "刷新", "Refresh");
+        Loc.Register(MetadataCapabilitiesKey, "能力", "Capabilities");
+        Loc.Register(CapabilityTextKey, "文本", "text");
+        Loc.Register(CapabilityImageKey, "图像", "image");
+        Loc.Register(CapabilityPdfKey, "PDF", "PDF");
+        Loc.Register(CapabilityAudioKey, "音频", "audio");
+        Loc.Register(CapabilityVideoKey, "视频", "video");
+        Loc.Register(CapabilityReasoningKey, "推理 {0} 档", "reasoning × {0}");
+        Loc.Register(CapabilityReasoningUnknownStepsKey, "推理", "reasoning");
         Loc.Register(DefaultContextWindowKey, "默认上下文窗口", "Default context window");
         Loc.Register(
             DefaultContextWindowHintKey,
-            "tokens，留空 = 用各模型的目录值；它只覆盖没有单独设置的模型。",
-            "tokens; empty uses each model's catalog value. It only applies to models without their own setting.");
+            "数字 = 固定 tokens；百分比（如 50%） = 按各模型自身窗口的比例，模型窗口未知时不生效；留空 = 用各模型的目录值。它只作用于没有单独设置的模型。",
+            "A number is a fixed token count; a percentage such as 50% takes that share of each model's own window and does nothing while that window is unknown; empty uses each model's catalog value. It only applies to models without their own setting.");
         Loc.Register(
             DefaultContextWindowInvalidKey,
-            "默认上下文窗口必须是正整数，或留空表示使用模型目录值。",
-            "The default context window must be a positive whole number, or empty to use the catalog value.");
+            "默认上下文窗口必须是正整数、1% 到 1000% 的百分比，或留空表示使用模型目录值。",
+            "The default context window must be a positive whole number, a percentage from 1% to 1000%, or empty to use the catalog value.");
 
         Loc.Register(AgentsTitleKey, "内置 Agent 默认", "Built-in agent defaults");
         Loc.Register(
@@ -395,6 +430,23 @@ internal static class ProviderStrings
             "用 xAI 账号的设备码登录，登录后直接使用该订阅；本机不保存密码。",
             "Signs in with an xAI account's device code and uses that subscription directly; no password is stored on this machine.");
         Loc.Register(LoginXAiCodeKey, "在 xAI 输入代码 {0}", "Enter the code {0} at xAI");
+        Loc.Register(LoginOpenRouterStartKey, "在浏览器中登录", "Sign in in the browser");
+        Loc.Register(
+            LoginOpenRouterHintKey,
+            "在浏览器里用 OpenRouter 账号完成授权；完成后本机只保存一个 API 密钥。",
+            "Authorizes OpenRouter in the browser; only an API key is stored on this machine afterwards.");
+        Loc.Register(
+            LoginOpenRouterWaitingKey,
+            "已在浏览器打开 OpenRouter，等待你完成授权…",
+            "OpenRouter is open in the browser; waiting for you to finish signing in…");
+        Loc.Register(
+            LoginOpenRouterTimeoutKey,
+            "OpenRouter 登录在 5 分钟后放弃，请重新登录。",
+            "The OpenRouter sign-in gave up after five minutes. Please start it again.");
+        Loc.Register(
+            LoginOpenRouterNoCodeKey,
+            "OpenRouter 没有返回授权码，请重新登录。",
+            "OpenRouter returned no authorization code. Please start it again.");
         Loc.Register(LoginMetaStartKey, "开始登录", "Start sign-in");
         Loc.Register(
             LoginMetaHintKey,
@@ -490,6 +542,10 @@ internal static class ProviderStrings
 
     public static Localization.LocText XAiSignInRequiredText() => new(NeedsXAiSignInKey);
 
+    public static Localization.LocText OpenRouterTimedOutText() => new(LoginOpenRouterTimeoutKey);
+
+    public static Localization.LocText OpenRouterNoCodeText() => new(LoginOpenRouterNoCodeKey);
+
     public static Localization.LocText MetaSignInRequiredText() => new(NeedsMetaSignInKey);
 
     public static Localization.LocText MetaSignedInText() => new(ReadyMetaKey);
@@ -499,4 +555,56 @@ internal static class ProviderStrings
     public static Localization.LocText ChatGptSignedInText() => new(ReadyChatGptKey);
 
     public static string ManagedText => Localization.Loc.Instance[ManagedKey];
+
+    public static string MetadataCapabilities => Localization.Loc.Instance[MetadataCapabilitiesKey];
+
+    /// <summary>
+    /// The read-only capability summary of one model ("文本·图像 · 推理 4 档"). Empty when no source described the model,
+    /// which is the normal state for a model nobody has priced yet; the dialog then shows nothing instead of "unknown".
+    /// </summary>
+    public static string CapabilitiesText(ModelCapabilities? capabilities)
+    {
+        if (capabilities is not { IsKnown: true })
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>(2);
+        if (capabilities.Inputs is { } inputs)
+        {
+            var names = new List<string>(4);
+            foreach (var (flag, key) in new[]
+                     {
+                         (ModelInputs.Text, CapabilityTextKey),
+                         (ModelInputs.Image, CapabilityImageKey),
+                         (ModelInputs.Pdf, CapabilityPdfKey),
+                         (ModelInputs.Audio, CapabilityAudioKey),
+                         (ModelInputs.Video, CapabilityVideoKey),
+                     })
+            {
+                if ((inputs & flag) != 0)
+                {
+                    names.Add(Localization.Loc.Instance[key]);
+                }
+            }
+
+            if (names.Count > 0)
+            {
+                parts.Add(string.Join("·", names));
+            }
+        }
+
+        if (capabilities.ReasoningSteps is { Count: > 0 } steps)
+        {
+            parts.Add(Localization.Loc.Instance.Format(
+                CapabilityReasoningKey,
+                (steps.Count - 1).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+        else if (capabilities.Reasoning == true)
+        {
+            parts.Add(Localization.Loc.Instance[CapabilityReasoningUnknownStepsKey]);
+        }
+
+        return string.Join(" · ", parts);
+    }
 }

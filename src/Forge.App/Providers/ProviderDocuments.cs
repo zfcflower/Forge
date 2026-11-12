@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Forge.App.Providers;
@@ -22,18 +23,27 @@ internal sealed class SettingsDocument
 }
 
 /// <summary>
-/// The model-metadata settings that are not per provider. Only the global context window lives here today; a fetched catalog
-/// snapshot (<c>sourceUrl</c>/<c>generatedAt</c>) will join it when that work starts, which is why the section is separate
-/// from <c>providers</c> and is edited through <c>JsonNode</c> so unknown fields survive.
+/// The model-metadata settings that are not per provider: the global context window and the catalog address the daily
+/// refresh reads. The fetched catalog itself is not here — it is a cache of a network answer (<c>model-catalog.json</c>
+/// under the data root), edited through <c>JsonNode</c> so unknown fields survive.
 /// </summary>
 internal sealed class ModelCatalogSectionDocument
 {
     /// <summary>
-    /// The context window every model uses unless it has its own override; absent means "use the catalog value". It may be
-    /// smaller than the catalog window (to save cost or quota) or larger where the provider allows it.
+    /// The context window every model uses unless it has its own override; absent means "use the catalog value". It is
+    /// kept as the raw JSON value because the property has two shapes: a number is an absolute count, a string such as
+    /// <c>"50%"</c> is a share of each model's own window (<see cref="ContextWindowDefault"/> owns both meanings). It may
+    /// be smaller than the catalog window (to save cost or quota) or larger where the provider allows it.
     /// </summary>
     [JsonPropertyName("defaultContextWindow")]
-    public int? DefaultContextWindow { get; set; }
+    public JsonElement? DefaultContextWindow { get; set; }
+
+    /// <summary>
+    /// Where the daily refresh fetches the catalog from; absent means <see cref="Forge.Core.Providers.ModelCatalogFetcher.DefaultSourceUrl"/>.
+    /// A mirror or an internal proxy works as long as it serves the same JSON shape.
+    /// </summary>
+    [JsonPropertyName("sourceUrl")]
+    public string? SourceUrl { get; set; }
 }
 
 /// <summary>

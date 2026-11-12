@@ -55,6 +55,21 @@ internal sealed partial class ProvidersSettingsView : UserControl
         }
     }
 
+    /// <summary>
+    /// The catalog address is committed on focus loss (and on Enter) for the same reason the context window is: it re-saves
+    /// the section and may start a fetch, and a half-typed URL must not become a saved source.
+    /// </summary>
+    private void OnCatalogSourceCommit(object? sender, RoutedEventArgs e) => _ = Model?.CommitCatalogSourceAsync();
+
+    private void OnCatalogSourceKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.Enter)
+        {
+            e.Handled = true;
+            _ = Model?.CommitCatalogSourceAsync();
+        }
+    }
+
     private void OnEditClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: ProviderRowViewModel row })

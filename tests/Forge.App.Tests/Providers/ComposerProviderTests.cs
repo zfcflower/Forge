@@ -151,7 +151,7 @@ public sealed class ComposerProviderTests : IDisposable
             ]
             """,
             defaultId: "solo",
-            thinkingLevels: static model => string.Equals(model, "limited", StringComparison.Ordinal)
+            thinkingLevels: static (model, _) => string.Equals(model, "limited", StringComparison.Ordinal)
                 ? [ThinkingEffort.Off, ThinkingEffort.Low]
                 : ThinkingLevels.For(model));
         composer.Effort = ThinkingEffort.High;
@@ -227,7 +227,7 @@ public sealed class ComposerProviderTests : IDisposable
     private ComposerViewModel CreateComposer(
         string items,
         string defaultId,
-        Func<string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null) =>
+        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null) =>
         new(
             Services("""{ "providers": { "version": 1, "defaultId": "{{DEFAULT}}", {{ITEMS}} } }"""
                 .Replace("{{DEFAULT}}", defaultId, StringComparison.Ordinal)

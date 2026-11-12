@@ -123,8 +123,9 @@ internal sealed record ProviderDefinition
     };
 
     /// <summary>
-    /// The credential a fresh entry starts with: the first sign-in the preset offers, which is what makes a subscription the
-    /// default path for a vendor that also takes a key (Anthropic, Kimi For Coding, Meta and xAI all work that way).
+    /// The credential a fresh entry starts with when the caller does not name one: the first sign-in the preset offers, which
+    /// is what makes a subscription the default path for a vendor that also takes a key (Anthropic, Kimi For Coding, Meta,
+    /// xAI and OpenAI all work that way; GitHub Copilot's sign-in comes before its key for the same reason).
     /// </summary>
     private static ProviderCredentialKind PresetCredentialKind(ProviderAuthOptions auth) => auth switch
     {
@@ -137,19 +138,43 @@ internal sealed record ProviderDefinition
         _ => ProviderCredentialKind.ApiKey,
     };
 
-    /// <summary>A fresh entry for one preset, with the preset's protocol, URL, environment variable and seed models.</summary>
-    public static ProviderDefinition FromPreset(ProviderPreset preset, string id, string? displayName = null)
+    /// <summary>
+    /// True for the kinds that come from a sign-in rather than a key, which is what decides whether the preset's subscription
+    /// endpoint applies. A preset that has none (Anthropic, Kimi For Coding, GitHub Copilot, xAI, Meta) is reached at the
+    /// same address either way, so only OpenAI's plan actually moves.
+    /// </summary>
+    private static bool IsSubscription(ProviderCredentialKind kind) => kind is
+        ProviderCredentialKind.ClaudeSubscription or
+        ProviderCredentialKind.GitHubCopilot or
+        ProviderCredentialKind.KimiCode or
+        ProviderCredentialKind.XAiSubscription or
+        ProviderCredentialKind.MetaSubscription or
+        ProviderCredentialKind.ChatGptSubscription;
+
+    /// <summary>
+    /// A fresh entry for one preset. <paramref name="credentialKind"/> is the way in the caller means — the editor names a
+    /// key, the login dialog names the sign-in it just completed — and it decides the endpoint as well as the credential: a
+    /// subscription kind on a preset with a subscription endpoint takes that endpoint, its protocol and its seed models.
+    /// Left <c>null</c> it follows the preset's own priority chain, so a caller that does not care keeps the old behaviour.
+    /// </summary>
+    public static ProviderDefinition FromPreset(
+        ProviderPreset preset,
+        string id,
+        string? displayName = null,
+        ProviderCredentialKind? credentialKind = null)
     {
         ArgumentNullException.ThrowIfNull(preset);
-        var kind = PresetCredentialKind(preset.Auth);
-        var models = preset.SeedModels.Count > 0 ? preset.SeedModels : [];
+        var kind = credentialKind ?? PresetCredentialKind(preset.Auth);
+        var subscription = IsSubscription(kind) ? preset.Subscription : null;
+        var seedModels = subscription is null ? preset.SeedModels : subscription.SeedModels;
+        var models = seedModels.Count > 0 ? seedModels : [];
         return new ProviderDefinition
         {
             Id = id,
             PresetId = preset.Id,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? preset.DisplayName : displayName.Trim(),
-            Protocol = preset.Protocol,
-            BaseUrl = preset.BaseUrl,
+            Protocol = subscription?.Protocol ?? preset.Protocol,
+            BaseUrl = subscription?.BaseUrl ?? preset.BaseUrl,
             CredentialKind = kind,
             EnvironmentVariable = preset.EnvironmentVariable,
             SecretReference = null,

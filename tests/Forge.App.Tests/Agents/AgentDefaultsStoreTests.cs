@@ -253,7 +253,7 @@ public sealed class AgentDefaultsStoreTests : IDisposable
         var catalog = Services().Catalog;
         var store = new AgentDefaultsStore(SettingsPath);
 
-        static IReadOnlyList<ThinkingEffort> Restricted(string? model) =>
+        static IReadOnlyList<ThinkingEffort> Restricted(string? model, string? providerId) =>
             string.Equals(model, "beta-1", StringComparison.Ordinal)
                 ? [ThinkingEffort.Off, ThinkingEffort.Low]
                 : ThinkingLevels.For(model);
@@ -265,7 +265,7 @@ public sealed class AgentDefaultsStoreTests : IDisposable
         Assert.Equal("beta-1", resolved.Model);
     }
 
-    private static IReadOnlyList<ThinkingEffort> EveryStep(string? _) =>
+    private static IReadOnlyList<ThinkingEffort> EveryStep(string? _, string? __) =>
         [ThinkingEffort.Off, ThinkingEffort.Minimal, ThinkingEffort.Low, ThinkingEffort.Medium, ThinkingEffort.High, ThinkingEffort.XHigh, ThinkingEffort.Max];
 
     private ProviderServices Services()

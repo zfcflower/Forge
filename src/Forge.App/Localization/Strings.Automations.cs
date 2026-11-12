@@ -29,6 +29,8 @@ internal static class AutomationStrings
     public const string CiChainDescriptionKey = "automations.builtin.ciChain.description";
     public const string SessionWatchNameKey = "automations.builtin.sessionWatch";
     public const string SessionWatchDescriptionKey = "automations.builtin.sessionWatch.description";
+    public const string ModelCatalogNameKey = "automations.builtin.modelCatalog";
+    public const string ModelCatalogDescriptionKey = "automations.builtin.modelCatalog.description";
     public const string HousekeepingNameKey = "automations.builtin.housekeeping";
     public const string HousekeepingDescriptionKey = "automations.builtin.housekeeping.description";
 
@@ -124,6 +126,7 @@ internal static class AutomationStrings
         BuiltInAutomations.QuotaResume => Loc.Instance[QuotaResumeNameKey],
         BuiltInAutomations.CiChain => Loc.Instance[CiChainNameKey],
         BuiltInAutomations.SessionWatch => Loc.Instance[SessionWatchNameKey],
+        BuiltInAutomations.ModelCatalogRefresh => Loc.Instance[ModelCatalogNameKey],
         BuiltInAutomations.Housekeeping => Loc.Instance[HousekeepingNameKey],
         _ => name,
     };
@@ -134,6 +137,7 @@ internal static class AutomationStrings
         BuiltInAutomations.QuotaResume => Loc.Instance[QuotaResumeDescriptionKey],
         BuiltInAutomations.CiChain => Loc.Instance[CiChainDescriptionKey],
         BuiltInAutomations.SessionWatch => Loc.Instance[SessionWatchDescriptionKey],
+        BuiltInAutomations.ModelCatalogRefresh => Loc.Instance[ModelCatalogDescriptionKey],
         BuiltInAutomations.Housekeeping => Loc.Instance[HousekeepingDescriptionKey],
         _ => null,
     };
@@ -296,6 +300,11 @@ internal static class AutomationStrings
             SessionWatchDescriptionKey,
             "长任务停滞、审批久等未处理或窗口在后台时一轮完成，都会提醒你。",
             "Notifies you when a long turn stalls, an approval waits too long, or a turn finishes while the window is in the background.");
+        Loc.Register(ModelCatalogNameKey, "模型目录更新", "Model catalog update");
+        Loc.Register(
+            ModelCatalogDescriptionKey,
+            "每天 05:00 从 models.dev 抓取最新模型目录（窗口、价格、输入能力与思考档位），顺带刷新每个已连接提供方的模型列表；启动时若今天还没更新则后台补一次。",
+            "Daily at 05:00: fetches the latest model catalog from models.dev (windows, prices, input kinds, reasoning steps) and refreshes every connected provider's model list; on startup it catches up in the background when today's catalog is missing.");
         Loc.Register(HousekeepingNameKey, "周期清理", "Housekeeping");
         Loc.Register(
             HousekeepingDescriptionKey,

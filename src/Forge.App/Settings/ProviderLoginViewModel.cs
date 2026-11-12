@@ -9,8 +9,8 @@ namespace Forge.App.Settings;
 /// <summary>
 /// The "登录" dialog of a built-in provider that signs in instead of taking a key. Claude reuses the local Claude Code
 /// sign-in, so this dialog only checks for the command and its login and, when the command is missing, explains the install.
-/// GitHub Copilot, Kimi For Coding, xAI, Meta and ChatGPT run their device-code flows here. Either way, the dialog closes with
-/// the connected definition it produced.
+/// GitHub Copilot, Kimi For Coding, xAI, Meta and ChatGPT run their device-code flows here, and OpenRouter runs its PKCE
+/// browser sign-in here. Either way, the dialog closes with the connected definition it produced.
 /// </summary>
 internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
 {
@@ -26,6 +26,7 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     private readonly bool isXAi;
     private readonly bool isMeta;
     private readonly bool isChatGpt;
+    private readonly bool isOpenRouter;
     private bool cliInstalled;
     private bool claudeSignedIn;
     private bool isBusy;
@@ -54,6 +55,7 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         isXAi = preset.Auth.HasFlag(ProviderAuthOptions.XAiSubscription);
         isMeta = preset.Auth.HasFlag(ProviderAuthOptions.MetaSubscription);
         isChatGpt = preset.Auth.HasFlag(ProviderAuthOptions.ChatGptSubscription);
+        isOpenRouter = preset.Auth.HasFlag(ProviderAuthOptions.OpenRouterOAuth);
         id = ProviderIdentity.Unique(preset.Id, existingProviderIds ?? []);
 
         RecheckCommand = new AsyncRelayCommand(_ => RecheckAsync(), () => !IsBusy);
@@ -64,6 +66,7 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         StartXAiCommand = new AsyncRelayCommand(_ => StartXAiAsync(), () => !IsBusy);
         StartMetaCommand = new AsyncRelayCommand(_ => StartMetaAsync(), () => !IsBusy);
         StartChatGptCommand = new AsyncRelayCommand(_ => StartChatGptAsync(), () => !IsBusy);
+        StartOpenRouterCommand = new AsyncRelayCommand(_ => StartOpenRouterAsync(), () => !IsBusy);
         CancelCommand = new RelayCommand(() => Cancelled?.Invoke(this, EventArgs.Empty));
         _ = RecheckAsync();
     }
@@ -86,6 +89,8 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public bool IsMeta => isMeta;
 
     public bool IsChatGpt => isChatGpt;
+
+    public bool IsOpenRouter => isOpenRouter;
 
     public string Title => Loc.Instance.Format(ProviderStrings.LoginTitleKey, preset.DisplayName);
 
@@ -126,6 +131,10 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public string StartChatGptText => Loc.Instance[ProviderStrings.LoginChatGptStartKey];
 
     public string ChatGptHint => Loc.Instance[ProviderStrings.LoginChatGptHintKey];
+
+    public string StartOpenRouterText => Loc.Instance[ProviderStrings.LoginOpenRouterStartKey];
+
+    public string OpenRouterHint => Loc.Instance[ProviderStrings.LoginOpenRouterHintKey];
 
     public string CancelText => Loc.Instance[ProviderStrings.EditorCancelKey];
 
@@ -185,6 +194,8 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand StartMetaCommand { get; }
 
     public AsyncRelayCommand StartChatGptCommand { get; }
+
+    public AsyncRelayCommand StartOpenRouterCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
@@ -519,6 +530,48 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         OpenUrl?.Invoke(this, ChatGptAuthentication.VerificationUrl);
     }
 
+    /// <summary>
+    /// Runs the OpenRouter sign-in: the credential layer starts listening first, the browser approves the app, and the key that
+    /// comes back is stored exactly where a pasted one goes. There is no device code to type, so the dialog only says that the
+    /// browser was opened and is being waited on; the model list is fetched once, best effort, like the other vendors.
+    /// </summary>
+    private async Task StartOpenRouterAsync()
+    {
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        isBusy = true;
+        RaiseBusy();
+        Error = null;
+        LoginState = Loc.Instance[ProviderStrings.LoginOpenRouterWaitingKey];
+        try
+        {
+            await services.Credentials
+                .SignInOpenRouterAsync(id, page => OpenUrl?.Invoke(this, page.AbsoluteUri), token)
+                .ConfigureAwait(true);
+            LoginState = Loc.Instance[ProviderStrings.EditorSignedInKey];
+            var definition = Build(ProviderCredentialKind.ApiKey);
+            definition = await FetchModelsAsync(definition, token).ConfigureAwait(true);
+            await CompleteAsync(definition).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            LoginState = null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The sign-in ends the wait with its own reason: a timeout, a callback with no code or a refused exchange.
+            Error = exception.Message;
+            LoginState = null;
+        }
+        finally
+        {
+            isBusy = false;
+            RaiseBusy();
+        }
+    }
+
     /// <summary>Which vendor's wording the code line uses; Copilot is the one that is none of the others.</summary>
     private string DeviceCodeLabelKey => isKimi
         ? ProviderStrings.LoginKimiCodeKey
@@ -546,13 +599,15 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
 
     private ProviderDefinition Build(ProviderCredentialKind kind)
     {
-        var definition = ProviderDefinition.FromPreset(preset, id);
+        // The flow that just completed names the kind it produced, and the kind picks the endpoint too: a ChatGPT plan is a
+        // Responses endpoint with its own seed models, not the API-key one the preset's primary fields describe.
+        var definition = ProviderDefinition.FromPreset(preset, id, credentialKind: kind);
         return definition with
         {
-            CredentialKind = kind,
             Thinking = ThinkingEffort.Medium,
-            // The Claude subscription is the CLI's own credential, so the definition holds no secret reference.
-            SecretReference = null,
+            // A subscription keeps its bundle in the store under its own reference, so the definition holds none; an API-key
+            // sign-in (OpenRouter) produced an ordinary key, and that goes under the reference a pasted one uses.
+            SecretReference = kind == ProviderCredentialKind.ApiKey ? ProviderCredentials.ApiKeyReference(id) : null,
         };
     }
 
@@ -587,5 +642,6 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
         StartXAiCommand.NotifyCanExecuteChanged();
         StartMetaCommand.NotifyCanExecuteChanged();
         StartChatGptCommand.NotifyCanExecuteChanged();
+        StartOpenRouterCommand.NotifyCanExecuteChanged();
     }
 }

@@ -42,6 +42,26 @@ internal sealed class ProviderModelCache
 {
     private readonly Lock gate = new();
     private readonly Dictionary<string, Dictionary<string, ModelMetadata>> byProvider = new(StringComparer.Ordinal);
+    private readonly string? path;
+    private readonly Task loaded;
+
+    /// <summary>
+    /// A cache over one provider's <c>/models</c> answers. With a <paramref name="path"/> the answers survive a restart:
+    /// the file is read on the pool at construction and rewritten after each refresh, so prices a provider reports are
+    /// still there tomorrow instead of falling back to the table until somebody presses refresh. Without a path (tests,
+    /// the transient editor provider) it stays in memory.
+    /// </summary>
+    public ProviderModelCache(string? path = null)
+    {
+        this.path = string.IsNullOrWhiteSpace(path) ? null : path;
+        loaded = this.path is null ? Task.CompletedTask : Task.Run(LoadFromDisk);
+    }
+
+    /// <summary>
+    /// Completes when the file has been read (immediately for a memory-only cache). Readers that must not answer from a
+    /// half-filled cache wait on it; <see cref="ProviderServices"/> uses it to drop its memo once the file has landed.
+    /// </summary>
+    public Task Loaded => loaded;
 
     public ModelMetadata? Get(string providerId, string? modelId)
     {
@@ -86,6 +106,117 @@ internal sealed class ProviderModelCache
             byProvider[providerId] = models;
         }
     }
+
+    private void LoadFromDisk()
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            if (!ProviderModelsFile.TryRead(File.ReadAllBytes(path), out var lists, out var error))
+            {
+                System.Diagnostics.Trace.WriteLine("[providers] " + error);
+                return;
+            }
+
+            lock (gate)
+            {
+                // A refresh that already answered wins over the file: it is the newer answer.
+                foreach (var (providerId, list) in lists)
+                {
+                    if (byProvider.ContainsKey(providerId))
+                    {
+                        continue;
+                    }
+
+                    var models = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal);
+                    foreach (var id in list.Ids)
+                    {
+                        models[id] = list.Metadata.GetValueOrDefault(id) ?? ModelMetadata.Unknown;
+                    }
+
+                    byProvider[providerId] = models;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.TraceWarning("[providers] model cache read failed: " + exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Writes the cache off the caller's thread. Awaiting it is part of a model-list refresh, so "the refresh finished" means
+    /// "the file is on disk": a fire-and-forget write used to outlive the call and race anything that removed the data
+    /// directory (a test, a profile reset). A failed write only costs the persistence, never the in-memory answers.
+    /// </summary>
+    public Task SaveAsync(CancellationToken cancellationToken = default) => Task.Run(SaveNow, cancellationToken);
+
+    /// <summary>
+    /// Writes the cache on the calling thread. Used by <see cref="SaveAsync"/> on the pool, and by a caller that must have
+    /// the file before continuing.
+    /// </summary>
+    internal void SaveNow()
+    {
+        if (path is null)
+        {
+            return;
+        }
+
+        // A save that overtakes the load would publish only what this process has fetched so far and drop every other
+        // provider's entries from the file. Waiting for the read (a few milliseconds, on the caller's pool thread) keeps the
+        // file a superset instead of a truncation.
+        if (!loaded.IsCompleted)
+        {
+            try
+            {
+                loaded.GetAwaiter().GetResult();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Trace.TraceWarning("[providers] model cache load failed: " + exception.Message);
+            }
+        }
+
+        try
+        {
+            Dictionary<string, ProviderModelList> snapshot;
+            lock (gate)
+            {
+                snapshot = new Dictionary<string, ProviderModelList>(byProvider.Count, StringComparer.Ordinal);
+                foreach (var (providerId, models) in byProvider)
+                {
+                    var metadata = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal);
+                    foreach (var (modelId, entry) in models)
+                    {
+                        if (entry.IsKnown)
+                        {
+                            metadata[modelId] = entry;
+                        }
+                    }
+
+                    snapshot[providerId] = new ProviderModelList([.. models.Keys], metadata);
+                }
+            }
+
+            Forge.IO.AtomicFile.WriteAllBytes(path, ProviderModelsFile.Write(snapshot));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.TraceWarning("[providers] model cache write failed: " + exception.Message);
+        }
+    }
+
+    /// <summary>Reads the file on the calling thread (construction reads on the pool).</summary>
+    internal void LoadNow() => LoadFromDisk();
 }
 
 /// <summary>
@@ -98,18 +229,24 @@ internal sealed class ConnectedProvider
     private readonly ProviderSecretStore secrets;
     private readonly ProviderModelCache cache;
     private readonly ProviderCredentials credentials;
+    private readonly ModelCatalogStore? modelCatalog;
+    private readonly ModelMetadataMemo? memo;
 
     public ConnectedProvider(
         ProviderDefinition definition,
         ProviderSecretStore secrets,
         ProviderModelCache cache,
-        ProviderCredentials credentials)
+        ProviderCredentials credentials,
+        ModelCatalogStore? modelCatalog = null,
+        ModelMetadataMemo? memo = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         Definition = definition;
         this.secrets = secrets;
         this.cache = cache;
         this.credentials = credentials;
+        this.modelCatalog = modelCatalog;
+        this.memo = memo;
     }
 
     public ProviderDefinition Definition { get; }
@@ -208,15 +345,43 @@ internal sealed class ConnectedProvider
     }
 
     /// <summary>
-    /// The metadata chain for one model: built-in table → what this provider reported → the user's override. A model the
-    /// provider does not serve still resolves through the table, because a session can be resumed with a model that was
-    /// removed from the list and its window is still worth showing.
+    /// The metadata chain for one model: built-in table → the fetched catalog snapshot → what this provider reported →
+    /// the user's override. A model the provider does not serve still resolves through the first two layers, because a
+    /// session can be resumed with a model that was removed from the list and its window is still worth showing.
     /// </summary>
-    public ModelMetadata MetadataFor(string? modelId) =>
-        ModelMetadataResolver.Resolve(
+    public ModelMetadata MetadataFor(string? modelId)
+    {
+        if (string.IsNullOrEmpty(modelId))
+        {
+            return ModelMetadata.Unknown;
+        }
+
+        if (memo is not null && memo.TryGet(Id, modelId, out var cached))
+        {
+            return cached;
+        }
+
+        var metadata = ModelMetadataResolver.Resolve(
             modelId,
+            modelCatalog?.View.Lookup(Definition.PresetId, modelId),
             cache.Get(Id, modelId),
-            modelId is not null && Definition.Overrides.TryGetValue(modelId, out var overridden) ? overridden : null);
+            Definition.Overrides.TryGetValue(modelId, out var overridden) ? overridden : null);
+        memo?.Set(Id, modelId, metadata);
+        return metadata;
+    }
+
+    /// <summary>
+    /// The reasoning steps this model accepts: the compiled table first, because it was checked against the providers, then
+    /// the fetched catalog for a model the table does not know, then Off alone. A model nobody described never gets a step
+    /// it may reject.
+    /// </summary>
+    public IReadOnlyList<ThinkingEffort> ThinkingStepsFor(string? modelId)
+    {
+        var known = ThinkingLevels.For(modelId);
+        return known.Count > 1
+            ? known
+            : modelCatalog?.View.ReasoningStepsFor(Definition.PresetId, modelId) ?? known;
+    }
 
     /// <summary>
     /// Builds the provider for one turn. A key provider is built immediately; a sign-in provider is built behind a
@@ -335,6 +500,17 @@ internal sealed class MissingCredentialProvider(string id, LocText reason) : ICh
 }
 
 /// <summary>
+/// The non-provider settings a catalogue is built with: the global context window (an absolute count or a share of each
+/// model's own window), the catalog address, and the fetched catalog layer itself. Grouped so
+/// <see cref="ProviderCatalog.Create"/> stays readable as providers grow.
+/// </summary>
+internal sealed record ProviderCatalogOptions(
+    ContextWindowDefault DefaultContextWindow = default,
+    string? ModelCatalogSourceUrl = null,
+    ModelCatalogStore? ModelCatalog = null,
+    ModelMetadataMemo? Memo = null);
+
+/// <summary>
 /// Every connected provider plus the default one. Immutable: editing the list produces a new catalogue, which the
 /// composition root swaps in; a running session keeps the instance it captured, so a half-saved edit cannot change the
 /// provider under an in-flight turn.
@@ -342,19 +518,24 @@ internal sealed class MissingCredentialProvider(string id, LocText reason) : ICh
 internal sealed class ProviderCatalog
 {
     private readonly ProviderModelCache cache;
+    private readonly ModelCatalogStore? modelCatalog;
 
     private ProviderCatalog(
         IReadOnlyList<ConnectedProvider> providers,
         ConnectedProvider? defaultProvider,
         LocText status,
         ProviderModelCache cache,
-        int? defaultContextWindow)
+        ProviderCatalogOptions? options = null)
     {
         Providers = providers;
         Default = defaultProvider;
         StatusText = status;
         this.cache = cache;
-        DefaultContextWindow = defaultContextWindow is > 0 ? defaultContextWindow : null;
+        modelCatalog = options?.ModelCatalog;
+        DefaultContextWindow = options?.DefaultContextWindow ?? ContextWindowDefault.Empty;
+        ModelCatalogSourceUrl = string.IsNullOrWhiteSpace(options?.ModelCatalogSourceUrl)
+            ? ModelCatalogFetcher.DefaultSourceUrl
+            : options.ModelCatalogSourceUrl!.Trim();
     }
 
     /// <summary>The connected providers in stored order.</summary>
@@ -370,15 +551,26 @@ internal sealed class ProviderCatalog
 
     public ProviderModelCache Models => cache;
 
-    /// <summary>
-    /// The context window every model uses when it has no per-model override, or <c>null</c> to use the catalog value.
-    /// It sits above the catalog (and what the provider reports) and below a per-model override, matching the reference
-    /// product's "default uses the catalog limit, a global value overrides it, each model can still differ".
-    /// </summary>
-    public int? DefaultContextWindow { get; }
+    /// <summary>The fetched catalog layer (null in tests that do not build one).</summary>
+    public ModelCatalogStore? ModelCatalog => modelCatalog;
 
-    public static ProviderCatalog Empty(LocText status) =>
-        new([], null, status, new ProviderModelCache(), defaultContextWindow: null);
+    /// <summary>
+    /// The context window every model uses when it has no per-model override, or <see cref="ContextWindowDefault.Empty"/> to
+    /// use each model's catalog value. An absolute count sits above the catalog (and what the provider reports) and below a
+    /// per-model override, matching the reference product's "default uses the catalog limit, a global value overrides it,
+    /// each model can still differ"; a share scales whatever window those layers already found.
+    /// </summary>
+    public ContextWindowDefault DefaultContextWindow { get; }
+
+    /// <summary>The catalog address the daily refresh fetches; the default when the user never changed it.</summary>
+    public string ModelCatalogSourceUrl { get; }
+
+    /// <summary>
+    /// No connected provider. The model catalog layer still rides along, so the same chain answers whether or not anything
+    /// is configured (the settings page's model table reads it either way).
+    /// </summary>
+    public static ProviderCatalog Empty(LocText status, ProviderCatalogOptions? options = null) =>
+        new([], null, status, new ProviderModelCache(), options);
 
     public static ProviderCatalog Create(
         IReadOnlyList<ProviderDefinition> definitions,
@@ -386,7 +578,7 @@ internal sealed class ProviderCatalog
         ProviderSecretStore secrets,
         ProviderCredentials credentials,
         ProviderModelCache? cache = null,
-        int? defaultContextWindow = null)
+        ProviderCatalogOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         ArgumentNullException.ThrowIfNull(secrets);
@@ -397,7 +589,13 @@ internal sealed class ProviderCatalog
         var providers = new List<ConnectedProvider>(definitions.Count);
         foreach (var definition in definitions)
         {
-            providers.Add(new ConnectedProvider(definition, secrets, sharedCache, sharedCredentials));
+            providers.Add(new ConnectedProvider(
+                definition,
+                secrets,
+                sharedCache,
+                sharedCredentials,
+                options?.ModelCatalog,
+                options?.Memo));
         }
 
         var defaultProvider = providers.FirstOrDefault(provider =>
@@ -406,7 +604,7 @@ internal sealed class ProviderCatalog
         var status = defaultProvider is null
             ? ProviderStrings.SectionMissingText()
             : ProviderStrings.StoreReady(defaultProvider.DisplayName + " · " + defaultProvider.DefaultModel);
-        return new ProviderCatalog(providers, defaultProvider, status, sharedCache, defaultContextWindow);
+        return new ProviderCatalog(providers, defaultProvider, status, sharedCache, options);
     }
 
     /// <summary>The provider with this id, or <c>null</c>; a missing id means the caller wants the default.</summary>
@@ -466,25 +664,70 @@ internal sealed class ProviderCatalog
             }
         }
 
-        var table = ModelMetadataResolver.Resolve(modelId, providerMetadata: null, userOverride: null);
-        return DefaultContextWindow is { } window ? table with { ContextWindow = window } : table;
+        var table = ModelMetadataResolver.Resolve(modelId, modelCatalog?.View.Lookup(null, modelId), providerMetadata: null, userOverride: null);
+        var effective = DefaultContextWindow.Resolve(table.ContextWindow);
+        return effective == table.ContextWindow ? table : table with { ContextWindow = effective };
     }
 
     /// <summary>
-    /// Applies the global context window over the resolved metadata. A per-model override that names a window wins; one that
-    /// only carries prices does not, so setting prices does not silently drop the global limit.
+    /// The reasoning steps for a model, in the context of the provider that serves it (a model id can be served by two
+    /// providers with different step maps). Same order as <see cref="MetadataFor"/>: the provider that actually serves the
+    /// model first, then the default one, then any provider that knows it, then the compiled table.
+    /// </summary>
+    public IReadOnlyList<ThinkingEffort> ThinkingStepsFor(string? modelId, string? providerId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(providerId) && Find(providerId) is { } chosen)
+        {
+            return chosen.ThinkingStepsFor(modelId);
+        }
+
+        if (Default is { } defaultProvider)
+        {
+            var steps = defaultProvider.ThinkingStepsFor(modelId);
+            if (steps.Count > 1)
+            {
+                return steps;
+            }
+        }
+
+        foreach (var provider in Providers)
+        {
+            var steps = provider.ThinkingStepsFor(modelId);
+            if (steps.Count > 1)
+            {
+                return steps;
+            }
+        }
+
+        return ThinkingLevels.For(modelId);
+    }
+
+    /// <summary>
+    /// Applies the global context window over the resolved metadata. An absolute count wins over a per-model override that
+    /// only carries prices (setting prices must not silently drop the global limit) and loses to one that names a window,
+    /// exactly as before. A share scales the window the chain already found — catalog snapshot, provider report or a
+    /// per-model override — and leaves the model unknown when none of them knows one.
     /// </summary>
     private ModelMetadata WithDefaultWindow(ConnectedProvider provider, ModelMetadata resolved, string modelId)
     {
-        if (DefaultContextWindow is not { } window)
+        if (DefaultContextWindow.IsEmpty)
         {
             return resolved;
         }
 
-        var overriddenWindow = provider.Definition.Overrides.TryGetValue(modelId, out var overridden)
-            ? overridden.ContextWindow
-            : null;
-        return overriddenWindow is > 0 ? resolved : resolved with { ContextWindow = window };
+        // An absolute count replaces the window outright, except where the user already named one for this model.
+        if (DefaultContextWindow.Tokens is { } tokens)
+        {
+            var overriddenWindow = provider.Definition.Overrides.TryGetValue(modelId, out var overridden)
+                ? overridden.ContextWindow
+                : null;
+            return overriddenWindow is > 0 || resolved.ContextWindow == tokens
+                ? resolved
+                : resolved with { ContextWindow = tokens };
+        }
+
+        var scaled = DefaultContextWindow.Resolve(resolved.ContextWindow);
+        return scaled == resolved.ContextWindow ? resolved : resolved with { ContextWindow = scaled };
     }
 
     /// <summary>The provider behind a model request: its own <see cref="ModelSettings.ProviderId"/>, else the default.</summary>

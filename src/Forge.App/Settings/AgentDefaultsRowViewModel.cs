@@ -26,7 +26,7 @@ internal sealed record AgentThinkingChoice(ThinkingEffort Effort, string Name);
 internal sealed class AgentDefaultsRowViewModel : ObservableObject
 {
     private readonly Dictionary<string, string> providerNames = new(StringComparer.Ordinal);
-    private readonly Func<string?, IReadOnlyList<ThinkingEffort>> levels;
+    private readonly Func<string?, string?, IReadOnlyList<ThinkingEffort>> levels;
     private readonly Action<AgentDefaultsRowViewModel> changed;
     private AgentModelChoice selectedModel;
     private AgentThinkingChoice selectedThinking = new(ThinkingEffort.Off, string.Empty);
@@ -38,14 +38,14 @@ internal sealed class AgentDefaultsRowViewModel : ObservableObject
         AgentDefault? stored,
         ProviderCatalog catalog,
         string notSetText,
-        Func<string?, IReadOnlyList<ThinkingEffort>>? levels = null,
+        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? levels = null,
         Action<AgentDefaultsRowViewModel>? changed = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
         ArgumentNullException.ThrowIfNull(catalog);
         AgentId = agentId;
         Name = name;
-        this.levels = levels ?? ThinkingLevels.For;
+        this.levels = levels ?? ((modelId, providerId) => catalog.ThinkingStepsFor(modelId, providerId));
         this.changed = changed ?? (_ => { });
 
         var choices = new List<AgentModelChoice> { new(null, string.Empty, notSetText) };
@@ -128,7 +128,7 @@ internal sealed class AgentDefaultsRowViewModel : ObservableObject
         updating = true;
         try
         {
-            var steps = levels(selectedModel.IsInherited ? null : selectedModel.Model);
+            var steps = levels(selectedModel.IsInherited ? null : selectedModel.Model, selectedModel.ProviderId);
             if (steps is not { Count: > 0 })
             {
                 steps = [ThinkingEffort.Off];

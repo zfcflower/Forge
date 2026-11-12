@@ -382,6 +382,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // 6. Providers: the stored definitions, the encrypted secret store behind them and the credential resolvers.
         var httpClient = ProviderHttpClient.Create();
         var providers = new ProviderServices(paths.SettingsPath, paths.UserDataDirectory, httpClient);
+        // The catalog refresh is one service with three callers (the daily automation, the startup check, the settings
+        // button); it needs the provider list it also refreshes, so it is built here rather than inside automations.
+        var modelCatalogRefresh = new ModelCatalogRefreshService(providers, httpClient);
         // The per-agent defaults live in the same settings.json; one instance is shared by the settings page (writes) and
         // the session runtimes (reads), so a saved default reaches the next session without a reload.
         var agentDefaults = new AgentDefaultsStore(paths.SettingsPath);
@@ -389,7 +392,13 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsSectionIds.Provider,
             ProviderStrings.SectionTitleKey,
             SettingsSectionIds.ProviderOrder,
-            new ProvidersSettingsViewModel(providers, agentDefaults),
+            // The catalog notifications come from pool threads (the background read, the daily refresh), so they are
+            // posted to the UI thread exactly like the automations page's.
+            new ProvidersSettingsViewModel(
+                providers,
+                agentDefaults,
+                modelCatalogRefresh,
+                action => Avalonia.Threading.Dispatcher.UIThread.Post(action)),
             SettingsGroups.Agent,
             "IconPlug"));
 
@@ -539,7 +548,8 @@ internal sealed class AppComposition : IAsyncDisposable
             () => providers.Catalog.DefaultModelSettings,
             prPlatform,
             git,
-            notifications);
+            notifications,
+            modelCatalogRefresh);
         composition.Automations = automations;
         settings.Add(AutomationComposition.Section(automations, projects, sessions, composition.AutomationUi));
 

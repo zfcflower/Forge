@@ -66,6 +66,7 @@ internal static class AutomationSettingsStrings
     public const string BuiltInQuotaResumeKey = "automations.settings.builtin.quotaResume";
     public const string BuiltInCiChainKey = "automations.settings.builtin.ciChain";
     public const string BuiltInSessionWatchKey = "automations.settings.builtin.sessionWatch";
+    public const string BuiltInModelCatalogKey = "automations.settings.builtin.modelCatalog";
     public const string BuiltInHousekeepingKey = "automations.settings.builtin.housekeeping";
 
     // ---------------------------------------------------------------- trigger summary
@@ -214,6 +215,7 @@ internal static class AutomationSettingsStrings
         Loc.Register(BuiltInQuotaResumeKey, "限额恢复", "Quota resume");
         Loc.Register(BuiltInCiChainKey, "CI 分析与修复", "CI analysis and fix");
         Loc.Register(BuiltInSessionWatchKey, "长任务看护", "Long-task watch");
+        Loc.Register(BuiltInModelCatalogKey, "模型目录更新", "Model catalog update");
         Loc.Register(BuiltInHousekeepingKey, "Forge 内务清理", "Forge housekeeping");
 
         Loc.Register(TriggerManualKey, "仅手动", "Manual only");

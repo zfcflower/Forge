@@ -7,16 +7,33 @@ using Xunit;
 namespace Forge.App.Tests.Composition;
 
 /// <summary>
-/// Pins the two provider-side sources of the metadata chain: the user's override, which is the strongest source, and
-/// what a provider reports for its own models on <c>/models</c>, which sits between it and the built-in table. Both
-/// merge field by field, so a window from one source can sit next to a price from another, and an entry that only
-/// carries a cache price must not invent a whole price record.
+/// Pins the three sources of the metadata chain: the fetched catalog snapshot (weakest), what a provider reports for its
+/// own models on <c>/models</c>, and the user's override (strongest). Each merges field by field, so a window from one
+/// source can sit next to a price from another, and an entry that only carries a cache price must not invent a whole price
+/// record. There is no compiled fallback table any more: with no snapshot and no reported metadata, a model is unknown.
 /// Ported from the single-provider snapshot to the multi-provider catalogue: overrides live on
 /// <c>ProviderDefinition</c>, reported metadata in <c>ProviderModelCache</c>, resolution on
 /// <c>ConnectedProvider.MetadataFor</c> / <c>ProviderCatalog.MetadataFor</c>.
 /// </summary>
-public sealed class ProviderMetadataTests
+public sealed class ProviderMetadataTests : IDisposable
 {
+    /// <summary>The catalog fixtures below need a directory each; one test class runs one test at a time, so a list is enough.</summary>
+    private readonly List<string> catalogDirectories = [];
+
+    public void Dispose()
+    {
+        foreach (var directory in catalogDirectories)
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
     [Fact]
     public void A_settings_file_with_model_meta_produces_metadata_through_the_catalogue()
     {
@@ -65,7 +82,7 @@ public sealed class ProviderMetadataTests
     }
 
     [Fact]
-    public void A_model_the_settings_do_not_list_falls_back_to_the_built_in_table()
+    public void A_model_the_settings_do_not_list_falls_back_to_the_catalog_snapshot()
     {
         var provider = Provider(
             new Dictionary<string, ModelMetadataSection>
@@ -79,7 +96,7 @@ public sealed class ProviderMetadataTests
     }
 
     [Fact]
-    public void The_user_override_wins_over_the_built_in_table_field_by_field()
+    public void The_user_override_wins_over_the_catalog_snapshot_field_by_field()
     {
         var provider = Provider(
             new Dictionary<string, ModelMetadataSection>
@@ -194,12 +211,12 @@ public sealed class ProviderMetadataTests
         Assert.Equal(4.0, nested.Pricing.Output, 9);
         Assert.Equal(0d, nested.Pricing.CacheRead, 9);
 
-        // A model that reports nothing keeps whatever the built-in table knows and invents no window.
+        // A model that reports nothing and that the catalog does not know invents no window.
         Assert.Same(ModelMetadata.Unknown, provider.MetadataFor("model-c"));
     }
 
     [Fact]
-    public async Task The_provider_window_beats_the_table_while_the_user_override_beats_the_provider()
+    public async Task The_provider_window_beats_the_catalog_while_the_user_override_beats_the_provider()
     {
         var cache = new ProviderModelCache();
         var reported = Provider(cache: cache);
@@ -234,7 +251,7 @@ public sealed class ProviderMetadataTests
     }
 
     [Fact]
-    public async Task A_model_the_provider_reports_without_prices_takes_the_table_prices()
+    public async Task A_model_the_provider_reports_without_prices_takes_the_catalog_prices()
     {
         var cache = new ProviderModelCache();
         var provider = Provider(cache: cache);
@@ -266,14 +283,14 @@ public sealed class ProviderMetadataTests
     }
 
     [Fact]
-    public void A_missing_settings_file_connects_nothing_and_still_resolves_the_metadata_table()
+    public void A_missing_settings_file_connects_nothing_and_resolves_from_the_catalog_alone()
     {
-        // No placeholder provider: a missing file means nothing is connected, and the built-in table still answers.
+        // No placeholder provider: a missing file means nothing is connected, and only the catalog can still answer.
         var root = Path.Combine(Path.GetTempPath(), "forge-missing-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            var catalog = Load(Path.Combine(root, "settings.json"));
+            var catalog = Load(Path.Combine(root, "settings.json"), CatalogStore());
 
             Assert.False(catalog.IsConfigured);
             Assert.Empty(catalog.Providers);
@@ -286,7 +303,16 @@ public sealed class ProviderMetadataTests
         }
     }
 
-    private static ProviderCatalog Load(string settingsPath)
+    [Fact]
+    public void With_no_catalog_and_no_reported_metadata_a_model_is_unknown()
+    {
+        // The compiled table is gone: nothing but the snapshot, the provider's own answer and the user can speak.
+        var catalog = Load(Path.Combine(Path.GetTempPath(), "forge-no-catalog-" + Guid.NewGuid().ToString("N"), "settings.json"));
+
+        Assert.Same(ModelMetadata.Unknown, catalog.MetadataFor("gpt-4o"));
+    }
+
+    private static ProviderCatalog Load(string settingsPath, ModelCatalogStore? modelCatalog = null)
     {
         // A directory that stays empty: no secret file, no key file, and a credentials path that cannot exist, so
         // the seeded entry's status never depends on the machine running the test.
@@ -294,13 +320,47 @@ public sealed class ProviderMetadataTests
         var secrets = new ProviderSecretStore(probeDir);
         using var http = new HttpClient(new ModelListHandler("""{"data":[]}"""));
         var credentials = new ProviderCredentials(http, secrets, claudeCredentialsPath: Path.Combine(probeDir, "credentials.json"));
-        return new ProviderStore(settingsPath).Load(secrets, credentials);
+        return new ProviderStore(settingsPath).Load(secrets, credentials, modelCatalog: modelCatalog);
+    }
+
+    /// <summary>
+    /// A catalog snapshot on disk, loaded synchronously (the store reads on the pool in production, which would race an
+    /// assertion). OpenAI is the provider it knows, so a custom gateway for <c>gpt-4o</c> resolves through the model-id
+    /// fallback — exactly the path a user's own gateway takes.
+    /// </summary>
+    private ModelCatalogStore CatalogStore(params string[] extraModels)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "forge-catalog-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        catalogDirectories.Add(directory);
+        var models = new Dictionary<string, ModelCatalogModel>(StringComparer.Ordinal)
+        {
+            ["gpt-4o"] = new(128_000, 16_384, new ModelPricing(2.50, 10.00, 1.25, 0), ModelInputs.Text, null),
+        };
+        foreach (var id in extraModels)
+        {
+            models[id] = new(64_000, null, new ModelPricing(1, 2, 0, 0), ModelInputs.Text | ModelInputs.Image, null);
+        }
+
+        var snapshot = new ModelCatalogSnapshot(
+            "https://models.dev/api.json",
+            "\"v1\"",
+            DateTimeOffset.UtcNow,
+            new Dictionary<string, IReadOnlyDictionary<string, ModelCatalogModel>>(StringComparer.Ordinal)
+            {
+                ["openai"] = models,
+            });
+        var store = new ModelCatalogStore(directory);
+        store.LoadNow();
+        store.Apply(snapshot);
+        return store;
     }
 
     private static ConnectedProvider Provider(
         Dictionary<string, ModelMetadataSection>? modelMeta = null,
         ProviderModelCache? cache = null,
-        string id = "house")
+        string id = "house",
+        ModelCatalogStore? modelCatalog = null)
     {
         var entry = new ProviderEntryDocument
         {
@@ -321,7 +381,7 @@ public sealed class ProviderMetadataTests
         var sharedCache = cache ?? new ProviderModelCache();
         using var http = new HttpClient(new ModelListHandler("""{"data":[]}"""));
         var credentials = new ProviderCredentials(http, secrets, claudeCredentialsPath: Path.Combine(probeDir, "credentials.json"));
-        return new ConnectedProvider(definition, secrets, sharedCache, credentials);
+        return new ConnectedProvider(definition, secrets, sharedCache, credentials, modelCatalog ?? CatalogStore());
     }
 
     /// <summary>Answers <c>/models</c> with one fixed document; the listing parser only reads that response here.</summary>

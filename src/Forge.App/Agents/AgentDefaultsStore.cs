@@ -220,11 +220,14 @@ internal sealed class AgentDefaultsStore
     /// connected, which keeps the caller's existing "no model" behaviour. The thinking step is clamped to what the model
     /// accepts, never above it.
     /// </summary>
-    /// <param name="levels">The accepted steps per model; defaults to the Core table (a test can pass a restricted one).</param>
+    /// <param name="levels">
+    /// The accepted steps per model and provider; defaults to the live catalogue (compiled table first, then the fetched
+    /// catalog). A test can pass a restricted one.
+    /// </param>
     public ModelSettings? Resolve(
         string agentId,
         ProviderCatalog catalog,
-        Func<string?, IReadOnlyList<ThinkingEffort>>? levels = null)
+        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? levels = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         if (!AgentIds.IsKnown(agentId))
@@ -254,7 +257,7 @@ internal sealed class AgentDefaultsStore
             return null;
         }
 
-        var accepted = (levels ?? ThinkingLevels.For)(model);
+        var accepted = (levels ?? ((modelId, providerId) => catalog.ThinkingStepsFor(modelId, providerId)))(model, target.Id);
         var thinking = ThinkingEfforts.Clamp(entry?.Thinking ?? ThinkingEffort.Off, accepted);
         return new ModelSettings(model, thinking, target.Definition.MaxOutputTokens, target.Id);
     }

@@ -17,22 +17,41 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly ProviderServices services;
     private readonly AgentDefaultsStore agentDefaults;
+    private readonly ModelCatalogRefreshService? modelCatalogRefresh;
+    private readonly Action<Action> post;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool saving;
     private string? problem;
     private string? agentsProblem;
+    private string? catalogProblem;
     private string defaultContextWindowText = string.Empty;
+    private string catalogSourceUrlText = string.Empty;
     private bool showsNeedProviderBanner;
     private bool disposed;
 
-    public ProvidersSettingsViewModel(ProviderServices services, AgentDefaultsStore? agentDefaults = null)
+    public ProvidersSettingsViewModel(
+        ProviderServices services,
+        AgentDefaultsStore? agentDefaults = null,
+        ModelCatalogRefreshService? modelCatalogRefresh = null,
+        Action<Action>? post = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
+        this.modelCatalogRefresh = modelCatalogRefresh;
+        this.post = post ?? (static action => action());
         services.Changed += OnProvidersChanged;
+        // The catalog is written off the UI thread (the daily refresh, the startup catch-up), so its notifications come back
+        // through the injected post, exactly like the window's other background sources of change.
+        services.ModelCatalog.Changed += OnCatalogChanged;
+        if (this.modelCatalogRefresh is { } refresh)
+        {
+            refresh.Changed += OnCatalogChanged;
+        }
+
         Loc.Instance.LanguageChanged += OnLanguageChanged;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsSaving);
+        UpdateCatalogCommand = new AsyncRelayCommand(UpdateCatalogAsync, () => modelCatalogRefresh is { IsBusy: false });
     }
 
     /// <summary>The provider services, so the view can build the editor, login and metadata windows from the same store.</summary>
@@ -104,14 +123,69 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     public bool HasAgentsProblem => AgentsProblem is { Length: > 0 };
 
     /// <summary>
-    /// The global context window, as text while it is being typed. Empty means "use each model's catalog value"; the
-    /// commit parses it and re-saves the section, so an invalid entry is reported instead of clearing the setting.
+    /// The global context window, as text while it is being typed: a token count, or a share of each model's own window
+    /// such as <c>50%</c>. Empty means "use each model's catalog value"; the commit parses it and re-saves the section, so
+    /// an invalid entry is reported instead of clearing the setting.
     /// </summary>
     public string DefaultContextWindowText
     {
         get => defaultContextWindowText;
         set => Set(ref defaultContextWindowText, value ?? string.Empty);
     }
+
+    // ---------------------------------------------------------------- model catalog row
+    public string CatalogLabel => ModelCatalogStrings.Label;
+
+    /// <summary>The catalog button's label: "update now", or "updating…" while a refresh runs.</summary>
+    public string CatalogActionText => IsCatalogUpdating ? ModelCatalogStrings.UpdatingText : ModelCatalogStrings.UpdateText;
+
+    public string CatalogSourceLabel => ModelCatalogStrings.SourceLabel;
+
+    public string CatalogSourceHint => ModelCatalogStrings.SourceHint;
+
+    /// <summary>The catalog address, as typed; committed on focus loss.</summary>
+    public string CatalogSourceUrl
+    {
+        get => catalogSourceUrlText;
+        set => Set(ref catalogSourceUrlText, value ?? string.Empty);
+    }
+
+    /// <summary>When the cached catalog was fetched and how much it holds, or "not updated yet".</summary>
+    public string CatalogStatusText
+    {
+        get
+        {
+            if (services.ModelCatalog.View.FetchedAt is not { } fetched)
+            {
+                return ModelCatalogStrings.NeverText;
+            }
+
+            var text = ModelCatalogStrings.UpdatedAt(fetched);
+            var view = services.ModelCatalog.View;
+            return view.ModelCount == 0 ? text : text + " · " + ModelCatalogStrings.Counts(view.ProviderCount, view.ModelCount);
+        }
+    }
+
+    /// <summary>True while a refresh runs (the button says so and disables itself).</summary>
+    public bool IsCatalogUpdating => modelCatalogRefresh?.IsBusy == true;
+
+    /// <summary>Why the last catalog update failed, or a rejected address; null when there is nothing to say.</summary>
+    public string? CatalogProblem
+    {
+        get => catalogProblem;
+        private set
+        {
+            if (Set(ref catalogProblem, value))
+            {
+                OnPropertyChanged(nameof(HasCatalogProblem));
+            }
+        }
+    }
+
+    public bool HasCatalogProblem => CatalogProblem is { Length: > 0 };
+
+    /// <summary>Asks the catalog source for a fresh snapshot now; skipped when today's is already on disk.</summary>
+    public AsyncRelayCommand UpdateCatalogCommand { get; }
 
     /// <summary>Why the list is incomplete (a damaged settings file or secret store), or <c>null</c> when it is fine.</summary>
     public string? Problem
@@ -146,8 +220,8 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
 
         // A damaged secret store is a different problem from "no provider configured": it says the keys cannot be read,
         // which is exactly the case where a row must not claim a missing key.
-        DefaultContextWindowText = catalog.DefaultContextWindow?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                  ?? string.Empty;
+        DefaultContextWindowText = catalog.DefaultContextWindow.ToString();
+        CatalogSourceUrl = catalog.ModelCatalogSourceUrl;
         Problem = services.Secrets.Problem ?? (catalog.IsConfigured ? null : catalog.StatusText.Resolve());
         ShowsNeedProviderBanner = !Rows.Any(row => row.IsReady);
         RebuildAgentRows();
@@ -194,7 +268,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         IsSaving = true;
         try
         {
-            await services.SaveAsync(current, defaultId, ParseDefaultContextWindow(), cancellationToken).ConfigureAwait(true);
+            await services.SaveAsync(current, defaultId, ParseDefaultContextWindow(), cancellationToken: cancellationToken).ConfigureAwait(true);
             Problem = services.Secrets.Problem;
             return true;
         }
@@ -226,8 +300,9 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Commits the global context window typed in the section. An entry that is neither empty nor a positive number is
-    /// reported and not saved — clearing the setting has to be an explicit empty box, not a typo.
+    /// Commits the global context window typed in the section. An entry that is neither empty, a positive whole number nor
+    /// a share such as <c>50%</c> is reported and not saved — clearing the setting has to be an explicit empty box, not a
+    /// typo.
     /// </summary>
     public async Task CommitDefaultContextWindowAsync(CancellationToken cancellationToken = default)
     {
@@ -241,27 +316,72 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         await SaveAsync(edited: null, cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
-    private bool TryParseDefaultContextWindow(out int? window)
+    /// <summary>
+    /// Commits the catalog address typed in the section. An address that is not an absolute http(s) URL is reported and not
+    /// saved; a changed one re-fetches in the background at once (regardless of today's date, because the snapshot on disk
+    /// belongs to the old source) and the old snapshot keeps resolving until the new source answers.
+    /// </summary>
+    public async Task CommitCatalogSourceAsync(CancellationToken cancellationToken = default)
     {
-        var text = DefaultContextWindowText.Trim();
-        if (text.Length == 0)
+        var text = CatalogSourceUrl.Trim();
+        var valid = text.Length == 0
+                    || (Uri.TryCreate(text, UriKind.Absolute, out var uri)
+                        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps));
+        if (!valid)
         {
-            window = null;
-            return true;
+            CatalogProblem = ModelCatalogStrings.SourceInvalid;
+            return;
         }
 
-        if (int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed) &&
-            parsed > 0)
+        var changed = !string.Equals(text, services.Catalog.ModelCatalogSourceUrl, StringComparison.Ordinal);
+        var current = services.Catalog.Providers.Select(provider => provider.Definition).ToList();
+        IsSaving = true;
+        try
         {
-            window = parsed;
-            return true;
+            await services
+                .SaveAsync(current, DefaultId, ParseDefaultContextWindow(), text, cancellationToken)
+                .ConfigureAwait(true);
+            CatalogProblem = null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            CatalogProblem = exception.Message;
+            return;
+        }
+        finally
+        {
+            IsSaving = false;
         }
 
-        window = null;
-        return false;
+        Reload();
+        if (changed && modelCatalogRefresh is not null)
+        {
+            _ = modelCatalogRefresh.RefreshAsync(ModelCatalogRefreshMode.Scheduled, CancellationToken.None);
+        }
     }
 
-    private int? ParseDefaultContextWindow() => TryParseDefaultContextWindow(out var window) ? window : services.Catalog.DefaultContextWindow;
+    private async Task UpdateCatalogAsync(CancellationToken cancellationToken)
+    {
+        if (modelCatalogRefresh is null)
+        {
+            return;
+        }
+
+        CatalogProblem = null;
+        var result = await modelCatalogRefresh.RefreshAsync(ModelCatalogRefreshMode.Manual, cancellationToken).ConfigureAwait(true);
+        if (result.Outcome == ModelCatalogRefreshOutcome.Failed)
+        {
+            CatalogProblem = ModelCatalogStrings.Summary(result);
+        }
+
+        OnCatalogChanged(this, EventArgs.Empty);
+    }
+
+    private bool TryParseDefaultContextWindow(out ContextWindowDefault window) =>
+        ContextWindowDefault.TryParse(DefaultContextWindowText, out window);
+
+    private ContextWindowDefault ParseDefaultContextWindow() =>
+        TryParseDefaultContextWindow(out var window) ? window : services.Catalog.DefaultContextWindow;
 
     /// <summary>Makes one provider the default new sessions start on.</summary>
     public Task MakeDefaultAsync(ProviderRowViewModel row, CancellationToken cancellationToken = default)
@@ -284,7 +404,37 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     {
         disposed = true;
         services.Changed -= OnProvidersChanged;
+        services.ModelCatalog.Changed -= OnCatalogChanged;
+        if (modelCatalogRefresh is { } refresh)
+        {
+            refresh.Changed -= OnCatalogChanged;
+        }
+
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+    }
+
+    /// <summary>The catalog or a refresh changed (from either thread): re-read the row through the injected post.</summary>
+    private void OnCatalogChanged(object? sender, EventArgs e)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        post(() =>
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(CatalogStatusText));
+            OnPropertyChanged(nameof(IsCatalogUpdating));
+            OnPropertyChanged(nameof(CatalogActionText));
+            OnPropertyChanged(nameof(CatalogProblem));
+            OnPropertyChanged(nameof(HasCatalogProblem));
+            UpdateCatalogCommand.NotifyCanExecuteChanged();
+        });
     }
 
     private void OnProvidersChanged(object? sender, EventArgs e)
@@ -314,6 +464,11 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RefreshText));
         OnPropertyChanged(nameof(DefaultContextWindowLabel));
         OnPropertyChanged(nameof(DefaultContextWindowHint));
+        OnPropertyChanged(nameof(CatalogLabel));
+        OnPropertyChanged(nameof(CatalogActionText));
+        OnPropertyChanged(nameof(CatalogSourceLabel));
+        OnPropertyChanged(nameof(CatalogSourceHint));
+        OnPropertyChanged(nameof(CatalogStatusText));
         OnPropertyChanged(nameof(AgentsTitle));
         OnPropertyChanged(nameof(AgentsHint));
         OnPropertyChanged(nameof(AgentsModelHeader));
@@ -386,15 +541,16 @@ internal sealed class BuiltInProviderRowViewModel
     {
         ArgumentNullException.ThrowIfNull(preset);
         Preset = preset;
-        // A row offers 登录 only when the dialog has a flow for it, and every subscription the preset advertises now has one:
-        // Claude reuses the local CLI, Copilot, Kimi For Coding and xAI run a device code, and Meta and ChatGPT sign in to their
-        // own plan through their own device flow.
+        // A row offers 登录 only when the dialog has a flow for it, and every way in the preset advertises now has one:
+        // Claude reuses the local CLI, Copilot, Kimi For Coding and xAI run a device code, Meta and ChatGPT sign in to their
+        // own plan through their own device flow, and OpenRouter runs its browser sign-in for an ordinary key.
         ShowsLogin = preset.Auth.HasFlag(ProviderAuthOptions.ClaudeSubscription) ||
                      preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot) ||
                      preset.Auth.HasFlag(ProviderAuthOptions.KimiCode) ||
                      preset.Auth.HasFlag(ProviderAuthOptions.XAiSubscription) ||
                      preset.Auth.HasFlag(ProviderAuthOptions.MetaSubscription) ||
-                     preset.Auth.HasFlag(ProviderAuthOptions.ChatGptSubscription);
+                     preset.Auth.HasFlag(ProviderAuthOptions.ChatGptSubscription) ||
+                     preset.Auth.HasFlag(ProviderAuthOptions.OpenRouterOAuth);
         ShowsApiKey = preset.Auth.HasFlag(ProviderAuthOptions.ApiKey);
     }
 

@@ -5,14 +5,14 @@ using Xunit;
 namespace Forge.Core.Tests.Providers;
 
 /// <summary>
-/// Pins the metadata chain (task spec "Forge.Core", <c>ModelMetadataResolver</c>): the local table is the weakest source,
-/// then what the provider reported for its own models, then the user's <c>settings.json</c> override. The merge is
-/// field-wise, so a window can come from one source while the prices come from another, and a source that knows
-/// nothing must never erase what a weaker one knew.
+/// Pins the metadata chain (<c>ModelMetadataResolver</c>): the fetched catalog snapshot is the weakest source, then what
+/// the provider reported for its own models, then the user's <c>settings.json</c> override. The merge is field-wise, so a
+/// window can come from one source while the prices come from another, and a source that knows nothing must never erase
+/// what a weaker one knew.
 /// </summary>
 public sealed class ModelMetadataResolverTests
 {
-    private static readonly ModelPricing TablePrices = new(2.50, 10.00, 1.25, 0);
+    private static readonly ModelPricing CatalogPrices = new(2.50, 10.00, 1.25, 0);
 
     private static readonly ModelPricing ProviderPrices = new(9, 8, 7, 6);
 
@@ -21,27 +21,36 @@ public sealed class ModelMetadataResolverTests
     [Fact]
     public void The_strongest_source_wins_each_field_on_its_own()
     {
-        var fromTable = ModelMetadataResolver.Resolve("gpt-4o", null, null);
-        var fromProvider = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(64_000, null), null);
-        var fromUser = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(64_000, null), new ModelMetadata(32_000, null));
+        var fromCatalog = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(128_000, CatalogPrices), null, null);
+        var fromProvider = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(128_000, CatalogPrices), new ModelMetadata(64_000, null), null);
+        var fromUser = ModelMetadataResolver.Resolve(
+            "gpt-4o",
+            new ModelMetadata(128_000, CatalogPrices),
+            new ModelMetadata(64_000, null),
+            new ModelMetadata(32_000, null));
 
-        Assert.Equal(128_000, fromTable.ContextWindow);
-        Assert.Equal(TablePrices, fromTable.Pricing);
+        Assert.Equal(128_000, fromCatalog.ContextWindow);
+        Assert.Equal(CatalogPrices, fromCatalog.Pricing);
         Assert.Equal(64_000, fromProvider.ContextWindow);
-        Assert.Equal(TablePrices, fromProvider.Pricing);
+        Assert.Equal(CatalogPrices, fromProvider.Pricing);
         Assert.Equal(32_000, fromUser.ContextWindow);
-        Assert.Equal(TablePrices, fromUser.Pricing);
+        Assert.Equal(CatalogPrices, fromUser.Pricing);
     }
 
     [Fact]
-    public void The_user_override_beats_the_provider_prices_that_beat_the_table()
+    public void The_user_override_beats_the_provider_prices_that_beat_the_catalog()
     {
-        var fromProvider = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(null, ProviderPrices), null);
-        var fromUser = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(null, ProviderPrices), new ModelMetadata(null, UserPrices));
+        var fromProvider = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(null, CatalogPrices), new ModelMetadata(null, ProviderPrices), null);
+        var fromUser = ModelMetadataResolver.Resolve(
+            "gpt-4o",
+            new ModelMetadata(null, CatalogPrices),
+            new ModelMetadata(null, ProviderPrices),
+            new ModelMetadata(null, UserPrices));
 
         Assert.Equal(ProviderPrices, fromProvider.Pricing);
         Assert.Equal(UserPrices, fromUser.Pricing);
-        Assert.Equal(128_000, fromUser.ContextWindow);
+        // No source named a window, so the result keeps it unknown instead of inventing one.
+        Assert.Null(fromUser.ContextWindow);
     }
 
     [Fact]
@@ -50,6 +59,7 @@ public sealed class ModelMetadataResolverTests
         // The provider only knows prices, the user only knows the window: the result carries both halves.
         var resolved = ModelMetadataResolver.Resolve(
             "gpt-4o",
+            catalogSnapshot: null,
             new ModelMetadata(null, ProviderPrices),
             new ModelMetadata(32_768, null));
 
@@ -59,18 +69,42 @@ public sealed class ModelMetadataResolverTests
     }
 
     [Fact]
-    public void A_window_the_user_overrides_keeps_the_table_prices_beside_it()
+    public void A_window_the_user_overrides_keeps_the_catalog_prices_beside_it()
     {
-        var resolved = ModelMetadataResolver.Resolve("claude-sonnet-4-5", null, new ModelMetadata(1_000_000, null));
+        var resolved = ModelMetadataResolver.Resolve(
+            "claude-sonnet-4-5",
+            new ModelMetadata(200_000, new ModelPricing(3.00, 15.00, 0.30, 3.75)),
+            null,
+            new ModelMetadata(1_000_000, null));
 
         Assert.Equal(1_000_000, resolved.ContextWindow);
         Assert.Equal(new ModelPricing(3.00, 15.00, 0.30, 3.75), resolved.Pricing);
     }
 
     [Fact]
+    public void Capabilities_merge_field_wise_like_the_numbers()
+    {
+        // The catalog knows the input kinds and the steps; the user override only narrows the inputs.
+        var resolved = ModelMetadataResolver.Resolve(
+            "mystery-model",
+            new ModelMetadata(null, null)
+            {
+                Capabilities = new ModelCapabilities(
+                    ModelInputs.Text | ModelInputs.Image,
+                    [ThinkingEffort.Off, ThinkingEffort.High]),
+            },
+            null,
+            new ModelMetadata(null, null) { Capabilities = new ModelCapabilities(ModelInputs.Text, null) });
+
+        Assert.NotNull(resolved.Capabilities);
+        Assert.Equal(ModelInputs.Text, resolved.Capabilities!.Inputs);
+        Assert.Equal([ThinkingEffort.Off, ThinkingEffort.High], resolved.Capabilities.ReasoningSteps);
+    }
+
+    [Fact]
     public void Everything_unknown_stays_unknown()
     {
-        var resolved = ModelMetadataResolver.Resolve("no-such-model", ModelMetadata.Unknown, ModelMetadata.Unknown);
+        var resolved = ModelMetadataResolver.Resolve("no-such-model", ModelMetadata.Unknown, ModelMetadata.Unknown, ModelMetadata.Unknown);
 
         Assert.Same(ModelMetadata.Unknown, resolved);
         Assert.False(resolved.IsKnown);
@@ -81,14 +115,18 @@ public sealed class ModelMetadataResolverTests
     [Fact]
     public void An_empty_model_id_with_no_other_source_is_unknown()
     {
-        Assert.Same(ModelMetadata.Unknown, ModelMetadataResolver.Resolve(null, null, null));
-        Assert.Same(ModelMetadata.Unknown, ModelMetadataResolver.Resolve(string.Empty, null, null));
+        Assert.Same(ModelMetadata.Unknown, ModelMetadataResolver.Resolve(null, null, null, null));
+        Assert.Same(ModelMetadata.Unknown, ModelMetadataResolver.Resolve(string.Empty, null, null, null));
     }
 
     [Fact]
     public void A_non_positive_window_is_ignored_instead_of_erasing_a_known_one()
     {
-        var resolved = ModelMetadataResolver.Resolve("gpt-4o", new ModelMetadata(0, null), new ModelMetadata(-1, null));
+        var resolved = ModelMetadataResolver.Resolve(
+            "gpt-4o",
+            new ModelMetadata(128_000, null),
+            new ModelMetadata(0, null),
+            new ModelMetadata(-1, null));
 
         Assert.Equal(128_000, resolved.ContextWindow);
     }
@@ -100,15 +138,19 @@ public sealed class ModelMetadataResolverTests
 
         Assert.Same(known, known.With(null));
         Assert.Same(known, known.With(ModelMetadata.Unknown));
-        Assert.Equal(known, ModelMetadata.Unknown.With(known));
+        Assert.Same(ModelMetadata.Unknown, ModelMetadata.Unknown.With(null));
     }
 
     [Fact]
-    public void Merge_keeps_the_window_when_the_other_side_only_knows_prices()
+    public void Capabilities_alone_make_metadata_known()
     {
-        var merged = new ModelMetadata(1_000, null).With(new ModelMetadata(null, UserPrices));
+        var capabilitiesOnly = new ModelMetadata(null, null)
+        {
+            Capabilities = new ModelCapabilities(ModelInputs.Text, null),
+        };
 
-        Assert.Equal(1_000, merged.ContextWindow);
-        Assert.Equal(UserPrices, merged.Pricing);
+        Assert.True(capabilitiesOnly.IsKnown);
+        var resolved = ModelMetadataResolver.Resolve("m", null, capabilitiesOnly, null);
+        Assert.Equal(ModelInputs.Text, resolved.Capabilities?.Inputs);
     }
 }

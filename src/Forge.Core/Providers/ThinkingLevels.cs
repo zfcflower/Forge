@@ -6,7 +6,7 @@ namespace Forge.Core.Providers;
 /// Which reasoning-effort steps a model accepts. The steps are a per-model fact: the reasoning dial shows only these, and a
 /// stored effort that a model does not accept is clamped to the nearest accepted step. <see cref="ThinkingEffort.Off"/> is
 /// always accepted.
-/// <para>Lookup mirrors <see cref="ModelMetadataCatalog"/> because providers spell the same model differently: the id is
+/// <para>Lookup mirrors <see cref="ModelIdRules.Normalize"/> because providers spell the same model differently: the id is
 /// trimmed, lower-cased and stripped of an OpenRouter-style <c>vendor/</c> prefix, and an exact entry wins. The one other
 /// accepted spelling is a snapshot of a known id: the longest known id the model id starts with, whose remainder is exactly
 /// <c>-yyyyMMdd</c>, that optionally followed by <c>-v&lt;digits&gt;</c>, or <c>-latest</c> — which is how Anthropic's

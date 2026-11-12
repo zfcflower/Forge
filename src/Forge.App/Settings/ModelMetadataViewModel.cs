@@ -48,6 +48,9 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
 
     public string ModelHeader => Loc.Instance[ProviderStrings.MetadataModelKey];
 
+    /// <summary>The column of what the model accepts (input kinds and reasoning), which is read-only.</summary>
+    public string CapabilitiesHeader => ProviderStrings.MetadataCapabilities;
+
     public string ContextHeader => Loc.Instance[ProviderStrings.MetadataContextKey];
 
     public string InputHeader => Loc.Instance[ProviderStrings.MetadataInputKey];
@@ -114,10 +117,18 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
         Rows.Clear();
         foreach (var model in provider.Models)
         {
-            var metadata = provider.Definition.Overrides.TryGetValue(model, out var overridden)
-                ? overridden
+            // The editable cells start from the user's override, but the read-only capability column is what the chain
+            // resolved (catalog → provider → override): an override never carries capabilities, so reading them from it
+            // would leave the column blank for every model the catalog knows.
+            var overridden = provider.Definition.Overrides.TryGetValue(model, out var stored)
+                ? stored
                 : ModelMetadata.Unknown;
-            Rows.Add(new ModelMetadataRowViewModel(model, metadata, ShowsCacheWriteFor(metadata)));
+            var resolved = provider.MetadataFor(model);
+            Rows.Add(new ModelMetadataRowViewModel(
+                model,
+                overridden,
+                ShowsCacheWriteFor(overridden),
+                resolved.Capabilities));
         }
 
         OnPropertyChanged(nameof(HasRows));
@@ -246,7 +257,7 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
 
         foreach (var name in new[]
                  {
-                     nameof(Title), nameof(Intro), nameof(ModelHeader), nameof(ContextHeader), nameof(InputHeader),
+                     nameof(Title), nameof(Intro), nameof(ModelHeader), nameof(CapabilitiesHeader), nameof(ContextHeader), nameof(InputHeader),
                      nameof(OutputHeader), nameof(CacheReadHeader), nameof(CacheWriteHeader), nameof(PerMillion),
                      nameof(SaveText), nameof(RefreshText), nameof(ResetText), nameof(CloseText), nameof(EmptyText),
                  })
@@ -265,10 +276,15 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     private string cacheRead;
     private string cacheWrite;
 
-    public ModelMetadataRowViewModel(string model, ModelMetadata metadata, bool showCacheWrite = true)
+    public ModelMetadataRowViewModel(
+        string model,
+        ModelMetadata metadata,
+        bool showCacheWrite = true,
+        ModelCapabilities? capabilities = null)
     {
         Model = model;
         ShowCacheWrite = showCacheWrite;
+        Capabilities = ProviderStrings.CapabilitiesText(capabilities ?? metadata.Capabilities);
         contextWindow = Format(metadata.ContextWindow);
         input = Format(metadata.Pricing?.Input);
         output = Format(metadata.Pricing?.Output);
@@ -277,6 +293,9 @@ internal sealed class ModelMetadataRowViewModel : ObservableObject
     }
 
     public string Model { get; }
+
+    /// <summary>The read-only capability summary ("text·image · reasoning × 4"); empty when nothing described the model.</summary>
+    public string Capabilities { get; }
 
     /// <summary>Whether this row shows the cache-write price; hidden for providers that never bill it.</summary>
     public bool ShowCacheWrite { get; }

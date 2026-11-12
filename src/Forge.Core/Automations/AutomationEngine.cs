@@ -736,10 +736,16 @@ public sealed class AutomationEngine : IAutomationEngine, IAsyncDisposable
         return new Entry(def, enabled, schedules, due, pending);
     }
 
-    private static IReadOnlyList<AutomationTrigger> BuiltInTriggers(string id) =>
-        id == BuiltInAutomations.Housekeeping
-            ? [new AutomationTrigger(AutomationTriggerKind.Daily) { Times = [new AutomationTime(4, 0)] }]
-            : [];
+    private static IReadOnlyList<AutomationTrigger> BuiltInTriggers(string id) => id switch
+    {
+        // Housekeeping first, the catalog fetch an hour later: both are background file/network work, and one starting
+        // while the other holds the run store is pointless.
+        BuiltInAutomations.Housekeeping =>
+            [new AutomationTrigger(AutomationTriggerKind.Daily) { Times = [new AutomationTime(4, 0)] }],
+        BuiltInAutomations.ModelCatalogRefresh =>
+            [new AutomationTrigger(AutomationTriggerKind.Daily) { Times = [new AutomationTime(5, 0)] }],
+        _ => [],
+    };
 
     private sealed class Entry(AutomationDefinition definition, bool enabled, AutomationSchedule?[] schedules, DateTimeOffset?[] due, bool[] catchUpPending)
     {

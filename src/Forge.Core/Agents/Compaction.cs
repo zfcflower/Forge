@@ -47,13 +47,15 @@ public sealed class SummaryCompactor : IContextCompactor
     private readonly ITokenCounter tokens;
     private readonly double targetRatio;
     private readonly int maxStageSummaries;
+    private readonly string summarizerPrompt;
 
     public SummaryCompactor(
         ISessionStore store,
         Func<ModelSettings, IChatProvider> providers,
         ITokenCounter tokens,
         double targetRatio = 0.5,
-        int maxStageSummaries = 8)
+        int maxStageSummaries = 8,
+        string? summarizerPrompt = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(providers);
@@ -66,6 +68,7 @@ public sealed class SummaryCompactor : IContextCompactor
         this.tokens = tokens;
         this.targetRatio = targetRatio;
         this.maxStageSummaries = maxStageSummaries;
+        this.summarizerPrompt = string.IsNullOrWhiteSpace(summarizerPrompt) ? SummarizerPrompt : summarizerPrompt;
     }
 
     public async Task<CompactionResult?> CompactAsync(AgentInstance instance, int thresholdTokens, CancellationToken ct)
@@ -278,7 +281,7 @@ public sealed class SummaryCompactor : IContextCompactor
 
         var provider = providers(instance.Definition.Model);
         var request = new ChatRequest(
-            SummarizerPrompt,
+            summarizerPrompt,
             [],
             [ChatMessage.User(transcript)],
             instance.Definition.Model with { Thinking = ThinkingEffort.Off });

@@ -30,6 +30,7 @@ internal static class AutomationText
         BuiltInAutomations.QuotaResume => Loc.Instance[AutomationSettingsStrings.BuiltInQuotaResumeKey],
         BuiltInAutomations.CiChain => Loc.Instance[AutomationSettingsStrings.BuiltInCiChainKey],
         BuiltInAutomations.SessionWatch => Loc.Instance[AutomationSettingsStrings.BuiltInSessionWatchKey],
+        BuiltInAutomations.ModelCatalogRefresh => Loc.Instance[AutomationSettingsStrings.BuiltInModelCatalogKey],
         BuiltInAutomations.Housekeeping => Loc.Instance[AutomationSettingsStrings.BuiltInHousekeepingKey],
         _ => definition.Name,
     };

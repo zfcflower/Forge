@@ -342,20 +342,26 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     public ChatGptAuthenticationCredentialTests() => Directory.CreateDirectory(root);
 
     [Fact]
-    public void The_chatgpt_preset_signs_in_to_a_plan_and_its_row_shows_the_button()
+    public void The_openai_preset_offers_a_key_and_a_plan_and_the_plan_is_the_way_in_this_dialog_takes()
     {
-        var preset = ProviderPresets.Find(ProviderPresets.ChatGptId)!;
+        var preset = ProviderPresets.Find(ProviderPresets.OpenAiId)!;
         var row = new BuiltInProviderRowViewModel(preset);
 
+        // One preset, two buttons: the key is the editor's, the plan is this dialog's.
         Assert.True(row.ShowsLogin);
-        Assert.False(row.ShowsApiKey);
-        Assert.False(preset.Auth.HasFlag(ProviderAuthOptions.ApiKey));
+        Assert.True(row.ShowsApiKey);
+        Assert.True(preset.Auth.HasFlag(ProviderAuthOptions.ApiKey));
+        Assert.True(preset.Auth.HasFlag(ProviderAuthOptions.ChatGptSubscription));
 
-        // A plan is served by the Responses adapter under /codex, and the adapter appends /responses to the preset URL.
-        Assert.Equal("https://chatgpt.com/backend-api/codex", preset.BaseUrl);
-        Assert.Equal(ProviderProtocol.OpenAiResponses, preset.Protocol);
+        // The primary endpoint is the API-key one; the plan reaches the Responses adapter under /codex, and that adapter
+        // appends /responses to the URL the subscription endpoint carries.
+        Assert.Equal("https://api.openai.com/v1", preset.BaseUrl);
+        Assert.Equal(ProviderProtocol.OpenAiCompatible, preset.Protocol);
+        var subscription = preset.Subscription!;
+        Assert.Equal("https://chatgpt.com/backend-api/codex", subscription.BaseUrl);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, subscription.Protocol);
         Assert.Equal(ProviderCredentialKind.ChatGptSubscription, ProviderDefinition.FromPreset(preset, "chatgpt").CredentialKind);
-        Assert.Contains("codex/responses", preset.Note!, StringComparison.Ordinal);
+        Assert.Contains("codex/responses", subscription.Note!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -432,16 +438,17 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
         // Settings.json holds the definition, never the tokens: the chatgpt-subscription kind carries no secret reference.
         await services.SaveAsync([ChatGpt()], "chatgpt", defaultContextWindow: null);
         var settings = await File.ReadAllTextAsync(Path.Combine(root, "settings.json"));
-        Assert.Contains(ProviderPresets.ChatGptId, settings, StringComparison.Ordinal);
         Assert.DoesNotContain(accessToken, settings, StringComparison.Ordinal);
         Assert.DoesNotContain("refresh-1", settings, StringComparison.Ordinal);
         Assert.DoesNotContain(reference, settings, StringComparison.Ordinal);
 
         using var document = JsonDocument.Parse(settings);
-        var auth = document.RootElement
+        var entry = document.RootElement
             .GetProperty("providers")
-            .GetProperty("items")[0]
-            .GetProperty("auth");
+            .GetProperty("items")[0];
+        // The plan is the OpenAI preset's subscription way in, so the stored preset is the one merged one.
+        Assert.Equal(ProviderPresets.OpenAiId, entry.GetProperty("preset").GetString());
+        var auth = entry.GetProperty("auth");
         Assert.Equal("chatgpt-subscription", auth.GetProperty("kind").GetString());
         Assert.True(
             !auth.TryGetProperty("secretRef", out var secretReference) || secretReference.ValueKind is JsonValueKind.Null,
@@ -693,8 +700,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     private static ProviderDefinition ChatGpt() => new()
     {
         Id = "chatgpt",
-        PresetId = ProviderPresets.ChatGptId,
-        DisplayName = "OpenAI (ChatGPT)",
+        PresetId = ProviderPresets.OpenAiId,
+        DisplayName = "OpenAI",
         Protocol = ProviderProtocol.OpenAiResponses,
         BaseUrl = "https://chatgpt.com/backend-api/codex",
         CredentialKind = ProviderCredentialKind.ChatGptSubscription,

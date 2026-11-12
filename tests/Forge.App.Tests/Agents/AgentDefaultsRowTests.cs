@@ -60,7 +60,7 @@ public sealed class AgentDefaultsRowTests : IDisposable
     {
         var row = Row(
             new AgentDefault("alpha", "alpha-1", ThinkingEffort.Max),
-            levels: _ => [ThinkingEffort.Off, ThinkingEffort.Low]);
+            levels: (_, _) => [ThinkingEffort.Off, ThinkingEffort.Low]);
 
         Assert.Equal(2, row.Models.Count);
         Assert.Equal("alpha-1", row.SelectedModel.Model);
@@ -82,8 +82,8 @@ public sealed class AgentDefaultsRowTests : IDisposable
 
     private AgentDefaultsRowViewModel Row(
         AgentDefault? stored,
-        Func<string?, IReadOnlyList<ThinkingEffort>>? levels = null) =>
-        new(AgentIds.Main, "Main", stored, Catalog(), NotSet, levels ?? (_ => EveryStep));
+        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? levels = null) =>
+        new(AgentIds.Main, "Main", stored, Catalog(), NotSet, levels ?? ((_, _) => EveryStep));
 
     private ProviderCatalog Catalog() => ProviderCatalog.Create([Definition()], "alpha", secrets, credentials);
 

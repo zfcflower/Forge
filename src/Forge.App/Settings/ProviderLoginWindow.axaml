@@ -124,6 +124,17 @@
         <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
       </StackPanel>
 
+      <!-- OpenRouter: PKCE sign-in in the browser; what it returns is an ordinary API key, so there is no code to type. -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsOpenRouter}">
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding OpenRouterHint}" />
+        <Button Classes="primary"
+                HorizontalAlignment="Left"
+                Command="{Binding StartOpenRouterCommand}"
+                Content="{Binding StartOpenRouterText}"
+                AutomationProperties.AutomationId="provider-login-openrouter-start" />
+        <TextBlock Classes="caption" IsVisible="{Binding HasLoginState}" Text="{Binding LoginState}" />
+      </StackPanel>
+
       <TextBlock Classes="caption"
                  IsVisible="{Binding HasError}"
                  TextWrapping="Wrap"

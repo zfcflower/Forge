@@ -11,8 +11,10 @@ namespace Forge.App.Providers;
 /// The sign-in credentials the app supports, and the one place that knows how to obtain them: the Claude subscription the
 /// user already has in the local CLI, the GitHub Copilot login (device code → user token → short-lived session token), the
 /// Kimi For Coding login and the xAI login (device code → access/refresh token bundle), the Meta subscription (device code →
-/// identity token → minted API key) and the ChatGPT plan (device code → access/refresh token bundle that names its account).
-/// API keys are not here — they are read straight from the secret store or the environment.
+/// identity token → minted API key), the ChatGPT plan (device code → access/refresh token bundle that names its account) and
+/// the OpenRouter browser sign-in (PKCE → a long-lived API key). API keys are otherwise not here — they are read straight from
+/// the secret store or the environment — and the OpenRouter flow only is because it has to fetch one over the network; what it
+/// stores is an ordinary key, so every later request path is the plain key path.
 /// <para>Nothing in this class touches the network until a turn or an explicit sign-in asks it to; <see cref="HasClaudeLogin"/>,
 /// <see cref="HasCopilotLogin"/>, <see cref="HasKimiLogin"/>, <see cref="HasXAiLogin"/>, <see cref="HasMetaLogin"/> and
 /// <see cref="HasChatGptLogin"/> only look at local state, so a settings row can render without a round trip.</para>
@@ -28,6 +30,7 @@ internal sealed class ProviderCredentials
     private readonly XAiAuthentication xai;
     private readonly MetaAuthentication meta;
     private readonly ChatGptAuthentication chatGpt;
+    private readonly OpenRouterAuthentication openRouter;
     private readonly string claudeCredentialsPath;
     private readonly Lock gate = new();
     private readonly Dictionary<string, CopilotSession> copilotSessions = new(StringComparer.Ordinal);
@@ -58,6 +61,7 @@ internal sealed class ProviderCredentials
         xai = new XAiAuthentication(http, this.time);
         meta = new MetaAuthentication(http, this.time);
         chatGpt = new ChatGptAuthentication(http, this.time);
+        openRouter = new OpenRouterAuthentication(http, this.time);
     }
 
     /// <summary>
@@ -952,6 +956,32 @@ internal sealed class ProviderCredentials
         {
             chatGptBundles[providerId] = bundle;
         }
+    }
+
+    /// <summary>
+    /// The secret-store reference that holds the API key of an API-key provider, whether it was pasted or signed in for. The
+    /// editor writes a pasted key here, so an OpenRouter sign-in lands in exactly the same place and nothing downstream changes.
+    /// </summary>
+    public static string ApiKeyReference(string providerId) => "provider:" + providerId;
+
+    /// <summary>
+    /// Runs one OpenRouter sign-in: the browser approves the app, the loopback callback brings back the authorization code, and
+    /// the exchange turns it into a long-lived API key. <paramref name="progress"/> is handed the page to open as soon as the
+    /// callback listener is up. The key is stored under <see cref="ApiKeyReference"/> — the reference a pasted key uses — and
+    /// only once the exchange succeeded, so a cancelled or refused sign-in leaves nothing behind. It is never logged.
+    /// </summary>
+    public async Task<string> SignInOpenRouterAsync(
+        string providerId,
+        Action<Uri>? progress,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+
+        // ConfigureAwait(true) on purpose: the dialog awaits this on the UI thread, and progress must be applied there.
+        var key = await openRouter.SignInAsync(progress, ct).ConfigureAwait(true);
+        var reference = ApiKeyReference(providerId);
+        await Task.Run(() => secrets.Set(reference, key), ct).ConfigureAwait(true);
+        return key;
     }
 
     private CopilotSession? CachedSession(string providerId)

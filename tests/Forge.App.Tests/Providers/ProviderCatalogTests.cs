@@ -99,7 +99,7 @@ public sealed class ProviderCatalogTests : IDisposable
                 ["with-prices-only"] = new(null, new ModelPricing(1, 2, 0.1, 0)),
             },
         };
-        var catalog = ProviderCatalog.Create([provider], "windowed", secrets, credentials, cache: null, defaultContextWindow: 64_000);
+        var catalog = ProviderCatalog.Create([provider], "windowed", secrets, credentials, cache: null, new ProviderCatalogOptions(DefaultContextWindow: 64_000));
 
         Assert.Equal(300_000, catalog.MetadataFor("with-window", "windowed").ContextWindow);
         // A prices-only override must not drop the global limit.
@@ -110,13 +110,76 @@ public sealed class ProviderCatalogTests : IDisposable
     }
 
     [Fact]
+    public void A_share_window_scales_the_window_the_chain_already_knows()
+    {
+        var provider = Definition("shared", ProviderCredentialKind.ApiKey) with
+        {
+            Models = ["overridden", "reported", "priced-only", "nobody-knows"],
+            Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal)
+            {
+                ["overridden"] = new(300_000, null),
+                ["priced-only"] = new(null, new ModelPricing(1, 2, 0.1, 0)),
+            },
+        };
+        var catalog = ProviderCatalog.Create(
+            [provider],
+            "shared",
+            secrets,
+            credentials,
+            cache: null,
+            new ProviderCatalogOptions(DefaultContextWindow: ContextWindowDefault.FromPercent(50)));
+        catalog.Models.Set(
+            "shared",
+            new ProviderModelList(
+                ["reported"],
+                new Dictionary<string, ModelMetadata>(StringComparer.Ordinal) { ["reported"] = new(128_000, null) }));
+
+        // A per-model window (and a window the provider reported) is the base of the share, not something it overrides.
+        Assert.Equal(150_000, catalog.MetadataFor("overridden", "shared").ContextWindow);
+        Assert.Equal(64_000, catalog.MetadataFor("reported", "shared").ContextWindow);
+
+        // A prices-only override still does not block the global setting, but it also has no window for the share to scale.
+        Assert.Null(catalog.MetadataFor("priced-only", "shared").ContextWindow);
+        Assert.Equal(new ModelPricing(1, 2, 0.1, 0), catalog.MetadataFor("priced-only", "shared").Pricing);
+
+        // No layer knows a window: the share contributes nothing and the model stays unknown instead of getting a guess.
+        Assert.Null(catalog.MetadataFor("nobody-knows", "shared").ContextWindow);
+        Assert.False(catalog.MetadataFor("nobody-knows", "shared").IsKnown);
+        Assert.Null(catalog.MetadataFor("no-provider-knows-this").ContextWindow);
+    }
+
+    [Fact]
+    public void A_share_window_is_clamped_to_one_token_and_may_exceed_one_hundred_percent()
+    {
+        var provider = Definition("scaled", ProviderCredentialKind.ApiKey) with { Models = ["tiny", "large"] };
+
+        ProviderCatalog WithShare(int percent) => ProviderCatalog.Create(
+            [provider],
+            "scaled",
+            secrets,
+            credentials,
+            cache: null,
+            new ProviderCatalogOptions(DefaultContextWindow: ContextWindowDefault.FromPercent(percent)));
+
+        // 1% of 100 tokens floors to 1 rather than to zero tokens.
+        var tiny = WithShare(1);
+        tiny.Models.Set("scaled", new ProviderModelList(["tiny"], new Dictionary<string, ModelMetadata>(StringComparer.Ordinal) { ["tiny"] = new(100, null) }));
+        Assert.Equal(1, tiny.MetadataFor("tiny", "scaled").ContextWindow);
+
+        // Above 100% is allowed on purpose: a provider may permit a larger window than the one it advertises.
+        var large = WithShare(200);
+        large.Models.Set("scaled", new ProviderModelList(["large"], new Dictionary<string, ModelMetadata>(StringComparer.Ordinal) { ["large"] = new(64_000, null) }));
+        Assert.Equal(128_000, large.MetadataFor("large", "scaled").ContextWindow);
+    }
+
+    [Fact]
     public void Without_a_global_window_the_catalog_value_is_used()
     {
         var provider = Definition("plain", ProviderCredentialKind.ApiKey);
         var catalog = ProviderCatalog.Create([provider], "plain", secrets, credentials);
 
-        Assert.Null(catalog.DefaultContextWindow);
-        Assert.Equal(ModelMetadataResolver.Resolve("plain", null, null).ContextWindow, catalog.MetadataFor("plain").ContextWindow);
+        Assert.True(catalog.DefaultContextWindow.IsEmpty);
+        Assert.Equal(ModelMetadataResolver.Resolve("plain", null, null, null).ContextWindow, catalog.MetadataFor("plain").ContextWindow);
     }
 
     [Fact]
@@ -502,14 +565,54 @@ public sealed class ProviderEditorTests : IDisposable
         await section.CommitDefaultContextWindowAsync();
 
         Assert.True(section.HasProblem);
-        Assert.Null(services.Catalog.DefaultContextWindow);
+        Assert.True(services.Catalog.DefaultContextWindow.IsEmpty);
         Assert.False(File.Exists(Path.Combine(root, "settings.json")), "nothing is written for an invalid value");
 
         section.DefaultContextWindowText = "64000";
         await section.CommitDefaultContextWindowAsync();
 
-        Assert.Equal(64_000, services.Catalog.DefaultContextWindow);
+        Assert.Equal(ContextWindowDefault.FromTokens(64_000), services.Catalog.DefaultContextWindow);
         Assert.Contains("64000", File.ReadAllText(Path.Combine(root, "settings.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_share_typed_in_the_section_is_accepted_and_saved_as_a_string()
+    {
+        var services = Services();
+        using var section = new ProvidersSettingsViewModel(services);
+        section.Reload();
+        // "50 %" with the space is the same share as "50%": a typo, not a different meaning.
+        section.DefaultContextWindowText = "50 %";
+
+        await section.CommitDefaultContextWindowAsync();
+
+        Assert.False(section.HasProblem);
+        Assert.Equal(ContextWindowDefault.FromPercent(50), services.Catalog.DefaultContextWindow);
+        Assert.Contains("\"50%\"", File.ReadAllText(Path.Combine(root, "settings.json")), StringComparison.Ordinal);
+
+        // The box shows the stored value back in the shape it was entered.
+        section.Reload();
+        Assert.Equal("50%", section.DefaultContextWindowText);
+    }
+
+    [Theory]
+    [InlineData("0%")]
+    [InlineData("abc")]
+    [InlineData("%")]
+    [InlineData("-5")]
+    [InlineData("1001%")]
+    public async Task A_rejected_global_window_is_reported_with_the_invalid_message_and_nothing_is_written(string text)
+    {
+        var services = Services();
+        using var section = new ProvidersSettingsViewModel(services);
+        section.Reload();
+        section.DefaultContextWindowText = text;
+
+        await section.CommitDefaultContextWindowAsync();
+
+        Assert.Equal(Loc.Instance[ProviderStrings.DefaultContextWindowInvalidKey], section.Problem);
+        Assert.True(services.Catalog.DefaultContextWindow.IsEmpty);
+        Assert.False(File.Exists(Path.Combine(root, "settings.json")), "nothing is written for an invalid value");
     }
 
     [Fact]

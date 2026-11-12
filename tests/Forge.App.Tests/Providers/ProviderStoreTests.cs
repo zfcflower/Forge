@@ -142,7 +142,7 @@ public sealed class ProviderStoreTests : IDisposable
         var (store, secrets, credentials) = CreateStack(path);
 
         var catalog = store.Load(secrets, credentials);
-        Assert.Equal(128_000, catalog.DefaultContextWindow);
+        Assert.Equal(ContextWindowDefault.FromTokens(128_000), catalog.DefaultContextWindow);
 
         store.Save([.. catalog.Providers.Select(provider => provider.Definition)], "only", defaultContextWindow: 200_000);
 
@@ -156,6 +156,60 @@ public sealed class ProviderStoreTests : IDisposable
         using var cleared = JsonDocument.Parse(File.ReadAllText(path));
         Assert.False(cleared.RootElement.GetProperty("modelCatalog").TryGetProperty("defaultContextWindow", out _));
         Assert.True(cleared.RootElement.GetProperty("modelCatalog").TryGetProperty("generatedAt", out _));
+    }
+
+    [Fact]
+    public void The_global_context_window_round_trips_a_count_as_a_number_and_a_share_as_a_string()
+    {
+        var path = WriteSettings(
+            """
+            {
+              "providers": { "version": 1, "defaultId": "only", "items": [
+                { "id": "only", "preset": "openai", "baseUrl": "https://api.openai.com/v1", "auth": { "kind": "api-key" },
+                  "models": ["gpt"], "defaultModel": "gpt" } ] },
+              "modelCatalog": {
+                "defaultContextWindow": 64000,
+                "generatedAt": "2026-11-01T00:00:00Z",
+                "sourceUrl": "https://mirror.invalid/api.json",
+                "somethingThisBuildDoesNotKnow": { "keep": true }
+              }
+            }
+            """);
+        var (store, secrets, credentials) = CreateStack(path);
+        var catalog = store.Load(secrets, credentials);
+        var definitions = catalog.Providers.Select(provider => provider.Definition).ToList();
+
+        // An absolute count stays a JSON number, so a build from before shares existed reads it unchanged.
+        store.Save(definitions, "only", ContextWindowDefault.FromTokens(128_000), catalog.ModelCatalogSourceUrl);
+        using (var count = JsonDocument.Parse(File.ReadAllText(path)))
+        {
+            var section = count.RootElement.GetProperty("modelCatalog");
+            Assert.Equal(JsonValueKind.Number, section.GetProperty("defaultContextWindow").ValueKind);
+            Assert.Equal(128_000, section.GetProperty("defaultContextWindow").GetInt32());
+            Assert.True(section.GetProperty("somethingThisBuildDoesNotKnow").GetProperty("keep").GetBoolean());
+        }
+
+        // A share is a string under the same one property, and it reads back as a share.
+        store.Save(definitions, "only", ContextWindowDefault.FromPercent(50), catalog.ModelCatalogSourceUrl);
+        using (var share = JsonDocument.Parse(File.ReadAllText(path)))
+        {
+            var section = share.RootElement.GetProperty("modelCatalog");
+            Assert.Equal(JsonValueKind.String, section.GetProperty("defaultContextWindow").ValueKind);
+            Assert.Equal("50%", section.GetProperty("defaultContextWindow").GetString());
+            Assert.Equal("2026-11-01T00:00:00Z", section.GetProperty("generatedAt").GetString());
+            Assert.Equal("https://mirror.invalid/api.json", section.GetProperty("sourceUrl").GetString());
+            Assert.True(section.GetProperty("somethingThisBuildDoesNotKnow").GetProperty("keep").GetBoolean());
+        }
+
+        Assert.Equal(ContextWindowDefault.FromPercent(50), store.Load(secrets, credentials).DefaultContextWindow);
+
+        // Clearing removes only that property: the section, the address and the fields this build does not know stay.
+        store.Save(definitions, "only", ContextWindowDefault.Empty, catalog.ModelCatalogSourceUrl);
+        using var cleared = JsonDocument.Parse(File.ReadAllText(path));
+        var clearedSection = cleared.RootElement.GetProperty("modelCatalog");
+        Assert.False(clearedSection.TryGetProperty("defaultContextWindow", out _));
+        Assert.True(clearedSection.TryGetProperty("generatedAt", out _));
+        Assert.True(clearedSection.TryGetProperty("somethingThisBuildDoesNotKnow", out _));
     }
 
     [Fact]

@@ -33,14 +33,15 @@ internal sealed class ProviderStore
     public ProviderCatalog Load(
         ProviderSecretStore secrets,
         ProviderCredentials credentials,
-        ProviderModelCache? cache = null)
+        ProviderModelCache? cache = null,
+        ModelCatalogStore? modelCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(secrets);
         ArgumentNullException.ThrowIfNull(credentials);
 
         if (!File.Exists(settingsPath))
         {
-            return ProviderCatalog.Empty(ProviderStrings.SettingsMissingText());
+            return ProviderCatalog.Empty(ProviderStrings.SettingsMissingText(), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
         }
 
         SettingsDocument? document;
@@ -51,13 +52,20 @@ internal sealed class ProviderStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            return ProviderCatalog.Empty(ProviderStrings.SettingsUnreadableText(exception.Message));
+            return ProviderCatalog.Empty(ProviderStrings.SettingsUnreadableText(exception.Message), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
         }
 
         if (document is null)
         {
-            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText());
+            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText(), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
         }
+
+        // The global window and the catalog address are read once: the same two values go to every catalogue this load
+        // can produce (a migrated file, nothing connected, or the stored list).
+        var catalogSettings = new ProviderCatalogOptions(
+            ContextWindowDefault.FromJson(document.ModelCatalog?.DefaultContextWindow),
+            document.ModelCatalog?.SourceUrl,
+            modelCatalog);
 
         var entries = document.Providers?.Items;
         if (entries is null or { Count: 0 })
@@ -68,11 +76,23 @@ internal sealed class ProviderStore
                 var migrated = Migrate(legacy, secrets);
                 return migrated is null
                     ? ProviderCatalog.Empty(ProviderStrings.InvalidText("the provider section is unusable"))
-                    : ProviderCatalog.Create([migrated], migrated.Id, secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow);
+                    : ProviderCatalog.Create(
+                        [migrated],
+                        migrated.Id,
+                        secrets,
+                        credentials,
+                        cache,
+                        catalogSettings);
             }
 
             // Nothing connected yet: an empty catalogue, still carrying the page's global context window.
-            return ProviderCatalog.Create([], null, secrets, credentials, cache, document.ModelCatalog?.DefaultContextWindow);
+            return ProviderCatalog.Create(
+                [],
+                null,
+                secrets,
+                credentials,
+                cache,
+                catalogSettings);
         }
 
         var definitions = new List<ProviderDefinition>(entries.Count);
@@ -92,7 +112,7 @@ internal sealed class ProviderStore
 
         if (definitions.Count == 0)
         {
-            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText());
+            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText(), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
         }
 
         return ProviderCatalog.Create(
@@ -101,7 +121,7 @@ internal sealed class ProviderStore
             secrets,
             credentials,
             cache,
-            document.ModelCatalog?.DefaultContextWindow);
+            catalogSettings);
     }
 
     /// <summary>
@@ -109,7 +129,11 @@ internal sealed class ProviderStore
     /// only <c>providers</c> and <c>provider</c> are touched, everything else (including sections this build does not know)
     /// stays byte-for-byte in place.
     /// </summary>
-    public void Save(IReadOnlyList<ProviderDefinition> definitions, string? defaultId, int? defaultContextWindow)
+    public void Save(
+        IReadOnlyList<ProviderDefinition> definitions,
+        string? defaultId,
+        ContextWindowDefault defaultContextWindow,
+        string? modelCatalogSourceUrl = null)
     {
         ArgumentNullException.ThrowIfNull(definitions);
 
@@ -128,21 +152,34 @@ internal sealed class ProviderStore
         root["providers"] = JsonSerializer.SerializeToNode(section, ProvidersJsonContext.Default.ProvidersSectionDocument);
         root.Remove("provider");
 
-        // The catalog section keeps any field this build does not know (a fetched snapshot will live here); only the one
-        // value the page edits is written, and an empty value removes just that property.
+        // The catalog section keeps any field this build does not know (an older build's pointers, a field added later);
+        // only the two values the page edits are written, and an empty value removes just that property.
         if (root["modelCatalog"] is not JsonObject catalog)
         {
             catalog = [];
             root["modelCatalog"] = catalog;
         }
 
-        if (defaultContextWindow is > 0)
+        // A count is a JSON number and a share is a string ("50%"): an older build reads the count it understands and
+        // treats the share it cannot parse as "no global default" instead of as a wrong number.
+        if (defaultContextWindow.ToNode() is { } window)
         {
-            catalog["defaultContextWindow"] = defaultContextWindow.Value;
+            catalog["defaultContextWindow"] = window;
         }
         else
         {
             catalog.Remove("defaultContextWindow");
+        }
+
+        // The catalog address is the user's choice (a mirror is a legitimate reason to change it); an empty value means
+        // "use the built-in default", which is why it removes the property instead of writing an empty string.
+        if (string.IsNullOrWhiteSpace(modelCatalogSourceUrl))
+        {
+            catalog.Remove("sourceUrl");
+        }
+        else
+        {
+            catalog["sourceUrl"] = modelCatalogSourceUrl.Trim();
         }
 
         if (catalog.Count == 0)

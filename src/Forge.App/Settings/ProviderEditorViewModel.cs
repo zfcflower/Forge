@@ -277,31 +277,26 @@ internal sealed class ProviderEditorViewModel : ObservableObject
         Error = null;
         // The id is fixed at the first build: the key is stored under it, so a later rename must not orphan that key.
         var id = original?.Id ?? (draftId ??= ProviderIdentity.Unique(ProviderIdentity.Slug(trimmedName), existingIds));
-        var kind = original?.CredentialKind ?? ProviderCredentialKind.ApiKey;
-        var models = testedModels ?? original?.Models ?? preset.SeedModels;
+        // This dialog is the key way in, so it names that kind rather than following the preset's sign-in priority: a preset
+        // that also signs in (OpenAI, GitHub Copilot) still creates a key provider here, on the key endpoint. A sign-in is the
+        // login dialog's job.
+        var basis = original ?? ProviderDefinition.FromPreset(preset, id, credentialKind: ProviderCredentialKind.ApiKey);
+        var kind = basis.CredentialKind;
+        var models = testedModels ?? original?.Models ?? basis.Models;
         var remembered = original?.DefaultModel ?? string.Empty;
         var defaultModel = remembered.Length > 0 && models.Contains(remembered, StringComparer.Ordinal)
             ? remembered
             : models.FirstOrDefault() ?? string.Empty;
 
-        return new ProviderDefinition
+        return basis with
         {
-            Id = id,
-            PresetId = original?.PresetId ?? preset.Id,
             DisplayName = trimmedName,
-            Protocol = original?.Protocol ?? preset.Protocol,
             BaseUrl = url,
-            CredentialKind = kind,
-            EnvironmentVariable = ShowsKey ? (KeyIsSecret ? null : variable) : original?.EnvironmentVariable,
-            SecretReference = kind == ProviderCredentialKind.ApiKey ? "provider:" + id : original?.SecretReference,
+            EnvironmentVariable = ShowsKey ? (KeyIsSecret ? null : variable) : basis.EnvironmentVariable,
+            SecretReference = kind == ProviderCredentialKind.ApiKey ? "provider:" + id : basis.SecretReference,
             Models = [.. models],
             DefaultModel = defaultModel,
             Thinking = original?.Thinking ?? DefaultThinking,
-            MaxOutputTokens = original?.MaxOutputTokens,
-            Overrides = original?.Overrides ?? new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
-            Headers = original?.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-            SendPromptCacheKey = original?.SendPromptCacheKey ?? false,
-            PromptCacheTtl = original?.PromptCacheTtl,
         };
     }
 

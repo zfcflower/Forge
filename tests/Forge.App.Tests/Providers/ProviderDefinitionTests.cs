@@ -109,13 +109,121 @@ public sealed class ProviderDefinitionTests
     public void An_empty_member_auth_makes_a_new_provider_take_the_presets_credential_kind()
     {
         var claude = ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.AnthropicId)!, "anthropic");
-        var openAi = ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.OpenAiId)!, "openai");
         var copilot = ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.CopilotId)!, "copilot");
 
         Assert.Equal(ProviderCredentialKind.ClaudeSubscription, claude.CredentialKind);
-        Assert.Equal(ProviderCredentialKind.ApiKey, openAi.CredentialKind);
+        // GitHub Copilot takes a key too, but its device-code sign-in still comes first in the preset's priority chain.
         Assert.Equal(ProviderCredentialKind.GitHubCopilot, copilot.CredentialKind);
         Assert.Equal(CopilotAuthentication.DefaultApiHost, copilot.BaseUrl);
+    }
+
+    [Fact]
+    public void The_openai_preset_is_one_vendor_reached_two_ways_and_the_credential_decides_the_endpoint()
+    {
+        var preset = ProviderPresets.Find(ProviderPresets.OpenAiId)!;
+
+        // One row in the picker, advertising both ways in; the primary fields are the API-key ones.
+        Assert.Equal("OpenAI", preset.DisplayName);
+        Assert.Equal(ProviderAuthOptions.ApiKey | ProviderAuthOptions.ChatGptSubscription, preset.Auth);
+        Assert.Equal(ProviderProtocol.OpenAiCompatible, preset.Protocol);
+        Assert.Equal("https://api.openai.com/v1", preset.BaseUrl);
+        Assert.Equal("OPENAI_API_KEY", preset.EnvironmentVariable);
+        Assert.Equal("https://platform.openai.com/api-keys", preset.Documentation);
+        Assert.True(preset.SupportsModelListing);
+        // The key route has no seeds to offer: /models answers for it, so an empty list is the honest starting point.
+        Assert.Empty(preset.SeedModels);
+
+        // The retired ChatGPT preset is gone; its endpoint lives on as the subscription way in to this one.
+        Assert.Null(ProviderPresets.Find("chatgpt"));
+        Assert.DoesNotContain(ProviderPresets.All, built => string.Equals(built.Id, "chatgpt", StringComparison.OrdinalIgnoreCase));
+        var subscription = preset.Subscription;
+        Assert.NotNull(subscription);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, subscription!.Protocol);
+        Assert.Equal("https://chatgpt.com/backend-api/codex", subscription.BaseUrl);
+        Assert.Equal(
+            ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"],
+            subscription.SeedModels);
+
+        var key = ProviderDefinition.FromPreset(preset, "openai", credentialKind: ProviderCredentialKind.ApiKey);
+        Assert.Equal(ProviderCredentialKind.ApiKey, key.CredentialKind);
+        Assert.Equal(ProviderProtocol.OpenAiCompatible, key.Protocol);
+        Assert.Equal("https://api.openai.com/v1", key.BaseUrl);
+        Assert.Empty(key.Models);
+
+        var plan = ProviderDefinition.FromPreset(preset, "openai-plan", credentialKind: ProviderCredentialKind.ChatGptSubscription);
+        Assert.Equal(ProviderCredentialKind.ChatGptSubscription, plan.CredentialKind);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, plan.Protocol);
+        Assert.Equal("https://chatgpt.com/backend-api/codex", plan.BaseUrl);
+        Assert.Equal(subscription.SeedModels, plan.Models);
+        Assert.Equal("gpt-6-astra", plan.DefaultModel);
+
+        // Without a named kind the preset's own priority chain decides, which puts the plan first for this vendor.
+        Assert.Equal(ProviderCredentialKind.ChatGptSubscription, ProviderDefinition.FromPreset(preset, "openai").CredentialKind);
+
+        // Every other preset has one address whichever way in is used, so none of them carries a subscription endpoint.
+        Assert.All(
+            ProviderPresets.All.Where(built => !string.Equals(built.Id, ProviderPresets.OpenAiId, StringComparison.Ordinal)),
+            built => Assert.Null(built.Subscription));
+    }
+
+    [Fact]
+    public void The_retired_built_in_presets_are_gone_and_a_stored_one_degrades_to_custom()
+    {
+        foreach (var retired in new[] { "opencode-zen", "opencode-go", "deepseek" })
+        {
+            Assert.Null(ProviderPresets.Find(retired));
+            Assert.Equal(ProviderPresets.CustomId, ProviderPresets.FindOrDefault(retired).Id);
+        }
+
+        // A settings.json written before the deletion: the same protocol, name and URL, shown as the custom entry.
+        var definition = ProviderDefinition.FromDocument(
+            new ProviderEntryDocument
+            {
+                Id = "deepseek",
+                Preset = "deepseek",
+                Name = "DeepSeek",
+                Protocol = "openai-compatible",
+                BaseUrl = "https://api.deepseek.com/v1",
+                Auth = new ProviderAuthDocument { Kind = "api-key" },
+                Models = ["deepseek-chat"],
+                DefaultModel = "deepseek-chat",
+            },
+            "fallback");
+
+        Assert.Equal(ProviderPresets.CustomId, definition.Preset.Id);
+        Assert.Equal("DeepSeek", definition.DisplayName);
+        Assert.Equal("https://api.deepseek.com/v1", definition.BaseUrl);
+        Assert.Equal(ProviderProtocol.OpenAiCompatible, definition.Protocol);
+        Assert.Equal(ProviderCredentialKind.ApiKey, definition.CredentialKind);
+        Assert.Equal(["deepseek-chat"], definition.Models);
+    }
+
+    [Fact]
+    public void A_provider_stored_under_the_retired_chatgpt_preset_still_loads_as_custom_at_its_plan_endpoint()
+    {
+        // The shape settings.json had before the merge: the plan was a preset of its own with its own endpoint.
+        var definition = ProviderDefinition.FromDocument(
+            new ProviderEntryDocument
+            {
+                Id = "chatgpt",
+                Preset = "chatgpt",
+                Name = "OpenAI (ChatGPT)",
+                Protocol = ProviderFactory.OpenAiResponsesKind,
+                BaseUrl = "https://chatgpt.com/backend-api/codex",
+                Auth = new ProviderAuthDocument { Kind = "chatgpt-subscription" },
+                Models = ["gpt-5-codex"],
+                DefaultModel = "gpt-5-codex",
+            },
+            "fallback");
+
+        // The preset is gone, so the provider is the custom entry now — but it keeps everything it was configured with,
+        // including the plan credential and the Responses endpoint, so it keeps working without a re-sign-in.
+        Assert.Equal(ProviderPresets.CustomId, definition.Preset.Id);
+        Assert.Equal(ProviderCredentialKind.ChatGptSubscription, definition.CredentialKind);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, definition.Protocol);
+        Assert.Equal("https://chatgpt.com/backend-api/codex", definition.BaseUrl);
+        Assert.Equal("OpenAI (ChatGPT)", definition.DisplayName);
+        Assert.Equal(["gpt-5-codex"], definition.Models);
     }
 
     [Fact]

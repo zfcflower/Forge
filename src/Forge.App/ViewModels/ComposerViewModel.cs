@@ -211,7 +211,7 @@ internal sealed class ComposerViewModel : ObservableObject
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
     private readonly Func<CancellationToken, Task> modelRefresh;
-    private readonly Func<string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
+    private readonly Func<string?, string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
     private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
     private string providerId = string.Empty;
@@ -240,7 +240,7 @@ internal sealed class ComposerViewModel : ObservableObject
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
         Func<CancellationToken, Task>? modelRefresh = null,
-        Func<string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null)
+        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
@@ -254,7 +254,7 @@ internal sealed class ComposerViewModel : ObservableObject
         this.skillSource = skillSource ?? DiscoverSkills;
         // The picker's 刷新 re-fetches every provider that can list models; a test can pass its own.
         this.modelRefresh = modelRefresh ?? RefreshAllProvidersAsync;
-        this.thinkingLevels = thinkingLevels ?? ThinkingLevels.For;
+        this.thinkingLevels = thinkingLevels ?? ((modelId, provider) => services.Catalog.ThinkingStepsFor(modelId, provider));
 
         var agents = new List<ComposerAgentOption> { new(null) };
         agents.AddRange(BuiltInAgents.All.Select(definition => new ComposerAgentOption(definition)));
@@ -681,7 +681,7 @@ internal sealed class ComposerViewModel : ObservableObject
     /// </summary>
     private void RefreshEffortSteps()
     {
-        var accepted = thinkingLevels(model);
+        var accepted = thinkingLevels(model, providerId);
         effortSteps = accepted is { Count: > 0 } ? accepted : [ThinkingEffort.Off];
         effort = ThinkingEfforts.Clamp(effort, effortSteps);
         RebuildEffortBars();

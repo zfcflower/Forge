@@ -31,13 +31,14 @@
     </StackPanel>
 
     <!-- Column headers; the same column widths the rows use, so the table reads as a table. -->
-    <Grid Grid.Row="1" ColumnDefinitions="*,100,90,90,90,Auto" ColumnSpacing="6" Margin="0,14,0,6">
+    <Grid Grid.Row="1" ColumnDefinitions="*,150,100,90,90,90,Auto" ColumnSpacing="6" Margin="0,14,0,6">
       <TextBlock Grid.Column="0" Classes="meta-header" Text="{Binding ModelHeader}" />
-      <TextBlock Grid.Column="1" Classes="meta-header" Text="{Binding ContextHeader}" />
-      <TextBlock Grid.Column="2" Classes="meta-header" Text="{Binding InputHeader}" />
-      <TextBlock Grid.Column="3" Classes="meta-header" Text="{Binding OutputHeader}" />
-      <TextBlock Grid.Column="4" Classes="meta-header" Text="{Binding CacheReadHeader}" />
-      <TextBlock Grid.Column="5"
+      <TextBlock Grid.Column="1" Classes="meta-header" Text="{Binding CapabilitiesHeader}" />
+      <TextBlock Grid.Column="2" Classes="meta-header" Text="{Binding ContextHeader}" />
+      <TextBlock Grid.Column="3" Classes="meta-header" Text="{Binding InputHeader}" />
+      <TextBlock Grid.Column="4" Classes="meta-header" Text="{Binding OutputHeader}" />
+      <TextBlock Grid.Column="5" Classes="meta-header" Text="{Binding CacheReadHeader}" />
+      <TextBlock Grid.Column="6"
                  Classes="meta-header"
                  IsVisible="{Binding ShowsCacheWriteColumn}"
                  Text="{Binding CacheWriteHeader}" />
@@ -48,17 +49,23 @@
         <ItemsControl ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="model-metadata-rows">
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="settings:ModelMetadataRowViewModel">
-              <Grid ColumnDefinitions="*,100,90,90,90,Auto" ColumnSpacing="6">
+              <Grid ColumnDefinitions="*,150,100,90,90,90,Auto" ColumnSpacing="6">
                 <TextBlock Grid.Column="0"
                            Text="{Binding Model}"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis"
                            FontSize="{DynamicResource FontSizeSm}" />
-                <TextBox Grid.Column="1" Classes="meta-cell" Text="{Binding ContextWindow, Mode=TwoWay}" />
-                <TextBox Grid.Column="2" Classes="meta-cell" Text="{Binding Input, Mode=TwoWay}" />
-                <TextBox Grid.Column="3" Classes="meta-cell" Text="{Binding Output, Mode=TwoWay}" />
-                <TextBox Grid.Column="4" Classes="meta-cell" Text="{Binding CacheRead, Mode=TwoWay}" />
-                <TextBox Grid.Column="5" Classes="meta-cell" Width="90" IsVisible="{Binding ShowCacheWrite}" Text="{Binding CacheWrite, Mode=TwoWay}" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding Capabilities}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           FontSize="{DynamicResource FontSizeSm}" />
+                <TextBox Grid.Column="2" Classes="meta-cell" Text="{Binding ContextWindow, Mode=TwoWay}" />
+                <TextBox Grid.Column="3" Classes="meta-cell" Text="{Binding Input, Mode=TwoWay}" />
+                <TextBox Grid.Column="4" Classes="meta-cell" Text="{Binding Output, Mode=TwoWay}" />
+                <TextBox Grid.Column="5" Classes="meta-cell" Text="{Binding CacheRead, Mode=TwoWay}" />
+                <TextBox Grid.Column="6" Classes="meta-cell" Width="90" IsVisible="{Binding ShowCacheWrite}" Text="{Binding CacheWrite, Mode=TwoWay}" />
               </Grid>
             </DataTemplate>
           </ItemsControl.ItemTemplate>

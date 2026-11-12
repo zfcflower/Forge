@@ -62,8 +62,8 @@ public sealed class AutomationsSettingsViewModelTests
         Assert.Equal(
             [.. BuiltInAutomations.All, "user.a", "user.b"],
             vm.Rows.Select(r => r.Id));
-        Assert.All(vm.Rows.Take(4), r => Assert.True(r.IsBuiltIn));
-        Assert.All(vm.Rows.Skip(4), r => Assert.False(r.IsBuiltIn));
+        Assert.All(vm.Rows.Take(BuiltInAutomations.All.Count), r => Assert.True(r.IsBuiltIn));
+        Assert.All(vm.Rows.Skip(BuiltInAutomations.All.Count), r => Assert.False(r.IsBuiltIn));
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public sealed class AutomationsSettingsViewModelTests
         var h = new Harness();
         using var vm = h.Create();
         await vm.LoadAsync();
-        Assert.Equal(4, vm.Rows.Count);
+        Assert.Equal(BuiltInAutomations.All.Count, vm.Rows.Count);
 
         h.Engine.Config = new AutomationConfig { Definitions = [User("user.new")] };
         h.Engine.RaiseChanged();

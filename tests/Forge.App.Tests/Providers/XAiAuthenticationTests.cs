@@ -341,31 +341,18 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     }
 
     [Fact]
-    public void The_meta_and_chatgpt_presets_take_their_own_credential_and_the_responses_protocol()
+    public void The_meta_preset_takes_its_own_credential_and_the_responses_protocol()
     {
         var meta = ProviderPresets.Find(ProviderPresets.MetaId)!;
-        var chatGpt = ProviderPresets.Find(ProviderPresets.ChatGptId)!;
 
         Assert.Equal(ProviderProtocol.OpenAiResponses, meta.Protocol);
         Assert.Equal(ProviderAuthOptions.ApiKey | ProviderAuthOptions.MetaSubscription, meta.Auth);
         Assert.Equal("https://api.meta.ai/v1", meta.BaseUrl);
 
-        Assert.Equal(ProviderProtocol.OpenAiResponses, chatGpt.Protocol);
-        Assert.Equal(ProviderAuthOptions.ChatGptSubscription, chatGpt.Auth);
-        // The Responses adapter appends "/responses", so the preset carries the codex root and not the plain backend-api one.
-        Assert.Equal("https://chatgpt.com/backend-api/codex", chatGpt.BaseUrl);
-        Assert.Null(chatGpt.EnvironmentVariable);
-        Assert.False(chatGpt.SupportsModelListing);
-        // No listing endpoint exists for a subscription, so the seeds are what a fresh sign-in can offer.
-        Assert.NotEmpty(chatGpt.SeedModels);
-        Assert.All(chatGpt.SeedModels, model => Assert.False(string.IsNullOrWhiteSpace(model)));
-        Assert.Equal("OpenAI (ChatGPT)", chatGpt.DisplayName);
-
         // The subscription is the default way in: a key is the alternative, never the fallback of a vendor whose models
         // are only reachable with the plan.
         var metaDefinition = ProviderDefinition.FromPreset(meta, "meta");
         Assert.Equal(ProviderCredentialKind.MetaSubscription, metaDefinition.CredentialKind);
-        Assert.Equal(ProviderCredentialKind.ChatGptSubscription, ProviderDefinition.FromPreset(chatGpt, "chatgpt").CredentialKind);
 
         // Reaching "Responses" is the whole point of the preset: the stored name, the parsed protocol and the wire kind the
         // Core factory builds all have to agree.
@@ -382,7 +369,11 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public void A_chatgpt_provider_reaches_the_responses_kind_from_the_preset_alone()
     {
-        var chatGpt = ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.ChatGptId)!, "chatgpt");
+        // The plan is the OpenAI preset's subscription way in: naming that kind is what moves the endpoint and the protocol.
+        var chatGpt = ProviderDefinition.FromPreset(
+            ProviderPresets.Find(ProviderPresets.OpenAiId)!,
+            "chatgpt",
+            credentialKind: ProviderCredentialKind.ChatGptSubscription);
 
         var transient = Services(new ScriptedXAiHandler()).CreateTransient(chatGpt);
 

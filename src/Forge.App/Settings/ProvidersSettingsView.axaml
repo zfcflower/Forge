@@ -76,6 +76,43 @@
                  Text="{Binding DefaultContextWindowHint}" />
     </StackPanel>
 
+    <!-- The fetched catalog: the layer between the compiled table and what a provider reports. -->
+    <StackPanel Spacing="3">
+      <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <TextBlock Text="{Binding CatalogLabel}"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     FontSize="{DynamicResource FontSizeSm}"
+                     VerticalAlignment="Center" />
+          <TextBlock Text="{Binding CatalogStatusText}"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     FontSize="{DynamicResource FontSizeSm}"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBox Grid.Column="1"
+                 MinWidth="220"
+                 Text="{Binding CatalogSourceUrl, Mode=TwoWay}"
+                 LostFocus="OnCatalogSourceCommit"
+                 KeyDown="OnCatalogSourceKeyDown"
+                 AutomationProperties.AutomationId="providers-catalog-source"
+                 AutomationProperties.Name="{Binding CatalogSourceLabel}" />
+        <Button Grid.Column="2"
+                Classes="provider-action"
+                Command="{Binding UpdateCatalogCommand}"
+                AutomationProperties.AutomationId="providers-catalog-update">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" />
+            <TextBlock Text="{Binding CatalogActionText}" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+      </Grid>
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding CatalogSourceHint}" />
+      <TextBlock IsVisible="{Binding HasCatalogProblem}"
+                 TextWrapping="Wrap"
+                 Text="{Binding CatalogProblem}"
+                 Foreground="{DynamicResource DangerBrush}" />
+    </StackPanel>
+
     <!-- 1. Connected: what is already set up. -->
     <Grid ColumnDefinitions="*,Auto">
       <TextBlock Classes="section-title" Text="{Binding ConnectedTitle}" VerticalAlignment="Center" />
