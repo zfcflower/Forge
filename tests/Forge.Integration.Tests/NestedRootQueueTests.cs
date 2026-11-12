@@ -36,9 +36,7 @@ public sealed class NestedRootQueueTests
             });
         relay = new QueueRelayTool(fx);
         fx.WritePlugin("target", PluginSources.Standard("target", echoPrefix: "t"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("target");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("target").Count == PluginSources.AllTools.Length, "target tools");
+        await fx.StartAndApproveAsync("target", PluginSources.AllTools.Length);
 
         var runCode = fx.Client.CreateRunCodeTool(new SingleToolRegistry(relay!));
         var script = """
@@ -62,15 +60,11 @@ public sealed class NestedRootQueueTests
     {
         const int count = 5;
         QueueRelayTool? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1"],
-            toolResolver: name => name == QueueRelayTool.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == QueueRelayTool.Name ? relay : null, ["--concurrency", "1"]);
         relay = new QueueRelayTool(fx);
         fx.WritePlugin("target", PluginSources.Standard("target", echoPrefix: "t"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("target");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("target").Count == PluginSources.AllTools.Length, "target tools");
+        await fx.StartAndApproveAsync("target", PluginSources.AllTools.Length);
 
         var runCode = fx.Client.CreateRunCodeTool(new SingleToolRegistry(relay!));
         var script = """
@@ -93,15 +87,11 @@ public sealed class NestedRootQueueTests
     public async Task Cross_root_nested_call_is_refused_while_same_chain_name_is_shared()
     {
         QueueRelayTool? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1", "--script-workers", "2"],
-            toolResolver: name => name == QueueRelayTool.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == QueueRelayTool.Name ? relay : null, ["--concurrency", "1", "--script-workers", "2"]);
         relay = new QueueRelayTool(fx);
         fx.WritePlugin("target", PluginSources.Standard("target", echoPrefix: "t"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("target");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("target").Count == PluginSources.AllTools.Length, "target tools");
+        await fx.StartAndApproveAsync("target", PluginSources.AllTools.Length);
 
         var runCode = fx.Client.CreateRunCodeTool(new SingleToolRegistry(relay!));
 
@@ -131,10 +121,8 @@ public sealed class NestedRootQueueTests
     public async Task Opposite_nested_plugin_calls_finish_instead_of_deadlocking()
     {
         QueueRelayTool? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1"],
-            toolResolver: name => name == QueueRelayTool.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == QueueRelayTool.Name ? relay : null, ["--concurrency", "1"]);
         relay = new QueueRelayTool(fx);
         fx.WritePlugin("sideA", PluginSources.Standard("sideA", echoPrefix: "a"));
         fx.WritePlugin("sideB", PluginSources.Standard("sideB", echoPrefix: "b", toolPrefix: SideBToolPrefix));

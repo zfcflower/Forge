@@ -54,20 +54,7 @@ public class OpenAiCompatibleProviderTests
 
         var events = await provider.CollectAsync(TestData.Request());
 
-        var started = Assert.Single(events.OfType<ToolCallStarted>());
-        Assert.Equal("call_a", started.Id);
-        Assert.Equal("read_file", started.Name);
-
-        var deltas = events.OfType<ToolCallArgumentsDelta>().ToList();
-        Assert.Equal(2, deltas.Count);
-        Assert.All(deltas, d => Assert.Equal("call_a", d.Id));
-        Assert.Equal("{\"path\":\"a.txt\"}", string.Concat(deltas.Select(d => d.Json)));
-
-        var completed = events.Completed();
-        Assert.Equal(StopReason.ToolUse, completed.Stop);
-        Assert.Equal(
-            new ToolCallBlock("call_a", "read_file", "{\"path\":\"a.txt\"}"),
-            Assert.Single(completed.Message.Content));
+        events.AssertFragmentedReadFileCall("call_a");
     }
 
     [Fact]
@@ -158,8 +145,7 @@ public class OpenAiCompatibleProviderTests
     [Fact]
     public async Task Omits_reasoning_effort_and_tools_when_unused()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(model: new ModelSettings("gpt-test", ThinkingEffort.Off)));
 
@@ -195,8 +181,7 @@ public class OpenAiCompatibleProviderTests
     [InlineData(ThinkingEffort.Max, "xhigh")]
     public async Task Maps_thinking_effort_to_reasoning_effort(ThinkingEffort effort, string expected)
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(model: new ModelSettings("gpt-test", effort)));
 
@@ -225,10 +210,7 @@ public class OpenAiCompatibleProviderTests
         var handler = new FakeHttpMessageHandler().EnqueueStatus(HttpStatusCode.BadRequest, "bad request");
         var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(
-            () => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.Equal(400, exception.StatusCode);
     }
 

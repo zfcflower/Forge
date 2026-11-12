@@ -14,8 +14,7 @@ public sealed class WorktreeLifecycleTests
     {
         var sandbox = new TempDirectory();
         var repo = new TestRepo(sandbox);
-        repo.Write("README.md", "# repo\n");
-        repo.Commit("initial");
+        repo.CommitFile("README.md", "# repo\n", "initial");
         return (sandbox, repo);
     }
 
@@ -278,8 +277,7 @@ public sealed class WorktreeLifecycleTests
         repo.Write("top.txt", "top\n");
         repo.Write("alpha/a.txt", "a\n");
         repo.Write("beta/b.txt", "b\n");
-        repo.Write("gamma/c.txt", "c\n");
-        repo.Commit("initial");
+        repo.CommitFile("gamma/c.txt", "c\n", "initial");
         return (sandbox, repo);
     }
 

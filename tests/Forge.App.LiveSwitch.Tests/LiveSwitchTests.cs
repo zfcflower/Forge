@@ -39,151 +39,172 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
     private const int PanelWaitAttempts = 200;
 
     [Fact]
-    public async Task Title_bar_settings_button_tip_and_name_follow_the_language_live()
-    {
-        var session = fixture.Session;
-        await using var shell = await LiveShell.OpenAsync(session);
-        var token = new CancellationTokenSource(StepBudget).Token;
-        var previous = Loc.Instance.Language;
-        try
-        {
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var chinese = await LiveShell.WaitForSettingsButtonAsync(shell, "设置", "设置", token);
-            Assert.Equal("设置", chinese.Tip);
-            Assert.Equal("设置", chinese.Name);
+    public Task Title_bar_settings_button_tip_and_name_follow_the_language_live() =>
+        WithShellAsync(
+            async (_, shell, token) =>
+            {
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var chinese = await LiveShell.WaitForSettingsButtonAsync(shell, "设置", "设置", token);
+                Assert.Equal("设置", chinese.Tip);
+                Assert.Equal("设置", chinese.Name);
 
-            await shell.SwitchAsync(UiLanguage.English, token);
-            var english = await LiveShell.WaitForSettingsButtonAsync(shell, "Settings", "Settings", token);
-            Assert.True(
-                string.Equals(english.Tip, "Settings", StringComparison.Ordinal) &&
-                string.Equals(english.Name, "Settings", StringComparison.Ordinal),
-                $"Tip={english.Tip ?? "<null>"} Name={english.Name ?? "<null>"} " +
-                $"Loc={Loc.Instance.Language} key={Loc.Instance["shell.settings"]}");
+                await shell.SwitchAsync(UiLanguage.English, token);
+                var english = await LiveShell.WaitForSettingsButtonAsync(shell, "Settings", "Settings", token);
+                Assert.True(
+                    string.Equals(english.Tip, "Settings", StringComparison.Ordinal) &&
+                    string.Equals(english.Name, "Settings", StringComparison.Ordinal),
+                    $"Tip={english.Tip ?? "<null>"} Name={english.Name ?? "<null>"} " +
+                    $"Loc={Loc.Instance.Language} key={Loc.Instance["shell.settings"]}");
 
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var back = await LiveShell.WaitForSettingsButtonAsync(shell, "设置", "设置", token);
-            Assert.Equal("设置", back.Tip);
-            Assert.Equal("设置", back.Name);
-        }
-        finally
-        {
-            await shell.SwitchAsync(previous, token);
-        }
-    }
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var back = await LiveShell.WaitForSettingsButtonAsync(shell, "设置", "设置", token);
+                Assert.Equal("设置", back.Tip);
+                Assert.Equal("设置", back.Name);
+            });
 
     [Fact]
-    public async Task Status_bar_host_text_follows_the_language_live()
-    {
-        var session = fixture.Session;
-        await using var shell = await LiveShell.OpenAsync(session);
-        var token = new CancellationTokenSource(StepBudget).Token;
-        var previous = Loc.Instance.Language;
-        try
-        {
-            await session.Dispatch(
-                () =>
+    public Task Status_bar_host_text_follows_the_language_live() =>
+        WithShellAsync(
+            async (session, shell, token) =>
+            {
+                await session.Dispatch(
+                    () =>
+                    {
+                        shell.ViewModel.Status.SetHost(HostStatus.Running, null);
+                        return 0;
+                    },
+                    token);
+
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var chinese = await session.Dispatch(() => shell.ViewModel.Status.HostText, token);
+                Assert.Equal("扩展宿主：运行中", chinese);
+
+                await shell.SwitchAsync(UiLanguage.English, token);
+                var english = await session.Dispatch(() => shell.ViewModel.Status.HostText, token);
+                Assert.Equal("Extension host: running", english);
+
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var back = await session.Dispatch(() => shell.ViewModel.Status.HostText, token);
+                Assert.Equal("扩展宿主：运行中", back);
+            });
+
+    [Fact]
+    public Task Fixed_panel_titles_follow_the_language_live() =>
+        WithShellAsync(
+            async (session, shell, token) =>
+            {
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var chinese = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
+                Assert.Equal(
+                    ["项目", "文件", "会话", "子 Agent", "预览", "TODO | 评审 | 规格树", "TODO", "评审", "规格树"],
+                    chinese);
+
+                await shell.SwitchAsync(UiLanguage.English, token);
+                var english = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
+                Assert.Equal(
+                    ["Projects", "Files", "Sessions", "Sub-agents", "Preview", "TODO | Review | Spec tree", "TODO", "Review", "Spec tree"],
+                    english);
+
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var back = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
+                Assert.Equal(chinese, back);
+            });
+
+    [Fact]
+    public Task Language_section_lists_three_choices_and_preferences_drive_the_live_language() =>
+        WithShellAsync(
+            async (session, shell, token) =>
+            {
+                var previousPreference = shell.Composition.Preferences.Language;
+                try
                 {
-                    shell.ViewModel.Status.SetHost(HostStatus.Running, null);
-                    return 0;
-                },
-                token);
+                    await shell.OpenSettingsAsync(token);
 
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var chinese = await session.Dispatch(() => shell.ViewModel.Status.HostText, token);
-            Assert.Equal("扩展宿主：运行中", chinese);
+                    await shell.SwitchAsync(UiLanguage.Chinese, token);
+                    var chinese = await LiveShell.WaitForLanguageSectionAsync(shell, "语言", ["跟随系统", "中文", "English"], token);
+                    Assert.Equal("语言", chinese.Heading);
+                    Assert.Equal(["跟随系统", "中文", "English"], chinese.Options);
 
-            await shell.SwitchAsync(UiLanguage.English, token);
-            var english = await session.Dispatch(() => shell.ViewModel.Status.HostText, token);
-            Assert.Equal("Extension host: running", english);
+                    await shell.SwitchAsync(UiLanguage.English, token);
+                    var english = await LiveShell.WaitForLanguageSectionAsync(shell, "Language", ["Follow system", "Chinese", "English"], token);
+                    Assert.Equal("Language", english.Heading);
+                    Assert.Equal(["Follow system", "Chinese", "English"], english.Options);
 
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var back = await session.Dispatch(() => shell.ViewModel.Status.HostText, token);
-            Assert.Equal("扩展宿主：运行中", back);
-        }
-        finally
-        {
-            await shell.SwitchAsync(previous, token);
-        }
-    }
-
-    [Fact]
-    public async Task Fixed_panel_titles_follow_the_language_live()
-    {
-        var session = fixture.Session;
-        await using var shell = await LiveShell.OpenAsync(session);
-        var token = new CancellationTokenSource(StepBudget).Token;
-        var previous = Loc.Instance.Language;
-        try
-        {
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var chinese = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
-            Assert.Equal(
-                ["项目", "文件", "会话", "子 Agent", "预览", "TODO | 评审 | 规格树", "TODO", "评审", "规格树"],
-                chinese);
-
-            await shell.SwitchAsync(UiLanguage.English, token);
-            var english = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
-            Assert.Equal(
-                ["Projects", "Files", "Sessions", "Sub-agents", "Preview", "TODO | Review | Spec tree", "TODO", "Review", "Spec tree"],
-                english);
-
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var back = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
-            Assert.Equal(chinese, back);
-        }
-        finally
-        {
-            await shell.SwitchAsync(previous, token);
-        }
-    }
-
-    [Fact]
-    public async Task Language_section_lists_three_choices_and_preferences_drive_the_live_language()
-    {
-        var session = fixture.Session;
-        await using var shell = await LiveShell.OpenAsync(session);
-        var token = new CancellationTokenSource(StepBudget).Token;
-        var previousPreference = shell.Composition.Preferences.Language;
-        var previous = Loc.Instance.Language;
-        try
-        {
-            await shell.OpenSettingsAsync(token);
-
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var chinese = await LiveShell.WaitForLanguageSectionAsync(shell, "语言", ["跟随系统", "中文", "English"], token);
-            Assert.Equal("语言", chinese.Heading);
-            Assert.Equal(["跟随系统", "中文", "English"], chinese.Options);
-
-            await shell.SwitchAsync(UiLanguage.English, token);
-            var english = await LiveShell.WaitForLanguageSectionAsync(shell, "Language", ["Follow system", "Chinese", "English"], token);
-            Assert.Equal("Language", english.Heading);
-            Assert.Equal(["Follow system", "Chinese", "English"], english.Options);
-
-            // The composition root pushes the preference into Loc: flipping the preference flips the UI language.
-            await session.Dispatch(
-                () =>
+                    // The composition root pushes the preference into Loc: flipping the preference flips the UI language.
+                    await session.Dispatch(
+                        () =>
+                        {
+                            shell.Composition.Preferences.Language = UiLanguage.English;
+                            return 0;
+                        },
+                        token);
+                    Assert.Equal(UiLanguage.English, Loc.Instance.Language);
+                }
+                finally
                 {
-                    shell.Composition.Preferences.Language = UiLanguage.English;
-                    return 0;
-                },
-                token);
-            Assert.Equal(UiLanguage.English, Loc.Instance.Language);
-        }
-        finally
-        {
-            await session.Dispatch(
-                () =>
-                {
-                    shell.Composition.Preferences.Language = previousPreference;
-                    return 0;
-                },
-                token);
-            await shell.SwitchAsync(previous, token);
-        }
-    }
+                    await session.Dispatch(
+                        () =>
+                        {
+                            shell.Composition.Preferences.Language = previousPreference;
+                            return 0;
+                        },
+                        token);
+                }
+            });
 
     [Fact]
-    public async Task Turn_card_header_follows_the_language_live()
+    public Task Turn_card_header_follows_the_language_live() =>
+        WithShellAsync(
+            async (session, shell, token) =>
+            {
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var chinese = await session.Dispatch(() => LiveShell.ThirdTurnHeader(), token);
+                Assert.Contains("第 3 轮", chinese);
+                Assert.Contains("输入 900 · 输出 80", chinese);
+
+                await shell.SwitchAsync(UiLanguage.English, token);
+                var english = await session.Dispatch(() => LiveShell.ThirdTurnHeader(), token);
+                Assert.Contains("Turn 3", english);
+                Assert.Contains("in 900 · out 80", english);
+
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                var back = await session.Dispatch(() => LiveShell.ThirdTurnHeader(), token);
+                Assert.Contains("第 3 轮", back);
+            });
+
+    [Fact]
+    public Task Tab_context_menu_items_follow_the_language_live() =>
+        WithShellAsync(
+            async (session, shell, token) =>
+            {
+                await session.Dispatch(
+                    () =>
+                    {
+                        shell.ViewModel.Workbench.OpenTab(
+                            shell.ViewModel.Workbench.MainTabs, "live-switch-tab", TabKind.Session, new object(), "t");
+                        return 0;
+                    },
+                    token);
+
+                string[] zh = ["在新窗口打开", "关闭", "关闭其他标签"];
+                string[] en = ["Open in new window", "Close", "Close other tabs"];
+
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                Assert.Equal(zh, await LiveShell.WaitForTabMenuAsync(shell, "live-switch-tab", zh, token));
+
+                await shell.SwitchAsync(UiLanguage.English, token);
+                Assert.Equal(en, await LiveShell.WaitForTabMenuAsync(shell, "live-switch-tab", en, token));
+
+                await shell.SwitchAsync(UiLanguage.Chinese, token);
+                Assert.Equal(zh, await LiveShell.WaitForTabMenuAsync(shell, "live-switch-tab", zh, token));
+            });
+
+    /// <summary>
+    /// The shell of a language-switch test: opened over a throw-away data root and handed to <paramref name="body"/>
+    /// together with the step budget its dispatches run under. The language that was live before the body ran is
+    /// switched back afterwards, and only then is the shell torn down.
+    /// </summary>
+    private async Task WithShellAsync(Func<HeadlessUnitTestSession, LiveShell, CancellationToken, Task> body)
     {
         var session = fixture.Session;
         await using var shell = await LiveShell.OpenAsync(session);
@@ -191,55 +212,7 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
         var previous = Loc.Instance.Language;
         try
         {
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var chinese = await session.Dispatch(() => LiveShell.ThirdTurnHeader(), token);
-            Assert.Contains("第 3 轮", chinese);
-            Assert.Contains("输入 900 · 输出 80", chinese);
-
-            await shell.SwitchAsync(UiLanguage.English, token);
-            var english = await session.Dispatch(() => LiveShell.ThirdTurnHeader(), token);
-            Assert.Contains("Turn 3", english);
-            Assert.Contains("in 900 · out 80", english);
-
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            var back = await session.Dispatch(() => LiveShell.ThirdTurnHeader(), token);
-            Assert.Contains("第 3 轮", back);
-        }
-        finally
-        {
-            await shell.SwitchAsync(previous, token);
-        }
-    }
-
-    [Fact]
-    public async Task Tab_context_menu_items_follow_the_language_live()
-    {
-        var session = fixture.Session;
-        await using var shell = await LiveShell.OpenAsync(session);
-        var token = new CancellationTokenSource(StepBudget).Token;
-        var previous = Loc.Instance.Language;
-        try
-        {
-            await session.Dispatch(
-                () =>
-                {
-                    shell.ViewModel.Workbench.OpenTab(
-                        shell.ViewModel.Workbench.MainTabs, "live-switch-tab", TabKind.Session, new object(), "t");
-                    return 0;
-                },
-                token);
-
-            string[] zh = ["在新窗口打开", "关闭", "关闭其他标签"];
-            string[] en = ["Open in new window", "Close", "Close other tabs"];
-
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            Assert.Equal(zh, await LiveShell.WaitForTabMenuAsync(shell, "live-switch-tab", zh, token));
-
-            await shell.SwitchAsync(UiLanguage.English, token);
-            Assert.Equal(en, await LiveShell.WaitForTabMenuAsync(shell, "live-switch-tab", en, token));
-
-            await shell.SwitchAsync(UiLanguage.Chinese, token);
-            Assert.Equal(zh, await LiveShell.WaitForTabMenuAsync(shell, "live-switch-tab", zh, token));
+            await body(session, shell, token);
         }
         finally
         {

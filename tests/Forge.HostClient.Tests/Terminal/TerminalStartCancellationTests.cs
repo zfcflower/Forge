@@ -13,8 +13,7 @@ public sealed class TerminalStartCancellationTests
     public async Task Cancelled_start_throws_then_a_late_answer_makes_the_client_stop_that_terminal_and_drop_its_early_frames()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         const string terminalId = "t-cancelled";
         var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On(
@@ -61,8 +60,7 @@ public sealed class TerminalStartCancellationTests
     public async Task Already_cancelled_token_throws_without_sending_a_start()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
 
@@ -77,8 +75,7 @@ public sealed class TerminalStartCancellationTests
     public async Task Cancellation_that_races_with_the_answer_still_stops_the_terminal_the_host_built()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         const string terminalId = "t-raced";
         using var cancellation = new CancellationTokenSource();
 
@@ -122,8 +119,7 @@ public sealed class TerminalStartCancellationTests
         try
         {
             await using var host = new FakeHost();
-            await using var client = ClientFactory.Create(host);
-            await client.StartConnectedAsync(host);
+            await using var client = await ClientFactory.StartAsync(host);
             var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             host.On(
                 TerminalOps.Start,
@@ -169,10 +165,7 @@ public sealed class TerminalStartCancellationTests
         try
         {
             await using var host = new FakeHost();
-            await using var client = ClientFactory.Create(host);
-            var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-            client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-            await client.StartConnectedAsync(host);
+            await using var client = await host.StartTrackedAsync(out var statuses);
             host.On(TerminalOps.Start, FakeHost.NeverAnswer);
 
             using var cancellation = new CancellationTokenSource();

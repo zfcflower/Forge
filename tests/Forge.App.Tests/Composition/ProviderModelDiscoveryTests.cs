@@ -22,8 +22,7 @@ public sealed class ProviderModelDiscoveryTests
         const string testKey = "test-key-not-a-credential";
         var originalKey = Environment.GetEnvironmentVariable(variable);
         Environment.SetEnvironmentVariable(variable, testKey);
-        var root = Path.Combine(Path.GetTempPath(), "forge-model-discovery-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-model-discovery-");
 
         try
         {
@@ -70,8 +69,7 @@ public sealed class ProviderModelDiscoveryTests
         const string variable = "DEEPSEEK_API_KEY";
         var originalKey = Environment.GetEnvironmentVariable(variable);
         Environment.SetEnvironmentVariable(variable, null);
-        var root = Path.Combine(Path.GetTempPath(), "forge-model-discovery-missing-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-model-discovery-missing-");
 
         try
         {

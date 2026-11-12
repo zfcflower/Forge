@@ -37,8 +37,7 @@ public sealed class ProviderMetadataTests : IDisposable
     [Fact]
     public void A_settings_file_with_model_meta_produces_metadata_through_the_catalogue()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-provider-meta-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-provider-meta-");
         var path = Path.Combine(root, "settings.json");
         File.WriteAllText(
             path,
@@ -286,8 +285,7 @@ public sealed class ProviderMetadataTests : IDisposable
     public void A_missing_settings_file_connects_nothing_and_resolves_from_the_catalog_alone()
     {
         // No placeholder provider: a missing file means nothing is connected, and only the catalog can still answer.
-        var root = Path.Combine(Path.GetTempPath(), "forge-missing-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-missing-");
         try
         {
             var catalog = Load(Path.Combine(root, "settings.json"), CatalogStore());
@@ -316,7 +314,7 @@ public sealed class ProviderMetadataTests : IDisposable
     {
         // A directory that stays empty: no secret file, no key file, and a credentials path that cannot exist, so
         // the seeded entry's status never depends on the machine running the test.
-        var probeDir = Path.Combine(Path.GetTempPath(), "forge-provider-meta-data-" + Guid.NewGuid().ToString("N"));
+        var probeDir = TestTempFiles.NewDirectory("forge-provider-meta-data-");
         var secrets = new ProviderSecretStore(probeDir);
         using var http = new HttpClient(new ModelListHandler("""{"data":[]}"""));
         var credentials = new ProviderCredentials(http, secrets, claudeCredentialsPath: Path.Combine(probeDir, "credentials.json"));
@@ -330,8 +328,7 @@ public sealed class ProviderMetadataTests : IDisposable
     /// </summary>
     private ModelCatalogStore CatalogStore(params string[] extraModels)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "forge-catalog-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        var directory = TestTempFiles.NewDirectory("forge-catalog-");
         catalogDirectories.Add(directory);
         var models = new Dictionary<string, ModelCatalogModel>(StringComparer.Ordinal)
         {
@@ -376,7 +373,7 @@ public sealed class ProviderMetadataTests : IDisposable
         };
         var definition = ProviderDefinition.FromDocument(entry, id);
         // A path that is never created: nothing is stored, so nothing is written and nothing needs cleanup.
-        var probeDir = Path.Combine(Path.GetTempPath(), "forge-provider-meta-store-" + Guid.NewGuid().ToString("N"));
+        var probeDir = TestTempFiles.NewDirectory("forge-provider-meta-store-");
         var secrets = new ProviderSecretStore(probeDir);
         var sharedCache = cache ?? new ProviderModelCache();
         using var http = new HttpClient(new ModelListHandler("""{"data":[]}"""));

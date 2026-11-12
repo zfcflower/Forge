@@ -38,7 +38,7 @@ internal enum TerminalStatus
 /// <see cref="ITerminalEmulatorHost"/>: answers are written to the session's input, the title becomes the tab title,
 /// clipboard text goes to the Avalonia clipboard of whichever view is attached.</para>
 /// </summary>
-internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHost, IAsyncDisposable
+internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost, IAsyncDisposable
 {
     /// <summary>Columns a terminal starts with before its view has been laid out.</summary>
     internal const int InitialColumns = 100;
@@ -148,13 +148,7 @@ internal sealed class TerminalViewModel : ObservableObject, ITerminalEmulatorHos
     public TerminalStatus Status
     {
         get => status;
-        private set
-        {
-            if (Set(ref status, value))
-            {
-                OnPropertyChanged(nameof(ShowStatus));
-            }
-        }
+        private set => SetAndNotify(ref status, value, nameof(ShowStatus));
     }
 
     /// <summary>The line under the screen: starting, the exit code, or why the terminal stopped. Empty while running.</summary>

@@ -86,19 +86,17 @@ internal static class ForkStrings
 
     public static string Title => Loc.Instance[TitleKey];
 
-    public static string Intro(string branch, string sha) => Loc.Instance.Format(IntroKey, branch, ShortSha(sha));
+    public static string Intro(string branch, string sha) => Loc.Instance.Format(IntroKey, branch, TextFormat.ShortSha(sha));
 
     public static string BranchLabel => Loc.Instance[BranchLabelKey];
 
-    public static string Uncommitted(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(UncommittedKeyBase, count), TextFormat.Number(count));
+    public static string Uncommitted(int count) => Loc.Instance.FormatPlural(UncommittedKeyBase, count);
 
     public static string CommitFirst(string title) => Loc.Instance.Format(CommitFirstKey, title);
 
     public static string ForkAnyway => Loc.Instance[ForkAnywayKey];
 
-    public static string NotCarried(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(NotCarriedKeyBase, count), TextFormat.Number(count));
+    public static string NotCarried(int count) => Loc.Instance.FormatPlural(NotCarriedKeyBase, count);
 
     public static string SourceBusy(string title) => Loc.Instance.Format(SourceBusyKey, title);
 
@@ -151,11 +149,9 @@ internal static class ForkStrings
 
     public static string SyncIntro(string source, string fork) => Loc.Instance.Format(SyncIntroKey, source, fork);
 
-    public static string Commits(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(CommitsKeyBase, count), TextFormat.Number(count));
+    public static string Commits(int count) => Loc.Instance.FormatPlural(CommitsKeyBase, count);
 
-    public static string MoreCommits(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(MoreCommitsKeyBase, count), TextFormat.Number(count));
+    public static string MoreCommits(int count) => Loc.Instance.FormatPlural(MoreCommitsKeyBase, count);
 
     public static string AlreadyMerged(string fork, string source) => Loc.Instance.Format(AlreadyMergedKey, fork, source);
 
@@ -203,8 +199,6 @@ internal static class ForkStrings
     public static string KeepFork => Loc.Instance[KeepForkKey];
 
     public static string RemoveFailed(string reason) => Loc.Instance.Format(RemoveFailedKey, reason);
-
-    private static string ShortSha(string sha) => sha.Length > 10 ? sha[..10] : sha;
 
     [ModuleInitializer]
     internal static void Initialize() => Register();

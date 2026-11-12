@@ -15,9 +15,8 @@ namespace Forge.App.Tests.Agents;
 /// </summary>
 public sealed class AgentDefaultsStoreTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-agent-defaults-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-agent-defaults-");
 
-    public AgentDefaultsStoreTests() => Directory.CreateDirectory(root);
 
     private string SettingsPath => Path.Combine(root, "settings.json");
 
@@ -331,12 +330,6 @@ public sealed class AgentDefaultsStoreTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 }

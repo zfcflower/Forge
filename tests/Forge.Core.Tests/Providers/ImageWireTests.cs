@@ -20,8 +20,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task Anthropic_writes_a_base64_image_block_in_the_user_turn_in_order()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         await provider.CollectAsync(TestData.Request(messages: [UserWithImages("what is this?", Png, Jpeg)]));
 
@@ -42,8 +41,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task Anthropic_drops_an_image_block_outside_a_user_message()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         await provider.CollectAsync(TestData.Request(messages:
         [
@@ -63,8 +61,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task OpenAi_compatible_switches_a_user_turn_with_images_to_a_content_array()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages: [UserWithImages("look", Png, Jpeg)]));
 
@@ -83,8 +80,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task OpenAi_compatible_keeps_the_plain_string_form_for_a_text_only_user_turn()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages: [ChatMessage.User("hello")]));
 
@@ -94,8 +90,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task OpenAi_compatible_merges_consecutive_user_turns_and_collects_all_their_images()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages:
         [
@@ -114,8 +109,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task OpenAi_compatible_sends_an_image_only_user_turn_without_a_text_part()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages: [new ChatMessage(MessageRole.User, [Png])]));
 
@@ -127,8 +121,7 @@ public sealed class ImageWireTests
     [Fact]
     public async Task OpenAi_compatible_never_puts_an_assistant_image_on_the_wire()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages:
         [

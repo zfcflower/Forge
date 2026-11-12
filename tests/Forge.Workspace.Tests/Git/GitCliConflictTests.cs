@@ -6,6 +6,19 @@ public sealed class GitCliConflictTests
 {
     private static GitCli Cli() => new();
 
+    /// <summary>Clones origin and builds one <c>clash.txt</c> conflict between <c>side</c> and <c>main</c>;
+    /// returns the clone, still on <c>main</c> with the merge or rebase not yet started.</summary>
+    private static string ConflictedRepo(RemoteSandbox sandbox)
+    {
+        var repo = sandbox.Clone("work");
+        sandbox.CommitFile(repo, "clash.txt", "base\n", "seed");
+        IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "side");
+        sandbox.CommitFile(repo, "clash.txt", "side\n", "side work");
+        IsolatedGit.RunChecked(repo, "checkout", "-q", "main");
+        sandbox.CommitFile(repo, "clash.txt", "main\n", "main work");
+        return repo;
+    }
+
     [Fact]
     public async Task Merge_conflict_reports_conflict_and_state()
     {
@@ -15,12 +28,7 @@ public sealed class GitCliConflictTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = sandbox.Clone("work");
-        sandbox.CommitFile(repo, "clash.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "side");
-        sandbox.CommitFile(repo, "clash.txt", "side\n", "side work");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "main");
-        sandbox.CommitFile(repo, "clash.txt", "main\n", "main work");
+        var repo = ConflictedRepo(sandbox);
 
         var merge = await Cli().MergeAsync(repo, "side");
 
@@ -41,12 +49,7 @@ public sealed class GitCliConflictTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = sandbox.Clone("work");
-        sandbox.CommitFile(repo, "clash.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "side");
-        sandbox.CommitFile(repo, "clash.txt", "side\n", "side work");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "main");
-        sandbox.CommitFile(repo, "clash.txt", "main\n", "main work");
+        var repo = ConflictedRepo(sandbox);
         var merge = await Cli().MergeAsync(repo, "side");
         Assert.Equal(GitRemoteFailureKind.Conflict, merge.Failure);
 
@@ -67,12 +70,7 @@ public sealed class GitCliConflictTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = sandbox.Clone("work");
-        sandbox.CommitFile(repo, "clash.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "side");
-        sandbox.CommitFile(repo, "clash.txt", "side\n", "side work");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "main");
-        sandbox.CommitFile(repo, "clash.txt", "main\n", "main work");
+        var repo = ConflictedRepo(sandbox);
         var merge = await Cli().MergeAsync(repo, "side");
         Assert.Equal(GitRemoteFailureKind.Conflict, merge.Failure);
 
@@ -99,12 +97,8 @@ public sealed class GitCliConflictTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = sandbox.Clone("work");
-        sandbox.CommitFile(repo, "clash.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "side");
-        sandbox.CommitFile(repo, "clash.txt", "side\n", "side work");
-        IsolatedGit.RunChecked(repo, "checkout", "-q", "main");
-        var head = sandbox.CommitFile(repo, "clash.txt", "main\n", "main work");
+        var repo = ConflictedRepo(sandbox);
+        var head = IsolatedGit.Head(repo);
         var merge = await Cli().MergeAsync(repo, "side");
         Assert.Equal(GitRemoteFailureKind.Conflict, merge.Failure);
 

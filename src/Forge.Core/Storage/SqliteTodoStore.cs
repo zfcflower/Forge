@@ -294,8 +294,8 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
         return _writer.ReadAsync<PlanSummary?>(
             async connection =>
             {
-                await using var command = connection.CreateCommand();
-                command.CommandText = "SELECT session_id, text, updated_at FROM plan_summaries WHERE session_id = $session";
+                await using var command = StorageDb.Command(
+                    connection, "SELECT session_id, text, updated_at FROM plan_summaries WHERE session_id = $session");
                 command.Parameters.AddWithValue("$session", sessionId);
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 if (!await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -674,9 +674,7 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
             return;
         }
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT session_id FROM todo_groups WHERE id = $id";
+        await using var command = StorageDb.Command(connection, transaction, "SELECT session_id FROM todo_groups WHERE id = $id");
         command.Parameters.AddWithValue("$id", groupId);
         var owner = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         if (owner is not string stored || !string.Equals(stored, sessionId, StringComparison.Ordinal))
@@ -767,10 +765,10 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
         string? groupId,
         CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText =
-            "SELECT id FROM todos WHERE session_id = $session AND group_id IS $group ORDER BY order_index, id";
+        await using var command = StorageDb.Command(
+            connection,
+            transaction,
+            "SELECT id FROM todos WHERE session_id = $session AND group_id IS $group ORDER BY order_index, id");
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$group", groupId ?? (object)DBNull.Value);
         var ids = new List<string>();

@@ -269,33 +269,7 @@ internal sealed class PluginQueueBudgetHost : IAsyncDisposable
         process.Dispose();
         if (ownsRoot)
         {
-            DeleteDirectory(Root);
-        }
-    }
-
-    private static void DeleteDirectory(string path)
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    return;
-                }
-
-                Directory.Delete(path, recursive: true);
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == 49)
-                {
-                    return;
-                }
-
-                Thread.Sleep(100);
-            }
+            TempRoots.Delete(Root);
         }
     }
 }

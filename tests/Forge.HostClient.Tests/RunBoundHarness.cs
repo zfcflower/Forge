@@ -3,6 +3,7 @@ using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
@@ -48,8 +49,69 @@ internal sealed class TestRegistry : IToolRegistry
     public void Remove(string name) => tools.TryRemove(name, out _);
 }
 
+/// <summary>A client-initiated root execution parked inside the fake host (<c>plugin.execute</c> or
+/// <c>code.execute</c>), addressed by the run id its <c>host.tool_call</c> callbacks must carry.</summary>
+internal sealed record ActiveRoot(string RunId, InFlightRoot Hold, Task<ToolResult> RootTask)
+{
+    /// <summary>Releases the parked root and waits until it has finished.</summary>
+    public async Task<ToolResult> FinishAsync()
+    {
+        Hold.Release();
+        return await RootTask.Bounded().ConfigureAwait(false);
+    }
+
+    /// <summary>Issues one run-bound <c>host.tool_call</c> from inside this root, releases the root and waits until it
+    /// has finished; returns the callback's answer.</summary>
+    public async Task<IpcMessage> CallAsync(
+        FakeHost host, string name, string argsJson, CancellationToken ct,
+        string pluginId = "alpha", bool forgeLegacy = false)
+    {
+        var payload = BoundRoots.BoundPayload(RunId, pluginId, name, argsJson, forgeLegacy);
+        var response = await host.CallClientAsync("host.tool_call", payload, ct).ConfigureAwait(false);
+        await FinishAsync().ConfigureAwait(false);
+        return response;
+    }
+}
+
 internal static class BoundRoots
 {
+    /// <summary>Starts an <c>alpha</c>/<c>entry</c> plugin root against a parked <c>plugin.execute</c>.</summary>
+    public static Task<ActiveRoot> StartPluginToolRootAsync(
+        FakeHost host, ExtensionHostClient client, CancellationToken ct) =>
+        StartPluginToolRootAsync(host, client, new ToolContext("sess-root", AbsoluteDir("root")), ct);
+
+    /// <summary>Starts a plugin tool root of <paramref name="pluginId"/> against a parked <c>plugin.execute</c>
+    /// and returns the run id its callbacks must carry.</summary>
+    public static async Task<ActiveRoot> StartPluginToolRootAsync(
+        FakeHost host, ExtensionHostClient client, ToolContext context, CancellationToken ct,
+        string pluginId = "alpha", string tool = "entry")
+    {
+        var hold = new InFlightRoot();
+        ParkRoot(host, "plugin.execute", hold);
+        var proxy = await RegisterPluginToolAsync(client, host, pluginId, tool).ConfigureAwait(false);
+        var rootTask = await StartPluginRootAsync(proxy, context, hold, ct).ConfigureAwait(false);
+        var runId = RunIdOf(await WaitArrivedAsync(hold).ConfigureAwait(false));
+        Assert.NotEqual(string.Empty, runId);
+        return new ActiveRoot(runId, hold, rootTask);
+    }
+
+    /// <summary>Starts a <c>run_code</c> root against a parked <c>code.execute</c>.</summary>
+    public static async Task<ActiveRoot> StartScriptRootAsync(
+        FakeHost host, ExtensionHostClient client, IToolRegistry registry, CancellationToken ct,
+        Sdk.CodeExecutionOptions? execution = null, string code = "1+1")
+    {
+        var hold = new InFlightRoot { ResultJson = """{"content":"script-ok","isError":false}""" };
+        ParkRoot(host, "code.execute", hold);
+        var proxy = client.CreateRunCodeTool(
+            registry, execution is null ? null : new RunCodeProxyOptions { Execution = execution });
+        var rootTask = proxy.InvokeAsync(
+            new ToolCall("root-rc", "run_code", "{\"code\":" + JsonSerializer.Serialize(code) + "}"),
+            new ToolContext("sess-script", AbsoluteDir("script"), 0),
+            ct).AsTask();
+        var runId = RunIdOf(await WaitArrivedAsync(hold).ConfigureAwait(false));
+        return new ActiveRoot(runId, hold, rootTask);
+    }
+
     public static string AbsoluteDir(string name) =>
         Path.Combine(Path.GetTempPath(), "forge-hc", name).Replace('\\', '/');
 
@@ -94,6 +156,15 @@ internal static class BoundRoots
             + "\",\"args\":" + argsJson + forged + "}";
     }
 
+    /// <summary>The content of a refused callback answer; asserts <c>isError</c> so the message assertions that
+    /// follow cannot pass on a success envelope.</summary>
+    public static string RefusedContent(IpcMessage response)
+    {
+        var (content, isError) = OutputOf(response);
+        Assert.True(isError, "The callback should have been refused, but it succeeded with: " + content);
+        return content;
+    }
+
     public static (string Content, bool IsError) OutputOf(IpcMessage response)
     {
         var result = response.Result
@@ -106,10 +177,9 @@ internal static class BoundRoots
     public static async Task<ExtensionHostTool> RegisterPluginToolAsync(
         ExtensionHostClient client, FakeHost host, string pluginId, string tool, int sideEffect = 0)
     {
-        await host.NotifyClientAsync("tools.register",
+        await host.NotifyAndSyncAsync("tools.register",
             "{\"pluginId\":\"" + pluginId + "\",\"tools\":[{\"name\":\"" + tool
             + "\",\"description\":\"d\",\"inputSchemaJson\":\"{}\",\"sideEffect\":" + sideEffect + "}]}");
-        await host.SyncAsync();
         return (ExtensionHostTool)client.Tools.Single(t => t.Definition.Name == tool);
     }
 

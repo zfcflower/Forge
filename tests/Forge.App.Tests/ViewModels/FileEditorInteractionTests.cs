@@ -48,8 +48,7 @@ public sealed class FileEditorInteractionTests : IDisposable
             {
                 var path = Path.Combine(NewRoot(), name + ".txt");
                 await File.WriteAllBytesAsync(path, [.. encoding.GetPreamble(), .. encoding.GetBytes(text)]);
-                var model = FileDocumentViewModel.Create();
-                await model.LoadAsync(path, CancellationToken.None);
+                var model = await TestDocuments.LoadAsync(path);
                 Assert.False(model.HasError, name + ": " + model.Error);
                 Assert.Equal(text, model.EditText);
                 var edited = text.Replace("alpha", "ALPHA", StringComparison.Ordinal);
@@ -69,8 +68,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         var path = Write("readonly.txt", "keep\n");
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             model.IsEditing = true;
             model.EditText = "changed\n";
             File.SetAttributes(path, FileAttributes.ReadOnly);
@@ -97,8 +95,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         {
             foreach (var path in new[] { html, plain })
             {
-                var model = FileDocumentViewModel.Create();
-                await model.LoadAsync(path, CancellationToken.None);
+                var model = await TestDocuments.LoadAsync(path);
                 var host = Show(model);
                 var scroller = host.Editor.GetVisualDescendants().OfType<ScrollViewer>().First();
                 Assert.True(scroller.Viewport.Width <= 240.5, path + " viewport " + scroller.Viewport.Width);
@@ -118,8 +115,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         var path = Write("wrap.txt", new string('x', 3000) + "\nshort\n");
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model);
             var scroller = host.Editor.GetVisualDescendants().OfType<ScrollViewer>().First();
             var heightBefore = scroller.Extent.Height;
@@ -140,8 +136,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         var path = Write("edit.txt", "alpha\nbeta\n");
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, width: 600);
             var editor = host.Editor;
             editor.TextArea.Focus();
@@ -182,8 +177,7 @@ public sealed class FileEditorInteractionTests : IDisposable
             var documents = new List<FileDocumentViewModel>();
             foreach (var path in new[] { first, second })
             {
-                var document = FileDocumentViewModel.Create();
-                await document.LoadAsync(path, CancellationToken.None);
+                var document = await TestDocuments.LoadAsync(path);
                 model.Workbench.OpenTab(model.Workbench.PreviewTabs, WorkbenchIds.PinnedFileTab(path), TabKind.FilePreview, document, document.TabTitle);
                 document.IsEditing = true;
                 document.EditText = "edited " + Path.GetFileName(path) + "\n";
@@ -203,12 +197,7 @@ public sealed class FileEditorInteractionTests : IDisposable
         }, WorkbenchUi.Budget());
     }
 
-    private static async Task Ui(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntil(Func<bool> condition)
     {
@@ -250,8 +239,7 @@ public sealed class FileEditorInteractionTests : IDisposable
 
     private string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-file-editor-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-file-editor-");
         roots.Add(root);
         return root;
     }

@@ -64,9 +64,7 @@ public sealed class HotReloadTests
         });
         var host = AgentTestHost.Create(provider, [swapper, FakeTool.Echo("old_tool")]);
         hostRef = host;
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(3, provider.Requests.Count);
@@ -98,9 +96,7 @@ public sealed class HotReloadTests
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("victim")]);
         hostRef = host;
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var result = Assert.Single(root.History.SelectMany(message => message.Content.OfType<ToolResultBlock>()));
@@ -138,9 +134,7 @@ public sealed class HotReloadTests
         });
         var host = AgentTestHost.Create(provider, [readRef!]);
         hostRef = host;
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(3, provider.Requests.Count);
@@ -173,9 +167,7 @@ public sealed class HotReloadTests
             Layers = new PromptLayers("test system", null, null),
             Todos = new StubTodoStore(),
         });
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.True(host.Tools.TryGet("todo", out var todo));
@@ -230,9 +222,7 @@ public sealed class HotReloadTests
         });
         var host = AgentTestHost.Create(provider, [readRef!, grepRef!, findRef!, lsRef!], agents: [BuiltInAgents.Scout]);
         hostRef = host;
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var childRequests = provider.Requests
@@ -340,9 +330,7 @@ public sealed class HotReloadTests
                 released.Wait(ct);
                 return new ValueTask<ToolResult>(new ToolResult("through"));
             });
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("c1", "gate_tool", "{}"))
-            : Turn.Say("done"));
+        var provider = AgentTestScripts.OneToolCallThenSay("gate_tool", "done", "c1");
         var host = AgentTestHost.Create(provider, [gateRef!]);
         hostRef = host;
         var root = host.CreateRoot("session", Workspace);

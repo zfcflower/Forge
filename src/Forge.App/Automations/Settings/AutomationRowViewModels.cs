@@ -39,7 +39,7 @@ internal sealed class AutomationCiProjectViewModel : ObservableObject
 }
 
 /// <summary>One automation of the list: built-ins first, then the user's.</summary>
-internal sealed class AutomationRowViewModel : ObservableObject
+internal sealed class AutomationRowViewModel : NotifyingObject
 {
     private readonly AutomationsSettingsViewModel owner;
     private string name = string.Empty;
@@ -141,13 +141,7 @@ internal sealed class AutomationRowViewModel : ObservableObject
     public bool IsCiExpanded
     {
         get => isCiExpanded;
-        set
-        {
-            if (Set(ref isCiExpanded, value))
-            {
-                OnPropertyChanged(nameof(CiToggleText));
-            }
-        }
+        set => SetAndNotify(ref isCiExpanded, value, nameof(CiToggleText));
     }
 
     /// <summary>The UI language changed: the fixed labels re-read their text (the data texts come back with the refresh).</summary>

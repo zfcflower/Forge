@@ -25,6 +25,9 @@ internal static class TextFormat
     /// <summary>An identifier: never grouped (<c>49712</c>).</summary>
     public static string Id(long value) => value.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>A commit id as shown in the UI: its first 10 characters, unchanged when it is shorter.</summary>
+    public static string ShortSha(string sha) => sha.Length > 10 ? sha[..10] : sha;
+
     /// <summary>Local wall-clock time, 24-hour: <c>12:30:45</c>.</summary>
     public static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 

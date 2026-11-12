@@ -38,9 +38,13 @@ public sealed class TodoToolStepCommitTests
 
     private static ToolCall Call(string json) => new("call-1", "todo", json);
 
+    /// <summary>Invokes the todo tool with <paramref name="json"/> in the default session context.</summary>
+    private static ValueTask<ToolResult> InvokeAsync(TodoTool tool, string json) =>
+        tool.InvokeAsync(Call(json), Context(), CancellationToken.None);
+
     private static async Task<string> AddAsync(TodoTool tool, string title)
     {
-        var added = await tool.InvokeAsync(Call($$"""{"operation":"add","title":"{{title}}"}"""), Context(), CancellationToken.None);
+        var added = await InvokeAsync(tool, $$"""{"operation":"add","title":"{{title}}"}""");
         Assert.False(added.IsError);
         return added.Content[(added.Content.IndexOf('#') + 1)..added.Content.IndexOf(':')];
     }
@@ -54,10 +58,7 @@ public sealed class TodoToolStepCommitTests
         var tool = new TodoTool(store, committer);
         var id = await AddAsync(tool, "Step one");
 
-        var done = await tool.InvokeAsync(
-            Call($$"""{"operation":"update","id":"{{id}}","status":"done","commit_subject":"feat: one","summary":"did one","verification":"tests"}"""),
-            Context(),
-            CancellationToken.None);
+        var done = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"done","commit_subject":"feat: one","summary":"did one","verification":"tests"}""");
 
         Assert.False(done.IsError);
         Assert.Contains("Step commit: committed abc1234", done.Content, StringComparison.Ordinal);
@@ -68,12 +69,12 @@ public sealed class TodoToolStepCommitTests
         Assert.Equal("did one", seen.Summary);
         Assert.Equal("tests", seen.Verification);
 
-        var again = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{id}}","status":"done"}"""), Context(), CancellationToken.None);
+        var again = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"done"}""");
         Assert.False(again.IsError);
         Assert.DoesNotContain("Step commit", again.Content, StringComparison.Ordinal);
         Assert.Single(committer.Items);
 
-        var other = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{id}}","status":"in_progress"}"""), Context(), CancellationToken.None);
+        var other = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"in_progress"}""");
         Assert.DoesNotContain("Step commit", other.Content, StringComparison.Ordinal);
     }
 
@@ -89,13 +90,13 @@ public sealed class TodoToolStepCommitTests
         var tool = new TodoTool(store, committer);
         var id = await AddAsync(tool, "Step");
 
-        var first = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{id}}","status":"done"}"""), Context(), CancellationToken.None);
+        var first = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"done"}""");
         Assert.False(first.IsError);
         Assert.Contains("Step commit: FAILED: pre-commit hook rejected the commit", first.Content, StringComparison.Ordinal);
         Assert.Equal(TodoStatus.Done, Assert.Single(await store.ListAsync("sess-a", default)).Status);
 
         committer.Respond = _ => new StepCommitResult(StepCommitOutcome.Committed, "fedcba9876", "ok");
-        var retry = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{id}}","status":"done"}"""), Context(), CancellationToken.None);
+        var retry = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"done"}""");
         Assert.Contains("Step commit: committed fedcba9", retry.Content, StringComparison.Ordinal);
         Assert.Equal(2, committer.Items.Count);
         var stored = Assert.Single(await store.ListAsync("sess-a", default));
@@ -116,11 +117,11 @@ public sealed class TodoToolStepCommitTests
         var first = await AddAsync(tool, "A");
         var second = await AddAsync(tool, "B");
 
-        var skipped = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{first}}","status":"done"}"""), Context(), CancellationToken.None);
+        var skipped = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{first}}","status":"done"}""");
         Assert.Contains("Step commit: skipped (step commits are off)", skipped.Content, StringComparison.Ordinal);
 
         committer.Respond = _ => new StepCommitResult(StepCommitOutcome.NoChanges, null, "nothing to commit");
-        var none = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{second}}","status":"done"}"""), Context(), CancellationToken.None);
+        var none = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{second}}","status":"done"}""");
         Assert.Contains("Step commit: no changes", none.Content, StringComparison.Ordinal);
     }
 
@@ -132,7 +133,7 @@ public sealed class TodoToolStepCommitTests
         var tool = new TodoTool(store, new ThrowingCommitter());
         var id = await AddAsync(tool, "Step");
 
-        var result = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{id}}","status":"done"}"""), Context(), CancellationToken.None);
+        var result = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"done"}""");
 
         Assert.False(result.IsError);
         Assert.Contains("Step commit: FAILED: boom", result.Content, StringComparison.Ordinal);
@@ -149,19 +150,17 @@ public sealed class TodoToolStepCommitTests
         var tool = new TodoTool(store);
         var id = await AddAsync(tool, "Step");
 
-        var done = await tool.InvokeAsync(
-            Call($$"""{"operation":"update","id":"{{id}}","status":"done","summary":"s"}"""), Context(), CancellationToken.None);
+        var done = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","status":"done","summary":"s"}""");
         Assert.False(done.IsError);
         Assert.DoesNotContain("Step commit", done.Content, StringComparison.Ordinal);
 
-        var fieldsOnly = await tool.InvokeAsync(
-            Call($$"""{"operation":"update","id":"{{id}}","verification":"v"}"""), Context(), CancellationToken.None);
+        var fieldsOnly = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}","verification":"v"}""");
         Assert.False(fieldsOnly.IsError);
         var stored = Assert.Single(await store.ListAsync("sess-a", default));
         Assert.Equal("s", stored.Summary);
         Assert.Equal("v", stored.Verification);
 
-        var nothing = await tool.InvokeAsync(Call($$"""{"operation":"update","id":"{{id}}"}"""), Context(), CancellationToken.None);
+        var nothing = await InvokeAsync(tool, $$"""{"operation":"update","id":"{{id}}"}""");
         Assert.True(nothing.IsError);
     }
 
@@ -179,7 +178,7 @@ public sealed class TodoToolStepCommitTests
         await store.UpdateAsync(failed, null, TodoStatus.Done, null, default);
         await store.SetCommitResultAsync(failed, null, "hook failed", default);
 
-        var list = await tool.InvokeAsync(Call("""{"operation":"list"}"""), Context(), CancellationToken.None);
+        var list = await InvokeAsync(tool, """{"operation":"list"}""");
 
         Assert.Contains("[commit abcdef0]", list.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("abcdef01", list.Content, StringComparison.Ordinal);
@@ -197,16 +196,16 @@ public sealed class TodoToolStepCommitTests
         await using var store = new SqliteTodoStore(directory.Path);
         var tool = new TodoTool(store);
 
-        var empty = await tool.InvokeAsync(Call("""{"operation":"plan_summary_get"}"""), Context(), CancellationToken.None);
+        var empty = await InvokeAsync(tool, """{"operation":"plan_summary_get"}""");
         Assert.False(empty.IsError);
         Assert.Contains("No plan summary", empty.Content, StringComparison.Ordinal);
 
-        var rejected = await tool.InvokeAsync(Call("""{"operation":"plan_summary_set","text":"  "}"""), Context(), CancellationToken.None);
+        var rejected = await InvokeAsync(tool, """{"operation":"plan_summary_set","text":"  "}""");
         Assert.True(rejected.IsError);
 
-        var saved = await tool.InvokeAsync(Call("""{"operation":"plan_summary_set","text":"## Summary\nIt works."}"""), Context(), CancellationToken.None);
+        var saved = await InvokeAsync(tool, """{"operation":"plan_summary_set","text":"## Summary\nIt works."}""");
         Assert.False(saved.IsError);
-        var read = await tool.InvokeAsync(Call("""{"operation":"plan_summary_get"}"""), Context(), CancellationToken.None);
+        var read = await InvokeAsync(tool, """{"operation":"plan_summary_get"}""");
         Assert.Equal("## Summary\nIt works.", read.Content);
         var other = await tool.InvokeAsync(Call("""{"operation":"plan_summary_get"}"""), Context("sess-b"), CancellationToken.None);
         Assert.Contains("No plan summary", other.Content, StringComparison.Ordinal);
@@ -216,7 +215,7 @@ public sealed class TodoToolStepCommitTests
         Assert.Equal(ToolSideEffect.Write, ToolRegistry.SideEffectOf(tool, Call("""{"operation":"plan_summary_set","text":"x"}""")));
         Assert.Equal(ToolSideEffect.Write, ToolRegistry.SideEffectOf(tool, Call("""{"operation":"update","id":"x","status":"done"}""")));
 
-        var unknown = await tool.InvokeAsync(Call("""{"operation":"frobnicate"}"""), Context(), CancellationToken.None);
+        var unknown = await InvokeAsync(tool, """{"operation":"frobnicate"}""");
         Assert.True(unknown.IsError);
         Assert.Contains("plan_summary_set", unknown.Content, StringComparison.Ordinal);
     }

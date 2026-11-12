@@ -39,13 +39,9 @@ public sealed class HostToolCallConcurrencyTests
         });
         var registry = new TestRegistry([tool]);
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "work" ? tool : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: tool.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
-        var setup = await StartScriptRootAsync(host, client, registry, execution, limit.Token);
+        var setup = await BoundRoots.StartScriptRootAsync(host, client, registry, limit.Token, execution);
 
         using var callbackBudget = TestLimit.Create();
         var first = host.CallClientAsync(
@@ -58,8 +54,7 @@ public sealed class HostToolCallConcurrencyTests
         releaseTool.TrySetResult();
         Assert.Equal(("done", false), BoundRoots.OutputOf(await first.Bounded()));
         Assert.Equal(("done", false), BoundRoots.OutputOf(await second.Bounded()));
-        setup.Hold.Gate.TrySetResult();
-        await setup.RootTask.Bounded();
+        await setup.FinishAsync();
 
         Assert.Equal(1, Volatile.Read(ref peak));
         Assert.Equal(2, tool.InvocationCount);
@@ -85,15 +80,11 @@ public sealed class HostToolCallConcurrencyTests
         });
         var registry = new TestRegistry([tool]);
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "work" ? tool : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: tool.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
 
-        var first = await StartScriptRootAsync(host, client, registry, execution, limit.Token, "1+1");
-        var second = await StartScriptRootAsync(host, client, registry, execution, limit.Token, "2+2");
+        var first = await BoundRoots.StartScriptRootAsync(host, client, registry, limit.Token, execution, "1+1");
+        var second = await BoundRoots.StartScriptRootAsync(host, client, registry, limit.Token, execution, "2+2");
         Assert.NotEqual(first.RunId, second.RunId);
 
         using var callbackBudget = TestLimit.Create();
@@ -106,10 +97,8 @@ public sealed class HostToolCallConcurrencyTests
         releaseTools.TrySetResult();
         Assert.Equal(("done", false), BoundRoots.OutputOf(await callbackA.Bounded()));
         Assert.Equal(("done", false), BoundRoots.OutputOf(await callbackB.Bounded()));
-        first.Hold.Gate.TrySetResult();
-        second.Hold.Gate.TrySetResult();
-        await first.RootTask.Bounded();
-        await second.RootTask.Bounded();
+        await first.FinishAsync();
+        await second.FinishAsync();
 
         Assert.Equal(["{\"tag\":\"a\"}", "{\"tag\":\"b\"}"], entered.OrderBy(entry => entry, StringComparer.Ordinal).ToArray());
     }
@@ -123,18 +112,11 @@ public sealed class HostToolCallConcurrencyTests
             ValueTask.FromResult(new ToolResult(big)));
         var registry = new TestRegistry([tool]);
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "work" ? tool : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: tool.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
-        var setup = await StartScriptRootAsync(host, client, registry, execution, limit.Token);
+        var setup = await BoundRoots.StartScriptRootAsync(host, client, registry, limit.Token, execution);
 
-        var response = await host.CallClientAsync(
-            Operation, BoundRoots.BoundPayload(setup.RunId, "$run_code", "work", "{}"), limit.Token);
-        setup.Hold.Gate.TrySetResult();
-        await setup.RootTask.Bounded();
+        var response = await setup.CallAsync(host, "work", "{}", limit.Token, pluginId: "$run_code");
 
         var (content, isError) = BoundRoots.OutputOf(response);
         Assert.False(isError);
@@ -148,8 +130,7 @@ public sealed class HostToolCallConcurrencyTests
         var big = new string('y', 500);
         var registry = new TestRegistry();
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot
         {
@@ -177,7 +158,7 @@ public sealed class HostToolCallConcurrencyTests
         var releaseApproval = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var registry = new TestRegistry([tool]);
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
             resolver: _ => null,
             approval: async (_, _) =>
@@ -186,7 +167,6 @@ public sealed class HostToolCallConcurrencyTests
                 await releaseApproval.Task.ConfigureAwait(false);
                 return ApprovalDecision.Allow;
             });
-        await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot { ResultJson = """{"content":"script-ok","isError":false}""" };
         BoundRoots.ParkRoot(host, "code.execute", hold);
@@ -204,26 +184,8 @@ public sealed class HostToolCallConcurrencyTests
         await rootTask.Bounded();
         releaseApproval.TrySetResult();
 
-        var (content, isError) = BoundRoots.OutputOf(await pending.Bounded());
-        Assert.True(isError);
+        var content = BoundRoots.RefusedContent(await pending.Bounded());
         Assert.Contains("already ended", content);
         Assert.Equal(0, tool.InvocationCount);
-    }
-
-    private sealed record ScriptSetup(string RunId, InFlightRoot Hold, Task<ToolResult> RootTask);
-
-    private static async Task<ScriptSetup> StartScriptRootAsync(
-        FakeHost host, ExtensionHostClient client, TestRegistry registry, Sdk.CodeExecutionOptions execution,
-        CancellationToken ct, string code = "1+1")
-    {
-        var hold = new InFlightRoot { ResultJson = """{"content":"script-ok","isError":false}""" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
-        var proxy = client.CreateRunCodeTool(registry, new RunCodeProxyOptions { Execution = execution });
-        var rootTask = proxy.InvokeAsync(
-            new ToolCall("root-rc", "run_code", "{\"code\":" + JsonSerializer.Serialize(code) + "}"),
-            new ToolContext("sess-script", BoundRoots.AbsoluteDir("script"), 0),
-            ct).AsTask();
-        var runId = BoundRoots.RunIdOf(await hold.Arrived.Task.Bounded());
-        return new ScriptSetup(runId, hold, rootTask);
     }
 }

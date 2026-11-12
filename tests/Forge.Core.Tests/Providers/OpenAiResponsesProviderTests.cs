@@ -169,20 +169,7 @@ public class OpenAiResponsesProviderTests
 
         var events = await provider.CollectAsync(TestData.Request());
 
-        var started = Assert.Single(events.OfType<ToolCallStarted>());
-        Assert.Equal("call_a", started.Id);
-        Assert.Equal("read_file", started.Name);
-
-        var deltas = events.OfType<ToolCallArgumentsDelta>().ToList();
-        Assert.Equal(2, deltas.Count);
-        Assert.All(deltas, d => Assert.Equal("call_a", d.Id));
-        Assert.Equal("{\"path\":\"a.txt\"}", string.Concat(deltas.Select(d => d.Json)));
-
-        var completed = events.Completed();
-        Assert.Equal(StopReason.ToolUse, completed.Stop);
-        Assert.Equal(
-            new ToolCallBlock("call_a", "read_file", "{\"path\":\"a.txt\"}"),
-            Assert.Single(completed.Message.Content));
+        events.AssertFragmentedReadFileCall("call_a");
     }
 
     [Fact]
@@ -258,9 +245,7 @@ public class OpenAiResponsesProviderTests
 
         var provider = new OpenAiResponsesProvider(Config(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.Equal(400, exception.StatusCode);
         Assert.Contains("tools[0] is not valid", exception.Message, StringComparison.Ordinal);
     }
@@ -285,9 +270,7 @@ public class OpenAiResponsesProviderTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("{not json"));
         var provider = new OpenAiResponsesProvider(Config(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.Contains("malformed", exception.Message, StringComparison.Ordinal);
         Assert.IsAssignableFrom<System.Text.Json.JsonException>(exception.InnerException);
     }
@@ -299,9 +282,7 @@ public class OpenAiResponsesProviderTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[1,2]"));
         var provider = new OpenAiResponsesProvider(Config(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.Contains("malformed", exception.Message, StringComparison.Ordinal);
         Assert.Contains("[1,2]", exception.Message, StringComparison.Ordinal);
     }

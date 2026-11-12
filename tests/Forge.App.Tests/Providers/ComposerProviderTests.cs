@@ -15,9 +15,8 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class ComposerProviderTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-composer-providers-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-composer-providers-");
 
-    public ComposerProviderTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void Two_providers_produce_a_union_with_a_provider_caption_per_row()
@@ -173,13 +172,7 @@ public sealed class ComposerProviderTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     [Fact]

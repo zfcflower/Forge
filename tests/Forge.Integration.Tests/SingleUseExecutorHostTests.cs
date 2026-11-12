@@ -64,7 +64,7 @@ public sealed class SingleUseExecutorHostTests
         }
         finally
         {
-            DeleteDirectory(shadow);
+            TempRoots.Delete(shadow);
         }
     }
 
@@ -72,12 +72,8 @@ public sealed class SingleUseExecutorHostTests
     public async Task TwoScriptCallsThroughHost_UseFreshExecutorProcesses_AndLeaveNoneBehind()
     {
         var gate = new GateTool();
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == GateTool.Name ? gate : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(gate);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var hostPid = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
         var workerPid = await fx.WorkerPidAsync("alpha");
         Assert.True(workerPid > 0, "The plugin worker has no process id.");
@@ -95,12 +91,8 @@ public sealed class SingleUseExecutorHostTests
     public async Task HangingScriptBeyondBudget_IsKilled_AndExecutorDisappears()
     {
         var gate = new GateTool();
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == GateTool.Name ? gate : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(gate);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var hostPid = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
         var workerPid = await fx.WorkerPidAsync("alpha");
         var baseline = new HashSet<int>(HostProcessTree.GetChildPids(hostPid));
@@ -192,31 +184,6 @@ public sealed class SingleUseExecutorHostTests
         return shadow;
     }
 
-    private static void DeleteDirectory(string path)
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    return;
-                }
-
-                Directory.Delete(path, recursive: true);
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == 49)
-                {
-                    return;
-                }
-
-                Thread.Sleep(100);
-            }
-        }
-    }
 
     private sealed class GateTool : ITool
     {

@@ -496,9 +496,7 @@ public class CompactionPolicyTests
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: options, agents: [scout], compactor: compactor);
         var root = host.CreateRoot("s", Workspace);
 
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
-
-        Assert.Empty(events.OfType<AgentFailed>());
+        var events = await host.RunToCompletionAsync(root);
         var call = Assert.Single(compactor.Calls);
         Assert.Equal("scout-model", call.Model);
         Assert.NotEqual(root.Id, call.AgentId);

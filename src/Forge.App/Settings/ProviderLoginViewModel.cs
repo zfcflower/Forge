@@ -12,7 +12,7 @@ namespace Forge.App.Settings;
 /// GitHub Copilot, Kimi For Coding, xAI, Meta and ChatGPT run their device-code flows here, and OpenRouter runs its PKCE
 /// browser sign-in here. Either way, the dialog closes with the connected definition it produced.
 /// </summary>
-internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
+internal sealed class ProviderLoginViewModel : NotifyingObject, IDisposable
 {
     /// <summary>The official Claude Code setup page, opened from the install guidance.</summary>
     internal const string ClaudeCodeDocsUrl = "https://code.claude.com/docs/en/setup";
@@ -152,13 +152,7 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public string? LoginState
     {
         get => loginState;
-        private set
-        {
-            if (Set(ref loginState, value))
-            {
-                OnPropertyChanged(nameof(HasLoginState));
-            }
-        }
+        private set => SetAndNotify(ref loginState, value, nameof(HasLoginState));
     }
 
     public bool HasLoginState => LoginState is { Length: > 0 };
@@ -166,13 +160,7 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public string? Error
     {
         get => error;
-        private set
-        {
-            if (Set(ref error, value))
-            {
-                OnPropertyChanged(nameof(HasError));
-            }
-        }
+        private set => SetAndNotify(ref error, value, nameof(HasError));
     }
 
     public bool HasError => Error is { Length: > 0 };

@@ -8,8 +8,6 @@ namespace Forge.Core.Tests.Agents;
 /// <summary>Pins the per-child lifecycle ordering of the sub-agent scheduler and loop.</summary>
 public sealed class SubAgentLifecyclePinTests
 {
-    private static string Workspace => Path.GetTempPath();
-
     private static readonly AgentDefinition Scout =
         new("Scout", "scout kind", "scout role", new ModelSettings("scout-model"), ["read"]);
 
@@ -41,6 +39,27 @@ public sealed class SubAgentLifecyclePinTests
         return -1;
     }
 
+    /// <summary>Parent spawns two Scout children in one turn; each child's only turn sleeps
+    /// <paramref name="childDelayMs"/> before answering, so the scheduler has to serialise them.</summary>
+    private static FakeProvider TwoChildrenProvider(int childDelayMs) =>
+        new(async (request, index, ct) =>
+        {
+            if (request.Messages.Count == 1 && Turn.LastUserText(request) == "go")
+            {
+                return Turn.Call(
+                    ("call-1", "spawn_agent", Spawn("Scout", "task one")),
+                    ("call-2", "spawn_agent", Spawn("Scout", "task two")));
+            }
+
+            if (Turn.LastUserText(request).StartsWith("task", StringComparison.Ordinal))
+            {
+                await Task.Delay(childDelayMs, ct);
+                return Turn.Say("child done");
+            }
+
+            return Turn.Say("parent done");
+        });
+
     [Fact]
     public async Task Child_lifecycle_is_Started_then_Running_then_exactly_one_Finished()
     {
@@ -51,9 +70,7 @@ public sealed class SubAgentLifecyclePinTests
                     ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
                     : Turn.Say("parent done"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-lifecycle-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-lifecycle-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
 
         Assert.Empty(events.OfType<AgentFailed>());
         var started = Assert.Single(events.OfType<AgentSubAgentStarted>());
@@ -83,27 +100,9 @@ public sealed class SubAgentLifecyclePinTests
     public async Task Queued_is_emitted_only_when_slots_are_exhausted()
     {
         // MaxParallel = 1 with two parallel spawns: exactly one child must wait.
-        var provider = new FakeProvider(async (request, index, ct) =>
-        {
-            if (request.Messages.Count == 1 && Turn.LastUserText(request) == "go")
-            {
-                return Turn.Call(
-                    ("call-1", "spawn_agent", Spawn("Scout", "task one")),
-                    ("call-2", "spawn_agent", Spawn("Scout", "task two")));
-            }
-
-            if (Turn.LastUserText(request).StartsWith("task", StringComparison.Ordinal))
-            {
-                await Task.Delay(150, ct);
-                return Turn.Say("child done");
-            }
-
-            return Turn.Say("parent done");
-        });
+        var provider = TwoChildrenProvider(150);
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(maxParallel: 1), agents: [Scout]);
-        var root = host.CreateRoot("session-queued-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(20));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-queued-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(20));
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(2, host.SubAgents.Instances.Count);
@@ -128,9 +127,7 @@ public sealed class SubAgentLifecyclePinTests
                     ? Turn.Say("child done")
                     : Turn.Say("parent done"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(maxParallel: 4), agents: [Scout]);
-        var root = host.CreateRoot("session-free-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-free-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Empty(events.OfType<AgentSubAgentQueued>());
@@ -141,27 +138,9 @@ public sealed class SubAgentLifecyclePinTests
     [Fact]
     public async Task Finished_precedes_the_parent_spawn_tool_result()
     {
-        var provider = new FakeProvider(async (request, index, ct) =>
-        {
-            if (request.Messages.Count == 1 && Turn.LastUserText(request) == "go")
-            {
-                return Turn.Call(
-                    ("call-1", "spawn_agent", Spawn("Scout", "task one")),
-                    ("call-2", "spawn_agent", Spawn("Scout", "task two")));
-            }
-
-            if (Turn.LastUserText(request).StartsWith("task", StringComparison.Ordinal))
-            {
-                await Task.Delay(50, ct);
-                return Turn.Say("child done");
-            }
-
-            return Turn.Say("parent done");
-        });
+        var provider = TwoChildrenProvider(50);
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(maxParallel: 4), agents: [Scout]);
-        var root = host.CreateRoot("session-order-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(20));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-order-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(20));
 
         Assert.Empty(events.OfType<AgentFailed>());
         var eventList = events.ToList();
@@ -201,9 +180,7 @@ public sealed class SubAgentLifecyclePinTests
             };
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-usage-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-usage-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
 
         Assert.Empty(events.OfType<AgentFailed>());
         var finished = events.OfType<AgentSubAgentFinished>().ToArray();
@@ -217,27 +194,9 @@ public sealed class SubAgentLifecyclePinTests
     [Fact]
     public async Task Finished_elapsed_includes_queue_time()
     {
-        var provider = new FakeProvider(async (request, index, ct) =>
-        {
-            if (request.Messages.Count == 1 && Turn.LastUserText(request) == "go")
-            {
-                return Turn.Call(
-                    ("call-1", "spawn_agent", Spawn("Scout", "task one")),
-                    ("call-2", "spawn_agent", Spawn("Scout", "task two")));
-            }
-
-            if (Turn.LastUserText(request).StartsWith("task", StringComparison.Ordinal))
-            {
-                await Task.Delay(200, ct);
-                return Turn.Say("child done");
-            }
-
-            return Turn.Say("parent done");
-        });
+        var provider = TwoChildrenProvider(200);
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(maxParallel: 1), agents: [Scout]);
-        var root = host.CreateRoot("session-elapsed-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(20));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-elapsed-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(20));
 
         Assert.Empty(events.OfType<AgentFailed>());
         var finished = events.OfType<AgentSubAgentFinished>().OrderBy(f => f.At).ToArray();

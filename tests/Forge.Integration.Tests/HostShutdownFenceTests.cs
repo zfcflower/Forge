@@ -107,7 +107,7 @@ public sealed class HostShutdownFenceTests
             }
 
             await client.DisposeAsync();
-            DeleteDirectory(root);
+            TempRoots.Delete(root);
         }
 
         Assert.Equal(0, await runTask.WaitAsync(ct));
@@ -182,7 +182,7 @@ public sealed class HostShutdownFenceTests
         {
             blocker.Release();
             await client.DisposeAsync();
-            DeleteDirectory(root);
+            TempRoots.Delete(root);
         }
 
         Assert.Equal(0, await runTask.WaitAsync(ct));
@@ -287,7 +287,7 @@ public sealed class HostShutdownFenceTests
             }
 
             await client.DisposeAsync();
-            DeleteDirectory(root);
+            TempRoots.Delete(root);
         }
 
         Assert.Equal(0, await runTask.WaitAsync(ct));
@@ -364,32 +364,6 @@ public sealed class HostShutdownFenceTests
         catch (ArgumentException)
         {
             return false;
-        }
-    }
-
-    private static void DeleteDirectory(string path)
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    return;
-                }
-
-                Directory.Delete(path, recursive: true);
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == 49)
-                {
-                    return;
-                }
-
-                Thread.Sleep(100);
-            }
         }
     }
 

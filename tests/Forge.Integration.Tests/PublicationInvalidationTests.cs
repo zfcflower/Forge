@@ -13,8 +13,7 @@ public sealed class PublicationInvalidationTests
         var source = PluginSources.Standard("delta", echoPrefix: "d");
         fx.WritePluginWithManifest("delta", source, PluginSources.ManifestWithPermissions("delta", "1.0.0", "ReadFile"));
         await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("delta");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("delta").Count == PluginSources.AllTools.Length, "the tools of delta");
+        await fx.ApproveViaStatusAndWaitForToolsAsync("delta", PluginSources.AllTools.Length, "the tools of delta");
 
         var before = await StatusOfAsync(fx, "delta");
         Assert.Equal("approved", before.Status);
@@ -33,10 +32,8 @@ public sealed class PublicationInvalidationTests
     public async Task Source_edit_without_refresh_fails_closed_at_execution_while_approval_needs_an_explicit_refresh()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("delta", PluginSources.Standard("delta", echoPrefix: "d"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("delta");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("delta").Count == PluginSources.AllTools.Length, "the tools of delta");
+        await fx.StartWithStatusApprovedPluginAsync("delta", "d");
+        await fx.WaitForToolsAsync("delta", PluginSources.AllTools.Length, "the tools of delta");
 
         var before = await fx.InvokeAsync("delta", PluginSources.EchoTool, "{\"text\":\"before\"}");
         Assert.False(before.IsError, before.Content);

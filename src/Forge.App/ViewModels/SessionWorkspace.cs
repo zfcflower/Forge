@@ -43,7 +43,7 @@ internal enum TurnRejection
 /// <see cref="Loc.LanguageChanged"/>: the cards, tool rows, notices and sub-agent labels re-derive their texts when the
 /// language changes and are told to re-raise them from here, and the subscription ends with <see cref="Dispose"/>.</para>
 /// </summary>
-internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable, IAutomationSession
+internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, IAutomationSession
 {
     /// <summary>How much text of a child agent is parked while its start event is still in flight.</summary>
     private const int EarlyDeltaLimit = 8192;
@@ -248,13 +248,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     public AsyncRelayCommand? ContinueCommand
     {
         get => continueCommand;
-        set
-        {
-            if (Set(ref continueCommand, value))
-            {
-                OnPropertyChanged(nameof(HasContinue));
-            }
-        }
+        set => SetAndNotify(ref continueCommand, value, nameof(HasContinue));
     }
 
     public bool HasContinue => isReadOnlyView && continueCommand is not null && Info.Status != SessionStatus.Deleted;
@@ -263,13 +257,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     public AsyncRelayCommand? RestoreCommand
     {
         get => restoreCommand;
-        set
-        {
-            if (Set(ref restoreCommand, value))
-            {
-                OnPropertyChanged(nameof(HasRestore));
-            }
-        }
+        set => SetAndNotify(ref restoreCommand, value, nameof(HasRestore));
     }
 
     public bool HasRestore => isReadOnlyView && restoreCommand is not null && Info.Status == SessionStatus.Deleted;
@@ -406,13 +394,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     public string? AutomationBanner
     {
         get => automationBanner;
-        private set
-        {
-            if (Set(ref automationBanner, value))
-            {
-                OnPropertyChanged(nameof(HasAutomationBanner));
-            }
-        }
+        private set => SetAndNotify(ref automationBanner, value, nameof(HasAutomationBanner));
     }
 
     public bool HasAutomationBanner => automationBanner is not null;

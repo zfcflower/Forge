@@ -8,6 +8,16 @@ public sealed class ChangeBlockReverterTests
     private static string Numbered(int count, string prefix = "line") =>
         string.Concat(Enumerable.Range(1, count).Select(i => prefix + i + "\n"));
 
+    /// <summary>A repository with one commit of <c>f.txt</c> holding <paramref name="count"/> numbered lines;
+    /// <paramref name="original"/> receives exactly the committed text.</summary>
+    private static TestRepo RepositoryWithNumberedFile(int count, out string original)
+    {
+        var repo = new TestRepo();
+        original = Numbered(count);
+        repo.CommitFile("f.txt", original, "base");
+        return repo;
+    }
+
     private static async Task<FileDiff> DiffOf(TestRepo repo, string path, int context = 3)
     {
         var files = await new GitCli().GetDiffAsync(repo.Root, new GitDiffOptions { ContextLines = context, IncludeUntracked = true });
@@ -20,10 +30,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_restores_exactly_one_block_of_several()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         repo.Write("f.txt", original.Replace("line5\n", "FIVE\nFIVE-b\n", StringComparison.Ordinal).Replace("line25\n", "TWENTY-FIVE\n", StringComparison.Ordinal));
         var diff = await DiffOf(repo, "f.txt");
         var blocks = DiffBlocks.Split(diff);
@@ -39,10 +46,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_follows_a_drifted_position_when_the_match_is_unique()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         repo.Write("f.txt", original.Replace("line20\n", "CHANGED\n", StringComparison.Ordinal));
         var diff = await DiffOf(repo, "f.txt");
 
@@ -58,10 +62,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_reports_FileChanged_when_the_text_is_gone_or_ambiguous_and_leaves_the_file()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         repo.Write("f.txt", original.Replace("line20\n", "CHANGED\n", StringComparison.Ordinal));
         var diff = await DiffOf(repo, "f.txt");
         var block = DiffBlocks.Split(diff)[0];
@@ -86,10 +87,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_finds_a_short_block_shifted_far_beyond_any_small_window()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         var changed = original.Replace("line20\n", "CHANGED\n", StringComparison.Ordinal);
         repo.Write("f.txt", changed);
         var diff = await DiffOf(repo, "f.txt");
@@ -105,10 +103,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_uses_context_to_pick_the_right_occurrence_of_repeated_content()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         var changed = original.Replace("line20\n", "dup\n", StringComparison.Ordinal);
         repo.Write("f.txt", changed);
         var diff = await DiffOf(repo, "f.txt");
@@ -126,10 +121,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_fails_without_writing_when_block_and_context_occur_twice()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         var changed = original.Replace("line20\n", "dup\n", StringComparison.Ordinal);
         repo.Write("f.txt", changed);
         var diff = await DiffOf(repo, "f.txt");
@@ -148,10 +140,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_reinserts_a_pure_deletion_shifted_far_and_refuses_when_ambiguous()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(30);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(30, out var original);
         var deleted = original.Replace("line10\n", string.Empty, StringComparison.Ordinal);
         repo.Write("f.txt", deleted);
         var diff = await DiffOf(repo, "f.txt");
@@ -175,8 +164,7 @@ public sealed class ChangeBlockReverterTests
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
         var original = Numbered(10).Replace("\n", "\r\n", StringComparison.Ordinal);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        repo.CommitFile("f.txt", original, "base");
         var changed = original.Replace("line4\r\n", "FOUR\r\nFOUR-b\r\n", StringComparison.Ordinal);
         repo.Write("f.txt", changed);
         var diff = await DiffOf(repo, "f.txt");
@@ -192,8 +180,7 @@ public sealed class ChangeBlockReverterTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "a\nb\nc");
-        repo.Commit("base");
+        repo.CommitFile("f.txt", "a\nb\nc", "base");
         repo.Write("f.txt", "a\nb\nC");
         var diff = await DiffOf(repo, "f.txt");
 
@@ -220,10 +207,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_reinserts_a_pure_deletion_between_its_context_lines()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(20);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(20, out var original);
         repo.Write("f.txt", original.Replace("line10\nline11\n", string.Empty, StringComparison.Ordinal));
         var diff = await DiffOf(repo, "f.txt");
         var block = Assert.Single(DiffBlocks.Split(diff));
@@ -237,10 +221,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_of_a_pure_deletion_fails_when_the_surrounding_context_changed()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(20);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(20, out var original);
         var deleted = original.Replace("line10\nline11\n", string.Empty, StringComparison.Ordinal);
         repo.Write("f.txt", deleted);
         var diff = await DiffOf(repo, "f.txt");
@@ -257,10 +238,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertBlock_handles_a_pure_deletion_at_the_start_and_end_of_the_file()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(12);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(12, out var original);
         repo.Write("f.txt", original.Replace("line1\n", string.Empty, StringComparison.Ordinal).Replace("line12\n", string.Empty, StringComparison.Ordinal));
         var diff = await DiffOf(repo, "f.txt");
 
@@ -272,10 +250,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertFile_reverts_every_block_of_a_modified_file_in_one_write()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(60);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(60, out var original);
         repo.Write("f.txt", original
             .Replace("line3\n", "A\nA2\n", StringComparison.Ordinal)
             .Replace("line30\n", string.Empty, StringComparison.Ordinal)
@@ -291,10 +266,7 @@ public sealed class ChangeBlockReverterTests
     public async Task RevertFile_changes_nothing_when_any_block_no_longer_matches()
     {
         if (!GitProbe.IsAvailable) return;
-        using var repo = new TestRepo();
-        var original = Numbered(60);
-        repo.Write("f.txt", original);
-        repo.Commit("base");
+        using var repo = RepositoryWithNumberedFile(60, out var original);
         repo.Write("f.txt", original.Replace("line3\n", "A\n", StringComparison.Ordinal).Replace("line50\n", "B\n", StringComparison.Ordinal));
         var diff = await DiffOf(repo, "f.txt");
 
@@ -310,8 +282,7 @@ public sealed class ChangeBlockReverterTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "a\nb\n");
-        repo.Commit("base");
+        repo.CommitFile("f.txt", "a\nb\n", "base");
         repo.Write("f.txt", "a\nB\n");
         var diff = await DiffOf(repo, "f.txt");
         File.Delete(repo.FullPath("f.txt"));
@@ -325,8 +296,7 @@ public sealed class ChangeBlockReverterTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("keep.txt", "k\n");
-        repo.Commit("base");
+        repo.CommitFile("keep.txt", "k\n", "base");
         repo.Write("new.txt", "a\nb\n");
         var diff = await DiffOf(repo, "new.txt");
         Assert.Equal(FileDiffStatus.Added, diff.Status);
@@ -347,8 +317,7 @@ public sealed class ChangeBlockReverterTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("gone.txt", "one\ntwo\nthree\n");
-        repo.Commit("base");
+        repo.CommitFile("gone.txt", "one\ntwo\nthree\n", "base");
         File.Delete(repo.FullPath("gone.txt"));
         var diff = await DiffOf(repo, "gone.txt");
         Assert.Equal(FileDiffStatus.Deleted, diff.Status);
@@ -365,8 +334,7 @@ public sealed class ChangeBlockReverterTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("gone.txt", "one\ntwo");
-        repo.Commit("base");
+        repo.CommitFile("gone.txt", "one\ntwo", "base");
         File.Delete(repo.FullPath("gone.txt"));
         var diff = await DiffOf(repo, "gone.txt");
 
@@ -426,8 +394,7 @@ public sealed class ChangeBlockReverterTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "a\nb\n");
-        repo.Commit("base");
+        repo.CommitFile("f.txt", "a\nb\n", "base");
         repo.Write("f.txt", "a\nB\n");
         var diff = await DiffOf(repo, "f.txt");
         using var cts = new CancellationTokenSource();
@@ -452,8 +419,7 @@ public sealed class ChangeBlockReverterTests
     private static async Task AssertRoundTrip(string baseText, string workingText, bool blockwise = false)
     {
         using var repo = new TestRepo();
-        repo.Write("f.txt", baseText);
-        repo.Commit("base");
+        repo.CommitFile("f.txt", baseText, "base");
         repo.Write("f.txt", workingText);
         var diff = await DiffOf(repo, "f.txt");
 

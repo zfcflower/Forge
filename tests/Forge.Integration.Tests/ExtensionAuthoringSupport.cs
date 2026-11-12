@@ -74,6 +74,47 @@ internal static class ExtensionAuthoringSupport
     public static string SingleStepWorkflow(string tool, string argsJson = "{}") =>
         $$"""{"steps":[{"id":"only","tool":"{{tool}}","after":[],"args":{{argsJson}}}]""" + "}";
 
+    /// <summary>The <c>extensions.commit</c> request that commits exactly the bytes <paramref name="staged"/> was staged
+    /// with.</summary>
+    private static Sdk.ExtensionCommitRequest CommitRequest(Sdk.StagedExtension staged) =>
+        new(staged.PluginId, staged.SourceHash, staged.DependencyHash, staged.SdkVersion);
+
+    /// <summary>Commits <paramref name="staged"/> with the hashes the host reported for it.</summary>
+    public static Task<Sdk.ExtensionCommitResult> CommitAsync(E2eFixture fx, Sdk.StagedExtension staged) =>
+        CommitAsync(fx.Client, fx.Ct, staged);
+
+    /// <summary>Commits <paramref name="staged"/> with the hashes the host reported for it.</summary>
+    public static Task<Sdk.ExtensionCommitResult> CommitAsync(
+        ExtensionHostClient client,
+        CancellationToken ct,
+        Sdk.StagedExtension staged) =>
+        client.CommitExtensionAsync(CommitRequest(staged), ct);
+
+    /// <summary>Stages a plugin draft with the standard sources, commits it with the hashes the host reported, and returns
+    /// the staged draft.</summary>
+    public static Task<Sdk.StagedExtension> StageAndCommitPluginAsync(
+        E2eFixture fx,
+        string id,
+        string version = "1.0.0",
+        string echoPrefix = "x") =>
+        StageAndCommitPluginAsync(fx.Client, fx.Ct, id, version, echoPrefix);
+
+    /// <summary>Stages a plugin draft with the standard sources, commits it with the hashes the host reported, and returns
+    /// the staged draft.</summary>
+    public static async Task<Sdk.StagedExtension> StageAndCommitPluginAsync(
+        ExtensionHostClient client,
+        CancellationToken ct,
+        string id,
+        string version = "1.0.0",
+        string echoPrefix = "x")
+    {
+        var staged = await client.StageExtensionAsync(
+            StagePluginRequest(id, version, files: PluginFiles(id, version, echoPrefix)), ct);
+        Assert.Empty(staged.Diagnostics);
+        await client.CommitExtensionAsync(CommitRequest(staged), ct);
+        return staged;
+    }
+
     /// <summary>Two tool calls and their <c>host.tool_call</c> names as seen by the main program.</summary>
     public sealed record CapturedToolCall(string Name, string ArgumentsJson);
 
@@ -125,6 +166,21 @@ internal static class ExtensionAuthoringSupport
         }
 
         return error;
+    }
+
+    /// <summary>Snapshots the plugins tree, asserts <paramref name="act"/> fails with the host's business error
+    /// <paramref name="code"/>, and asserts the tree is byte-identical afterwards.</summary>
+    public static async Task AssertRefusedAsync(
+        E2eFixture fx,
+        Func<Task> act,
+        string what,
+        string? messageContains = null,
+        string code = "invalid_extension",
+        bool includeCompilerCache = false)
+    {
+        var before = SnapshotTree(fx.PluginsDirectory, includeCompilerCache);
+        await AssertHostErrorAsync(act, code, messageContains);
+        AssertSameTree(before, SnapshotTree(fx.PluginsDirectory, includeCompilerCache), what);
     }
 
     /// <summary>Snapshots every file under <paramref name="root"/> as relative path to SHA-256, except the host

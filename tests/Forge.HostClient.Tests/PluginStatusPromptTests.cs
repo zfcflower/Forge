@@ -3,6 +3,7 @@ using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
+using static Forge.HostClient.Tests.ToolFixtures;
 using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
@@ -23,7 +24,7 @@ public sealed class PluginStatusPromptTests
     public async Task Statuses_decode_permissions_and_survive_optional_fields()
     {
         await using var host = new FakeHost();
-        host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(
+        host.Answer("plugins.status",
             "{\"plugins\":["
             + "{\"pluginId\":\"alpha\",\"version\":\"1.2.0\",\"status\":\"active\","
             + "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-2.0\","
@@ -31,9 +32,8 @@ public sealed class PluginStatusPromptTests
             + "{\"pluginId\":\"beta\",\"version\":\"0.1\",\"status\":\"failed\","
             + "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-2.0\","
             + "\"permissions\":[],\"error\":\"crashed\"}"
-            + "]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+            + "]}");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -62,7 +62,7 @@ public sealed class PluginStatusPromptTests
     [InlineData("{\"plugins\":\"nope\"}")]
     public async Task Malformed_status_response_throws_InvalidDataException_and_keeps_the_connection(string payload)
     {
-        var resolved = 0;
+        var resolver = new ResolverSpy();
         await using var host = new FakeHost();
         var calls = 0;
         host.On("plugins.status", (_, _) =>
@@ -71,12 +71,7 @@ public sealed class PluginStatusPromptTests
             return Task.FromResult(Json.Element(payload));
         });
         host.On("plugin.execute", (_, _) => throw new FakeHostError("must-not-run", "metadata must not execute"));
-        await using var client = ClientFactory.Create(host, resolver: _ =>
-        {
-            Interlocked.Increment(ref resolved);
-            return null;
-        });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -84,7 +79,7 @@ public sealed class PluginStatusPromptTests
 
         Assert.Contains("plugins.status", error.Message);
         Assert.Equal(1, calls);
-        Assert.Equal(0, resolved);
+        Assert.Equal(0, resolver.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
         Assert.Empty(host.Requests("plugin.execute"));
         var diagnostic = Assert.Single(
@@ -95,26 +90,18 @@ public sealed class PluginStatusPromptTests
     [Fact]
     public async Task Status_timeout_throws_IpcTimeoutException_and_keeps_the_connection()
     {
-        var resolved = 0;
+        var resolver = new ResolverSpy();
         await using var host = new FakeHost();
         host.On("plugins.status", FakeHost.NeverAnswer);
         var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(200) };
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: _ =>
-            {
-                Interlocked.Increment(ref resolved);
-                return null;
-            },
-            options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve, options: options);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcTimeoutException>(
             () => client.GetPluginStatusesAsync(limit.Token));
 
         Assert.Equal("plugins.status", error.Operation);
-        Assert.Equal(0, resolved);
+        Assert.Equal(0, resolver.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
         Assert.NotEmpty(client.Diagnostics);
     }
@@ -122,72 +109,57 @@ public sealed class PluginStatusPromptTests
     [Fact]
     public async Task Valid_empty_registry_returns_empty_and_is_distinct_from_unknown()
     {
-        var resolved = 0;
+        var resolver = new ResolverSpy();
         await using var host = new FakeHost();
-        host.On("plugins.status", (_, _) => Task.FromResult(Json.Element("{\"plugins\":[]}")));
-        await using var client = ClientFactory.Create(host, resolver: _ =>
-        {
-            Interlocked.Increment(ref resolved);
-            return null;
-        });
-        await client.StartConnectedAsync(host);
+        host.Answer("plugins.status", "{\"plugins\":[]}");
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
 
         Assert.Empty(statuses);
-        Assert.Equal(0, resolved);
+        Assert.Equal(0, resolver.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
     [Fact]
     public async Task Host_business_error_on_status_propagates_as_IpcRemoteException()
     {
-        var resolved = 0;
+        var resolver = new ResolverSpy();
         await using var host = new FakeHost();
         host.On("plugins.status", (_, _) => throw new FakeHostError("store-offline", "status store is unavailable"));
-        await using var client = ClientFactory.Create(host, resolver: _ =>
-        {
-            Interlocked.Increment(ref resolved);
-            return null;
-        });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
             () => client.GetPluginStatusesAsync(limit.Token));
 
         Assert.Equal("store-offline", error.Code);
-        Assert.Equal(0, resolved);
+        Assert.Equal(0, resolver.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
     [Fact]
     public async Task Caller_cancellation_of_status_propagates_as_OperationCanceledException()
     {
-        var resolved = 0;
+        var resolver = new ResolverSpy();
         await using var host = new FakeHost();
         host.On("plugins.status", FakeHost.NeverAnswer);
-        await using var client = ClientFactory.Create(host, resolver: _ =>
-        {
-            Interlocked.Increment(ref resolved);
-            return null;
-        });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => client.GetPluginStatusesAsync(canceled.Token));
 
-        Assert.Equal(0, resolved);
+        Assert.Equal(0, resolver.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
     [Fact]
     public async Task Disconnect_during_status_propagates_as_IpcConnectionClosedException()
     {
-        var resolved = 0;
+        var resolver = new ResolverSpy();
         await using var host = new FakeHost();
         var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On("plugins.status", async (message, ct) =>
@@ -196,12 +168,7 @@ public sealed class PluginStatusPromptTests
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
             return Json.Element("{\"plugins\":[]}");
         });
-        await using var client = ClientFactory.Create(host, resolver: _ =>
-        {
-            Interlocked.Increment(ref resolved);
-            return null;
-        });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
 
         var pending = client.GetPluginStatusesAsync(limit.Token);
@@ -210,19 +177,18 @@ public sealed class PluginStatusPromptTests
         await host.DropConnectionAsync();
 
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() => pending);
-        Assert.Equal(0, resolved);
+        Assert.Equal(0, resolver.Calls);
     }
 
     [Fact]
     public async Task Entire_malformed_status_array_throws_without_a_partial_result()
     {
         await using var host = new FakeHost();
-        host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(
+        host.Answer("plugins.status",
             "{\"plugins\":[{\"pluginId\":\"ok\",\"version\":\"1\",\"status\":\"active\",\"sourceHash\":\"s\","
-            + "\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk\",\"permissions\":[]},null]}")));
+            + "\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk\",\"permissions\":[]},null]}");
         host.On("plugin.execute", (_, _) => throw new FakeHostError("must-not-run", "metadata must not execute"));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -243,9 +209,8 @@ public sealed class PluginStatusPromptTests
     public async Task Malformed_entry_mixed_with_valid_rows_throws_without_a_partial_result(string payload)
     {
         await using var host = new FakeHost();
-        host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(payload)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugins.status", payload);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<InvalidDataException>(
@@ -258,13 +223,12 @@ public sealed class PluginStatusPromptTests
     public async Task Valid_invalid_status_and_error_rows_remain_observable()
     {
         await using var host = new FakeHost();
-        host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(
+        host.Answer("plugins.status",
             "{\"plugins\":["
             + "{\"pluginId\":\"broken\",\"version\":\"1.0\",\"status\":\"invalid\","
             + "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk\","
-            + "\"permissions\":[],\"error\":\"compile failed\"}]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+            + "\"permissions\":[],\"error\":\"compile failed\"}]}");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -280,9 +244,8 @@ public sealed class PluginStatusPromptTests
     public async Task Prompt_is_evaluated_with_the_bound_context()
     {
         await using var host = new FakeHost();
-        host.On("plugin.prompt", (_, _) => Task.FromResult(Json.Element("""{"text":"dynamic-text"}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.prompt", """{"text":"dynamic-text"}""");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("prompts");
@@ -306,8 +269,7 @@ public sealed class PluginStatusPromptTests
     public async Task Unregistered_prompt_returns_null_and_sends_nothing()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         await RegisterPromptAsync(host, client, "alpha", "tone");
 
@@ -331,11 +293,7 @@ public sealed class PluginStatusPromptTests
     {
         var tool = new StubTool("echo");
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "echo" ? tool : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: tool.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("promptbound");
@@ -366,8 +324,7 @@ public sealed class PluginStatusPromptTests
     {
         await using var host = new FakeHost();
         host.On("plugin.prompt", (_, _) => throw new FakeHostError("gone", "worker is gone"));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
 
@@ -380,14 +337,4 @@ public sealed class PluginStatusPromptTests
         Assert.NotEmpty(client.Diagnostics);
     }
 
-    private static async Task<PluginPromptReference> RegisterPromptAsync(
-        FakeHost host, ExtensionHostClient client, string pluginId, string contributorId)
-    {
-        await host.NotifyClientAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"promptContributors\":[{\"id\":\""
-            + contributorId + "\"}]}}");
-        await host.SyncAsync();
-        return client.PromptContributors.Single(p =>
-            p.PluginId == pluginId && p.ContributorId == contributorId);
-    }
 }

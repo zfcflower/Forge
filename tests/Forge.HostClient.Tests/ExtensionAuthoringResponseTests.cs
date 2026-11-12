@@ -1,5 +1,6 @@
 using System.IO;
 using Xunit;
+using static Forge.HostClient.Tests.AuthoringPayloads;
 using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
@@ -10,19 +11,6 @@ namespace Forge.HostClient.Tests;
 public sealed class ExtensionAuthoringResponseTests
 {
     private const string Operation = Sdk.ExtensionProtocol.ExtensionsStage;
-
-    private const string ValidStagedJson =
-        "{\"pluginId\":\"demo\",\"version\":\"1.0.0\",\"kind\":\"plugin\"," +
-        "\"files\":[{\"path\":\"Plugin.cs\",\"text\":\"// code\"}]," +
-        "\"permissions\":[{\"kind\":0}]," +
-        "\"dependencies\":[{\"name\":\"Dep\",\"version\":\"1.0.0\"}]," +
-        "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-1\"," +
-        "\"diagnostics\":[]}";
-
-    private const string ValidCommitJson =
-        "{\"status\":{\"pluginId\":\"demo\",\"version\":\"1.0.0\",\"status\":\"approved\"," +
-        "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-1\"," +
-        "\"permissions\":[],\"error\":null},\"toolNames\":[\"demo-tool\"]}";
 
     [Theory]
     [InlineData("null", "instead of a staged extension object")]
@@ -208,8 +196,7 @@ public sealed class ExtensionAuthoringResponseTests
         host.On(Sdk.ExtensionProtocol.ExtensionsPending, (_, _) => Task.FromResult(Json.Element(
             "{\"items\":[" + ValidStagedJson + "," +
             Row([("pluginId", "\"second\""), .. RestOfValidRow("pluginId"), ("liveVersion", "\"0.9.0\"")]) + "]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var pending = await client.GetPendingExtensionsAsync(limit.Token);
@@ -239,8 +226,7 @@ public sealed class ExtensionAuthoringResponseTests
                 ? "{\"items\":[" + ValidStagedJson + "," + second + "]}"
                 : "{\"items\":[" + ValidStagedJson + "]}"));
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -267,8 +253,7 @@ public sealed class ExtensionAuthoringResponseTests
     {
         await using var host = new FakeHost();
         host.On(Sdk.ExtensionProtocol.ExtensionsPending, (_, _) => Task.FromResult(Json.Element("{\"items\":[]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var pending = await client.GetPendingExtensionsAsync(limit.Token);
@@ -291,8 +276,7 @@ public sealed class ExtensionAuthoringResponseTests
             var call = Interlocked.Increment(ref calls);
             return Task.FromResult(Json.Element(call == 1 ? payload : "{\"items\":[]}"));
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -315,8 +299,7 @@ public sealed class ExtensionAuthoringResponseTests
     {
         await using var host = new FakeHost();
         host.On(Sdk.ExtensionProtocol.ExtensionsCommit, (_, _) => Task.FromResult(Json.Element(ValidCommitJson)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var result = await client.CommitExtensionAsync(
@@ -354,8 +337,7 @@ public sealed class ExtensionAuthoringResponseTests
         host.On(Sdk.ExtensionProtocol.ExtensionsCommit, (_, _) => Task.FromResult(Json.Element(
             "{\"status\":{\"pluginId\":\"demo\",\"status\":\"invalid\",\"permissions\":[],\"error\":\"boom\"}," +
             "\"toolNames\":[]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var result = await client.CommitExtensionAsync(
@@ -390,8 +372,7 @@ public sealed class ExtensionAuthoringResponseTests
         var calls = 0;
         host.On(Operation, (_, _) => Task.FromResult(
             Json.Element(Interlocked.Increment(ref calls) == 1 ? resultJson : ValidStagedJson)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -421,8 +402,7 @@ public sealed class ExtensionAuthoringResponseTests
     {
         await using var host = new FakeHost();
         host.On(Operation, (_, _) => Task.FromResult(Json.Element(resultJson)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(
@@ -439,8 +419,7 @@ public sealed class ExtensionAuthoringResponseTests
         var calls = 0;
         host.On(operation, (_, _) => Task.FromResult(
             Json.Element(Interlocked.Increment(ref calls) == 1 ? payload : ValidCommitJson)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(

@@ -58,14 +58,11 @@ internal static class ChangesReviewStrings
         Loc.Register(RevertMissing, "无法撤销：文件已不存在。", "Cannot revert: the file no longer exists.");
     }
 
-    public static string KeptSummary(int kept, int total) =>
-        Loc.Instance.Format(KeptPattern, TextFormat.Number(kept), TextFormat.Number(total));
+    public static string KeptSummary(int kept, int total) => Loc.Instance.FormatCounts(KeptPattern, kept, total);
 
-    public static string ViewedSummary(int viewed, int total) =>
-        Loc.Instance.Format(ViewedPattern, TextFormat.Number(viewed), TextFormat.Number(total));
+    public static string ViewedSummary(int viewed, int total) => Loc.Instance.FormatCounts(ViewedPattern, viewed, total);
 
-    public static string ReviewedSummary(int viewed, int total) =>
-        Loc.Instance.Format(ReviewedPattern, TextFormat.Number(viewed), TextFormat.Number(total));
+    public static string ReviewedSummary(int reviewed, int total) => Loc.Instance.FormatCounts(ReviewedPattern, reviewed, total);
 
     public static string RevertFileMessage(string path) => Loc.Instance.Format(RevertFileMessagePattern, path);
 

@@ -26,9 +26,7 @@ public sealed class ExtensionWorkflowPluginTests
                 Interlocked.Increment(ref probeCalls);
                 return Task.FromResult(new ToolResult("probe-ok"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
 
         var staged = await fx.Client.StageExtensionAsync(
@@ -43,14 +41,12 @@ public sealed class ExtensionWorkflowPluginTests
 
         Assert.Equal("greet", result.Status.PluginId);
         Assert.Equal(["greet"], result.ToolNames);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("greet").Count == 1, "greet tool");
+        await fx.WaitForToolsAsync("greet", 1, "greet tool");
         var tool = fx.ToolOf("greet", "greet");
         Assert.Equal(ToolSideEffect.Execute, tool.SideEffect);
         Assert.Equal("Approved", fx.ReadRecord("greet", "1.0.0")!.Status);
 
-        var invoked = await fx.InvokeAsync("greet", "greet", "{}");
-        Assert.False(invoked.IsError, invoked.Content);
-        Assert.Equal("probe-ok", invoked.Content);
+        await fx.AssertToolContentAsync("greet", "greet", "{}", "probe-ok");
         Assert.Equal(1, Volatile.Read(ref probeCalls));
     }
 
@@ -97,17 +93,13 @@ public sealed class ExtensionWorkflowPluginTests
                 using var document = JsonDocument.Parse(call.ArgumentsJson);
                 return Task.FromResult(new ToolResult("got:" + document.RootElement.GetProperty("text").GetString()));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
 
         var workflow = """{"steps":[{"id":"only","tool":"probe","args":{"text":{"$ref":"$input.label"}}}]}""";
         await CommitWorkflowAsync(fx, "inbind", workflow, "run-it");
 
-        var result = await fx.InvokeAsync("inbind", "run-it", """{"label":"hello","other":1}""");
-        Assert.False(result.IsError, result.Content);
-        Assert.Equal("got:hello", result.Content);
+        await fx.AssertToolContentAsync("inbind", "run-it", """{"label":"hello","other":1}""", "got:hello");
         Assert.NotNull(seen);
         Assert.Equal("probe", seen!.Name);
         Assert.Equal("hello", JsonDocument.Parse(seen.ArgumentsJson).RootElement.GetProperty("text").GetString());
@@ -138,17 +130,13 @@ public sealed class ExtensionWorkflowPluginTests
                         return new ToolResult("three");
                 }
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
 
         var workflow = """{"steps":[{"id":"s1","tool":"probe","after":[],"args":{"tag":"s1"}},{"id":"s2","tool":"probe","after":[],"args":{"tag":"s2"}},{"id":"s3","tool":"probe","after":["s1","s2"],"args":{"tag":"s3"}}]}""";
         await CommitWorkflowAsync(fx, "fan", workflow, "run-it");
 
-        var result = await fx.InvokeAsync("fan", "run-it", "{}");
-        Assert.False(result.IsError, result.Content);
-        Assert.Equal("three", result.Content);
+        await fx.AssertToolContentAsync("fan", "run-it", "{}", "three");
         Assert.Equal(3, probe.Invocations);
     }
 
@@ -164,9 +152,7 @@ public sealed class ExtensionWorkflowPluginTests
                 return Task.FromResult(
                     mode == "fail" ? new ToolResult("kaput-detail", IsError: true) : new ToolResult("fine"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
 
         var workflow = """{"steps":[{"id":"bad","tool":"probe","after":[],"args":{"mode":"fail"}},{"id":"after","tool":"probe","args":{"mode":"ok"}}]}""";
@@ -188,9 +174,7 @@ public sealed class ExtensionWorkflowPluginTests
     [Fact]
     public async Task Unknown_step_tool_fails_the_step_with_names()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals();
         await fx.StartAsync();
 
         var workflow = """{"steps":[{"id":"lost","tool":"no-such-tool","after":[]}]}""";
@@ -212,9 +196,7 @@ public sealed class ExtensionWorkflowPluginTests
                 using var document = JsonDocument.Parse(call.ArgumentsJson);
                 return Task.FromResult(new ToolResult("v:" + document.RootElement.GetProperty("tag").GetString()));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
 
         var v1 = """{"steps":[{"id":"only","tool":"probe","after":[],"args":{"tag":"one"}}]}""";
@@ -234,13 +216,10 @@ public sealed class ExtensionWorkflowPluginTests
         Assert.Equal("approval_mismatch", stale.Code);
 
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("doc").Count == 0, "doc tools to be unregistered");
+        await fx.WaitForToolsAsync("doc", 0, "doc tools to be unregistered");
 
-        await fx.ApproveViaStatusAsync("doc");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("doc").Count == 1, "doc tool after re-approval");
-        var after = await fx.InvokeAsync("doc", "run-it", "{}");
-        Assert.False(after.IsError, after.Content);
-        Assert.Equal("v:two", after.Content);
+        await fx.ApproveViaStatusAndWaitForToolsAsync("doc", 1, "doc tool after re-approval");
+        await fx.AssertToolContentAsync("doc", "run-it", "{}", "v:two");
     }
 
     [Fact]
@@ -303,9 +282,7 @@ public sealed class ExtensionWorkflowPluginTests
                 return new ToolResult("never");
             },
             entered: () => entered.TrySetResult());
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
         await CommitWorkflowAsync(fx, "cancelwf", ExtensionAuthoringSupport.SingleStepWorkflow("probe"), "run-it");
 
@@ -332,10 +309,7 @@ public sealed class ExtensionWorkflowPluginTests
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 return new ToolResult("never");
             });
-        await using var fx = new E2eFixture(
-            hostArguments: ["--tool-timeout", "2"],
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe, ["--tool-timeout", "2"]);
         await fx.StartAsync();
         await CommitWorkflowAsync(fx, "slowwf", ExtensionAuthoringSupport.SingleStepWorkflow("probe"), "run-it");
 
@@ -360,12 +334,10 @@ public sealed class ExtensionWorkflowPluginTests
             "probe",
             async (_, _) => new ToolResult(await gate.Task),
             entered: () => entered.TrySetResult());
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
         await CommitWorkflowAsync(fx, "wfr", ExtensionAuthoringSupport.SingleStepWorkflow("probe"), "run-it");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("wfr").Count == 1, "wfr tool");
+        await fx.WaitForToolsAsync("wfr", 1, "wfr tool");
         var stale = fx.ToolOf("wfr", "run-it");
 
         var running = fx.InvokeAsync("wfr", "run-it", "{}");
@@ -374,7 +346,7 @@ public sealed class ExtensionWorkflowPluginTests
         var revoking = fx.Client.RevokePluginAsync("wfr", "1.0.0", fx.Ct);
         // The revoke unregisters first and then waits for the in-flight run: observing the empty
         // tool table proves it reached the wait, so releasing the gate cannot hide a deadlock.
-        await fx.WaitUntilAsync(() => fx.ToolsOf("wfr").Count == 0, "wfr tools revoked");
+        await fx.WaitForToolsAsync("wfr", 0, "wfr tools revoked");
         gate.TrySetResult("late");
 
         await running.WaitAsync(TimeSpan.FromSeconds(30), fx.Ct);
@@ -398,7 +370,7 @@ public sealed class ExtensionWorkflowPluginTests
             new Sdk.ExtensionCommitRequest(id, staged.SourceHash, staged.DependencyHash, staged.SdkVersion),
             fx.Ct);
         Assert.Equal([toolName], result.ToolNames);
-        await fx.WaitUntilAsync(() => fx.ToolsOf(id).Count == 1, id + " tool");
+        await fx.WaitForToolsAsync(id, 1, id + " tool");
     }
 
     /// <summary>Raw main program: real host process, scripted peer that answers <c>host.tool_call</c>.</summary>

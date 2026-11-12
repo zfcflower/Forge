@@ -21,8 +21,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class SessionEventRoutingTests
 {
-    private const int PumpIterations = 400;
-    private const int PumpDelayMilliseconds = 5;
     private const string SessionId = "main-session";
     private const string ChildAgentId = "child-agent";
     private const string ChildSessionId = "child-session";
@@ -196,7 +194,7 @@ public sealed class SessionEventRoutingTests
     private static SessionWorkspaceViewModel CreateWorkspace()
     {
         var info = new SessionInfo(SessionId, Path.GetTempPath(), "demo session", At);
-        var store = new EmptyStore();
+        var store = new EmptySessionStore(At);
         return new SessionWorkspaceViewModel(
             info,
             new SessionRuntime(
@@ -204,13 +202,13 @@ public sealed class SessionEventRoutingTests
                     static _ => new MissingCredentialProvider("unconfigured", Forge.App.Localization.ProviderStrings.SectionMissingText()),
                     HostClient: null,
                     store,
-                    new EmptyCatalog(),
-                    new EmptyTodoStore(),
+                    new EmptySessionCatalog(At),
+                    new EmptyTodoStore("t1", At),
                     new ModelSettings("model")),
                 info),
             checkpoints: null,
             store,
-            UnconfiguredProviders());
+            TestProviderServices.UnconfiguredProbe());
     }
 
     /// <summary>Every text of the one live sub-agent; empty until its start event reached the dispatcher.</summary>
@@ -249,112 +247,6 @@ public sealed class SessionEventRoutingTests
     }
 
     /// <summary>An empty catalogue for tests that never touch providers; self-cleaning because the catalogue is in memory after load.</summary>
-    private static ProviderServices UnconfiguredProviders()
-    {
-        var probe = Path.Combine(Path.GetTempPath(), "forge-unconfigured-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(probe);
-        try
-        {
-            var settingsPath = Path.Combine(probe, "settings.json");
-            File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
-            var dataDir = Path.Combine(probe, "data");
-            Directory.CreateDirectory(dataDir);
-            return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
-        }
-        finally
-        {
-            Directory.Delete(probe, recursive: true);
-        }
-    }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
-    private sealed class ThrowingHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("no network in this test");
-    }
-
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
-
-    private sealed class EmptyStore : ISessionStore
-    {
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", workspacePath, title, At));
-
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult<SessionInfo?>(null);
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
-            Task.FromResult(1L);
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
-            Empty();
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Task.FromResult(0L);
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
-
-        private static async IAsyncEnumerable<StoredMessage> Empty()
-        {
-            await Task.Yield();
-            yield break;
-        }
-    }
-
-    private sealed class EmptyCatalog : ISessionCatalog
-    {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, At));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class EmptyTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("t1", sessionId, title, TodoStatus.Pending, note, 0, At));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

@@ -317,8 +317,7 @@ internal static class SessionStrings
     public static string SubAgentsLabel => Loc.Instance[SubAgentToggleKey];
 
     /// <summary>The chip's name while sub-agents run: assistive technology replaces the button's content with it.</summary>
-    public static string SubAgentsRunningName(int running) =>
-        Loc.Instance.Format(LocText.PluralKey(SubAgentRunningNameBase, running), TextFormat.Number(running));
+    public static string SubAgentsRunningName(int running) => Loc.Instance.FormatPlural(SubAgentRunningNameBase, running);
 
     public static string SubAgentsToggleName => Loc.Instance[SubAgentToggleNameKey];
 

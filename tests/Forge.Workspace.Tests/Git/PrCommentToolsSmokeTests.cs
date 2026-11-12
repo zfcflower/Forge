@@ -28,6 +28,16 @@ internal static class PrCommentHarness
     public static PullRequestInfo PullRequest(string head = "feature", int number = 5, PrState state = PrState.Open) =>
         new(number, $"https://github.com/acme/forge/pull/{number}", state, "Title", "Body", head, "main", "0000000", false, PrMergeStateStatus.Clean, PrReviewDecision.None);
 
+    /// <summary>The comment tools over a <see cref="FakePrPlatform"/> holding <paramref name="threads"/>, together with
+    /// that platform and the ledger that remembers the verdicts.</summary>
+    public static (PrCommentTools Tools, FakePrPlatform Platform, PrReplyLedger Ledger) Tools(params PrReviewThread[] threads)
+    {
+        var platform = new FakePrPlatform();
+        platform.Threads.AddRange(threads);
+        var ledger = new PrReplyLedger();
+        return (new PrCommentTools(new GitCli(), platform, new GitToolSettings(), ledger, null), platform, ledger);
+    }
+
     /// <summary>A resolver that returns a fixed login, or null, and counts its calls.</summary>
     public sealed class FixedUser(string? login)
     {

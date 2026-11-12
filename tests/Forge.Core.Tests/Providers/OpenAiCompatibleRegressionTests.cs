@@ -33,8 +33,7 @@ public class OpenAiCompatibleRegressionTests
     [Fact]
     public async Task Tool_results_follow_the_tool_calls_before_the_user_text_they_arrived_with()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [
@@ -72,9 +71,7 @@ public class OpenAiCompatibleRegressionTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[1,2,3]", "[DONE]"));
         var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.Contains("malformed", exception.Message, StringComparison.Ordinal);
     }
 
@@ -84,9 +81,7 @@ public class OpenAiCompatibleRegressionTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("{not json", "[DONE]"));
         var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.IsAssignableFrom<System.Text.Json.JsonException>(exception.InnerException);
     }
 
@@ -96,9 +91,7 @@ public class OpenAiCompatibleRegressionTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("""{"choices":"oops"}""", "[DONE]"));
         var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
     }
 
     [Fact]
@@ -107,8 +100,6 @@ public class OpenAiCompatibleRegressionTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("""{"choices":["oops"]}""", "[DONE]"));
         var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
     }
 }

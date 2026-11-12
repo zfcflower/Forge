@@ -43,8 +43,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         await Assert.ThrowsAsync<GitException>(() => Cli().GetCommitAsync(repo.Root, "does-not-exist-xyz"));
     }
@@ -54,8 +53,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         Assert.Null(await Cli().RevParseAsync(repo.Root, "does-not-exist-xyz"));
         Assert.Equal(repo.Head(), await Cli().RevParseAsync(repo.Root, "HEAD"));
@@ -66,8 +64,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         // The typed surface rejects a leading dash before git ever sees it, so the
         // value can never escape into option position.
@@ -98,8 +95,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
         repo.Write("a.txt", "changed\n");
         repo.Write("new.txt", "new\n");
 
@@ -114,8 +110,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Cli().GetStatusAsync(repo.Root)))
             .WaitAsync(TimeSpan.FromSeconds(30));
@@ -138,8 +133,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         var branches = await Cli().GetBranchesAsync(repo.Root);
         Assert.NotEmpty(branches);
@@ -153,8 +147,7 @@ public sealed class GitCliPinTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
         repo.Write("a.txt", "changed\n");
         repo.Write("new.txt", "new\n");
 

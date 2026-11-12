@@ -24,8 +24,7 @@ public sealed class StepCommitterSettingsTests : IDisposable
 
     public StepCommitterSettingsTests()
     {
-        directory = Path.Combine(Path.GetTempPath(), "forge-step-settings-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        directory = TestTempFiles.NewDirectory("forge-step-settings-");
         settingsPath = Path.Combine(directory, "settings.json");
     }
 
@@ -281,12 +280,12 @@ public sealed class StepCommitterSettingsViewTests
                     var afterUntick = preferences.GitStepCommits;
 
                     section.StepCommits = true;
-                    Settle();
+                    SharedUi.Settle();
                     var afterModelChange = box.IsChecked;
 
                     box.IsChecked = false;
                     section.StepCommits = false;
-                    Settle();
+                    SharedUi.Settle();
                     return (initial, name, afterUntick, afterModelChange, boxAfterOff: box.IsChecked, pref: preferences.GitStepCommits);
                 }
                 finally
@@ -333,20 +332,10 @@ public sealed class StepCommitterSettingsViewTests
 
     private static CheckBox CheckBoxOf(Window window)
     {
-        Settle();
+        SharedUi.Settle();
         return window.GetVisualDescendants()
             .OfType<CheckBox>()
             .Single(static box => string.Equals(AutomationProperties.GetAutomationId(box), "git-step-commits", StringComparison.Ordinal));
     }
 
-    private static void Settle()
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
 }

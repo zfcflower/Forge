@@ -33,11 +33,9 @@ public sealed class TextEditorLifecycleTests : IDisposable
         var path = Write("undo.txt", "alpha\nbeta\n");
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var view = new FileDocumentView { DataContext = model };
-            var window = new Window { Width = 600, Height = 400, Content = view };
-            window.Show();
+            var window = SharedUi.Show(view, 600, 400);
             WorkbenchUi.Settle(window);
             var editor = view.GetVisualDescendants().OfType<TextEditor>().Single();
             editor.TextArea.Focus();
@@ -68,8 +66,7 @@ public sealed class TextEditorLifecycleTests : IDisposable
         var path = Write("Sample.cs", text);
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model);
             await WaitUntil(() => LineColors(host.Editor, 1).Distinct().Count() >= 2);
             var before = new[] { LineColors(host.Editor, 1), LineColors(host.Editor, 2) };
@@ -102,8 +99,7 @@ public sealed class TextEditorLifecycleTests : IDisposable
         var path = Write("large.txt", text);
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model);
             host.Editor.TextArea.TextView.EnsureVisualLines();
             Assert.Equal(200_001, host.Editor.Document.LineCount);
@@ -133,8 +129,7 @@ public sealed class TextEditorLifecycleTests : IDisposable
         var path = Write("fault.txt", "alpha\nbeta\n");
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model);
             Assert.False(model.IsEditorFaulted);
             var shared = model.EditorDocument!;
@@ -191,22 +186,9 @@ public sealed class TextEditorLifecycleTests : IDisposable
             .Select(static r => (r.Properties?.ForegroundBrush as ISolidColorBrush)?.Color ?? default)];
     }
 
-    private sealed record EditorHost(Window Window, TextEditor Editor);
+    private static EditorHost Show(FileDocumentViewModel model) => EditorUi.Show(model);
 
-    private static EditorHost Show(FileDocumentViewModel model)
-    {
-        var view = new FileDocumentView { DataContext = model };
-        var window = new Window { Width = 900, Height = 600, Content = view };
-        window.Show();
-        WorkbenchUi.Settle(window);
-        return new EditorHost(window, view.GetVisualDescendants().OfType<TextEditor>().Single());
-    }
-
-    private static async Task Ui(Func<Task> body)
-    {
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await SharedUi.Session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntil(Func<bool> condition)
     {
@@ -220,8 +202,7 @@ public sealed class TextEditorLifecycleTests : IDisposable
 
     private string Write(string name, string content)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-lifecycle-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-lifecycle-");
         roots.Add(root);
         var path = Path.Combine(root, name);
         File.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(content));

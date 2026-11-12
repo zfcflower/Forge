@@ -42,11 +42,10 @@ public sealed class TextMateRegistryTests : IDisposable
         var path = Write(name, text, new UTF8Encoding(false));
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, ThemeVariant.Dark);
-            Assert.Equal(text.Split('\n'), RenderedLines(host.Editor).Take(text.Split('\n').Length).ToArray());
-            await WaitUntil(() => Colors(host.Editor).Count >= 2);
+            Assert.Equal(text.Split('\n'), EditorUi.RenderedLines(host.Editor).Take(text.Split('\n').Length).ToArray());
+            await WaitUntil(() => EditorUi.TokenColors(host.Editor).Count >= 2);
             host.Window.Close();
         });
     }
@@ -57,14 +56,13 @@ public sealed class TextMateRegistryTests : IDisposable
         var path = Write("Sample.cs", "using System;\nclass A { int x = 1; string s = \"a\"; // c\n}\n", new UTF8Encoding(false));
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, ThemeVariant.Dark);
-            await WaitUntil(() => Colors(host.Editor).Count >= 2);
-            var dark = Colors(host.Editor);
+            await WaitUntil(() => EditorUi.TokenColors(host.Editor).Count >= 2);
+            var dark = EditorUi.TokenColors(host.Editor);
             host.Window.RequestedThemeVariant = ThemeVariant.Light;
             WorkbenchUi.Settle(host.Window);
-            await WaitUntil(() => Colors(host.Editor).Count >= 2 && !Colors(host.Editor).SetEquals(dark));
+            await WaitUntil(() => EditorUi.TokenColors(host.Editor).Count >= 2 && !EditorUi.TokenColors(host.Editor).SetEquals(dark));
             host.Window.Close();
         });
     }
@@ -76,8 +74,7 @@ public sealed class TextMateRegistryTests : IDisposable
         var path = Write("crlf.txt", text, new UTF8Encoding(false));
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, ThemeVariant.Dark);
             host.Editor.SelectAll();
             Assert.Equal(text, host.Editor.SelectedText);
@@ -86,42 +83,9 @@ public sealed class TextMateRegistryTests : IDisposable
         });
     }
 
-    private static string[] RenderedLines(TextEditor editor)
-    {
-        var textView = editor.TextArea.TextView;
-        textView.EnsureVisualLines();
-        return [.. textView.VisualLines.Select(static line => string.Concat(
-            line.TextLines.SelectMany(static t => t.TextRuns).Where(static r => r is not TextEndOfLine).Select(static r => r.Text.ToString())))];
-    }
+    private static EditorHost Show(FileDocumentViewModel model, ThemeVariant variant) => EditorUi.Show(model, variant: variant);
 
-    private static HashSet<Color> Colors(TextEditor editor)
-    {
-        var textView = editor.TextArea.TextView;
-        textView.Redraw();
-        textView.EnsureVisualLines();
-        return [.. textView.VisualLines
-            .SelectMany(static l => l.TextLines).SelectMany(static t => t.TextRuns)
-            .Where(static r => r is not TextEndOfLine && !string.IsNullOrWhiteSpace(r.Text.ToString()))
-            .Select(static r => r.Properties?.ForegroundBrush as ISolidColorBrush)
-            .OfType<ISolidColorBrush>().Select(static b => b.Color)];
-    }
-
-    private sealed record EditorHost(Window Window, TextEditor Editor);
-
-    private static EditorHost Show(FileDocumentViewModel model, ThemeVariant variant)
-    {
-        var view = new FileDocumentView { DataContext = model };
-        var window = new Window { Width = 900, Height = 600, Content = view, RequestedThemeVariant = variant };
-        window.Show();
-        WorkbenchUi.Settle(window);
-        return new EditorHost(window, view.GetVisualDescendants().OfType<TextEditor>().Single());
-    }
-
-    private static async Task Ui(Func<Task> body)
-    {
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await SharedUi.Session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntil(Func<bool> condition)
     {
@@ -135,8 +99,7 @@ public sealed class TextMateRegistryTests : IDisposable
 
     private string Write(string name, string content, Encoding encoding)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-textmate-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-textmate-");
         roots.Add(root);
         var path = Path.Combine(root, name);
         File.WriteAllBytes(path, [.. encoding.GetPreamble(), .. encoding.GetBytes(content)]);

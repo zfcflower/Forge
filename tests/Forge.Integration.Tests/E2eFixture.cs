@@ -73,6 +73,30 @@ internal sealed class E2eFixture : IAsyncDisposable
 
     public static string HostAssemblyPath => Path.Combine(AppContext.BaseDirectory, "Forge.ExtensionHost.dll");
 
+    /// <summary>A fixture whose approval path allows every request; <paramref name="tool"/> is the only main-program tool
+    /// plugins and workflows may call.</summary>
+    public static E2eFixture AllowingApprovals(ITool tool, IReadOnlyList<string>? hostArguments = null) =>
+        new(
+            hostArguments,
+            toolResolver: name => string.Equals(name, tool.Definition.Name, StringComparison.Ordinal) ? tool : null,
+            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+
+    /// <summary>A fixture whose approval path allows every request and whose main program exposes no tool.</summary>
+    public static E2eFixture AllowingApprovals() =>
+        new(
+            toolResolver: _ => null,
+            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+
+    /// <summary>A fixture whose approval path allows every request; <paramref name="toolResolver"/> decides which
+    /// main-program tools plugins and workflows see.</summary>
+    public static E2eFixture AllowingApprovals(
+        Func<string, ITool?> toolResolver,
+        IReadOnlyList<string>? hostArguments = null) =>
+        new(
+            hostArguments,
+            toolResolver: toolResolver,
+            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+
     public string Root { get; }
 
     public string PluginsDirectory { get; }
@@ -100,6 +124,18 @@ internal sealed class E2eFixture : IAsyncDisposable
         File.WriteAllText(Path.Combine(directory, "manifest.json"), manifest);
         File.WriteAllText(SourcePath(id), source);
         return directory;
+    }
+
+    /// <summary>Writes the plugin that registers every non-UI contribution kind and records its own registration in a
+    /// marker file; returns the marker path.</summary>
+    public string WriteContributedPlugin(string id)
+    {
+        var marker = Path.Combine(Root, "registered.txt");
+        WritePluginWithManifest(
+            id,
+            PluginSources.Contributed(id, marker),
+            PluginSources.ManifestWithPermissions(id, "1.0.0", "ReadFile"));
+        return marker;
     }
 
     /// <summary>Writes a plugin with a caller-supplied manifest document (permissions, prebuilt entry, ...).</summary>
@@ -139,6 +175,16 @@ internal sealed class E2eFixture : IAsyncDisposable
         }
     }
 
+    /// <summary>Waits for the draft status row of a plugin nobody approved yet and asserts the host still reports it as a
+    /// clean draft, with no error against it.</summary>
+    public async Task WaitForCleanDraftAsync(string id)
+    {
+        var status = await WaitForStatusAsync(id, $"a status row for {id}");
+        Assert.NotNull(status);
+        Assert.Equal("draft", status!.Status);
+        Assert.Null(status.Error);
+    }
+
     /// <summary>Approves <paramref name="id"/> with the hashes the host itself reports; never reads the database.</summary>
     public async Task ApproveViaStatusAsync(string id, string version = "1.0.0")
     {
@@ -156,6 +202,62 @@ internal sealed class E2eFixture : IAsyncDisposable
         await Client.StartAsync(Ct);
         TestBudgets.NoteHostStart(System.Diagnostics.Stopwatch.GetElapsedTime(start));
         await Client.RefreshPluginsAsync(Ct);
+    }
+
+    /// <summary>Waits until <paramref name="toolCount"/> tools of <paramref name="id"/> are registered.</summary>
+    public Task WaitForToolsAsync(string id, int toolCount, string? what = null) =>
+        WaitUntilAsync(() => ToolsOf(id).Count == toolCount, what ?? id + " tools");
+
+    /// <summary>Starts the host, approves <paramref name="id"/> with the hashes it persisted, and waits for its tools.</summary>
+    public async Task StartAndApproveAsync(string id, int toolCount, string? what = null)
+    {
+        await StartAsync();
+        await ApproveAsync(id);
+        await WaitForToolsAsync(id, toolCount, what);
+    }
+
+    /// <summary>Writes the standard six-tool plugin, starts the host, and approves it with the hashes it persisted.</summary>
+    public async Task StartWithApprovedPluginAsync(string id, string echoPrefix, int toolCount)
+    {
+        WritePlugin(id, PluginSources.Standard(id, echoPrefix));
+        await StartAndApproveAsync(id, toolCount);
+    }
+
+    /// <summary>Approves the hashes <c>plugins.status</c> reports for <paramref name="id"/> and waits for its tools.</summary>
+    public async Task ApproveViaStatusAndWaitForToolsAsync(string id, int toolCount, string? what = null)
+    {
+        await ApproveViaStatusAsync(id);
+        await WaitForToolsAsync(id, toolCount, what);
+    }
+
+    /// <summary>Starts the host and approves the hashes <c>plugins.status</c> reports for <paramref name="id"/>.</summary>
+    public async Task StartAndApproveViaStatusAsync(string id)
+    {
+        await StartAsync();
+        await ApproveViaStatusAsync(id);
+    }
+
+    /// <summary>Approves the hashes <c>plugins.status</c> reports for <paramref name="id"/> and asks the host to load it
+    /// again, so a draft that cannot load is tried again.</summary>
+    public async Task ApproveViaStatusAndRefreshAsync(string id)
+    {
+        await ApproveViaStatusAsync(id);
+        await Client.RefreshPluginsAsync(Ct);
+    }
+
+    /// <summary>Writes the standard six-tool plugin (<see cref="PluginSources.Standard"/>), starts the host, and approves
+    /// the hashes <c>plugins.status</c> reports for it.</summary>
+    public async Task StartWithStatusApprovedPluginAsync(string id, string echoPrefix, string toolPrefix = "")
+    {
+        WritePlugin(id, PluginSources.Standard(id, echoPrefix, toolPrefix: toolPrefix));
+        await StartAndApproveViaStatusAsync(id);
+    }
+
+    /// <summary>The one status row <c>plugins.status</c> reports for <paramref name="id"/>.</summary>
+    public async Task<Sdk.PluginStatusInfo> StatusOfAsync(string id)
+    {
+        var statuses = await Client.GetPluginStatusesAsync(Ct);
+        return statuses.Single(status => string.Equals(status.PluginId, id, StringComparison.Ordinal));
     }
 
     /// <summary>Reads the persisted record for one plugin version; null when the approval database has none.</summary>
@@ -191,6 +293,19 @@ internal sealed class E2eFixture : IAsyncDisposable
 
     public async Task<ToolResult> InvokeAsync(string pluginId, string toolName, string argumentsJson = "{}") =>
         await InvokeAsync(ToolOf(pluginId, toolName), argumentsJson);
+
+    /// <summary>Calls <paramref name="toolName"/> of <paramref name="pluginId"/> with <paramref name="argumentsJson"/> and
+    /// asserts the call succeeded with exactly <paramref name="expectedContent"/>.</summary>
+    public async Task AssertToolContentAsync(
+        string pluginId,
+        string toolName,
+        string argumentsJson,
+        string expectedContent)
+    {
+        var result = await InvokeAsync(pluginId, toolName, argumentsJson);
+        Assert.False(result.IsError, result.Content);
+        Assert.Equal(expectedContent, result.Content);
+    }
 
     /// <summary>Calls the <c>pid</c> tool and returns the worker process id it reports.</summary>
     public async Task<int> WorkerPidAsync(string pluginId)
@@ -278,33 +393,7 @@ internal sealed class E2eFixture : IAsyncDisposable
 
         await Client.DisposeAsync();
         budget.Dispose();
-        DeleteDirectory(Root);
-    }
-
-    private static void DeleteDirectory(string path)
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    return;
-                }
-
-                Directory.Delete(path, recursive: true);
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == 49)
-                {
-                    throw;
-                }
-
-                Thread.Sleep(100);
-            }
-        }
+        TempRoots.Delete(Root, throwOnPersistentFailure: true);
     }
 }
 

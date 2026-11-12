@@ -22,6 +22,18 @@ public sealed class ScreenshotPublisherTests
         return capture.Pairs;
     }
 
+    /// <summary>Publishes one <c>home</c> pair and asserts the run failed at <paramref name="stage"/>.</summary>
+    private static async Task<ScreenshotPublishResult> PublishFailsAtAsync(
+        ScreenshotFixture fixture,
+        ScreenshotPublishStage stage)
+    {
+        var result = await Publisher(fixture).PublishAsync(
+            fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
+        Assert.False(result.Success, result.Message);
+        Assert.Equal(stage, result.Stage);
+        return result;
+    }
+
     private static ScreenshotPair Pair(ScreenshotFixture fixture, string name, string? beforeTag, string? afterTag)
     {
         string? Make(string? tag, string side)
@@ -325,10 +337,7 @@ public sealed class ScreenshotPublisherTests
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
         fixture.UseAddress(fixture.Origin.Replace('\\', '/'));
 
-        var result = await Publisher(fixture).PublishAsync(fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ScreenshotPublishStage.Remote, result.Stage);
+        var result = await PublishFailsAtAsync(fixture, ScreenshotPublishStage.Remote);
         Assert.Contains("not a GitHub address", result.Message, StringComparison.Ordinal);
         Assert.Null(result.AssetsCommit);
         Assert.Null(fixture.OriginTip(AssetsBranch));
@@ -348,10 +357,7 @@ public sealed class ScreenshotPublisherTests
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
         fixture.UseAddress("https://oauth2:s3cret-token@gitlab.example.test/group/subgroup/project.git");
 
-        var result = await Publisher(fixture).PublishAsync(fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ScreenshotPublishStage.Remote, result.Stage);
+        var result = await PublishFailsAtAsync(fixture, ScreenshotPublishStage.Remote);
         Assert.Contains("gitlab.example.test", result.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("s3cret", result.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("oauth2", result.Message, StringComparison.Ordinal);
@@ -370,10 +376,7 @@ public sealed class ScreenshotPublisherTests
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
         IsolatedGit.RunChecked(fixture.Work, "checkout", "-q", "--detach");
 
-        var result = await Publisher(fixture).PublishAsync(fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ScreenshotPublishStage.Remote, result.Stage);
+        var result = await PublishFailsAtAsync(fixture, ScreenshotPublishStage.Remote);
         Assert.Contains("detached", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(fixture.Platform.Edits);
         Assert.Empty(IsolatedGit.RunChecked(fixture.Origin, "for-each-ref", "refs/heads/assets"));
@@ -477,10 +480,7 @@ public sealed class ScreenshotPublisherTests
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
         fixture.Platform.DropEdits = true;
 
-        var result = await Publisher(fixture).PublishAsync(fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ScreenshotPublishStage.Body, result.Stage);
+        var result = await PublishFailsAtAsync(fixture, ScreenshotPublishStage.Body);
         Assert.Equal(result.AssetsCommit, fixture.OriginTip(AssetsBranch));
         Assert.NotEmpty(result.Markdown!);
         Assert.Contains("the description was not updated", result.Message, StringComparison.Ordinal);
@@ -499,10 +499,7 @@ public sealed class ScreenshotPublisherTests
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
         fixture.RejectPushes();
 
-        var result = await Publisher(fixture).PublishAsync(fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ScreenshotPublishStage.Push, result.Stage);
+        var result = await PublishFailsAtAsync(fixture, ScreenshotPublishStage.Push);
         Assert.NotEqual(GitRemoteFailureKind.None, result.Failure);
         Assert.Null(result.AssetsCommit);
         Assert.Null(result.Markdown);
@@ -525,10 +522,7 @@ public sealed class ScreenshotPublisherTests
         IsolatedGit.RunChecked(fixture.Work, "config", "--local", "--unset-all", "url." + fixture.Origin.Replace('\\', '/') + ".insteadOf");
         IsolatedGit.RunChecked(fixture.Work, "config", "--local", "url." + missing + ".insteadOf", ScreenshotFixture.PublicAddress);
 
-        var result = await Publisher(fixture).PublishAsync(fixture.Work, [Pair(fixture, "home", "a", "b")], null, CancellationToken.None);
-
-        Assert.False(result.Success);
-        Assert.Equal(ScreenshotPublishStage.Push, result.Stage);
+        var result = await PublishFailsAtAsync(fixture, ScreenshotPublishStage.Push);
         Assert.Empty(fixture.Platform.Edits);
     }
 

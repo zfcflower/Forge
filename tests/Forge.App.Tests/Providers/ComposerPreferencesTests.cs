@@ -11,9 +11,8 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class ComposerPreferencesTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-composer-preferences-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-composer-preferences-");
 
-    public ComposerPreferencesTests() => Directory.CreateDirectory(root);
 
     [Theory]
     [InlineData("off", ThinkingEffort.Off)]
@@ -79,12 +78,6 @@ public sealed class ComposerPreferencesTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 }

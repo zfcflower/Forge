@@ -89,8 +89,7 @@ public sealed class SessionAutomationTurnTests
 
     private static async Task<Outcome> RunAsync(ProviderMode mode, AgentDefinition? agent)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-automation-turn-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-automation-turn-");
         try
         {
             var repository = Path.Combine(root, "repository");
@@ -110,15 +109,15 @@ public sealed class SessionAutomationTurnTests
                             HostClient: null,
                             store,
                             store,
-                            new NoTodos(),
+                            new EmptyTodoStore("t1", DateTimeOffset.UnixEpoch),
                             new ModelSettings("scripted-model")),
                         Info(repository));
                     var workspace = new SessionWorkspaceViewModel(
                         Info(repository),
                         runtime,
-                        new TurnCheckpointService(git, new NoCheckpoints()),
+                        new TurnCheckpointService(git, new EmptyCheckpointStore()),
                         store,
-                        UnconfiguredProviders(root));
+                        TestProviderServices.Unconfigured(root));
 
                     var quotaEvents = new List<ProviderQuotaExhausted>();
                     var turnStarts = new List<bool>();
@@ -141,32 +140,12 @@ public sealed class SessionAutomationTurnTests
         }
         finally
         {
-            try
-            {
-                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-
-                Directory.Delete(root, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
+            TestTempFiles.DeleteTree(root);
         }
     }
 
     private static SessionInfo Info(string workingDirectory) =>
         new(SessionId, workingDirectory, "automation session", new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero));
-
-    private static ProviderServices UnconfiguredProviders(string root)
-    {
-        var settingsPath = Path.Combine(root, "providers-settings.json");
-        File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
-        var dataDir = Path.Combine(root, "provider-data");
-        Directory.CreateDirectory(dataDir);
-        return new ProviderServices(settingsPath, dataDir, new HttpClient(new NoNetwork()));
-    }
 
     private static async Task PumpAsync()
     {
@@ -174,12 +153,6 @@ public sealed class SessionAutomationTurnTests
         {
             await Task.Delay(PumpDelayMilliseconds);
         }
-    }
-
-    private sealed class NoNetwork : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("no network in this test");
     }
 
     private sealed class ScriptedProvider(ProviderMode mode) : IChatProvider
@@ -206,18 +179,6 @@ public sealed class SessionAutomationTurnTests
             yield return new TextDelta("done");
             yield return new MessageCompleted(ChatMessage.Assistant("done"), new TokenUsage(3, 2), StopReason.EndTurn);
         }
-    }
-
-    private sealed class NoCheckpoints : ITurnCheckpointStore
-    {
-        public Task BeginAsync(string sessionId, int turn, string worktreePath, string treeBefore, DateTimeOffset at, CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task<bool> CompleteAsync(string sessionId, int turn, string treeAfter, DateTimeOffset at, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<IReadOnlyList<TurnCheckpoint>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TurnCheckpoint>>([]);
     }
 
     private sealed class MemorySessionStore : ISessionStore, ISessionCatalog
@@ -300,25 +261,4 @@ public sealed class SessionAutomationTurnTests
         public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class NoTodos : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("t1", sessionId, title, TodoStatus.Pending, note, 0, DateTimeOffset.UnixEpoch));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

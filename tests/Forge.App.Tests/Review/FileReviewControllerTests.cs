@@ -258,12 +258,7 @@ public sealed class FileReviewControllerTests
         Assert.Equal(2, rig.Sent.Count);
     });
 
-    private static async Task Ui(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private sealed class Rig : IAsyncDisposable
     {
@@ -288,8 +283,7 @@ public sealed class FileReviewControllerTests
             var root = Directory.CreateTempSubdirectory("forge-review-").FullName;
             var file = Path.Combine(root, "a.cs");
             await File.WriteAllTextAsync(file, text);
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(file, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(file);
             Assert.False(model.HasError, model.Error);
             return new Rig(root, file, model);
         }

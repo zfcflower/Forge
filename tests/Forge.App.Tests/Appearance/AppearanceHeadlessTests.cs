@@ -42,14 +42,14 @@ public sealed class AppearanceHeadlessTests
                 try
                 {
                     window.Show();
-                    Settle();
+                    SharedUi.Settle(3);
                     var before = (Names(plain), plain.FontSize, Names(mono), mono.FontSize);
 
                     preferences.UiFontFamily = "Georgia, serif";
                     preferences.UiFontSize = 20;
                     preferences.CodeFontFamily = "Menlo, monospace";
                     preferences.CodeFontSize = 17;
-                    Settle();
+                    SharedUi.Settle(3);
                     var after = (Names(plain), plain.FontSize, Names(mono), mono.FontSize, Names(window));
 
                     return (before, after);
@@ -90,10 +90,10 @@ public sealed class AppearanceHeadlessTests
                 {
                     window.Show();
                     preferences.UiFontSize = 20;
-                    Settle();
+                    SharedUi.Settle(3);
                     var first = plain.FontSize;
                     preferences.UiFontSize = 9;
-                    Settle();
+                    SharedUi.Settle(3);
                     return (first, plain.FontSize);
                 }
                 finally
@@ -175,7 +175,7 @@ public sealed class AppearanceHeadlessTests
     {
         var session = SharedUi.Session;
         var token = new CancellationTokenSource(StepBudget).Token;
-        var root = Path.Combine(Path.GetTempPath(), "forge-appearance-" + Guid.NewGuid().ToString("N"));
+        var root = TestTempFiles.NewDirectory("forge-appearance-");
         var data = Path.Combine(root, "data");
         Directory.CreateDirectory(data);
         Directory.CreateDirectory(Path.Combine(root, "workspace"));
@@ -206,7 +206,7 @@ public sealed class AppearanceHeadlessTests
                     {
                         window.Show();
                         await composition.Initialization;
-                        Settle();
+                        SharedUi.Settle(3);
                         // That the panel renders every registered section in order is SettingsPanelTests' job (its shared
                         // session); a per-test session here only proves the registration and the applied fonts.
 
@@ -254,7 +254,7 @@ public sealed class AppearanceHeadlessTests
             Environment.SetEnvironmentVariable(AppPaths.DataVariable, saved.Data);
             Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, saved.General);
             Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, saved.Workspace);
-            TryDelete(root);
+            TestTempFiles.DeleteTree(root);
         }
     }
 
@@ -266,16 +266,6 @@ public sealed class AppearanceHeadlessTests
             _ => string.Empty,
         };
 
-    private static void Settle()
-    {
-        for (var pass = 0; pass < 3; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
 
     /// <summary>Removes every merged dictionary an applier left behind in the shared application resources.</summary>
     private static void RemoveTokens(IResourceDictionary resources)
@@ -289,21 +279,6 @@ public sealed class AppearanceHeadlessTests
         }
     }
 
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
 
     private sealed record Seen(
         List<string> Ids,

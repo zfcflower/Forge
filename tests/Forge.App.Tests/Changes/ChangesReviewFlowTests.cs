@@ -557,18 +557,7 @@ public sealed class ChangesReviewFlowTests
 
     // ---------------------------------------------------------------- harness
 
-    private static async Task RunAsync(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(
-            async () =>
-            {
-                await body();
-                return 0;
-            },
-            budget.Token);
-    }
+    private static Task RunAsync(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntilAsync(Func<bool> condition, string what) =>
         await WaitUntilAsync(() => Task.FromResult(condition()), what);
@@ -646,7 +635,7 @@ public sealed class ChangesReviewFlowTests
             Func<string, string, string, string, Task<bool>>? confirm = null,
             bool settleMarks = true)
         {
-            var vm = new ChangesViewModel(new GitCli(), new EmptyCheckpoints());
+            var vm = new ChangesViewModel(new GitCli(), new EmptyCheckpointStore());
             vm.ConfigureReview(Services, confirm);
             vm.Attach(new PanelContext(sessionId, Dir, null));
             await vm.LoadAsync(CancellationToken.None);
@@ -708,17 +697,6 @@ public sealed class ChangesReviewFlowTests
         }
     }
 
-    private sealed class EmptyCheckpoints : ITurnCheckpointStore
-    {
-        public Task BeginAsync(string sessionId, int turn, string worktreePath, string treeBefore, DateTimeOffset at, CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task<bool> CompleteAsync(string sessionId, int turn, string treeAfter, DateTimeOffset at, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<IReadOnlyList<TurnCheckpoint>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TurnCheckpoint>>([]);
-    }
 }
 
 internal static class ChangesViewModelTestExtensions

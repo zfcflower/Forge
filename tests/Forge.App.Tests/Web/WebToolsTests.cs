@@ -12,9 +12,8 @@ namespace Forge.App.Tests.Web;
 [Collection("forge-app-ui")]
 public sealed class WebToolsTests : IDisposable
 {
-    private readonly string dir = Path.Combine(Path.GetTempPath(), "forge-web-" + Guid.NewGuid().ToString("N"));
+    private readonly string dir = TestTempFiles.NewDirectory("forge-web-");
 
-    public WebToolsTests() => Directory.CreateDirectory(dir);
 
     public void Dispose()
     {

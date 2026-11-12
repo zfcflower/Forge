@@ -285,9 +285,8 @@ public sealed class FilesPanelTests : IDisposable
                 await panel.RefreshAsync(CancellationToken.None);
 
                 var view = new FilesToolView { DataContext = panel };
-                var window = new Window { Width = 275, Height = 320, Content = view };
-                window.Show();
-                Settle(window);
+                var window = SharedUi.Show(view, 275, 320);
+                SharedUi.Settle(window);
 
                 var all = Badge(window, "files-all-count");
                 var changed = Badge(window, "files-changed-count");
@@ -326,29 +325,12 @@ public sealed class FilesPanelTests : IDisposable
         root.GetVisualDescendants().OfType<TextBlock>()
             .First(block => AutomationProperties.GetAutomationId(block) == automationId);
 
-    private static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
-
     private string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-files-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-files-");
         roots.Add(root);
         return root;
     }
 
-    private static void Write(string root, string relativePath)
-    {
-        var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, "x");
-    }
+    private static void Write(string root, string relativePath) => TestTempFiles.WriteFile(root, relativePath, "x");
 }

@@ -41,8 +41,7 @@ public sealed class SessionStripHeadlessTests
         // The strip's labels are read from Loc, so the assertions below name the language they expect.
         using var language = new LanguageScope(UiLanguage.Chinese);
         var session = SharedUi.Session;
-        var root = Path.Combine(Path.GetTempPath(), "forge-strip-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-strip-");
 
         try
         {
@@ -58,14 +57,13 @@ public sealed class SessionStripHeadlessTests
                     workspace.Instruments.SetGit("↑1 ↓2");
 
                     var view = new SessionView { DataContext = workspace };
-                    var window = new Window { Width = 1200, Height = 700, Content = view };
-                    window.Show();
-                    Settle(window);
+                    var window = SharedUi.Show(view, 1200, 700);
+                    SharedUi.Settle(window);
 
                     sources.Records = 5;
                     workspace.Instruments.RefreshSources();
                     var settled = await UntilAsync(() => workspace.Instruments.ApprovalText == "2/5");
-                    Settle(window);
+                    SharedUi.Settle(window);
 
                     var ids = AutomationIds(window);
                     var visible = AutomationIds(window, onlyVisible: true);
@@ -76,11 +74,11 @@ public sealed class SessionStripHeadlessTests
                     // Dragged narrow, only the branch group goes; the resources button, the workspace button and the token
                     // readout stay.
                     window.Width = 600;
-                    Settle(window);
+                    SharedUi.Settle(window);
                     var narrow = (Ids: AutomationIds(window), Visible: AutomationIds(window, onlyVisible: true));
 
                     window.Width = 1200;
-                    Settle(window);
+                    SharedUi.Settle(window);
                     var wide = AutomationIds(window, onlyVisible: true);
 
                     window.Close();
@@ -134,7 +132,7 @@ public sealed class SessionStripHeadlessTests
     private static SessionWorkspaceViewModel Workspace(string root, ISessionInstrumentSources sources)
     {
         var info = new SessionInfo("strip-session", root, "strip", At) { Branch = "feature/strip" };
-        var store = new EmptyStore();
+        var store = new EmptySessionStore(At);
         return new SessionWorkspaceViewModel(
             info,
             new SessionRuntime(
@@ -142,33 +140,17 @@ public sealed class SessionStripHeadlessTests
                     static _ => new MissingCredentialProvider("unconfigured", ProviderStrings.SectionMissingText()),
                     HostClient: null,
                     store,
-                    new EmptyCatalog(),
-                    new EmptyTodoStore(),
+                    new EmptySessionCatalog(At),
+                    new EmptyTodoStore("todo-1", At),
                     new ModelSettings("model")),
                 info),
             checkpoints: null,
             store,
-            UnconfiguredProviders(root),
+            TestProviderServices.Unconfigured(root),
             instrumentSources: sources);
     }
 
     /// <summary>An empty catalogue (a legacy section with no usable fields) so the strip test keeps its "no provider" shape.</summary>
-    private static ProviderServices UnconfiguredProviders(string root)
-    {
-        var settingsPath = Path.Combine(root, "providers-settings.json");
-        File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
-        var dataDir = Path.Combine(root, "provider-data");
-        Directory.CreateDirectory(dataDir);
-        // Fake handler, never used for network here; the workspace does not own it so it is left for reclamation.
-        return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
-    }
-
-    private sealed class ThrowingHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("no network in this test");
-    }
-
     private static List<string> AutomationIds(Window window, bool onlyVisible = false) =>
         window.GetVisualDescendants()
             .Where(control => !onlyVisible || control.IsEffectivelyVisible)
@@ -190,8 +172,7 @@ public sealed class SessionStripHeadlessTests
         // (the row then renders as a chevron with nothing beside it). Each row is now a plain header string.
         using var language = new LanguageScope(UiLanguage.Chinese);
         var session = SharedUi.Session;
-        var root = Path.Combine(Path.GetTempPath(), "forge-strip-menu-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-strip-menu-");
 
         try
         {
@@ -201,9 +182,8 @@ public sealed class SessionStripHeadlessTests
                     var sources = new FakeSources { Records = 5 };
                     using var workspace = Workspace(root, sources);
                     var view = new SessionView { DataContext = workspace };
-                    var window = new Window { Width = 600, Height = 700, Content = view };
-                    window.Show();
-                    Settle(window);
+                    var window = SharedUi.Show(view, 600, 700);
+                    SharedUi.Settle(window);
 
                     var button = window.GetVisualDescendants()
                         .OfType<Button>()
@@ -213,7 +193,7 @@ public sealed class SessionStripHeadlessTests
                     var flyout = Assert.IsType<MenuFlyout>(button!.Flyout);
 
                     flyout.ShowAt(button);
-                    Settle(window);
+                    SharedUi.Settle(window);
 
                     var items = flyout.Items.OfType<MenuItem>().ToList();
 
@@ -264,18 +244,6 @@ public sealed class SessionStripHeadlessTests
     /// Drains the dispatcher and lays the window out twice: layout can post follow-up work that only exists after a pass,
     /// and the layout manager's own scheduled pass does not reliably run under <c>RunJobs</c> alone.
     /// </summary>
-    private static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            window.UpdateLayout();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
-
     /// <summary>Waits for a background read to land; the wait yields to the dispatcher instead of blocking it.</summary>
     private static async Task<bool> UntilAsync(Func<bool> condition)
     {
@@ -324,73 +292,4 @@ public sealed class SessionStripHeadlessTests
         }
     }
 
-    private sealed class EmptyStore : ISessionStore
-    {
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", workspacePath, title, At));
-
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult<SessionInfo?>(null);
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
-            Task.FromResult(1L);
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
-            Empty();
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Task.FromResult(0L);
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
-
-        private static async IAsyncEnumerable<StoredMessage> Empty()
-        {
-            await Task.Yield();
-            yield break;
-        }
-    }
-
-    private sealed class EmptyCatalog : ISessionCatalog
-    {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, At));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class EmptyTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("todo-1", sessionId, title, TodoStatus.Pending, note, 0, At));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

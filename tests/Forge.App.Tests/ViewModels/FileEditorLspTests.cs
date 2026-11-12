@@ -20,8 +20,7 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class FileEditorLspTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-file-lsp-" + Guid.NewGuid().ToString("N"));
-    public FileEditorLspTests() => Directory.CreateDirectory(root);
+    private readonly string root = TestTempFiles.NewDirectory("forge-file-lsp-");
     public void Dispose() => Directory.Delete(root, recursive: true);
 
     [Fact]
@@ -66,8 +65,7 @@ public sealed class FileEditorLspTests : IDisposable
             await model.LspOpening;
             await lsp.Server!.WaitForAsync("textDocument/didOpen");
             var view = new FileDocumentView { DataContext = model };
-            var window = new Window { Width = 800, Height = 400, Content = view };
-            window.Show();
+            var window = SharedUi.Show(view, 800, 400);
             WorkbenchUi.Settle(window);
             var editor = view.GetVisualDescendants().OfType<TextEditor>().Single();
             editor.TextArea.Focus();
@@ -185,12 +183,7 @@ public sealed class FileEditorLspTests : IDisposable
         });
     }
 
-    private static async Task Ui(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private sealed class FakeLsp : IAsyncDisposable
     {

@@ -453,53 +453,17 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
 
         var context = CallBinding.Require(request.Context, request.PluginId, ExtensionProtocol.PluginCommand);
-        var nested = context.PluginChain.Count > 0;
         using var budget = new CallDeadline(
             PluginCallLimits.RequestTimeout(options, request.TimeoutMilliseconds), ct, stop.Token);
-        var captured = Find(request.PluginId) ??
-            throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
-
-        var state = StateOf(captured.Id);
-        await EnterCallAsync(captured, state, context, nested, budget, ct, "the command call").ConfigureAwait(false);
-        WorkerSlot slot;
-        PluginState.Lease lease;
-        try
-        {
-            var entry = Current(captured);
-            var evaluation = await EvaluateAsync(entry, budget.Token).ConfigureAwait(false);
-            RequireAllowed(entry, evaluation.Decision);
-            if (evaluation.Image is not { } image)
-            {
-                throw new HostOperationException("plugin_not_loadable", $"Plugin '{entry.Id}' {entry.Version} has no loadable assembly.");
-            }
-
-            slot = GetWorker(entry);
-            var loadout = await slot.EnsureLoadedAsync(entry.Version, image, entry.Manifest.Permissions, budget.Token).ConfigureAwait(false);
-            entry.Tools = loadout.Tools;
-            entry.Contributions = loadout.Contributions;
-
-            var rechecked = ApprovalEngine.Evaluate(Candidate(entry, evaluation), approvals);
-            entry.Decision = rechecked;
-            RequireAllowed(entry, rechecked);
-
-            await PublishAsync(entry.Id, loadout, budget.Token).ConfigureAwait(false);
-            if (!ContainsCommand(loadout.Contributions.Commands, request.Command))
-            {
-                throw new HostOperationException(
-                    "unknown_command",
-                    $"Plugin '{entry.Id}' does not declare an executable command named '{request.Command}'.");
-            }
-
-            lease = state.BeginExecution(entry.Id, CallBinding.RootOf(context), nested);
-        }
-        catch (OperationCanceledException) when (BudgetEndedBeforeDispatch(budget, ct))
-        {
-            throw BudgetEnded("the command call", budget);
-        }
-        finally
-        {
-            state.Exit();
-        }
+        var (slot, lease) = await AdmitCallAsync(
+                request.PluginId,
+                context,
+                budget,
+                ct,
+                ContributedCall.Command,
+                request.Command,
+                "the command call")
+            .ConfigureAwait(false);
 
         using (lease)
         {
@@ -517,14 +481,53 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
 
         var context = CallBinding.Require(request.Context, request.PluginId, ExtensionProtocol.PluginPrompt);
-        var nested = context.PluginChain.Count > 0;
         using var budget = new CallDeadline(
             PluginCallLimits.RequestTimeout(options, request.TimeoutMilliseconds), ct, stop.Token);
-        var captured = Find(request.PluginId) ??
-            throw new HostOperationException("unknown_plugin", $"No plugin '{request.PluginId}' was discovered.");
+        var (slot, lease) = await AdmitCallAsync(
+                request.PluginId,
+                context,
+                budget,
+                ct,
+                ContributedCall.Prompt,
+                request.ContributorId,
+                "the prompt call")
+            .ConfigureAwait(false);
+
+        using (lease)
+        {
+            var output = await slot.EvaluatePromptAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
+            return HostJson.ToElement(output);
+        }
+    }
+
+    /// <summary>What a contributed call reaches: the kind decides which declaration the loadout has to name.</summary>
+    private enum ContributedCall
+    {
+        Command,
+        Prompt,
+    }
+
+    /// <summary>
+    /// The admission half of a contributed call (a command or a prompt contributor): the approved image is re-hashed and
+    /// re-approved, the worker is loaded only from those bytes and published, the loadout has to declare the requested
+    /// name, and the execution lease is taken - all under the call's own deadline and the plugin's dispatch gate. A
+    /// timeout here is reported as a queue timeout, and nothing the call had dispatched is killed.
+    /// </summary>
+    private async Task<(WorkerSlot Slot, PluginState.Lease Lease)> AdmitCallAsync(
+        string pluginId,
+        ExtensionCallContext context,
+        CallDeadline budget,
+        CancellationToken ct,
+        ContributedCall kind,
+        string name,
+        string what)
+    {
+        var nested = context.PluginChain.Count > 0;
+        var captured = Find(pluginId) ??
+            throw new HostOperationException("unknown_plugin", $"No plugin '{pluginId}' was discovered.");
 
         var state = StateOf(captured.Id);
-        await EnterCallAsync(captured, state, context, nested, budget, ct, "the prompt call").ConfigureAwait(false);
+        await EnterCallAsync(captured, state, context, nested, budget, ct, what).ConfigureAwait(false);
         WorkerSlot slot;
         PluginState.Lease lease;
         try
@@ -547,30 +550,44 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             RequireAllowed(entry, rechecked);
 
             await PublishAsync(entry.Id, loadout, budget.Token).ConfigureAwait(false);
-            if (!ContainsPrompt(loadout.Contributions.PromptContributors, request.ContributorId))
+            if (!Declares(kind, loadout, name))
             {
-                throw new HostOperationException(
-                    "unknown_prompt",
-                    $"Plugin '{entry.Id}' does not declare a prompt contributor named '{request.ContributorId}'.");
+                throw Undeclared(kind, entry, name);
             }
 
             lease = state.BeginExecution(entry.Id, CallBinding.RootOf(context), nested);
         }
         catch (OperationCanceledException) when (BudgetEndedBeforeDispatch(budget, ct))
         {
-            throw BudgetEnded("the prompt call", budget);
+            throw BudgetEnded(what, budget);
         }
         finally
         {
             state.Exit();
         }
 
-        using (lease)
-        {
-            var output = await slot.EvaluatePromptAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
-            return HostJson.ToElement(output);
-        }
+        return (slot, lease);
     }
+
+    /// <summary>Whether the published loadout declares the contributed name the call asked for.</summary>
+    private static bool Declares(ContributedCall kind, WorkerLoadout loadout, string name) =>
+        kind switch
+        {
+            ContributedCall.Command => ContainsCommand(loadout.Contributions.Commands, name),
+            _ => ContainsPrompt(loadout.Contributions.PromptContributors, name),
+        };
+
+    /// <summary>The call names something the plugin did not declare; the code says which kind of declaration it looked for.</summary>
+    private static HostOperationException Undeclared(ContributedCall kind, PluginEntry entry, string name) =>
+        kind switch
+        {
+            ContributedCall.Command => new HostOperationException(
+                "unknown_command",
+                $"Plugin '{entry.Id}' does not declare an executable command named '{name}'."),
+            _ => new HostOperationException(
+                "unknown_prompt",
+                $"Plugin '{entry.Id}' does not declare a prompt contributor named '{name}'."),
+        };
 
     /// <summary>
     /// Runs one script on a leased script worker. The context must be the main program's bound context, run_code is a

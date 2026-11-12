@@ -127,7 +127,7 @@ internal enum TreeRowMark
 /// <summary>A repository workspace row as the removal / restore / purge commands see it (7.3, 7.5).</summary>
 internal sealed record WorkspaceTarget(ProjectInfo Project, string Directory, string? Branch, string? ForkOfBranch);
 
-internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNode<TreeNodeViewModel>
+internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode<TreeNodeViewModel>
 {
     private bool isExpanded = true;
     private bool isRunning;
@@ -225,26 +225,14 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
     public bool IsMainCheckout
     {
         get => isMainCheckout;
-        set
-        {
-            if (Set(ref isMainCheckout, value))
-            {
-                OnPropertyChanged(nameof(Title));
-            }
-        }
+        set => SetAndNotify(ref isMainCheckout, value, nameof(Title));
     }
 
     /// <summary>Archived sessions of a history row; the row title is formatted from it, so it follows the language too.</summary>
     public int HistoryCount
     {
         get => historyCount;
-        set
-        {
-            if (Set(ref historyCount, value))
-            {
-                OnPropertyChanged(nameof(Title));
-            }
-        }
+        set => SetAndNotify(ref historyCount, value, nameof(Title));
     }
 
     /// <summary>True for an archived session row: its subtitle is the archived label, resolved on read.</summary>
@@ -268,13 +256,7 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
     public string Subtitle
     {
         get => archived ? ProjectStrings.ArchivedSubtitle : subtitle;
-        set
-        {
-            if (Set(ref subtitle, value))
-            {
-                OnPropertyChanged(nameof(HasSubtitle));
-            }
-        }
+        set => SetAndNotify(ref subtitle, value, nameof(HasSubtitle));
     }
 
     public bool HasSubtitle => archived || subtitle.Length > 0;
@@ -314,13 +296,7 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
     public string NewSessionTipKey
     {
         get => newSessionTipKey;
-        set
-        {
-            if (Set(ref newSessionTipKey, value))
-            {
-                OnPropertyChanged(nameof(NewSessionTooltip));
-            }
-        }
+        set => SetAndNotify(ref newSessionTipKey, value, nameof(NewSessionTooltip));
     }
 
     /// <summary>The trailing "+"; a project that is not a git repository has no "new workspace…" to offer (5.2).</summary>
@@ -329,38 +305,20 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
     public bool IsRunning
     {
         get => isRunning;
-        set
-        {
-            if (Set(ref isRunning, value))
-            {
-                OnPropertyChanged(nameof(RunningText));
-            }
-        }
+        set => SetAndNotify(ref isRunning, value, nameof(RunningText));
     }
 
     public bool IsActiveSession
     {
         get => isActiveSession;
-        set
-        {
-            if (Set(ref isActiveSession, value))
-            {
-                OnPropertyChanged(nameof(IsActiveRow));
-            }
-        }
+        set => SetAndNotify(ref isActiveSession, value, nameof(IsActiveRow));
     }
 
     /// <summary>True for the agent row whose tab the bottom group is showing, so the tree and that group agree.</summary>
     public bool IsActiveAgent
     {
         get => isActiveAgent;
-        set
-        {
-            if (Set(ref isActiveAgent, value))
-            {
-                OnPropertyChanged(nameof(IsActiveRow));
-            }
-        }
+        set => SetAndNotify(ref isActiveAgent, value, nameof(IsActiveRow));
     }
 
     /// <summary>The row the main region (a session) or the bottom group (a sub-agent) is currently showing.</summary>
@@ -512,13 +470,7 @@ internal sealed partial class TreeNodeViewModel : ObservableObject, IFlatTreeNod
     public bool IsConflicted
     {
         get => isConflicted;
-        set
-        {
-            if (Set(ref isConflicted, value))
-            {
-                OnPropertyChanged(nameof(HasAbortMerge));
-            }
-        }
+        set => SetAndNotify(ref isConflicted, value, nameof(HasAbortMerge));
     }
 
     /// <summary>The fork entry's label, resolved on read: a session row inherits the session, a workspace row does not.</summary>

@@ -6,14 +6,6 @@ public sealed class GitCliBranchManagementTests
 {
     private static GitCli Cli() => new();
 
-    private static string SeedTracked(RemoteSandbox sandbox, string name = "alice")
-    {
-        var repo = sandbox.Clone(name);
-        sandbox.CommitFile(repo, "base.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "push", "-q", "-u", "origin", "main");
-        return repo;
-    }
-
     [Fact]
     public async Task Create_branch_at_head_without_switching()
     {
@@ -23,7 +15,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var head = IsolatedGit.Head(repo);
 
         var result = await Cli().CreateBranchAsync(repo, "feature-a");
@@ -43,7 +35,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
 
         var result = await Cli().CreateBranchAsync(repo, "feature-b", switchTo: true);
 
@@ -60,7 +52,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
+        var alice = sandbox.SeedTracked("alice");
         var bob = sandbox.Clone("bob");
         IsolatedGit.RunChecked(bob, "checkout", "-q", "-b", "shared");
         sandbox.CommitFile(bob, "shared.txt", "shared\n", "shared work");
@@ -83,7 +75,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "branch", "other");
         File.WriteAllText(Path.Combine(repo, "base.txt"), "uncommitted change\n", new System.Text.UTF8Encoding(false));
         var head = IsolatedGit.Head(repo);
@@ -105,7 +97,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "branch", "other");
         File.WriteAllText(Path.Combine(repo, "new-untracked.txt"), "untracked\n", new System.Text.UTF8Encoding(false));
 
@@ -125,7 +117,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var head = IsolatedGit.Head(repo);
 
         var result = await Cli().SwitchBranchAsync(repo, "no-such-branch");
@@ -145,7 +137,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var head = IsolatedGit.Head(repo);
         var branches = IsolatedGit.BranchList(repo);
         var cli = Cli();
@@ -180,7 +172,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "feature-x");
 
         var result = await Cli().SetUpstreamAsync(repo, branch: null, upstream: "origin/main");
@@ -201,7 +193,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
+        var alice = sandbox.SeedTracked("alice");
         var bob = sandbox.Clone("bob");
         var tip = sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
         IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
@@ -221,7 +213,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
 
         var result = await Cli().FetchAsync(repo, "no-such-remote");
 
@@ -238,7 +230,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var missing = Path.Combine(sandbox.Root, "does-not-exist.git");
         IsolatedGit.RunChecked(repo, "remote", "add", "gone", missing);
 
@@ -257,7 +249,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         using var server = new HangingHttpServer();
         IsolatedGit.RunChecked(repo, "remote", "add", "hanging", server.Url);
 
@@ -279,7 +271,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var port = IsolatedGit.ClosedPort();
         IsolatedGit.RunChecked(repo, "remote", "add", "closed", $"https://127.0.0.1:{port}/x.git");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -302,7 +294,7 @@ public sealed class GitCliBranchManagementTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var port = IsolatedGit.ClosedPort();
         IsolatedGit.RunChecked(repo, "remote", "add", "locked", $"https://user:secret@127.0.0.1:{port}/x.git");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));

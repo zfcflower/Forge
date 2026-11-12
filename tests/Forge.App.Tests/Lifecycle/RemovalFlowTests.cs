@@ -16,7 +16,7 @@ namespace Forge.App.Tests.Lifecycle;
 /// </summary>
 public sealed class RemovalFlowTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-removal-flow-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-removal-flow-");
     private readonly FakeCatalog catalog = new();
     private readonly FakeGit git = new();
     private readonly List<string> trashed = [];

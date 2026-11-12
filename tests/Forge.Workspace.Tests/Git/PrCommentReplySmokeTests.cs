@@ -71,11 +71,10 @@ public sealed class PrCommentReplySmokeTests
         using var fixture = new Fixture();
         var unpushed = fixture.Sandbox.CommitFile(fixture.Repo, "b.txt", "b\n", "local only");
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Fixed.", unpushed));
-
-        Assert.True(result.IsError);
-        Assert.Contains("has not been pushed", result.Content);
-        Assert.Contains(unpushed[..7], result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.ReplyAsync(Json("PRRT_1", "apply", "Fixed.", unpushed)),
+            "has not been pushed",
+            unpushed[..7]);
         Assert.Empty(fixture.Platform.Replies);
         Assert.Null(fixture.Ledger.Get("PRRT_1"));
     }
@@ -159,10 +158,9 @@ public sealed class PrCommentReplySmokeTests
         // Forge the remote-tracking ref so a lazy check against it would believe the commit is pushed.
         IsolatedGit.RunChecked(fixture.Repo, "update-ref", "refs/remotes/origin/feature", unpushed);
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Fixed.", unpushed));
-
-        Assert.True(result.IsError);
-        Assert.Contains("has not been pushed", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.ReplyAsync(Json("PRRT_1", "apply", "Fixed.", unpushed)),
+            "has not been pushed");
         Assert.Empty(fixture.Platform.Replies);
     }
 
@@ -203,10 +201,9 @@ public sealed class PrCommentReplySmokeTests
         IsolatedGit.RunChecked(fixture.Repo, "push", "-q", "-u", "origin", "other");
         IsolatedGit.RunChecked(fixture.Repo, "checkout", "-q", "feature");
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", elsewhere));
-
-        Assert.True(result.IsError);
-        Assert.Contains("is not on the head of pull request #5", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", elsewhere)),
+            "is not on the head of pull request #5");
         Assert.Empty(fixture.Platform.Replies);
     }
 
@@ -227,10 +224,7 @@ public sealed class PrCommentReplySmokeTests
         IsolatedGit.RunChecked(fixture.Repo, "push", "-q", "--force");
         fixture.MovePullRequestHead(replacement);
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", doomed));
-
-        Assert.True(result.IsError);
-        Assert.Contains("rewritten", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", doomed)), "rewritten");
         Assert.Empty(fixture.Platform.Replies);
     }
 
@@ -244,10 +238,9 @@ public sealed class PrCommentReplySmokeTests
 
         using var fixture = new Fixture();
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", "deadbeefdeadbeef"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("does not exist in this repository", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", "deadbeefdeadbeef")),
+            "does not exist in this repository");
         Assert.Empty(fixture.Platform.Replies);
     }
 
@@ -262,10 +255,9 @@ public sealed class PrCommentReplySmokeTests
         using var fixture = new Fixture();
         fixture.MovePullRequestHead("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
 
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed));
-
-        Assert.True(result.IsError);
-        Assert.Contains("The head of pull request #5 (deadbee) is not available locally", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed)),
+            "The head of pull request #5 (deadbee) is not available locally");
         Assert.Empty(fixture.Platform.Replies);
     }
 
@@ -299,9 +291,7 @@ public sealed class PrCommentReplySmokeTests
 
         // The cited commit is local, the head is not, so the head would have to be fetched - which cannot work now.
         fixture.MovePullRequestHead("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
-        var result = await fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed));
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.ReplyAsync(Json("PRRT_1", "apply", "Done.", fixture.Pushed)));
         Assert.Empty(fixture.Platform.Replies);
         Assert.Null(fixture.Ledger.Get("PRRT_1"));
     }
@@ -314,14 +304,11 @@ public sealed class PrCommentReplySmokeTests
     public async Task A_commit_that_is_not_a_sha_is_rejected_without_a_post(string commit)
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "apply", "Done.", commit));
-
-        Assert.True(result.IsError);
-        Assert.Contains("not a commit sha", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "apply", "Done.", commit)),
+            "not a commit sha");
         Assert.Empty(platform.Replies);
     }
 
@@ -359,14 +346,11 @@ public sealed class PrCommentReplySmokeTests
     public async Task Invalid_verdict_and_commit_combinations_never_reach_the_platform(string verdict, string? commit, string expected)
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", verdict, "text", commit));
-
-        Assert.True(result.IsError);
-        Assert.Contains(expected, result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", verdict, "text", commit)),
+            expected);
         Assert.Empty(platform.Replies);
         Assert.Equal(0, platform.ThreadReads);
     }
@@ -377,13 +361,10 @@ public sealed class PrCommentReplySmokeTests
     public async Task An_empty_body_is_not_an_answer(string body)
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", body));
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", body)));
         Assert.Empty(platform.Replies);
     }
 
@@ -395,13 +376,9 @@ public sealed class PrCommentReplySmokeTests
     public async Task Missing_required_arguments_and_unknown_properties_are_tool_errors(string json)
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, json);
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, json));
         Assert.Empty(platform.Replies);
     }
 
@@ -409,15 +386,12 @@ public sealed class PrCommentReplySmokeTests
     public async Task An_unknown_thread_id_is_a_tool_error_that_points_at_the_listing()
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_404", "push_back", "no"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("'PRRT_404' is not a review thread of pull request #5", result.Content);
-        Assert.Contains("pr_comments", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_404", "push_back", "no")),
+            "'PRRT_404' is not a review thread of pull request #5",
+            "pr_comments");
         Assert.Empty(platform.Replies);
     }
 
@@ -425,10 +399,7 @@ public sealed class PrCommentReplySmokeTests
     public async Task A_thread_that_is_already_resolved_gets_no_reply_and_is_not_an_error()
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1", resolved: true, resolvedBy: "reviewer"));
-        var ledger = new PrReplyLedger();
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), ledger, null);
+        var (tools, platform, ledger) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1", resolved: true, resolvedBy: "reviewer"));
 
         // Apply with a sha that no repository knows: the resolved short-circuit must come before the push gate.
         var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "apply", "Done.", "0123abc"));
@@ -443,9 +414,7 @@ public sealed class PrCommentReplySmokeTests
     public async Task The_thread_is_read_again_right_before_replying_so_a_late_resolve_is_noticed()
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
         var listing = await PrCommentHarness.InvokeAsync(tools.Comments, temp.Path, "{}");
         Assert.Contains("Thread PRRT_1 [unresolved]", listing.Content);
@@ -473,10 +442,9 @@ public sealed class PrCommentReplySmokeTests
         var ledger = new PrReplyLedger();
         var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), ledger, null);
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "no"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("Could not post the reply.", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "no")),
+            "Could not post the reply.");
         Assert.Null(ledger.Get("PRRT_1"));
         Assert.Null(ledger.CurrentUser);
     }
@@ -513,10 +481,9 @@ public sealed class PrCommentReplySmokeTests
         var ledger = new PrReplyLedger();
         var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), ledger, null);
 
-        var timedOut = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "Out of scope."));
-
-        Assert.True(timedOut.IsError);
-        Assert.Contains("Could not post the reply.", timedOut.Content);
+        var timedOut = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "Out of scope.")),
+            "Could not post the reply.");
         Assert.Empty(platform.Replies);
         Assert.Null(ledger.Get("PRRT_1"));
         Assert.NotNull(ledger.PendingReply("PRRT_1"));
@@ -541,10 +508,9 @@ public sealed class PrCommentReplySmokeTests
         };
         var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "no"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("pr_create", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, Json("PRRT_1", "push_back", "no")),
+            "pr_create");
         Assert.Empty(platform.Replies);
     }
 
@@ -552,9 +518,7 @@ public sealed class PrCommentReplySmokeTests
     public async Task A_cancelled_reply_throws_and_posts_nothing()
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
         using var source = new CancellationTokenSource();
         source.Cancel();
 
@@ -568,9 +532,7 @@ public sealed class PrCommentReplySmokeTests
     public async Task A_reply_body_is_trimmed_and_multi_line_text_survives()
     {
         using var temp = new TempDirectory();
-        var platform = new FakePrPlatform();
-        platform.Threads.Add(PrCommentHarness.Thread("PRRT_1"));
-        var tools = new PrCommentTools(new GitCli(), platform, new GitToolSettings(), new PrReplyLedger(), null);
+        var (tools, platform, _) = PrCommentHarness.Tools(PrCommentHarness.Thread("PRRT_1"));
 
         var result = await PrCommentHarness.InvokeAsync(
             tools.Reply, temp.Path, """{"thread_id":"PRRT_1","verdict":"push_back","body":"\n  First line.\nSecond line.\n\n"}""");

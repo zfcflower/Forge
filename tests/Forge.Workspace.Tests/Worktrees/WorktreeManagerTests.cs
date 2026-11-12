@@ -10,8 +10,7 @@ public sealed class WorktreeManagerTests
     {
         var sandbox = new TempDirectory();
         var repo = new TestRepo(sandbox);
-        repo.Write("README.md", "# repo\n");
-        repo.Commit("initial");
+        repo.CommitFile("README.md", "# repo\n", "initial");
         return (sandbox, repo);
     }
 
@@ -130,8 +129,7 @@ public sealed class WorktreeManagerTests
         using (repo)
         {
             var initial = repo.Head();
-            repo.Write("later.txt", "later\n");
-            repo.Commit("later");
+            repo.CommitFile("later.txt", "later\n", "later");
             repo.RunGit("tag", "v-start", initial);
 
             var session = await Manager(new WorktreeOptions { StartPoint = "v-start" }).CreateAsync(repo.Root, "from tag");

@@ -24,8 +24,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class SessionTurnFailureTests
 {
-    private const int PumpIterations = 400;
-    private const int PumpDelayMilliseconds = 5;
     private const string SessionId = "session-under-test";
     private const string FailureText = "checkpoint store is down";
     private const string UserText = "please answer";
@@ -114,14 +112,14 @@ public sealed class SessionTurnFailureTests
                     }
 
                     var store = new FakeSessionStore();
-                    var catalog = new FakeSessionCatalog();
+                    var catalog = new EmptySessionCatalog(DateTimeOffset.UnixEpoch);
                     var runtime = new SessionRuntime(
                         new AgentRuntimeServices(
                             static _ => new ScriptedProvider(),
                             HostClient: null,
                             store,
                             catalog,
-                            new FakeTodoStore(),
+                            new EmptyTodoStore("t1", DateTimeOffset.UnixEpoch),
                             new ModelSettings("scripted-model")),
                         Info(repository));
                     var workspace = new SessionWorkspaceViewModel(
@@ -129,7 +127,7 @@ public sealed class SessionTurnFailureTests
                         runtime,
                         new TurnCheckpointService(git, checkpoints),
                         store,
-                        UnconfiguredProviders(repository));
+                        TestProviderServices.Unconfigured(repository));
 
                     var completed = 0;
                     workspace.TurnCompleted += _ => completed++;
@@ -147,7 +145,7 @@ public sealed class SessionTurnFailureTests
         }
         finally
         {
-            DeleteTree(root);
+            TestTempFiles.DeleteTree(root);
         }
     }
 
@@ -155,65 +153,13 @@ public sealed class SessionTurnFailureTests
         new(SessionId, workingDirectory, "demo session", new DateTimeOffset(2025, 6, 1, 12, 0, 0, TimeSpan.Zero));
 
     /// <summary>An empty catalogue under the test root (deleted with it); the turn itself runs on the scripted runtime provider.</summary>
-    private static ProviderServices UnconfiguredProviders(string root)
-    {
-        var settingsPath = Path.Combine(root, "providers-settings.json");
-        File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
-        var dataDir = Path.Combine(root, "provider-data");
-        Directory.CreateDirectory(dataDir);
-        // Fake handler, never used for network here; the workspace does not own it so it is left for reclamation.
-        return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
-    }
-
-    private sealed class ThrowingHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("no network in this test");
-    }
-
     private static string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-turn-failure-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-turn-failure-");
         return root;
     }
 
-    private static void DeleteTree(string path)
-    {
-        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
     /// <summary>One tool-free assistant turn, so the checkpoint failure is the only unusual thing in the run.</summary>
     private sealed class ScriptedProvider : IChatProvider
@@ -333,40 +279,4 @@ public sealed class SessionTurnFailureTests
         public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class FakeSessionCatalog : ISessionCatalog
-    {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, DateTimeOffset.UnixEpoch));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class FakeTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("t1", sessionId, title, TodoStatus.Pending, note, 0, DateTimeOffset.UnixEpoch));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

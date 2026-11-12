@@ -343,59 +343,13 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
             return true;
         });
 
+    /// <summary>Marks this surface's ids sent through <see cref="ReviewMarking" /> and shows what it reported.</summary>
     private async Task MarkAsync(ReviewServices svc, long[] ids, bool retry = false)
     {
-        var gate = FileReviewController.GateOf(svc.Store);
-        await gate.WaitAsync().ConfigureAwait(true);
-        try
+        var reported = await ReviewMarking.MarkAsync(svc, ids, retry).ConfigureAwait(true);
+        if (!reported.IsEmpty)
         {
-            var unmarked = FileReviewController.UnmarkedOf(svc.Store);
-            var targets = retry ? ids.Where(unmarked.Contains).ToArray() : ids;
-            if (targets.Length > 0)
-            {
-                await MarkCoreAsync(svc, targets).ConfigureAwait(true);
-            }
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
-
-    private async Task MarkCoreAsync(ReviewServices svc, long[] ids)
-    {
-        var unmarked = FileReviewController.UnmarkedOf(svc.Store);
-        try
-        {
-            var done = await svc.Store.MarkSentAsync(ids).ConfigureAwait(true);
-            var marked = done.Select(static comment => comment.Id).ToHashSet();
-            foreach (var id in ids)
-            {
-                if (marked.Contains(id))
-                {
-                    unmarked.Remove(id);
-                }
-                else
-                {
-                    unmarked.Add(id);
-                }
-            }
-
-            var missing = ids.Count(id => !marked.Contains(id));
-            if (missing > 0)
-            {
-                SetMessage(new LocText(ReviewStrings.SentNotMarked, LocText.Literal($"{missing}/{ids.Length}")));
-            }
-        }
-        catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
-        {
-            Trace.WriteLine("[review] marking sent failed: " + exception.Message);
-            foreach (var id in ids)
-            {
-                unmarked.Add(id);
-            }
-
-            SetMessage(new LocText(ReviewStrings.SentNotMarked, LocText.Literal(exception.Message)));
+            SetMessage(reported);
         }
     }
 

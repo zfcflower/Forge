@@ -41,9 +41,7 @@ public class AgentLoopTests
             ? Turn.Call(("call-1", "echo", """{"text":"ping"}"""), ("call-2", "echo", """{"text":"pong"}"""))
             : Turn.Say("done"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("echo")]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(2, events.OfType<AgentToolStarted>().Count());
@@ -80,9 +78,7 @@ public class AgentLoopTests
                 ("4", "write-last", "{}"))
             : Turn.Say("done"));
         var host = AgentTestHost.Create(provider, tools, policy: new DefaultApprovalPolicy { TrustedDirectories = [Workspace] });
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(2, recorder.PeakReaders);
@@ -122,13 +118,9 @@ public class AgentLoopTests
         {
             ToolRules = new Dictionary<string, ApprovalMode>(StringComparer.Ordinal) { ["write-file"] = ApprovalMode.Deny },
         };
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("call-1", "write-file", "{}"))
-            : Turn.Say("ok"));
+        var provider = AgentTestScripts.OneToolCallThenSay("write-file", "ok", "call-1");
         var host = AgentTestHost.Create(provider, [tool], policy: policy);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Equal(0, invoked);
         Assert.Single(events.OfType<AgentApprovalDenied>());
@@ -140,13 +132,9 @@ public class AgentLoopTests
     [Fact]
     public async Task AskWithoutHandler_is_denied()
     {
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("call-1", "write-file", "{}"))
-            : Turn.Say("ok"));
+        var provider = AgentTestScripts.OneToolCallThenSay("write-file", "ok", "call-1");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("write-file", ToolSideEffect.Write)]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Single(events.OfType<AgentApprovalDenied>());
         Assert.True(Assert.Single(root.History[2].Content.OfType<ToolResultBlock>()).IsError);
@@ -177,9 +165,7 @@ public class AgentLoopTests
             tools,
             policy: new DefaultApprovalPolicy { AutoAllowReadOnly = false },
             handler: gate);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(1, gate.Peak);
@@ -230,9 +216,7 @@ public class AgentLoopTests
     {
         var artifacts = new InMemoryArtifactStore();
         var payload = new string('x', 500);
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("call-1", "big", "{}"))
-            : Turn.Say("ok"));
+        var provider = AgentTestScripts.OneToolCallThenSay("big", "ok", "call-1");
         var options = new AgentOptions { ArtifactThresholdChars = 100, ArtifactPreviewChars = 20 };
         var host = AgentTestHost.Create(
             provider,
@@ -259,9 +243,7 @@ public class AgentLoopTests
     {
         var provider = new FakeProvider((request, index) => Turn.Call(("call", "echo", "{}")));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("echo")], options: new AgentOptions { MaxTurns = 2 });
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         var failure = Assert.Single(events.OfType<AgentFailed>());
         Assert.Contains("did not finish within 2 turns", failure.Error, StringComparison.Ordinal);
@@ -279,9 +261,7 @@ public class AgentLoopTests
             FakeTool.Echo("echo"),
         };
         var host = AgentTestHost.Create(provider, tools);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var results = root.History[2].Content.OfType<ToolResultBlock>().ToArray();
@@ -359,9 +339,7 @@ public class AgentLoopTests
         var provider = new FakeProvider((Func<ChatRequest, int, IReadOnlyList<ChatStreamEvent>>)((request, index) =>
             throw new ProviderException("upstream down", retryable: true)));
         var host = AgentTestHost.Create(provider);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         var failure = Assert.Single(events.OfType<AgentFailed>());
         Assert.Equal("root", failure.AgentId);

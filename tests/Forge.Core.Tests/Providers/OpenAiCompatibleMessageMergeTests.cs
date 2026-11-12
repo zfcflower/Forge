@@ -9,8 +9,7 @@ public class OpenAiCompatibleMessageMergeTests
     [Fact]
     public async Task Merges_consecutive_user_messages_with_blank_line_between_paragraphs()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [
@@ -31,8 +30,7 @@ public class OpenAiCompatibleMessageMergeTests
     [Fact]
     public async Task Keeps_tool_results_separate_and_emits_them_before_merged_user_text()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [
@@ -68,8 +66,7 @@ public class OpenAiCompatibleMessageMergeTests
     [Fact]
     public async Task Does_not_merge_user_and_tool_messages()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [
@@ -95,8 +92,7 @@ public class OpenAiCompatibleMessageMergeTests
     [Fact]
     public async Task Merges_assistant_text_and_tool_calls_in_order()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [
@@ -132,8 +128,7 @@ public class OpenAiCompatibleMessageMergeTests
     [Fact]
     public async Task Omits_empty_messages_when_merging()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [
@@ -155,8 +150,7 @@ public class OpenAiCompatibleMessageMergeTests
     [Fact]
     public async Task Emits_only_tool_message_when_user_content_has_only_tool_results()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         var request = TestData.Request(messages:
         [

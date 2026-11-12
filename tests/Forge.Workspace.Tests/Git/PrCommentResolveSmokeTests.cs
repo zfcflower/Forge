@@ -42,11 +42,10 @@ public sealed class PrCommentResolveSmokeTests
         using var temp = new TempDirectory();
         var (tools, platform, _) = Create("octo", PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("has no verdict reply from you", result.Content);
-        Assert.Contains("pr_comment_reply", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "has no verdict reply from you",
+            "pr_comment_reply");
         Assert.Empty(platform.Resolves);
     }
 
@@ -122,10 +121,9 @@ public sealed class PrCommentResolveSmokeTests
         using var temp = new TempDirectory();
         var (tools, platform, _) = Create(user: null, ThreadWithReply("PRRT_1", PrReplyVerdict.PushBack));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("has no verdict reply from you", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "has no verdict reply from you");
         Assert.Empty(platform.Resolves);
     }
 
@@ -152,10 +150,9 @@ public sealed class PrCommentResolveSmokeTests
         using var temp = new TempDirectory();
         var (tools, platform, _) = Create("octo", ThreadWithReply("PRRT_1", PrReplyVerdict.PushBack, author: "mallory"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("has no verdict reply from you", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "has no verdict reply from you");
         Assert.Empty(platform.Resolves);
     }
 
@@ -166,9 +163,8 @@ public sealed class PrCommentResolveSmokeTests
         var (tools, platform, ledger) = Create("octo", PrCommentHarness.Thread("PRRT_1"));
         ledger.Record("PRRT_1", PrReplyVerdict.PushBack, null, "PRRC_gone");
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")));
         Assert.Empty(platform.Resolves);
     }
 
@@ -213,10 +209,9 @@ public sealed class PrCommentResolveSmokeTests
             after: [PrCommentHarness.Comment("c2", "reviewer", "I disagree, please change it", 2)]);
         var (tools, platform, _) = Create("octo", thread);
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("1 comment(s) after your push_back reply", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "1 comment(s) after your push_back reply");
         Assert.Empty(platform.Resolves);
     }
 
@@ -252,10 +247,9 @@ public sealed class PrCommentResolveSmokeTests
             after: [PrCommentHarness.Comment("c2", "Octo", "One more thing: also fix the log line.", 2)]);
         var (tools, platform, _) = Create("octo", thread);
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("1 comment(s) after your push_back reply", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "1 comment(s) after your push_back reply");
         Assert.Empty(platform.Resolves);
     }
 
@@ -307,9 +301,8 @@ public sealed class PrCommentResolveSmokeTests
         var (tools, platform, _) = Create("octo", PrCommentHarness.Thread("PRRT_1"), PrCommentHarness.Thread("PRRT_2"));
         await PrCommentHarness.InvokeAsync(tools.Reply, temp.Path, ReplyJson("PRRT_1", "push_back", "no"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_2"));
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_2")));
         Assert.Empty(platform.Resolves);
     }
 
@@ -319,10 +312,9 @@ public sealed class PrCommentResolveSmokeTests
         using var temp = new TempDirectory();
         var (tools, platform, _) = Create("octo", PrCommentHarness.Thread("PRRT_1"));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_404"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("is not a review thread of pull request #5", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_404")),
+            "is not a review thread of pull request #5");
         Assert.Empty(platform.Resolves);
     }
 
@@ -333,10 +325,9 @@ public sealed class PrCommentResolveSmokeTests
         var (tools, platform, _) = Create("octo", ThreadWithReply("PRRT_1", PrReplyVerdict.PushBack));
         platform.ResolveFailure = PrResult<PrThreadResolution>.Fail(GitRemoteFailureKind.Network, "timeout talking to github");
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("Could not resolve the thread.", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "Could not resolve the thread.");
     }
 
     [Fact]
@@ -346,10 +337,9 @@ public sealed class PrCommentResolveSmokeTests
         var (tools, platform, _) = Create("octo", ThreadWithReply("PRRT_1", PrReplyVerdict.PushBack));
         platform.ResolveDoesNotStick = true;
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("still unresolved", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "still unresolved");
         Assert.False(platform.Threads[0].IsResolved);
     }
 
@@ -360,10 +350,9 @@ public sealed class PrCommentResolveSmokeTests
         var (tools, platform, _) = Create("octo");
         platform.ViewFailure = PrResult<PullRequestInfo>.Fail(GitRemoteFailureKind.Other, "none", reason: PrFailureReason.PullRequestNotFound);
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("pr_create", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, ResolveJson("PRRT_1")),
+            "pr_create");
         Assert.Empty(platform.Resolves);
     }
 
@@ -376,9 +365,7 @@ public sealed class PrCommentResolveSmokeTests
         using var temp = new TempDirectory();
         var (tools, platform, _) = Create("octo", ThreadWithReply("PRRT_1", PrReplyVerdict.PushBack));
 
-        var result = await PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, json);
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(PrCommentHarness.InvokeAsync(tools.Resolve, temp.Path, json));
         Assert.Empty(platform.Resolves);
     }
 

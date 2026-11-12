@@ -1025,19 +1025,7 @@ public sealed class MenuShellTests
 
         public static async Task<Harness> CreateAsync()
         {
-            var root = Path.Combine(Path.GetTempPath(), "forge-menu-shell-" + Guid.NewGuid().ToString("N"));
-            var data = Path.Combine(root, "data");
-            var workspace = Path.Combine(root, "workspace");
-            var general = Path.Combine(root, "general");
-            foreach (var directory in new[] { data, workspace, general })
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var previous = EnvironmentSnapshot.Capture();
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, data);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, general);
+            var (root, previous) = TempDataRoot.Redirect("forge-menu-shell-");
 
             var sandbox = GitTestSandbox.Create();
             var repository = sandbox.CloneTracked("repo");
@@ -1186,19 +1174,4 @@ public sealed class MenuShellTests
         }
     }
 
-    private readonly record struct EnvironmentSnapshot(string DataRoot, string Workspace, string GeneralWorkspace)
-    {
-        public static EnvironmentSnapshot Capture() =>
-            new(
-                Environment.GetEnvironmentVariable(AppPaths.DataVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.GeneralVariable) ?? string.Empty);
-
-        public void Restore()
-        {
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, DataRoot);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, GeneralWorkspace);
-        }
-    }
 }

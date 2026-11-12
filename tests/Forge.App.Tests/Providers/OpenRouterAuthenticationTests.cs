@@ -185,9 +185,8 @@ public sealed class OpenRouterAuthenticationCredentialTests : IDisposable
 {
     private const string KeyBody = """{"key":"sk-or-v1-signed-in"}""";
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-openrouter-login-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-openrouter-login-");
 
-    public OpenRouterAuthenticationCredentialTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void The_openrouter_preset_offers_a_key_and_a_sign_in_and_its_row_shows_both_buttons()
@@ -305,13 +304,7 @@ public sealed class OpenRouterAuthenticationCredentialTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     /// <summary>

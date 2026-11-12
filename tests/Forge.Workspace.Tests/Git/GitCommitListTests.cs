@@ -38,8 +38,7 @@ public sealed class GitCommitListTests
         var baseSha = repo.Commit("base");
         Assert.Empty(await Cli().GetCommitsAsync(repo.Root, baseSha, "HEAD"));
 
-        repo.Write("a.txt", "2\n");
-        repo.Commit("two");
+        repo.CommitFile("a.txt", "2\n", "two");
         repo.Write("a.txt", "3\n");
         var three = repo.Commit("three");
 
@@ -60,11 +59,9 @@ public sealed class GitCommitListTests
         Assert.Empty(only.ParentShas);
 
         repo.RunGit("checkout", "-q", "-b", "side");
-        repo.Write("b.txt", "b\n");
-        repo.Commit("side");
+        repo.CommitFile("b.txt", "b\n", "side");
         repo.RunGit("checkout", "-q", "main");
-        repo.Write("c.txt", "c\n");
-        repo.Commit("main2");
+        repo.CommitFile("c.txt", "c\n", "main2");
         repo.RunGit("merge", "-q", "--no-ff", "-m", "merge", "side");
 
         var merged = await Cli().GetCommitsAsync(repo.Root, root, "HEAD");
@@ -128,8 +125,7 @@ public sealed class GitCommitListTests
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
         var body = string.Join('\n', Enumerable.Range(1, 30).Select(static i => "line" + i)) + "\n";
-        repo.Write("f.txt", body);
-        repo.Commit("base");
+        repo.CommitFile("f.txt", body, "base");
         repo.Write("f.txt", body.Replace("line15\n", "X\n", StringComparison.Ordinal));
         repo.Write("new.txt", "a\nb\nc\n");
 

@@ -13,8 +13,7 @@ public sealed class RunCodeProxyTests
     public async Task Description_is_stable_across_tool_registration_order()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var first = new TestRegistry([new StubTool("b"), new StubTool("a")]);
         var second = new TestRegistry([new StubTool("a"), new StubTool("b")]);
 
@@ -28,8 +27,7 @@ public sealed class RunCodeProxyTests
     public async Task Description_updates_after_the_registry_changes()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var registry = new TestRegistry([new StubTool("solo")]);
         var proxy = client.CreateRunCodeTool(registry);
         var before = proxy.Definition.Description;
@@ -47,8 +45,7 @@ public sealed class RunCodeProxyTests
     public async Task Own_run_code_tool_is_excluded_from_the_description_and_declarations()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var registry = new TestRegistry([new StubTool("run_code"), new StubTool("real")]);
         var proxy = client.CreateRunCodeTool(registry);
@@ -90,8 +87,7 @@ public sealed class RunCodeProxyTests
     public async Task Invalid_arguments_are_rejected_locally_without_any_request(string arguments, string fragment)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = client.CreateRunCodeTool(new TestRegistry());
 
@@ -109,8 +105,7 @@ public sealed class RunCodeProxyTests
     public async Task Oversize_script_is_rejected_locally()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var execution = new Sdk.CodeExecutionOptions { MaxScriptChars = 8 };
         var proxy = client.CreateRunCodeTool(new TestRegistry(), new RunCodeProxyOptions { Execution = execution });
@@ -130,8 +125,7 @@ public sealed class RunCodeProxyTests
     public async Task Finite_huge_timeout_clamps_to_the_maximum_without_overflow()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
         BoundRoots.ParkRoot(host, "code.execute", hold);
@@ -153,8 +147,7 @@ public sealed class RunCodeProxyTests
     public async Task Default_timeout_is_60s_and_values_above_600s_clamp()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot();
         BoundRoots.ParkRoot(host, "code.execute", hold);
@@ -178,8 +171,7 @@ public sealed class RunCodeProxyTests
     public async Task Null_timeout_uses_the_default_budget()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot();
         BoundRoots.ParkRoot(host, "code.execute", hold);
@@ -207,8 +199,7 @@ public sealed class RunCodeProxyTests
             return Json.Element("""{"content":"slow-ok","isError":false}""");
         });
         var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(30) };
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
         var proxy = client.CreateRunCodeTool(new TestRegistry());
 
@@ -226,8 +217,7 @@ public sealed class RunCodeProxyTests
     public async Task Code_execute_carries_camelCase_context_tools_and_options()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var execution = new Sdk.CodeExecutionOptions { MaxConcurrentToolCalls = 3, MaxResultChars = 1234 };
         var registry = new TestRegistry(
@@ -279,8 +269,7 @@ public sealed class RunCodeProxyTests
     public async Task Expired_script_call_fails_and_the_next_call_recovers()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         host.On("code.execute", async (_, ct) =>
         {
@@ -297,7 +286,7 @@ public sealed class RunCodeProxyTests
         Assert.Contains("script was stopped", expired.Content);
         Assert.Contains("run_code timeout", expired.Content);
 
-        host.On("code.execute", (_, _) => Task.FromResult(Json.Element("""{"content":"recovered","isError":false}""")));
+        host.Answer("code.execute", """{"content":"recovered","isError":false}""");
         var recovered = await proxy.InvokeAsync(
             new ToolCall("rc-2", "run_code", "{\"code\":\"2\"}"), context, limit.Token);
 

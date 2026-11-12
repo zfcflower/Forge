@@ -73,6 +73,26 @@ internal static class StorageDb
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// A command on <paramref name="connection" /> that already carries <paramref name="sql" />; the caller only binds
+    /// its parameters.
+    /// </summary>
+    public static SqliteCommand Command(SqliteConnection connection, string sql)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command;
+    }
+
+    /// <summary>The same, enlisted in <paramref name="transaction" /> (when there is one) before the SQL is set.</summary>
+    public static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        return command;
+    }
+
     public static string FormatTimestamp(DateTimeOffset value) =>
         value.ToString("O", CultureInfo.InvariantCulture);
 

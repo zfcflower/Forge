@@ -504,20 +504,8 @@ public sealed class SessionLifecycleShellTests
 
         public static async Task<Harness> CreateAsync(int sessionCount, RecordingDialogs? dialogs)
         {
-            var root = Path.Combine(Path.GetTempPath(), "forge-lifecycle-" + Guid.NewGuid().ToString("N"));
-            var data = Path.Combine(root, "data");
-            var workspace = Path.Combine(root, "workspace");
-            var general = Path.Combine(root, "general");
+            var (root, previous) = TempDataRoot.Redirect("forge-lifecycle-", "work");
             var work = Path.Combine(root, "work");
-            foreach (var directory in new[] { data, workspace, general, work })
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var previous = EnvironmentSnapshot.Capture();
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, data);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, general);
 
             var composition = AppComposition.Create();
             var catalog = composition.Catalog;
@@ -563,24 +551,7 @@ public sealed class SessionLifecycleShellTests
             await Composition.DisposeAsync();
             previous.Restore();
 
-            foreach (var file in Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
-
-            try
-            {
-                Directory.Delete(Root, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
+            TestTempFiles.DeleteTree(Root);
         }
 
         private async Task<MainWindowViewModel> CreateShellAsync(RecordingDialogs? dialogs)
@@ -596,19 +567,4 @@ public sealed class SessionLifecycleShellTests
         }
     }
 
-    private readonly record struct EnvironmentSnapshot(string DataRoot, string Workspace, string GeneralWorkspace)
-    {
-        public static EnvironmentSnapshot Capture() =>
-            new(
-                Environment.GetEnvironmentVariable(AppPaths.DataVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.GeneralVariable) ?? string.Empty);
-
-        public void Restore()
-        {
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, DataRoot);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, GeneralWorkspace);
-        }
-    }
 }

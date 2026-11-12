@@ -1223,9 +1223,7 @@ public sealed class WorkbenchControlsTests
 
         var active = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.ClickTab(scene, FirstTabId);
             return scene.Layout.MainTabs.ActiveTab?.Id;
         });
@@ -1240,9 +1238,7 @@ public sealed class WorkbenchControlsTests
 
         var remaining = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.ClickCloseOfTab(scene, FirstTabId);
             return WorkbenchUi.TabIdsOf(scene.Layout.MainTabs);
         });
@@ -1257,9 +1253,7 @@ public sealed class WorkbenchControlsTests
 
         var remaining = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.MiddleClickTab(scene, FirstTabId);
             return WorkbenchUi.TabIdsOf(scene.Layout.MainTabs);
         });
@@ -1274,9 +1268,7 @@ public sealed class WorkbenchControlsTests
 
         var order = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.OpenSessionTab(scene.Layout, ThirdTabId);
             WorkbenchUi.DragTabAlongStrip(scene, FirstTabId, SecondTabId);
             return WorkbenchUi.TabIdsOf(scene.Layout.MainTabs);
@@ -1292,9 +1284,7 @@ public sealed class WorkbenchControlsTests
 
         var floating = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.DragTabOutOfStrip(scene, FirstTabId);
             return scene.Layout.Floating.Select(static item => item.Id).ToList();
         });
@@ -1309,9 +1299,7 @@ public sealed class WorkbenchControlsTests
 
         var distinct = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             return WorkbenchUi.HasDistinctContextMenus(scene, FirstTabId, SecondTabId);
         });
 
@@ -1360,9 +1348,7 @@ public sealed class WorkbenchControlsTests
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.FloatTab(scene, FirstTabId);
             WorkbenchUi.CloseFloatingWindow(scene, WorkbenchIds.SessionTab(FirstTabId));
             var tab = WorkbenchUi.Tab(scene.Layout, FirstTabId);
@@ -1400,9 +1386,7 @@ public sealed class WorkbenchControlsTests
 
         var state = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.FloatTab(scene, FirstTabId);
             scene.Layout.IsShuttingDown = true;
             WorkbenchUi.CloseFloatingWindow(scene, WorkbenchIds.SessionTab(FirstTabId));
@@ -1419,9 +1403,7 @@ public sealed class WorkbenchControlsTests
 
         var stillOpen = await WorkbenchUi.QueryAsync(session, () =>
         {
-            var scene = WorkbenchUi.Open(WorkbenchUi.NewLayout());
-            WorkbenchUi.OpenSessionTab(scene.Layout, FirstTabId);
-            WorkbenchUi.OpenSessionTab(scene.Layout, SecondTabId);
+            var scene = WorkbenchUi.TwoTabs(FirstTabId, SecondTabId);
             WorkbenchUi.FloatTab(scene, FirstTabId);
             scene.Layout.CloseTab(WorkbenchUi.Tab(scene.Layout, FirstTabId));
             Dispatcher.UIThread.RunJobs();
@@ -1627,30 +1609,26 @@ internal static class WorkbenchUi
 
     public static WorkbenchLayout NewLayout() => new(new object(), new object(), new object(), new object(), new object());
 
+    /// <summary>A shown workbench scene with two session tabs open, so a test only has to say what it does with them.</summary>
+    public static Scene TwoTabs(string firstTabId, string secondTabId)
+    {
+        var scene = Open(NewLayout());
+        OpenSessionTab(scene.Layout, firstTabId);
+        OpenSessionTab(scene.Layout, secondTabId);
+        return scene;
+    }
+
     /// <summary>A window with the host as its content, shown and laid out once.</summary>
     public static Scene Open(WorkbenchLayout layout, double width = WindowWidth)
     {
         var host = new WorkbenchHost { Layout = layout };
-        var window = new Window { Width = width, Height = WindowHeight, Content = host };
-        window.Show();
-        Settle(window);
+        var window = SharedUi.Show(host, width, WindowHeight);
+        SharedUi.Settle(window);
         return new Scene(window, host, layout);
     }
 
-    /// <summary>
-    /// Drains the dispatcher and renders, twice: a layout change can post follow-up work (the drawer's z-order, a pending
-    /// arrange) that only exists after the first pass. Headless rendering runs only when this is called, so nothing waits.
-    /// </summary>
-    public static void Settle(Window window)
-    {
-        for (var pass = 0; pass < SettlePasses; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
+    /// <summary>Drains the dispatcher and renders <paramref name="window"/> twice; the shared helper every workbench suite calls.</summary>
+    public static void Settle(Window window) => SharedUi.Settle(window);
 
     public static string RegionSplitterId(int index) => "region-splitter-" + index;
 
@@ -1722,7 +1700,7 @@ internal static class WorkbenchUi
     {
         window.MouseDown(at, MouseButton.Left);
         window.MouseUp(at, MouseButton.Left);
-        Settle(window);
+        SharedUi.Settle(window);
     }
 
     public static void ClickPin(Scene scene, string panel) =>
@@ -1737,7 +1715,7 @@ internal static class WorkbenchUi
     public static void PressEscape(Scene scene)
     {
         scene.Window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     /// <summary>A real left-button drag from the centre of a splitter by the given offsets.</summary>
@@ -1749,7 +1727,7 @@ internal static class WorkbenchUi
         scene.Window.MouseDown(from, MouseButton.Left);
         scene.Window.MouseMove(to);
         scene.Window.MouseUp(to, MouseButton.Left);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     /// <summary>
@@ -1764,7 +1742,7 @@ internal static class WorkbenchUi
         scene.Window.MouseDown(from, MouseButton.Left);
         scene.Window.MouseMove(to);
         scene.Window.MouseUp(to, MouseButton.Left);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     /// <summary>Drags a panel title bar's blank space across to the centre of <paramref name="target"/>; optionally cancels with Escape.</summary>
@@ -1781,7 +1759,7 @@ internal static class WorkbenchUi
         }
 
         scene.Window.MouseUp(to, MouseButton.Left);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     public static IReadOnlyList<RegionRole> OrderOf(WorkbenchLayout layout) =>
@@ -1790,13 +1768,13 @@ internal static class WorkbenchUi
     public static void OpenBottomTab(Scene scene)
     {
         scene.Layout.OpenTab(scene.Layout.BottomTabs, WorkbenchIds.SubAgentTab("agent-1"), TabKind.SubAgent, new object(), "agent-1");
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     public static void OpenPreviewTab(Scene scene)
     {
         scene.Layout.OpenTab(scene.Layout.PreviewTabs, WorkbenchIds.PreviewTab, TabKind.FilePreview, new object(), "file");
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     public static TabModel OpenSessionTab(WorkbenchLayout layout, string id) =>
@@ -1812,33 +1790,33 @@ internal static class WorkbenchUi
 
     public static void ClickTab(Scene scene, string id)
     {
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
         Click(scene.Window, CentreOf(Header(scene, id), scene.Window));
     }
 
     public static void ClickCloseOfTab(Scene scene, string id)
     {
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
         var header = Header(scene, id);
         scene.Window.MouseMove(CentreOf(header, scene.Window));
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
         var close = Find<Control>(scene.Window, "tab-" + WorkbenchIds.SessionTab(id) + "-close");
         Click(scene.Window, CentreOf(close, scene.Window));
     }
 
     public static void MiddleClickTab(Scene scene, string id)
     {
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
         var at = CentreOf(Header(scene, id), scene.Window);
         scene.Window.MouseDown(at, MouseButton.Middle);
         scene.Window.MouseUp(at, MouseButton.Middle);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     /// <summary>Presses on the first tab and moves onto the leading edge of the second, which reorders them.</summary>
     public static void DragTabAlongStrip(Scene scene, string draggedId, string overId)
     {
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
         var dragged = Header(scene, draggedId);
         var over = Header(scene, overId);
         var from = CentreOf(dragged, scene.Window);
@@ -1846,13 +1824,13 @@ internal static class WorkbenchUi
         scene.Window.MouseDown(from, MouseButton.Left);
         scene.Window.MouseMove(to);
         scene.Window.MouseUp(to, MouseButton.Left);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     /// <summary>Presses on a tab and drops it well below its strip, past the float-out distance.</summary>
     public static void DragTabOutOfStrip(Scene scene, string id)
     {
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
         var header = Header(scene, id);
         var strip = header.FindAncestorOfType<PanelTabStrip>() ?? throw new InvalidOperationException("Header is not inside a tab strip.");
         var from = CentreOf(header, scene.Window);
@@ -1860,7 +1838,7 @@ internal static class WorkbenchUi
         scene.Window.MouseDown(from, MouseButton.Left);
         scene.Window.MouseMove(to);
         scene.Window.MouseUp(to, MouseButton.Left);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     public static bool HasDistinctContextMenus(Scene scene, string first, string second)
@@ -1873,7 +1851,7 @@ internal static class WorkbenchUi
     public static void FloatTab(Scene scene, string id)
     {
         scene.Layout.FloatTab(Tab(scene.Layout, id));
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     public static Window? FloatingWindow(Window owner, string itemId)
@@ -1886,7 +1864,7 @@ internal static class WorkbenchUi
     {
         var item = scene.Layout.Floating.Single(entry => entry.Id == itemId);
         scene.Layout.Dock(item);
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     /// <summary>Closes a floating window the way the title-bar close box does: the window's own close path.</summary>
@@ -1894,13 +1872,13 @@ internal static class WorkbenchUi
     {
         var window = FloatingWindow(scene.Window, itemId) ?? throw new InvalidOperationException("No floating window for " + itemId + ".");
         window.Close();
-        Settle(scene.Window);
+        SharedUi.Settle(scene.Window);
     }
 
     public static void ClickFloatingDock(Scene scene, string itemId)
     {
         var window = FloatingWindow(scene.Window, itemId) ?? throw new InvalidOperationException("No floating window for " + itemId + ".");
-        Settle(window);
+        SharedUi.Settle(window);
         Click(window, CentreOf(Find<Control>(window, "floating-" + itemId + "-dock"), window));
     }
 }
@@ -1948,7 +1926,7 @@ internal sealed class ShellFixture : IAsyncDisposable
 
     public static async Task<ShellFixture> OpenAsync(HeadlessUnitTestSession session)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-shell-smoke-" + Guid.NewGuid().ToString("N"));
+        var root = TestTempFiles.NewDirectory("forge-shell-smoke-");
         var workspace = Path.Combine(root, "workspace");
         Directory.CreateDirectory(workspace);
         var saved = (

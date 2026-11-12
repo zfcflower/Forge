@@ -10,9 +10,8 @@ public sealed class AutomationDefinitionStoreTests : IDisposable
 {
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-automation-defs-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-automation-defs-");
 
-    public AutomationDefinitionStoreTests() => Directory.CreateDirectory(root);
 
     public void Dispose()
     {

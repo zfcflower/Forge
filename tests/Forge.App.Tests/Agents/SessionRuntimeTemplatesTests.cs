@@ -16,7 +16,7 @@ namespace Forge.App.Tests.Agents;
 /// </summary>
 public sealed class SessionRuntimeTemplatesTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-runtime-templates-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-runtime-templates-");
     private readonly string user;
     private readonly string workspace;
 

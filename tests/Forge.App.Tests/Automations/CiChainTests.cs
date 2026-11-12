@@ -234,7 +234,7 @@ public sealed class CiChainTests
     [Fact]
     public async Task Runner_honours_project_overrides_of_the_scout_and_fix_slots()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-ci-slots-" + Guid.NewGuid().ToString("N"));
+        var root = TestTempFiles.NewDirectory("forge-ci-slots-");
         try
         {
             var prompts = Path.Combine(root, "ws", ".forge", "prompts");

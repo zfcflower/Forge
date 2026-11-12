@@ -529,25 +529,13 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
         public static async Task<Harness> CreateAsync(Scenario scenario)
         {
-            var root = Path.Combine(Path.GetTempPath(), "forge-workbench-" + Guid.NewGuid().ToString("N"));
-            var data = Path.Combine(root, "data");
+            var (root, previous) = TempDataRoot.Redirect("forge-workbench-", "work");
             var workspace = Path.Combine(root, "workspace");
-            var general = Path.Combine(root, "general");
             var work = Path.Combine(root, "work");
-            foreach (var directory in new[] { data, workspace, general, work })
-            {
-                Directory.CreateDirectory(directory);
-            }
-
             foreach (var file in scenario.Files)
             {
                 File.WriteAllLines(Path.Combine(work, file), ["first line of " + file, "second line of " + file]);
             }
-
-            var previous = EnvironmentSnapshot.Capture();
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, data);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, general);
 
             var composition = AppComposition.Create();
             var sessionIds = new List<string>(scenario.SessionCount);
@@ -636,47 +624,11 @@ public sealed class MainWindowWorkbenchIntegrationTests
 
             previous.Restore();
 
-            DeleteTree(root);
+            TestTempFiles.DeleteTree(root);
         }
 
         /// <summary>git writes its objects read-only, so the temp tree is only removable once the attributes are reset.</summary>
-        private static void DeleteTree(string path)
-        {
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
-
-            try
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
     }
 
     /// <summary>The three data-root variables the composition root reads, captured so a test leaves no trace.</summary>
-    private readonly record struct EnvironmentSnapshot(string DataRoot, string Workspace, string GeneralWorkspace)
-    {
-        public static EnvironmentSnapshot Capture() =>
-            new(
-                Environment.GetEnvironmentVariable(AppPaths.DataVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.GeneralVariable) ?? string.Empty);
-
-        public void Restore()
-        {
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, DataRoot);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, GeneralWorkspace);
-        }
-    }
 }

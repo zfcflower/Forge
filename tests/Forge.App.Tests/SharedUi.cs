@@ -1,4 +1,6 @@
+using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Threading;
 using Xunit;
 
 namespace Forge.App.Tests;
@@ -17,6 +19,55 @@ internal static class SharedUi
     public static HeadlessUnitTestSession Session =>
         session ?? throw new InvalidOperationException(
             "The shared headless session is only available inside the forge-app-ui collection; mark the test class [Collection(\"forge-app-ui\")].");
+
+    /// <summary>Runs <paramref name="body"/> on the shared UI thread under this suite's 120 s budget.</summary>
+    internal static async Task RunAsync(Func<Task> body)
+    {
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        await Session.Dispatch(
+            async () =>
+            {
+                await body();
+                return 0;
+            },
+            budget.Token);
+    }
+
+    /// <summary>Pumps the dispatcher and one headless render tick <paramref name="passes"/> times, then drains the queue.</summary>
+    internal static void Settle(int passes = 2)
+    {
+        for (var pass = 0; pass < passes; pass++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        }
+
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    /// <summary>Shows <paramref name="content"/> in a window of the given size and returns that window.</summary>
+    internal static Window Show(Control content, double width, double height)
+    {
+        var window = new Window { Width = width, Height = height, Content = content };
+        window.Show();
+        return window;
+    }
+
+    /// <summary>
+    /// Same as <see cref="Settle(int)"/>, but lays <paramref name="window"/> out explicitly between passes: the layout
+    /// manager's own scheduled pass is a dispatcher post that does not reliably run under <c>RunJobs</c> alone.
+    /// </summary>
+    internal static void Settle(Window window, int passes = 2)
+    {
+        for (var pass = 0; pass < passes; pass++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+        }
+
+        Dispatcher.UIThread.RunJobs();
+    }
 
     internal static void Start() => session = HeadlessUnitTestSession.StartNew(typeof(App));
 

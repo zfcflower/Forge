@@ -70,7 +70,7 @@ public sealed class RootInterjectionTests
                 return new ToolResult("ok");
             }),
         };
-        var provider = new FakeProvider((_, index) => index == 0 ? Turn.Call(("c1", "slow", "{}")) : Turn.Say("done"));
+        var provider = AgentTestScripts.OneToolCallThenSay("slow", "done", "c1");
         var host = AgentTestHost.Create(provider, tools);
         var root = host.CreateRoot("session-interject-" + Guid.NewGuid().ToString("n"), Workspace);
 
@@ -125,7 +125,7 @@ public sealed class RootInterjectionTests
                 return new ToolResult("ok");
             }),
         };
-        var provider = new FakeProvider((_, index) => index == 0 ? Turn.Call(("c1", "slow", "{}")) : Turn.Say("done"));
+        var provider = AgentTestScripts.OneToolCallThenSay("slow", "done", "c1");
         var host = AgentTestHost.Create(provider, tools);
         var root = host.CreateRoot("session-interject-" + Guid.NewGuid().ToString("n"), Workspace);
         var image = new ImageBlock("image/png", "AAAA");

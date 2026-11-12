@@ -23,7 +23,7 @@ public sealed class HostToolCallRecursionTests
         var leaf = new StubTool("leaf", ToolSideEffect.ReadOnly, (_, _, _) =>
             ValueTask.FromResult(new ToolResult("leaf-ok")));
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
             resolver: name => name switch
             {
@@ -31,8 +31,7 @@ public sealed class HostToolCallRecursionTests
                 "leaf" => leaf,
                 _ => null,
             },
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+            approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var setup = await StartChainAsync(host, client, bridge, betaSource, limit.Token);
 
@@ -84,7 +83,7 @@ public sealed class HostToolCallRecursionTests
             return await beta.InvokeAsync(new ToolCall("nested-1", "work", "{}"), context, ct).ConfigureAwait(false);
         });
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
             resolver: name => name switch
             {
@@ -92,8 +91,7 @@ public sealed class HostToolCallRecursionTests
                 "leaf" => leaf,
                 _ => null,
             },
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+            approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var setup = await StartChainAsync(host, client, bridge, betaSource, limit.Token);
         alphaProxy = setup.AlphaProxy;
@@ -106,8 +104,7 @@ public sealed class HostToolCallRecursionTests
         var callbackB = await host.CallClientAsync(
             Operation, BoundRoots.BoundPayload(runB, "beta", "leaf", "{}"), limit.Token);
 
-        var (content, isError) = BoundRoots.OutputOf(callbackB);
-        Assert.True(isError);
+        var content = BoundRoots.RefusedContent(callbackB);
         Assert.Contains("already on the call chain", content);
         Assert.Contains("'alpha'", content);
         Assert.Equal(before, host.Requests("plugin.execute").Count);
@@ -131,8 +128,8 @@ public sealed class HostToolCallRecursionTests
         });
         await using var client = ClientFactory.Create(
             host,
-            resolver: name => name == "bridge" ? bridge : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+            resolver: bridge.Resolver(),
+            approval: Approvals.AllowAll);
         clientRef = client;
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
@@ -144,8 +141,7 @@ public sealed class HostToolCallRecursionTests
         setup.HoldA.Gate.TrySetResult();
         await setup.RootTask.Bounded();
 
-        var (content, isError) = BoundRoots.OutputOf(response);
-        Assert.True(isError);
+        var content = BoundRoots.RefusedContent(response);
         Assert.Contains("run_code cannot be invoked", content);
         Assert.Empty(host.Requests("code.execute"));
     }
@@ -165,20 +161,16 @@ public sealed class HostToolCallRecursionTests
         registry.Add(bridge);
         await using var client = ClientFactory.Create(
             host,
-            resolver: name => name == "bridge" ? bridge : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+            resolver: bridge.Resolver(),
+            approval: Approvals.AllowAll);
         clientRef = client;
         await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
-        var setup = await StartScriptRootAsync(host, client, registry, limit.Token);
+        var setup = await BoundRoots.StartScriptRootAsync(host, client, registry, limit.Token);
 
-        var response = await host.CallClientAsync(
-            Operation, BoundRoots.BoundPayload(setup.RunId, "$run_code", "bridge", "{}"), limit.Token);
-        setup.Hold.Gate.TrySetResult();
-        await setup.RootTask.Bounded();
+        var response = await setup.CallAsync(host, "bridge", "{}", limit.Token, pluginId: "$run_code");
 
-        var (content, isError) = BoundRoots.OutputOf(response);
-        Assert.True(isError);
+        var content = BoundRoots.RefusedContent(response);
         Assert.Contains("run_code cannot be invoked from inside another extension invocation", content);
         Assert.Single(host.Requests("code.execute"));
     }
@@ -186,43 +178,25 @@ public sealed class HostToolCallRecursionTests
     [Fact]
     public async Task Script_callback_naming_run_code_on_the_wire_is_refused_before_resolver_and_approval()
     {
-        var resolved = 0;
-        var approved = 0;
+        var resolver = new ResolverSpy();
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
         var registry = new TestRegistry([new StubTool("bridge")]);
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: _ =>
-            {
-                Interlocked.Increment(ref resolved);
-                return null;
-            },
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approved);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve, approval: approval.Approve);
         using var limit = TestLimit.Create();
-        var setup = await StartScriptRootAsync(host, client, registry, limit.Token);
+        var setup = await BoundRoots.StartScriptRootAsync(host, client, registry, limit.Token);
 
-        var response = await host.CallClientAsync(
-            Operation, BoundRoots.BoundPayload(setup.RunId, "$run_code", "run_code", "{\"code\":\"1+1\"}"), limit.Token);
-        setup.Hold.Gate.TrySetResult();
-        await setup.RootTask.Bounded();
+        var response = await setup.CallAsync(host, "run_code", "{\"code\":\"1+1\"}", limit.Token, pluginId: "$run_code");
 
-        var (content, isError) = BoundRoots.OutputOf(response);
-        Assert.True(isError);
+        var content = BoundRoots.RefusedContent(response);
         Assert.Contains("run_code cannot be invoked from inside another extension invocation", content);
-        Assert.Equal(0, resolved);
-        Assert.Equal(0, approved);
+        Assert.Equal(0, resolver.Calls);
+        Assert.Equal(0, approval.Calls);
     }
 
     private sealed record ChainSetup(
         string RunA, string Directory, InFlightRoot HoldA, InFlightRoot HoldB, Task<ToolResult> RootTask,
         TaskCompletionSource<IpcMessage> NestedArrived, ExtensionHostTool AlphaProxy, ExtensionHostTool BetaProxy);
-
-    private sealed record ScriptSetup(string RunId, InFlightRoot Hold, Task<ToolResult> RootTask);
 
     private static async Task<ChainSetup> StartChainAsync(
         FakeHost host, ExtensionHostClient client, StubTool bridge,
@@ -255,19 +229,5 @@ public sealed class HostToolCallRecursionTests
             ct).AsTask();
         var runA = BoundRoots.RunIdOf(await holdA.Arrived.Task.Bounded());
         return new ChainSetup(runA, directory, holdA, holdB, rootTask, nestedArrived, alphaProxy, betaProxy);
-    }
-
-    private static async Task<ScriptSetup> StartScriptRootAsync(
-        FakeHost host, ExtensionHostClient client, TestRegistry registry, CancellationToken ct)
-    {
-        var hold = new InFlightRoot { ResultJson = """{"content":"script-ok","isError":false}""" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
-        var proxy = client.CreateRunCodeTool(registry);
-        var rootTask = proxy.InvokeAsync(
-            new ToolCall("root-rc", "run_code", "{\"code\":\"1+1\"}"),
-            new ToolContext("sess-script", BoundRoots.AbsoluteDir("script"), 0),
-            ct).AsTask();
-        var runId = BoundRoots.RunIdOf(await hold.Arrived.Task.Bounded());
-        return new ScriptSetup(runId, hold, rootTask);
     }
 }

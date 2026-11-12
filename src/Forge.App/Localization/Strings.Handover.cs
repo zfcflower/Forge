@@ -81,8 +81,7 @@ internal static class HandoverStrings
 
     public static string Intro(string oldTitle) => Loc.Instance.Format(IntroKey, oldTitle);
 
-    public static string Uncommitted(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(UncommittedKeyBase, count), TextFormat.Number(count));
+    public static string Uncommitted(int count) => Loc.Instance.FormatPlural(UncommittedKeyBase, count);
 
     public static string CommitAsOld(string oldTitle) => Loc.Instance.Format(CommitAsOldKey, oldTitle);
 
@@ -108,7 +107,7 @@ internal static class HandoverStrings
 
     public static string CommitFailed(string reason) => Loc.Instance.Format(CommitFailedKey, reason);
 
-    public static string CommitLanded(string sha) => Loc.Instance.Format(CommitLandedKey, ShortSha(sha));
+    public static string CommitLanded(string sha) => Loc.Instance.Format(CommitLandedKey, TextFormat.ShortSha(sha));
 
     public static string ContextFailed(string reason) => Loc.Instance.Format(ContextFailedKey, reason);
 
@@ -119,11 +118,9 @@ internal static class HandoverStrings
     public static string SwitchFailed(string reason) => Loc.Instance.Format(SwitchFailedKey, reason);
 
     public static string SwitchFailedAfterCommit(string sha, string reason) =>
-        Loc.Instance.Format(SwitchFailedAfterCommitKey, ShortSha(sha), reason);
+        Loc.Instance.Format(SwitchFailedAfterCommitKey, TextFormat.ShortSha(sha), reason);
 
     public static string ReviewCopyFailed(string reason) => Loc.Instance.Format(ReviewCopyFailedKey, reason);
-
-    private static string ShortSha(string sha) => sha.Length > 10 ? sha[..10] : sha;
 
     [ModuleInitializer]
     internal static void Initialize() => Register();

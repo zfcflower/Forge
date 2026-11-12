@@ -12,7 +12,7 @@ namespace Forge.App.ViewModels;
 /// accepts and no local branch already carries enables Create. The dialog itself only renders; the answer travels back as
 /// a <see cref="NewBranchChoice"/>.
 /// </summary>
-internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
+internal sealed class NewBranchDialogViewModel : NotifyingObject, IDisposable
 {
     /// <summary>Quiet time after the last keystroke before the name is checked; typed names are also checked once at open.</summary>
     private static readonly TimeSpan ValidationDelay = TimeSpan.FromMilliseconds(250);
@@ -77,13 +77,7 @@ internal sealed class NewBranchDialogViewModel : ObservableObject, IDisposable
     public string? Hint
     {
         get => hint;
-        private set
-        {
-            if (Set(ref hint, value))
-            {
-                OnPropertyChanged(nameof(HasHint));
-            }
-        }
+        private set => SetAndNotify(ref hint, value, nameof(HasHint));
     }
 
     public bool HasHint => hint is { Length: > 0 };

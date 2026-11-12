@@ -190,16 +190,11 @@ public sealed class ChangedLineCountsCacheTests : IDisposable
 
     private string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-counts-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-counts-");
         roots.Add(root);
         return root;
     }
 
-    private static void Write(string root, string relativePath, string content)
-    {
-        var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content);
-    }
+    private static void Write(string root, string relativePath, string content) =>
+        TestTempFiles.WriteFile(root, relativePath, content);
 }

@@ -11,8 +11,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_sends_required_fields_with_values_and_camel_case_names()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-shape");
         var directory = BoundRoots.AbsoluteDir("term-shape");
@@ -37,8 +36,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_with_shell_arguments_environment_sends_all_optional_fields()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-full");
 
@@ -65,8 +63,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_omits_shell_arguments_environment_when_the_caller_leaves_them_null()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-minimal");
 
@@ -83,8 +80,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_result_id_becomes_the_session_id()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-abc-123");
 
@@ -98,10 +94,9 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_result_without_a_terminal_id_is_rejected_locally()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        host.On(TerminalOps.Start, (_, _) => Task.FromResult(Json.Element("""{"processId":1,"shell":"sh"}""")));
+        host.Answer(TerminalOps.Start, """{"processId":1,"shell":"sh"}""");
 
         var failure = await Assert.ThrowsAsync<InvalidDataException>(
             () => client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask());
@@ -116,8 +111,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_rejects_out_of_range_columns_without_IPC(int columns)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -133,8 +127,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_rejects_out_of_range_rows_without_IPC(int rows)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -147,8 +140,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_rejects_a_relative_working_directory_without_IPC()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -161,8 +153,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_rejects_a_blank_session_id_without_IPC()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -188,10 +179,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_while_failed_throws_and_sends_nothing_new()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         await host.DropConnectionAsync();
         await statuses.UntilAsync(events => events.Any(e => e.Status == HostStatus.Failed));
         using var limit = TestLimit.Create();
@@ -209,8 +197,7 @@ public sealed class TerminalStartProtocolTests
     public async Task Start_propagates_host_error_codes_to_the_caller(string code)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         host.On(TerminalOps.Start, (_, _) => throw new FakeHostError(code, "refused by host"));
 

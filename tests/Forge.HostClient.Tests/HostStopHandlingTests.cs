@@ -9,13 +9,9 @@ public sealed class HostStopHandlingTests
     public async Task Acknowledged_stop_stops_cleanly_and_a_repeat_stop_sends_nothing()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         await ToolFixtures.RegisterEchoAsync(client, host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        var changes = client.TrackToolsChanged();
         using var limit = TestLimit.Create();
 
         await client.StopAsync(limit.Token);
@@ -40,10 +36,7 @@ public sealed class HostStopHandlingTests
         await using var host = new FakeHost();
         host.On("host.stop", FakeHost.NeverAnswer);
         var options = new ExtensionHostClientOptions { StopRequestTimeout = TimeSpan.FromMilliseconds(300) };
-        await using var client = ClientFactory.Create(host, options: options);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses, options: options);
         await ToolFixtures.RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 

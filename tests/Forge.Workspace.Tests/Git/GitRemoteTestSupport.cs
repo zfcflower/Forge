@@ -152,6 +152,16 @@ internal sealed class RemoteSandbox : IDisposable
         return IsolatedGit.Head(repository);
     }
 
+    /// <summary>Clones origin as <paramref name="name"/>, commits <c>base.txt</c> on <c>main</c> and pushes it
+    /// upstream, so the clone starts out tracking <c>origin/main</c> with a single commit.</summary>
+    public string SeedTracked(string name = "alice")
+    {
+        var repo = Clone(name);
+        CommitFile(repo, "base.txt", "base\n", "seed");
+        IsolatedGit.RunChecked(repo, "push", "-q", "-u", "origin", "main");
+        return repo;
+    }
+
     public void Dispose() => temp.Dispose();
 }
 

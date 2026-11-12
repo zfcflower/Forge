@@ -59,17 +59,8 @@ public sealed class TerminalGridResizeTests
 
         private static Scene Open(FakeTerminalHost host, TaskCompletionSource<ITerminalSession>? gate)
         {
-            var viewModel = new TerminalViewModel(
-                "s1",
-                1,
-                host,
-                new TerminalStartRequest("s1", "C:\\work", new TerminalSize(100, 30)),
-                new AppPreferences());
-            var control = new TerminalControl { Source = viewModel };
-            var window = new Window { Width = 1000, Height = 700, Content = control };
-            viewModel.Start();
-            TerminalUi.Show(window);
-            return new Scene(window, control, viewModel, host, gate);
+            var scene = TerminalSceneUi.Open(host);
+            return new Scene(scene.Window, scene.Control, scene.ViewModel, host, gate);
         }
 
         public async ValueTask DisposeAsync()

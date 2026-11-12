@@ -525,7 +525,7 @@ public sealed class QuotaResumeTests
     [Fact]
     public async Task Run_sends_the_project_override_of_the_continue_slot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-quota-slot-" + Guid.NewGuid().ToString("N"));
+        var root = TestTempFiles.NewDirectory("forge-quota-slot-");
         try
         {
             var prompts = Path.Combine(root, "ws", ".forge", "prompts");

@@ -873,8 +873,7 @@ public sealed class StepCommitterTests
     {
         public TempData()
         {
-            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "forge-step-commit-data-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path);
+            Path = TestTempFiles.NewDirectory("forge-step-commit-data-");
         }
 
         public string Path { get; }

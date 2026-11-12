@@ -201,8 +201,8 @@ public sealed class SqliteAutomationRunStore : IAutomationRunStore, IAsyncDispos
         return _writer.ReadAsync(
             async connection =>
             {
-                await using var command = connection.CreateCommand();
-                command.CommandText = "SELECT value FROM automation_state WHERE key = $key";
+                await using var command = StorageDb.Command(
+                    connection, "SELECT value FROM automation_state WHERE key = $key");
                 command.Parameters.AddWithValue("$key", key);
                 return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
             },

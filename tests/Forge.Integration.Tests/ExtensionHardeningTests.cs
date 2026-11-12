@@ -19,9 +19,7 @@ public sealed class ExtensionHardeningTests
         var probe = new ExtensionAuthoringSupport.ProbeTool(
             "probe",
             (_, _) => Task.FromResult(new ToolResult("probe-ok")));
-        return new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        return E2eFixture.AllowingApprovals(probe);
     }
 
     private static async Task<Sdk.StagedExtension> CommitWorkflowAsync(E2eFixture fx, string id, string toolName)
@@ -29,9 +27,8 @@ public sealed class ExtensionHardeningTests
         var staged = await fx.Client.StageExtensionAsync(
             ExtensionAuthoringSupport.StageWorkflowRequest(id, Workflow, toolName: toolName), fx.Ct);
         Assert.Empty(staged.Diagnostics);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest(id, staged.SourceHash, staged.DependencyHash, staged.SdkVersion), fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf(id).Count == 1, id + " tool");
+        await ExtensionAuthoringSupport.CommitAsync(fx, staged);
+        await fx.WaitForToolsAsync(id, 1, id + " tool");
         return staged;
     }
 
@@ -63,8 +60,7 @@ public sealed class ExtensionHardeningTests
 
         // A stale approval for the first hashes cannot commit the changed draft.
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest("spec", first.SourceHash, first.DependencyHash, first.SdkVersion), fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, first),
             "approval_mismatch");
     }
 
@@ -83,7 +79,7 @@ public sealed class ExtensionHardeningTests
         File.WriteAllText(manifest, text.Replace("workflow tool desc-tool", "workflow tool EVIL", StringComparison.Ordinal));
 
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("descwf").Count == 0, "the edited workflow tool to be unregistered");
+        await fx.WaitForToolsAsync("descwf", 0, "the edited workflow tool to be unregistered");
 
         var stale = await ExtensionAuthoringSupport.AssertHostErrorAsync(
             () => fx.Client.ApprovePluginAsync(
@@ -104,8 +100,7 @@ public sealed class ExtensionHardeningTests
         Assert.Contains(staged.Diagnostics, d => d.Contains("shared-tool", StringComparison.Ordinal) && d.Contains("owner", StringComparison.Ordinal));
 
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest("shadow", staged.SourceHash, staged.DependencyHash, staged.SdkVersion), fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, staged),
             "invalid_extension",
             "shared-tool");
 
@@ -131,9 +126,8 @@ public sealed class ExtensionHardeningTests
         var alpha = await fx.Client.StageExtensionAsync(
             ExtensionAuthoringSupport.StagePluginRequest("alpha"), fx.Ct);
         Assert.Empty(alpha.Diagnostics);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("alpha", alpha.SourceHash, alpha.DependencyHash, alpha.SdkVersion), fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await ExtensionAuthoringSupport.CommitAsync(fx, alpha);
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length);
 
         var beta = await fx.Client.StageExtensionAsync(
             ExtensionAuthoringSupport.StagePluginRequest("beta"), fx.Ct);
@@ -154,8 +148,7 @@ public sealed class ExtensionHardeningTests
         };
 
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest("beta", beta.SourceHash, beta.DependencyHash, beta.SdkVersion), fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, beta),
             "invalid_extension",
             PluginSources.EchoTool);
 
@@ -176,9 +169,7 @@ public sealed class ExtensionHardeningTests
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
         fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.AllTools.Length);
 
         var betaToolsSeen = 0;
         fx.Client.ToolsChanged += () =>
@@ -280,16 +271,14 @@ public sealed class ExtensionHardeningTests
         File.WriteAllText(manifest, original);
 
         // Intact again: the same approval now commits.
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("planted", staged.SourceHash, staged.DependencyHash, staged.SdkVersion), fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("planted").Count == 1, "planted tool");
+        await ExtensionAuthoringSupport.CommitAsync(fx, staged);
+        await fx.WaitForToolsAsync("planted", 1, "planted tool");
     }
 
     private static async Task AssertCommitRefusedAsync(E2eFixture fx, Sdk.StagedExtension staged)
     {
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest(staged.PluginId, staged.SourceHash, staged.DependencyHash, staged.SdkVersion), fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, staged),
             "invalid_extension");
         Assert.False(Directory.Exists(ExtensionAuthoringSupport.LiveDirectory(fx.PluginsDirectory, staged.PluginId)));
         Assert.True(Directory.Exists(ExtensionAuthoringSupport.PendingDirectory(fx.PluginsDirectory, staged.PluginId)));

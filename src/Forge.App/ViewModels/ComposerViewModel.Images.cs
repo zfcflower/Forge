@@ -71,13 +71,7 @@ internal sealed partial class ComposerViewModel
     public string? AttachmentError
     {
         get => attachmentError;
-        private set
-        {
-            if (Set(ref attachmentError, value))
-            {
-                OnPropertyChanged(nameof(HasAttachmentError));
-            }
-        }
+        private set => SetAndNotify(ref attachmentError, value, nameof(HasAttachmentError));
     }
 
     public bool HasAttachmentError => !string.IsNullOrEmpty(attachmentError);

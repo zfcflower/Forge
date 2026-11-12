@@ -25,7 +25,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "trav",
@@ -34,10 +33,8 @@ public sealed class ExtensionStageValidationTests
                 [path] = PluginSources.Standard("trav"),
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", path);
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "traversal stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "traversal stage", path);
         Assert.False(Directory.Exists(ExtensionAuthoringSupport.PendingDirectory(fx.PluginsDirectory, "trav")));
     }
 
@@ -48,7 +45,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "abs",
@@ -57,10 +53,8 @@ public sealed class ExtensionStageValidationTests
                 [path] = PluginSources.Standard("abs"),
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "absolute-path stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "absolute-path stage");
     }
 
     [Theory]
@@ -70,7 +64,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "seg",
@@ -80,10 +73,8 @@ public sealed class ExtensionStageValidationTests
                 ["Plugin.cs"] = PluginSources.Standard("seg"),
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "empty-segment stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "empty-segment stage");
     }
 
     [Fact]
@@ -91,7 +82,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "slash",
@@ -100,10 +90,8 @@ public sealed class ExtensionStageValidationTests
                 ["sub\\file.cs"] = PluginSources.Standard("slash"),
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "\\");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "backslash stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "backslash stage", "\\");
     }
 
     [Theory]
@@ -115,7 +103,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "ext",
@@ -125,10 +112,8 @@ public sealed class ExtensionStageValidationTests
                 [path] = "payload",
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "allowed");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "extension stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "extension stage", "allowed");
     }
 
     [Theory]
@@ -139,7 +124,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "man",
@@ -149,10 +133,8 @@ public sealed class ExtensionStageValidationTests
                 [path] = """{"id":"man","version":"1.0.0"}""",
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "manifest.json");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "manifest stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "manifest stage", "manifest.json");
     }
 
     [Fact]
@@ -185,15 +167,12 @@ public sealed class ExtensionStageValidationTests
             ["Plugin.cs"] = PluginSources.Standard("over1"),
             ["notes.md"] = new string('a', MaxFileBytes + 1),
         };
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
-
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx,
             () => fx.Client.StageExtensionAsync(
                 ExtensionAuthoringSupport.StagePluginRequest("over1", files: files), fx.Ct),
-            "invalid_extension",
+            "oversize-file stage",
             "262144");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "oversize-file stage");
         Assert.False(Directory.Exists(ExtensionAuthoringSupport.PendingDirectory(fx.PluginsDirectory, "over1")));
     }
 
@@ -236,15 +215,12 @@ public sealed class ExtensionStageValidationTests
         await using var fx = new E2eFixture();
         await fx.StartAsync();
         var files = SizedDraft("overT", MaxDraftBytes + 1);
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
-
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx,
             () => fx.Client.StageExtensionAsync(
                 ExtensionAuthoringSupport.StagePluginRequest("overT", files: files), fx.Ct),
-            "invalid_extension",
+            "oversize-draft stage",
             "1");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "oversize-draft stage");
         Assert.False(Directory.Exists(ExtensionAuthoringSupport.PendingDirectory(fx.PluginsDirectory, "overT")));
     }
 
@@ -253,7 +229,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "dup",
@@ -263,10 +238,8 @@ public sealed class ExtensionStageValidationTests
                 ["PLUGIN.cs"] = PluginSources.Standard("dup"),
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "twice");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "duplicate-path stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "duplicate-path stage", "twice");
     }
 
     [Fact]
@@ -274,16 +247,13 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "perm",
             permissions: [new Sdk.Permission((Sdk.PermissionKind)99)]);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "permission");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "permission stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "permission stage", "permission");
     }
 
     [Theory]
@@ -293,16 +263,13 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "scope",
             permissions: [new Sdk.Permission(Sdk.PermissionKind.ReadFile, scope)]);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "scope");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "scope stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "scope stage", "scope");
     }
 
     [Fact]
@@ -310,7 +277,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "dupperm",
@@ -320,10 +286,8 @@ public sealed class ExtensionStageValidationTests
                 new Sdk.Permission(Sdk.PermissionKind.ReadFile, "docs"),
             ]);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "twice");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "duplicate-permission stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "duplicate-permission stage", "twice");
     }
 
     [Fact]
@@ -331,7 +295,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "dupperm2",
@@ -341,10 +304,8 @@ public sealed class ExtensionStageValidationTests
                 new Sdk.Permission(Sdk.PermissionKind.Network),
             ]);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "twice");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "duplicate-scopeless stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "duplicate-scopeless stage", "twice");
     }
 
     [Fact]
@@ -352,7 +313,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "nocs",
@@ -361,10 +321,8 @@ public sealed class ExtensionStageValidationTests
                 ["notes.md"] = "just notes",
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "exactly one");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "zero-cs stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "zero-cs stage", "exactly one");
     }
 
     [Fact]
@@ -372,7 +330,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StagePluginRequest(
             "twocs",
@@ -382,10 +339,8 @@ public sealed class ExtensionStageValidationTests
                 ["Extra.cs"] = PluginSources.Standard("twocs"),
             });
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "exactly one");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "two-cs stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "two-cs stage", "exactly one");
     }
 
     [Fact]
@@ -393,7 +348,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = new Sdk.ExtensionStageRequest(
             "nowf",
@@ -404,10 +358,8 @@ public sealed class ExtensionStageValidationTests
             [],
             ExtensionAuthoringSupport.WorkflowTool("run-it"));
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "workflow.json");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "missing-workflow stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "missing-workflow stage", "workflow.json");
     }
 
     [Fact]
@@ -415,7 +367,6 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = new Sdk.ExtensionStageRequest(
             "notool",
@@ -426,10 +377,8 @@ public sealed class ExtensionStageValidationTests
             [],
             Tool: null);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "tool");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "missing-tool stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "missing-tool stage", "tool");
     }
 
     [Theory]
@@ -441,14 +390,11 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StageWorkflowRequest("badtool", "{}", toolName: name);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "tool name");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "bad-tool-name stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "bad-tool-name stage", "tool name");
     }
 
     [Theory]
@@ -461,22 +407,21 @@ public sealed class ExtensionStageValidationTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         var request = ExtensionAuthoringSupport.StageWorkflowRequest(
             "badschema", ExtensionAuthoringSupport.SingleStepWorkflow("probe"), inputSchema: schema);
 
-        await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.StageExtensionAsync(request, fx.Ct), "invalid_extension", "inputSchema");
-        ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory), "bad-schema stage");
+        await ExtensionAuthoringSupport.AssertRefusedAsync(
+            fx, () => fx.Client.StageExtensionAsync(request, fx.Ct), "bad-schema stage", "inputSchema");
     }
 
     [Fact]
     public async Task Unknown_kind_rejected_over_the_wire_and_disk_unchanged()
     {
-        await using var raw = await RawHost.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(raw.PluginsDirectory);
+        await using var raw = RawHost.StartNew();
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(120), TimeSpan.FromMinutes(10)));
+        await using var peer = await RawHost.ConnectAsync(raw.Pipe, budget.Token);
+        var before = ExtensionAuthoringSupport.SnapshotTree(raw.Plugins);
 
         var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
         {
@@ -490,18 +435,20 @@ public sealed class ExtensionStageValidationTests
         });
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => raw.Peer.SendRequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, raw.Ct));
+            () => peer.SendRequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, budget.Token));
         Assert.Equal("invalid_extension", error.Code);
         ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(raw.PluginsDirectory), "unknown-kind stage");
-        Assert.False(Directory.Exists(Path.Combine(raw.PluginsDirectory, ".pending", "weird")));
+            before, ExtensionAuthoringSupport.SnapshotTree(raw.Plugins), "unknown-kind stage");
+        Assert.False(Directory.Exists(Path.Combine(raw.Plugins, ".pending", "weird")));
     }
 
     [Fact]
     public async Task Blank_path_rejected_over_the_wire_and_disk_unchanged()
     {
-        await using var raw = await RawHost.StartAsync();
-        var before = ExtensionAuthoringSupport.SnapshotTree(raw.PluginsDirectory);
+        await using var raw = RawHost.StartNew();
+        using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(120), TimeSpan.FromMinutes(10)));
+        await using var peer = await RawHost.ConnectAsync(raw.Pipe, budget.Token);
+        var before = ExtensionAuthoringSupport.SnapshotTree(raw.Plugins);
 
         var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
         {
@@ -512,10 +459,10 @@ public sealed class ExtensionStageValidationTests
         });
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => raw.Peer.SendRequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, raw.Ct));
+            () => peer.SendRequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, budget.Token));
         Assert.Equal("invalid_extension", error.Code);
         ExtensionAuthoringSupport.AssertSameTree(
-            before, ExtensionAuthoringSupport.SnapshotTree(raw.PluginsDirectory), "blank-path stage");
+            before, ExtensionAuthoringSupport.SnapshotTree(raw.Plugins), "blank-path stage");
     }
 
     [Fact]
@@ -562,116 +509,5 @@ public sealed class ExtensionStageValidationTests
         }
 
         return files;
-    }
-
-    /// <summary>Minimal raw host: a real Extension Host process plus a scripted main-program peer.</summary>
-    private sealed class RawHost : IAsyncDisposable
-    {
-        private readonly Process process;
-        private readonly NamedPipeClientTransport transport;
-
-        private RawHost(Process process, NamedPipeClientTransport transport, IpcPeer peer, string root)
-        {
-            this.process = process;
-            this.transport = transport;
-            Peer = peer;
-            Root = root;
-            PluginsDirectory = Path.Combine(root, "plugins");
-        }
-
-        public IpcPeer Peer { get; }
-
-        public string Root { get; }
-
-        public string PluginsDirectory { get; }
-
-        public CancellationToken Ct => budget.Token;
-
-        private readonly CancellationTokenSource budget = new(TimeSpan.FromSeconds(120));
-
-        public static async Task<RawHost> StartAsync()
-        {
-            var root = Path.Combine(Path.GetTempPath(), "forge-raw-" + Guid.NewGuid().ToString("N")[..10]);
-            var plugins = Path.Combine(root, "plugins");
-            var data = Path.Combine(root, "data");
-            Directory.CreateDirectory(plugins);
-            Directory.CreateDirectory(data);
-            var pipe = "forge-raw-" + Guid.NewGuid().ToString("N")[..16];
-            var info = new ProcessStartInfo
-            {
-                FileName = "dotnet",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            info.ArgumentList.Add(E2eFixture.HostAssemblyPath);
-            info.ArgumentList.Add("--pipe");
-            info.ArgumentList.Add(pipe);
-            info.ArgumentList.Add("--plugins");
-            info.ArgumentList.Add(plugins);
-            info.ArgumentList.Add("--data");
-            info.ArgumentList.Add(data);
-            var process = Process.Start(info) ?? throw new InvalidOperationException("The raw host did not start.");
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            NamedPipeClientTransport? transport = null;
-            while (true)
-            {
-                var candidate = new NamedPipeClientTransport(pipe, new IpcPipeOptions { ConnectTimeout = TimeSpan.FromSeconds(2) });
-                try
-                {
-                    await candidate.StartAsync(budget.Token);
-                    transport = candidate;
-                    break;
-                }
-                catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
-                {
-                    await candidate.DisposeAsync();
-                    await Task.Delay(TimeSpan.FromMilliseconds(50), budget.Token);
-                }
-            }
-
-            var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
-            await peer.StartAsync(budget.Token);
-            return new RawHost(process, transport, peer, root);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            try
-            {
-                await Peer.StopAsync(CancellationToken.None);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or IOException or OperationCanceledException)
-            {
-            }
-
-            await Peer.DisposeAsync();
-            await transport.DisposeAsync();
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-
-            await process.WaitForExitAsync(CancellationToken.None);
-            process.Dispose();
-            budget.Dispose();
-            try
-            {
-                Directory.Delete(Root, recursive: true);
-            }
-            catch (IOException)
-            {
-            }
-        }
     }
 }

@@ -17,7 +17,7 @@ public sealed class HandoverFlowTests : IAsyncLifetime
 {
     private const string Sha = "0123456789abcdef0123456789abcdef01234567";
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-handover-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-handover-");
     private SqliteSessionStore store = null!;
     private SqliteTodoStore todos = null!;
 
@@ -35,13 +35,7 @@ public sealed class HandoverFlowTests : IAsyncLifetime
     {
         await todos.DisposeAsync();
         await store.DisposeAsync();
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     [Fact]

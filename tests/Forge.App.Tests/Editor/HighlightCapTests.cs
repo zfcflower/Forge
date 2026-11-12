@@ -106,8 +106,7 @@ public sealed class HighlightCapTests
 
     private static async Task Run(Func<Host, Task> body)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-cap-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-cap-");
         try
         {
             var path = Path.Combine(root, "Sample.cs");

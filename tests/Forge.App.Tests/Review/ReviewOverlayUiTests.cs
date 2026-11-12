@@ -201,12 +201,7 @@ public sealed class ReviewOverlayUiTests
     private static Point Center(Window window, Visual visual) =>
         visual.TranslatePoint(new Point(visual.Bounds.Width / 2, visual.Bounds.Height / 2), window)!.Value;
 
-    private static async Task Ui(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private sealed class Scene : IAsyncDisposable
     {
@@ -232,8 +227,7 @@ public sealed class ReviewOverlayUiTests
             var root = Directory.CreateTempSubdirectory("forge-review-ui-").FullName;
             var file = Path.Combine(root, "a.cs");
             await File.WriteAllTextAsync(file, text);
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(file, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(file);
             Assert.False(model.HasError, model.Error);
             var scene = new Scene(root, file, model);
             if (seed is not null)

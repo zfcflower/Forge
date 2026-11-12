@@ -270,30 +270,16 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
     {
         var confirm = new Button { Content = confirmText, IsDefault = true };
         var cancel = new Button { Content = cancelText, IsCancel = true };
-        var dialog = new Window
+        var dialog = CreateDialogWindow(title, 460, new StackPanel
         {
-            Title = title,
-            Width = 460,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
             {
-                Margin = new Avalonia.Thickness(16),
-                Spacing = 14,
-                Children =
-                {
-                    new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new StackPanel
-                    {
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Spacing = 8,
-                        Children = { cancel, confirm },
-                    },
-                },
+                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                ButtonRow(cancel, confirm),
             },
-        };
+        });
 
         confirm.Click += (_, _) => dialog.Close(true);
         cancel.Click += (_, _) => dialog.Close(false);
@@ -309,24 +295,16 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
             Spacing = 8,
         };
-        var dialog = new Window
+        var dialog = CreateDialogWindow(title, 480, new StackPanel
         {
-            Title = title,
-            Width = 480,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
             {
-                Margin = new Avalonia.Thickness(16),
-                Spacing = 14,
-                Children =
-                {
-                    new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    buttons,
-                },
+                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                buttons,
             },
-        };
+        });
 
         // The last option is the cancel button; the first is the default.
         for (var i = options.Count - 1; i >= 0; i--)
@@ -372,31 +350,17 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
             list.Children.Add(radio);
         }
 
-        var dialog = new Window
+        var dialog = CreateDialogWindow(title, 560, new StackPanel
         {
-            Title = title,
-            Width = 560,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
             {
-                Margin = new Avalonia.Thickness(16),
-                Spacing = 14,
-                Children =
-                {
-                    new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                    new ScrollViewer { MaxHeight = 360, Content = list },
-                    new StackPanel
-                    {
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Spacing = 8,
-                        Children = { cancel, confirm },
-                    },
-                },
+                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                new ScrollViewer { MaxHeight = 360, Content = list },
+                ButtonRow(cancel, confirm),
             },
-        };
+        });
 
         confirm.Click += (_, _) => dialog.Close(chosen);
         cancel.Click += (_, _) => dialog.Close(-1);
@@ -454,22 +418,8 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
         body.Children.Add(error);
         body.Children.Add(progress);
-        body.Children.Add(new StackPanel
-        {
-            Orientation = Avalonia.Layout.Orientation.Horizontal,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-            Spacing = 8,
-            Children = { cancel, confirm },
-        });
-        var dialog = new Window
-        {
-            Title = HandoverStrings.Title,
-            Width = 520,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = body,
-        };
+        body.Children.Add(ButtonRow(cancel, confirm));
+        var dialog = CreateDialogWindow(HandoverStrings.Title, 520, body);
 
         void Sync()
         {
@@ -601,22 +551,8 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
         body.Children.Add(error);
         body.Children.Add(progress);
-        body.Children.Add(new StackPanel
-        {
-            Orientation = Avalonia.Layout.Orientation.Horizontal,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-            Spacing = 8,
-            Children = { cancel, confirm },
-        });
-        var dialog = new Window
-        {
-            Title = ForkStrings.Title,
-            Width = 560,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = body,
-        };
+        body.Children.Add(ButtonRow(cancel, confirm));
+        var dialog = CreateDialogWindow(ForkStrings.Title, 560, body);
 
         void Sync()
         {
@@ -676,33 +612,44 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         var input = new TextBox { Text = initial, MinWidth = 320 };
         var ok = new Button { Content = ShellStrings.Ok, IsDefault = true };
         var cancel = new Button { Content = ShellStrings.Cancel, IsCancel = true };
-        var dialog = new Window
+        var dialog = CreateDialogWindow(title, 460, new StackPanel
         {
-            Title = title,
-            Width = 460,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 14,
+            Children =
             {
-                Margin = new Avalonia.Thickness(16),
-                Spacing = 14,
-                Children =
-                {
-                    input,
-                    new StackPanel
-                    {
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Spacing = 8,
-                        Children = { cancel, ok },
-                    },
-                },
+                input,
+                ButtonRow(cancel, ok),
             },
-        };
+        });
 
         ok.Click += (_, _) => dialog.Close(input.Text);
         cancel.Click += (_, _) => dialog.Close(null);
         return await dialog.ShowDialog<string?>(owner);
+    }
+
+    /// <summary>The modal dialog frame every prompt in this window uses: a title, a fixed width, and content-sized height.</summary>
+    private static Window CreateDialogWindow(string title, double width, Control content) => new()
+    {
+        Title = title,
+        Width = width,
+        SizeToContent = SizeToContent.Height,
+        CanResize = false,
+        WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        Content = content,
+    };
+
+    /// <summary>The footer row of a dialog: cancel on the left, the default action on the right.</summary>
+    private static StackPanel ButtonRow(Control cancel, Control confirm)
+    {
+        var row = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+        };
+        row.Children.Add(cancel);
+        row.Children.Add(confirm);
+        return row;
     }
 }

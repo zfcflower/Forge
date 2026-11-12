@@ -251,9 +251,7 @@ public sealed class PrCreateSyncSmokeTests
         Assert.False(statOnly.IsError, statOnly.Content);
         Assert.False(onePath.IsError, onePath.Content);
 
-        var refused = await fixture.CreateAsync(Args());
-        Assert.True(refused.IsError);
-        Assert.Contains("gate 3", refused.Content, StringComparison.Ordinal);
+        var refused = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "gate 3");
 
         var full = await diff.InvokeAsync(new ToolCall("c3", "git_diff", "{}"), context, CancellationToken.None);
         Assert.False(full.IsError, full.Content);
@@ -277,12 +275,11 @@ public sealed class PrCreateSyncSmokeTests
         File.WriteAllText(Path.Combine(fixture.Work, "scratch.txt"), "debug\n");
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("pr_create refused (gate 1: clean working tree)", result.Content, StringComparison.Ordinal);
-        Assert.Contains("scratch.txt (untracked)", result.Content, StringComparison.Ordinal);
-        Assert.Contains("Next:", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "pr_create refused (gate 1: clean working tree)",
+            "scratch.txt (untracked)",
+            "Next:");
         AssertNothingPublished(fixture);
     }
 
@@ -298,11 +295,7 @@ public sealed class PrCreateSyncSmokeTests
         File.WriteAllText(Path.Combine(fixture.Work, "base.txt"), "edited\n");
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 1", result.Content, StringComparison.Ordinal);
-        Assert.Contains("base.txt", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "gate 1", "base.txt");
         Assert.DoesNotContain("(untracked)", result.Content, StringComparison.Ordinal);
         AssertNothingPublished(fixture);
     }
@@ -321,12 +314,11 @@ public sealed class PrCreateSyncSmokeTests
         Assert.NotEqual(newMain, staleRef);
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 2: up to date with the base", result.Content, StringComparison.Ordinal);
-        Assert.Contains("origin/main has 1 commit(s) that HEAD does not contain", result.Content, StringComparison.Ordinal);
-        Assert.Contains("pr_sync", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "gate 2: up to date with the base",
+            "origin/main has 1 commit(s) that HEAD does not contain",
+            "pr_sync");
         Assert.Equal(newMain, RunGit(fixture, "rev-parse", "origin/main"));
         AssertNothingPublished(fixture);
     }
@@ -343,11 +335,7 @@ public sealed class PrCreateSyncSmokeTests
         RunGit(fixture, "reset", "-q", "--hard", "origin/main");
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 2", result.Content, StringComparison.Ordinal);
-        Assert.Contains("no commits beyond origin/main", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "gate 2", "no commits beyond origin/main");
         AssertNothingPublished(fixture);
     }
 
@@ -361,11 +349,10 @@ public sealed class PrCreateSyncSmokeTests
 
         using var fixture = new PrLifecycleFixture();
 
-        var result = await fixture.CreateAsync(Args(baseName: "no-such-branch"));
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 2", result.Content, StringComparison.Ordinal);
-        Assert.Contains("origin/no-such-branch does not exist", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args(baseName: "no-such-branch")),
+            "gate 2",
+            "origin/no-such-branch does not exist");
         AssertNothingPublished(fixture);
     }
 
@@ -379,13 +366,12 @@ public sealed class PrCreateSyncSmokeTests
 
         using var fixture = new PrLifecycleFixture();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 3: self-review of the full diff", result.Content, StringComparison.Ordinal);
-        Assert.Contains("has not been read in this session", result.Content, StringComparison.Ordinal);
-        Assert.Contains("only enforce that the diff was re-read", result.Content, StringComparison.Ordinal);
-        Assert.Contains("git_diff", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "gate 3: self-review of the full diff",
+            "has not been read in this session",
+            "only enforce that the diff was re-read",
+            "git_diff");
         AssertNothingPublished(fixture);
     }
 
@@ -402,12 +388,11 @@ public sealed class PrCreateSyncSmokeTests
         fixture.MarkReviewed();
         var newHead = fixture.Commit("more.txt", "more\n", "more work");
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 3", result.Content, StringComparison.Ordinal);
-        Assert.Contains($"last read at {Short(reviewedAt)}", result.Content, StringComparison.Ordinal);
-        Assert.Contains($"HEAD is now {Short(newHead)}", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "gate 3",
+            $"last read at {Short(reviewedAt)}",
+            $"HEAD is now {Short(newHead)}");
         AssertNothingPublished(fixture);
     }
 
@@ -422,11 +407,7 @@ public sealed class PrCreateSyncSmokeTests
         using var fixture = new PrLifecycleFixture();
         fixture.Ledger.RecordReviewed("another-session", fixture.Work, fixture.Head);
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 3", result.Content, StringComparison.Ordinal);
-        Assert.Contains("has not been read in this session", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "gate 3", "has not been read in this session");
         AssertNothingPublished(fixture);
     }
 
@@ -447,12 +428,11 @@ public sealed class PrCreateSyncSmokeTests
         using var fixture = new PrLifecycleFixture();
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args(body: body));
-
-        Assert.True(result.IsError);
-        Assert.Contains("pr_create refused (gate 4: testing evidence)", result.Content, StringComparison.Ordinal);
-        Assert.Contains(expectedReason, result.Content, StringComparison.Ordinal);
-        Assert.Contains("the body argument", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args(body: body)),
+            "pr_create refused (gate 4: testing evidence)",
+            expectedReason,
+            "the body argument");
         AssertNothingPublished(fixture);
     }
 
@@ -467,11 +447,10 @@ public sealed class PrCreateSyncSmokeTests
         using var fixture = new PrLifecycleFixture();
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args(body: null));
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 4", result.Content, StringComparison.Ordinal);
-        Assert.Contains("the plan summary and 0 step(s)", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args(body: null)),
+            "gate 4",
+            "the plan summary and 0 step(s)");
         AssertNothingPublished(fixture);
     }
 
@@ -515,10 +494,7 @@ public sealed class PrCreateSyncSmokeTests
         fixture.MarkReviewed();
         var body = GoodBody + "\n## Notes\n" + new string('x', PrBodyEditor.MaxBodyLength);
 
-        var result = await fixture.CreateAsync(Args(body: body));
-
-        Assert.True(result.IsError);
-        Assert.Contains("at most 65536", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args(body: body)), "at most 65536");
         AssertNothingPublished(fixture);
     }
 
@@ -534,14 +510,9 @@ public sealed class PrCreateSyncSmokeTests
         fixture.MarkReviewed();
 
         RunGit(fixture, "checkout", "-q", "--detach");
-        var detached = await fixture.CreateAsync(Args());
+        var detached = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "detached");
         RunGit(fixture, "checkout", "-q", "main");
-        var onBase = await fixture.CreateAsync(Args());
-
-        Assert.True(detached.IsError);
-        Assert.Contains("detached", detached.Content, StringComparison.Ordinal);
-        Assert.True(onBase.IsError);
-        Assert.Contains("is the base branch itself", onBase.Content, StringComparison.Ordinal);
+        var onBase = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "is the base branch itself");
         Assert.Empty(fixture.Platform.Creates);
     }
 
@@ -559,10 +530,7 @@ public sealed class PrCreateSyncSmokeTests
         using var fixture = new PrLifecycleFixture();
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args(title));
-
-        Assert.True(result.IsError);
-        Assert.Contains("title", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args(title)), "title");
         AssertNothingPublished(fixture);
     }
 
@@ -582,10 +550,9 @@ public sealed class PrCreateSyncSmokeTests
         fixture.Todos.Summary = new PlanSummary(PrLifecycleTestHelpers.Session, GoodBody, DateTimeOffset.UnixEpoch);
         fixture.Todos.OnPlanSummary = () => fixture.Commit("late.txt", "late\n", "late commit");
 
-        var result = await fixture.CreateAsync(Args(body: null));
-
-        Assert.True(result.IsError);
-        Assert.Contains("state changed while checking", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args(body: null)),
+            "state changed while checking");
         Assert.Contains($"HEAD moved from {Short(before)} to {Short(fixture.Head)}", result.Content, StringComparison.Ordinal);
         AssertNothingPublished(fixture);
     }
@@ -604,12 +571,11 @@ public sealed class PrCreateSyncSmokeTests
         // The platform read is the last step before the push; a commit landing there is exactly the gate-to-push race.
         fixture.Platform.BeforeView = _ => fixture.Commit("late.txt", "late\n", "late commit");
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate-to-push race", result.Content);
-        Assert.Contains("was never reviewed", result.Content);
-        Assert.Contains("git_diff", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "gate-to-push race",
+            "was never reviewed",
+            "git_diff");
         AssertNothingPublished(fixture);
     }
 
@@ -626,11 +592,7 @@ public sealed class PrCreateSyncSmokeTests
         fixture.Todos.Summary = new PlanSummary(PrLifecycleTestHelpers.Session, GoodBody, DateTimeOffset.UnixEpoch);
         fixture.Todos.OnPlanSummary = () => File.WriteAllText(Path.Combine(fixture.Work, "late.txt"), "late\n");
 
-        var result = await fixture.CreateAsync(Args(body: null));
-
-        Assert.True(result.IsError);
-        Assert.Contains("gate 1", result.Content, StringComparison.Ordinal);
-        Assert.Contains("late.txt (untracked)", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args(body: null)), "gate 1", "late.txt (untracked)");
         AssertNothingPublished(fixture);
     }
 
@@ -646,13 +608,12 @@ public sealed class PrCreateSyncSmokeTests
         fixture.MarkReviewed();
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("a pull request already exists", result.Content, StringComparison.Ordinal);
-        Assert.Contains("#5", result.Content, StringComparison.Ordinal);
-        Assert.Contains("https://example.test/acme/forge/pull/5", result.Content, StringComparison.Ordinal);
-        Assert.Contains("pr_edit", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "a pull request already exists",
+            "#5",
+            "https://example.test/acme/forge/pull/5",
+            "pr_edit");
         AssertNothingPublished(fixture);
     }
 
@@ -712,10 +673,7 @@ public sealed class PrCreateSyncSmokeTests
         fixture.MarkReviewed();
         fixture.Platform.Availability = new PrPlatformAvailability(state, "gh: " + state);
 
-        var create = await fixture.CreateAsync(Args());
-
-        Assert.True(create.IsError);
-        Assert.Contains(expected, create.Content, StringComparison.Ordinal);
+        var create = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), expected);
         AssertNothingPublished(fixture);
     }
 
@@ -731,11 +689,10 @@ public sealed class PrCreateSyncSmokeTests
         var theirs = fixture.PushFromElsewhere("theirs.txt");
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
-        Assert.Contains("NonFastForward", result.Content, StringComparison.Ordinal);
-        Assert.Contains("never overwrites an existing remote branch", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "NonFastForward",
+            "never overwrites an existing remote branch");
         Assert.Equal(theirs, fixture.OriginTip(Branch));
         Assert.Empty(fixture.Platform.Creates);
     }
@@ -815,12 +772,11 @@ public sealed class PrCreateSyncSmokeTests
         fixture.MarkReviewed();
         fixture.Platform.CreateFailure = PrResult<PrReference>.Fail(GitRemoteFailureKind.AuthenticationFailed, "bad credentials");
 
-        var failed = await fixture.CreateAsync(Args());
-
-        Assert.True(failed.IsError);
-        Assert.Contains("AuthenticationFailed", failed.Content, StringComparison.Ordinal);
-        Assert.Contains("already pushed", failed.Content, StringComparison.Ordinal);
-        Assert.Contains("only the pull request is missing", failed.Content, StringComparison.Ordinal);
+        var failed = await ToolResultAssertions.RefusedAsync(
+            fixture.CreateAsync(Args()),
+            "AuthenticationFailed",
+            "already pushed",
+            "only the pull request is missing");
         Assert.Equal(fixture.Head, fixture.OriginTip(Branch));
 
         fixture.Platform.CreateFailure = null;
@@ -843,9 +799,7 @@ public sealed class PrCreateSyncSmokeTests
         fixture.RejectPushes();
         fixture.MarkReviewed();
 
-        var result = await fixture.CreateAsync(Args());
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()));
         Assert.Contains("rejected", result.Content, StringComparison.OrdinalIgnoreCase);
         AssertNothingPublished(fixture);
     }
@@ -1036,32 +990,27 @@ public sealed class PrCreateSyncSmokeTests
         fixture.AdvanceMain("base.txt", "main version\n", "main edits base");
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
 
-        var result = await fixture.SyncAsync();
-
-        Assert.True(result.IsError);
-        Assert.Contains("Conflict:", result.Content, StringComparison.Ordinal);
-        Assert.Contains("base.txt", result.Content, StringComparison.Ordinal);
-        Assert.Contains("git log -p forge/feature..origin/main -- <file>", result.Content, StringComparison.Ordinal);
-        Assert.Contains("git log -p origin/main..forge/feature -- <file>", result.Content, StringComparison.Ordinal);
-        Assert.Contains("git_sync continue", result.Content, StringComparison.Ordinal);
-        Assert.Contains("never take one side wholesale", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.SyncAsync(),
+            "Conflict:",
+            "base.txt",
+            "git log -p forge/feature..origin/main -- <file>",
+            "git log -p origin/main..forge/feature -- <file>",
+            "git_sync continue",
+            "never take one side wholesale");
         Assert.True(
             Directory.Exists(Path.Combine(fixture.Work, ".git", "rebase-merge"))
             || Directory.Exists(Path.Combine(fixture.Work, ".git", "rebase-apply")),
             "the rebase is left in progress for the agent to resolve");
         Assert.Equal(published, fixture.OriginTip(Branch));
 
-        var again = await fixture.SyncAsync();
+        var again = await ToolResultAssertions.RefusedAsync(
+            fixture.SyncAsync(),
+            "pr_sync refused (an operation is in progress)",
+            "rebase",
+            "git_sync continue");
         fixture.MarkReviewed();
-        var create = await fixture.CreateAsync(Args());
-
-        Assert.True(again.IsError);
-        Assert.Contains("pr_sync refused (an operation is in progress)", again.Content, StringComparison.Ordinal);
-        Assert.Contains("rebase", again.Content, StringComparison.Ordinal);
-        Assert.Contains("git_sync continue", again.Content, StringComparison.Ordinal);
-        Assert.True(create.IsError);
-        Assert.Contains("gate 1", create.Content, StringComparison.Ordinal);
-        Assert.Contains("rebase is in progress", create.Content, StringComparison.Ordinal);
+        var create = await ToolResultAssertions.RefusedAsync(fixture.CreateAsync(Args()), "gate 1", "rebase is in progress");
         Assert.Empty(fixture.Platform.Creates);
         Assert.Equal(published, fixture.OriginTip(Branch));
     }
@@ -1080,11 +1029,7 @@ public sealed class PrCreateSyncSmokeTests
         var head = fixture.Head;
         File.WriteAllText(Path.Combine(fixture.Work, "base.txt"), "edited\n");
 
-        var dirty = await fixture.SyncAsync();
-
-        Assert.True(dirty.IsError);
-        Assert.Contains("pr_sync refused (uncommitted changes)", dirty.Content, StringComparison.Ordinal);
-        Assert.Contains("base.txt", dirty.Content, StringComparison.Ordinal);
+        var dirty = await ToolResultAssertions.RefusedAsync(fixture.SyncAsync(), "pr_sync refused (uncommitted changes)", "base.txt");
         Assert.Equal(head, fixture.Head);
 
         RunGit(fixture, "checkout", "-q", "--", "base.txt");
@@ -1112,14 +1057,13 @@ public sealed class PrCreateSyncSmokeTests
         fixture.AdvanceMain("main-only.txt", "m\n", "main moves");
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
 
-        var result = await fixture.SyncAsync();
-
-        Assert.True(result.IsError);
-        Assert.Contains("NonFastForward", result.Content, StringComparison.Ordinal);
-        Assert.Contains("someone else pushed", result.Content, StringComparison.Ordinal);
-        Assert.Contains("other work", result.Content, StringComparison.Ordinal);
-        Assert.Contains("The local branch is already updated", result.Content, StringComparison.Ordinal);
-        Assert.Contains("so it was rebased", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.SyncAsync(),
+            "NonFastForward",
+            "someone else pushed",
+            "other work",
+            "The local branch is already updated",
+            "so it was rebased");
         Assert.Equal(theirs, fixture.OriginTip(Branch));
     }
 
@@ -1138,9 +1082,7 @@ public sealed class PrCreateSyncSmokeTests
         fixture.RejectPushes();
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
 
-        var result = await fixture.SyncAsync();
-
-        Assert.True(result.IsError);
+        var result = await ToolResultAssertions.RefusedAsync(fixture.SyncAsync());
         Assert.Contains("rejected", result.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("The local branch is already updated", result.Content, StringComparison.Ordinal);
         Assert.NotEqual(published, fixture.Head);
@@ -1159,11 +1101,10 @@ public sealed class PrCreateSyncSmokeTests
         fixture.PushBranch();
         var head = fixture.Head;
 
-        var result = await fixture.SyncAsync();
-
-        Assert.True(result.IsError);
-        Assert.Contains("pr_sync refused (no pull request for this branch)", result.Content);
-        Assert.Contains("pr_create", result.Content);
+        var result = await ToolResultAssertions.RefusedAsync(
+            fixture.SyncAsync(),
+            "pr_sync refused (no pull request for this branch)",
+            "pr_create");
         Assert.Equal(head, fixture.Head);
         Assert.Equal(head, fixture.OriginTip(Branch));
     }
@@ -1179,15 +1120,10 @@ public sealed class PrCreateSyncSmokeTests
         using var fixture = new PrLifecycleFixture();
 
         RunGit(fixture, "checkout", "-q", "--detach");
-        var detached = await fixture.SyncAsync();
+        var detached = await ToolResultAssertions.RefusedAsync(fixture.SyncAsync(), "detached");
         RunGit(fixture, "checkout", "-q", "main");
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr();
-        var onBase = await fixture.SyncAsync();
-
-        Assert.True(detached.IsError);
-        Assert.Contains("detached", detached.Content, StringComparison.Ordinal);
-        Assert.True(onBase.IsError);
-        Assert.Contains("is the base branch itself", onBase.Content, StringComparison.Ordinal);
+        var onBase = await ToolResultAssertions.RefusedAsync(fixture.SyncAsync(), "is the base branch itself");
     }
 
     [Theory]

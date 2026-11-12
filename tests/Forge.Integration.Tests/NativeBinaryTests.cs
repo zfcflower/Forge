@@ -33,12 +33,8 @@ public sealed class NativeBinaryTests
         File.Delete(Path.Combine(output, NativeName));
         await fx.Client.RefreshPluginsAsync(fx.Ct);
         await fx.ApproveAsync("delta");
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("delta").Count == PluginSources.AllTools.Length,
-            "the delta tools once the native file is gone");
-        var echo = await fx.InvokeAsync("delta", "echo", """{"text":"ok"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("echo:ok", echo.Content);
+        await fx.WaitForToolsAsync("delta", PluginSources.AllTools.Length, "the delta tools once the native file is gone");
+        await fx.AssertToolContentAsync("delta", "echo", """{"text":"ok"}""", "echo:ok");
     }
 
     /// <summary>Writes a prebuilt (source-free) plugin package: <c>bin/&lt;version&gt;/plugin.dll</c> plus its declared

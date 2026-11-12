@@ -406,8 +406,7 @@ public sealed class ComposerImageTests
         Func<ComposerViewModel, FakeCodec, Task> body,
         Func<string?, string?, ModelInputs?>? inputs = null)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-images-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-images-");
         try
         {
             await SharedUi.Session.Dispatch(

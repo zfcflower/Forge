@@ -133,9 +133,8 @@ public sealed class TreeVisualTests : IDisposable
                 panel.Rows.Single(static row => row.RelativePath == "d1/d2").IsExpanded = true;
 
                 var view = new FilesToolView { DataContext = panel };
-                var window = new Window { Width = 420, Height = 320, Content = view };
-                window.Show();
-                Settle(window);
+                var window = SharedUi.Show(view, 420, 320);
+                SharedUi.Settle(window);
 
                 var tree = FilesTree(view);
                 var topItem = ItemWithTitle(tree, "top.txt")!;
@@ -165,9 +164,8 @@ public sealed class TreeVisualTests : IDisposable
                 panel.Rows.Single(static row => row.RelativePath == "a").IsExpanded = true;
 
                 var view = new FilesToolView { DataContext = panel };
-                var window = new Window { Width = 420, Height = 320, Content = view };
-                window.Show();
-                Settle(window);
+                var window = SharedUi.Show(view, 420, 320);
+                SharedUi.Settle(window);
 
                 var tree = FilesTree(view);
                 var parent = ItemWithTitle(tree, "a")!;
@@ -217,9 +215,8 @@ public sealed class TreeVisualTests : IDisposable
                 rootRow.IsExpanded = true;
 
                 var view = new SpecTreeToolView { DataContext = panel };
-                var window = new Window { Width = 420, Height = 240, Content = view };
-                window.Show();
-                Settle(window);
+                var window = SharedUi.Show(view, 420, 240);
+                SharedUi.Settle(window);
 
                 var tree = SpecTree(view);
                 var rootItem = ItemWithTitle(tree, "Root")!;
@@ -265,9 +262,8 @@ public sealed class TreeVisualTests : IDisposable
             {
                 Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
                 var view = new ProjectView { DataContext = BuildAgentViewModel() };
-                var window = new Window { Width = 440, Height = 240, Content = view };
-                window.Show();
-                Settle(window);
+                var window = SharedUi.Show(view, 440, 240);
+                SharedUi.Settle(window);
 
                 var tree = ProjectTree(view);
                 var mainItem = ItemWithTitle(tree, "Ran 3 subagents")!;
@@ -356,7 +352,7 @@ public sealed class TreeVisualTests : IDisposable
                 var filesView = new FilesToolView { DataContext = files };
                 var filesWindow = new Window { Width = 360, Height = 400, Content = filesView };
                 filesWindow.Show();
-                Settle(filesWindow);
+                SharedUi.Settle(filesWindow);
                 using (var frame = filesWindow.CaptureRenderedFrame())
                 {
                     frame?.Save(System.IO.Path.Combine(output, "files-tree.png"), PngBitmapEncoderOptions.Default);
@@ -369,7 +365,7 @@ public sealed class TreeVisualTests : IDisposable
                 var specView = new SpecTreeToolView { DataContext = specs };
                 var specWindow = new Window { Width = 360, Height = 260, Content = specView };
                 specWindow.Show();
-                Settle(specWindow);
+                SharedUi.Settle(specWindow);
                 using (var frame = specWindow.CaptureRenderedFrame())
                 {
                     frame?.Save(System.IO.Path.Combine(output, "spec-tree.png"), PngBitmapEncoderOptions.Default);
@@ -378,7 +374,7 @@ public sealed class TreeVisualTests : IDisposable
                 var agents = new ProjectView { DataContext = BuildAgentViewModel() };
                 var agentsWindow = new Window { Width = 360, Height = 240, Content = agents };
                 agentsWindow.Show();
-                Settle(agentsWindow);
+                SharedUi.Settle(agentsWindow);
                 using (var frame = agentsWindow.CaptureRenderedFrame())
                 {
                     frame?.Save(System.IO.Path.Combine(output, "agent-tree.png"), PngBitmapEncoderOptions.Default);
@@ -482,31 +478,14 @@ public sealed class TreeVisualTests : IDisposable
         return ((SolidColorBrush)value!).Color;
     }
 
-    private static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
-
     private string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-tree-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-tree-");
         roots.Add(root);
         return root;
     }
 
-    private static void Write(string root, string relativePath)
-    {
-        var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, "x");
-    }
+    private static void Write(string root, string relativePath) => TestTempFiles.WriteFile(root, relativePath, "x");
 
     private static void WriteSpec(string root, string relativePath, string id, string? parent, string title, string status)
     {

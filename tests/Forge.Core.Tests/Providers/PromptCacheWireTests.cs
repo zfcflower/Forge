@@ -114,8 +114,7 @@ public class PromptCacheWireTests
         // Pinned on purpose: section 8.3.6 asks for "1h" on the message breakpoint only, but the prompt caching docs
         // require longer-TTL entries to come before shorter ones (tools -> system -> messages), so the provider keeps
         // sending the 5-minute default everywhere until the design is settled.
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
         var request = TestData.Request(
             tools: [TestData.ReadFileTool()],
             messages: [ChatMessage.User("a"), ChatMessage.Assistant("b"), ChatMessage.User("c")],

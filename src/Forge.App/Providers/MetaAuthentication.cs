@@ -99,11 +99,6 @@ internal sealed class MetaAuthentication
 
     private const int SlowDownIntervalIncrementSeconds = 5;
 
-    private const int MaxErrorBodyLength = 1024;
-
-    /// <summary>Each step stands alone, so a stalled connection must not hold the dialog for the whole code lifetime.</summary>
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
-
     private readonly HttpClient http;
     private readonly TimeProvider time;
 
@@ -134,8 +129,8 @@ internal sealed class MetaAuthentication
         }
 
         var element = document!.RootElement;
-        var deviceCode = Text(element, "device_code");
-        var userCode = Text(element, "user_code");
+        var deviceCode = ProviderSignInJson.Text(element, "device_code");
+        var userCode = ProviderSignInJson.Text(element, "user_code");
         if (deviceCode is null || userCode is null)
         {
             throw new ProviderException(
@@ -153,8 +148,8 @@ internal sealed class MetaAuthentication
             userCode,
             verificationUri,
             verificationUriComplete,
-            Interval(element, MinimumIntervalSeconds),
-            time.GetUtcNow() + TimeSpan.FromSeconds(PositiveInt(element, "expires_in") ?? DefaultExpiresInSeconds));
+            ProviderSignInJson.Interval(element, MinimumIntervalSeconds),
+            time.GetUtcNow() + TimeSpan.FromSeconds(ProviderSignInJson.PositiveInt(element, "expires_in") ?? DefaultExpiresInSeconds));
     }
 
     /// <summary>
@@ -187,13 +182,13 @@ internal sealed class MetaAuthentication
         }
 
         var element = document?.RootElement ?? default;
-        if (status is >= 200 and < 300 && Text(element, "access_token") is { Length: > 0 } identityToken)
+        if (status is >= 200 and < 300 && ProviderSignInJson.Text(element, "access_token") is { Length: > 0 } identityToken)
         {
             // This is the identity token, not the API credential: the caller still has to mint a key with it.
             return MetaPollResult.Complete(identityToken, waited);
         }
 
-        switch (Text(element, "error"))
+        switch (ProviderSignInJson.Text(element, "error"))
         {
             case "authorization_pending":
                 return MetaPollResult.Pending(waited);
@@ -201,7 +196,7 @@ internal sealed class MetaAuthentication
             case "slow_down":
                 // The server names the interval when it wants a specific one; otherwise five seconds are added.
                 return MetaPollResult.Pending(
-                    PositiveInt(element, "interval") is { } named
+                    ProviderSignInJson.PositiveInt(element, "interval") is { } named
                         ? Math.Max(MinimumIntervalSeconds, named)
                         : waited + SlowDownIntervalIncrementSeconds);
 
@@ -276,14 +271,14 @@ internal sealed class MetaAuthentication
         }
 
         var element = document!.RootElement;
-        if (Text(element, "api_key") is { Length: > 0 } apiKey)
+        if (ProviderSignInJson.Text(element, "api_key") is { Length: > 0 } apiKey)
         {
             return new MetaCredentialBundle(apiKey, identityToken, time.GetUtcNow() + KeyLifetime);
         }
 
         // The account is not set up yet: Meta answers with the page that finishes the job, and that page is the only useful
         // thing to tell the user — without it the failure reads like a broken server.
-        var actionUrl = Text(element, "action_url");
+        var actionUrl = ProviderSignInJson.Text(element, "action_url");
         throw new ProviderException(
             actionUrl is null
                 ? "Meta: the key response carried no api_key."
@@ -308,137 +303,36 @@ internal sealed class MetaAuthentication
     }
 
     /// <summary>
-    /// Sends one request and reads its body once. The body comes back as text plus a parsed document (null when it is not
-    /// JSON), because a failure still has to report the status and what the server said, JSON or not.
+    /// Sends one authorization request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
+    /// mapping and the single body read, this class only names the provider and the step.
     /// </summary>
-    private async Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
+    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
         HttpRequestMessage message,
         string operation,
-        CancellationToken ct)
-    {
-        // The shared client has no timeout of its own: each step gets its own, so a stalled connection cannot outlive the
-        // device-code lifetime.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await http
-                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new ProviderException("Meta: the authorization request timed out.", retryable: true);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or IOException)
-        {
-            throw new ProviderException($"Meta: the authorization request failed: {ex.Message}", retryable: true, inner: ex);
-        }
-
-        using (response)
-        {
-            var status = (int)response.StatusCode;
-            string body;
-            try
-            {
-                body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is IOException or HttpRequestException)
-            {
-                throw new ProviderException(
-                    $"Meta: the {operation} response could not be read.",
-                    retryable: true,
-                    status,
-                    ex);
-            }
-
-            if (status is >= 200 and < 300)
-            {
-                try
-                {
-                    return (status, JsonDocument.Parse(body), string.Empty);
-                }
-                catch (JsonException ex)
-                {
-                    // A mint answer of "{}" is valid JSON; an empty body is not, and the login needs an api_key, so this is
-                    // reported as the unusable answer it is rather than as a transport problem.
-                    throw new ProviderException(
-                        $"Meta: the {operation} response is not JSON.",
-                        retryable: false,
-                        status,
-                        ex);
-                }
-            }
-
-            // A failure body is only shown to explain a failure; a successful one is parsed and never echoed.
-            return (status, TryParse(body), body.Length <= MaxErrorBodyLength ? body : body[..MaxErrorBodyLength]);
-        }
-    }
-
-    private static JsonDocument? TryParse(string body)
-    {
-        try
-        {
-            return JsonDocument.Parse(body);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+        CancellationToken ct) =>
+        ProviderSignInHttp.SendForJsonAsync(http, message, "Meta", "authorization", operation, ct);
 
     /// <summary>The tail of a failed request's error message: what the server said, if it said anything.</summary>
     private static string Describe(string body) => body.Length == 0 ? string.Empty : ": " + body;
-
-    private static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(name, out var value)
-        && value.ValueKind == JsonValueKind.String
-        && value.GetString() is { Length: > 0 } text
-            ? text
-            : null;
 
     /// <summary>
     /// What the server said about a failure. Meta's error shape is not one name: depending on the step it fills
     /// <c>error_description</c>, <c>detail</c>, <c>message</c> or only <c>error</c>, so the first one present is the sentence.
     /// </summary>
     private static string? Detail(JsonElement element) =>
-        Text(element, "error_description")
-        ?? Text(element, "detail")
-        ?? Text(element, "message")
-        ?? Text(element, "error");
+        ProviderSignInJson.Text(element, "error_description")
+        ?? ProviderSignInJson.Text(element, "detail")
+        ?? ProviderSignInJson.Text(element, "message")
+        ?? ProviderSignInJson.Text(element, "error");
 
     /// <summary>
     /// A verification URL has to be an absolute https address before the app offers to open it: the user code is typed
     /// there, so it is never opened over plain http.
     /// </summary>
     private static string? SecureUrl(JsonElement element, string name) =>
-        Text(element, name) is { } text
+        ProviderSignInJson.Text(element, name) is { } text
         && Uri.TryCreate(text, UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps
             ? text
             : null;
-
-    /// <summary>A positive whole number of seconds, from a JSON number that may still arrive as a fraction.</summary>
-    private static int? PositiveInt(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object
-            || !element.TryGetProperty(name, out var value)
-            || value.ValueKind != JsonValueKind.Number
-            || !value.TryGetDouble(out var number)
-            || !double.IsFinite(number)
-            || number <= 0)
-        {
-            return null;
-        }
-
-        // Rounded up: waiting a fraction of a second too long is harmless, polling early is not.
-        return (int)Math.Min(Math.Ceiling(number), int.MaxValue);
-    }
-
-    /// <summary>The interval to wait, never below <paramref name="floor"/>.</summary>
-    private static int Interval(JsonElement element, int floor) =>
-        PositiveInt(element, "interval") is { } named ? Math.Max(floor, named) : floor;
 }

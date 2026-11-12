@@ -141,7 +141,7 @@ public sealed class NewBranchDialogViewModelTests
         await dialog.InitializeAsync();
         Assert.Contains(dialog.Picker.LocalBranches, static branch => branch.Name == "feature/session");
 
-        using var changes = new ChangesViewModel(new GitCli(), new MemoryCheckpointStore());
+        using var changes = new ChangesViewModel(new GitCli(), new EmptyCheckpointStore());
         changes.Attach(new PanelContext("dialog-picker-session", work, null));
         await changes.LoadAsync(CancellationToken.None);
         try
@@ -170,15 +170,4 @@ public sealed class NewBranchDialogViewModelTests
         }
     }
 
-    private sealed class MemoryCheckpointStore : ITurnCheckpointStore
-    {
-        public Task BeginAsync(string sessionId, int turn, string worktreePath, string treeBefore, DateTimeOffset at, CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task<bool> CompleteAsync(string sessionId, int turn, string treeAfter, DateTimeOffset at, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<IReadOnlyList<TurnCheckpoint>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TurnCheckpoint>>([]);
-    }
 }

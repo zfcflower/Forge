@@ -92,11 +92,6 @@ internal sealed class XAiAuthentication
 
     private const int MaxRefreshRetries = 3;
 
-    private const int MaxErrorBodyLength = 1024;
-
-    /// <summary>Each step stands alone, so a stalled connection must not hold the dialog for the whole code lifetime.</summary>
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
-
     private readonly HttpClient http;
     private readonly TimeProvider time;
 
@@ -131,12 +126,12 @@ internal sealed class XAiAuthentication
         }
 
         var element = document!.RootElement;
-        var deviceCode = Text(element, "device_code");
-        var userCode = Text(element, "user_code");
+        var deviceCode = ProviderSignInJson.Text(element, "device_code");
+        var userCode = ProviderSignInJson.Text(element, "user_code");
         var verificationUri = SecureUrl(element, "verification_uri");
 
         // Without a positive lifetime the code would count as already expired, so the answer is unusable.
-        var expiresIn = PositiveInt(element, "expires_in");
+        var expiresIn = ProviderSignInJson.PositiveInt(element, "expires_in");
         if (deviceCode is null || userCode is null || verificationUri is null || expiresIn is null)
         {
             throw new ProviderException(
@@ -152,7 +147,7 @@ internal sealed class XAiAuthentication
             userCode,
             verificationUri,
             verificationUriComplete,
-            Interval(element, MinimumIntervalSeconds),
+            ProviderSignInJson.Interval(element, MinimumIntervalSeconds),
             time.GetUtcNow() + TimeSpan.FromSeconds(expiresIn.Value));
     }
 
@@ -186,12 +181,12 @@ internal sealed class XAiAuthentication
         }
 
         var element = document?.RootElement ?? default;
-        if (status is >= 200 and < 300 && Text(element, "access_token") is { Length: > 0 })
+        if (status is >= 200 and < 300 && ProviderSignInJson.Text(element, "access_token") is { Length: > 0 })
         {
             return XAiPollResult.Complete(Bundle(element, "device", previousRefreshToken: null), waited);
         }
 
-        switch (Text(element, "error"))
+        switch (ProviderSignInJson.Text(element, "error"))
         {
             case "authorization_pending":
                 return XAiPollResult.Pending(waited);
@@ -199,7 +194,7 @@ internal sealed class XAiAuthentication
             case "slow_down":
                 // The server names the interval when it wants a specific one; otherwise the reference client adds five seconds.
                 return XAiPollResult.Pending(
-                    PositiveInt(element, "interval") is { } named
+                    ProviderSignInJson.PositiveInt(element, "interval") is { } named
                         ? Math.Max(MinimumIntervalSeconds, named)
                         : waited + SlowDownIntervalIncrementSeconds);
 
@@ -220,7 +215,7 @@ internal sealed class XAiAuthentication
                     status);
 
             case var error:
-                var description = Text(element, "error_description");
+                var description = ProviderSignInJson.Text(element, "error_description");
                 throw new ProviderException(
                     description is null
                         ? $"xAI: the device token request ended with '{error}' (HTTP {status})"
@@ -268,7 +263,7 @@ internal sealed class XAiAuthentication
             var element = document?.RootElement ?? default;
 
             // A refused refresh token is reported as 401 whatever the server called it, so the caller has one rule.
-            if (status is 401 or 403 || Text(element, "error") == "invalid_grant")
+            if (status is 401 or 403 || ProviderSignInJson.Text(element, "error") == "invalid_grant")
             {
                 throw new ProviderException(
                     "xAI: the token refresh was rejected (HTTP " + status + "). Please sign in again.",
@@ -312,84 +307,14 @@ internal sealed class XAiAuthentication
     }
 
     /// <summary>
-    /// Sends one request and reads its body once. The body comes back as text plus a parsed document (null when it is not
-    /// JSON), because a failure still has to report the status and what the server said, JSON or not.
+    /// Sends one authorization request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
+    /// mapping and the single body read, this class only names the provider and the step.
     /// </summary>
-    private async Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
+    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
         HttpRequestMessage message,
         string operation,
-        CancellationToken ct)
-    {
-        // The shared client has no timeout of its own: each step gets its own, so a stalled connection cannot outlive the
-        // device-code lifetime.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await http
-                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new ProviderException("xAI: the authorization request timed out.", retryable: true);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or IOException)
-        {
-            throw new ProviderException($"xAI: the authorization request failed: {ex.Message}", retryable: true, inner: ex);
-        }
-
-        using (response)
-        {
-            var status = (int)response.StatusCode;
-            string body;
-            try
-            {
-                body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is IOException or HttpRequestException)
-            {
-                throw new ProviderException(
-                    $"xAI: the {operation} response could not be read.",
-                    retryable: true,
-                    status,
-                    ex);
-            }
-
-            if (status is >= 200 and < 300)
-            {
-                try
-                {
-                    return (status, JsonDocument.Parse(body), string.Empty);
-                }
-                catch (JsonException ex)
-                {
-                    throw new ProviderException(
-                        $"xAI: the {operation} response is not JSON.",
-                        retryable: false,
-                        status,
-                        ex);
-                }
-            }
-
-            // A failure body is only shown to explain a failure; a successful one is parsed and never echoed.
-            return (status, TryParse(body), body.Length <= MaxErrorBodyLength ? body : body[..MaxErrorBodyLength]);
-        }
-    }
-
-    private static JsonDocument? TryParse(string body)
-    {
-        try
-        {
-            return JsonDocument.Parse(body);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+        CancellationToken ct) =>
+        ProviderSignInHttp.SendForJsonAsync(http, message, "xAI", "authorization", operation, ct);
 
     /// <summary>The tail of a failed request's error message: what the server said, if it said anything.</summary>
     private static string Describe(string body) => body.Length == 0 ? string.Empty : ": " + body;
@@ -401,9 +326,9 @@ internal sealed class XAiAuthentication
     /// </summary>
     private XAiTokenBundle Bundle(JsonElement root, string operation, string? previousRefreshToken)
     {
-        var access = Text(root, "access_token");
-        var refresh = Text(root, "refresh_token") ?? previousRefreshToken;
-        var expiresIn = PositiveInt(root, "expires_in")
+        var access = ProviderSignInJson.Text(root, "access_token");
+        var refresh = ProviderSignInJson.Text(root, "refresh_token") ?? previousRefreshToken;
+        var expiresIn = ProviderSignInJson.PositiveInt(root, "expires_in")
                         ?? (previousRefreshToken is null ? null : DefaultRefreshLifetimeSeconds);
         if (access is null || refresh is null || expiresIn is null)
         {
@@ -415,43 +340,14 @@ internal sealed class XAiAuthentication
         return new XAiTokenBundle(access, refresh, time.GetUtcNow() + TimeSpan.FromSeconds(expiresIn.Value));
     }
 
-    private static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(name, out var value)
-        && value.ValueKind == JsonValueKind.String
-        && value.GetString() is { Length: > 0 } text
-            ? text
-            : null;
-
     /// <summary>
     /// A device-flow URL has to be an absolute https address before the app offers to open it: this page carries the user
     /// code, so it is never opened over plain http.
     /// </summary>
     private static string? SecureUrl(JsonElement element, string name) =>
-        Text(element, name) is { } text
+        ProviderSignInJson.Text(element, name) is { } text
         && Uri.TryCreate(text, UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps
             ? text
             : null;
-
-    /// <summary>A positive whole number of seconds, from a JSON number that may still arrive as a fraction.</summary>
-    private static int? PositiveInt(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object
-            || !element.TryGetProperty(name, out var value)
-            || value.ValueKind != JsonValueKind.Number
-            || !value.TryGetDouble(out var number)
-            || !double.IsFinite(number)
-            || number <= 0)
-        {
-            return null;
-        }
-
-        // Rounded up: waiting a fraction of a second too long is harmless, polling early is not.
-        return (int)Math.Min(Math.Ceiling(number), int.MaxValue);
-    }
-
-    /// <summary>The interval to wait, never below <paramref name="floor"/>.</summary>
-    private static int Interval(JsonElement element, int floor) =>
-        PositiveInt(element, "interval") is { } named ? Math.Max(floor, named) : floor;
 }

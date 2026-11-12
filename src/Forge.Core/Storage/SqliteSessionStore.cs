@@ -240,9 +240,9 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         StoragePaths.SafeSegment(sessionId, nameof(sessionId));
         await EnsureInitializedAsync().ConfigureAwait(false);
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText =
-            "SELECT seq, content_json, usage_json, at FROM messages WHERE session_id = $id AND seq >= $from AND seq <= $to ORDER BY seq";
+        await using var command = StorageDb.Command(
+            connection,
+            "SELECT seq, content_json, usage_json, at FROM messages WHERE session_id = $id AND seq >= $from AND seq <= $to ORDER BY seq");
         command.Parameters.AddWithValue("$id", sessionId);
         command.Parameters.AddWithValue("$from", fromSeq);
         command.Parameters.AddWithValue("$to", toSeq ?? long.MaxValue);
@@ -283,9 +283,9 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         StoragePaths.SafeSegment(sessionId, nameof(sessionId));
         await EnsureInitializedAsync().ConfigureAwait(false);
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText =
-            "SELECT session_id, layer, from_seq, to_seq, text, at FROM summaries WHERE session_id = $id ORDER BY from_seq, layer, id";
+        await using var command = StorageDb.Command(
+            connection,
+            "SELECT session_id, layer, from_seq, to_seq, text, at FROM summaries WHERE session_id = $id ORDER BY from_seq, layer, id");
         command.Parameters.AddWithValue("$id", sessionId);
         var summaries = new List<SummaryRecord>();
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -586,9 +586,10 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
 
     private async Task<long> ReadLastSeqAsync(SqliteConnection connection, SqliteTransaction? transaction, string sessionId, CancellationToken ct)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE session_id = $id";
+        await using var command = StorageDb.Command(
+            connection,
+            transaction,
+            "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE session_id = $id");
         command.Parameters.AddWithValue("$id", sessionId);
         var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is long value ? value : Convert.ToInt64(result, CultureInfo.InvariantCulture);

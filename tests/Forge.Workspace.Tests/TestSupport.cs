@@ -176,6 +176,14 @@ internal sealed class TestRepo : IDisposable
         return Head();
     }
 
+    /// <summary>Writes <paramref name="relativePath"/> with <paramref name="content"/> and folds it into one
+    /// commit <paramref name="message"/> together with every other pending change; returns the new head.</summary>
+    public string CommitFile(string relativePath, string content, string message)
+    {
+        Write(relativePath, content);
+        return Commit(message);
+    }
+
     public string Head() => RunGit("rev-parse", "HEAD").Trim();
 
     public string RunGit(params string[] arguments) => GitFixture.RunChecked(Root, arguments);

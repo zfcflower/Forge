@@ -10,7 +10,7 @@ namespace Forge.App.Tests.ViewModels;
 /// <summary>Slash commands and user agents from the prompt templates, as the composer shows and expands them.</summary>
 public sealed class ComposerCommandTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-composer-cmd-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-composer-cmd-");
     private readonly string userDir;
     private readonly ComposerSuggestionTests.TestServices services;
 

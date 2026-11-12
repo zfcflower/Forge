@@ -18,8 +18,7 @@ public sealed class ManifestSnapshotConsistencyTests
         var source = PluginSources.Contributed("gamma", marker);
         fx.WritePluginWithManifest("gamma", source, PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
         await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma");
+        await fx.ApproveViaStatusAndWaitForToolsAsync("gamma", 1, "the tool of gamma");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 1, "the command of gamma");
         var beforeStatus = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "gamma");
         var registeredLines = File.ReadAllLines(marker).Length;
@@ -58,10 +57,7 @@ public sealed class ManifestSnapshotConsistencyTests
         Assert.Equal(beforeStatus.SourceHash, afterStatus!.SourceHash);
         Assert.NotEqual(beforeStatus.DependencyHash, afterStatus.DependencyHash);
 
-        await fx.ApproveViaStatusAsync("gamma");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma after re-approval");
-        var after = await fx.InvokeAsync("gamma", "cecho", """{"text":"back"}""");
-        Assert.False(after.IsError, after.Content);
-        Assert.Equal("c:back", after.Content);
+        await fx.ApproveViaStatusAndWaitForToolsAsync("gamma", 1, "the tool of gamma after re-approval");
+        await fx.AssertToolContentAsync("gamma", "cecho", """{"text":"back"}""", "c:back");
     }
 }

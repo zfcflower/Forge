@@ -306,9 +306,8 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
         {"access_token":"xai-access-token","refresh_token":"xai-refresh-token","expires_in":3600}
         """;
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-xai-login-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-xai-login-");
 
-    public XAiAuthenticationCredentialTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void The_xai_preset_offers_a_key_and_a_sign_in_and_its_row_shows_the_button()
@@ -562,13 +561,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private ProviderServices Services(HttpMessageHandler handler) =>

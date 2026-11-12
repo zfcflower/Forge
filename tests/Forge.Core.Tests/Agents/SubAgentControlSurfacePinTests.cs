@@ -43,9 +43,7 @@ public sealed class SubAgentControlSurfacePinTests
                     ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
                     : Turn.Say("parent done"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-cs-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-cs-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
         Assert.Empty(events.OfType<AgentFailed>());
         var childId = Assert.Single(host.SubAgents.Instances).Id;
 
@@ -135,9 +133,7 @@ public sealed class SubAgentControlSurfacePinTests
                 : Turn.Say("leaf");
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-depth-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(20));
+        var (_, events) = await AgentTestHost.RunRootAsync(host, "session-depth-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(20));
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Equal(3, host.SubAgents.Instances.Count);
 
@@ -165,9 +161,7 @@ public sealed class SubAgentControlSurfacePinTests
             _ => Turn.Say("parent done"),
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-notfound-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
+        var (root, events) = await AgentTestHost.RunRootAsync(host, "session-notfound-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
         Assert.Empty(events.OfType<AgentFailed>());
         var results = root.History.SelectMany(m => m.Content.OfType<ToolResultBlock>()).ToArray();
         Assert.Equal(3, results.Length);
@@ -194,9 +188,7 @@ public sealed class SubAgentControlSurfacePinTests
             };
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-already-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
+        var (root, events) = await AgentTestHost.RunRootAsync(host, "session-already-" + Guid.NewGuid().ToString("n"), timeout: TimeSpan.FromSeconds(15));
         Assert.Empty(events.OfType<AgentFailed>());
         var results = root.History.SelectMany(m => m.Content.OfType<ToolResultBlock>()).ToArray();
         Assert.Equal(2, results.Length);

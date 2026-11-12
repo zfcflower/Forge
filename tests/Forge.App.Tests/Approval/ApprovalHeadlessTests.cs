@@ -19,24 +19,6 @@ internal static class ApprovalHeadlessShell
 {
     public static readonly TimeSpan StepBudget = TimeSpan.FromSeconds(60);
 
-    /// <summary>
-    /// Drains the dispatcher and renders, twice: layout can post follow-up work that only exists after a pass. The
-    /// layout pass is run explicitly: the layout manager's own scheduled pass is a dispatcher post that does not
-    /// reliably run under <c>RunJobs</c> once an earlier UI class has torn down its per-assembly session, which left
-    /// the window shown but the content never measured (no visual tree). <c>UpdateLayout</c> makes it deterministic.
-    /// </summary>
-    public static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            window.UpdateLayout();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
-
     public static T? FindById<T>(Window window, string id)
         where T : Control =>
         window.GetVisualDescendants()
@@ -68,9 +50,9 @@ internal static class ApprovalHeadlessShell
 /// <summary>Holds the temp data root the approval headless tests point the composition paths at.</summary>
 internal sealed class ApprovalHeadlessRoot : IAsyncDisposable
 {
-    private readonly (string? Data, string? General, string? Workspace) saved;
+    private readonly EnvironmentSnapshot saved;
 
-    private ApprovalHeadlessRoot(string root, (string? Data, string? General, string? Workspace) saved)
+    private ApprovalHeadlessRoot(string root, EnvironmentSnapshot saved)
     {
         Root = root;
         this.saved = saved;
@@ -82,16 +64,8 @@ internal sealed class ApprovalHeadlessRoot : IAsyncDisposable
 
     public static ApprovalHeadlessRoot Create()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-approval-ui-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(root, "workspace"));
-        var saved = (
-            Data: Environment.GetEnvironmentVariable(AppPaths.DataVariable),
-            General: Environment.GetEnvironmentVariable(AppPaths.GeneralVariable),
-            Workspace: Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable));
-        Environment.SetEnvironmentVariable(AppPaths.DataVariable, Path.Combine(root, "data"));
-        Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, Path.Combine(root, "general"));
-        Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Path.Combine(root, "workspace"));
-        return new ApprovalHeadlessRoot(root, saved);
+        var (root, previous) = TempDataRoot.Redirect("forge-approval-ui-");
+        return new ApprovalHeadlessRoot(root, previous);
     }
 
     public async ValueTask DisposeAsync()
@@ -101,9 +75,7 @@ internal sealed class ApprovalHeadlessRoot : IAsyncDisposable
             await services.DisposeAsync();
         }
 
-        Environment.SetEnvironmentVariable(AppPaths.DataVariable, saved.Data);
-        Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, saved.General);
-        Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, saved.Workspace);
+        saved.Restore();
         ApprovalFixtures.DeleteTree(Root);
     }
 }
@@ -135,9 +107,8 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
                 try
                 {
                     var overlay = new ApprovalQueueOverlay();
-                    var window = new Window { Width = 800, Height = 600, Content = overlay };
-                    window.Show();
-                    ApprovalHeadlessShell.Settle(window);
+                    var window = SharedUi.Show(overlay, 800, 600);
+                    SharedUi.Settle(window);
                     var shown = overlay.IsVisible;
                     window.Close();
                     return shown;
@@ -166,8 +137,7 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
                 try
                 {
                     var overlay = new ApprovalQueueOverlay();
-                    var window = new Window { Width = 800, Height = 600, Content = overlay };
-                    window.Show();
+                    var window = SharedUi.Show(overlay, 800, 600);
 
                     var dispatcher = services.Queue.Dispatcher;
                     Assert.True(await services.Queue.EnqueueAsync(
@@ -180,7 +150,7 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
                             ApprovalFixtures.Staged("plug"), "s1", "Session s1", fromPreviousRun: false, dispatcher),
                         CancellationToken.None));
 
-                    ApprovalHeadlessShell.Settle(window);
+                    SharedUi.Settle(window);
                     var ids = ApprovalHeadlessShell.ButtonIds(window);
                     var result = (
                         Shown: overlay.IsVisible,
@@ -237,10 +207,9 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
                     {
                         await section.RefreshAsync(CancellationToken.None);
                         var view = new ExtensionsSettingsView { DataContext = section };
-                        var window = new Window { Width = 800, Height = 600, Content = view };
-                        window.Show();
+                        var window = SharedUi.Show(view, 800, 600);
 
-                        ApprovalHeadlessShell.Settle(window);
+                        SharedUi.Settle(window);
                         var installed = ApprovalHeadlessShell.TextById(window, "extensions-installed-title");
                         var pending = ApprovalHeadlessShell.TextById(window, "extensions-pending-title");
                         var ruleBlock = ApprovalHeadlessShell.TextById(window, "extensions-rules-title");
@@ -292,9 +261,8 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
                     {
                         await section.RefreshAsync(CancellationToken.None);
                         var view = new ExtensionsSettingsView { DataContext = section };
-                        var window = new Window { Width = 800, Height = 600, Content = view };
-                        window.Show();
-                        ApprovalHeadlessShell.Settle(window);
+                        var window = SharedUi.Show(view, 800, 600);
+                        SharedUi.Settle(window);
 
                         var notice = window.GetVisualDescendants()
                             .OfType<TextBlock>()
@@ -356,16 +324,15 @@ public sealed class ApprovalHeadlessTests : IClassFixture<ApprovalHeadlessFixtur
                         CancellationToken.None));
 
                     var overlay = new ApprovalQueueOverlay();
-                    var window = new Window { Width = 800, Height = 600, Content = overlay };
-                    window.Show();
+                    var window = SharedUi.Show(overlay, 800, 600);
 
                     Loc.Instance.Language = UiLanguage.English;
-                    ApprovalHeadlessShell.Settle(window);
+                    SharedUi.Settle(window);
                     var englishToggle = ApprovalHeadlessShell.TextsInsideButton(window, "approval-queue-toggle");
                     var englishButtons = ApprovalHeadlessShell.ButtonIds(window);
 
                     Loc.Instance.Language = UiLanguage.Chinese;
-                    ApprovalHeadlessShell.Settle(window);
+                    SharedUi.Settle(window);
                     var chineseToggle = ApprovalHeadlessShell.TextsInsideButton(window, "approval-queue-toggle");
                     var chineseButtons = ApprovalHeadlessShell.ButtonIds(window);
 

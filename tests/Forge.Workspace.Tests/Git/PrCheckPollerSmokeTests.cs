@@ -11,6 +11,15 @@ public sealed class PrCheckPollerSmokeTests
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
+    /// <summary>Waits with the default options and asserts the settled outcome together with the number of polls.</summary>
+    private static async Task<PrWaitResult> SettlesAsync(PrCheckPollerRig rig, PrWaitOutcome outcome, int polls)
+    {
+        var result = await rig.WaitAsync();
+        Assert.Equal(outcome, result.Outcome);
+        Assert.Equal(polls, result.Polls);
+        return result;
+    }
+
     // ---- Ready / settled verdicts -------------------------------------------------------------------------------
 
     [Fact]
@@ -20,10 +29,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pending), PrCheckSample.Check("lint", PrCheckBucket.Pass)),
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pass), PrCheckSample.Check("lint", PrCheckBucket.Pass)));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(2, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 2);
         Assert.Equal(Interval, result.Elapsed);
         Assert.Equal([Interval], rig.Time.Delays);
         Assert.Null(result.Note);
@@ -39,10 +45,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Check("build", PrCheckBucket.Pass),
             PrCheckSample.Check("optional", PrCheckBucket.Skipping)));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(1, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 1);
         Assert.Equal(2, result.Observation!.PassedCount);
         Assert.Equal(1, result.Observation.SkippedCount);
     }
@@ -68,10 +71,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Step(PrMergeStateStatus.Unknown, passed),
             PrCheckSample.Step(PrMergeStateStatus.Clean, passed));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(3, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 3);
     }
 
     [Theory]
@@ -101,10 +101,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Check("build", PrCheckBucket.Pending),
             PrCheckSample.Check("lint", PrCheckBucket.Fail, run: 11, job: 22, link: "https://github.com/acme/forge/actions/runs/11/job/22")));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.ChecksFailed, result.Outcome);
-        Assert.Equal(1, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.ChecksFailed, 1);
         Assert.Empty(rig.Time.Delays);
         var failed = Assert.Single(result.FailedChecks);
         Assert.Equal("lint", failed.Name);
@@ -240,10 +237,7 @@ public sealed class PrCheckPollerSmokeTests
     {
         var rig = new PrCheckPollerRig(PrCheckSample.Step(PrMergeStateStatus.Clean));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.NoCi, result.Outcome);
-        Assert.Equal(3, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.NoCi, 3);
         Assert.Equal([Interval, Interval], rig.Time.Delays);
         Assert.True(result.Observation!.Checks.NoneReported);
     }
@@ -279,10 +273,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pending)),
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pass)));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(4, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 4);
     }
 
     [Fact]
@@ -295,10 +286,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pending)),
             PrCheckSample.Step(PrMergeStateStatus.Clean));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.NoCi, result.Outcome);
-        Assert.Equal(6, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.NoCi, 6);
     }
 
     [Fact]
@@ -310,10 +298,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.FailedRead(),
             PrCheckSample.Step(PrMergeStateStatus.Clean));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.NoCi, result.Outcome);
-        Assert.Equal(6, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.NoCi, 6);
     }
 
     [Theory]
@@ -340,10 +325,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Step(PrMergeStateStatus.Unknown),
             PrCheckSample.Step(PrMergeStateStatus.Clean));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.NoCi, result.Outcome);
-        Assert.Equal(4, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.NoCi, 4);
     }
 
     [Fact]
@@ -367,10 +349,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.FailedRead(GitRemoteFailureKind.Network),
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pass)));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(3, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 3);
         Assert.Equal([Interval, Interval], rig.Time.Delays);
         Assert.Null(result.Failure);
     }
@@ -380,10 +359,7 @@ public sealed class PrCheckPollerSmokeTests
     {
         var rig = new PrCheckPollerRig(PrCheckSample.FailedRead(GitRemoteFailureKind.AuthenticationFailed, "token rejected"));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Failed, result.Outcome);
-        Assert.Equal(3, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Failed, 3);
         Assert.Equal(TimeSpan.FromSeconds(60), result.Elapsed);
         Assert.Null(result.Observation);
         Assert.Equal(GitRemoteFailureKind.AuthenticationFailed, result.Failure!.Failure);
@@ -402,10 +378,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.FailedRead(),
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pass)));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(6, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 6);
     }
 
     [Fact]
@@ -415,10 +388,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pending)),
             PrCheckSample.FailedRead(GitRemoteFailureKind.Network));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Failed, result.Outcome);
-        Assert.Equal(4, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Failed, 4);
         Assert.Equal("build", Assert.Single(result.Observation!.Checks.Checks).Name);
     }
 
@@ -427,10 +397,7 @@ public sealed class PrCheckPollerSmokeTests
     {
         var rig = new PrCheckPollerRig(PrCheckSample.FailedRead(GitRemoteFailureKind.Other, reason: PrFailureReason.PlatformNotInstalled));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Failed, result.Outcome);
-        Assert.Equal(1, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Failed, 1);
         Assert.Equal(PrFailureReason.PlatformNotInstalled, result.FailureReason);
         Assert.Empty(rig.Time.Delays);
     }
@@ -442,10 +409,7 @@ public sealed class PrCheckPollerSmokeTests
             PrCheckSample.FailedRead(GitRemoteFailureKind.Other, reason: PrFailureReason.PullRequestNotFound),
             PrCheckSample.Step(PrMergeStateStatus.Clean, PrCheckSample.Check("build", PrCheckBucket.Pass)));
 
-        var result = await rig.WaitAsync();
-
-        Assert.Equal(PrWaitOutcome.Ready, result.Outcome);
-        Assert.Equal(2, result.Polls);
+        var result = await SettlesAsync(rig, PrWaitOutcome.Ready, 2);
     }
 
     [Fact]

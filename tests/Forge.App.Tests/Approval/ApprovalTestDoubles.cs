@@ -228,34 +228,9 @@ internal static class ApprovalFixtures
 {
     public static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(15);
 
-    public static string TempDir(string prefix)
-    {
-        var dir = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
+    public static string TempDir(string prefix) => TestTempFiles.NewDirectory(prefix);
 
-    public static void DeleteTree(string path)
-    {
-        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
+    public static void DeleteTree(string path) => TestTempFiles.DeleteTree(path);
 
     public static SessionInfo Session(string id = "s1", string? projectId = "p1") =>
         new(id, Path.Combine(Path.GetTempPath(), "ws-" + id), "Session " + id, DateTimeOffset.UtcNow)

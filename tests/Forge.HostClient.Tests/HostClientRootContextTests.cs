@@ -1,5 +1,7 @@
 using Forge.Abstractions;
 using Xunit;
+using static Forge.HostClient.Tests.CommandFixtures;
+using static Forge.HostClient.Tests.ToolFixtures;
 
 namespace Forge.HostClient.Tests;
 
@@ -29,17 +31,12 @@ public sealed class HostClientRootContextTests
     [MemberData(nameof(InvalidRoots))]
     public async Task Plugin_tool_with_an_invalid_root_is_rejected_without_ipc_or_approval(string? root)
     {
-        var approvals = 0;
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
             resolver: name => string.Equals(name, "echo", StringComparison.Ordinal) ? new StubTool("echo") : null,
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approvals);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+            approval: approval.Approve);
         using var limit = TestLimit.Create();
         var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
 
@@ -51,23 +48,16 @@ public sealed class HostClientRootContextTests
         Assert.True(result.IsError);
         Assert.Contains("fully qualified", result.Content);
         Assert.Empty(host.Requests("plugin.execute"));
-        Assert.Equal(0, approvals);
+        Assert.Equal(0, approval.Calls);
     }
 
     [Theory]
     [MemberData(nameof(InvalidRoots))]
     public async Task Run_code_with_an_invalid_root_is_rejected_without_ipc_or_approval(string? root)
     {
-        var approvals = 0;
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approvals);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, approval: approval.Approve);
         using var limit = TestLimit.Create();
         var proxy = client.CreateRunCodeTool(new TestRegistry());
 
@@ -79,23 +69,16 @@ public sealed class HostClientRootContextTests
         Assert.True(result.IsError);
         Assert.Contains("fully qualified", result.Content);
         Assert.Empty(host.Requests("code.execute"));
-        Assert.Equal(0, approvals);
+        Assert.Equal(0, approval.Calls);
     }
 
     [Theory]
     [MemberData(nameof(InvalidRoots))]
     public async Task Command_with_an_invalid_root_is_rejected_without_ipc_or_approval(string? root)
     {
-        var approvals = 0;
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approvals);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, approval: approval.Approve);
         using var limit = TestLimit.Create();
         var command = await RegisterCommandAsync(host, client, "alpha", "hi");
 
@@ -104,7 +87,7 @@ public sealed class HostClientRootContextTests
         Assert.True(result.IsError);
         Assert.Contains("fully qualified", result.Output);
         Assert.Empty(host.Requests("plugin.command"));
-        Assert.Equal(0, approvals);
+        Assert.Equal(0, approval.Calls);
     }
 
     [Theory]
@@ -112,8 +95,7 @@ public sealed class HostClientRootContextTests
     public async Task Prompt_with_an_invalid_root_returns_null_without_ipc(string? root)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
 
@@ -131,11 +113,8 @@ public sealed class HostClientRootContextTests
     public async Task Plugin_tool_sends_a_nonexistent_absolute_root_verbatim()
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) => Task.FromResult(Json.Element("""{"content":"ok","isError":false}""")));
-        await using var client = ClientFactory.Create(
-            host,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", """{"content":"ok","isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
         var directory = BoundRoots.AbsoluteDir("missing-plugin") + "/does-not-exist";
@@ -154,8 +133,7 @@ public sealed class HostClientRootContextTests
     public async Task Run_code_sends_a_nonexistent_absolute_root_verbatim()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
         BoundRoots.ParkRoot(host, "code.execute", hold);
@@ -177,16 +155,9 @@ public sealed class HostClientRootContextTests
     [Fact]
     public async Task Command_sends_a_nonexistent_absolute_root_verbatim()
     {
-        ApprovalRequest? seen = null;
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            approval: (request, _) =>
-            {
-                seen = request;
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, approval: approval.Approve);
         using var limit = TestLimit.Create();
         var command = await RegisterCommandAsync(host, client, "alpha", "hi");
         var directory = BoundRoots.AbsoluteDir("missing-command") + "/does-not-exist";
@@ -194,7 +165,7 @@ public sealed class HostClientRootContextTests
         var result = await command.ExecuteAsync("args", new CommandContext("sess", directory), limit.Token);
 
         Assert.False(result.IsError);
-        Assert.Equal(directory, seen?.WorkingDirectory);
+        Assert.Equal(directory, approval.Last?.WorkingDirectory);
         var sent = Assert.Single(host.Requests("plugin.command")).Arguments!.Value;
         Assert.Equal(directory, sent.GetProperty("context").GetProperty("workingDirectory").GetString());
     }
@@ -203,9 +174,8 @@ public sealed class HostClientRootContextTests
     public async Task Prompt_sends_a_nonexistent_absolute_root_verbatim()
     {
         await using var host = new FakeHost();
-        host.On("plugin.prompt", (_, _) => Task.FromResult(Json.Element("""{"text":"dynamic-text"}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.prompt", """{"text":"dynamic-text"}""");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("missing-prompt") + "/does-not-exist";
@@ -218,28 +188,5 @@ public sealed class HostClientRootContextTests
         Assert.Equal("dynamic-text", text);
         var sent = Assert.Single(host.Requests("plugin.prompt")).Arguments!.Value;
         Assert.Equal(directory, sent.GetProperty("context").GetProperty("workingDirectory").GetString());
-    }
-
-    private static async Task<ExtensionHostCommand> RegisterCommandAsync(
-        FakeHost host, ExtensionHostClient client, string pluginId, string name)
-    {
-        host.On("plugin.command", (_, _) =>
-            Task.FromResult(Json.Element("""{"output":"hello","promptToSend":"next","isError":false}""")));
-        await host.NotifyClientAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"commands\":["
-            + "{\"name\":\"" + name + "\",\"description\":\"d\",\"argumentHint\":\"\"}]}}");
-        await host.SyncAsync();
-        return (ExtensionHostCommand)client.Commands.Single(c => c.Definition.Name == name);
-    }
-
-    private static async Task<PluginPromptReference> RegisterPromptAsync(
-        FakeHost host, ExtensionHostClient client, string pluginId, string contributorId)
-    {
-        await host.NotifyClientAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"promptContributors\":[{\"id\":\""
-            + contributorId + "\"}]}}");
-        await host.SyncAsync();
-        return client.PromptContributors.Single(p =>
-            p.PluginId == pluginId && p.ContributorId == contributorId);
     }
 }

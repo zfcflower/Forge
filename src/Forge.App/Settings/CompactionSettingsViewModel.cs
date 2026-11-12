@@ -10,7 +10,7 @@ namespace Forge.App.Settings;
 /// percentages. The toggle saves at once; the two numbers are validated as they are typed (inline errors) and saved on
 /// commit (focus loss or Enter) only when both are valid, so a half-typed value never reaches <c>settings.json</c>.
 /// </summary>
-internal sealed class CompactionSettingsViewModel : ObservableObject, IDisposable
+internal sealed class CompactionSettingsViewModel : NotifyingObject, IDisposable
 {
     private readonly CompactionSettingsStore store;
     private bool enabled;
@@ -78,13 +78,7 @@ internal sealed class CompactionSettingsViewModel : ObservableObject, IDisposabl
     public string? TriggerError
     {
         get => triggerError;
-        private set
-        {
-            if (Set(ref triggerError, value))
-            {
-                OnPropertyChanged(nameof(HasTriggerError));
-            }
-        }
+        private set => SetAndNotify(ref triggerError, value, nameof(HasTriggerError));
     }
 
     public bool HasTriggerError => triggerError is not null;
@@ -92,13 +86,7 @@ internal sealed class CompactionSettingsViewModel : ObservableObject, IDisposabl
     public string? TargetError
     {
         get => targetError;
-        private set
-        {
-            if (Set(ref targetError, value))
-            {
-                OnPropertyChanged(nameof(HasTargetError));
-            }
-        }
+        private set => SetAndNotify(ref targetError, value, nameof(HasTargetError));
     }
 
     public bool HasTargetError => targetError is not null;
@@ -106,13 +94,7 @@ internal sealed class CompactionSettingsViewModel : ObservableObject, IDisposabl
     public string? SaveError
     {
         get => saveError;
-        private set
-        {
-            if (Set(ref saveError, value))
-            {
-                OnPropertyChanged(nameof(HasSaveError));
-            }
-        }
+        private set => SetAndNotify(ref saveError, value, nameof(HasSaveError));
     }
 
     public bool HasSaveError => saveError is not null;

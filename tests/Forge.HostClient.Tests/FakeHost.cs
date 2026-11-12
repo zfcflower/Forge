@@ -121,6 +121,14 @@ internal sealed class FakeHost : IAsyncDisposable
         Assert.Equal("unsupported", error.Code);
     }
 
+    /// <summary>Sends one notification and returns once the client has processed it (see <see cref="SyncAsync"/>),
+    /// which is how a test publishes a registration without sleeping.</summary>
+    public async Task NotifyAndSyncAsync(string operation, string argsJson)
+    {
+        await NotifyClientAsync(operation, argsJson).ConfigureAwait(false);
+        await SyncAsync().ConfigureAwait(false);
+    }
+
     /// <summary>Closes the host side of the pipe without a stop request, as a crashed host would.</summary>
     public async Task DropConnectionAsync()
     {

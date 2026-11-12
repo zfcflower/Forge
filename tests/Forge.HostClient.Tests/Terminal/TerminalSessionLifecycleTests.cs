@@ -13,12 +13,10 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Exit_completes_output_and_reports_the_code_then_ignores_late_calls()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         const string terminalId = "t-exit";
-        TerminalFixtures.AnswerStart(host, terminalId);
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
         await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "tail"));
         await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 7));
@@ -44,12 +42,10 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Duplicate_exit_is_ignored_and_keeps_the_first_code()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         const string terminalId = "t-dup-exit";
-        TerminalFixtures.AnswerStart(host, terminalId);
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
         await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 2));
         await host.SyncAsync();
@@ -63,8 +59,7 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Dispose_sends_stop_with_the_terminal_id_and_reports_the_host_exit_code()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         const string terminalId = "t-stop";
         TerminalFixtures.AnswerStart(host, terminalId);
@@ -96,11 +91,9 @@ public sealed class TerminalSessionLifecycleTests
         // Host 对 stop 应答了 {} 但没发 exit：会话本地收口，Exited 为 -1（“结束了但码未知”），
         // Output 正常完成而非 fault。
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        TerminalFixtures.AnswerStart(host, "t-stop-quiet");
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, "t-stop-quiet", limit.Token);
 
         await session.DisposeAsync();
 
@@ -113,11 +106,9 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Resize_sends_columns_and_rows_and_succeeds()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        TerminalFixtures.AnswerStart(host, "t-resize");
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, "t-resize", limit.Token);
 
         await session.ResizeAsync(new TerminalSize(132, 43), limit.Token);
 
@@ -132,8 +123,7 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Resize_propagates_host_business_errors_to_the_caller()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-resize-err");
         host.On(TerminalOps.Resize, (_, _) => throw new FakeHostError("gone", "unknown terminal"));
@@ -150,9 +140,8 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Resize_timeout_propagates_to_the_caller()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host, options: new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(250) });
-        await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-resize-timeout");
         host.On(TerminalOps.Resize, FakeHost.NeverAnswer);
@@ -170,8 +159,7 @@ public sealed class TerminalSessionLifecycleTests
     public async Task Foreground_reads_the_busy_flag(bool busy)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg");
         host.On(TerminalOps.Foreground, (_, _) => Task.FromResult(Json.Element(busy ? """{"busy":true}""" : """{"busy":false}""")));
@@ -189,8 +177,7 @@ public sealed class TerminalSessionLifecycleTests
     {
         // 实际行为：实现吞掉 IpcRemoteException 转 false（只记诊断），不是抛给调用方。
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg-err");
         host.On(TerminalOps.Foreground, (_, _) => throw new FakeHostError("gone", "unknown terminal"));
@@ -207,9 +194,8 @@ public sealed class TerminalSessionLifecycleTests
     {
         // 实际行为：超时同样被吞掉转 false（只记诊断），不是抛 IpcTimeoutException。
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host, options: new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(250) });
-        await client.StartConnectedAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg-timeout");
         host.On(TerminalOps.Foreground, FakeHost.NeverAnswer);
@@ -226,11 +212,10 @@ public sealed class TerminalSessionLifecycleTests
     {
         // 读不到 busy 字段 ≠ “没有前台进程”：实现同样按 false 处理并记诊断。
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg-bad");
-        host.On(TerminalOps.Foreground, (_, _) => Task.FromResult(Json.Element("{}")));
+        host.Answer(TerminalOps.Foreground, "{}");
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         Assert.False(await session.HasForegroundProcessAsync(limit.Token));

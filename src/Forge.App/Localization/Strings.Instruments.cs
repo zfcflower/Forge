@@ -84,8 +84,7 @@ internal static class InstrumentsStrings
 
     public static string ToolsLabel => Loc.Instance[ToolsLabelKey];
 
-    public static string CountPair(int used, int total) =>
-        Loc.Instance.Format(CountPairKey, TextFormat.Number(used), TextFormat.Number(total));
+    public static string CountPair(int used, int total) => Loc.Instance.FormatCounts(CountPairKey, used, total);
 
     public static string CountUnknown(int used) =>
         Loc.Instance.Format(CountUnknownKey, TextFormat.Number(used));
@@ -94,18 +93,18 @@ internal static class InstrumentsStrings
     public static string MenuEntry(string label, string count) => Loc.Instance.Format(MenuEntryKey, label, count);
 
     public static string ApprovalsTooltip(int pending, int records) =>
-        Loc.Instance.Format(ApprovalsTooltipKey, TextFormat.Number(pending), TextFormat.Number(records));
+        Loc.Instance.FormatCounts(ApprovalsTooltipKey, pending, records);
 
     public static string ApprovalsUnavailable => Loc.Instance[ApprovalsUnavailableKey];
 
     public static string SkillsTooltip(int used, int discovered) =>
-        Loc.Instance.Format(SkillsTooltipKey, TextFormat.Number(used), TextFormat.Number(discovered));
+        Loc.Instance.FormatCounts(SkillsTooltipKey, used, discovered);
 
     public static string McpTooltip(int ready, int configured) =>
-        Loc.Instance.Format(McpTooltipKey, TextFormat.Number(ready), TextFormat.Number(configured));
+        Loc.Instance.FormatCounts(McpTooltipKey, ready, configured);
 
     public static string ToolsTooltip(int used, int available) =>
-        Loc.Instance.Format(ToolsTooltipKey, TextFormat.Number(used), TextFormat.Number(available));
+        Loc.Instance.FormatCounts(ToolsTooltipKey, used, available);
 
     public static string ToolsTooltipUnknown(int used) =>
         Loc.Instance.Format(ToolsTooltipUnknownKey, TextFormat.Number(used));

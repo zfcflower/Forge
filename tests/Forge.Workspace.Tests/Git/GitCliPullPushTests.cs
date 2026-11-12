@@ -6,14 +6,6 @@ public sealed class GitCliPullPushTests
 {
     private static GitCli Cli() => new();
 
-    private static string SeedTracked(RemoteSandbox sandbox, string name = "alice")
-    {
-        var repo = sandbox.Clone(name);
-        sandbox.CommitFile(repo, "base.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "push", "-q", "-u", "origin", "main");
-        return repo;
-    }
-
     private static string OriginTip(RemoteSandbox sandbox, string branch = "main") =>
         IsolatedGit.RunChecked(sandbox.Origin, "rev-parse", branch).Trim();
 
@@ -26,10 +18,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        var tip = sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, tip) = sandbox.SeedRemoteAhead();
 
         var result = await Cli().PullAsync(alice, GitPullStrategy.FastForwardOnly);
 
@@ -46,10 +35,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         var head = sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
 
         var result = await Cli().PullAsync(alice, GitPullStrategy.FastForwardOnly);
@@ -68,10 +54,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
 
         var result = await Cli().PullAsync(alice, GitPullStrategy.Rebase);
@@ -92,10 +75,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
 
         var result = await Cli().PullAsync(alice, GitPullStrategy.Merge);
@@ -114,10 +94,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "clash.txt", "bob\n", "bob work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead("clash.txt", "bob\n", "bob work");
         sandbox.CommitFile(alice, "clash.txt", "alice\n", "alice work");
         var head = IsolatedGit.Head(alice);
 
@@ -145,7 +122,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "lonely");
 
         var result = await Cli().PullAsync(repo, GitPullStrategy.FastForwardOnly);
@@ -163,7 +140,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "feature-c");
         sandbox.CommitFile(repo, "c.txt", "c\n", "feature work");
 
@@ -183,10 +160,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
         var remoteBefore = OriginTip(sandbox);
 
@@ -206,10 +180,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
         IsolatedGit.RunChecked(alice, "fetch", "-q", "origin");
         IsolatedGit.RunChecked(alice, "rebase", "-q", "origin/main");
@@ -236,10 +207,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, bob, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
         IsolatedGit.RunChecked(alice, "fetch", "-q", "origin");
         IsolatedGit.RunChecked(alice, "rebase", "-q", "origin/main");
@@ -269,10 +237,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
 
         var result = await Cli().PushAsync(alice, new GitPushOptions { ForceWithLease = true });
@@ -290,7 +255,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var remoteBefore = OriginTip(sandbox);
 
         var result = await Cli().PushAsync(repo, new GitPushOptions
@@ -312,7 +277,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var tip = OriginTip(sandbox);
 
         var read = await Cli().LsRemoteAsync(repo, "origin", "main");
@@ -330,7 +295,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
 
         var read = await Cli().LsRemoteAsync(repo, "origin", "no-such-branch");
 
@@ -347,7 +312,7 @@ public sealed class GitCliPullPushTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
 
         var read = await Cli().LsRemoteAsync(repo, "no-such-remote", "main");
 

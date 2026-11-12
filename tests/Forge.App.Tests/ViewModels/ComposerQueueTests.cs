@@ -20,7 +20,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class ComposerQueueTests
 {
-    private const int PumpIterations = 600;
     private const int PumpDelayMilliseconds = 5;
     private const string SessionId = "composer-session";
 
@@ -411,8 +410,7 @@ public sealed class ComposerQueueTests
         bool blockUntilCancelled = false,
         bool firstCallsTool = false)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-composer-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-composer-");
         try
         {
             var session = SharedUi.Session;
@@ -427,8 +425,8 @@ public sealed class ComposerQueueTests
                             _ => provider,
                             HostClient: null,
                             store,
-                            new FakeSessionCatalog(),
-                            new FakeTodoStore(),
+                            new EmptySessionCatalog(DateTimeOffset.UnixEpoch),
+                            new EmptyTodoStore("t1", DateTimeOffset.UnixEpoch),
                             new ModelSettings("gpt-5.1")),
                         info);
                     using var workspace = new SessionWorkspaceViewModel(
@@ -489,26 +487,7 @@ public sealed class ComposerQueueTests
         return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
     }
 
-    private sealed class ThrowingHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("no network in this test");
-    }
-
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition, 600);
 
     private static async Task PumpAsync(int iterations)
     {
@@ -659,40 +638,4 @@ public sealed class ComposerQueueTests
         public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class FakeSessionCatalog : ISessionCatalog
-    {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, DateTimeOffset.UnixEpoch));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class FakeTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("t1", sessionId, title, TodoStatus.Pending, note, 0, DateTimeOffset.UnixEpoch));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

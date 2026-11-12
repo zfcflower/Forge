@@ -11,16 +11,13 @@ public sealed class GitCliLifecycleTests
     {
         sandbox = new TempDirectory();
         var repo = new TestRepo(sandbox);
-        repo.Write("shared.txt", "base\n");
-        repo.Commit("base");
+        repo.CommitFile("shared.txt", "base\n", "base");
         repo.RunGit("checkout", "-q", "-b", "side");
-        repo.Write(conflicting ? "shared.txt" : "side.txt", "side\n");
-        repo.Commit("side work");
+        repo.CommitFile(conflicting ? "shared.txt" : "side.txt", "side\n", "side work");
         repo.RunGit("checkout", "-q", "main");
         if (conflicting)
         {
-            repo.Write("shared.txt", "main\n");
-            repo.Commit("main work");
+            repo.CommitFile("shared.txt", "main\n", "main work");
         }
 
         return repo;
@@ -128,8 +125,7 @@ public sealed class GitCliLifecycleTests
         {
             // side changes shared.txt too, so an uncommitted edit of it would be overwritten by a fast-forward-less merge.
             repo.RunGit("checkout", "-q", "side");
-            repo.Write("shared.txt", "side edit\n");
-            repo.Commit("side edits shared");
+            repo.CommitFile("shared.txt", "side edit\n", "side edits shared");
             repo.RunGit("checkout", "-q", "main");
             repo.Write("shared.txt", "uncommitted local edit\n");
             var before = repo.Head();
@@ -205,10 +201,8 @@ public sealed class GitCliLifecycleTests
         using var repo = new TestRepo();
         repo.Write("a.txt", "1\n");
         var baseCommit = repo.Commit("base");
-        repo.Write("a.txt", "2\n");
-        repo.Commit("second");
-        repo.Write("a.txt", "3\n");
-        repo.Commit("third");
+        repo.CommitFile("a.txt", "2\n", "second");
+        repo.CommitFile("a.txt", "3\n", "third");
 
         var commits = await Cli().ListCommitsAsync(repo.Root, baseCommit + "..HEAD");
 
@@ -220,8 +214,7 @@ public sealed class GitCliLifecycleTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "1\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "1\n", "base");
 
         Assert.Empty(await Cli().ListCommitsAsync(repo.Root, "HEAD..HEAD"));
         await Assert.ThrowsAsync<GitException>(() => Cli().ListCommitsAsync(repo.Root, "nope..HEAD"));
@@ -365,8 +358,7 @@ public sealed class GitCliLifecycleTests
         using var repo = new TestRepo();
         repo.Write("alpha/a.txt", "a\n");
         repo.Write("beta/b.txt", "b\n");
-        repo.Write("top.txt", "t\n");
-        repo.Commit("initial");
+        repo.CommitFile("top.txt", "t\n", "initial");
         repo.RunGit("sparse-checkout", "set", "--cone", "beta");
 
         var config = await Cli().GetSparseConfigAsync(repo.Root);
@@ -380,8 +372,7 @@ public sealed class GitCliLifecycleTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("alpha/a.txt", "a\n");
-        repo.Commit("initial");
+        repo.CommitFile("alpha/a.txt", "a\n", "initial");
         repo.RunGit("sparse-checkout", "set", "--cone", "alpha");
         repo.RunGit("sparse-checkout", "disable");
 
@@ -396,8 +387,7 @@ public sealed class GitCliLifecycleTests
         repo.Write("alpha/a.txt", "a\n");
         repo.Write("beta/nested/b.txt", "b\n");
         repo.Write("top.txt", "t\n");
-        repo.Write("with space/s.txt", "s\n");
-        repo.Commit("initial");
+        repo.CommitFile("with space/s.txt", "s\n", "initial");
 
         var directories = await Cli().ListTopLevelDirectoriesAsync(repo.Root, "HEAD");
 

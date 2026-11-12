@@ -19,12 +19,8 @@ public sealed class RunCodeScriptTests
     [Fact]
     public async Task Script_returns_real_arithmetic_result()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals();
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
 
         var registry = new ScriptRegistry();
         var result = await RunScriptAsync(
@@ -45,12 +41,8 @@ public sealed class RunCodeScriptTests
                 Interlocked.Increment(ref probeCalls);
                 return ValueTask.FromResult(new ToolResult("called"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(probe);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
 
         var result = await RunScriptAsync(
             fx.Client,
@@ -67,12 +59,8 @@ public sealed class RunCodeScriptTests
     [Fact]
     public async Task Unknown_tool_error_lists_available_names()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals();
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
 
         var result = await RunScriptAsync(
             fx.Client,
@@ -89,12 +77,8 @@ public sealed class RunCodeScriptTests
     [Fact]
     public async Task Inner_calls_logs_and_final_output_compose()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == "add" ? ScriptMainTool.Add() : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(name => name == "add" ? ScriptMainTool.Add() : null);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
 
         var result = await RunScriptAsync(
             fx.Client,
@@ -121,9 +105,7 @@ public sealed class RunCodeScriptTests
                 return ValueTask.FromResult(
                     request.ToolName == "bad" ? ApprovalDecision.Deny : ApprovalDecision.Allow);
             });
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry(
             new ScriptMainTool("good", (_, _, _) => ValueTask.FromResult(new ToolResult("fine"))),
             new ScriptMainTool("bad", (_, _, _) => ValueTask.FromResult(new ToolResult("should-not-surface"))));
@@ -161,12 +143,8 @@ public sealed class RunCodeScriptTests
             },
             ToolSideEffect.Execute);
 
-        await using var fx = new E2eFixture(
-            toolResolver: name => name is "left" or "right" ? Gated(name) : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(name => name is "left" or "right" ? Gated(name) : null);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var options = new RunCodeProxyOptions
         {
             Execution = new Sdk.CodeExecutionOptions { MaxConcurrentToolCalls = 2 },
@@ -202,12 +180,8 @@ public sealed class RunCodeScriptTests
                 return ValueTask.FromResult(new ToolResult(
                     forged ? "saw-forged-arg:" + sessionId : "saw-clean"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(probe);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
 
         var result = await RunScriptAsync(
             fx.Client,
@@ -264,10 +238,8 @@ public sealed class RunCodeScriptTests
                   fx.ToolsOf("beta").Count == PluginSources.AllTools.Length,
             "tools of both plugins");
 
-        var leg = await fx.InvokeAsync(
-            "alpha", "callHost", """{"target":"toEchoB","args":{"text":"deep"}}""");
-        Assert.False(leg.IsError, leg.Content);
-        Assert.Equal("b:deep", leg.Content);
+        await fx.AssertToolContentAsync(
+            "alpha", "callHost", """{"target":"toEchoB","args":{"text":"deep"}}""", "b:deep");
 
         var cycle = await fx.InvokeAsync(
             "alpha", "callHost", """{"target":"toB","args":{"target":"backToA","args":{}}}""");
@@ -287,12 +259,8 @@ public sealed class RunCodeScriptTests
     [Fact]
     public async Task Nested_run_code_from_script_refused()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals();
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
 
         var result = await RunScriptAsync(
             fx.Client,
@@ -347,9 +315,7 @@ public sealed class RunCodeScriptTests
             };
         }
 
-        await using var fx = new E2eFixture(
-            toolResolver: Resolver,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(Resolver);
         box = fx;
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
         fx.WritePlugin("beta", PluginSources.Standard("beta", echoPrefix: "b", toolPrefix: BetaToolPrefix));

@@ -37,17 +37,8 @@ public sealed class TerminalInputOrderTests
         public static Scene Open()
         {
             var host = new FakeTerminalHost();
-            var viewModel = new TerminalViewModel(
-                "s1",
-                1,
-                host,
-                new TerminalStartRequest("s1", "C:\\work", new TerminalSize(100, 30)),
-                new AppPreferences());
-            var control = new TerminalControl { Source = viewModel };
-            var window = new Window { Width = 1000, Height = 700, Content = control };
-            viewModel.Start();
-            TerminalUi.Show(window);
-            return new Scene(window, viewModel, host);
+            var scene = TerminalSceneUi.Open(host);
+            return new Scene(scene.Window, scene.ViewModel, host);
         }
 
         public async ValueTask DisposeAsync()

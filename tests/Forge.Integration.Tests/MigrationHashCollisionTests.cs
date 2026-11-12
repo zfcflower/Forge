@@ -33,12 +33,10 @@ public sealed class MigrationHashCollisionTests
         // Approve through the hashes plugins.status reports, not through the database.
         await fx.Client.ApprovePluginAsync(
             "alpha", "1.0.0", before.SourceHash, before.DependencyHash, before.SdkVersion, fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "alpha tools");
 
         var echoTool = fx.ToolOf("alpha", "echo");
-        var echo = await fx.InvokeAsync(echoTool, """{"text":"hi"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:hi", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"hi"}""", "a:hi");
 
         // Same source, honest manifest: the fake dependency becomes a real permission demand.
         WriteManifest(fx, "alpha", null, [new { kind = "Database", scope = "s" }]);
@@ -51,7 +49,7 @@ public sealed class MigrationHashCollisionTests
             string.IsNullOrWhiteSpace(after.Error),
             "a stale approval must be reported as an error until it is re-approved");
 
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "alpha tools to be withdrawn");
+        await fx.WaitForToolsAsync("alpha", 0, "alpha tools to be withdrawn");
         var blocked = await fx.InvokeAsync(echoTool, """{"text":"hi"}""");
         Assert.True(blocked.IsError, blocked.Content);
         Assert.Contains("must not run", blocked.Content, StringComparison.Ordinal);
@@ -60,9 +58,7 @@ public sealed class MigrationHashCollisionTests
             "alpha", "1.0.0", after.SourceHash, after.DependencyHash, after.SdkVersion, fx.Ct);
         await fx.WaitUntilAsync(
             () => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools after re-approval");
-        var revived = await fx.InvokeAsync("alpha", "echo", """{"text":"hi"}""");
-        Assert.False(revived.IsError, revived.Content);
-        Assert.Equal("a:hi", revived.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"hi"}""", "a:hi");
     }
 
     [Fact]
