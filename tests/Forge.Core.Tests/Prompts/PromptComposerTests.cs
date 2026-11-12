@@ -22,9 +22,76 @@ public class PromptComposerTests
         Assert.True(system < global);
         Assert.True(global < project);
         Assert.True(project < role);
-        Assert.Contains(BuiltInPrompts.System, prompt.StablePrefix, StringComparison.Ordinal);
-        Assert.Contains("Project-specific system text.", prompt.StablePrefix, StringComparison.Ordinal);
+        // PromptLayers.System is the whole system layer: it replaces the built-in text instead of extending it.
+        Assert.DoesNotContain(BuiltInPrompts.System, prompt.StablePrefix, StringComparison.Ordinal);
+        Assert.DoesNotContain("You are Forge", prompt.StablePrefix, StringComparison.Ordinal);
+        Assert.StartsWith(PromptComposer.SystemHeading + "\n\nProject-specific system text.\n\n", prompt.StablePrefix, StringComparison.Ordinal);
         Assert.EndsWith("Role text.", prompt.StablePrefix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Custom_system_text_replaces_the_built_in_and_appears_exactly_once()
+    {
+        var prompt = new PromptComposer().Compose(new PromptInput(new PromptLayers("CUSTOM-SYSTEM-MARKER", null, null), null, null));
+
+        Assert.Equal(PromptComposer.SystemHeading + "\n\nCUSTOM-SYSTEM-MARKER", prompt.StablePrefix);
+        Assert.Equal(1, CountOf(prompt.StablePrefix, "CUSTOM-SYSTEM-MARKER"));
+        Assert.Equal(1, CountOf(prompt.StablePrefix, PromptComposer.SystemHeading));
+    }
+
+    [Fact]
+    public void The_built_in_text_passed_as_the_system_layer_is_not_doubled()
+    {
+        var composer = new PromptComposer();
+
+        var explicitBuiltIn = composer.Compose(new PromptInput(new PromptLayers(BuiltInPrompts.System, null, null), null, null));
+        var blank = composer.Compose(new PromptInput(new PromptLayers("", null, null), null, null));
+
+        Assert.Equal(1, CountOf(explicitBuiltIn.StablePrefix, "You are Forge"));
+        Assert.Equal(blank.StablePrefix, explicitBuiltIn.StablePrefix);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\r\n\t\r\n")]
+    public void A_blank_system_layer_falls_back_to_the_built_in_text(string system)
+    {
+        var prompt = new PromptComposer().Compose(new PromptInput(new PromptLayers(system, null, null), null, null));
+
+        Assert.StartsWith(PromptComposer.SystemHeading + "\n\n", prompt.StablePrefix, StringComparison.Ordinal);
+        var body = prompt.StablePrefix[(PromptComposer.SystemHeading.Length + 2)..];
+        Assert.Equal(BuiltInPrompts.System.ReplaceLineEndings("\n").Trim(), body);
+    }
+
+    [Fact]
+    public void A_custom_system_layer_is_normalized_like_any_other_layer()
+    {
+        var prompt = new PromptComposer().Compose(new PromptInput(new PromptLayers("\r\nline one   \r\nline two\r\n\r\n", null, null), null, null));
+
+        Assert.Equal(PromptComposer.SystemHeading + "\n\nline one\nline two", prompt.StablePrefix);
+    }
+
+    [Fact]
+    public void Changing_the_system_layer_changes_the_prefix_key()
+    {
+        var composer = new PromptComposer();
+
+        var builtIn = composer.Compose(new PromptInput(new PromptLayers("", null, null), null, null));
+        var custom = composer.Compose(new PromptInput(new PromptLayers("custom", null, null), null, null));
+
+        Assert.NotEqual(PromptComposer.PrefixKey(builtIn), PromptComposer.PrefixKey(custom));
+    }
+
+    private static int CountOf(string text, string needle)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(needle, StringComparison.Ordinal); index >= 0; index = text.IndexOf(needle, index + needle.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     [Fact]

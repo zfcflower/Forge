@@ -62,7 +62,7 @@ internal static class ComposerSuggestions
         };
     }
 
-    /// <summary>Entries whose name contains the query (case-insensitive); name-prefix matches first, then by name.</summary>
+    /// <summary>Entries whose name contains the query (case-insensitive); name-prefix matches first, then commands before skills, then by name.</summary>
     public static IReadOnlyList<SlashEntry> FilterSlash(IEnumerable<SlashEntry> entries, string query)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -71,6 +71,7 @@ internal static class ComposerSuggestions
             .Select(entry => (Entry: entry, Rank: SlashRank(entry, query)))
             .Where(pair => pair.Rank >= 0)
             .OrderBy(pair => pair.Rank)
+            .ThenBy(pair => pair.Entry.IsSkill)
             .ThenBy(pair => pair.Entry.Name, StringComparer.OrdinalIgnoreCase)
             .Select(pair => pair.Entry)
             .ToList();

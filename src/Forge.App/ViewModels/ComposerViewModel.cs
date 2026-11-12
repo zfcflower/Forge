@@ -7,7 +7,9 @@ using Forge.App.Notifications;
 using Forge.App.Providers;
 using Forge.Core.Providers;
 using Forge.App.Services;
+using Forge.App.Prompts;
 using Forge.Core.Prompts;
+using Forge.Core.Prompts.Templates;
 using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
@@ -200,9 +202,6 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 /// </summary>
 internal sealed class ComposerViewModel : ObservableObject
 {
-    /// <summary>The app's own slash commands; none exist yet, skills fill the list.</summary>
-    internal static readonly IReadOnlyList<SlashEntry> Commands = [];
-
     private readonly Action<AgentDefinition?> apply;
     private readonly ComposerPreferences preferences;
     private readonly string workspace;
@@ -210,6 +209,8 @@ internal sealed class ComposerViewModel : ObservableObject
     private ProviderCatalog catalog;
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
+    private readonly Func<PromptTemplateSet> templateSource;
+    private PromptTemplateSet? templates;
     private readonly Func<CancellationToken, Task> modelRefresh;
     private readonly Func<string?, string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
@@ -240,7 +241,8 @@ internal sealed class ComposerViewModel : ObservableObject
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
         Func<CancellationToken, Task>? modelRefresh = null,
-        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null)
+        Func<string?, string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null,
+        Func<PromptTemplateSet>? templateSource = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
@@ -252,12 +254,15 @@ internal sealed class ComposerViewModel : ObservableObject
         this.workspace = workspace ?? string.Empty;
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
         this.skillSource = skillSource ?? DiscoverSkills;
+        this.templateSource = templateSource ??
+                              (() => new PromptTemplateService(AgentRuntimeServices.UserDirectory()).Resolve(this.workspace));
         // The picker's 刷新 re-fetches every provider that can list models; a test can pass its own.
         this.modelRefresh = modelRefresh ?? RefreshAllProvidersAsync;
         this.thinkingLevels = thinkingLevels ?? ((modelId, provider) => services.Catalog.ThinkingStepsFor(modelId, provider));
 
         var agents = new List<ComposerAgentOption> { new(null) };
-        agents.AddRange(BuiltInAgents.All.Select(definition => new ComposerAgentOption(definition)));
+        // Built-ins (possibly overridden by a file) first, then the user's own agents.
+        agents.AddRange(ResolveTemplates().Agents.Select(definition => new ComposerAgentOption(definition)));
         foreach (var agent in agents)
         {
             agent.Selected += OnAgentSelected;
@@ -478,7 +483,14 @@ internal sealed class ComposerViewModel : ObservableObject
     {
         lastText = text ?? string.Empty;
         lastCaret = caret;
+        var previous = token;
         token = ComposerSuggestions.FindToken(lastText, caret);
+        if (token.Kind == ComposerTokenKind.Slash && (previous.Kind != ComposerTokenKind.Slash || previous.Start != token.Start))
+        {
+            // A new slash token: pick up commands edited since the popup last opened.
+            templates = null;
+        }
+
         if (token.Kind == ComposerTokenKind.None || token.Start != dismissed.Start || token.Kind != dismissed.Kind)
         {
             dismissed = ComposerToken.None;
@@ -495,7 +507,7 @@ internal sealed class ComposerViewModel : ObservableObject
         {
             case ComposerTokenKind.Slash:
                 skills ??= LoadSkills();
-                foreach (var entry in ComposerSuggestions.FilterSlash(Commands.Concat(skills), token.Query))
+                foreach (var entry in ComposerSuggestions.FilterSlash(SlashEntries(), token.Query))
                 {
                     items.Add(new ComposerSuggestionItem(
                         entry.Name,
@@ -605,6 +617,66 @@ internal sealed class ComposerViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(SelectedSuggestionIndex));
+    }
+
+    /// <summary>
+    /// The text to send for <paramref name="text"/>: the command body with arguments filled in when it is
+    /// <c>/name args</c> for a known command, otherwise the text unchanged.
+    /// </summary>
+    public string ExpandCommand(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        return ResolveTemplates().TryExpandCommand(text, out var expanded) ? expanded : text;
+    }
+
+    /// <summary>Commands first, then skills; a skill sharing a command's name is hidden.</summary>
+    private List<SlashEntry> SlashEntries()
+    {
+        var commands = ResolveTemplates().Commands;
+        var entries = new List<SlashEntry>(commands.Count + (skills?.Count ?? 0));
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var command in commands)
+        {
+            names.Add(command.Name);
+            var description = string.IsNullOrWhiteSpace(command.ArgumentHint)
+                ? command.Description
+                : command.ArgumentHint + "  " + command.Description;
+            entries.Add(new SlashEntry(command.Name, description, IsSkill: false));
+        }
+
+        foreach (var skill in skills ?? [])
+        {
+            if (!names.Contains(skill.Name))
+            {
+                entries.Add(skill);
+            }
+        }
+
+        return entries;
+    }
+
+    // Same approach as skill discovery: a small synchronous read of a few files, kept off the per-keystroke path by the cache.
+    private PromptTemplateSet ResolveTemplates()
+    {
+        if (templates is { } cached)
+        {
+            return cached;
+        }
+
+        try
+        {
+            templates = templateSource();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            templates = PromptTemplateSet.BuiltIn();
+        }
+
+        return templates;
     }
 
     private IReadOnlyList<SlashEntry> DiscoverSkills() => SkillCatalog.Discover(workspace, AgentRuntimeServices.UserDirectory());

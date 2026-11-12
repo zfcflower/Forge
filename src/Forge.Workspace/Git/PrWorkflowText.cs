@@ -152,7 +152,7 @@ public static class PrWorkflowText
 }
 
 /// <summary>Returns the written guidance for one phase of the pull request workflow.</summary>
-internal sealed class PrWorkflowTool(GitCli git) : GitToolBase(
+internal sealed class PrWorkflowTool(GitCli git, Func<string, string, string?>? workflowText = null) : GitToolBase(
     git,
     PrTools.WorkflowName,
     "Read the written guidance for one phase of working with pull requests. Read the phase before using the matching " +
@@ -170,9 +170,20 @@ internal sealed class PrWorkflowTool(GitCli git) : GitToolBase(
         GitToolJson.EnsureObject(arguments, "phase");
         var phase = GitToolJson.RequiredString(arguments, "phase");
         return ValueTask.FromResult(PrWorkflowText.TryGet(phase, out var text)
-            ? new ToolResult(text)
+            ? new ToolResult(Override(phase, context.WorkingDirectory) ?? text)
             : new ToolResult(
                 $"Unknown phase '{phase}'; use one of: {string.Join(", ", PrWorkflowText.Phases)}.",
                 IsError: true));
+    }
+
+    private string? Override(string phase, string workingDirectory)
+    {
+        if (workflowText is null)
+        {
+            return null;
+        }
+
+        var text = workflowText(phase.Trim().ToLowerInvariant(), workingDirectory);
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 }

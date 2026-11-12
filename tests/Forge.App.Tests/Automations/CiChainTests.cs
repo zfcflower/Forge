@@ -216,6 +216,47 @@ public sealed class CiChainTests
     }
 
     [Fact]
+    public async Task Runner_sends_the_built_in_slot_texts_with_placeholders_filled()
+    {
+        var r = new RunnerHarness();
+        var outcome = await r.RunAsync();
+
+        Assert.NotEqual(AutomationRunStatus.Failed, outcome.Status);
+        var scout = Assert.Single(r.Launcher.Requests).Task;
+        Assert.StartsWith("The CI checks of PR #7 (branch feature) failed.", scout, StringComparison.Ordinal);
+        Assert.DoesNotContain("{pr}", scout, StringComparison.Ordinal);
+        Assert.DoesNotContain("{failures}", scout, StringComparison.Ordinal);
+        var fix = Assert.Single(r.Mailbox.Messages).Text;
+        Assert.StartsWith("The CI checks of PR #7 failed. Scout's analysis:", fix, StringComparison.Ordinal);
+        Assert.Contains("scout analysis", fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Runner_honours_project_overrides_of_the_scout_and_fix_slots()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "forge-ci-slots-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var prompts = Path.Combine(root, "ws", ".forge", "prompts");
+            Directory.CreateDirectory(prompts);
+            File.WriteAllText(Path.Combine(prompts, "automations.ci.scout.md"), "SCOUT pr={pr} branch={branch} :: {failures}");
+            File.WriteAllText(Path.Combine(prompts, "automations.ci.fix.md"), "FIX pr={pr} :: {analysis}");
+            var r = new RunnerHarness { Templates = new Forge.App.Prompts.PromptTemplateService(Path.Combine(root, "user")) };
+            r.Sessions.Session = Session("s1") with { WorkspacePath = Path.Combine(root, "ws") };
+
+            await r.RunAsync();
+
+            var scout = Assert.Single(r.Launcher.Requests).Task;
+            Assert.StartsWith("SCOUT pr=7 branch=feature :: ", scout, StringComparison.Ordinal);
+            Assert.Equal("FIX pr=7 :: scout analysis", Assert.Single(r.Mailbox.Messages).Text);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Runner_fails_when_scout_errors()
     {
         var r = new RunnerHarness();
@@ -516,6 +557,8 @@ public sealed class CiChainTests
 
         public AutomationConfig Config { get; init; } = new();
 
+        public Forge.App.Prompts.PromptTemplateService? Templates { get; init; }
+
         public CiFakePr Pr { get; } = new();
 
         public CiFakeGit Git { get; } = new();
@@ -543,7 +586,7 @@ public sealed class CiChainTests
         public Task<AutomationRunOutcome> RunAsync(CancellationToken ct = default)
         {
             Mailbox.Context = Context;
-            var runner = new CiChainRunner(Pr, Git, Sessions, Mailbox, Launcher, Notes, () => Config, State);
+            var runner = new CiChainRunner(Pr, Git, Sessions, Mailbox, Launcher, Notes, () => Config, State, Templates);
             return runner.RunAsync(Context, ct);
         }
     }

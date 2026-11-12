@@ -43,7 +43,8 @@ internal sealed class AutomationService : IAsyncDisposable
         Func<ModelSettings> defaultModel,
         INotifications? notifications,
         IUiThread? ui = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Prompts.PromptTemplateService? promptTemplates = null)
     {
         this.ui = ui ?? DispatcherUiThread.Instance;
         this.time = time ?? TimeProvider.System;
@@ -68,7 +69,9 @@ internal sealed class AutomationService : IAsyncDisposable
             new ResumeStagger(this.time),
             notifications,
             this.time,
-            shuttingDown: () => stopping.IsCancellationRequested);
+            shuttingDown: () => stopping.IsCancellationRequested,
+            sessions: store,
+            templates: promptTemplates);
         Engine.RegisterRunner(BuiltInAutomations.QuotaResume, quotaRunner);
         Engine.RegisterRunner(BuiltInAutomations.SessionWatch, new SessionWatchRunner(notifications));
         Engine.RegisterRunner(

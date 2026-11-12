@@ -92,23 +92,23 @@ public sealed class AgentDefaultsStoreTests : IDisposable
               "preferences": { "language": "english" },
               "somethingThisBuildDoesNotKnow": { "keep": true },
               "agents": {
-                "mystery": { "model": "future-model", "note": "kept" },
+                "Mystery Agent": { "model": "future-model", "note": "kept" },
                 "scout": { "model": "alpha-1", "note": "hand-written" }
               }
             }
             """);
         var before = JsonNode.Parse(File.ReadAllText(SettingsPath))!;
         var unknownSection = before["somethingThisBuildDoesNotKnow"]!.ToJsonString();
-        var unknownAgent = before["agents"]!["mystery"]!.ToJsonString();
+        var unknownAgent = before["agents"]!["Mystery Agent"]!.ToJsonString();
         var unknownField = before["agents"]!["scout"]!["note"]!.ToJsonString();
         var store = new AgentDefaultsStore(SettingsPath);
-        Assert.Null(store.Get("mystery"));
+        Assert.Null(store.Get("Mystery Agent"));
 
         store.Save(AgentIds.Scout, new AgentDefault("alpha", "alpha-1", ThinkingEffort.High));
 
         var after = JsonNode.Parse(File.ReadAllText(SettingsPath))!;
         Assert.Equal(unknownSection, after["somethingThisBuildDoesNotKnow"]!.ToJsonString());
-        Assert.Equal(unknownAgent, after["agents"]!["mystery"]!.ToJsonString());
+        Assert.Equal(unknownAgent, after["agents"]!["Mystery Agent"]!.ToJsonString());
         Assert.Equal(unknownField, after["agents"]!["scout"]!["note"]!.ToJsonString());
         Assert.Equal("english", after["preferences"]!["language"]!.GetValue<string>());
         Assert.Equal("high", after["agents"]!["scout"]!["thinking"]!.GetValue<string>());
@@ -169,6 +169,44 @@ public sealed class AgentDefaultsStoreTests : IDisposable
 
             Assert.Empty(store.All);
         }
+    }
+
+    [Fact]
+    public void A_user_agent_id_round_trips_and_the_name_maps_to_the_same_id()
+    {
+        var store = new AgentDefaultsStore(SettingsPath);
+
+        store.Save("code-helper", new AgentDefault("alpha", "alpha-1", ThinkingEffort.High));
+
+        var reloaded = new AgentDefaultsStore(SettingsPath);
+        Assert.Equal("alpha-1", reloaded.Get("code-helper")!.Model);
+        Assert.True(reloaded.All.ContainsKey("code-helper"));
+        Assert.Equal(["main", "scout", "worker", "plan", "reviewer"], AgentIds.All);
+    }
+
+    [Fact]
+    public void An_invalid_id_is_refused_on_save_and_kept_untouched_in_the_file()
+    {
+        File.WriteAllText(SettingsPath, """{ "agents": { "Bad Id": { "model": "m" } } }""");
+        var store = new AgentDefaultsStore(SettingsPath);
+
+        Assert.Throws<ArgumentException>(() => store.Save("Bad Id", new AgentDefault(null, "m", ThinkingEffort.Off)));
+        store.Save("fine", new AgentDefault(null, "m", ThinkingEffort.Off));
+
+        Assert.DoesNotContain("Bad Id", store.All.Keys);
+        Assert.NotNull(JsonNode.Parse(File.ReadAllText(SettingsPath))!["agents"]!["Bad Id"]);
+    }
+
+    [Fact]
+    public void A_user_agent_without_an_entry_resolves_to_the_worker_entry()
+    {
+        File.WriteAllText(SettingsPath, TwoProviders("\"worker\": { \"model\": \"alpha-2\", \"thinking\": \"medium\" }"));
+        var store = new AgentDefaultsStore(SettingsPath);
+
+        var resolved = store.Resolve("code-helper", Services().Catalog, EveryStep);
+
+        Assert.NotNull(resolved);
+        Assert.Equal("alpha-2", resolved!.Model);
     }
 
     [Fact]

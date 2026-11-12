@@ -15,9 +15,11 @@ using Forge.App.Preferences;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
+using Forge.App.Prompts;
 using Forge.App.Providers;
 using Forge.App.Settings;
 using Forge.Core.Agents;
+using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
 using Forge.HostClient;
@@ -145,6 +147,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public Func<IReadOnlyList<string>> ActiveSessionTools { get; set; } = static () => [];
 
     /// <summary>
+    /// The working directory (worktree or scratch folder) of the session in front, or null. The prompts page's project
+    /// scope writes to its <c>.forge</c>, the same directory that session's runtime and composer read.
+    /// </summary>
+    public Func<string?> ActiveSessionWorkspace { get; set; } = static () => null;
+
+    /// <summary>
     /// What the extension host last reported it registered (plugins, tools, commands), or null before it answered. The
     /// window status bar used to show this; it now has a line in the tools settings section.
     /// </summary>
@@ -256,6 +264,9 @@ internal sealed class AppComposition : IAsyncDisposable
     public AutomationUiBridge AutomationUi { get; } = new();
 
     public string WorkspaceDirectory => Paths.WorkspaceDirectory;
+
+    /// <summary>The prompt template store (commands, agents, slots); file IO, call it off the UI thread.</summary>
+    public PromptTemplateService PromptTemplates { get; private set; } = new(AgentRuntimeServices.UserDirectory());
 
     public static AppComposition Create()
     {
@@ -388,6 +399,8 @@ internal sealed class AppComposition : IAsyncDisposable
         // The per-agent defaults live in the same settings.json; one instance is shared by the settings page (writes) and
         // the session runtimes (reads), so a saved default reaches the next session without a reload.
         var agentDefaults = new AgentDefaultsStore(paths.SettingsPath);
+        // One template service: the settings pages edit it, the runtimes, PR tool and automations resolve it per use.
+        var promptTemplates = new PromptTemplateService(AgentRuntimeServices.UserDirectory());
         settings.Add(new SettingsSection(
             SettingsSectionIds.Provider,
             ProviderStrings.SectionTitleKey,
@@ -398,7 +411,8 @@ internal sealed class AppComposition : IAsyncDisposable
                 providers,
                 agentDefaults,
                 modelCatalogRefresh,
-                action => Avalonia.Threading.Dispatcher.UIThread.Post(action)),
+                action => Avalonia.Threading.Dispatcher.UIThread.Post(action),
+                promptTemplates),
             SettingsGroups.Agent,
             "IconPlug"));
 
@@ -431,7 +445,13 @@ internal sealed class AppComposition : IAsyncDisposable
         Func<PrChecksPollerOptions> checksOptions = () => GitToolPreferences.ChecksOptions(preferences.Current);
         IReadOnlyList<ITool> pullRequestTools =
         [
-            .. new PrTools(git, prPlatform, gitToolSettings, reviewLedger, todos).All,
+            .. new PrTools(
+                git,
+                prPlatform,
+                gitToolSettings,
+                reviewLedger,
+                todos,
+                (phase, directory) => promptTemplates.PrWorkflowOverride(phase, directory)).All,
             .. new ScreenshotTools(git, prPlatform, gitToolSettings).All,
             .. new PrCheckTools(prPlatform, prChecksPoller, checksOptions).All,
             .. new PrCommentTools(git, prPlatform, gitToolSettings, new PrReplyLedger(), workspace?.Reviews, gh.UserResolver).All,
@@ -448,6 +468,7 @@ internal sealed class AppComposition : IAsyncDisposable
         // which cannot describe a per-provider setting, and the Anthropic adapter does not send it yet. When it does, the
         // loop has to take the TTL from the selected provider's ModelSettings instead.
         runtimeServices.Approvals = approvals;
+        runtimeServices.PromptTemplates = promptTemplates;
         runtimeServices.AgentDefaults = agentId => agentDefaults.Resolve(agentId, providers.Catalog);
         runtimeServices.PullRequestTools = pullRequestTools;
         // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
@@ -505,6 +526,7 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             initialization);
         composition.Approvals = approvals;
+        composition.PromptTemplates = promptTemplates;
         composition.TodoStepCommitter = stepCommitter;
         composition.PullRequests = prPlatform;
         var reviews = workspace?.Reviews;
@@ -549,7 +571,8 @@ internal sealed class AppComposition : IAsyncDisposable
             prPlatform,
             git,
             notifications,
-            modelCatalogRefresh);
+            modelCatalogRefresh,
+            promptTemplates);
         composition.Automations = automations;
         settings.Add(AutomationComposition.Section(automations, projects, sessions, composition.AutomationUi));
 
@@ -570,6 +593,11 @@ internal sealed class AppComposition : IAsyncDisposable
             new SkillsSettingsSectionViewModel(composition),
             SettingsGroups.Agent,
             "IconBook"));
+        // Prompt templates: the project scope is the front session's working directory, which is what sessions resolve
+        // (<worktree>/.forge); without a session in front the page offers only the global scope.
+        settings.Add(Forge.App.Settings.Prompts.PromptsSettingsSection.Create(
+            composition.PromptTemplates,
+            () => composition.ActiveSessionWorkspace() is { Length: > 0 } directory ? directory : null));
         settings.Add(new SettingsSection(
             SettingsSectionIds.Mcp,
             InstrumentsStrings.McpSectionTitleKey,
@@ -699,7 +727,8 @@ internal sealed class AppComposition : IAsyncDisposable
             provider.Definition.DefaultModelSettings,
             history,
             tree,
-            ct);
+            ct,
+            PromptTemplates.Resolve(workspace: null).FindSlot(PromptSlotIds.HandoverSummary));
     }
     /// <summary>
     /// Shuts the graph down in reverse construction order. The host client kills and waits for the child process tree

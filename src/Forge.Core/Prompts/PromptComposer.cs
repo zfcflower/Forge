@@ -56,16 +56,15 @@ public sealed class PromptComposer : IPromptComposer
         return Convert.ToHexStringLower(hash[..PrefixKeyBytes]);
     }
 
+    /// <summary>
+    /// The system layer is <see cref="PromptLayers.System"/> as given: the effective <c>system</c> slot, which already is
+    /// the built-in text, a replacement, or the built-in with appended text. Blank falls back to
+    /// <see cref="BuiltInPrompts.System"/> so a prompt never goes out without one.
+    /// </summary>
     private static string SystemLayer(string? systemText)
     {
-        var builtIn = TextNormalizer.Normalize(BuiltInPrompts.System);
-        var extra = TextNormalizer.Normalize(systemText);
-        if (extra.Length == 0)
-        {
-            return builtIn;
-        }
-
-        return string.Concat(builtIn, "\n\n", extra);
+        var text = TextNormalizer.Normalize(systemText);
+        return text.Length == 0 ? TextNormalizer.Normalize(BuiltInPrompts.System) : text;
     }
 
     private static void AppendLayer(StringBuilder builder, string heading, string? text)

@@ -41,6 +41,13 @@ public sealed record AgentHostOptions
     /// </summary>
     public IStepCommitter? StepCommitter { get; init; }
 
+    /// <summary>
+    /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
+    /// default compactor takes its summarizer prompt from the <c>compaction.summarizer</c> slot. Null = compiled-in texts.
+    /// The system slot is not read from here: it is <see cref="Layers"/>' <see cref="PromptLayers.System"/>.
+    /// </summary>
+    public Prompts.Templates.PromptTemplateSet? Templates { get; init; }
+
     /// <summary>Overrides the default <see cref="SummaryCompactor"/> (used when a store is configured).</summary>
     public IContextCompactor? Compactor { get; init; }
 
@@ -116,7 +123,12 @@ public sealed class AgentHost
 
         var compactor = options.Compactor
                         ?? (options.Store is { } summaryStore
-                            ? new SummaryCompactor(summaryStore, options.Providers, options.TokenCounter, this.options.CompactionTargetRatio)
+                            ? new SummaryCompactor(
+                                summaryStore,
+                                options.Providers,
+                                options.TokenCounter,
+                                this.options.CompactionTargetRatio,
+                                summarizerPrompt: options.Templates?.FindSlot(Prompts.Templates.PromptSlotIds.CompactionSummarizer))
                             : NoopCompactor.Instance);
 
         toolSurface = new ToolSurface(builtIns);

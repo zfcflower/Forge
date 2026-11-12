@@ -39,8 +39,11 @@ internal static class AutomationComposition
         IPrPlatform pullRequests,
         GitCli git,
         INotifications? notifications,
-        Providers.ModelCatalogRefreshService modelCatalogRefresh)
+        Providers.ModelCatalogRefreshService modelCatalogRefresh,
+        Prompts.PromptTemplateService? promptTemplates = null)
     {
+        // Without the composition's service (a test) the user's ~/.forge and the workspace's .forge are still honoured.
+        promptTemplates ??= new Prompts.PromptTemplateService(Agents.AgentRuntimeServices.UserDirectory());
         var service = new AutomationService(
             Path.Combine(settingsDirectory, DefinitionsFileName),
             dataDirectory,
@@ -50,7 +53,8 @@ internal static class AutomationComposition
             worktrees,
             providers,
             defaultModel,
-            notifications);
+            notifications,
+            promptTemplates: promptTemplates);
         service.RegisterRunner(
             BuiltInAutomations.CiChain,
             new CiChainRunner(
@@ -61,7 +65,8 @@ internal static class AutomationComposition
                 service.Launcher,
                 notifications,
                 () => service.Engine.Config,
-                service.Runs));
+                service.Runs,
+                promptTemplates));
         service.RegisterRunner(
             BuiltInAutomations.ModelCatalogRefresh,
             new ModelCatalogRefreshRunner(modelCatalogRefresh));

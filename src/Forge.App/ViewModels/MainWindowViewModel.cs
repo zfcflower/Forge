@@ -181,6 +181,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Settings = new SettingsViewModel(composition);
         instruments = new SessionInstrumentSources(composition, CountPendingApprovals, OpenSettingsSection);
         composition.ActiveSessionTools = () => activeSession?.ToolNames() ?? [];
+        composition.ActiveSessionWorkspace = () => activeSession?.WorkDir;
         if (ApprovalServices.Current is { } approvalServices)
         {
             approvalServices.Queue.Changed += OnApprovalQueueChanged;

@@ -228,7 +228,7 @@ public sealed class QuotaResumeTests
         Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
         var message = Assert.Single(h.Mailbox.Messages);
         Assert.Equal("s1", message.SessionId);
-        Assert.Equal(AutomationStrings.QuotaContinuePrompt, message.Text);
+        Assert.Equal(Forge.App.Prompts.AppPromptTexts.QuotaContinue, message.Text);
         Assert.Equal("run-1", message.RunId);
         Assert.Equal(AutomationStrings.DisplayName(BuiltInAutomations.QuotaResume, "x"), message.Origin);
         Assert.Equal(AutomationRunStatus.Running, context.Run.Status);
@@ -520,6 +520,41 @@ public sealed class QuotaResumeTests
         var outcome = await runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None).Within();
 
         Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
+    }
+
+    [Fact]
+    public async Task Run_sends_the_project_override_of_the_continue_slot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "forge-quota-slot-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var prompts = Path.Combine(root, "ws", ".forge", "prompts");
+            Directory.CreateDirectory(prompts);
+            File.WriteAllText(Path.Combine(prompts, "automations.quota.continue.md"), "Carry on, please.");
+            var sessions = new CiFakeSessions { Session = new SessionInfo("s1", Path.Combine(root, "ws"), "t", DateTimeOffset.UnixEpoch) };
+            var h = new Harness();
+            h.Note();
+            var runner = new QuotaResumeRunner(
+                h.Mailbox,
+                h.State,
+                h.Probe,
+                h.Schedule,
+                h.Stagger,
+                h.Notes,
+                h.Time,
+                () => 0,
+                sessions: sessions,
+                templates: new Forge.App.Prompts.PromptTemplateService(Path.Combine(root, "user")));
+
+            var outcome = await runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None).Within();
+
+            Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
+            Assert.Equal("Carry on, please.", Assert.Single(h.Mailbox.Messages).Text);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private sealed class Harness

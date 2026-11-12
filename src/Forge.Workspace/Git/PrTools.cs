@@ -18,7 +18,17 @@ public sealed class PrTools
     public const string EditName = "pr_edit";
     public const string WorkflowName = "pr_workflow";
 
-    public PrTools(GitCli git, IPrPlatform platform, GitToolSettings settings, GitReviewLedger ledger, ITodoStore todos)
+    /// <param name="workflowText">
+    /// The user's override of one <c>pr_workflow</c> phase text (phase name, the call's working directory), or null to
+    /// serve the compiled-in <see cref="PrWorkflowText"/>. Asked on every call, so an edit applies to the next read.
+    /// </param>
+    public PrTools(
+        GitCli git,
+        IPrPlatform platform,
+        GitToolSettings settings,
+        GitReviewLedger ledger,
+        ITodoStore todos,
+        Func<string, string, string?>? workflowText = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(platform);
@@ -30,7 +40,7 @@ public sealed class PrTools
         Create = new PrCreateTool(git, platform, settings, ledger, todos);
         Sync = new PrSyncTool(git, platform, settings);
         Edit = new PrEditTool(git, platform);
-        Workflow = new PrWorkflowTool(git);
+        Workflow = new PrWorkflowTool(git, workflowText);
         All = [View, Create, Sync, Edit, Workflow];
     }
 

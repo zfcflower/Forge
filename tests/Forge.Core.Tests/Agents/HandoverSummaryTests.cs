@@ -45,6 +45,53 @@ public class HandoverSummaryTests
     }
 
     [Fact]
+    public async Task A_given_prompt_replaces_the_built_in_one_and_leaves_the_rest_of_the_request_alone()
+    {
+        var provider = new FakeProvider((_, _) => Turn.Say("summary"));
+
+        var text = await HandoverSummary.GenerateAsync(
+            provider,
+            new ModelSettings("m", ThinkingEffort.High, 2000),
+            History,
+            " M src/Uploader.cs ",
+            CancellationToken.None,
+            prompt: "CUSTOM-HANDOVER-PROMPT");
+
+        var request = Assert.Single(provider.Requests);
+        Assert.Equal("CUSTOM-HANDOVER-PROMPT", request.SystemPrompt);
+        Assert.Equal(HandoverSummary.MessageHeading + "\n\nsummary", text);
+        Assert.Empty(request.Tools);
+        Assert.Equal(new ModelSettings("m", ThinkingEffort.Off, 2000), request.Model);
+        Assert.EndsWith("# Working tree\n\nM src/Uploader.cs", Turn.LastUserText(request), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  \r\n\t ")]
+    public async Task A_null_or_blank_prompt_falls_back_to_the_built_in_one(string? prompt)
+    {
+        var provider = new FakeProvider((_, _) => Turn.Say("summary"));
+
+        await HandoverSummary.GenerateAsync(provider, new ModelSettings("m"), History, null, CancellationToken.None, prompt);
+
+        Assert.Equal(HandoverSummary.Prompt, Assert.Single(provider.Requests).SystemPrompt);
+    }
+
+    [Fact]
+    public async Task The_handover_slot_of_a_template_set_can_be_passed_as_the_prompt()
+    {
+        using var fixture = new Forge.Core.Tests.Prompts.Templates.TemplateFixture();
+        fixture.Global(PromptTemplateKind.Slot, Forge.Core.Prompts.Templates.PromptSlotIds.HandoverSummary, "Write a haiku.\n");
+        var slot = fixture.Resolve().Slot(Forge.Core.Prompts.Templates.PromptSlotIds.HandoverSummary);
+        var provider = new FakeProvider((_, _) => Turn.Say("summary"));
+
+        await HandoverSummary.GenerateAsync(provider, new ModelSettings("m"), History, null, CancellationToken.None, slot);
+
+        Assert.Equal("Write a haiku.", Assert.Single(provider.Requests).SystemPrompt);
+    }
+
+    [Fact]
     public async Task Reports_no_uncommitted_changes_when_none_are_given()
     {
         var provider = new FakeProvider((_, _) => Turn.Say("summary"));

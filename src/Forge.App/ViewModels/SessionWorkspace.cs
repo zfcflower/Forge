@@ -854,6 +854,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     private async Task SendAsync(CancellationToken ignored)
     {
         var text = draft.Trim();
+        var typed = text;
         if (text.Length > 0)
         {
             Draft = string.Empty;
@@ -869,6 +870,11 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
         queuePaused = false;
         Instruments.NoteDraft(text);
+        if (typed.Length > 0)
+        {
+            text = Composer.ExpandCommand(text);
+        }
+
         await RunTurnAsync(text).ConfigureAwait(true);
     }
 
@@ -881,6 +887,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
 
         Draft = string.Empty;
+        text = Composer.ExpandCommand(text);
         AddQueued(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued), queued.Count);
         if (!isRunning)
         {
@@ -997,6 +1004,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
 
         Draft = string.Empty;
+        text = Composer.ExpandCommand(text);
         var delivered = isRunning && runtime is { } live && live.TryInterject(text);
         var front = queued.TakeWhile(message => message.IsInterjection).Count();
         AddQueued(new QueuedMessageViewModel(text, delivered, RemoveQueued), delivered ? front : 0);
@@ -1015,6 +1023,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
 
         Draft = string.Empty;
+        text = Composer.ExpandCommand(text);
         if (!isRunning)
         {
             queuePaused = false;

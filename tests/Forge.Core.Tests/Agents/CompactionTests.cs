@@ -127,4 +127,151 @@ public class CompactionTests
         Assert.All(summaries, summary => Assert.Equal(SummaryText, summary.Text));
         Assert.Equal(12, (await AgentTestHost.CollectAsync(store.ReadAsync(session.Id, 1, null, CancellationToken.None))).Count);
     }
+
+    private const string CustomPrompt = "CUSTOM-SUMMARIZER-PROMPT";
+
+    /// <summary>Runs four turns past the threshold; the provider answers any summarizer request (known prompts) with <see cref="SummaryText"/>.</summary>
+    private static async Task<(IReadOnlyList<ChatRequest> Requests, IReadOnlyList<SummaryRecord> Summaries)> RunCompactingAsync(
+        Func<ISessionStore, Func<ModelSettings, IChatProvider>, AgentHost> build,
+        params string[] summarizerPrompts)
+    {
+        using var directory = new TempDir();
+        using var store = new SqliteSessionStore(directory.Path);
+        var session = await store.CreateSessionAsync(directory.Path, "prompt", CancellationToken.None);
+        var answer = new string('a', 800);
+        var provider = new FakeProvider((request, _) =>
+            summarizerPrompts.Contains(request.SystemPrompt) ? Turn.Say(SummaryText) : Turn.Say(answer));
+        var host = build(store, _ => provider);
+        var root = host.CreateRoot(session.Id, directory.Path);
+
+        for (var turn = 1; turn <= 4; turn++)
+        {
+            var events = await AgentTestHost.CollectAsync(host.RunAsync(root, $"turn {turn}"));
+            Assert.Empty(events.OfType<AgentFailed>());
+        }
+
+        return (provider.Requests, await store.GetSummariesAsync(session.Id, CancellationToken.None));
+    }
+
+    private static AgentHost Host(ISessionStore store, Func<ModelSettings, IChatProvider> providers, Forge.Core.Prompts.Templates.PromptTemplateSet? templates, IContextCompactor? compactor = null) =>
+        new(new AgentHostOptions
+        {
+            Providers = providers,
+            Tools = [],
+            Layers = new PromptLayers("test system", null, null),
+            Options = new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 },
+            Store = store,
+            Templates = templates,
+            Compactor = compactor,
+        });
+
+    [Fact]
+    public async Task A_custom_summarizer_prompt_is_what_the_summarizer_request_carries()
+    {
+        var (requests, summaries) = await RunCompactingAsync(
+            (store, providers) => AgentTestHost.Create(
+                providers(new ModelSettings("m")),
+                options: new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 },
+                store: store,
+                compactor: new SummaryCompactor(store, providers, new ApproximateTokenCounter(), summarizerPrompt: CustomPrompt)),
+            CustomPrompt,
+            SummaryCompactor.SummarizerPrompt);
+
+        var summarizerCalls = requests.Where(r => r.SystemPrompt == CustomPrompt).ToList();
+        Assert.NotEmpty(summarizerCalls);
+        Assert.DoesNotContain(requests, r => r.SystemPrompt == SummaryCompactor.SummarizerPrompt);
+        Assert.All(summarizerCalls, call => Assert.Empty(call.Tools));
+        Assert.All(summarizerCalls, call => Assert.Equal(ThinkingEffort.Off, call.Model.Thinking));
+        Assert.NotEmpty(summaries);
+        Assert.All(summaries, summary => Assert.Equal(SummaryText, summary.Text));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \r\n\t")]
+    public async Task A_null_or_blank_summarizer_prompt_falls_back_to_the_built_in_one(string? prompt)
+    {
+        var (requests, summaries) = await RunCompactingAsync(
+            (store, providers) => AgentTestHost.Create(
+                providers(new ModelSettings("m")),
+                options: new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 },
+                store: store,
+                compactor: new SummaryCompactor(store, providers, new ApproximateTokenCounter(), summarizerPrompt: prompt)),
+            SummaryCompactor.SummarizerPrompt);
+
+        Assert.Contains(requests, r => r.SystemPrompt == SummaryCompactor.SummarizerPrompt);
+        Assert.NotEmpty(summaries);
+    }
+
+    [Fact]
+    public async Task An_agent_host_built_with_an_overridden_compaction_slot_summarizes_with_it()
+    {
+        using var fixture = new Forge.Core.Tests.Prompts.Templates.TemplateFixture();
+        fixture.Global(PromptTemplateKind.Slot, Forge.Core.Prompts.Templates.PromptSlotIds.CompactionSummarizer, "---\nmode: replace\n---\n" + CustomPrompt);
+        var templates = fixture.Resolve();
+
+        var (requests, summaries) = await RunCompactingAsync(
+            (store, providers) => Host(store, providers, templates),
+            CustomPrompt,
+            SummaryCompactor.SummarizerPrompt);
+
+        Assert.Contains(requests, r => r.SystemPrompt == CustomPrompt);
+        Assert.DoesNotContain(requests, r => r.SystemPrompt == SummaryCompactor.SummarizerPrompt);
+        Assert.NotEmpty(summaries);
+    }
+
+    [Fact]
+    public async Task An_agent_host_with_an_appended_compaction_slot_uses_the_composed_text()
+    {
+        using var fixture = new Forge.Core.Tests.Prompts.Templates.TemplateFixture();
+        fixture.Global(PromptTemplateKind.Slot, Forge.Core.Prompts.Templates.PromptSlotIds.CompactionSummarizer, "---\nmode: append\n---\nAPPENDED-RULE");
+        var templates = fixture.Resolve();
+        var composed = templates.Slot(Forge.Core.Prompts.Templates.PromptSlotIds.CompactionSummarizer);
+
+        var (requests, _) = await RunCompactingAsync(
+            (store, providers) => Host(store, providers, templates),
+            composed,
+            SummaryCompactor.SummarizerPrompt);
+
+        Assert.Contains(requests, r => r.SystemPrompt == composed);
+        Assert.EndsWith("\n\nAPPENDED-RULE", composed, StringComparison.Ordinal);
+        Assert.DoesNotContain(requests, r => r.SystemPrompt == SummaryCompactor.SummarizerPrompt);
+    }
+
+    [Fact]
+    public async Task An_agent_host_without_templates_or_with_the_built_in_set_uses_the_compiled_in_prompt()
+    {
+        var builtIn = Forge.Core.Prompts.Templates.PromptTemplateSet.BuiltIn();
+        var normalized = builtIn.Slot(Forge.Core.Prompts.Templates.PromptSlotIds.CompactionSummarizer);
+
+        var (withoutTemplates, _) = await RunCompactingAsync((store, providers) => Host(store, providers, null), SummaryCompactor.SummarizerPrompt);
+        var (withBuiltIn, summaries) = await RunCompactingAsync((store, providers) => Host(store, providers, builtIn), normalized, SummaryCompactor.SummarizerPrompt);
+
+        Assert.Contains(withoutTemplates, r => r.SystemPrompt == SummaryCompactor.SummarizerPrompt);
+        Assert.Contains(withBuiltIn, r => r.SystemPrompt == normalized);
+        Assert.NotEmpty(summaries);
+    }
+
+    [Fact]
+    public async Task An_explicit_compactor_wins_over_the_templates_slot()
+    {
+        using var fixture = new Forge.Core.Tests.Prompts.Templates.TemplateFixture();
+        fixture.Global(PromptTemplateKind.Slot, Forge.Core.Prompts.Templates.PromptSlotIds.CompactionSummarizer, "FROM-TEMPLATE");
+        var templates = fixture.Resolve();
+
+        var (requests, summaries) = await RunCompactingAsync(
+            (store, providers) => Host(
+                store,
+                providers,
+                templates,
+                new SummaryCompactor(store, providers, new ApproximateTokenCounter(), summarizerPrompt: "EXPLICIT-COMPACTOR")),
+            "EXPLICIT-COMPACTOR",
+            "FROM-TEMPLATE",
+            SummaryCompactor.SummarizerPrompt);
+
+        Assert.Contains(requests, r => r.SystemPrompt == "EXPLICIT-COMPACTOR");
+        Assert.DoesNotContain(requests, r => r.SystemPrompt == "FROM-TEMPLATE");
+        Assert.NotEmpty(summaries);
+    }
 }

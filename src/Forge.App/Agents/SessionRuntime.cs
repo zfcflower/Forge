@@ -3,6 +3,7 @@ using Forge.Abstractions;
 using Forge.App.Approval;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
+using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
 using Forge.Core.Tools;
 using Forge.HostClient;
@@ -26,6 +27,13 @@ internal sealed record AgentRuntimeServices(
     /// denial, exactly as before the queue existed.
     /// </summary>
     public ApprovalServices? Approvals { get; set; }
+
+    /// <summary>
+    /// The prompt template store. A session resolves a snapshot from it (for its worktree) when its agent host is built:
+    /// the system slot, the agent kinds and the compaction prompt then stay fixed for that host. Null in a unit test: the
+    /// compiled-in texts are used.
+    /// </summary>
+    public Prompts.PromptTemplateService? PromptTemplates { get; set; }
 
     /// <summary>Agent defaults resolved from settings.json; null when the runtime has no store (a unit test).</summary>
     public Func<string, ModelSettings?>? AgentDefaults { get; set; }
@@ -368,7 +376,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         approvalHandler?.Dispose();
         approvalHandler = handler;
 
-        var layers = LayerSources.Resolve(BuiltInPrompts.System, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
+        // One snapshot per build: the system slot, the agent kinds and the compaction prompt stay fixed for this host.
+        var templates = services.PromptTemplates?.Resolve(Session.WorkspacePath)
+            ?? PromptTemplateSet.BuiltIn(Prompts.AppPromptTexts.Registry);
+        var layers = LayerSources.Resolve(templates.Slot(PromptSlotIds.System), AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
         var built = new AgentHost(
             new AgentHostOptions
             {
@@ -381,7 +392,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
                 Artifacts = services.Artifacts,
-                Agents = ResolveAgentDefaults(),
+                Templates = templates,
+                Agents = ResolveAgentDefaults(templates),
                 Options = new AgentOptions
                 {
                     DefaultModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model,
@@ -396,26 +408,33 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
-    /// The built-in agent kinds with their <c>settings.json</c> defaults substituted for the placeholder
-    /// <c>ModelSettings("default", …)</c> they ship with. Null when nothing was resolved, so a runtime without the store (a
-    /// test) keeps Core's definitions exactly as they are.
+    /// Every agent kind of the template snapshot (built-ins, possibly overridden, then user agents) with its
+    /// <c>settings.json</c> defaults substituted for the placeholder <c>ModelSettings("default", ...)</c>. An agent whose file
+    /// sets an explicit model keeps it. The substituted <see cref="ModelSettings"/> carries the entry's provider id, so an
+    /// agent pinned to another provider is routed there by the host's provider factory. Without the defaults store (a test)
+    /// the snapshot's definitions are used as they are.
     /// </summary>
-    private IReadOnlyList<AgentDefinition>? ResolveAgentDefaults()
+    private IReadOnlyList<AgentDefinition> ResolveAgentDefaults(PromptTemplateSet templates)
     {
         if (services.AgentDefaults is not { } resolve)
         {
-            return null;
+            return templates.Agents;
         }
 
-        List<AgentDefinition>? resolved = null;
-        foreach (var definition in BuiltInAgents.All)
+        var resolved = new List<AgentDefinition>(templates.Agents.Count);
+        foreach (var (id, definition, explicitThinking) in templates.ResolvedAgents)
         {
-            if (AgentIds.FromBuiltInName(definition.Name) is not { } id || resolve(id) is not { } model)
+            // The settings key is the template id (the file name), never derived from the name, so every agent has one.
+            if (string.Equals(definition.Model.Model, "default", StringComparison.OrdinalIgnoreCase) &&
+                resolve(id) is { } model)
             {
-                continue;
+                // A file that sets thinking keeps it; the settings default then only picks the model and provider.
+                resolved.Add(definition with { Model = explicitThinking ? model with { Thinking = definition.Model.Thinking } : model });
             }
-
-            (resolved ??= []).Add(definition with { Model = model });
+            else
+            {
+                resolved.Add(definition);
+            }
         }
 
         return resolved;

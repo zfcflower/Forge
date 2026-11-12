@@ -1,0 +1,306 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:ps="using:Forge.App.Settings.Prompts"
+             x:Class="Forge.App.Settings.Prompts.PromptsSettingsView"
+             x:DataType="ps:PromptsSettingsViewModel">
+  <UserControl.Styles>
+    <Style Selector="Button.prompt-row">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.prompt-row /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.prompt-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Button.prompt-row.selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Button.prompt-action">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    </Style>
+    <Style Selector="Button.prompt-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Border.prompt-badge">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.prompt-badge.global">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.prompt-badge.project">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource InfoBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.prompt-badge.invalid">
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="TextBlock.prompt-badge-text">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+    <Style Selector="Border.global TextBlock.prompt-badge-text">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+    <Style Selector="Border.project TextBlock.prompt-badge-text">
+      <Setter Property="Foreground" Value="{DynamicResource InfoBrush}" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Border.invalid TextBlock.prompt-badge-text">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="10">
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
+
+    <TextBlock Classes="caption"
+               IsVisible="{Binding HasListProblem}"
+               TextWrapping="Wrap"
+               Foreground="{DynamicResource DangerBrush}"
+               Text="{Binding ListProblem}"
+               AutomationProperties.AutomationId="prompts-list-problem" />
+
+    <Grid ColumnDefinitions="300,*" ColumnSpacing="16">
+      <!-- Left pane: filter, new, and the grouped list. -->
+      <StackPanel Grid.Column="0" Spacing="8">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+            <RadioButton GroupName="prompts-filter"
+                         Content="{Binding FilterAllText}"
+                         IsChecked="{Binding IsFilterAll, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="prompts-filter-all" />
+            <RadioButton GroupName="prompts-filter"
+                         Content="{Binding FilterBuiltInText}"
+                         IsChecked="{Binding IsFilterBuiltIn, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="prompts-filter-builtin" />
+            <RadioButton GroupName="prompts-filter"
+                         Content="{Binding FilterCustomText}"
+                         IsChecked="{Binding IsFilterCustom, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="prompts-filter-custom" />
+          </StackPanel>
+          <Button Grid.Column="1"
+                  Classes="primary"
+                  Command="{Binding NewCommand}"
+                  Content="{Binding NewText}"
+                  AutomationProperties.AutomationId="prompts-new" />
+        </Grid>
+
+        <TextBlock Classes="caption" IsVisible="{Binding IsEmpty}" Text="{Binding EmptyText}" />
+
+        <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding Groups}" AutomationProperties.AutomationId="prompts-list">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="ps:PromptGroupViewModel">
+                <StackPanel Spacing="2" Margin="0,0,0,8">
+                  <TextBlock Classes="section-title" Margin="8,4,0,2" Text="{Binding Title}" />
+                  <ItemsControl ItemsSource="{Binding Rows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="ps:PromptRowViewModel">
+                        <Button Classes="prompt-row"
+                                Classes.selected="{Binding IsSelected}"
+                                Command="{Binding SelectCommand}"
+                                Opacity="{Binding RowOpacity}"
+                                ToolTip.Tip="{Binding ToolTipText}"
+                                AutomationProperties.AutomationId="{Binding Id, StringFormat=prompt-row-{0}}">
+                          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <Panel Grid.Column="0" VerticalAlignment="Top" Margin="0,2,0,0">
+                              <wc:FluentIcon Data="{StaticResource IconSlash}" Width="14" Height="14" IsVisible="{Binding IsCommandKind}" />
+                              <wc:FluentIcon Data="{StaticResource IconBot}" Width="14" Height="14" IsVisible="{Binding IsAgentKind}" />
+                              <wc:FluentIcon Data="{StaticResource IconGear}" Width="14" Height="14" IsVisible="{Binding IsSlotKind}" />
+                            </Panel>
+                            <StackPanel Grid.Column="1" Spacing="3">
+                              <TextBlock Text="{Binding DisplayName}"
+                                         FontSize="{DynamicResource FontSizeMd}"
+                                         TextTrimming="CharacterEllipsis" />
+                              <WrapPanel Orientation="Horizontal">
+                                <Border Classes="prompt-badge" Margin="0,0,4,0" IsVisible="{Binding Overrides}">
+                                  <TextBlock Classes="prompt-badge-text" Text="{Binding OverridesText}" />
+                                </Border>
+                                <Border Classes="prompt-badge" Margin="0,0,4,0" IsVisible="{Binding IsAppend}">
+                                  <TextBlock Classes="prompt-badge-text" Text="{Binding AppendText}" />
+                                </Border>
+                                <Border Classes="prompt-badge" Margin="0,0,4,0" IsVisible="{Binding IsShadowed}">
+                                  <TextBlock Classes="prompt-badge-text" Text="{Binding ShadowedText}" />
+                                </Border>
+                                <Border Classes="prompt-badge invalid"
+                                        Margin="0,0,4,0"
+                                        IsVisible="{Binding IsInvalid}"
+                                        ToolTip.Tip="{Binding ProblemsText}">
+                                  <TextBlock Classes="prompt-badge-text" Text="{Binding InvalidText}" />
+                                </Border>
+                              </WrapPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                              <Border Classes="prompt-badge" IsVisible="{Binding IsBuiltIn}">
+                                <StackPanel Orientation="Horizontal" Spacing="3">
+                                  <wc:FluentIcon Data="{StaticResource IconLock}" Width="10" Height="10" Foreground="{DynamicResource TextSecondaryBrush}" />
+                                  <TextBlock Classes="prompt-badge-text" Text="{Binding ScopeText}" />
+                                </StackPanel>
+                              </Border>
+                              <Border Classes="prompt-badge global" IsVisible="{Binding IsGlobal}">
+                                <TextBlock Classes="prompt-badge-text" Text="{Binding ScopeText}" />
+                              </Border>
+                              <Border Classes="prompt-badge project" IsVisible="{Binding IsProject}">
+                                <TextBlock Classes="prompt-badge-text" Text="{Binding ScopeText}" />
+                              </Border>
+                            </StackPanel>
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </StackPanel>
+
+      <!-- Right pane: the editor of the selected (or new) template. -->
+      <StackPanel Grid.Column="1" Spacing="8">
+        <TextBlock Classes="caption" IsVisible="{Binding ShowsSelectHint}" TextWrapping="Wrap" Text="{Binding SelectHint}" />
+
+        <ContentControl Content="{Binding Editor}" IsVisible="{Binding HasEditor}">
+          <ContentControl.ContentTemplate>
+            <DataTemplate x:DataType="ps:PromptEditorViewModel">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="section-title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding HasDescription}" Text="{Binding Description}" />
+
+                <!-- Existing entry: id, kind and scope are fixed facts. -->
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="6" IsVisible="{Binding !IsNew}">
+                  <TextBlock Grid.Row="0" Classes="label" Text="{Binding IdLabel}" />
+                  <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Ref.Id}" FontFamily="{DynamicResource FontMono}" />
+                  <TextBlock Grid.Row="1" Classes="label" Text="{Binding KindLabel}" />
+                  <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding KindText}" />
+                  <TextBlock Grid.Row="2" Classes="label" Text="{Binding ScopeLabel}" />
+                  <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ScopeText}" />
+                  <TextBlock Grid.Row="3" Classes="label" Text="{Binding FileLabel}" IsVisible="{Binding HasPath}" />
+                  <TextBlock Grid.Row="3" Grid.Column="1"
+                             Classes="caption"
+                             IsVisible="{Binding HasPath}"
+                             Text="{Binding PathText}"
+                             TextWrapping="Wrap" />
+                </Grid>
+
+                <!-- New entry: pick kind (commands and agents only), scope and id. -->
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="6" IsVisible="{Binding IsNew}">
+                  <TextBlock Grid.Row="0" Classes="label" VerticalAlignment="Center" Text="{Binding KindLabel}" />
+                  <ComboBox Grid.Row="0" Grid.Column="1"
+                            MinWidth="160"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding KindChoices}"
+                            SelectedItem="{Binding SelectedKind, Mode=TwoWay}"
+                            AutomationProperties.AutomationId="prompts-new-kind" />
+                  <TextBlock Grid.Row="1" Classes="label" VerticalAlignment="Center" Text="{Binding ScopeLabel}" />
+                  <ComboBox Grid.Row="1" Grid.Column="1"
+                            MinWidth="160"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding ScopeChoices}"
+                            SelectedItem="{Binding SelectedScope, Mode=TwoWay}"
+                            AutomationProperties.AutomationId="prompts-new-scope" />
+                  <TextBlock Grid.Row="2" Classes="label" VerticalAlignment="Center" Text="{Binding IdLabel}" />
+                  <TextBox Grid.Row="2" Grid.Column="1"
+                           FontFamily="{DynamicResource FontMono}"
+                           MaxLength="64"
+                           Text="{Binding Id, Mode=TwoWay}"
+                           AutomationProperties.AutomationId="prompts-new-id" />
+                </Grid>
+                <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding ShowsNoWorkspaceHint}" Text="{Binding NoWorkspaceHint}" />
+
+                <TextBlock Classes="label" Text="{Binding TextLabel}" />
+                <TextBox AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         Height="360"
+                         IsReadOnly="{Binding IsReadOnly}"
+                         FontFamily="{DynamicResource FontMono}"
+                         FontSize="{DynamicResource FontSizeCode}"
+                         Text="{Binding Text, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="prompts-text" />
+                <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding !IsBuiltIn}" Text="{Binding AppendHint}" />
+                <TextBlock Classes="caption" TextWrapping="Wrap" IsVisible="{Binding IsBuiltIn}" Text="{Binding BuiltInHint}" />
+
+                <!-- Live validation. -->
+                <StackPanel Spacing="2" IsVisible="{Binding HasProblems}">
+                  <TextBlock Classes="label" Foreground="{DynamicResource DangerBrush}" Text="{Binding ProblemsTitle}" />
+                  <ItemsControl ItemsSource="{Binding Problems}" AutomationProperties.AutomationId="prompts-problems">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="x:String">
+                        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}" Text="{Binding}" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding HasStatus}"
+                           TextWrapping="Wrap"
+                           Classes.error="{Binding StatusIsError}"
+                           Text="{Binding Status}"
+                           AutomationProperties.AutomationId="prompts-status" />
+
+                <!-- Actions by mode. -->
+                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsBuiltIn}">
+                  <Button Classes="primary"
+                          Command="{Binding CopyGlobalCommand}"
+                          Content="{Binding CopyGlobalText}"
+                          AutomationProperties.AutomationId="prompts-copy-global" />
+                  <Button Classes="prompt-action"
+                          Command="{Binding CopyProjectCommand}"
+                          Content="{Binding CopyProjectText}"
+                          AutomationProperties.AutomationId="prompts-copy-project" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding !IsBuiltIn}">
+                  <Button Classes="primary"
+                          Command="{Binding SaveCommand}"
+                          Content="{Binding SaveText}"
+                          AutomationProperties.AutomationId="prompts-save" />
+                  <Button Classes="prompt-action"
+                          Command="{Binding RevertCommand}"
+                          Content="{Binding RevertText}"
+                          AutomationProperties.AutomationId="prompts-revert" />
+                  <Button Classes="prompt-action"
+                          IsVisible="{Binding ShowsDeleteButton}"
+                          Command="{Binding DeleteCommand}"
+                          Content="{Binding DeleteText}"
+                          AutomationProperties.AutomationId="prompts-delete" />
+                  <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ConfirmingDelete}">
+                    <Button Classes="prompt-action"
+                            Foreground="{DynamicResource DangerBrush}"
+                            Command="{Binding ConfirmDeleteCommand}"
+                            Content="{Binding DeleteConfirmText}"
+                            AutomationProperties.AutomationId="prompts-delete-confirm" />
+                    <Button Classes="prompt-action"
+                            Command="{Binding CancelDeleteCommand}"
+                            Content="{Binding DeleteCancelText}"
+                            AutomationProperties.AutomationId="prompts-delete-cancel" />
+                  </StackPanel>
+                </StackPanel>
+              </StackPanel>
+            </DataTemplate>
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+      </StackPanel>
+    </Grid>
+  </StackPanel>
+</UserControl>

@@ -356,7 +356,7 @@ public sealed class ProviderMetadataTests : IDisposable
         return store;
     }
 
-    private static ConnectedProvider Provider(
+    private ConnectedProvider Provider(
         Dictionary<string, ModelMetadataSection>? modelMeta = null,
         ProviderModelCache? cache = null,
         string id = "house",

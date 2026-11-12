@@ -46,12 +46,14 @@ public static class HandoverSummary
     /// </summary>
     /// <param name="history">The old session's context, oldest first; when it is too long the most recent part is kept.</param>
     /// <param name="uncommittedChanges">Description of the working tree (for example <c>git status</c> / a diff stat); null or empty = none.</param>
+    /// <param name="prompt">The effective <c>handover.summary</c> slot; null or blank = <see cref="Prompt"/>.</param>
     public static async Task<string> GenerateAsync(
         IChatProvider provider,
         ModelSettings model,
         IReadOnlyList<ChatMessage> history,
         string? uncommittedChanges,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? prompt = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(model);
@@ -59,7 +61,7 @@ public static class HandoverSummary
         ct.ThrowIfCancellationRequested();
 
         var request = new ChatRequest(
-            Prompt,
+            string.IsNullOrWhiteSpace(prompt) ? Prompt : prompt,
             [],
             [ChatMessage.User(RenderInput(history, uncommittedChanges))],
             model with { Thinking = ThinkingEffort.Off });

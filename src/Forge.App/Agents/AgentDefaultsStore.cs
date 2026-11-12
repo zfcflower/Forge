@@ -6,11 +6,12 @@ using Forge.App.Composition;
 using Forge.App.Providers;
 using Forge.Core.Providers;
 using Forge.Core.Prompts;
+using Forge.Core.Prompts.Templates;
 using Forge.IO;
 
 namespace Forge.App.Agents;
 
-/// <summary>The agents whose defaults <c>settings.json</c> can pin: the root agent and the four built-in kinds.</summary>
+/// <summary>The agents whose defaults <c>settings.json</c> can pin: the root agent, the four built-in kinds and any user agent.</summary>
 internal static class AgentIds
 {
     public const string Main = "main";
@@ -19,32 +20,15 @@ internal static class AgentIds
     public const string Plan = "plan";
     public const string Reviewer = "reviewer";
 
-    /// <summary>Every known id, in the order the settings page lists them.</summary>
+    /// <summary>The root agent and the four built-in kinds, in the order the settings page lists them; user agents follow.</summary>
     public static IReadOnlyList<string> All { get; } = [Main, Scout, Worker, Plan, Reviewer];
 
-    public static bool IsKnown(string? id) =>
-        id is not null && All.Contains(id, StringComparer.Ordinal);
-
-    /// <summary>The settings id of a built-in agent kind, or <c>null</c> for a kind this build does not know.</summary>
-    public static string? FromBuiltInName(string? name)
-    {
-        if (string.Equals(name, BuiltInAgents.Scout.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            return Scout;
-        }
-
-        if (string.Equals(name, BuiltInAgents.Worker.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            return Worker;
-        }
-
-        if (string.Equals(name, BuiltInAgents.Plan.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            return Plan;
-        }
-
-        return string.Equals(name, BuiltInAgents.Reviewer.Name, StringComparison.OrdinalIgnoreCase) ? Reviewer : null;
-    }
+    /// <summary>
+    /// Whether <paramref name="id"/> can have an entry: a main/built-in id, or any valid prompt template id. An agent's id is
+    /// its template id (the file name under <c>agents/</c>), never derived from its name. Other ids stay in the file untouched
+    /// but are never loaded.
+    /// </summary>
+    public static bool IsKnown(string? id) => PromptTemplateIds.IsValid(id);
 }
 
 /// <summary>What one agent runs on: which connected provider (or the default one), which model and how hard it thinks.</summary>
@@ -80,7 +64,7 @@ internal sealed class AgentDefaultsStore
 
     public string SettingsPath => settingsPath;
 
-    /// <summary>Every known agent that has an entry; unknown ids in the file are kept there but not loaded.</summary>
+    /// <summary>Every agent that has an entry; entries whose id is not a valid template id are kept in the file but not loaded.</summary>
     public IReadOnlyDictionary<string, AgentDefault> All
     {
         get

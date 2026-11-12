@@ -2,6 +2,7 @@ using System.Globalization;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
 
 namespace Forge.App.Automations;
@@ -89,7 +90,9 @@ internal sealed class QuotaResumeRunner(
     INotifications? notifications,
     TimeProvider time,
     Func<double>? random = null,
-    Func<bool>? shuttingDown = null) : IAutomationRunner
+    Func<bool>? shuttingDown = null,
+    ISessionStore? sessions = null,
+    Prompts.PromptTemplateService? templates = null) : IAutomationRunner
 {
     public const int MaxRounds = 5;
 
@@ -129,10 +132,11 @@ internal sealed class QuotaResumeRunner(
                 await context.UpdateAsync(run => run with { Status = AutomationRunStatus.Running, ResumeAt = null }, ct)
                     .ConfigureAwait(false);
                 var progress = new WaitingProgress(context);
+                var prompts = await AutomationPrompts.ResolveAsync(templates, sessions, sessionId, ct).ConfigureAwait(false);
                 var result = await mailbox.DeliverAsync(
                         new MailboxMessage(
                             sessionId,
-                            AutomationStrings.QuotaContinuePrompt,
+                            prompts.Slot(Prompts.AppPromptSlotIds.QuotaContinue),
                             context.Run.Id,
                             AutomationStrings.DisplayName(BuiltInAutomations.QuotaResume, context.Run.AutomationName)),
                         progress,
@@ -202,5 +206,31 @@ internal sealed class QuotaResumeRunner(
 
         await schedule.WaitUntilAvailableAsync(QuotaProbeSchedule.KeyFor(note.ProviderId), note.Settings, probe, ct)
             .ConfigureAwait(false);
+    }
+}
+
+/// <summary>Resolves the prompt template snapshot an automation sends from: the target session's workspace, else the compiled-in texts.</summary>
+internal static class AutomationPrompts
+{
+    private static readonly Lazy<PromptTemplateSet> BuiltIn = new(() => PromptTemplateSet.BuiltIn(Prompts.AppPromptTexts.Registry));
+
+    public static async Task<PromptTemplateSet> ResolveAsync(
+        Prompts.PromptTemplateService? templates,
+        ISessionStore? sessions,
+        string sessionId,
+        CancellationToken ct)
+    {
+        if (templates is null)
+        {
+            return BuiltIn.Value;
+        }
+
+        string? workspace = null;
+        if (sessions is not null)
+        {
+            workspace = (await sessions.GetSessionAsync(sessionId, ct).ConfigureAwait(false))?.WorkspacePath;
+        }
+
+        return await Task.Run(() => templates.Resolve(workspace), ct).ConfigureAwait(false);
     }
 }

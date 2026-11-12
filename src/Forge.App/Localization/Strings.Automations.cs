@@ -50,7 +50,6 @@ internal static class AutomationStrings
     public const string QuotaWaitingProbeBodyKey = "automations.quota.waitingProbeBody";
     public const string QuotaResumedTitleKey = "automations.quota.resumedTitle";
     public const string QuotaResumedBodyKey = "automations.quota.resumedBody";
-    public const string QuotaContinuePromptKey = "automations.quota.continuePrompt";
     public const string QuotaAgainKey = "automations.quota.again";
 
     // ---------------------------------------------------------------- CI chain
@@ -73,8 +72,6 @@ internal static class AutomationStrings
     public const string CiRefuseProtectedKey = "automations.ci.refuseProtected";
     public const string CiRefuseHeadKey = "automations.ci.refuseHead";
     public const string CiChecksGoneKey = "automations.ci.checksGone";
-    public const string CiScoutTaskKey = "automations.ci.scoutTask";
-    public const string CiFixPromptKey = "automations.ci.fixPrompt";
     public const string CiLogUnavailableKey = "automations.ci.logUnavailable";
 
     // ---------------------------------------------------------------- session watch
@@ -164,8 +161,6 @@ internal static class AutomationStrings
 
     public static LocText QuotaResumedBody(string session) => new(QuotaResumedBodyKey, session);
 
-    public static string QuotaContinuePrompt => Loc.Instance[QuotaContinuePromptKey];
-
     public static string QuotaAgain(string message) => Loc.Instance.Format(QuotaAgainKey, message);
 
     public static LocText CiFailedTitle => new(CiFailedTitleKey);
@@ -204,10 +199,6 @@ internal static class AutomationStrings
     };
 
     public static string CiChecksGone => Loc.Instance[CiChecksGoneKey];
-
-    public static string CiScoutTask(string pr, string branch, string failures) => Loc.Instance.Format(CiScoutTaskKey, pr, branch, failures);
-
-    public static string CiFixPrompt(string pr, string analysis) => Loc.Instance.Format(CiFixPromptKey, pr, analysis);
 
     public static string CiLogUnavailable(string message) => Loc.Instance.Format(CiLogUnavailableKey, message);
 
@@ -325,10 +316,6 @@ internal static class AutomationStrings
         Loc.Register(QuotaWaitingProbeBodyKey, "「{0}」将在额度恢复后自动继续（定期探测）。", "\"{0}\" continues automatically once the quota is back (checked periodically).");
         Loc.Register(QuotaResumedTitleKey, "额度已恢复", "Quota restored");
         Loc.Register(QuotaResumedBodyKey, "「{0}」已自动继续。", "\"{0}\" continued automatically.");
-        Loc.Register(
-            QuotaContinuePromptKey,
-            "模型额度已恢复。请从中断的地方继续完成之前的任务。",
-            "The model quota has been restored. Continue the previous task from where it stopped.");
         Loc.Register(QuotaAgainKey, "额度再次用尽：{0}", "The quota ran out again: {0}");
 
         Loc.Register(CiFailedTitleKey, "CI 检查失败", "CI checks failed");
@@ -350,14 +337,6 @@ internal static class AutomationStrings
         Loc.Register(CiRefuseProtectedKey, "{0} 是基线分支或仓库默认分支", "{0} is the base or the default branch of the repository");
         Loc.Register(CiRefuseHeadKey, "无法读取当前提交", "the current commit cannot be read");
         Loc.Register(CiChecksGoneKey, "失败的检查已不存在（可能已重跑或 PR 已更新）", "The failed checks are gone (re-run, or the PR moved on)");
-        Loc.Register(
-            CiScoutTaskKey,
-            "PR #{0}（分支 {1}）的 CI 检查失败。失败的任务与日志末尾如下。\n请只读调查：定位根因（引用文件与行号），判断是代码问题、测试问题还是环境/偶发问题，并给出最小修复建议。不要修改任何文件。\n\n{2}",
-            "The CI checks of PR #{0} (branch {1}) failed. The failed jobs and the tails of their logs follow.\nInvestigate read-only: find the root cause (cite files and lines), decide whether it is a code problem, a test problem or an environment/flaky problem, and propose the smallest fix. Do not change any file.\n\n{2}");
-        Loc.Register(
-            CiFixPromptKey,
-            "PR #{0} 的 CI 检查失败。Scout 的分析如下：\n\n{1}\n\n请修复根因并提交（不要推送，推送由自动化处理）。如果判断是偶发或环境问题、无需改代码，请直接说明，不要提交。",
-            "The CI checks of PR #{0} failed. Scout's analysis:\n\n{1}\n\nFix the root cause and commit (do not push; the automation pushes). If it is a flaky or environment problem that needs no code change, say so and do not commit.");
         Loc.Register(CiLogUnavailableKey, "（日志不可用：{0}）", "(log unavailable: {0})");
 
         Loc.Register(WatchStalledTitleKey, "长任务可能停滞", "A long turn may be stuck");

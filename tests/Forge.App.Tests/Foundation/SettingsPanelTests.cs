@@ -402,6 +402,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         [
             SettingsSectionIds.Provider,
             SettingsSectionIds.Automations,
+            SettingsSectionIds.Prompts,
             SettingsSectionIds.Appearance,
             SettingsSectionIds.Language,
             SettingsSectionIds.Editor,

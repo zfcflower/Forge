@@ -19,6 +19,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     private readonly AgentDefaultsStore agentDefaults;
     private readonly ModelCatalogRefreshService? modelCatalogRefresh;
     private readonly Action<Action> post;
+    private readonly Forge.App.Prompts.PromptTemplateService promptTemplates;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool saving;
     private string? problem;
@@ -33,14 +34,19 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         ProviderServices services,
         AgentDefaultsStore? agentDefaults = null,
         ModelCatalogRefreshService? modelCatalogRefresh = null,
-        Action<Action>? post = null)
+        Action<Action>? post = null,
+        Forge.App.Prompts.PromptTemplateService? promptTemplates = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
         this.modelCatalogRefresh = modelCatalogRefresh;
+        // The settings page is global, so it lists the user agents of ~/.forge/agents; project agents belong to a session.
+        this.promptTemplates = promptTemplates ?? new Forge.App.Prompts.PromptTemplateService(AgentRuntimeServices.UserDirectory());
         this.post = post ?? (static action => action());
         services.Changed += OnProvidersChanged;
+        // A save on the prompts page runs on the thread pool; the agent rows are rebuilt on the UI thread.
+        this.promptTemplates.Changed += OnPromptTemplatesChanged;
         // The catalog is written off the UI thread (the daily refresh, the startup catch-up), so its notifications come back
         // through the injected post, exactly like the window's other background sources of change.
         services.ModelCatalog.Changed += OnCatalogChanged;
@@ -404,6 +410,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     {
         disposed = true;
         services.Changed -= OnProvidersChanged;
+        promptTemplates.Changed -= OnPromptTemplatesChanged;
         services.ModelCatalog.Changed -= OnCatalogChanged;
         if (modelCatalogRefresh is { } refresh)
         {
@@ -476,6 +483,14 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         Reload();
     }
 
+    private void OnPromptTemplatesChanged() => post(() =>
+    {
+        if (!disposed)
+        {
+            RebuildAgentRows();
+        }
+    });
+
     /// <summary>Rebuilds the agent rows from the store and the live catalogue, keeping each stored choice selected.</summary>
     private void RebuildAgentRows()
     {
@@ -492,6 +507,41 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
                 notSet,
                 changed: OnAgentChanged));
         }
+
+        // User agents follow the built-ins. Their label is the agent's own name: it is the user's content, not localized.
+        foreach (var (agentId, name) in UserAgents())
+        {
+            AgentRows.Add(new AgentDefaultsRowViewModel(
+                agentId,
+                name,
+                agentDefaults.Get(agentId),
+                catalog,
+                notSet,
+                changed: OnAgentChanged));
+        }
+    }
+
+    /// <summary>The agents of the global template scope that are not one of the fixed rows, as id and name; empty when unreadable.</summary>
+    private List<(string Id, string Name)> UserAgents()
+    {
+        var found = new List<(string, string)>();
+        try
+        {
+            var seen = new HashSet<string>(AgentIds.All, StringComparer.Ordinal);
+            foreach (var agent in promptTemplates.Resolve(workspace: null).ResolvedAgents)
+            {
+                if (seen.Add(agent.Id))
+                {
+                    found.Add((agent.Id, agent.Definition.Name));
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // An unreadable agents directory leaves the page with the fixed rows.
+        }
+
+        return found;
     }
 
     private static string AgentLabel(string agentId) => Loc.Instance[agentId switch

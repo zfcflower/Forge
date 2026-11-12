@@ -2,6 +2,7 @@ using Forge.Abstractions;
 using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.App.ViewModels;
+using Forge.Core.Prompts.Templates;
 using Xunit;
 
 namespace Forge.App.Tests.ViewModels;
@@ -204,7 +205,8 @@ public sealed class ComposerSuggestionTests
                 preferences,
                 string.Empty,
                 skillSource: () => [],
-                thinkingLevels: static (_, _) => EveryStep);
+                thinkingLevels: static (_, _) => EveryStep,
+                templateSource: static () => PromptTemplateSet.BuiltIn());
             Assert.Equal("model-b", next.Model);
             Assert.Equal(ThinkingEffort.Medium, next.Effort);
         }
@@ -215,7 +217,7 @@ public sealed class ComposerSuggestionTests
     }
 
     /// <summary>Every step, for a fixture whose model ids are not in the model table.</summary>
-    private static readonly IReadOnlyList<ThinkingEffort> EveryStep =
+    internal static readonly IReadOnlyList<ThinkingEffort> EveryStep =
         [ThinkingEffort.Off, ThinkingEffort.Minimal, ThinkingEffort.Low, ThinkingEffort.Medium, ThinkingEffort.High, ThinkingEffort.XHigh, ThinkingEffort.Max];
 
     private static ComposerViewModel NewComposer(string root, out ComposerPreferences preferences, out TestServices services)
@@ -229,13 +231,14 @@ public sealed class ComposerSuggestionTests
             string.Empty,
             fileSource: _ => Task.FromResult<IReadOnlyList<string>>(["src/View.axaml", "readme.md"]),
             skillSource: () => [new SlashEntry("alpha", "a", true), new SlashEntry("beta", "b", true)],
+            templateSource: static () => PromptTemplateSet.BuiltIn(),
             // The fixture's model ids are invented, so the composer is given the steps to offer instead of asking the
             // model table (which knows no "model-b" and would offer Off alone).
             thinkingLevels: static (_, _) => EveryStep);
     }
 
     /// <summary>One connected provider behind a temp <c>settings.json</c>; owns its <c>HttpClient</c> for the test.</summary>
-    private sealed class TestServices : IDisposable
+    internal sealed class TestServices : IDisposable
     {
         private TestServices(ProviderServices inner, HttpClient http) { Services = inner; Http = http; }
 

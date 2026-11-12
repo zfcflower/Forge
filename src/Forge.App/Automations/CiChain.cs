@@ -424,6 +424,7 @@ internal sealed class CiChainRunner : IAutomationRunner
     private readonly INotifications? notifications;
     private readonly Func<AutomationConfig> config;
     private readonly IAutomationRunStore state;
+    private readonly Prompts.PromptTemplateService? templates;
 
     public CiChainRunner(
         IPrPlatform pr,
@@ -433,8 +434,10 @@ internal sealed class CiChainRunner : IAutomationRunner
         IChildAgentLauncher launcher,
         INotifications? notifications,
         Func<AutomationConfig> config,
-        IAutomationRunStore state)
+        IAutomationRunStore state,
+        Prompts.PromptTemplateService? templates = null)
     {
+        this.templates = templates;
         this.pr = pr;
         this.git = git;
         this.sessions = sessions;
@@ -491,8 +494,12 @@ internal sealed class CiChainRunner : IAutomationRunner
             AutomationStrings.CiAnalysingBody(prText, session.Title, failed.Count.ToString(CultureInfo.InvariantCulture)),
             key: "ci.failed:" + run.Id);
 
+        var prompts = await AutomationPrompts.ResolveAsync(templates, sessions, session.Id, ct).ConfigureAwait(false);
+        var scoutTask = prompts.FormatSlot(
+            Prompts.AppPromptSlotIds.CiScout,
+            new Dictionary<string, string> { ["pr"] = prText, ["branch"] = detail.HeadBranch, ["failures"] = failures });
         var scout = await launcher
-            .LaunchAsync(new ChildAgentRequest(session.Id, "Scout", AutomationStrings.CiScoutTask(prText, detail.HeadBranch, failures)), ct)
+            .LaunchAsync(new ChildAgentRequest(session.Id, "Scout", scoutTask), ct)
             .ConfigureAwait(false);
         if (scout.IsError)
         {
@@ -502,7 +509,9 @@ internal sealed class CiChainRunner : IAutomationRunner
         var before = await git.HeadAsync(worktree, ct).ConfigureAwait(false);
         var message = new MailboxMessage(
             session.Id,
-            AutomationStrings.CiFixPrompt(prText, scout.Text),
+            prompts.FormatSlot(
+                Prompts.AppPromptSlotIds.CiFix,
+                new Dictionary<string, string> { ["pr"] = prText, ["analysis"] = scout.Text }),
             run.Id,
             AutomationStrings.DisplayName(BuiltInAutomations.CiChain, run.AutomationName));
         var progress = new WaitingProgress(context);
