@@ -77,8 +77,6 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     /// <summary>Raised when the view should open a page in the browser.</summary>
     public event EventHandler<string>? OpenUrl;
 
-    public bool IsClaude => isClaude;
-
     public bool IsCopilot => preset.Auth.HasFlag(ProviderAuthOptions.GitHubCopilot);
 
     public bool IsKimi => isKimi;
@@ -106,8 +104,6 @@ internal sealed class ProviderLoginViewModel : ObservableObject, IDisposable
     public string ClaudeReadyText => Loc.Instance[ProviderStrings.ReadyClaudeKey];
 
     public string InstallText => Loc.Instance[ProviderStrings.LoginClaudeInstallKey];
-
-    public string DocsText => Loc.Instance[ProviderStrings.LoginClaudeDocsKey];
 
     public string RecheckText => Loc.Instance[ProviderStrings.LoginClaudeRecheckKey];
 

@@ -83,6 +83,11 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
 
     public string AgentsHint => Loc.Instance[ProviderStrings.AgentsHintKey];
 
+    /// <summary>The two column headings of the agent rows.</summary>
+    public string AgentsModelHeader => Loc.Instance[ProviderStrings.AgentsModelKey];
+
+    public string AgentsThinkingHeader => Loc.Instance[ProviderStrings.AgentsThinkingKey];
+
     /// <summary>Why the last agent-defaults write was refused; null when it succeeded or nothing was written yet.</summary>
     public string? AgentsProblem
     {
@@ -311,6 +316,8 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DefaultContextWindowHint));
         OnPropertyChanged(nameof(AgentsTitle));
         OnPropertyChanged(nameof(AgentsHint));
+        OnPropertyChanged(nameof(AgentsModelHeader));
+        OnPropertyChanged(nameof(AgentsThinkingHeader));
         Reload();
     }
 

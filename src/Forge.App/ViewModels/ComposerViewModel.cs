@@ -210,7 +210,7 @@ internal sealed class ComposerViewModel : ObservableObject
     private ProviderCatalog catalog;
     private readonly Func<CancellationToken, Task<IReadOnlyList<string>>> fileSource;
     private readonly Func<IReadOnlyList<SlashEntry>> skillSource;
-    private readonly Func<CancellationToken, Task>? modelRefresh;
+    private readonly Func<CancellationToken, Task> modelRefresh;
     private readonly Func<string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
     private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
@@ -252,7 +252,8 @@ internal sealed class ComposerViewModel : ObservableObject
         this.workspace = workspace ?? string.Empty;
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
         this.skillSource = skillSource ?? DiscoverSkills;
-        this.modelRefresh = modelRefresh;
+        // The picker's 刷新 re-fetches every provider that can list models; a test can pass its own.
+        this.modelRefresh = modelRefresh ?? RefreshAllProvidersAsync;
         this.thinkingLevels = thinkingLevels ?? ThinkingLevels.For;
 
         var agents = new List<ComposerAgentOption> { new(null) };
@@ -428,13 +429,6 @@ internal sealed class ComposerViewModel : ObservableObject
         Status = null;
         skills = null;
         files = null;
-        if (modelRefresh is null)
-        {
-            RebuildModels();
-            RefreshEffortSteps();
-            return;
-        }
-
         await modelRefresh(cancellationToken).ConfigureAwait(true);
         catalog = services.Catalog;
         RebuildModels();

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.Core.Providers;
 using Forge.IO;
@@ -194,7 +195,22 @@ internal sealed class ProviderStore
             return null;
         }
 
-        var preset = string.Equals(kind, ProviderFactory.AnthropicKind, StringComparison.Ordinal)
+        // The legacy section named a protocol, so it is read as one of the three this build speaks. A kind that is not one of
+        // them is unusable rather than something to guess at: a wrong protocol fails every turn with a confusing error.
+        var protocol = kind switch
+        {
+            ProviderFactory.AnthropicKind => ProviderProtocol.Anthropic,
+            ProviderFactory.OpenAiResponsesKind => ProviderProtocol.OpenAiResponses,
+            ProviderFactory.OpenAiCompatibleKind => ProviderProtocol.OpenAiCompatible,
+            _ => (ProviderProtocol?)null,
+        };
+
+        if (protocol is null)
+        {
+            return null;
+        }
+
+        var preset = protocol == ProviderProtocol.Anthropic
             ? ProviderPresets.Find(ProviderPresets.AnthropicId)!
             : ProviderPresets.Custom;
 
@@ -221,22 +237,15 @@ internal sealed class ProviderStore
             Id = preset.Id,
             PresetId = preset.Id,
             DisplayName = preset.DisplayName,
-            Protocol = string.Equals(kind, ProviderFactory.AnthropicKind, StringComparison.Ordinal)
-                ? ProviderProtocol.Anthropic
-                : ProviderProtocol.OpenAiCompatible,
+            Protocol = protocol.Value,
             BaseUrl = baseUrl,
             CredentialKind = ProviderCredentialKind.ApiKey,
             EnvironmentVariable = string.IsNullOrWhiteSpace(legacy.ApiKeyEnv) ? null : legacy.ApiKeyEnv!.Trim(),
             SecretReference = reference,
             Models = models,
             DefaultModel = model,
-            Thinking = (legacy.Thinking ?? string.Empty).Trim().ToLowerInvariant() switch
-            {
-                "low" => Forge.Abstractions.ThinkingEffort.Low,
-                "medium" => Forge.Abstractions.ThinkingEffort.Medium,
-                "high" => Forge.Abstractions.ThinkingEffort.High,
-                _ => Forge.Abstractions.ThinkingEffort.Off,
-            },
+            // Every step name this build knows, so a migrated setting keeps the effort it had instead of dropping to off.
+            Thinking = ThinkingEfforts.TryParse(legacy.Thinking, out var thinking) ? thinking : ThinkingEffort.Off,
             MaxOutputTokens = legacy.MaxOutputTokens is > 0 ? legacy.MaxOutputTokens : null,
             Overrides = ProviderDefinition.FromMetadataDocument(legacy.ModelMeta),
             // The single-provider section carried these two; dropping them on migration would silently change how prompts
