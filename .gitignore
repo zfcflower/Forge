@@ -5,6 +5,7 @@ obj/
 .thinkrail/context/
 .thinkrail/build/
 .pi/
+.deslop/
 publish/
 dist/
 TestResults/
