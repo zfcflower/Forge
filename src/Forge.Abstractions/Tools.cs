@@ -7,7 +7,52 @@ public sealed record ToolCall(string Id, string Name, string ArgumentsJson);
 public sealed record ToolResult(string Content, bool IsError = false);
 
 /// <summary>Execution context handed to every tool; the workspace root bounds file access.</summary>
-public sealed record ToolContext(string SessionId, string WorkingDirectory, int AgentDepth = 0);
+public sealed record ToolContext(string SessionId, string WorkingDirectory, int AgentDepth = 0)
+{
+    /// <summary>The calling agent instance's id; null when the caller is not an agent loop (a script, a plugin bridge).</summary>
+    public string? AgentId { get; init; }
+
+    /// <summary>The calling agent's display name (its definition name, e.g. "main", "scout"); null like <see cref="AgentId"/>.</summary>
+    public string? AgentName { get; init; }
+}
+
+/// <summary>Where a tool comes from. Declared by whoever registers the tool, never reported by the tool itself.</summary>
+public enum ToolOrigin
+{
+    /// <summary>Ships with Forge (Core or App). The user may switch it off in settings.</summary>
+    BuiltIn,
+
+    /// <summary>A plugin tool from the extension host (including <c>run_code</c>); switched on and off per plugin.</summary>
+    Extension,
+
+    /// <summary>A tool of an MCP server; switched on and off per server.</summary>
+    Mcp,
+}
+
+/// <summary>
+/// Catalog entry for one tool. <paramref name="Group"/> is one of <see cref="ToolGroups"/> for a built-in tool and the
+/// plugin or server name otherwise; <paramref name="Source"/> names the plugin or MCP server (null for a built-in tool).
+/// <paramref name="CanDisable"/> is false only for a built-in tool another feature cannot run without.
+/// </summary>
+public sealed record ToolDescriptor(
+    string Name,
+    ToolOrigin Origin,
+    string Group,
+    string? Source = null,
+    bool CanDisable = true);
+
+/// <summary>Groups of built-in tools, used to lay out the settings page.</summary>
+public static class ToolGroups
+{
+    public const string Files = "files";
+    public const string Git = "git";
+    public const string PullRequests = "pr";
+    public const string Web = "web";
+    public const string Session = "session";
+    public const string Agents = "agents";
+    public const string Retrieval = "retrieval";
+    public const string Extensions = "extensions";
+}
 
 public interface ITool
 {

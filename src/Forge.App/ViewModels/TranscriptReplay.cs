@@ -1,5 +1,6 @@
 using System.Text;
 using Forge.Abstractions;
+using Forge.Core.Storage;
 
 namespace Forge.App.ViewModels;
 
@@ -52,10 +53,11 @@ internal static class TranscriptReplay
         switch (message.Role)
         {
             case MessageRole.User:
-                var text = TextOf(message);
-                if (text.Length > 0)
+                var text = TextOf(message, skipAttachments: true);
+                var attachments = AttachmentsOf(message);
+                if (text.Length > 0 || attachments.Count > 0)
                 {
-                    transcript.AddUserMessage(text, at);
+                    transcript.AddUserMessage(text, at, attachments);
                     transcript.BeginTurn(at, closePrevious: true);
                 }
 
@@ -101,12 +103,27 @@ internal static class TranscriptReplay
         }
     }
 
-    private static string TextOf(ChatMessage message)
+    /// <summary>The attachments of a user message: images, files, and text files inlined in the attachment shape.</summary>
+    private static List<ContentBlock> AttachmentsOf(ChatMessage message)
+    {
+        List<ContentBlock>? attachments = null;
+        foreach (var block in message.Content)
+        {
+            if (block is ImageBlock or FileBlock || TextAttachment.IsAttachment(block))
+            {
+                (attachments ??= []).Add(block);
+            }
+        }
+
+        return attachments ?? [];
+    }
+
+    private static string TextOf(ChatMessage message, bool skipAttachments = false)
     {
         var builder = new StringBuilder();
         foreach (var block in message.Content)
         {
-            if (block is TextBlock text)
+            if (block is TextBlock text && !(skipAttachments && TextAttachment.IsAttachment(block)))
             {
                 builder.Append(text.Text);
             }

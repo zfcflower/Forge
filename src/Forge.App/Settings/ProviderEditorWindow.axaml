@@ -50,6 +50,19 @@
         <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding KeyHint}" />
       </StackPanel>
 
+      <StackPanel Spacing="3">
+        <TextBlock Classes="field-label" Text="{Binding HeadersLabel}" />
+        <TextBox Text="{Binding HeadersText, Mode=TwoWay}"
+                 AcceptsReturn="True"
+                 TextWrapping="NoWrap"
+                 MinHeight="56"
+                 MaxHeight="120"
+                 FontFamily="{DynamicResource FontMono}"
+                 AutomationProperties.Name="{Binding HeadersLabel}"
+                 AutomationProperties.AutomationId="provider-editor-headers" />
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding HeadersHint}" />
+      </StackPanel>
+
       <TextBlock Classes="caption"
                  IsVisible="{Binding HasStatus}"
                  TextWrapping="Wrap"

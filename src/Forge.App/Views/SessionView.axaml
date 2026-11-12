@@ -218,6 +218,17 @@
     <Style Selector="Button.composer-row.selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
     </Style>
+    <Style Selector="Border.image-thumb">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Button.image-remove">
+      <Setter Property="Margin" Value="0,2,2,0" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    </Style>
     <Style Selector="Button.composer-mini">
       <Setter Property="MinWidth" Value="20" />
       <Setter Property="MinHeight" Value="20" />
@@ -569,7 +580,7 @@
           </Border>
 
           <Border Grid.Row="1" Classes="composer-body">
-            <Grid RowDefinitions="Auto,Auto,Auto" Margin="0,10,0,0">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,10,0,0">
               <!-- queued and interjected messages -->
               <StackPanel Grid.Row="0"
                           Spacing="4"
@@ -589,6 +600,10 @@
                               ToolTip.Tip="{Binding Text}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                           <TextBlock Classes="queued-label" Text="{Binding Label}" VerticalAlignment="Center" />
+                          <TextBlock Classes="queued-label"
+                                     Text="{Binding AttachmentsLabel}"
+                                     IsVisible="{Binding HasAttachments}"
+                                     VerticalAlignment="Center" />
                           <TextBlock Text="{Binding Preview}"
                                      MaxWidth="260"
                                      TextTrimming="CharacterEllipsis"
@@ -610,8 +625,95 @@
                            Text="{Binding [session.composer.queuePaused], Source={x:Static loc:Loc.Instance}}" />
               </StackPanel>
 
+              <!-- attachments of the draft (image thumbnails, file chips), why the last one was refused, and why they block sending -->
+              <StackPanel Grid.Row="1" Spacing="4">
+                <ItemsControl ItemsSource="{Binding Composer.Attachments}"
+                              Margin="8,8,8,0"
+                              IsVisible="{Binding Composer.HasImageAttachments}"
+                              AutomationProperties.AutomationId="composer-attachments">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PendingImageViewModel">
+                      <Panel Width="56" Height="56" Margin="0,0,6,6" ToolTip.Tip="{Binding Caption}">
+                        <Border Classes="image-thumb" Width="56" Height="56">
+                          <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                        </Border>
+                        <Button Classes="icon composer-mini image-remove"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Command="{Binding RemoveCommand}"
+                                AutomationProperties.AutomationId="composer-attachment-remove"
+                                AutomationProperties.Name="{Binding [session.images.remove], Source={x:Static loc:Loc.Instance}}"
+                                ToolTip.Tip="{Binding [session.images.remove], Source={x:Static loc:Loc.Instance}}">
+                          <wc:FluentIcon Data="{StaticResource IconClose}" Width="10" Height="10" />
+                        </Button>
+                      </Panel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <ItemsControl ItemsSource="{Binding Composer.Files}"
+                              Margin="8,8,8,0"
+                              IsVisible="{Binding Composer.HasFileAttachments}"
+                              AutomationProperties.AutomationId="composer-file-attachments">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PendingFileViewModel">
+                      <Border Classes="queued-chip" Margin="0,0,6,6" ToolTip.Tip="{Binding Name}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <wc:FluentIcon Data="{StaticResource IconChangesDocument}" Width="14" Height="14" VerticalAlignment="Center" />
+                          <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}" MaxWidth="200" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="caption" Text="{Binding Caption}" />
+                          </StackPanel>
+                          <Button Classes="icon composer-mini"
+                                  VerticalAlignment="Center"
+                                  Command="{Binding RemoveCommand}"
+                                  AutomationProperties.AutomationId="composer-file-remove"
+                                  AutomationProperties.Name="{Binding [session.attachments.remove], Source={x:Static loc:Loc.Instance}}"
+                                  ToolTip.Tip="{Binding [session.attachments.remove], Source={x:Static loc:Loc.Instance}}">
+                            <wc:FluentIcon Data="{StaticResource IconClose}" Width="10" Height="10" />
+                          </Button>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Classes="caption"
+                           Margin="10,4,8,0"
+                           Foreground="{DynamicResource WarningBrush}"
+                           TextWrapping="Wrap"
+                           Text="{Binding Composer.AttachmentsBlockedHint}"
+                           IsVisible="{Binding Composer.AttachmentsBlocked}"
+                           AutomationProperties.AutomationId="composer-attachments-blocked" />
+                <Grid ColumnDefinitions="*,Auto"
+                      Margin="10,4,8,0"
+                      IsVisible="{Binding Composer.HasAttachmentError}">
+                  <TextBlock Classes="caption"
+                             Foreground="{DynamicResource DangerBrush}"
+                             TextWrapping="Wrap"
+                             VerticalAlignment="Center"
+                             Text="{Binding Composer.AttachmentError}"
+                             AutomationProperties.AutomationId="composer-attachment-error" />
+                  <Button Grid.Column="1"
+                          Classes="icon composer-mini"
+                          Click="OnDismissAttachmentError"
+                          AutomationProperties.Name="{Binding [session.images.dismiss], Source={x:Static loc:Loc.Instance}}"
+                          ToolTip.Tip="{Binding [session.images.dismiss], Source={x:Static loc:Loc.Instance}}">
+                    <wc:FluentIcon Data="{StaticResource IconClose}" Width="10" Height="10" />
+                  </Button>
+                </Grid>
+              </StackPanel>
+
               <TextBox x:Name="Input"
-                       Grid.Row="1"
+                       Grid.Row="2"
                        Classes="composer-input"
                        Text="{Binding Draft, Mode=TwoWay}"
                        AcceptsReturn="True"
@@ -624,7 +726,7 @@
                        AutomationProperties.Name="{Binding [session.messageName], Source={x:Static loc:Loc.Instance}}" />
 
               <!-- toolbar: agent and model chips on the left, send / running menu on the right -->
-              <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto" Margin="6,0,6,6">
+              <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*,Auto" Margin="6,0,6,6">
                 <Button x:Name="AgentChip"
                         Classes="composer-chip"
                         AutomationProperties.AutomationId="composer-agent"
@@ -787,6 +889,20 @@
                 </Button>
 
                 <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom">
+                  <!-- Always enabled: each picked file is gated by kind; the tooltip says when images are refused. -->
+                  <Button Classes="icon"
+                          Click="OnAttachImagesClick"
+                          AutomationProperties.AutomationId="composer-attach-images"
+                          AutomationProperties.Name="{Binding [session.attachments.attach], Source={x:Static loc:Loc.Instance}}">
+                    <ToolTip.Tip>
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding [session.attachments.attach.tooltip], Source={x:Static loc:Loc.Instance}}" />
+                        <TextBlock Text="{Binding Composer.ImageGateHint}"
+                                   IsVisible="{Binding !Composer.AcceptsImages}" />
+                      </StackPanel>
+                    </ToolTip.Tip>
+                    <wc:FluentIcon Data="{StaticResource IconPlus}" Width="14" Height="14" />
+                  </Button>
                   <Button Classes="icon"
                           Command="{Binding CancelCommand}"
                           IsVisible="{Binding IsRunning}"

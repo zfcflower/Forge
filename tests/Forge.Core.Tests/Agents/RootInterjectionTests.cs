@@ -96,7 +96,7 @@ public sealed class RootInterjectionTests
         var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
 
         Assert.Empty(events.OfType<AgentInterjected>());
-        Assert.Equal(["late"], root.TakeInterjections());
+        Assert.Equal(["late"], root.TakeInterjections().Select(static interjection => interjection.Text));
         Assert.Empty(root.TakeInterjections());
         Assert.False(root.HasInterjections);
     }
@@ -109,5 +109,91 @@ public sealed class RootInterjectionTests
 
         Assert.ThrowsAny<ArgumentException>(() => root.Interject("  "));
         Assert.False(root.HasInterjections);
+    }
+
+    [Fact]
+    public async Task An_interjection_with_an_image_reaches_the_next_request_after_the_tool_results()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tools = new List<ITool>
+        {
+            new FakeTool("slow", ToolSideEffect.ReadOnly, async (_, _, ct) =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(ct);
+                return new ToolResult("ok");
+            }),
+        };
+        var provider = new FakeProvider((_, index) => index == 0 ? Turn.Call(("c1", "slow", "{}")) : Turn.Say("done"));
+        var host = AgentTestHost.Create(provider, tools);
+        var root = host.CreateRoot("session-interject-" + Guid.NewGuid().ToString("n"), Workspace);
+        var image = new ImageBlock("image/png", "AAAA");
+        var pdf = new FileBlock("application/pdf", "JVBERi0=", "spec.pdf");
+
+        var run = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        root.Interject([new TextBlock("look at this"), image]);
+        root.Interject([pdf]);
+        release.TrySetResult();
+        var events = await run.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.Empty(events.OfType<AgentFailed>());
+        // The notice text is the typed text only; an attachment-only interjection has none.
+        Assert.Equal(["look at this", string.Empty], events.OfType<AgentInterjected>().Select(static e => e.Text));
+
+        var second = provider.Requests[1];
+        Assert.Equal(MessageRole.Tool, second.Messages[^2].Role);
+        var merged = second.Messages[^1];
+        Assert.Equal(MessageRole.User, merged.Role);
+        Assert.Equal([new TextBlock("look at this"), image, pdf], merged.Content);
+    }
+
+    [Fact]
+    public async Task Undelivered_interjections_come_back_with_their_blocks()
+    {
+        var provider = new FakeProvider((_, _) => Turn.Say("done"));
+        var host = AgentTestHost.Create(provider);
+        var root = host.CreateRoot("session-interject-" + Guid.NewGuid().ToString("n"), Workspace);
+        var image = new ImageBlock("image/png", "AAAA");
+
+        root.Interject("text only");
+        root.Interject([new TextBlock("with picture"), image]);
+        await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+
+        var left = root.TakeInterjections();
+        Assert.Equal(2, left.Count);
+        Assert.Equal("text only", left[0].Text);
+        Assert.Empty(left[0].Attachments);
+        Assert.Equal("with picture", left[1].Text);
+        Assert.Equal([image], left[1].Attachments);
+        Assert.Equal([new TextBlock("with picture"), image], left[1].Content);
+        Assert.Empty(root.TakeInterjections());
+    }
+
+    [Fact]
+    public void Interject_with_blocks_rejects_empty_content_and_other_block_kinds()
+    {
+        var host = AgentTestHost.Create(new FakeProvider((_, _) => Turn.Say("x")));
+        var root = host.CreateRoot("session-interject-blocks", Workspace);
+
+        Assert.ThrowsAny<ArgumentException>(() => root.Interject(Array.Empty<ContentBlock>()));
+        Assert.ThrowsAny<ArgumentException>(() => root.Interject([new TextBlock("   ")]));
+        Assert.ThrowsAny<ArgumentException>(() => root.Interject([new ToolCallBlock("c", "t", "{}")]));
+        Assert.False(root.HasInterjections);
+    }
+
+    [Fact]
+    public void An_inlined_text_file_is_an_attachment_not_typed_text()
+    {
+        var host = AgentTestHost.Create(new FakeProvider((_, _) => Turn.Say("x")));
+        var root = host.CreateRoot("session-interject-textfile", Workspace);
+        var file = Forge.Core.Storage.TextAttachment.Create("notes.md", "# hi");
+
+        root.Interject([file]);
+
+        var taken = Assert.Single(root.TakeInterjections());
+        Assert.Equal(string.Empty, taken.Text);
+        Assert.Equal([file], taken.Attachments);
     }
 }

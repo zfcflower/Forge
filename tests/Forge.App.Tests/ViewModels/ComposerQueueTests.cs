@@ -239,6 +239,173 @@ public sealed class ComposerQueueTests
         });
     }
 
+    [Fact]
+    public async Task An_image_only_draft_sends_and_its_images_reach_the_model_and_the_transcript()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            Assert.False(workspace.SendCommand.CanExecute(null));
+            workspace.Composer.RestoreAttachments([Image("AAAA"), Image("BBBB")]);
+            Assert.True(workspace.SendCommand.CanExecute(null));
+
+            workspace.SendCommand.Execute(null);
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1));
+            Assert.False(workspace.Composer.HasAttachments);
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => !workspace.IsRunning));
+
+            Assert.Equal([2], provider.Images);
+            Assert.Equal([string.Empty], provider.Seen);
+            var user = Assert.Single(workspace.Transcript.Items.OfType<UserMessageViewModel>());
+            Assert.False(user.HasText);
+            Assert.Equal(2, user.Images.Count);
+        });
+    }
+
+    [Fact]
+    public async Task A_queued_message_keeps_its_images_until_it_is_sent()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = "first";
+            workspace.SendCommand.Execute(null);
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && workspace.IsRunning));
+
+            workspace.Draft = "with a picture";
+            workspace.Composer.RestoreAttachments([Image("AAAA")]);
+            workspace.QueueCommand.Execute(null);
+
+            var chip = Assert.Single(workspace.Queued);
+            Assert.True(chip.HasAttachments);
+            Assert.False(workspace.Composer.HasAttachments);
+
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 2 && !workspace.IsRunning && workspace.Queued.Count == 0));
+            Assert.Equal(["first", "with a picture"], provider.Seen);
+            Assert.Equal([0, 1], provider.Images);
+        });
+    }
+
+    [Fact]
+    public async Task An_interjection_with_an_image_is_delivered_to_the_running_turn_instead_of_queued()
+    {
+        await RunAsync(
+            async (workspace, provider) =>
+            {
+                workspace.Draft = "first";
+                workspace.SendCommand.Execute(null);
+                Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && workspace.IsRunning));
+
+                workspace.Draft = "queued later";
+                workspace.QueueCommand.Execute(null);
+                workspace.Draft = "see this";
+                workspace.Composer.RestoreAttachments([Image("AAAA")]);
+                workspace.InterjectCommand.Execute(null);
+
+                // Handed to the running turn: an interjection chip ahead of the queued message, with its image.
+                Assert.Equal(2, workspace.Queued.Count);
+                Assert.Equal("see this", workspace.Queued[0].Text);
+                Assert.True(workspace.Queued[0].IsInterjection);
+                Assert.True(workspace.Queued[0].HasAttachments);
+                Assert.False(workspace.Composer.HasAttachments);
+
+                provider.Release();
+                Assert.True(await PumpUntilAsync(() => !workspace.IsRunning && workspace.Queued.Count == 0 && provider.Calls >= 3));
+
+                // The second request continues the first turn after the tool batch, carrying the interjection and its
+                // image; the queued message only starts the next turn.
+                Assert.Equal("see this", provider.Seen[1]);
+                Assert.Equal(1, provider.Images[1]);
+                Assert.Equal("queued later", provider.Seen[2]);
+                Assert.Equal(0, provider.Images[2]);
+            },
+            firstCallsTool: true);
+    }
+
+    [Fact]
+    public async Task An_image_interjection_the_turn_never_reached_is_sent_next_with_its_image()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            workspace.Draft = "first";
+            workspace.SendCommand.Execute(null);
+            Assert.True(await PumpUntilAsync(() => provider.Calls == 1 && workspace.IsRunning));
+
+            // The first turn ends without a tool batch, so the interjection is never delivered and comes back.
+            workspace.Draft = "look";
+            workspace.Composer.RestoreAttachments([Image("AAAA"), Image("BBBB")]);
+            workspace.InterjectCommand.Execute(null);
+            Assert.True(Assert.Single(workspace.Queued).IsInterjection);
+
+            provider.Release();
+            Assert.True(await PumpUntilAsync(() => !workspace.IsRunning && workspace.Queued.Count == 0 && provider.Calls == 2));
+            Assert.Equal(["first", "look"], provider.Seen);
+            Assert.Equal([0, 2], provider.Images);
+        });
+    }
+
+    [Fact]
+    public async Task Attachments_the_provider_cannot_carry_block_sending_until_removed()
+    {
+        await RunAsync(async (workspace, provider) =>
+        {
+            // The test provider speaks Chat Completions, which has no shape for video.
+            workspace.Draft = "watch this";
+            workspace.Composer.RestoreAttachments([new FileBlock("video/mp4", "AAAA", "clip.mp4")]);
+
+            Assert.True(workspace.Composer.AttachmentsBlocked);
+            Assert.False(workspace.SendCommand.CanExecute(null));
+            workspace.SendCommand.Execute(null);
+            await PumpAsync(5);
+            Assert.Equal(0, provider.Calls);
+            Assert.Equal("watch this", workspace.Draft);
+            Assert.Single(workspace.Composer.Files);
+
+            workspace.Composer.Files[0].RemoveCommand.Execute(null);
+            Assert.False(workspace.Composer.AttachmentsBlocked);
+            Assert.True(workspace.SendCommand.CanExecute(null));
+        });
+    }
+
+    [Fact]
+    public async Task Carrying_the_composer_state_keeps_draft_files()
+    {
+        await RunAsync(async (workspace, _) =>
+        {
+            var pdf = new FileBlock("application/pdf", "AAAA", "a.pdf");
+            workspace.Draft = "draft";
+            workspace.Composer.RestoreAttachments([Image("AAAA"), pdf]);
+
+            var carried = workspace.TakeComposerState();
+            Assert.Equal([Image("AAAA"), pdf], carried.DraftAttachments);
+
+            workspace.RestoreComposerState(carried);
+            Assert.Equal(pdf, Assert.Single(workspace.Composer.Files).Block);
+            await Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Carrying_the_composer_state_keeps_the_draft_images()
+    {
+        await RunAsync(async (workspace, _) =>
+        {
+            workspace.Draft = "draft";
+            workspace.Composer.RestoreAttachments([Image("AAAA")]);
+
+            var carried = workspace.TakeComposerState();
+            Assert.False(workspace.Composer.HasAttachments);
+            Assert.Equal([Image("AAAA")], carried.DraftAttachments);
+
+            workspace.RestoreComposerState(carried);
+            Assert.Equal("draft", workspace.Draft);
+            Assert.Equal([Image("AAAA")], workspace.Composer.Attachments.Select(static image => image.Block));
+            await Task.CompletedTask;
+        });
+    }
+
+    private static ImageBlock Image(string data) => new("image/png", data);
+
     private static async Task RunAsync(
         Func<SessionWorkspaceViewModel, GatedProvider, Task> body,
         bool blockUntilCancelled = false,
@@ -361,6 +528,7 @@ public sealed class ComposerQueueTests
         private readonly TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ConcurrentQueue<string> seen = new();
         private readonly ConcurrentQueue<ModelSettings> models = new();
+        private readonly ConcurrentQueue<int> images = new();
         private int calls;
 
         public string Id => "gated";
@@ -371,6 +539,9 @@ public sealed class ComposerQueueTests
 
         public IReadOnlyList<ModelSettings> Models => [.. models];
 
+        /// <summary>How many images the last user message of each request carried.</summary>
+        public IReadOnlyList<int> Images => [.. images];
+
         public void Release() => gate.TrySetResult();
 
         public async IAsyncEnumerable<ChatStreamEvent> StreamAsync(ChatRequest request, [EnumeratorCancellation] CancellationToken ct)
@@ -378,6 +549,7 @@ public sealed class ComposerQueueTests
             var last = request.Messages.LastOrDefault(message => message.Role == MessageRole.User);
             seen.Enqueue(last is null ? string.Empty : string.Concat(last.Content.OfType<TextBlock>().Select(block => block.Text)));
             models.Enqueue(request.Model);
+            images.Enqueue(last is null ? 0 : last.Content.OfType<ImageBlock>().Count());
             var call = Interlocked.Increment(ref calls);
             if (call == 1)
             {

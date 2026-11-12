@@ -8,11 +8,14 @@
              xmlns:term="using:Forge.App.Terminal"
              xmlns:git="using:Forge.App.Git"
              xmlns:notif="using:Forge.App.Notifications"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:editing="using:Forge.App.Editing"
              xmlns:set="using:Forge.App.ViewModels.Settings"
              xmlns:settings="using:Forge.App.Settings"
              xmlns:autoset="using:Forge.App.Automations.Settings"
              xmlns:promptset="using:Forge.App.Settings.Prompts"
+             xmlns:webset="using:Forge.App.Web"
+             xmlns:netset="using:Forge.App.Network"
              x:Class="Forge.App.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
@@ -161,14 +164,50 @@
       <views:InstrumentSectionView />
     </DataTemplate>
     <DataTemplate DataType="set:ToolsSettingsSectionViewModel" x:DataType="set:ToolsSettingsSectionViewModel">
-      <Grid RowDefinitions="Auto,*" RowSpacing="10">
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding InventoryText}"
-                   IsVisible="{Binding HasInventory}"
-                   AutomationProperties.AutomationId="settings-tools-inventory" />
-        <views:InstrumentSectionView Grid.Row="1" />
-      </Grid>
+      <!-- Grouped by origin: built-in groups carry a switch per tool, extension and MCP tools are read-only here. -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     Text="{Binding InventoryText}"
+                     IsVisible="{Binding HasInventory}"
+                     AutomationProperties.AutomationId="settings-tools-inventory" />
+          <ItemsControl ItemsSource="{Binding Groups}" AutomationProperties.AutomationId="settings-tools-groups">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="set:ToolGroupViewModel">
+                <StackPanel Spacing="2" Margin="0,4,0,6">
+                  <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding Title}" />
+                  <ItemsControl ItemsSource="{Binding Tools}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="set:ToolRowViewModel">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                          <StackPanel Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}"
+                                       FontFamily="{DynamicResource FontMono}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="caption" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" />
+                          </StackPanel>
+                          <CheckBox Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    IsVisible="{Binding CanToggle}"
+                                    IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                                    AutomationProperties.Name="{Binding Name}"
+                                    AutomationProperties.AutomationId="settings-tools-switch" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     Text="{Binding EmptyText}"
+                     IsVisible="{Binding !HasGroups}" />
+        </StackPanel>
+      </ScrollViewer>
     </DataTemplate>
 
     <!-- The notification section: the one switch that decides whether anything is shown at all, in the window or on the desktop. -->
@@ -272,6 +311,133 @@
             <ComboBoxItem Content="{Binding [editor.settings.theme.dark], Source={x:Static loc:Loc.Instance}}" />
           </ComboBox>
         </Grid>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- The web section: search backend, key or SearXNG URL, test and the private-network switch. -->
+    <DataTemplate DataType="webset:WebSettingsSectionViewModel" x:DataType="webset:WebSettingsSectionViewModel">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="caption" TextWrapping="Wrap"
+                   Text="{Binding [web.hint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label" VerticalAlignment="Center"
+                     Text="{Binding [web.backend], Source={x:Static loc:Loc.Instance}}" />
+          <ComboBox Grid.Column="1" MinWidth="200" HorizontalAlignment="Left"
+                    ItemsSource="{Binding Backends}"
+                    SelectedItem="{Binding SelectedBackend, Mode=TwoWay}"
+                    AutomationProperties.AutomationId="web-backend">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="webset:WebBackendOption">
+                <TextBlock Classes="caption" Text="{Binding Label}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </Grid>
+        <StackPanel Spacing="4" IsVisible="{Binding ShowsKey}">
+          <TextBlock Classes="label" Text="{Binding [web.apiKey], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Text="{Binding ApiKeyText, Mode=TwoWay}" PasswordChar="•"
+                   PlaceholderText="{Binding [web.apiKey.placeholder], Source={x:Static loc:Loc.Instance}}"
+                   AutomationProperties.AutomationId="web-api-key" />
+          <TextBlock Classes="caption" IsVisible="{Binding HasStoredKey}"
+                     Text="{Binding [web.apiKey.stored], Source={x:Static loc:Loc.Instance}}" />
+        </StackPanel>
+        <StackPanel Spacing="4" IsVisible="{Binding ShowsUrl}">
+          <TextBlock Classes="label" Text="{Binding [web.searxngUrl], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Text="{Binding SearxngUrl, Mode=TwoWay}" PlaceholderText="https://searx.example.org"
+                   AutomationProperties.AutomationId="web-searxng-url" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="{Binding [web.save], Source={x:Static loc:Loc.Instance}}"
+                  Command="{Binding SaveCommand}" AutomationProperties.AutomationId="web-save" />
+          <Button Content="{Binding [web.test], Source={x:Static loc:Loc.Instance}}"
+                  Command="{Binding TestCommand}" AutomationProperties.AutomationId="web-test" />
+        </StackPanel>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding StatusText}" />
+        <CheckBox Content="{Binding [web.allowPrivate], Source={x:Static loc:Loc.Instance}}"
+                  IsChecked="{Binding AllowPrivateNetwork, Mode=TwoWay}"
+                  AutomationProperties.AutomationId="web-allow-private" />
+        <TextBlock Classes="caption" TextWrapping="Wrap"
+                   Text="{Binding [web.allowPrivate.hint], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- The network section: DNS mode and proxy mode for every outbound connection, validated inline; Apply saves and applies live, Test resolves a host with the entered settings. -->
+    <DataTemplate DataType="netset:NetworkSettingsSectionViewModel" x:DataType="netset:NetworkSettingsSectionViewModel">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="caption" TextWrapping="Wrap"
+                   Text="{Binding [network.hint], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                   IsVisible="{Binding HasLoadProblem}" Text="{Binding LoadProblemText}" />
+        <TextBlock Classes="label" Text="{Binding [network.dns], Source={x:Static loc:Loc.Instance}}" />
+        <StackPanel Orientation="Horizontal" Spacing="16">
+          <RadioButton GroupName="network-dns" IsChecked="{Binding IsDnsSystem, Mode=TwoWay}"
+                       Content="{Binding [network.dns.system], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="network-dns-system" />
+          <RadioButton GroupName="network-dns" IsChecked="{Binding IsDnsServers, Mode=TwoWay}"
+                       Content="{Binding [network.dns.servers], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="network-dns-servers" />
+          <RadioButton GroupName="network-dns" IsChecked="{Binding IsDnsDoh, Mode=TwoWay}"
+                       Content="{Binding [network.dns.doh], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="network-dns-doh" />
+        </StackPanel>
+        <StackPanel Spacing="4" IsVisible="{Binding IsDnsServers}">
+          <TextBlock Classes="caption" TextWrapping="Wrap"
+                     Text="{Binding [network.dns.servers.label], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Text="{Binding ServersText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"
+                   PlaceholderText="1.1.1.1"
+                   AutomationProperties.AutomationId="network-dns-servers-text" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                     IsVisible="{Binding HasServersError}" Text="{Binding ServersError}" />
+        </StackPanel>
+        <StackPanel Spacing="4" IsVisible="{Binding IsDnsDoh}">
+          <TextBlock Classes="caption" Text="{Binding [network.dns.doh.label], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Text="{Binding DohUrl, Mode=TwoWay}" PlaceholderText="https://1.1.1.1/dns-query"
+                   AutomationProperties.AutomationId="network-doh-url" />
+          <TextBlock Classes="caption" TextWrapping="Wrap"
+                     Text="{Binding [network.dns.doh.hint], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                     IsVisible="{Binding HasDohError}" Text="{Binding DohError}" />
+        </StackPanel>
+        <TextBlock Classes="label" Margin="0,6,0,0" Text="{Binding [network.proxy], Source={x:Static loc:Loc.Instance}}" />
+        <StackPanel Orientation="Horizontal" Spacing="16">
+          <RadioButton GroupName="network-proxy" IsChecked="{Binding IsProxySystem, Mode=TwoWay}"
+                       Content="{Binding [network.proxy.system], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="network-proxy-system" />
+          <RadioButton GroupName="network-proxy" IsChecked="{Binding IsProxyNone, Mode=TwoWay}"
+                       Content="{Binding [network.proxy.none], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="network-proxy-none" />
+          <RadioButton GroupName="network-proxy" IsChecked="{Binding IsProxyManual, Mode=TwoWay}"
+                       Content="{Binding [network.proxy.manual], Source={x:Static loc:Loc.Instance}}"
+                       AutomationProperties.AutomationId="network-proxy-manual" />
+        </StackPanel>
+        <StackPanel Spacing="4" IsVisible="{Binding IsProxyManual}">
+          <TextBlock Classes="caption" Text="{Binding [network.proxy.url], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Text="{Binding ProxyUrl, Mode=TwoWay}" PlaceholderText="socks5://127.0.0.1:1080"
+                   AutomationProperties.AutomationId="network-proxy-url" />
+          <TextBlock Classes="caption" TextWrapping="Wrap"
+                     Text="{Binding [network.proxy.url.hint], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                     IsVisible="{Binding HasProxyError}" Text="{Binding ProxyError}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap"
+                     Text="{Binding [network.proxy.bypass], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Text="{Binding BypassText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"
+                   PlaceholderText="*.corp.example"
+                   AutomationProperties.AutomationId="network-proxy-bypass" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                     IsVisible="{Binding HasBypassError}" Text="{Binding BypassError}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+          <Button Content="{Binding [network.apply], Source={x:Static loc:Loc.Instance}}"
+                  Command="{Binding ApplyCommand}" IsEnabled="{Binding IsValid}"
+                  AutomationProperties.AutomationId="network-apply" />
+          <TextBox Text="{Binding TestHost, Mode=TwoWay}" MinWidth="200"
+                   PlaceholderText="{Binding [network.test.host], Source={x:Static loc:Loc.Instance}}"
+                   AutomationProperties.AutomationId="network-test-host" />
+          <Button Content="{Binding [network.test], Source={x:Static loc:Loc.Instance}}"
+                  Command="{Binding TestCommand}" IsEnabled="{Binding IsValid}"
+                  AutomationProperties.AutomationId="network-test" />
+        </StackPanel>
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding StatusText}" />
       </StackPanel>
     </DataTemplate>
 
@@ -380,7 +546,61 @@
     <!-- User message: IM-style bubble aligned right. -->
     <DataTemplate DataType="vm:UserMessageViewModel" x:DataType="vm:UserMessageViewModel">
       <StackPanel Margin="0,10,0,4" HorizontalAlignment="Right" Spacing="2">
-        <Border Classes="user-bubble">
+        <!-- Attached images: small thumbnails above the bubble, right-aligned like it. -->
+        <ItemsControl ItemsSource="{Binding Images}"
+                      IsVisible="{Binding HasImages}"
+                      HorizontalAlignment="Right">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel HorizontalAlignment="Right" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:TranscriptImageViewModel">
+              <Border Width="72"
+                      Height="72"
+                      Margin="6,0,0,4"
+                      CornerRadius="6"
+                      ClipToBounds="True"
+                      BorderThickness="1"
+                      BorderBrush="{DynamicResource BorderBrush}"
+                      Background="{DynamicResource SurfaceMutedBrush}"
+                      ToolTip.Tip="{Binding Caption}">
+                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- Other attachments (PDF, audio, video, text files): a chip each with icon, name and size. -->
+        <ItemsControl ItemsSource="{Binding Files}"
+                      IsVisible="{Binding HasFiles}"
+                      HorizontalAlignment="Right">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel HorizontalAlignment="Right" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:TranscriptFileViewModel">
+              <Border Margin="6,0,0,4"
+                      Padding="8,4"
+                      CornerRadius="6"
+                      BorderThickness="1"
+                      BorderBrush="{DynamicResource BorderBrush}"
+                      Background="{DynamicResource SurfaceMutedBrush}"
+                      ToolTip.Tip="{Binding Name}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <wc:FluentIcon Data="{StaticResource IconChangesDocument}" Width="14" Height="14" VerticalAlignment="Center" />
+                  <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="caption" Text="{Binding Caption}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Border Classes="user-bubble" IsVisible="{Binding HasText}">
           <SelectableTextBlock Text="{Binding Text}"
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource TextPrimaryBrush}" />

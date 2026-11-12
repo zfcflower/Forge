@@ -16,12 +16,64 @@ internal abstract class TranscriptItemViewModel : ObservableObject
     }
 }
 
-/// <summary>A user message, rendered as an IM-style bubble aligned right.</summary>
-internal sealed class UserMessageViewModel(string text, DateTimeOffset at) : TranscriptItemViewModel
+/// <summary>
+/// A user message, rendered as an IM-style bubble aligned right: the typed text, image thumbnails, and a chip (icon, name,
+/// size) for each other attachment - PDF, audio, video, or a text file inlined into the message.
+/// </summary>
+internal sealed class UserMessageViewModel : TranscriptItemViewModel
 {
-    public string Text { get; } = text;
+    public UserMessageViewModel(string text, DateTimeOffset at, IReadOnlyList<ContentBlock>? attachments = null)
+    {
+        Text = text;
+        Time = TextFormat.Clock(at);
+        if (attachments is not { Count: > 0 })
+        {
+            Images = [];
+            Files = [];
+            return;
+        }
 
-    public string Time { get; } = TextFormat.Clock(at);
+        List<TranscriptImageViewModel>? images = null;
+        List<TranscriptFileViewModel>? files = null;
+        foreach (var block in attachments)
+        {
+            if (block is ImageBlock image)
+            {
+                (images ??= []).Add(new TranscriptImageViewModel(image));
+            }
+            else if (FileChipViewModel.Describe(block) is { } chip)
+            {
+                (files ??= []).Add(new TranscriptFileViewModel(block, chip.Name, chip.Kind, chip.MediaType, chip.Bytes));
+            }
+        }
+
+        Images = images is null ? [] : images;
+        Files = files is null ? [] : files;
+    }
+
+    public string Text { get; }
+
+    public bool HasText => Text.Length > 0;
+
+    /// <summary>The images the message carried, as thumbnails; empty for a text-only message.</summary>
+    public IReadOnlyList<TranscriptImageViewModel> Images { get; }
+
+    public bool HasImages => Images.Count > 0;
+
+    /// <summary>The other attachments the message carried, as chips.</summary>
+    public IReadOnlyList<TranscriptFileViewModel> Files { get; }
+
+    public bool HasFiles => Files.Count > 0;
+
+    public string Time { get; }
+
+    public override void RefreshText()
+    {
+        foreach (var file in Files)
+        {
+            file.RefreshText();
+        }
+    }
 }
 
 /// <summary>A one-line system note inside a transcript (compaction, denied call, stopped turn).</summary>
@@ -457,8 +509,8 @@ internal sealed class TranscriptViewModel : ObservableObject
 
     public TurnCardViewModel? Current => current;
 
-    public void AddUserMessage(string text, DateTimeOffset at) =>
-        Add(new UserMessageViewModel(text, at));
+    public void AddUserMessage(string text, DateTimeOffset at, IReadOnlyList<ContentBlock>? attachments = null) =>
+        Add(new UserMessageViewModel(text, at, attachments));
 
     public void AddNotice(LocText text, bool isError = false) =>
         Add(new NoticeViewModel(text, isError));

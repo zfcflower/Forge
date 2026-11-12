@@ -125,10 +125,53 @@ public static class MessageJson
                 case ToolResultBlock result:
                     Append(builder, result.Content);
                     break;
+                case ImageBlock image:
+                    Append(builder, ImagePlaceholder(image));
+                    break;
+                case FileBlock file:
+                    Append(builder, FilePlaceholder(file));
+                    break;
             }
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// The text that stands in for an image anywhere text is wanted (search, summaries, retrieval):
+    /// <c>[image: image/png, 123 KB]</c>. Never the base64 itself.
+    /// </summary>
+    public static string ImagePlaceholder(ImageBlock image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        var kilobytes = Math.Max(1, (DecodedLength(image.Data) + 1023) / 1024);
+        return string.Concat("[image: ", image.MediaType, ", ", kilobytes.ToString(System.Globalization.CultureInfo.InvariantCulture), " KB]");
+    }
+
+    /// <summary>
+    /// The text that stands in for an attached file anywhere text is wanted (search, summaries, retrieval):
+    /// <c>[file: report.pdf, 123 KB]</c>, or the media type when the file has no name. Never the base64 itself.
+    /// </summary>
+    public static string FilePlaceholder(FileBlock file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var kilobytes = Math.Max(1, (DecodedLength(file.Data) + 1023) / 1024);
+        var label = string.IsNullOrWhiteSpace(file.Name) ? file.MediaType : file.Name;
+        return string.Concat("[file: ", label, ", ", kilobytes.ToString(System.Globalization.CultureInfo.InvariantCulture), " KB]");
+    }
+
+    /// <summary>Decoded byte count of a base64 string, from its length and padding alone (nothing is decoded).</summary>
+    public static long DecodedLength(string base64)
+    {
+        ArgumentNullException.ThrowIfNull(base64);
+        var length = base64.Length;
+        if (length == 0)
+        {
+            return 0;
+        }
+
+        var padding = base64[length - 1] == '=' ? (length > 1 && base64[length - 2] == '=' ? 2 : 1) : 0;
+        return Math.Max(0, (long)length / 4 * 3 + (length % 4 * 3 / 4) - padding);
     }
 
     /// <summary>Everything a model would see for this message; used for token accounting.</summary>
@@ -155,6 +198,12 @@ public static class MessageJson
                     break;
                 case ArtifactRefBlock artifact:
                     Append(builder, artifact.Description);
+                    break;
+                case ImageBlock image:
+                    Append(builder, ImagePlaceholder(image));
+                    break;
+                case FileBlock file:
+                    Append(builder, FilePlaceholder(file));
                     break;
             }
         }
@@ -235,6 +284,21 @@ public static class MessageJson
                 writer.WriteString("description", artifact.Description);
                 writer.WriteNumber("size_bytes", artifact.SizeBytes);
                 break;
+            case ImageBlock image:
+                writer.WriteString(TypeKey, "image");
+                writer.WriteString("media_type", image.MediaType);
+                writer.WriteString("data", image.Data);
+                break;
+            case FileBlock file:
+                writer.WriteString(TypeKey, "file");
+                writer.WriteString("media_type", file.MediaType);
+                writer.WriteString("data", file.Data);
+                if (file.Name is not null)
+                {
+                    writer.WriteString("name", file.Name);
+                }
+
+                break;
             default:
                 throw new JsonException($"Unsupported content block '{block?.GetType().Name ?? "null"}'.");
         }
@@ -264,6 +328,11 @@ public static class MessageJson
                 RequiredString(block, "artifact_id"),
                 RequiredString(block, "description"),
                 OptionalLong(block, "size_bytes")),
+            "image" => new ImageBlock(RequiredString(block, "media_type"), RequiredString(block, "data")),
+            "file" => new FileBlock(
+                RequiredString(block, "media_type"),
+                RequiredString(block, "data"),
+                OptionalString(block, "name")),
             _ => throw new JsonException($"Unknown content block type '{type}'."),
         };
     }

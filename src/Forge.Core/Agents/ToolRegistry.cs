@@ -114,10 +114,12 @@ internal sealed record ToolSet(int Version, ToolRegistry Tools);
 
 /// <summary>
 /// The live tool set of one host: the built-in tools, which never change, plus the externally supplied tools, which
-/// <see cref="AgentHost.ReplaceExternalTools"/> swaps at any time. Readers take one immutable snapshot, so no lock is needed
-/// on the hot path; <see cref="Version"/> changes exactly when <see cref="Tools"/> is replaced, which lets each run reuse
-/// its selected registry (and its byte-identical definitions) until the set really changed. Built-in tools always win: an
-/// external tool with the name of a built-in tool is dropped, never registered next to it.
+/// <see cref="AgentHost.ReplaceExternalTools"/> swaps at any time, minus the names the user switched off
+/// (<see cref="SetDisabled"/>). Readers take one immutable snapshot, so no lock is needed on the hot path;
+/// <see cref="Version"/> changes exactly when <see cref="Tools"/> is replaced, which lets each run reuse its selected
+/// registry (and its byte-identical definitions) until the set really changed. Built-in tools always win: an external tool
+/// with the name of a built-in tool is dropped, never registered next to it. A disabled name is filtered from both halves,
+/// so a switched-off tool is neither offered to the model nor callable through the host router.
 /// </summary>
 public sealed class ToolSurface
 {
@@ -125,6 +127,8 @@ public sealed class ToolSurface
     private readonly HashSet<string> builtInNames;
     private readonly Lock publishGate = new();
     private ToolSet current;
+    private ITool[] external = [];
+    private HashSet<string> disabled = new(StringComparer.Ordinal);
 
     public ToolSurface(IEnumerable<ITool> builtIns)
     {
@@ -144,13 +148,28 @@ public sealed class ToolSurface
         current = new ToolSet(0, this.builtIns);
     }
 
-    /// <summary>Current tool set: the built-ins plus the external tools, sorted by name and deduplicated.</summary>
+    /// <summary>Current tool set: the built-ins plus the external tools, sorted by name and deduplicated, without disabled names.</summary>
     public ToolRegistry Tools => Volatile.Read(ref current).Tools;
 
     /// <summary>Version of the current tool set, starting at 0; compare it to detect that <see cref="Tools"/> was replaced.</summary>
     public int Version => Volatile.Read(ref current).Version;
 
     internal ToolSet Current => Volatile.Read(ref current);
+
+    /// <summary>The Core built-in tools of this host, including disabled ones; the catalog page lists them with their switch.</summary>
+    public IReadOnlyList<ITool> BuiltIns => builtIns.Tools;
+
+    /// <summary>The external tools last published (built-in names already dropped), including disabled ones.</summary>
+    public IReadOnlyList<ITool> External
+    {
+        get
+        {
+            lock (publishGate)
+            {
+                return external;
+            }
+        }
+    }
 
     /// <summary>
     /// Publishes a new external tool set; safe to call from any thread. Built-ins stay and shadow an external tool of the
@@ -160,28 +179,65 @@ public sealed class ToolSurface
     public void ReplaceExternal(IEnumerable<ITool> tools)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        var external = new List<ITool>();
+        var list = new List<ITool>();
         foreach (var tool in tools)
         {
             ArgumentNullException.ThrowIfNull(tool);
             if (!builtInNames.Contains(tool.Definition.Name))
             {
-                external.Add(tool);
+                list.Add(tool);
             }
         }
 
-        var builtInTools = builtIns.Tools;
-        var merged = new ITool[builtInTools.Count + external.Count];
-        for (var index = 0; index < builtInTools.Count; index++)
-        {
-            merged[index] = builtInTools[index];
-        }
-
-        external.CopyTo(merged, builtInTools.Count);
-        var registry = new ToolRegistry(merged);
         lock (publishGate)
         {
-            Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), registry));
+            external = [.. list];
+            Publish();
         }
+    }
+
+    /// <summary>
+    /// Switches the named tools off (and every other name back on). Publishes a new version only when the effective set
+    /// changed, so re-applying the same setting before every turn costs nothing and never breaks the prompt cache. Unknown
+    /// names are kept: a tool registered later under that name starts disabled.
+    /// </summary>
+    public void SetDisabled(IEnumerable<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        var next = new HashSet<string>(names, StringComparer.Ordinal);
+        lock (publishGate)
+        {
+            if (next.SetEquals(disabled))
+            {
+                return;
+            }
+
+            disabled = next;
+            Publish();
+        }
+    }
+
+    // Caller holds publishGate.
+    private void Publish()
+    {
+        var builtInTools = builtIns.Tools;
+        var merged = new List<ITool>(builtInTools.Count + external.Length);
+        foreach (var tool in builtInTools)
+        {
+            if (!disabled.Contains(tool.Definition.Name))
+            {
+                merged.Add(tool);
+            }
+        }
+
+        foreach (var tool in external)
+        {
+            if (!disabled.Contains(tool.Definition.Name))
+            {
+                merged.Add(tool);
+            }
+        }
+
+        Volatile.Write(ref current, new ToolSet(unchecked(current.Version + 1), new ToolRegistry(merged)));
     }
 }

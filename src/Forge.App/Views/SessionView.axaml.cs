@@ -23,6 +23,7 @@ public partial class SessionView : UserControl
             input.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
             input.PropertyChanged += OnInputPropertyChanged;
             input.LostFocus += OnInputLostFocus;
+            AttachImageInput(input);
         }
     }
 

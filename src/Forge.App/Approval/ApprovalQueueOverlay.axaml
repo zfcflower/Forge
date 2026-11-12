@@ -106,6 +106,76 @@
       </Border>
     </DataTemplate>
 
+    <!-- One ask_user question card: which agent asks, then each question with its options and optional free text. -->
+    <DataTemplate DataType="ap:UserQuestionCardViewModel" x:DataType="ap:UserQuestionCardViewModel">
+      <Border Classes="turn-card" Padding="10" Margin="0,0,0,8">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="label"
+                     Text="{Binding Title}"
+                     AutomationProperties.AutomationId="question-card-title" />
+          <TextBlock Classes="caption"
+                     Text="{Binding AskedByText}"
+                     TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="caption"
+                     Text="{Binding SessionTitle}"
+                     TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding SessionTitle}" />
+          <ItemsControl ItemsSource="{Binding Questions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="ap:QuestionItemViewModel">
+                <StackPanel Spacing="4" Margin="0,6,0,0">
+                  <Border Classes="notice" HorizontalAlignment="Left" Padding="6,1">
+                    <TextBlock Classes="caption" Text="{Binding Header}" />
+                  </Border>
+                  <TextBlock Text="{Binding Prompt}" TextWrapping="Wrap" />
+                  <TextBlock Classes="caption"
+                             IsVisible="{Binding MultiSelect}"
+                             Text="{Binding [questions.card.multiHint], Source={x:Static loc:Loc.Instance}}" />
+                  <ItemsControl ItemsSource="{Binding Options}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="ap:QuestionOptionViewModel">
+                        <StackPanel Margin="0,2,0,0">
+                          <RadioButton IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                       Content="{Binding Label}"
+                                       IsVisible="{Binding IsSingle}" />
+                          <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                    Content="{Binding Label}"
+                                    IsVisible="{Binding IsMulti}" />
+                          <TextBlock Classes="caption"
+                                     Margin="28,0,0,0"
+                                     IsVisible="{Binding HasDescription}"
+                                     Text="{Binding Description}"
+                                     TextWrapping="Wrap" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBox IsVisible="{Binding AllowFreeText}"
+                           Text="{Binding FreeText, Mode=TwoWay}"
+                           AcceptsReturn="False"
+                           PlaceholderText="{Binding [questions.card.freeText], Source={x:Static loc:Loc.Instance}}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <WrapPanel Margin="0,6,0,0">
+            <Button Classes="primary"
+                    Margin="0,0,6,6"
+                    Command="{Binding SubmitCommand}"
+                    Content="{Binding [questions.card.submit], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="question-submit"
+                    AutomationProperties.Name="{Binding [questions.card.submit], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding DismissCommand}"
+                    Content="{Binding [questions.card.dismiss], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="question-dismiss"
+                    AutomationProperties.Name="{Binding [questions.card.dismiss], Source={x:Static loc:Loc.Instance}}" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+
     <!-- One staged extension: full text of a new draft, per-file diff of an update, permissions, dependencies and hashes. -->
     <DataTemplate DataType="ap:ExtensionApprovalCardViewModel" x:DataType="ap:ExtensionApprovalCardViewModel">
       <Border Classes="turn-card" Padding="10" Margin="0,0,0,8">

@@ -47,7 +47,8 @@ public static class ProviderModelListing
 
     /// <summary>Fetches and parses one provider's model list.</summary>
     /// <param name="baseUrl">The provider's API root, with or without a trailing slash; <c>/models</c> is appended.</param>
-    /// <param name="headers">Headers to send verbatim (an existing header of the same name is replaced); may be null.</param>
+    /// <param name="headers">Headers to send (an existing header of the same name is replaced); may be null. A value that needs
+    /// <c>{session}</c> is left out: a listing belongs to no session.</param>
     /// <param name="http">The client to use; its own timeout should be <see cref="Timeout.InfiniteTimeSpan"/> since the call enforces its own.</param>
     /// <param name="ct">Cancelling it cancels the call and is not reported as a timeout.</param>
     /// <exception cref="TimeoutException">The call did not finish within twenty seconds; the caller may retry.</exception>
@@ -70,12 +71,7 @@ public static class ProviderModelListing
         using var message = new HttpRequestMessage(HttpMethod.Get, new Uri(trimmed + "/models", UriKind.Absolute));
         if (headers is { Count: > 0 })
         {
-            foreach (var (name, value) in headers)
-            {
-                // Replace, not append: the caller's header is the one that must go out.
-                message.Headers.Remove(name);
-                message.Headers.TryAddWithoutValidation(name, value);
-            }
+            ProviderHeaders.Apply(message, headers, sessionId: null);
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);

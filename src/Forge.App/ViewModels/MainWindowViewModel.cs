@@ -181,6 +181,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Settings = new SettingsViewModel(composition);
         instruments = new SessionInstrumentSources(composition, CountPendingApprovals, OpenSettingsSection);
         composition.ActiveSessionTools = () => activeSession?.ToolNames() ?? [];
+        composition.ActiveSessionToolCatalog = () => activeSession?.DescribeTools() ?? [];
         composition.ActiveSessionWorkspace = () => activeSession?.WorkDir;
         if (ApprovalServices.Current is { } approvalServices)
         {
@@ -452,6 +453,17 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 NotificationsStrings.PreferencesProblemTitle,
                 LocText.Literal(preferencesProblem),
                 "preferences-problem");
+        }
+
+        // Invalid network values silently falling back to the system resolver or proxy would route traffic somewhere the
+        // user did not choose, so it gets the same one toast.
+        if (composition.NetworkProblem is { Length: > 0 } networkProblem)
+        {
+            composition.Notifications.Notify(
+                NotificationLevel.Warning,
+                Forge.App.Localization.NetworkStrings.LoadProblemTitle,
+                LocText.Literal(Loc.Instance.Format(Forge.App.Localization.NetworkStrings.LoadProblem, networkProblem)),
+                "network-problem");
         }
 
         await RunStartupLifecycleAsync().ConfigureAwait(true);
@@ -896,7 +908,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private async Task OpenSessionAsync(SessionInfo info, CancellationToken ct)
     {
-        (string Draft, IReadOnlyList<string> Queued)? carried = null;
+        ComposerCarry? carried = null;
         if (sessions.TryGetValue(info.Id, out var existing))
         {
             if (!(existing.IsReadOnlyView && info.Status == SessionStatus.Active) || existing.IsRunning)

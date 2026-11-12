@@ -28,6 +28,9 @@ public sealed record AgentHostOptions
 
     public IApprovalHandler? ApprovalHandler { get; init; }
 
+    /// <summary>The UI side of <c>ask_user</c>; the tool is registered only when this is set.</summary>
+    public IUserQuestionHandler? QuestionHandler { get; init; }
+
     public ISessionStore? Store { get; init; }
 
     public IArtifactStore? Artifacts { get; init; }
@@ -65,6 +68,12 @@ public sealed record AgentHostOptions
     public bool IncludeRetrievalTools { get; init; } = true;
 
     /// <summary>
+    /// Tool names switched off from the start (built-in or external); <see cref="AgentHost.SetDisabledTools"/> changes the
+    /// set later. A disabled tool is neither offered to the model nor callable through the host.
+    /// </summary>
+    public IEnumerable<string>? DisabledTools { get; init; }
+
+    /// <summary>
     /// Receives the usage of each instance's first model request in this process (section 8.3.5). Null writes
     /// <see cref="FirstRequestCacheReport.ToString"/> to <see cref="System.Diagnostics.Trace"/>, the host's diagnostics channel.
     /// </summary>
@@ -89,6 +98,7 @@ public sealed class AgentHost
     public AgentHost(AgentHostOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        options.Options.Compaction.Validate();
         this.options = options.Options;
         catalog = new AgentCatalog(options.Agents);
         layers = options.Layers;
@@ -115,6 +125,11 @@ public sealed class AgentHost
             builtIns.Add(new TodoTool(todos, options.StepCommitter));
         }
 
+        if (options.QuestionHandler is { } questionHandler)
+        {
+            builtIns.Add(new AskUserTool(questionHandler));
+        }
+
         scheduler = new SubAgentScheduler(catalog, layers, composer, options.Store, this.options);
         builtIns.Add(new SpawnAgentTool(scheduler, catalog.All));
         builtIns.Add(new SubAgentSteerTool(scheduler));
@@ -127,12 +142,16 @@ public sealed class AgentHost
                                 summaryStore,
                                 options.Providers,
                                 options.TokenCounter,
-                                this.options.CompactionTargetRatio,
                                 summarizerPrompt: options.Templates?.FindSlot(Prompts.Templates.PromptSlotIds.CompactionSummarizer))
                             : NoopCompactor.Instance);
 
         toolSurface = new ToolSurface(builtIns);
         toolSurface.ReplaceExternal(options.Tools);
+        if (options.DisabledTools is { } disabledTools)
+        {
+            toolSurface.SetDisabled(disabledTools);
+        }
+
         loop = new AgentLoop(new AgentLoopServices(
             options.Providers,
             toolSurface,
@@ -195,6 +214,15 @@ public sealed class AgentHost
     public void ReplaceExternalTools(IEnumerable<ITool> tools) => toolSurface.ReplaceExternal(tools);
 
     /// <summary>
+    /// Switches the named tools off and every other name back on; a no-op when the set is unchanged, so the prompt cache only
+    /// breaks when a switch really moved. Applies to the root and every sub-agent of this host from their next model request.
+    /// </summary>
+    public void SetDisabledTools(IEnumerable<string> names) => toolSurface.SetDisabled(names);
+
+    /// <summary>Every tool registered with this host, disabled ones included: the Core built-ins, then the external tools.</summary>
+    public (IReadOnlyList<ITool> BuiltIns, IReadOnlyList<ITool> External) AllTools => (toolSurface.BuiltIns, toolSurface.External);
+
+    /// <summary>
     /// <c>prefix_fingerprint</c> of what <paramref name="instance"/>'s next request would send ahead of its messages: its
     /// stable system prompt and the tool definitions it sees right now. Equal fingerprints mean the prompt cache of one
     /// session can serve the other; the loop writes the same value back to the session whenever it changes.
@@ -254,17 +282,50 @@ public sealed class AgentHost
     }
 
     /// <summary>
+    /// Manual compaction of <paramref name="instance"/> (the <c>/compact</c> command): ignores the threshold and whether
+    /// automatic compaction is enabled, summarizes everything but the newest keepRecent tokens, then re-enables automatic
+    /// compaction for the instance. The caller must not run a turn of the same instance concurrently. Null when there was
+    /// nothing to compact; <see cref="AgentCompacted"/> is reported through <paramref name="sink"/> when it did; throws
+    /// <see cref="CompactionFailedException"/> when the summary could not be produced (nothing changed then).
+    /// </summary>
+    public Task<CompactionResult?> CompactAsync(AgentInstance instance, IAgentEventSink? sink, CancellationToken ct) =>
+        CompactAsync(instance, sink, null, ct);
+
+    /// <summary>
+    /// <see cref="CompactAsync(AgentInstance, IAgentEventSink?, CancellationToken)"/> with the user's focus text
+    /// (<c>/compact &lt;text&gt;</c>), appended to the summarizer prompts as "Additional focus".
+    /// </summary>
+    public Task<CompactionResult?> CompactAsync(AgentInstance instance, IAgentEventSink? sink, string? instructions, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        return loop.CompactNowAsync(instance, sink, instructions, ct);
+    }
+
+    /// <summary>
     /// Runs one user turn of <paramref name="root"/> and yields every event of the root and of the
     /// sub-agents it spawns. Abandoning the enumeration cancels the run; failures arrive as
     /// <see cref="AgentFailed"/>, cancellation just ends the stream.
     /// </summary>
-    public async IAsyncEnumerable<AgentEvent> RunAsync(
+    public IAsyncEnumerable<AgentEvent> RunAsync(
         AgentInstance root,
         string userText,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(userText);
+        return RunAsync(root, ChatMessage.User(userText), ct);
+    }
+
+    /// <summary>
+    /// Runs one user turn whose message is already built (text plus attached images); otherwise the same as the text
+    /// overload.
+    /// </summary>
+    public async IAsyncEnumerable<AgentEvent> RunAsync(
+        AgentInstance root,
+        ChatMessage userMessage,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(root);
-        ArgumentNullException.ThrowIfNull(userText);
+        ArgumentNullException.ThrowIfNull(userMessage);
 
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var channel = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
@@ -279,7 +340,7 @@ public sealed class AgentHost
             {
                 try
                 {
-                    await loop.RunAsync(root, ChatMessage.User(userText), sink, token).ConfigureAwait(false);
+                    await loop.RunAsync(root, userMessage, sink, token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {

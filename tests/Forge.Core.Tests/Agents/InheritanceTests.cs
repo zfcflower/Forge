@@ -115,8 +115,8 @@ public class InheritanceTests
         var store = new LineageTestStore();
         var answer = new string('a', 800);
         var provider = new FakeProvider((request, index) =>
-            request.SystemPrompt == SummaryCompactor.SummarizerPrompt ? Turn.Say("PARENT-SUMMARY") : Turn.Say(answer));
-        var options = new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 };
+            request.SystemPrompt == SummaryCompactor.SummarizerPrompt ? Turn.Say("PARENT-SUMMARY") : Turn.Say(answer, TokenUsage.Empty));
+        var options = CompactionWindows.Legacy(200, maxTurns: 4);
         var host = AgentTestHost.Create(provider, options: options, store: store);
 
         var parent = await store.CreateSessionAsync(Workspace, "parent", CancellationToken.None);
@@ -266,9 +266,9 @@ public class InheritanceTests
                 return Turn.Say("CHILD-SUMMARY");
             }
 
-            return Turn.Say(answer);
+            return Turn.Say(answer, TokenUsage.Empty);
         });
-        var host = AgentTestHost.Create(provider, options: new AgentOptions { CompactionThresholdTokens = 300, MaxTurns = 4 }, store: store);
+        var host = AgentTestHost.Create(provider, options: CompactionWindows.Legacy(300, maxTurns: 4), store: store);
         var root = await host.ResumeRootAsync(child.Id, Workspace, ct);
         var inherited = Wire(root.History);
         Assert.Equal(2, inherited.Length);

@@ -69,14 +69,40 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public IReadOnlyList<ITool> FileTools { get; set; } = [];
 
+    // --- web tools (web_fetch / web_search) ---
+    /// <summary>
+    /// Produces the web tools when a session assembles its tool surface: <c>web_fetch</c> always, <c>web_search</c> only
+    /// while a backend is configured with its key or URL. Null in a unit test: no web tools. Both always ask for approval
+    /// (see <c>CreatePolicy</c>): network egress can carry data out.
+    /// </summary>
+    public Func<IReadOnlyList<ITool>>? WebTools { get; set; }
+    // --- end web tools ---
+
     /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
     /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
     /// </summary>
     public SessionToolCallRouter? ToolRouter { get; set; }
 
+    /// <summary>
+    /// Names of the tools the user switched off in the Tools settings section; read before every turn and handed to
+    /// <see cref="AgentHost.SetDisabledTools"/> (a no-op when unchanged). Null = every tool on (a unit test).
+    /// </summary>
+    public Func<IReadOnlyList<string>>? DisabledTools { get; set; }
+
     /// <summary>The message-breakpoint prompt-cache TTL (<c>provider.promptCacheTtl</c>) handed to <see cref="AgentOptions.MessageCacheTtl"/>; null = provider default.</summary>
     public string? MessageCacheTtl { get; set; }
+
+    // --- compaction (feature B) ---
+    /// <summary>Effective context window of a model (the catalog's resolution chain); null = unknown, no automatic compaction.</summary>
+    public Func<ModelSettings, int?>? ContextWindow { get; set; }
+
+    /// <summary>Largest output of a model when its settings do not pin one; null = unknown (the reserve is then 20% of the window).</summary>
+    public Func<ModelSettings, int?>? MaxOutputTokens { get; set; }
+
+    /// <summary>The <c>compaction</c> settings, read when a session's host is built; null = the defaults.</summary>
+    public Func<CompactionSettings>? Compaction { get; set; }
+    // --- end compaction ---
 
     public static string? UserDirectory()
     {
@@ -100,8 +126,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private AgentInstance? activeRoot;
     private AgentDefinition? rootDefinition;
     private bool rootStale;
-    private List<string>? undelivered;
+    private List<Interjection>? undelivered;
     private SessionApprovalHandler? approvalHandler;
+    private SessionQuestionHandler? questionHandler;
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
     private bool disposed;
@@ -139,10 +166,25 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     public Task<IReadOnlyList<SessionInfo>> QueryChildrenAsync(string parentSessionId, CancellationToken ct) =>
         services.Catalog.QueryAsync(new SessionQuery { ParentSessionId = parentSessionId }, ct);
 
-    public async Task RunTurnAsync(string userText, Action<AgentEvent> sink, CancellationToken ct)
+    public Task RunTurnAsync(string userText, Action<AgentEvent> sink, CancellationToken ct) =>
+        RunTurnAsync(userText, [], sink, ct);
+
+    /// <summary>
+    /// Runs one user turn whose message is <paramref name="userText"/> followed by <paramref name="attachments"/> (images,
+    /// files, inlined text files). The text may be empty only when at least one attachment is present.
+    /// </summary>
+    public async Task RunTurnAsync(
+        string userText, IReadOnlyList<ContentBlock> attachments, Action<AgentEvent> sink, CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(userText);
+        ArgumentNullException.ThrowIfNull(userText);
+        ArgumentNullException.ThrowIfNull(attachments);
+        if (attachments.Count == 0)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(userText);
+        }
+
         ArgumentNullException.ThrowIfNull(sink);
+        var message = UserMessage(userText, attachments);
 
         var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
         lock (gate)
@@ -155,7 +197,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             await Task.Run(
                     async () =>
                     {
-                        await foreach (var value in agentHost.RunAsync(agent, userText, ct).ConfigureAwait(false))
+                        await foreach (var value in agentHost.RunAsync(agent, message, ct).ConfigureAwait(false))
                         {
                             TrackSubAgent(value);
                             sink(value);
@@ -177,6 +219,29 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 }
             }
         }
+    }
+
+    /// <summary>The user message of a turn: the text block (when there is text), then the attachments in attaching order.</summary>
+    internal static ChatMessage UserMessage(string text, IReadOnlyList<ContentBlock> attachments)
+    {
+        if (attachments.Count == 0)
+        {
+            return ChatMessage.User(text);
+        }
+
+        return new ChatMessage(MessageRole.User, UserContent(text, attachments));
+    }
+
+    private static List<ContentBlock> UserContent(string text, IReadOnlyList<ContentBlock> attachments)
+    {
+        var content = new List<ContentBlock>(attachments.Count + 1);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            content.Add(new TextBlock(text));
+        }
+
+        content.AddRange(attachments);
+        return content;
     }
 
     /// <summary>
@@ -247,9 +312,23 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// Hands a user message to the running root turn; the loop delivers it at the next tool-batch boundary. False when no
     /// turn is running, in which case the caller should queue the message instead.
     /// </summary>
-    public bool TryInterject(string text)
+    public bool TryInterject(string text) => TryInterject(text, []);
+
+    /// <summary>
+    /// Hands a user message with attachments (images, files, inlined text files) to the running root turn, delivered with
+    /// them at the next tool-batch boundary. The text may be empty only when an attachment is present. False when no turn
+    /// is running.
+    /// </summary>
+    public bool TryInterject(string text, IReadOnlyList<ContentBlock> attachments)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(attachments);
+        if (attachments.Count == 0)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        }
+
+        var content = UserContent(text, attachments);
         lock (gate)
         {
             if (disposed || activeRoot is null)
@@ -257,10 +336,54 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 return false;
             }
 
-            activeRoot.Interject(text);
+            activeRoot.Interject(content);
             return true;
         }
     }
+
+    // --- compaction (feature B) ---
+    /// <summary>
+    /// Manual compaction of the root context (<c>/compact [focus]</c>, the context gauge): ignores the threshold and the
+    /// automatic-compaction switch, keeps the newest keepRecent tokens verbatim, passes <paramref name="instructions"/> to
+    /// the summarizer as additional focus and re-enables automatic compaction. Returns null when nothing was compacted.
+    /// Throws <see cref="InvalidOperationException"/> while a turn runs (the caller offers it only when the session is
+    /// idle) and <see cref="CompactionFailedException"/> when no usable summary came back.
+    /// </summary>
+    public async Task<CompactionResult?> CompactNowAsync(Action<AgentEvent> sink, CancellationToken ct) =>
+        await CompactNowAsync(sink, null, ct).ConfigureAwait(false);
+
+    /// <inheritdoc cref="CompactNowAsync(Action{AgentEvent}, CancellationToken)"/>
+    public async Task<CompactionResult?> CompactNowAsync(Action<AgentEvent> sink, string? instructions, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
+        lock (gate)
+        {
+            if (activeRoot is not null)
+            {
+                throw new InvalidOperationException("A turn is running.");
+            }
+
+            activeRoot = agent;
+        }
+
+        try
+        {
+            return await Task.Run(() => agentHost.CompactAsync(agent, new ForwardingSink(sink), instructions, ct), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                if (ReferenceEquals(activeRoot, agent))
+                {
+                    activeRoot = null;
+                }
+            }
+        }
+    }
+    // --- end compaction ---
 
     /// <summary>Whether interjections wait to be taken (a busy reason of the handover check); does not take them.</summary>
     public bool HasUndeliveredInterjections
@@ -274,8 +397,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
-    /// <summary>Interjections the last turn ended without delivering, oldest first; each is returned once.</summary>
-    public IReadOnlyList<string> TakeUndeliveredInterjections()
+    /// <summary>Interjections the last turn ended without delivering, oldest first, with their attachments; each is returned once.</summary>
+    public IReadOnlyList<Interjection> TakeUndeliveredInterjections()
     {
         lock (gate)
         {
@@ -340,6 +463,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             ObjectDisposedException.ThrowIf(disposed, this);
             if (host is not null && root is not null && !rootStale)
             {
+                ApplyDisabledTools(host);
                 return (host, root);
             }
 
@@ -354,6 +478,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
             host ??= built;
             root = agent;
+            ApplyDisabledTools(host);
             rootStale = !SameDefinition(rootDefinition, definition);
 
             // Subscribed here rather than in Build: a registration that arrives before the host field is set would otherwise
@@ -368,6 +493,15 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    /// <summary>Re-applies the user's tool switches; publishes a new tool set only when a switch moved.</summary>
+    private void ApplyDisabledTools(AgentHost target)
+    {
+        if (services.DisabledTools is { } disabled)
+        {
+            target.SetDisabledTools(ToolCatalog.EffectiveDisabled(disabled()));
+        }
+    }
+
     private AgentHost Build()
     {
         var handler = services.Approvals?.CreateHandler(Session);
@@ -375,6 +509,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         // A retried build (the first resume failed) replaces the handler; the old one must not keep a dead wait alive.
         approvalHandler?.Dispose();
         approvalHandler = handler;
+        questionHandler?.Dispose();
+        questionHandler = services.Approvals?.CreateQuestionHandler(Session);
 
         // One snapshot per build: the system slot, the agent kinds and the compaction prompt stay fixed for this host.
         var templates = services.PromptTemplates?.Resolve(Session.WorkspacePath)
@@ -385,9 +521,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             {
                 Providers = services.ProviderFactory,
                 Tools = BuildTools(),
+                DisabledTools = services.DisabledTools is { } disabledTools ? ToolCatalog.EffectiveDisabled(disabledTools()) : null,
                 Layers = layers,
                 Policy = SessionPolicy,
                 ApprovalHandler = handler,
+                QuestionHandler = questionHandler,
                 Store = services.Store,
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
@@ -398,6 +536,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 {
                     DefaultModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model,
                     MessageCacheTtl = services.MessageCacheTtl,
+                    // compaction (feature B): thresholds relative to each model's effective window.
+                    Compaction = (services.Compaction?.Invoke() ?? CompactionSettings.Default)
+                        .ToPolicy(services.ContextWindow, services.MaxOutputTokens),
                 },
             });
 
@@ -464,6 +605,89 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    /// <summary>
+    /// Every tool this session registers, switched-off ones included, with where it comes from; the Tools settings section
+    /// groups them and offers a switch on each built-in. Empty until the first turn built the agent host.
+    /// </summary>
+    internal IReadOnlyList<ToolDescriptor> DescribeTools()
+    {
+        AgentHost? current;
+        lock (gate)
+        {
+            current = disposed ? null : builtHost;
+        }
+
+        if (current is null)
+        {
+            return [];
+        }
+
+        var (builtIns, external) = current.AllTools;
+        var descriptors = new List<ToolDescriptor>(builtIns.Count + 32);
+        foreach (var tool in builtIns)
+        {
+            descriptors.Add(ToolCatalog.DescribeCore(tool.Definition.Name));
+        }
+
+        // Classified by the list each tool came from rather than by name, so a plugin cannot pose as a built-in. Collected
+        // afresh (not read from the host) because the host keeps no record of the source list.
+        DescribeExternal(descriptors);
+
+        // The web tools are built per host (web_search only while a backend is configured), so they are read from what the
+        // host actually holds instead of calling the factory again.
+        foreach (var tool in external)
+        {
+            if (tool.Definition.Name is Forge.Core.Tools.Web.WebFetchTool.Name or Forge.Core.Tools.Web.WebSearchTool.Name)
+            {
+                descriptors.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Web));
+            }
+        }
+
+        return descriptors;
+    }
+
+    private void DescribeExternal(List<ToolDescriptor> into)
+    {
+        if (services.HostClient is { } client)
+        {
+            foreach (var tool in client.Tools)
+            {
+                into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.Extension, ToolGroups.Extensions, CanDisable: false));
+            }
+
+            if (client.Tools.Count > 0)
+            {
+                into.Add(new ToolDescriptor(ToolCatalog.RunCode, ToolOrigin.BuiltIn, ToolGroups.Extensions));
+            }
+
+            if (services.Approvals?.Extensions is not null)
+            {
+                foreach (var name in (string[])[ExtensionToolNames.List, ExtensionToolNames.Create, ExtensionToolNames.Update, ExtensionToolNames.Disable, ExtensionToolNames.Delete])
+                {
+                    into.Add(new ToolDescriptor(name, ToolOrigin.BuiltIn, ToolGroups.Extensions));
+                }
+            }
+        }
+
+        if (services.Git is { } git)
+        {
+            foreach (var tool in git.All)
+            {
+                into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Git));
+            }
+        }
+
+        foreach (var tool in services.FileTools)
+        {
+            into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Files));
+        }
+
+        foreach (var tool in services.PullRequestTools)
+        {
+            into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.PullRequests));
+        }
+    }
+
     // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
     IApprovalPolicy ISessionToolScope.Policy => SessionPolicy;
 
@@ -520,6 +744,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
         tools.AddRange(services.FileTools);
         tools.AddRange(services.PullRequestTools);
+        if (services.WebTools is { } webTools)
+        {
+            tools.AddRange(webTools());
+        }
+
         return tools;
     }
 
@@ -562,6 +791,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         SessionApprovalHandler? handler;
         ExtensionHostClient? client;
+        SessionQuestionHandler? questionDisposable;
         string[] aliases;
         lock (gate)
         {
@@ -573,6 +803,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             root = null;
             handler = approvalHandler;
             approvalHandler = null;
+            questionDisposable = questionHandler;
+            questionHandler = null;
             client = listenedClient;
             listenedClient = null;
         }
@@ -590,6 +822,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
         // Releasing the runtime withdraws this session's approval cards; every waiting loop then sees a denial.
         handler?.Dispose();
+        questionDisposable?.Dispose();
     }
 
     /// <summary>
@@ -609,6 +842,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         var rules = new Dictionary<string, ApprovalMode>(StringComparer.Ordinal)
         {
             [TodoTool.Name] = ApprovalMode.Allow,
+            [AskUserTool.Name] = ApprovalMode.Allow,
+
+            // Read-only, but a prompt-injected URL or query can carry workspace content out, so these always ask.
+            [Forge.Core.Tools.Web.WebFetchTool.Name] = ApprovalMode.Ask,
+            [Forge.Core.Tools.Web.WebSearchTool.Name] = ApprovalMode.Ask,
         };
         foreach (var name in ExtensionToolNames.AllowedWithoutAsking)
         {

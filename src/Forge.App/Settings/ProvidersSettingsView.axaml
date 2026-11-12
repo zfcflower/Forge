@@ -76,6 +76,62 @@
                  Text="{Binding DefaultContextWindowHint}" />
     </StackPanel>
 
+    <!-- Automatic compaction: trigger and target in percent of each model's usable window (the window above caps it). -->
+    <StackPanel Spacing="3" DataContext="{Binding Compaction}" x:DataType="settings:CompactionSettingsViewModel">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10">
+        <CheckBox Grid.Column="0"
+                  IsChecked="{Binding Enabled, Mode=TwoWay}"
+                  Content="{Binding EnabledLabel}"
+                  FontSize="{DynamicResource FontSizeSm}"
+                  VerticalAlignment="Center"
+                  AutomationProperties.AutomationId="providers-compaction-enabled" />
+        <TextBlock Grid.Column="1"
+                   Text="{Binding TriggerLabel}"
+                   Foreground="{DynamicResource TextSecondaryBrush}"
+                   FontSize="{DynamicResource FontSizeSm}"
+                   VerticalAlignment="Center" />
+        <TextBox Grid.Column="2"
+                 Width="64"
+                 Text="{Binding TriggerText, Mode=TwoWay}"
+                 IsEnabled="{Binding Enabled}"
+                 LostFocus="OnCompactionCommit"
+                 KeyDown="OnCompactionKeyDown"
+                 AutomationProperties.AutomationId="providers-compaction-trigger"
+                 AutomationProperties.Name="{Binding TriggerLabel}" />
+        <TextBlock Grid.Column="3"
+                   Text="{Binding TargetLabel}"
+                   Foreground="{DynamicResource TextSecondaryBrush}"
+                   FontSize="{DynamicResource FontSizeSm}"
+                   VerticalAlignment="Center" />
+        <TextBox Grid.Column="4"
+                 Width="64"
+                 Text="{Binding TargetText, Mode=TwoWay}"
+                 IsEnabled="{Binding Enabled}"
+                 LostFocus="OnCompactionCommit"
+                 KeyDown="OnCompactionKeyDown"
+                 AutomationProperties.AutomationId="providers-compaction-target"
+                 AutomationProperties.Name="{Binding TargetLabel}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource DangerBrush}"
+                 IsVisible="{Binding HasTriggerError}"
+                 Text="{Binding TriggerError}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource DangerBrush}"
+                 IsVisible="{Binding HasTargetError}"
+                 Text="{Binding TargetError}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource DangerBrush}"
+                 IsVisible="{Binding HasSaveError}"
+                 Text="{Binding SaveError}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding Hint}" />
+    </StackPanel>
+
     <!-- The fetched catalog: the layer between the compiled table and what a provider reports. -->
     <StackPanel Spacing="3">
       <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">

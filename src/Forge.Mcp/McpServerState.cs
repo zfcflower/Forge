@@ -41,4 +41,10 @@ public sealed class McpServerManagerOptions
 
     /// <summary>Replaces the built-in transport creation, e.g. for tests or a custom socket.</summary>
     public Func<McpServerConfig, IMcpTransport>? TransportFactory { get; init; }
+
+    /// <summary>
+    /// The client every HTTP server's transport uses (the host routes it through its network stack: resolver and proxy).
+    /// Not owned by the manager. Null keeps the transport's own shared client.
+    /// </summary>
+    public HttpClient? HttpClient { get; init; }
 }

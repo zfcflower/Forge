@@ -7,7 +7,9 @@ public sealed record SummaryRange(long FromSeq, long ToSeq);
 
 /// <summary>
 /// The context a model sees for a compacted session: an optional layer-2 session summary, the live
-/// layer-1 stage summaries, and the raw messages that start after the last summarized sequence.
+/// layer-1 stage summaries, and the raw messages that start after the last summarized sequence. The current
+/// compactor only writes layer-2 records that cover the session from its start, so a view it leaves behind has no
+/// stage summaries; layer-1 records come from sessions compacted by earlier versions and are still read.
 /// </summary>
 public sealed record ContextView(
     SummaryRecord? SessionSummary,
@@ -18,28 +20,20 @@ public sealed record ContextView(
 }
 
 /// <summary>
-/// Work required to stay inside a token budget. <see cref="Promote"/> is the oldest still-raw range
-/// that must become a new layer-1 summary; <see cref="Fold"/> holds the oldest layer-1 records that
-/// must be rolled into a new layer-2 record covering <see cref="FoldRange"/>. Existing records are
-/// never rewritten: a later record with a wider range supersedes them.
+/// Where a compaction cuts the still-raw tail (indices into the raw list, ascending). Messages before
+/// <see cref="KeepFrom"/> are summarized and the rest stays raw. When the kept tail starts inside an interaction
+/// (a split turn), <see cref="TurnStart"/> is the index of the user message that opened it: messages before it are
+/// the history part and <c>[TurnStart, KeepFrom)</c> is the turn prefix, summarized separately; otherwise it is -1.
 /// </summary>
-public sealed record CompactionPlan(
-    SummaryRange? Promote,
-    IReadOnlyList<SummaryRecord> Fold,
-    SummaryRange? FoldRange)
+public readonly record struct CompactionCut(int KeepFrom, int TurnStart)
 {
-    public static CompactionPlan None { get; } = new(null, [], null);
+    public bool IsSplitTurn => TurnStart >= 0;
 
-    public bool IsIdle => Promote is null && Fold.Count == 0;
-
-    /// <summary>
-    /// True when the context is over budget and this plan cannot reduce it any further: the caller has
-    /// to accept the overshoot instead of planning another round.
-    /// </summary>
-    public bool CannotSatisfy { get; init; }
+    /// <summary>End (exclusive) of the history part: everything summarized as ordinary history.</summary>
+    public int HistoryEnd => IsSplitTurn ? TurnStart : KeepFrom;
 }
 
-/// <summary>Pure planning helpers over stored <see cref="SummaryRecord"/> layers.</summary>
+/// <summary>Pure helpers over stored <see cref="SummaryRecord"/> layers and the raw tail.</summary>
 public static class SummaryLayers
 {
     public const int SessionLayer = 2;
@@ -96,128 +90,82 @@ public static class SummaryLayers
     }
 
     /// <summary>
-    /// Decides what to compact next. <paramref name="messages"/> is the raw tail (ascending); only
-    /// messages after the last summarized sequence are considered. <paramref name="countTokens"/> is
-    /// applied to the message text and to summary text. A promoted range never splits a tool
-    /// interaction: an assistant message with tool calls and the tool results answering it are either
-    /// summarized together or kept raw together, so the raw tail never starts with an orphan result.
-    /// Stage summaries are folded when they outnumber <paramref name="maxStageSummaries"/> or when
-    /// summary text alone exceeds <paramref name="tokenBudget"/>.
+    /// Chooses the cut of the raw tail <paramref name="raw"/> (ascending, all unsummarized): the longest suffix that
+    /// starts at a valid cut point and costs no more than max(<paramref name="keepRecentTokens"/>,
+    /// <paramref name="rawBudget"/>) stays raw, the rest is summarized. A valid cut point is a user or assistant message
+    /// other than the first one, never a tool result, so a tool call and its results are never separated and the raw
+    /// tail never starts with an orphan result. When no suffix fits, the cut keeps only the newest valid suffix. Null
+    /// when the whole tail already fits or there is no valid cut point at all. A cut at an assistant message after a
+    /// user message in <paramref name="raw"/> is a split turn (<see cref="CompactionCut.TurnStart"/>).
     /// </summary>
-    public static CompactionPlan Plan(
-        IReadOnlyList<SummaryRecord> summaries,
-        IReadOnlyList<StoredMessage> messages,
-        long lastSeq,
-        int tokenBudget,
-        Func<string, int> countTokens,
-        int maxStageSummaries = 8)
+    public static CompactionCut? PlanCut(
+        IReadOnlyList<StoredMessage> raw,
+        int rawBudget,
+        int keepRecentTokens,
+        Func<ChatMessage, int> countTokens)
     {
-        ArgumentNullException.ThrowIfNull(summaries);
-        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(raw);
         ArgumentNullException.ThrowIfNull(countTokens);
-        ArgumentOutOfRangeException.ThrowIfNegative(tokenBudget);
-        ArgumentOutOfRangeException.ThrowIfLessThan(maxStageSummaries, 1);
-
-        var view = Build(summaries, lastSeq);
-        var summaryTokens = 0;
-        if (view.SessionSummary is not null)
+        ArgumentOutOfRangeException.ThrowIfNegative(keepRecentTokens);
+        if (raw.Count < 2)
         {
-            summaryTokens += Count(countTokens, view.SessionSummary.Text);
+            return null;
         }
 
-        foreach (var stage in view.StageSummaries)
+        var goal = (long)Math.Max(keepRecentTokens, rawBudget);
+        var suffix = new long[raw.Count + 1];
+        for (var index = raw.Count - 1; index >= 0; index--)
         {
-            summaryTokens += Count(countTokens, stage.Text);
+            suffix[index] = suffix[index + 1] + Math.Max(0, countTokens(raw[index].Message));
         }
 
-        var raw = new List<StoredMessage>(messages.Count);
-        var rawTokens = 0;
-        foreach (var message in messages)
+        if (suffix[0] <= goal)
         {
-            if (message.Seq <= view.LastSummarizedSeq || message.Seq > lastSeq)
+            return null;
+        }
+
+        var keepFrom = -1;
+        var newestValid = -1;
+        for (var index = 1; index < raw.Count; index++)
+        {
+            if (!IsCutPoint(raw[index].Message))
             {
                 continue;
             }
 
-            raw.Add(message);
-            rawTokens += Count(countTokens, MessageJson.ExtractFullText(message.Message));
-        }
-
-        raw.Sort(static (left, right) => left.Seq.CompareTo(right.Seq));
-
-        SummaryRange? promote = null;
-        var excess = summaryTokens + rawTokens - tokenBudget;
-        if (excess > 0 && raw.Count > 1)
-        {
-            var accumulated = 0;
-            var end = 0;
-            while (end < raw.Count - 1 && accumulated < excess)
+            newestValid = index;
+            if (keepFrom < 0 && suffix[index] <= goal)
             {
-                accumulated += Count(countTokens, MessageJson.ExtractFullText(raw[end].Message));
-                end++;
-            }
-
-            while (end < raw.Count - 1 && !IsInteractionBoundary(raw, end))
-            {
-                end++;
-            }
-
-            if (IsInteractionBoundary(raw, end))
-            {
-                promote = new SummaryRange(raw[0].Seq, raw[end - 1].Seq);
+                keepFrom = index;
             }
         }
 
-        var fold = new List<SummaryRecord>();
-        SummaryRange? foldRange = null;
-        var stages = view.StageSummaries;
-        var foldCount = 0;
-        if (stages.Count > maxStageSummaries)
+        if (keepFrom < 0)
         {
-            foldCount = stages.Count - maxStageSummaries;
-        }
-        else if (summaryTokens > tokenBudget && stages.Count > 0)
-        {
-            foldCount = 1;
+            keepFrom = newestValid;
         }
 
-        if (foldCount > 0)
+        if (keepFrom < 0)
         {
-            for (var index = 0; index < foldCount; index++)
+            return null;
+        }
+
+        var turnStart = -1;
+        if (raw[keepFrom].Message.Role == MessageRole.Assistant)
+        {
+            for (var index = keepFrom - 1; index >= 0; index--)
             {
-                fold.Add(stages[index]);
+                if (raw[index].Message.Role == MessageRole.User)
+                {
+                    turnStart = index;
+                    break;
+                }
             }
-
-            foldRange = new SummaryRange(view.SessionSummary?.FromSeq ?? fold[0].FromSeq, fold[^1].ToSeq);
         }
 
-        if (promote is null && fold.Count == 0)
-        {
-            return excess > 0 ? CompactionPlan.None with { CannotSatisfy = true } : CompactionPlan.None;
-        }
-
-        return new CompactionPlan(promote, fold, foldRange);
+        return new CompactionCut(keepFrom, turnStart);
     }
 
-    /// <summary>Text a new layer-1 record built from <paramref name="promote"/> would summarize.</summary>
-    public static IReadOnlyList<StoredMessage> Slice(IReadOnlyList<StoredMessage> messages, SummaryRange range)
-    {
-        ArgumentNullException.ThrowIfNull(messages);
-        var slice = new List<StoredMessage>((int)Math.Min(range.ToSeq - range.FromSeq + 1, int.MaxValue));
-        foreach (var message in messages)
-        {
-            if (message.Seq >= range.FromSeq && message.Seq <= range.ToSeq)
-            {
-                slice.Add(message);
-            }
-        }
-
-        return slice;
-    }
-
-    private static int Count(Func<string, int> countTokens, string text) =>
-        text.Length == 0 ? 0 : Math.Max(0, countTokens(text));
-
-    private static bool IsInteractionBoundary(IReadOnlyList<StoredMessage> messages, int index) =>
-        messages[index].Message.Role != MessageRole.Tool;
+    private static bool IsCutPoint(ChatMessage message) =>
+        message.Role is MessageRole.User or MessageRole.Assistant;
 }

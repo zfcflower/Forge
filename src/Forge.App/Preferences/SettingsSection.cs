@@ -105,6 +105,7 @@ internal static class SettingsSectionIds
     public const string Terminal = "terminal";
     public const string Git = "git";
     public const string Notifications = "notifications";
+    public const string Network = "network";
     public const string Extensions = "extensions";
     public const string Paths = "paths";
 
@@ -136,6 +137,7 @@ internal static class SettingsSectionIds
     /// <summary>The notification switch sits right after git: it is the one place a window-wide preference lives.</summary>
     public const int NotificationsOrder = 550;
 
+    public const int NetworkOrder = 580;
     public const int ExtensionsOrder = 600;
     public const int PathsOrder = 900;
 

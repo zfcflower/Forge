@@ -35,10 +35,12 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         AgentDefaultsStore? agentDefaults = null,
         ModelCatalogRefreshService? modelCatalogRefresh = null,
         Action<Action>? post = null,
-        Forge.App.Prompts.PromptTemplateService? promptTemplates = null)
+        Forge.App.Prompts.PromptTemplateService? promptTemplates = null,
+        CompactionSettingsStore? compaction = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
+        Compaction = new CompactionSettingsViewModel(compaction ?? new CompactionSettingsStore(services.Store.SettingsPath));
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
         this.modelCatalogRefresh = modelCatalogRefresh;
         // The settings page is global, so it lists the user agents of ~/.forge/agents; project agents belong to a session.
@@ -64,6 +66,9 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     internal ProviderServices Services => services;
 
     public AsyncRelayCommand RefreshCommand { get; }
+
+    /// <summary>The compaction block under the default context window: thresholds relative to each model's effective window.</summary>
+    public CompactionSettingsViewModel Compaction { get; }
 
     /// <summary>The connected providers, in stored order.</summary>
     public ObservableCollection<ProviderRowViewModel> Rows { get; } = [];
@@ -302,6 +307,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     {
         await services.ReloadAsync(cancellationToken).ConfigureAwait(true);
         agentDefaults.Reload();
+        Compaction.Reload();
         Reload();
     }
 
@@ -418,6 +424,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
         }
 
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        Compaction.Dispose();
     }
 
     /// <summary>The catalog or a refresh changed (from either thread): re-read the row through the injected post.</summary>

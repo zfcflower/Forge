@@ -4,154 +4,157 @@ using Xunit;
 
 namespace Forge.Core.Tests.Storage;
 
+/// <summary>The cut of the raw tail: what stays verbatim, where it may start, and when a turn is split.</summary>
 public class SummaryLayersRegressionTests
 {
     private static readonly DateTimeOffset Clock = new(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-    private static readonly Func<string, int> Chars = static text => text.Length;
+    private static readonly Func<ChatMessage, int> Chars = static message => MessageJson.ExtractFullText(message).Length;
 
     [Fact]
-    public void Single_tool_call_is_promoted_together_with_its_result()
+    public void A_tail_within_the_budget_is_not_cut()
     {
-        var messages = new List<StoredMessage>
+        var raw = Raw(User(40), Assistant(40));
+
+        Assert.Null(SummaryLayers.PlanCut(raw, rawBudget: 80, keepRecentTokens: 10, Chars));
+        Assert.Null(SummaryLayers.PlanCut(raw, rawBudget: 0, keepRecentTokens: 80, Chars));
+    }
+
+    [Fact]
+    public void Fewer_than_two_messages_are_never_cut()
+    {
+        Assert.Null(SummaryLayers.PlanCut(Raw(User(500)), 0, 0, Chars));
+        Assert.Null(SummaryLayers.PlanCut([], 0, 0, Chars));
+    }
+
+    [Fact]
+    public void The_longest_suffix_within_the_budget_stays_raw()
+    {
+        var raw = Raw(User(100), Assistant(100), User(10), Assistant(10));
+
+        var cut = SummaryLayers.PlanCut(raw, rawBudget: 25, keepRecentTokens: 5, Chars);
+
+        Assert.Equal(new CompactionCut(2, -1), cut);
+    }
+
+    [Fact]
+    public void Keep_recent_raises_what_stays_raw_above_a_smaller_budget()
+    {
+        var raw = Raw(User(100), Assistant(100), User(10), Assistant(10));
+
+        Assert.Equal(3, SummaryLayers.PlanCut(raw, rawBudget: -50, keepRecentTokens: 10, Chars)!.Value.KeepFrom);
+        Assert.Equal(2, SummaryLayers.PlanCut(raw, rawBudget: -50, keepRecentTokens: 20, Chars)!.Value.KeepFrom);
+        Assert.Equal(1, SummaryLayers.PlanCut(raw, rawBudget: -50, keepRecentTokens: 120, Chars)!.Value.KeepFrom);
+    }
+
+    [Fact]
+    public void The_cut_never_lands_on_a_tool_result_so_a_call_and_its_results_stay_together()
+    {
+        // Indices: 0 user, 1 assistant with two calls, 2 and 3 their results, 4 assistant.
+        var raw = Raw(
+            User(100),
+            Call("c1", "c2"),
+            Result("c1", 30),
+            Result("c2", 30),
+            Assistant(5));
+
+        // A budget of 40 would fit the suffix starting at the second result (35), but a result is no cut point.
+        var cut = SummaryLayers.PlanCut(raw, rawBudget: 40, keepRecentTokens: 1, Chars)!.Value;
+
+        Assert.Equal(4, cut.KeepFrom);
+        Assert.Equal(MessageRole.Assistant, raw[cut.KeepFrom].Message.Role);
+        Assert.NotEqual(MessageRole.Tool, raw[cut.KeepFrom].Message.Role);
+    }
+
+    [Fact]
+    public void A_cut_at_an_assistant_message_inside_one_interaction_is_a_split_turn()
+    {
+        // One user request followed by a long tool loop: no user message to cut at after the first one.
+        var raw = Raw(
+            User(20),
+            Call("c1"),
+            Result("c1", 400),
+            Call("c2"),
+            Result("c2", 400),
+            Call("c3"),
+            Result("c3", 30),
+            Assistant(20));
+
+        var cut = SummaryLayers.PlanCut(raw, rawBudget: 100, keepRecentTokens: 10, Chars)!.Value;
+
+        Assert.True(cut.IsSplitTurn);
+        Assert.Equal(0, cut.TurnStart);
+        Assert.Equal(5, cut.KeepFrom);
+        Assert.Equal(0, cut.HistoryEnd);
+        Assert.Equal(MessageRole.Assistant, raw[cut.KeepFrom].Message.Role);
+    }
+
+    [Fact]
+    public void A_split_turn_keeps_the_earlier_interactions_as_history()
+    {
+        var raw = Raw(User(50), Assistant(50), User(20), Call("c1"), Result("c1", 400), Assistant(30));
+
+        var cut = SummaryLayers.PlanCut(raw, rawBudget: 40, keepRecentTokens: 1, Chars)!.Value;
+
+        Assert.Equal(new CompactionCut(5, 2), cut);
+        Assert.Equal(2, cut.HistoryEnd);
+    }
+
+    [Fact]
+    public void A_cut_at_a_user_message_is_not_a_split_turn()
+    {
+        var raw = Raw(User(20), Call("c1"), Result("c1", 400), Assistant(20), User(10), Assistant(10));
+
+        var cut = SummaryLayers.PlanCut(raw, rawBudget: 25, keepRecentTokens: 1, Chars)!.Value;
+
+        Assert.Equal(new CompactionCut(4, -1), cut);
+        Assert.False(cut.IsSplitTurn);
+    }
+
+    [Fact]
+    public void A_tail_continuing_an_already_split_turn_is_not_split_again()
+    {
+        // The raw tail starts inside a turn whose user message was summarized by an earlier compaction.
+        var raw = Raw(Call("c1"), Result("c1", 400), Call("c2"), Result("c2", 30), Assistant(10));
+
+        var cut = SummaryLayers.PlanCut(raw, rawBudget: 50, keepRecentTokens: 1, Chars)!.Value;
+
+        Assert.Equal(new CompactionCut(2, -1), cut);
+    }
+
+    [Fact]
+    public void When_no_suffix_fits_only_the_newest_valid_suffix_stays_raw()
+    {
+        var raw = Raw(User(100), Assistant(100), User(500));
+
+        Assert.Equal(new CompactionCut(2, -1), SummaryLayers.PlanCut(raw, rawBudget: 10, keepRecentTokens: 10, Chars));
+    }
+
+    [Fact]
+    public void Without_a_cut_point_after_the_first_message_nothing_is_cut()
+    {
+        var raw = Raw(Call("c1"), Result("c1", 400));
+
+        Assert.Null(SummaryLayers.PlanCut(raw, rawBudget: 0, keepRecentTokens: 1, Chars));
+    }
+
+    private static ChatMessage User(int length) => ChatMessage.User(new string('u', length));
+
+    private static ChatMessage Assistant(int length) => ChatMessage.Assistant(new string('a', length));
+
+    private static ChatMessage Call(params string[] ids) =>
+        new(MessageRole.Assistant, [.. ids.Select(static id => (ContentBlock)new ToolCallBlock(id, "tool", string.Empty))]);
+
+    private static ChatMessage Result(string id, int length) =>
+        new(MessageRole.Tool, [new ToolResultBlock(id, new string('r', length))]);
+
+    private static List<StoredMessage> Raw(params ChatMessage[] messages)
+    {
+        var raw = new List<StoredMessage>(messages.Length);
+        for (var index = 0; index < messages.Length; index++)
         {
-            Stored(1, ChatMessage.User(new string('u', 100))),
-            Stored(2, new ChatMessage(MessageRole.Assistant, [new ToolCallBlock("c1", "tool", string.Empty)])),
-            Stored(3, new ChatMessage(MessageRole.Tool, [new ToolResultBlock("c1", "rr")])),
-            Stored(4, ChatMessage.User("newest")),
-        };
+            raw.Add(new StoredMessage(index + 1, messages[index], null, Clock.AddMinutes(index)));
+        }
 
-        var plan = SummaryLayers.Plan([], messages, 4, 9, Chars);
-
-        Assert.Equal(new SummaryRange(1, 3), plan.Promote);
-        Assert.False(plan.CannotSatisfy);
+        return raw;
     }
-
-    [Fact]
-    public void Parallel_tool_calls_are_promoted_with_every_result_and_never_split()
-    {
-        var messages = new List<StoredMessage>
-        {
-            Stored(1, ChatMessage.User(new string('u', 100))),
-            Stored(2, new ChatMessage(MessageRole.Assistant,
-            [
-                new ToolCallBlock("c1", "a", string.Empty),
-                new ToolCallBlock("c2", "b", string.Empty),
-            ])),
-            Stored(3, new ChatMessage(MessageRole.Tool, [new ToolResultBlock("c1", "x")])),
-            Stored(4, new ChatMessage(MessageRole.Tool, [new ToolResultBlock("c2", "y")])),
-            Stored(5, ChatMessage.User("newest")),
-        };
-
-        var plan = SummaryLayers.Plan([], messages, 5, 9, Chars);
-
-        Assert.Equal(new SummaryRange(1, 4), plan.Promote);
-    }
-
-    [Fact]
-    public void Newest_tool_result_without_a_following_user_message_is_kept_whole()
-    {
-        var messages = new List<StoredMessage>
-        {
-            Stored(1, ChatMessage.User(new string('u', 100))),
-            Stored(2, new ChatMessage(MessageRole.Assistant, [new ToolCallBlock("c1", "tool", string.Empty)])),
-            Stored(3, new ChatMessage(MessageRole.Tool, [new ToolResultBlock("c1", "rr")])),
-        };
-
-        var plan = SummaryLayers.Plan([], messages, 3, 0, Chars);
-
-        Assert.Null(plan.Promote);
-        Assert.Empty(plan.Fold);
-        Assert.True(plan.CannotSatisfy);
-    }
-
-    [Fact]
-    public void Over_budget_stage_summaries_fold_only_the_oldest_one_below_the_count_limit()
-    {
-        var summaries = new List<SummaryRecord>
-        {
-            new("s", 1, 1, 2, new string('a', 40), Clock),
-            new("s", 1, 3, 4, new string('b', 40), Clock),
-            new("s", 1, 5, 6, new string('c', 40), Clock),
-        };
-        var messages = new List<StoredMessage> { Stored(7, ChatMessage.User("abc")) };
-
-        var plan = SummaryLayers.Plan(summaries, messages, 7, 100, Chars, maxStageSummaries: 8);
-
-        var folded = Assert.Single(plan.Fold);
-        Assert.Equal(new SummaryRange(1, 2), plan.FoldRange);
-        Assert.Equal(1, folded.FromSeq);
-        Assert.Equal(2, folded.ToSeq);
-        Assert.Equal(new string('a', 40), folded.Text);
-        Assert.Null(plan.Promote);
-        Assert.False(plan.CannotSatisfy);
-    }
-
-    [Fact]
-    public void Stage_summaries_within_budget_and_count_limit_are_not_folded()
-    {
-        var summaries = new List<SummaryRecord>
-        {
-            new("s", 1, 1, 2, new string('a', 40), Clock),
-            new("s", 1, 3, 4, new string('b', 40), Clock),
-        };
-        var messages = new List<StoredMessage> { Stored(5, ChatMessage.User("abc")) };
-
-        var plan = SummaryLayers.Plan(summaries, messages, 5, 100, Chars, maxStageSummaries: 8);
-
-        Assert.True(plan.IsIdle);
-        Assert.Empty(plan.Fold);
-        Assert.Null(plan.FoldRange);
-    }
-
-    [Fact]
-    public void Within_budget_is_none_and_not_cannot_satisfy()
-    {
-        var messages = new List<StoredMessage> { Stored(1, ChatMessage.User("hi")), Stored(2, ChatMessage.User("there")) };
-
-        var plan = SummaryLayers.Plan([], messages, 2, 1000, Chars);
-
-        Assert.True(plan.IsIdle);
-        Assert.False(plan.CannotSatisfy);
-    }
-
-    [Fact]
-    public void Over_budget_with_nothing_promotable_is_cannot_satisfy_rather_than_none()
-    {
-        var messages = new List<StoredMessage> { Stored(1, ChatMessage.User(new string('x', 50))) };
-
-        var plan = SummaryLayers.Plan([], messages, 1, 10, Chars);
-
-        Assert.True(plan.IsIdle);
-        Assert.Null(plan.Promote);
-        Assert.True(plan.CannotSatisfy);
-    }
-
-    [Fact]
-    public void Oversized_session_summary_with_no_stage_to_fold_cannot_be_satisfied()
-    {
-        var summaries = new List<SummaryRecord> { new("s", 2, 1, 5, new string('s', 50), Clock) };
-        var messages = new List<StoredMessage> { Stored(6, ChatMessage.User("abc")) };
-
-        var plan = SummaryLayers.Plan(summaries, messages, 6, 10, Chars);
-
-        Assert.True(plan.IsIdle);
-        Assert.True(plan.CannotSatisfy);
-    }
-
-    [Fact]
-    public void Over_budget_with_a_promotable_range_is_not_cannot_satisfy()
-    {
-        var messages = new List<StoredMessage>
-        {
-            Stored(1, ChatMessage.User(new string('x', 50))),
-            Stored(2, ChatMessage.User("tail")),
-        };
-
-        var plan = SummaryLayers.Plan([], messages, 2, 10, Chars);
-
-        Assert.Equal(new SummaryRange(1, 1), plan.Promote);
-        Assert.False(plan.CannotSatisfy);
-    }
-
-    private static StoredMessage Stored(long seq, ChatMessage message) => new(seq, message, null, Clock.AddMinutes(seq));
 }

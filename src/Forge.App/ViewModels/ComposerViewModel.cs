@@ -136,15 +136,39 @@ internal sealed class ComposerEffortBarViewModel : ObservableObject
 /// <summary>A message waiting above the input: queued for after the running turn, or interjected and not yet delivered.</summary>
 internal sealed class QueuedMessageViewModel : ObservableObject
 {
-    public QueuedMessageViewModel(string text, bool isInterjection, Action<QueuedMessageViewModel> remove)
+    public QueuedMessageViewModel(
+        string text,
+        bool isInterjection,
+        Action<QueuedMessageViewModel> remove,
+        IReadOnlyList<ContentBlock>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(remove);
         Text = text;
+        Attachments = attachments ?? [];
         IsInterjection = isInterjection;
         RemoveCommand = new RelayCommand(() => remove(this), () => !IsInterjection);
     }
 
+    public QueuedMessageViewModel(ComposerPrompt prompt, bool isInterjection, Action<QueuedMessageViewModel> remove)
+        : this(prompt.Text, isInterjection, remove, prompt.Attachments)
+    {
+    }
+
     public string Text { get; }
+
+    /// <summary>The attachments of the message (images, files, inlined text files); they travel with it through the queue.</summary>
+    public IReadOnlyList<ContentBlock> Attachments { get; }
+
+    public bool HasAttachments => Attachments.Count > 0;
+
+    /// <summary>"Images ×2" when only images are attached, "Attachments ×3" otherwise; empty without attachments.</summary>
+    public string AttachmentsLabel =>
+        Attachments.Count == 0 ? string.Empty
+        : Attachments.All(static block => block is ImageBlock) ? ImageStrings.Count(Attachments.Count)
+        : AttachmentStrings.Count(Attachments.Count);
+
+    /// <summary>The message as it will be sent.</summary>
+    public ComposerPrompt Prompt => new(Text, Attachments);
 
     /// <summary>Single-line preview for the chip.</summary>
     public string Preview => Text.ReplaceLineEndings(" ");
@@ -158,8 +182,30 @@ internal sealed class QueuedMessageViewModel : ObservableObject
 
     public RelayCommand RemoveCommand { get; }
 
-    public void RefreshText() => OnPropertyChanged(nameof(Label));
+    public void RefreshText()
+    {
+        OnPropertyChanged(nameof(Label));
+        OnPropertyChanged(nameof(AttachmentsLabel));
+    }
 }
+
+/// <summary>
+/// A message the user composed: its text (possibly empty when something is attached) and its attachments - images,
+/// <see cref="FileBlock"/>s and text files inlined as <see cref="TextBlock"/>s, in sending order. It is what the queue, an
+/// interjection, a redirect and a refused turn carry, so attachments are never dropped on the way.
+/// </summary>
+internal sealed record ComposerPrompt(string Text, IReadOnlyList<ContentBlock> Attachments)
+{
+    public static ComposerPrompt FromText(string text) => new(text, []);
+
+    public bool IsEmpty => string.IsNullOrWhiteSpace(Text) && Attachments.Count == 0;
+}
+
+/// <summary>
+/// The unsent composer state a replacing view takes over ("continue"): the draft text, the queued messages and the
+/// attachments of the draft.
+/// </summary>
+internal sealed record ComposerCarry(string Draft, IReadOnlyList<ComposerPrompt> Queued, IReadOnlyList<ContentBlock> DraftAttachments);
 
 /// <summary>One row of the <c>/</c> or <c>@</c> picker.</summary>
 internal sealed class ComposerSuggestionItem : ObservableObject
@@ -200,7 +246,7 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 /// model or effort is handed to <paramref name="apply"/> as the root definition for the next turn; the default agent with
 /// the configured model and effort hands over null, so a session nobody touched runs exactly as before.
 /// </summary>
-internal sealed class ComposerViewModel : ObservableObject
+internal sealed partial class ComposerViewModel : ObservableObject
 {
     private readonly Action<AgentDefinition?> apply;
     private readonly ComposerPreferences preferences;
@@ -242,7 +288,12 @@ internal sealed class ComposerViewModel : ObservableObject
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
         Func<CancellationToken, Task>? modelRefresh = null,
         Func<string?, string?, IReadOnlyList<ThinkingEffort>>? thinkingLevels = null,
-        Func<PromptTemplateSet>? templateSource = null)
+        Func<PromptTemplateSet>? templateSource = null,
+        IImageCodec? imageCodec = null,
+        Func<string?, string?, ModelInputs?>? imageInputs = null,
+        Func<string?, string, bool>? wireCarries = null,
+        INotifications? notifications = null,
+        string? notificationScope = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
@@ -259,6 +310,14 @@ internal sealed class ComposerViewModel : ObservableObject
         // The picker's 刷新 re-fetches every provider that can list models; a test can pass its own.
         this.modelRefresh = modelRefresh ?? RefreshAllProvidersAsync;
         this.thinkingLevels = thinkingLevels ?? ((modelId, provider) => services.Catalog.ThinkingStepsFor(modelId, provider));
+        this.imageCodec = imageCodec ?? AvaloniaImageCodec.Instance;
+        this.imageInputs = imageInputs ??
+                           ((modelId, provider) => services.Catalog.MetadataFor(modelId, provider).Capabilities?.Inputs);
+        this.wireCarries = wireCarries ?? DefaultWireCarries;
+        this.notifications = notifications;
+        this.notificationScope = notificationScope ?? string.Empty;
+        Attachments = [];
+        Files = [];
 
         var agents = new List<ComposerAgentOption> { new(null) };
         // Built-ins (possibly overridden by a file) first, then the user's own agents.
@@ -605,6 +664,7 @@ internal sealed class ComposerViewModel : ObservableObject
 
         OnPropertyChanged(nameof(AgentLabel));
         OnPropertyChanged(nameof(EffortName));
+        RefreshImageText();
         Status = null;
     }
 
@@ -637,11 +697,20 @@ internal sealed class ComposerViewModel : ObservableObject
     private List<SlashEntry> SlashEntries()
     {
         var commands = ResolveTemplates().Commands;
-        var entries = new List<SlashEntry>(commands.Count + (skills?.Count ?? 0));
+        var entries = new List<SlashEntry>(commands.Count + (skills?.Count ?? 0) + 1);
         var names = new HashSet<string>(StringComparer.Ordinal);
+
+        // Built-in: /compact is handled by the session (manual compaction), never sent; it shadows a same-named template.
+        const string compact = "compact";
+        names.Add(compact);
+        entries.Add(new SlashEntry(compact, CompactionStrings.CommandDescription, IsSkill: false));
         foreach (var command in commands)
         {
-            names.Add(command.Name);
+            if (!names.Add(command.Name))
+            {
+                continue;
+            }
+
             var description = string.IsNullOrWhiteSpace(command.ArgumentHint)
                 ? command.Description
                 : command.ArgumentHint + "  " + command.Description;
@@ -758,6 +827,7 @@ internal sealed class ComposerViewModel : ObservableObject
         effort = ThinkingEfforts.Clamp(effort, effortSteps);
         RebuildEffortBars();
         UpdateEffortBars();
+        RefreshImageGate();
         OnPropertyChanged(nameof(EffortSteps));
         OnPropertyChanged(nameof(EffortMaximum));
         OnPropertyChanged(nameof(EffortValue));

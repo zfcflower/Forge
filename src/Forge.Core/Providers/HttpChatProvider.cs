@@ -58,7 +58,7 @@ public abstract class HttpChatProvider : IChatProvider
         ct.ThrowIfCancellationRequested();
 
         var body = BuildBody(request);
-        using var message = CreateRequest(body);
+        using var message = CreateRequest(body, request.SessionId);
         using var response = await SendAsync(message, ct).ConfigureAwait(false);
 
         var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
@@ -113,7 +113,7 @@ public abstract class HttpChatProvider : IChatProvider
     protected ProviderException Malformed(string payload, Exception? inner = null) =>
         new($"{Id}: malformed stream payload: {payload}", retryable: false, inner: inner);
 
-    private HttpRequestMessage CreateRequest(byte[] body)
+    private HttpRequestMessage CreateRequest(byte[] body, string? sessionId)
     {
         var message = new HttpRequestMessage(HttpMethod.Post, BuildUri())
         {
@@ -124,11 +124,7 @@ public abstract class HttpChatProvider : IChatProvider
 
         if (_config.Headers is { Count: > 0 } headers)
         {
-            foreach (var (name, value) in headers)
-            {
-                message.Headers.Remove(name);
-                message.Headers.TryAddWithoutValidation(name, value);
-            }
+            ProviderHeaders.Apply(message, headers, sessionId);
         }
 
         return message;

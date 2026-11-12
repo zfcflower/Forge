@@ -15,6 +15,16 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
 {
     private const string FunctionCallItem = "function_call";
 
+    /// <summary>
+    /// The attachment kinds the Responses input has an item part for: images (<c>input_image</c>) and PDF
+    /// (<c>input_file</c>). Audio and video have none, so a request carrying them fails before it is sent.
+    /// </summary>
+    public const ModelInputs WireInputs = ModelInputs.Text | ModelInputs.Image | ModelInputs.Pdf;
+
+    /// <summary>Whether an attachment of <paramref name="mediaType"/> can be written: any image, or a PDF.</summary>
+    public static bool CanCarry(string mediaType) =>
+        ProviderAttachments.KindOf(mediaType) is ModelInputs.Image or ModelInputs.Pdf;
+
     public OpenAiResponsesProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null)
         : base(config, http, idleTimeout)
     {
@@ -121,7 +131,12 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
             // A tool result answers the call, so it opens the turn the way the other adapters order it.
             WriteToolResults(writer, message.Content);
 
-            if (ProviderJson.Text(message.Content) is { Length: > 0 } text)
+            var text = ProviderJson.Text(message.Content);
+            if (message.Role == MessageRole.User && ProviderJson.HasMedia(message.Content))
+            {
+                WriteUserItemWithImages(writer, text, message.Content);
+            }
+            else if (text is { Length: > 0 })
             {
                 WriteTextItem(writer, message.Role == MessageRole.Assistant ? "assistant" : "user", text);
             }
@@ -157,6 +172,51 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
         writer.WriteString("type", "input_text");
         writer.WriteString("text", text);
         writer.WriteEndObject();
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// A user turn with images or files: one input message whose content is the text (if any) followed by each image
+    /// (<c>input_image</c>) and PDF (<c>input_file</c>); other files fail the request.
+    /// </summary>
+    private static void WriteUserItemWithImages(Utf8JsonWriter writer, string? text, IReadOnlyList<ContentBlock> blocks)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("role", "user");
+        writer.WriteStartArray("content");
+        if (text is { Length: > 0 })
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "input_text");
+            writer.WriteString("text", text);
+            writer.WriteEndObject();
+        }
+
+        foreach (var block in blocks)
+        {
+            if (block is ImageBlock image)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("type", "input_image");
+                writer.WriteString("image_url", ProviderJson.DataUrl(image));
+                writer.WriteEndObject();
+            }
+            else if (block is FileBlock file)
+            {
+                if (!ProviderAttachments.IsPdf(file.MediaType))
+                {
+                    throw ProviderAttachments.Unsupported(ProviderFactory.OpenAiResponsesKind, file);
+                }
+
+                writer.WriteStartObject();
+                writer.WriteString("type", "input_file");
+                writer.WriteString("filename", ProviderAttachments.FileName(file));
+                writer.WriteString("file_data", ProviderAttachments.DataUrl(file));
+                writer.WriteEndObject();
+            }
+        }
+
         writer.WriteEndArray();
         writer.WriteEndObject();
     }

@@ -107,7 +107,7 @@ public sealed class PromptTemplateRegistry
         yield return Slot(
             PromptSlotIds.CompactionSummarizer,
             "Compaction summarizer",
-            "Compresses older conversation turns when the context window fills up.",
+            "System prompt of the summarizer that turns older conversation into a structured checkpoint when the context window fills up.",
             SummaryCompactor.SummarizerPrompt);
         yield return Slot(
             PromptSlotIds.HandoverSummary,

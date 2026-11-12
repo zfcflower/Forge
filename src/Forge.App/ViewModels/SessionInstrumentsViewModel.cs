@@ -297,6 +297,20 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
+    /// A manual compaction shrank the root context: the bar shows the compactor's estimate of what is left until the next
+    /// turn reports a real prompt size again. Spend is untouched.
+    /// </summary>
+    public void NoteCompacted(int contextTokens)
+    {
+        lastPromptTokens = Math.Max(0, contextTokens);
+        ContextSegments = BuildSegments(SessionUsageMath.ContextRatio(lastPromptTokens, Metadata.ContextWindow) ?? 0);
+        OnPropertyChanged(nameof(HasContextWindow));
+        OnPropertyChanged(nameof(ContextPercent));
+        OnPropertyChanged(nameof(ContextSegments));
+        OnPropertyChanged(nameof(ContextLabel));
+    }
+
+    /// <summary>
     /// The usage a reopened session already spent, summed from its stored messages. The prompt size of its last request is
     /// not recoverable from that sum, so the context bar stays empty until the next turn reports one.
     /// </summary>

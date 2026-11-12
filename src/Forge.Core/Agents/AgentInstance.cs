@@ -19,7 +19,7 @@ public sealed class AgentInstance
     private readonly List<AgentMessage> history = [];
     private readonly StringBuilder streaming = new();
     private readonly Lock interjectionGate = new();
-    private List<string>? interjections;
+    private List<Interjection>? interjections;
     private int pendingInterjections;
     private string lastText = string.Empty;
     private int running;
@@ -57,6 +57,9 @@ public sealed class AgentInstance
     /// <summary>Prompt-cache bookkeeping of this instance (routing key, last fingerprint, first-request report); loop-owned.</summary>
     internal PromptCacheState CacheState { get; } = new();
 
+    /// <summary>Usage and hysteresis bookkeeping for automatic compaction; loop-owned.</summary>
+    internal CompactionState Compaction { get; } = new();
+
     /// <summary>Control state of the run driving this instance right now; null for a root agent or a finished sub-agent.</summary>
     internal SubAgentRun? Control { get; set; }
 
@@ -79,15 +82,22 @@ public sealed class AgentInstance
     public void Interject(string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        lock (interjectionGate)
-        {
-            (interjections ??= []).Add(text);
-            Volatile.Write(ref pendingInterjections, interjections.Count);
-        }
+        Enqueue(new Interjection([new TextBlock(text)]));
     }
 
-    /// <summary>Removes and returns the interjections not delivered yet, oldest first; empty when there are none.</summary>
-    public IReadOnlyList<string> TakeInterjections()
+    /// <summary>
+    /// Queues a user message with attachments: typed text as <see cref="TextBlock"/>s, attachments as
+    /// <see cref="ImageBlock"/>, <see cref="FileBlock"/> or an inlined text file (<see cref="Storage.TextAttachment"/>), in
+    /// the order they should reach the model. It must carry typed text or at least one attachment; other block kinds are
+    /// refused. Delivered like <see cref="Interject(string)"/>.
+    /// </summary>
+    public void Interject(IReadOnlyList<ContentBlock> content)
+    {
+        Enqueue(Interjection.Create(content));
+    }
+
+    /// <summary>Removes and returns the interjections not delivered yet, oldest first, with their blocks; empty when none.</summary>
+    public IReadOnlyList<Interjection> TakeInterjections()
     {
         if (Volatile.Read(ref pendingInterjections) == 0)
         {
@@ -103,11 +113,23 @@ public sealed class AgentInstance
         }
     }
 
+    private void Enqueue(Interjection interjection)
+    {
+        lock (interjectionGate)
+        {
+            (interjections ??= []).Add(interjection);
+            Volatile.Write(ref pendingInterjections, interjections.Count);
+        }
+    }
+
     internal bool TryAcquire() => Interlocked.CompareExchange(ref running, 1, 0) == 0;
 
     internal void Release() => Volatile.Write(ref running, 0);
 
     internal void Add(ChatMessage message, long seq) => history.Add(new AgentMessage(message, seq));
+
+    /// <summary>Bumped whenever the history is replaced rather than appended to, so recorded positions stop matching.</summary>
+    internal int HistoryVersion { get; private set; }
 
     internal void BeginText() => streaming.Clear();
 
@@ -129,6 +151,47 @@ public sealed class AgentInstance
     {
         history.Clear();
         history.AddRange(messages);
+        HistoryVersion++;
+    }
+}
+
+/// <summary>
+/// Per-instance compaction bookkeeping, touched only by the run that holds the instance (or a manual compaction, which
+/// the host runs only while no turn does).
+/// </summary>
+internal sealed class CompactionState
+{
+    /// <summary>Model the recorded usage belongs to (provider and model id); null when nothing was recorded.</summary>
+    public string? ModelKey { get; set; }
+
+    /// <summary>Real prompt size of the last request (input tokens, which include cached ones), 0 when unknown.</summary>
+    public int LastPromptTokens { get; set; }
+
+    /// <summary>How many messages the history held when that request was built.</summary>
+    public int MessagesAtRequest { get; set; }
+
+    /// <summary><see cref="AgentInstance.HistoryVersion"/> at that request.</summary>
+    public int HistoryVersionAtRequest { get; set; }
+
+    /// <summary>Own-content estimate after the last fruitless attempt; automatic attempts wait for growth past it.</summary>
+    public int? FruitlessBaseline { get; set; }
+
+    public int FruitlessAttempts { get; set; }
+
+    /// <summary>True once automatic compaction gave up, until a manual compaction or another model.</summary>
+    public bool Stalled { get; set; }
+
+    public void ResetHysteresis()
+    {
+        FruitlessBaseline = null;
+        FruitlessAttempts = 0;
+        Stalled = false;
+    }
+
+    public void ForgetUsage()
+    {
+        LastPromptTokens = 0;
+        MessagesAtRequest = 0;
     }
 }
 

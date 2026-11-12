@@ -294,7 +294,7 @@ internal static class AutomationStrings
         Loc.Register(ModelCatalogNameKey, "模型目录更新", "Model catalog update");
         Loc.Register(
             ModelCatalogDescriptionKey,
-            "每天 05:00 从 models.dev 抓取最新模型目录（窗口、价格、输入能力与思考档位），顺带刷新每个已连接提供方的模型列表；启动时若今天还没更新则后台补一次。",
+            "每天 05:00 从 models.dev 抓取最新模型目录（窗口、价格、输入能力与思考档位），顺带刷新每个已连接提供商的模型列表；启动时若今天还没更新则后台补一次。",
             "Daily at 05:00: fetches the latest model catalog from models.dev (windows, prices, input kinds, reasoning steps) and refreshes every connected provider's model list; on startup it catches up in the background when today's catalog is missing.");
         Loc.Register(HousekeepingNameKey, "周期清理", "Housekeeping");
         Loc.Register(

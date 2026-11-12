@@ -613,6 +613,7 @@ public sealed class McpServerManager : IAsyncDisposable
             {
                 Endpoint = new Uri(config.Url!),
                 Headers = config.Headers,
+                HttpClient = options.HttpClient,
             });
         }
 

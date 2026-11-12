@@ -379,6 +379,69 @@ public sealed class ProviderEditorTests : IDisposable
     }
 
     [Fact]
+    public void Request_headers_round_trip_through_the_box_and_the_stored_document()
+    {
+        var services = Services();
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
+        {
+            Name = "OpenCode Go",
+            BaseUrl = "https://opencode.ai/zen/go/v1",
+            HeadersText = "x-opencode-session: {session}\n\n  X-Mode :  a:b  \r\nx-mode: last",
+        };
+
+        var definition = editor.TryBuild();
+
+        Assert.NotNull(definition);
+        Assert.Equal(2, definition!.Headers.Count);
+        Assert.Equal("{session}", definition.Headers["x-opencode-session"]);
+        // Split at the first colon; names are case-insensitive and the later line wins.
+        Assert.Equal("last", definition.Headers["X-MODE"]);
+
+        var reloaded = ProviderDefinition.FromDocument(definition.ToDocument(), definition.Id);
+        Assert.Equal("{session}", reloaded.Headers["x-opencode-session"]);
+
+        var reopened = new ProviderEditorViewModel(services, reloaded);
+        Assert.Contains("x-opencode-session: {session}", reopened.HeadersText, StringComparison.Ordinal);
+        Assert.Equal(definition.Headers, reopened.TryBuild()!.Headers);
+    }
+
+    [Theory]
+    [InlineData("no colon here", 1)]
+    [InlineData("x-ok: 1\n: value", 2)]
+    [InlineData("x-ok: 1\n\nx-empty:   ", 3)]
+    [InlineData("bad name: v", 1)]
+    public void A_malformed_header_line_is_refused_with_its_number(string text, int line)
+    {
+        var services = Services();
+        var editor = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
+        {
+            Name = "Gateway",
+            BaseUrl = "https://gateway.invalid/v1",
+            HeadersText = text,
+        };
+
+        Assert.Null(editor.TryBuild());
+        Assert.Contains(line.ToString(System.Globalization.CultureInfo.InvariantCulture), editor.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Editing_the_headers_asks_for_a_new_test()
+    {
+        var services = Services();
+        var existing = new ProviderEditorViewModel(services, definition: null, ProviderPresets.Custom)
+        {
+            Name = "Gateway",
+            BaseUrl = "https://gateway.invalid/v1",
+        }.TryBuild()!;
+        var editor = new ProviderEditorViewModel(services, existing);
+        Assert.Equal(ProviderTestState.Passed, editor.TestState);
+
+        editor.HeadersText = "x-opencode-session: {session}";
+
+        Assert.Equal(ProviderTestState.Untested, editor.TestState);
+    }
+
+    [Fact]
     public void A_second_provider_with_the_same_name_gets_its_own_id()
     {
         var services = Services();

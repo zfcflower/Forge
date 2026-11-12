@@ -21,7 +21,7 @@ depends-on: [forge-goal]
 | `Forge.IO` | 文件与进程原语 + Agent 的文件/搜索/shell 工具:`AtomicFile`、工作区路径守卫、有界文件读写、目录遍历、`.gitignore` 匹配、grep 引擎、`ProcessRunner`、7 个 `ITool`(`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash`);只依赖 BCL 与 `Abstractions` |
 | `Forge.Ipc`(新增) | 命名管道 + 4 字节长度前缀 JSON 的协议、帧编解码、协议版本;主程序、宿主、Worker 共用;须 AOT 兼容 |
 | `Forge.Plugin.Sdk`(新增) | 供插件源码引用的稳定 SDK 与契约,独立版本化,不依赖 Core |
-| `Forge.Core` | Agent 循环、会话、模型提供方(OpenAI 兼容、Anthropic)、SubAgent 调度与提示词缓存、提示词三层合成 |
+| `Forge.Core` | Agent 循环、会话、模型提供商(OpenAI 兼容、Anthropic)、SubAgent 调度与提示词缓存、提示词三层合成 |
 | `Forge.Workspace` | Git 与 Worktree、规格图(spec-graph)读写、评审意见存储 |
 | `Forge.Mcp` | MCP 客户端与服务器管理 |
 | `Forge.Editor` | 文本缓冲、LSP 客户端(含语义 token)、TextMate 着色、补全、Diff 模型;不含 UI |
@@ -45,7 +45,7 @@ depends-on: [forge-goal]
 
 **Native AOT 主程序(已确认要求;可行性已由 Stage 0 实测确认)。** 主程序不可变、Native AOT 发布;不在其中使用 Roslyn 动态编译或 `AssemblyLoadContext` 加载插件。五个主程序项目(`Abstractions`/`Core`/`Workspace`/`Mcp`/`Editor`)已开启 `IsAotCompatible` 且 AOT 分析器 0 警告;Workspace 的 JSON 输出改走反射无关的 `JsonPayload`,持久化类型走 `WorkspaceJsonContext` 源生成。体积与延迟均按实测记录,不给估算:`25.3 MiB` 是 Stage 0 可行性探针(**只含一个最小 Avalonia 窗口**)的数,不是产品基线。2026-11 在 .NET 11 / Avalonia 12.1.6 上重测(win-x64,同一台机器):最小 Avalonia 窗口 16.5 MiB,加 AvaloniaEdit+TextMate 编辑器栈 28.7 MiB,完整 `Forge.App` 49.7 MiB——即约 +12 MiB 编辑器栈、+21 MiB 产品自身代码与其余模块,其中嵌入资源(TextMate 语法、Avalonia 资源、图标)8.6 MiB。构建开关实测:`OptimizationPreference=Size` 降到 42.8 MiB,再关托管堆栈追踪 40.8 MiB;两者都不建议默认开(前者牺牲速度,后者丢掉插件与 Agent 链路最需要的托管堆栈)。headless 对话 81-84ms、GUI 到窗口句柄 166ms 同样来自 Stage 0 探针,产品化后未重测。风险:Avalonia 与 Microsoft.Data.Sqlite/SQLitePCLRaw 未声明 AOT 兼容,靠实测背书,CI 需三平台冒烟;原生库不能静态链接,"单文件"不成立;Linux/macOS 发布未在本机验证(需 CI)。只有核心依赖确实无法解决时才重新评估放弃 AOT。
 
-**扩展点统一为契约,执行在进程外。** 工具、命令、提示词、Agent、工作流经 `Forge.Plugin.Sdk` 注册,由 `ExtensionHost` 通过 IPC 向主程序报告;主程序侧以代理 `ITool` 暴露。模型提供方内置,仅在设置中配置,不开放插件注册。
+**扩展点统一为契约,执行在进程外。** 工具、命令、提示词、Agent、工作流经 `Forge.Plugin.Sdk` 注册,由 `ExtensionHost` 通过 IPC 向主程序报告;主程序侧以代理 `ITool` 暴露。模型提供商内置,仅在设置中配置,不开放插件注册。
 
 **插件 UI 为声明式。** 插件不能返回进程内控件,改由 IPC 返回 UI Schema(第一阶段 Form、Table、Markdown、Text、Button、Status),由主程序渲染 Avalonia 控件。原 `PanelDefinition(Func<object>)` 契约需迁移。
 

@@ -131,6 +131,14 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         return new SessionApprovalHandler(Queue, Rules, session, Notifications);
     }
 
+    /// <summary>The <c>ask_user</c> handler of one session; its cards share the approval queue and its notifications.</summary>
+    public SessionQuestionHandler CreateQuestionHandler(SessionInfo session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        Sessions.Register(session.Id, session.Title);
+        return new SessionQuestionHandler(Queue, session, Notifications);
+    }
+
     /// <summary>
     /// Opens the approval card of one staged draft: an already queued card is revealed, otherwise the draft is re-queued as
     /// a "submitted before the restart" card. False when there is nothing to show (no such draft, or no host).

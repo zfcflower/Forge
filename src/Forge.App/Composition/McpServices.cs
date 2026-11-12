@@ -12,13 +12,15 @@ internal sealed class McpServices : IAsyncDisposable
 {
     private readonly McpServerManager manager;
     private readonly INotifications? notifications;
+    private readonly HttpClient? http;
     private readonly CancellationTokenSource lifetime = new();
     private bool disposed;
 
-    private McpServices(McpServerManager manager, INotifications? notifications)
+    private McpServices(McpServerManager manager, INotifications? notifications, HttpClient? http)
     {
         this.manager = manager;
         this.notifications = notifications;
+        this.http = http;
         manager.StateChanged += OnServerStateChanged;
         ConfigDiagnostics = manager.Diagnostics.Count;
         ConfiguredServers = manager.ServerNames.Count;
@@ -32,7 +34,11 @@ internal sealed class McpServices : IAsyncDisposable
 
     public IReadOnlyList<McpServerState> States => manager.States;
 
-    public static McpServices Create(AppPaths paths, INotifications? notifications = null)
+    /// <param name="http">
+    /// The client of every HTTP server (the composition routes it through the network stack); owned by the services and
+    /// disposed after the manager. Null keeps the transport's own default client.
+    /// </param>
+    public static McpServices Create(AppPaths paths, INotifications? notifications = null, HttpClient? http = null)
     {
         McpConfig config;
         try
@@ -44,7 +50,7 @@ internal sealed class McpServices : IAsyncDisposable
             config = McpConfig.Empty;
         }
 
-        return new McpServices(new McpServerManager(config), notifications);
+        return new McpServices(new McpServerManager(config, new McpServerManagerOptions { HttpClient = http }), notifications, http);
     }
 
     /// <summary>Starts every enabled server in the background; per-server failures stay in <see cref="States"/>.</summary>
@@ -107,5 +113,6 @@ internal sealed class McpServices : IAsyncDisposable
         await lifetime.CancelAsync().ConfigureAwait(false);
         lifetime.Dispose();
         await manager.DisposeAsync().ConfigureAwait(false);
+        http?.Dispose();
     }
 }

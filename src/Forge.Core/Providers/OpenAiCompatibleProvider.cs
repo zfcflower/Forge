@@ -13,6 +13,20 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
 
     private readonly bool sendPromptCacheKey;
 
+    /// <summary>
+    /// The attachment kinds Chat Completions has a content part for: images (<c>image_url</c>), PDF (<c>file</c>) and audio
+    /// (<c>input_audio</c>, wav or mp3 only). Video has none, so a request carrying it fails before it is sent.
+    /// </summary>
+    public const ModelInputs WireInputs = ModelInputs.Text | ModelInputs.Image | ModelInputs.Pdf | ModelInputs.Audio;
+
+    /// <summary>Whether an attachment of <paramref name="mediaType"/> can be written: any image, a PDF, wav or mp3 audio.</summary>
+    public static bool CanCarry(string mediaType) => ProviderAttachments.KindOf(mediaType) switch
+    {
+        ModelInputs.Image or ModelInputs.Pdf => true,
+        ModelInputs.Audio => ProviderAttachments.AudioFormat(mediaType) is not null,
+        _ => false,
+    };
+
     public OpenAiCompatibleProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null, ProviderOptions? options = null)
         : base(config, http, idleTimeout)
     {
@@ -130,7 +144,11 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
             }
 
             var text = MergedText(messages, start, end);
-            if (text is not null)
+            if (ProviderJson.HasMedia(messages, start, end))
+            {
+                WriteUserWithImages(writer, text, messages, start, end);
+            }
+            else if (text is not null)
             {
                 WritePlain(writer, "user", text);
             }
@@ -217,6 +235,81 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         }
 
         return calls;
+    }
+
+    /// <summary>
+    /// A user turn carrying images or files switches to the content-array form: the merged text first, then each image as a
+    /// data URL and each file as its own part (<see cref="WriteFile"/>).
+    /// A text-only turn keeps the plain string form (<see cref="WritePlain"/>) so its bytes never change.
+    /// </summary>
+    private static void WriteUserWithImages(
+        Utf8JsonWriter writer, string? text, IReadOnlyList<ChatMessage> messages, int start, int end)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("role", "user");
+        writer.WriteStartArray("content");
+        if (text is not null)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "text");
+            writer.WriteString("text", text);
+            writer.WriteEndObject();
+        }
+
+        for (var i = start; i <= end; i++)
+        {
+            foreach (var block in messages[i].Content)
+            {
+                switch (block)
+                {
+                    case ImageBlock image:
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "image_url");
+                        writer.WriteStartObject("image_url");
+                        writer.WriteString("url", ProviderJson.DataUrl(image));
+                        writer.WriteEndObject();
+                        writer.WriteEndObject();
+                        break;
+                    case FileBlock file:
+                        WriteFile(writer, file);
+                        break;
+                }
+            }
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+    }
+
+    /// <summary>A PDF as a <c>file</c> part (data URL), wav/mp3 audio as <c>input_audio</c>; anything else fails the request.</summary>
+    private static void WriteFile(Utf8JsonWriter writer, FileBlock file)
+    {
+        if (ProviderAttachments.IsPdf(file.MediaType))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "file");
+            writer.WriteStartObject("file");
+            writer.WriteString("filename", ProviderAttachments.FileName(file));
+            writer.WriteString("file_data", ProviderAttachments.DataUrl(file));
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+            return;
+        }
+
+        if (ProviderAttachments.KindOf(file.MediaType) == ModelInputs.Audio &&
+            ProviderAttachments.AudioFormat(file.MediaType) is { } format)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "input_audio");
+            writer.WriteStartObject("input_audio");
+            writer.WriteString("data", file.Data);
+            writer.WriteString("format", format);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+            return;
+        }
+
+        throw ProviderAttachments.Unsupported(ProviderFactory.OpenAiCompatibleKind, file);
     }
 
     private static void WritePlain(Utf8JsonWriter writer, string role, string content)

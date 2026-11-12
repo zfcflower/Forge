@@ -10,7 +10,7 @@ public class CompactionTests
     private const string SummaryText = "SUMMARY-OF-OLD-MESSAGES";
 
     [Fact]
-    public async Task Threshold_compacts_into_a_layer_one_summary_and_keeps_the_originals()
+    public async Task Threshold_compacts_into_a_session_summary_from_the_start_and_keeps_the_originals()
     {
         using var directory = new TempDir();
         using var store = new SqliteSessionStore(directory.Path);
@@ -19,8 +19,8 @@ public class CompactionTests
         var provider = new FakeProvider((request, index) =>
             request.SystemPrompt == SummaryCompactor.SummarizerPrompt
                 ? Turn.Say(SummaryText)
-                : Turn.Say(answer));
-        var options = new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 };
+                : Turn.Say(answer, TokenUsage.Empty));
+        var options = CompactionWindows.Legacy(200, maxTurns: 4);
         var host = AgentTestHost.Create(provider, options: options, store: store);
         var root = host.CreateRoot(session.Id, directory.Path);
 
@@ -43,8 +43,9 @@ public class CompactionTests
         Assert.NotEmpty(summaries);
         Assert.All(summaries, summary =>
         {
-            Assert.Equal(SummaryLayers.StageLayer, summary.Layer);
+            Assert.Equal(SummaryLayers.SessionLayer, summary.Layer);
             Assert.Equal(SummaryText, summary.Text);
+            Assert.Equal(1, summary.FromSeq);
             Assert.True(summary.ToSeq >= summary.FromSeq);
         });
 
@@ -83,7 +84,7 @@ public class CompactionTests
     public async Task Compaction_is_skipped_without_a_session_store()
     {
         var provider = new FakeProvider((request, index) => Turn.Say(new string('c', 4_000)));
-        var options = new AgentOptions { CompactionThresholdTokens = 10 };
+        var options = CompactionWindows.Legacy(10);
         var host = AgentTestHost.Create(provider, options: options);
         var root = host.CreateRoot("session", Path.GetTempPath());
 
@@ -94,25 +95,15 @@ public class CompactionTests
     }
 
     [Fact]
-    public async Task Stage_summaries_fold_into_a_session_summary_without_rewriting_them()
+    public async Task Every_compaction_appends_a_wider_session_summary_and_never_rewrites_earlier_ones()
     {
         using var directory = new TempDir();
         using var store = new SqliteSessionStore(directory.Path);
-        var session = await store.CreateSessionAsync(directory.Path, "fold", CancellationToken.None);
+        var session = await store.CreateSessionAsync(directory.Path, "rounds", CancellationToken.None);
         var answer = new string('d', 800);
         var provider = new FakeProvider((request, index) =>
-            request.SystemPrompt == SummaryCompactor.SummarizerPrompt ? Turn.Say(SummaryText) : Turn.Say(answer));
-        var compactor = new SummaryCompactor(
-            store,
-            _ => provider,
-            new ApproximateTokenCounter(),
-            targetRatio: 0.05,
-            maxStageSummaries: 1);
-        var host = AgentTestHost.Create(
-            provider,
-            options: new AgentOptions { CompactionThresholdTokens = 100 },
-            store: store,
-            compactor: compactor);
+            request.SystemPrompt == SummaryCompactor.SummarizerPrompt ? Turn.Say(SummaryText) : Turn.Say(answer, TokenUsage.Empty));
+        var host = AgentTestHost.Create(provider, options: CompactionWindows.Legacy(100, targetRatio: 0.05), store: store);
         var root = host.CreateRoot(session.Id, directory.Path);
 
         for (var turn = 1; turn <= 6; turn++)
@@ -122,10 +113,16 @@ public class CompactionTests
         }
 
         var summaries = await store.GetSummariesAsync(session.Id, CancellationToken.None);
-        Assert.Contains(summaries, summary => summary.Layer == SummaryLayers.SessionLayer);
-        Assert.Contains(summaries, summary => summary.Layer == SummaryLayers.StageLayer);
-        Assert.All(summaries, summary => Assert.Equal(SummaryText, summary.Text));
+        Assert.True(summaries.Count >= 2);
+        Assert.All(summaries, summary =>
+        {
+            Assert.Equal(SummaryLayers.SessionLayer, summary.Layer);
+            Assert.Equal(1, summary.FromSeq);
+        });
+        var byTime = summaries.OrderBy(summary => summary.At).Select(summary => summary.ToSeq).ToList();
+        Assert.Equal(byTime.Order().Distinct(), byTime); // each later record reaches further than the one before
         Assert.Equal(12, (await AgentTestHost.CollectAsync(store.ReadAsync(session.Id, 1, null, CancellationToken.None))).Count);
+        Assert.Single(root.History, message => Turn.Text(message).Contains(SummaryText, StringComparison.Ordinal));
     }
 
     private const string CustomPrompt = "CUSTOM-SUMMARIZER-PROMPT";
@@ -140,7 +137,7 @@ public class CompactionTests
         var session = await store.CreateSessionAsync(directory.Path, "prompt", CancellationToken.None);
         var answer = new string('a', 800);
         var provider = new FakeProvider((request, _) =>
-            summarizerPrompts.Contains(request.SystemPrompt) ? Turn.Say(SummaryText) : Turn.Say(answer));
+            summarizerPrompts.Contains(request.SystemPrompt) ? Turn.Say(SummaryText) : Turn.Say(answer, TokenUsage.Empty));
         var host = build(store, _ => provider);
         var root = host.CreateRoot(session.Id, directory.Path);
 
@@ -159,7 +156,7 @@ public class CompactionTests
             Providers = providers,
             Tools = [],
             Layers = new PromptLayers("test system", null, null),
-            Options = new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 },
+            Options = CompactionWindows.Legacy(200, maxTurns: 4),
             Store = store,
             Templates = templates,
             Compactor = compactor,
@@ -171,7 +168,7 @@ public class CompactionTests
         var (requests, summaries) = await RunCompactingAsync(
             (store, providers) => AgentTestHost.Create(
                 providers(new ModelSettings("m")),
-                options: new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 },
+                options: CompactionWindows.Legacy(200, maxTurns: 4),
                 store: store,
                 compactor: new SummaryCompactor(store, providers, new ApproximateTokenCounter(), summarizerPrompt: CustomPrompt)),
             CustomPrompt,
@@ -195,7 +192,7 @@ public class CompactionTests
         var (requests, summaries) = await RunCompactingAsync(
             (store, providers) => AgentTestHost.Create(
                 providers(new ModelSettings("m")),
-                options: new AgentOptions { CompactionThresholdTokens = 200, MaxTurns = 4 },
+                options: CompactionWindows.Legacy(200, maxTurns: 4),
                 store: store,
                 compactor: new SummaryCompactor(store, providers, new ApproximateTokenCounter(), summarizerPrompt: prompt)),
             SummaryCompactor.SummarizerPrompt);

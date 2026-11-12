@@ -20,11 +20,11 @@ public sealed record AgentOptions
 
     public int MaxSubAgentDepth { get; init; } = 3;
 
-    /// <summary>Absolute token count that starts compaction; null disables automatic compaction.</summary>
-    public int? CompactionThresholdTokens { get; init; }
-
-    /// <summary>Share of the threshold a compaction aims to leave in context, so it does not retrigger immediately.</summary>
-    public double CompactionTargetRatio { get; init; } = 0.5;
+    /// <summary>
+    /// When automatic compaction runs, relative to each model's window. Without a <see cref="CompactionPolicy.ContextWindow"/>
+    /// resolver no window is known and only the overflow fallback and manual compaction apply.
+    /// </summary>
+    public CompactionPolicy Compaction { get; init; } = new();
 
     /// <summary>Tool output longer than this many characters moves into the artifact store.</summary>
     public int ArtifactThresholdChars { get; init; } = 32_000;

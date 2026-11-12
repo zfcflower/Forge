@@ -102,31 +102,60 @@ public sealed class AgentLoop(AgentLoopServices services)
             ct.ThrowIfCancellationRequested();
             await CompactIfNeededAsync(instance, sink, ct).ConfigureAwait(false);
 
-            var registry = tools.Current();
-            await RecordFingerprintAsync(instance, registry, ct).ConfigureAwait(false);
-            var request = BuildRequest(instance, registry.Definitions);
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
             var stop = StopReason.Other;
-            instance.BeginText();
-
-            await foreach (var chunk in provider.StreamAsync(request, ct).ConfigureAwait(false))
+            var messagesAtRequest = 0;
+            var versionAtRequest = 0;
+            var overflowRetried = false;
+            while (true)
             {
-                switch (chunk)
+                var registry = tools.Current();
+                await RecordFingerprintAsync(instance, registry, ct).ConfigureAwait(false);
+                var request = BuildRequest(instance, registry.Definitions);
+                messagesAtRequest = instance.Messages.Count;
+                versionAtRequest = instance.HistoryVersion;
+                instance.BeginText();
+                var received = false;
+                try
                 {
-                    case TextDelta text:
-                        instance.AppendText(text.Text);
-                        sink.Emit(new AgentTextDelta(instance.Id, text.Text));
-                        break;
-                    case ThinkingDelta thinking:
-                        sink.Emit(new AgentThinkingDelta(instance.Id, thinking.Text));
-                        break;
-                    case MessageCompleted completed:
-                        assistant = completed.Message;
-                        usage = completed.Usage;
-                        stop = completed.Stop;
-                        break;
+                    await foreach (var chunk in provider.StreamAsync(request, ct).ConfigureAwait(false))
+                    {
+                        received = true;
+                        switch (chunk)
+                        {
+                            case TextDelta text:
+                                instance.AppendText(text.Text);
+                                sink.Emit(new AgentTextDelta(instance.Id, text.Text));
+                                break;
+                            case ThinkingDelta thinking:
+                                sink.Emit(new AgentThinkingDelta(instance.Id, thinking.Text));
+                                break;
+                            case MessageCompleted completed:
+                                assistant = completed.Message;
+                                usage = completed.Usage;
+                                stop = completed.Stop;
+                                break;
+                        }
+                    }
                 }
+                catch (Exception exception) when (!overflowRetried
+                                                  && !received
+                                                  && !ct.IsCancellationRequested
+                                                  && Providers.ProviderErrors.IsContextOverflow(exception))
+                {
+                    // Overflow fallback: the window was misjudged (or unknown). Compact once and resend the same turn once;
+                    // when nothing could be compacted, or the resend overflows again, the provider error stands.
+                    overflowRetried = true;
+                    if (!await CompactAfterOverflowAsync(instance, sink, ct).ConfigureAwait(false))
+                    {
+                        throw;
+                    }
+
+                    continue;
+                }
+
+                break;
             }
 
             if (assistant is null)
@@ -134,6 +163,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                 throw new ProviderException($"Provider '{provider.Id}' ended the stream without a completed message.", retryable: false);
             }
 
+            RecordPromptUsage(instance, usage, messagesAtRequest, versionAtRequest);
             instance.Usage += usage;
             ReportFirstRequest(instance, provider, usage);
             instance.CommitText(Text(assistant));
@@ -224,7 +254,8 @@ public sealed class AgentLoop(AgentLoopServices services)
 
     /// <summary>
     /// Hands the user's interjections to the model at a tool-batch boundary: all pending ones become one user message after
-    /// the batch's results, and each is reported so the UI can show where it landed. Nothing is skipped.
+    /// the batch's results (typed texts first, then every attachment in order; see <see cref="Interjection.Merge"/>), and
+    /// each is reported so the UI can show where it landed. Nothing is skipped.
     /// </summary>
     private async ValueTask DeliverInterjectionsAsync(AgentInstance instance, IAgentEventSink sink)
     {
@@ -240,13 +271,12 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var at = DateTimeOffset.UtcNow;
-        foreach (var text in taken)
+        foreach (var interjection in taken)
         {
-            sink.Emit(new AgentInterjected(instance.Id, text, at));
+            sink.Emit(new AgentInterjected(instance.Id, interjection.Text, at));
         }
 
-        var message = taken.Count == 1 ? taken[0] : string.Join("\n\n", taken);
-        await PersistAsync(instance, ChatMessage.User(message), null, CancellationToken.None).ConfigureAwait(false);
+        await PersistAsync(instance, Interjection.Merge(taken), null, CancellationToken.None).ConfigureAwait(false);
     }
 
     private static ChatMessage WithInstructions(ChatMessage message, string instructions)
@@ -299,6 +329,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             new CacheHint(CacheSystemAndTools: true, cacheThrough, messageTtl))
         {
             CacheRoutingKey = instance.CacheState.RoutingKey ?? instance.SessionId,
+            SessionId = instance.SessionId,
         };
     }
 
@@ -429,24 +460,213 @@ public sealed class AgentLoop(AgentLoopServices services)
         return string.Concat(suffix, "\n\n", callback);
     }
 
+    /// <summary>
+    /// Automatic compaction before a request: C ≥ trigger·U starts it and it aims at target·U, where U is the usable input
+    /// budget of the instance's own model. An attempt that leaves C at or above the trigger line (for example an inherited
+    /// prefix that alone exceeds it) is fruitless: the next attempt waits until the instance's own content grew by
+    /// 0.1·U, and after two consecutive fruitless attempts automatic compaction stops until a manual one or another model.
+    /// </summary>
     private async Task CompactIfNeededAsync(AgentInstance instance, IAgentEventSink sink, CancellationToken ct)
     {
-        if (services.Options.CompactionThresholdTokens is not { } threshold)
+        var policy = services.Options.Compaction;
+        if (!policy.Enabled || services.Compactor is NoopCompactor)
         {
             return;
         }
 
-        if (services.TokenCounter.Count(instance.History) <= threshold)
+        var state = SyncModel(instance);
+        if (state.Stalled || policy.BudgetFor(instance.Definition.Model) is not { } budget)
         {
             return;
         }
 
-        var result = await services.Compactor.CompactAsync(instance, threshold, ct).ConfigureAwait(false);
+        var trigger = budget.TriggerTokens(policy.TriggerRatio);
+        var current = ContextTokens(instance);
+        if (current < trigger)
+        {
+            return;
+        }
+
+        if (state.FruitlessBaseline is { } baseline && OwnTokens(instance) < (long)baseline + budget.RegrowthTokens)
+        {
+            return;
+        }
+
+        var target = budget.TargetTokens(policy.TargetRatio);
+        var result = await TryCompactAsync(
+            instance,
+            new CompactionRequest(target, KeepRecent(budget.KeepRecentTokens, target), CompactionReason.Auto),
+            ct).ConfigureAwait(false);
+        var after = current;
         if (result is not null)
         {
             sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
+            after = ContextTokens(instance);
+            if (after < trigger)
+            {
+                state.ResetHysteresis();
+                return;
+            }
+        }
+
+        state.FruitlessAttempts++;
+        state.FruitlessBaseline = OwnTokens(instance);
+        if (state.FruitlessAttempts >= CompactionPolicy.MaxFruitlessAttempts)
+        {
+            state.Stalled = true;
+            sink.Emit(new AgentCompactionStalled(instance.Id, after, trigger));
         }
     }
+
+    /// <summary>Forced compaction after the provider rejected the request as too long; false when nothing changed.</summary>
+    private async Task<bool> CompactAfterOverflowAsync(AgentInstance instance, IAgentEventSink sink, CancellationToken ct)
+    {
+        var policy = services.Options.Compaction;
+        if (!policy.Enabled || services.Compactor is NoopCompactor)
+        {
+            return false;
+        }
+
+        SyncModel(instance);
+        var current = ContextTokens(instance);
+        var target = Math.Max(1, (int)(current * policy.TargetRatio));
+        var keepRecent = CompactionPolicy.MaxKeepRecentTokens;
+        if (policy.BudgetFor(instance.Definition.Model) is { } budget)
+        {
+            target = Math.Min(target, budget.TargetTokens(policy.TargetRatio));
+            keepRecent = budget.KeepRecentTokens;
+        }
+
+        var result = await TryCompactAsync(
+            instance,
+            new CompactionRequest(target, KeepRecent(keepRecent, target), CompactionReason.Overflow),
+            ct).ConfigureAwait(false);
+        if (result is null)
+        {
+            return false;
+        }
+
+        sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
+        return true;
+    }
+
+    /// <summary>
+    /// The automatic and overflow paths keep at most half their target verbatim, so a low target is still reachable; a
+    /// summary that could not be produced counts as no compaction (fruitless for the automatic path).
+    /// </summary>
+    private static int KeepRecent(int keepRecent, int target) => Math.Max(1, Math.Min(keepRecent, target / 2));
+
+    private async Task<CompactionResult?> TryCompactAsync(AgentInstance instance, CompactionRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return await services.Compactor.CompactAsync(instance, request, ct).ConfigureAwait(false);
+        }
+        catch (CompactionFailedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Manual compaction: no threshold and regardless of <see cref="CompactionPolicy.Enabled"/>; everything but the newest
+    /// keepRecent = min(20 000, 0.2·U) tokens (20 000 when the window is unknown) is summarized, with
+    /// <paramref name="instructions"/> as additional focus, and automatic compaction is re-enabled for the instance. A
+    /// summary that could not be produced throws <see cref="CompactionFailedException"/>. Must not run while a turn of the
+    /// same instance does.
+    /// </summary>
+    internal async Task<CompactionResult?> CompactNowAsync(AgentInstance instance, IAgentEventSink? sink, string? instructions, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        var state = SyncModel(instance);
+        state.ResetHysteresis();
+        if (services.Compactor is NoopCompactor)
+        {
+            return null;
+        }
+
+        var keepRecent = services.Options.Compaction.BudgetFor(instance.Definition.Model)?.KeepRecentTokens
+                         ?? CompactionPolicy.MaxKeepRecentTokens;
+        var result = await services.Compactor.CompactAsync(
+            instance,
+            new CompactionRequest(1, keepRecent, CompactionReason.Manual, string.IsNullOrWhiteSpace(instructions) ? null : instructions.Trim()),
+            ct).ConfigureAwait(false);
+        if (result is not null)
+        {
+            sink?.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Current context size C: the last real prompt size of this instance on this model plus an estimate of what was
+    /// appended since that request; the full estimate (messages and stable prefix) when no real usage applies.
+    /// </summary>
+    internal int ContextTokens(AgentInstance instance)
+    {
+        var state = instance.Compaction;
+        var messages = instance.Messages;
+        if (state.LastPromptTokens > 0
+            && state.ModelKey == ModelKey(instance.Definition.Model)
+            && state.HistoryVersionAtRequest == instance.HistoryVersion
+            && state.MessagesAtRequest <= messages.Count)
+        {
+            return (int)Math.Min(int.MaxValue, (long)state.LastPromptTokens + Estimate(messages, state.MessagesAtRequest, ownOnly: false));
+        }
+
+        return (int)Math.Min(
+            int.MaxValue,
+            (long)Estimate(messages, 0, ownOnly: false) + services.TokenCounter.Count(instance.Prompt.StablePrefix));
+    }
+
+    private int OwnTokens(AgentInstance instance) => Estimate(instance.Messages, 0, ownOnly: true);
+
+    private int Estimate(List<AgentMessage> messages, int from, bool ownOnly)
+    {
+        if (from >= messages.Count)
+        {
+            return 0;
+        }
+
+        var slice = new List<ChatMessage>(messages.Count - from);
+        for (var index = from; index < messages.Count; index++)
+        {
+            if (!ownOnly || !messages[index].Inherited)
+            {
+                slice.Add(messages[index].Message);
+            }
+        }
+
+        return slice.Count == 0 ? 0 : services.TokenCounter.Count(slice);
+    }
+
+    /// <summary>Usage recorded for another model no longer applies, and neither does that model's hysteresis.</summary>
+    private static CompactionState SyncModel(AgentInstance instance)
+    {
+        var state = instance.Compaction;
+        var key = ModelKey(instance.Definition.Model);
+        if (state.ModelKey != key)
+        {
+            state.ModelKey = key;
+            state.ForgetUsage();
+            state.ResetHysteresis();
+        }
+
+        return state;
+    }
+
+    private static void RecordPromptUsage(AgentInstance instance, TokenUsage usage, int messagesAtRequest, int versionAtRequest)
+    {
+        // InputTokens already counts cache reads and writes in every adapter (Anthropic adds them up, OpenAI's prompt_tokens
+        // includes cached tokens), so it is the whole prompt; adding the cache fields again would count them twice.
+        var state = SyncModel(instance);
+        state.LastPromptTokens = Math.Max(0, usage.InputTokens);
+        state.MessagesAtRequest = messagesAtRequest;
+        state.HistoryVersionAtRequest = versionAtRequest;
+    }
+
+    private static string ModelKey(ModelSettings model) => string.Concat(model.ProviderId, "\u001f", model.Model);
 
     private async ValueTask<(ContentBlock[] Results, string? Steering)> ExecuteToolsAsync(
         AgentInstance instance,
@@ -457,7 +677,11 @@ public sealed class AgentLoop(AgentLoopServices services)
         CancellationToken ct)
     {
         var results = new ContentBlock?[calls.Length];
-        var context = new ToolContext(instance.SessionId, instance.WorkingDirectory, instance.Depth);
+        var context = new ToolContext(instance.SessionId, instance.WorkingDirectory, instance.Depth)
+        {
+            AgentId = instance.Id,
+            AgentName = instance.Definition.Name,
+        };
         string? steering = null;
         try
         {

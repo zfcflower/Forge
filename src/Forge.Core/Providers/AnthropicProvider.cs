@@ -13,6 +13,16 @@ public sealed class AnthropicProvider : HttpChatProvider
     /// <summary>Signature prefix that marks a thinking block as a server-redacted one.</summary>
     public const string RedactedSignaturePrefix = "redacted:";
 
+    /// <summary>
+    /// The attachment kinds the Messages API has a block for: images and PDF (<c>document</c>). Audio and video have none, so
+    /// a request carrying them fails before it is sent.
+    /// </summary>
+    public const ModelInputs WireInputs = ModelInputs.Text | ModelInputs.Image | ModelInputs.Pdf;
+
+    /// <summary>Whether an attachment of <paramref name="mediaType"/> can be written: any image, or a PDF.</summary>
+    public static bool CanCarry(string mediaType) =>
+        ProviderAttachments.KindOf(mediaType) is ModelInputs.Image or ModelInputs.Pdf;
+
     private const int DefaultMaxTokens = 8192;
     private const int ThinkingHeadroom = 4096;
 
@@ -201,7 +211,7 @@ public sealed class AnthropicProvider : HttpChatProvider
             var blocks = new List<WireBlock>(message.Content.Count);
             foreach (var block in message.Content)
             {
-                if (IsSendable(block))
+                if (IsSendable(block) && (block is not (ImageBlock or FileBlock) || message.Role == MessageRole.User))
                 {
                     blocks.Add(new WireBlock(block, index));
                 }
@@ -334,6 +344,24 @@ public sealed class AnthropicProvider : HttpChatProvider
                 writer.WriteString("type", "text");
                 writer.WriteString("text", ProviderJson.RenderArtifact(artifact));
                 break;
+            case ImageBlock image:
+                writer.WriteString("type", "image");
+                writer.WriteStartObject("source");
+                writer.WriteString("type", "base64");
+                writer.WriteString("media_type", image.MediaType);
+                writer.WriteString("data", image.Data);
+                writer.WriteEndObject();
+                break;
+            case FileBlock file when ProviderAttachments.IsPdf(file.MediaType):
+                writer.WriteString("type", "document");
+                writer.WriteStartObject("source");
+                writer.WriteString("type", "base64");
+                writer.WriteString("media_type", ProviderAttachments.Pdf);
+                writer.WriteString("data", file.Data);
+                writer.WriteEndObject();
+                break;
+            case FileBlock file:
+                throw ProviderAttachments.Unsupported(ProviderFactory.AnthropicKind, file);
             default:
                 throw new ProviderException($"Unsupported content block {block.GetType().Name}.", retryable: false);
         }

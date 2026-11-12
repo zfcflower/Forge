@@ -72,6 +72,36 @@ internal static class ProviderJson
         return builder?.ToString();
     }
 
+    /// <summary>Whether any message in the range carries an image or a file, which needs the content-array form.</summary>
+    internal static bool HasMedia(IReadOnlyList<ChatMessage> messages, int start, int end)
+    {
+        for (var i = start; i <= end; i++)
+        {
+            if (HasMedia(messages[i].Content))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool HasMedia(IReadOnlyList<ContentBlock> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block is ImageBlock or FileBlock)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The <c>data:</c> URL both OpenAI protocols take for an inline image.</summary>
+    internal static string DataUrl(ImageBlock image) => string.Concat("data:", image.MediaType, ";base64,", image.Data);
+
     internal static string RenderArtifact(ArtifactRefBlock artifact) =>
         $"[artifact {artifact.ArtifactId}] {artifact.Description} ({artifact.SizeBytes} bytes)";
 

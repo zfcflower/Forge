@@ -68,7 +68,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     private bool isRunning;
 
     /// <summary>The message a redirect sends once the cancelled turn has wound down.</summary>
-    private string? redirectText;
+    private ComposerPrompt? redirectText;
 
     /// <summary>Set by Stop: the queue waits until the user sends again.</summary>
     private bool queuePaused;
@@ -148,7 +148,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
             composerPreferences ?? ComposerPreferences.Shared,
             session.WorkspacePath,
             fileSource,
-            skillSource);
+            skillSource,
+            notifications: notifications,
+            notificationScope: session.Id);
+        Composer.AttachmentsChanged += RefreshCanSend;
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         Instruments = new SessionInstrumentsViewModel(
             session,
@@ -226,6 +229,9 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     /// <summary>Names of the tools this session can call; empty until its first turn built the agent host.</summary>
     internal IReadOnlyList<string> ToolNames() => runtime?.ToolNames() ?? [];
 
+    /// <summary>The session's tool catalog for the Tools settings section; empty until the first turn built the host.</summary>
+    internal IReadOnlyList<Forge.Abstractions.ToolDescriptor> DescribeTools() => runtime?.DescribeTools() ?? [];
+
     /// <summary>
     /// True for a session that is not the active session of its workspace: opened from history or the recycled rows, or
     /// turned read-only when the turn-start check found it taken over. Nothing can be sent; the tab offers "continue"
@@ -282,9 +288,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     /// Takes the unsent draft and the queued (not interjected) messages out of this view, for the live view that replaces
     /// it ("continue"). Interjections of a read-only view were already turned into queued messages when its turn ended.
     /// </summary>
-    internal (string Draft, IReadOnlyList<string> Queued) TakeComposerState()
+    internal ComposerCarry TakeComposerState()
     {
-        var taken = (draft, (IReadOnlyList<string>)[.. queued.Select(static message => message.Text)]);
+        var taken = new ComposerCarry(
+            draft,
+            [.. queued.Select(static message => message.Prompt)],
+            Composer.TakeAttachments());
         queued.Clear();
         reviewWithdrawn.Clear();
         Draft = string.Empty;
@@ -292,17 +301,23 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         return taken;
     }
 
+    /// <summary>Text-only form of <see cref="RestoreComposerState(ComposerCarry)"/>.</summary>
+    internal void RestoreComposerState((string Draft, IReadOnlyList<string> Queued) state) =>
+        RestoreComposerState(new ComposerCarry(state.Draft, [.. state.Queued.Select(ComposerPrompt.FromText)], []));
+
     /// <summary>Puts a carried draft and queue back (the counterpart of <see cref="TakeComposerState"/>); the queue stays paused.</summary>
-    internal void RestoreComposerState((string Draft, IReadOnlyList<string> Queued) state)
+    internal void RestoreComposerState(ComposerCarry state)
     {
+        ArgumentNullException.ThrowIfNull(state);
         if (!string.IsNullOrWhiteSpace(state.Draft))
         {
             Draft = state.Draft;
         }
 
-        foreach (var text in state.Queued)
+        Composer.RestoreAttachments(state.DraftAttachments);
+        foreach (var prompt in state.Queued)
         {
-            queued.Add(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued));
+            queued.Add(new QueuedMessageViewModel(prompt, isInterjection: false, RemoveQueued));
         }
 
         if (state.Queued.Count > 0)
@@ -777,13 +792,33 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
     }
 
-    /// <summary>Idle with a draft to send, or with queued messages waiting (an empty send resumes the queue).</summary>
+    /// <summary>
+    /// Idle with a draft to send, or with queued messages waiting (an empty send resumes the queue). A draft whose
+    /// attachments the current model or provider cannot take blocks sending until they are removed (the composer shows why).
+    /// </summary>
     private bool EvaluateCanSend() =>
-        !isReadOnlyView && !isHandingOver && !isRunning && !gating && (!string.IsNullOrWhiteSpace(draft) || HasSendableQueue());
+        !isReadOnlyView && !isHandingOver && !isRunning && !gating && !compacting &&
+        (HasDraft() ? !Composer.AttachmentsBlocked : HasSendableQueue());
+
+    /// <summary>Something typed or attached: either is enough to send.</summary>
+    private bool HasDraft() => !string.IsNullOrWhiteSpace(draft) || Composer.HasAttachments;
+
+    /// <summary>Takes the draft (trimmed, command-expanded text and the attachments) out of the composer; null when empty.</summary>
+    private ComposerPrompt? TakeDraft()
+    {
+        if (!HasDraft())
+        {
+            return null;
+        }
+
+        var text = draft.Trim();
+        Draft = string.Empty;
+        return new ComposerPrompt(Composer.ExpandCommand(text), Composer.TakeAttachments());
+    }
 
     private bool HasSendableQueue() => queued.Any(message => !message.IsInterjection);
 
-    private bool CanSendWhileRunning() => !isReadOnlyView && !isHandingOver && isRunning && !string.IsNullOrWhiteSpace(draft);
+    private bool CanSendWhileRunning() => !isReadOnlyView && !isHandingOver && isRunning && HasDraft() && !Composer.AttachmentsBlocked;
 
     /// <summary>
     /// "Handing over" (lifecycle section 2): set once the handover check passed, cleared when the handover finishes,
@@ -813,7 +848,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     internal IReadOnlyList<string> BusyReasons()
     {
         var reasons = new List<string>(5);
-        if (isRunning)
+        if (isRunning || compacting)
         {
             reasons.Add(HandoverStrings.BusyTurn);
         }
@@ -853,15 +888,25 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
     private async Task SendAsync(CancellationToken ignored)
     {
-        var text = draft.Trim();
-        var typed = text;
-        if (text.Length > 0)
+        var typed = draft.Trim();
+        if (TryParseCompactCommand(typed, out var focus) && !Composer.HasAttachments)
         {
             Draft = string.Empty;
+            queuePaused = false;
+            Instruments.NoteDraft(typed);
+            await CompactNowAsync(focus).ConfigureAwait(true);
+            return;
+        }
+
+        ComposerPrompt prompt;
+        if (TakeDraft() is { } composed)
+        {
+            prompt = composed;
         }
         else if (TakeQueued() is { } next)
         {
-            text = next;
+            prompt = next;
+            typed = next.Text;
         }
         else
         {
@@ -869,26 +914,110 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
 
         queuePaused = false;
-        Instruments.NoteDraft(text);
-        if (typed.Length > 0)
-        {
-            text = Composer.ExpandCommand(text);
-        }
-
-        await RunTurnAsync(text).ConfigureAwait(true);
+        Instruments.NoteDraft(typed);
+        await RunTurnAsync(prompt).ConfigureAwait(true);
     }
 
-    private void Queue()
+    // --- compaction (feature B) ---
+    /// <summary>The composer command that compacts the root context now instead of sending a message.</summary>
+    public const string CompactCommandText = "/compact";
+
+    private bool compacting;
+
+    internal static bool IsCompactCommand(string text) => TryParseCompactCommand(text, out _);
+
+    /// <summary>
+    /// <c>/compact</c> (command word in any case) alone or followed by whitespace and focus text; <paramref name="focus"/> is
+    /// that text trimmed, null when there is none. <c>/compactfoo</c> is not the command.
+    /// </summary>
+    internal static bool TryParseCompactCommand(string text, out string? focus)
     {
-        var text = draft.Trim();
-        if (text.Length == 0)
+        focus = null;
+        var trimmed = text.AsSpan().Trim();
+        if (!trimmed.StartsWith(CompactCommandText, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rest = trimmed[CompactCommandText.Length..];
+        if (rest.IsEmpty)
+        {
+            return true;
+        }
+
+        if (!char.IsWhiteSpace(rest[0]))
+        {
+            return false;
+        }
+
+        var remainder = rest.Trim();
+        focus = remainder.IsEmpty ? null : remainder.ToString();
+        return true;
+    }
+
+    /// <summary>Whether a manual compaction can start: a live, idle session (no turn, no compaction under way).</summary>
+    public bool CanCompactNow => !disposed && !isReadOnlyView && runtime is not null && !isRunning && !gating && !isHandingOver && !compacting;
+
+    /// <summary>
+    /// Manual compaction (<c>/compact [focus]</c>, the context gauge): summarizes everything but the newest keepRecent tokens
+    /// regardless of the threshold, with <paramref name="focus"/> as additional summarizer focus, and re-enables automatic
+    /// compaction. Sending stays blocked while it runs; the outcome is a notice.
+    /// </summary>
+    public async Task CompactNowAsync(string? focus = null)
+    {
+        if (disposed || isReadOnlyView || runtime is not { } live)
         {
             return;
         }
 
-        Draft = string.Empty;
-        text = Composer.ExpandCommand(text);
-        AddQueued(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued), queued.Count);
+        if (!CanCompactNow)
+        {
+            Transcript.AddNotice(CompactionStrings.Busy(), isError: true);
+            return;
+        }
+
+        compacting = true;
+        RefreshCanSend();
+        OnPropertyChanged(nameof(CanCompactNow));
+        try
+        {
+            var result = await live.CompactNowAsync(static _ => { }, focus, CancellationToken.None).ConfigureAwait(true);
+            if (result is null)
+            {
+                Transcript.AddNotice(CompactionStrings.Nothing());
+            }
+            else
+            {
+                Transcript.AddNotice(SessionStrings.Compacted(result.TokensBefore, result.TokensAfter));
+                Instruments.NoteCompacted(result.TokensAfter);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            Transcript.AddNotice(CompactionStrings.Busy(), isError: true);
+        }
+        catch (Exception exception) when (exception is CompactionFailedException or ProviderException or IOException or DbException or ObjectDisposedException)
+        {
+            Transcript.AddNotice(CompactionStrings.Failed(exception.Message), isError: true);
+        }
+        finally
+        {
+            compacting = false;
+            RefreshCanSend();
+            OnPropertyChanged(nameof(CanCompactNow));
+            ScheduleNext();
+        }
+    }
+    // --- end compaction ---
+
+    private void Queue()
+    {
+        if (TakeDraft() is not { } prompt)
+        {
+            return;
+        }
+
+        AddQueued(new QueuedMessageViewModel(prompt, isInterjection: false, RemoveQueued), queued.Count);
         if (!isRunning)
         {
             ScheduleNext();
@@ -948,7 +1077,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
         try
         {
-            await RunTurnAsync(text).ConfigureAwait(true);
+            await RunTurnAsync(ComposerPrompt.FromText(text)).ConfigureAwait(true);
         }
         finally
         {
@@ -997,17 +1126,16 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
     private void Interject()
     {
-        var text = draft.Trim();
-        if (text.Length == 0)
+        if (TakeDraft() is not { } prompt)
         {
             return;
         }
 
-        Draft = string.Empty;
-        text = Composer.ExpandCommand(text);
-        var delivered = isRunning && runtime is { } live && live.TryInterject(text);
+        // Attachments travel with the interjection: the loop delivers text and attachments together at the next tool-batch
+        // boundary. When no turn takes it, the message is queued normally.
+        var delivered = isRunning && runtime is { } live && live.TryInterject(prompt.Text, prompt.Attachments);
         var front = queued.TakeWhile(message => message.IsInterjection).Count();
-        AddQueued(new QueuedMessageViewModel(text, delivered, RemoveQueued), delivered ? front : 0);
+        AddQueued(new QueuedMessageViewModel(prompt, delivered, RemoveQueued), delivered ? front : 0);
         if (!isRunning)
         {
             ScheduleNext();
@@ -1016,23 +1144,20 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
     private void Redirect()
     {
-        var text = draft.Trim();
-        if (text.Length == 0)
+        if (TakeDraft() is not { } prompt)
         {
             return;
         }
 
-        Draft = string.Empty;
-        text = Composer.ExpandCommand(text);
         if (!isRunning)
         {
             queuePaused = false;
-            AddQueued(new QueuedMessageViewModel(text, isInterjection: false, RemoveQueued), 0);
+            AddQueued(new QueuedMessageViewModel(prompt, isInterjection: false, RemoveQueued), 0);
             ScheduleNext();
             return;
         }
 
-        redirectText = text;
+        redirectText = prompt;
         CancelTurn();
     }
 
@@ -1077,7 +1202,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     }
 
     /// <summary>Removes and returns the first queued (not interjected) message.</summary>
-    private string? TakeQueued()
+    private ComposerPrompt? TakeQueued()
     {
         var next = queued.FirstOrDefault(message => !message.IsInterjection);
         if (next is null)
@@ -1088,7 +1213,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         queued.Remove(next);
         reviewWithdrawn.Remove(next);
         OnQueueChanged();
-        return next.Text;
+        return next.Prompt;
     }
 
     /// <summary>
@@ -1107,13 +1232,19 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
             for (var i = undelivered.Count - 1; i >= 0; i--)
             {
-                queued.Insert(0, new QueuedMessageViewModel(undelivered[i], isInterjection: false, RemoveQueued));
+                var leftover = undelivered[i];
+                queued.Insert(
+                    0,
+                    new QueuedMessageViewModel(
+                        new ComposerPrompt(leftover.Text, [.. leftover.Attachments]),
+                        isInterjection: false,
+                        RemoveQueued));
             }
 
             OnQueueChanged();
         }
 
-        if (disposed || isRunning || isReadOnlyView)
+        if (disposed || isRunning || isReadOnlyView || compacting)
         {
             return;
         }
@@ -1128,7 +1259,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         Dispatcher.UIThread.Post(() => _ = RunNextAsync(redirect));
     }
 
-    private async Task RunNextAsync(string? redirect)
+    private async Task RunNextAsync(ComposerPrompt? redirect)
     {
         if (disposed)
         {
@@ -1146,15 +1277,15 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        var text = redirect ?? (queuePaused ? null : TakeQueued());
-        if (text is null)
+        var prompt = redirect ?? (queuePaused ? null : TakeQueued());
+        if (prompt is null)
         {
             return;
         }
 
         try
         {
-            await RunTurnAsync(text).ConfigureAwait(true);
+            await RunTurnAsync(prompt).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -1176,9 +1307,10 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         }
     }
 
-    private async Task RunTurnAsync(string text)
+    private async Task RunTurnAsync(ComposerPrompt prompt)
     {
-        if (!await PassesTurnGateAsync(text).ConfigureAwait(true))
+        var text = prompt.Text;
+        if (!await PassesTurnGateAsync(prompt).ConfigureAwait(true))
         {
             return;
         }
@@ -1197,7 +1329,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
         Interlocked.Exchange(ref runningTools, 0);
         Instruments.RefreshCounters();
         Instruments.RefreshSources();
-        Transcript.AddUserMessage(text, turnStartedAt);
+        Transcript.AddUserMessage(text, turnStartedAt, prompt.Attachments);
         var card = Transcript.BeginTurn(turnStartedAt);
         turnNumber = card.Round;
         IsRunning = true;
@@ -1233,7 +1365,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
                 }
             }
 
-            await live.RunTurnAsync(text, OnAgentEvent, token).ConfigureAwait(true);
+            await live.RunTurnAsync(text, prompt.Attachments, OnAgentEvent, token).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -1294,7 +1426,7 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
     /// The turn-start check (6.3). A rejected text is never lost: it goes back into an empty draft, else to the front of
     /// the queue. A session the store no longer has as active turns read-only in place; a merge conflict pauses the queue.
     /// </summary>
-    private async Task<bool> PassesTurnGateAsync(string text)
+    private async Task<bool> PassesTurnGateAsync(ComposerPrompt text)
     {
         if (isReadOnlyView || runtime is null)
         {
@@ -1360,11 +1492,12 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
 
         return false;
 
-        void Restore(string rejected)
+        void Restore(ComposerPrompt rejected)
         {
-            if (string.IsNullOrWhiteSpace(draft))
+            if (!HasDraft())
             {
-                Draft = rejected;
+                Draft = rejected.Text;
+                Composer.RestoreAttachments(rejected.Attachments);
             }
             else
             {
@@ -1530,6 +1663,9 @@ internal sealed class SessionWorkspaceViewModel : ObservableObject, IDisposable,
                 break;
             case AgentCompacted compacted:
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));
+                break;
+            case AgentCompactionStalled stalled:
+                Card(stalled.AgentId)?.AddNotice(CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens), isError: true);
                 break;
             case AgentInterjected interjected:
                 OnInterjected(interjected);

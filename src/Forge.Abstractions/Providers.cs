@@ -34,6 +34,12 @@ public sealed record ChatRequest(
     /// Null = do not send. Providers that do not support it ignore it.
     /// </summary>
     public string? CacheRoutingKey { get; init; }
+
+    /// <summary>
+    /// The session the turn belongs to; fills a <c>{session}</c> placeholder in a provider's configured request headers
+    /// (OpenCode's <c>x-opencode-session</c>, for one). Null outside a session: a header that needs it is then not sent.
+    /// </summary>
+    public string? SessionId { get; init; }
 }
 
 public enum StopReason { EndTurn, ToolUse, MaxTokens, Other }

@@ -403,6 +403,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Provider,
             SettingsSectionIds.Automations,
             SettingsSectionIds.Prompts,
+            Forge.App.Web.WebSettingsSectionViewModel.SectionId,
             SettingsSectionIds.Appearance,
             SettingsSectionIds.Language,
             SettingsSectionIds.Editor,
@@ -414,6 +415,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Mcp,
             SettingsSectionIds.Tools,
             SettingsSectionIds.Notifications,
+            SettingsSectionIds.Network,
             SettingsSectionIds.Paths,
         ];
 

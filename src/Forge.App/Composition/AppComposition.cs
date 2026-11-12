@@ -10,6 +10,7 @@ using Forge.App.Editing;
 using Forge.App.Git;
 using Forge.App.Lifecycle;
 using Forge.App.Localization;
+using Forge.App.Network;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.ViewModels.Settings;
@@ -19,6 +20,7 @@ using Forge.App.Prompts;
 using Forge.App.Providers;
 using Forge.App.Settings;
 using Forge.Core.Agents;
+using Forge.Core.Net;
 using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
@@ -50,6 +52,7 @@ internal sealed class AppComposition : IAsyncDisposable
     private readonly PreferencesStore preferences;
     private readonly SettingsSections settings;
     private readonly AppearanceFeature appearance;
+    private Forge.App.Web.WebServices? webServices;
     private bool disposed;
 
     private AppComposition(
@@ -147,6 +150,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public Func<IReadOnlyList<string>> ActiveSessionTools { get; set; } = static () => [];
 
     /// <summary>
+    /// The active session's tool catalog (switched-off tools included, with origin and group), set by the window; the Tools
+    /// settings section lists it and offers a switch on each built-in. Empty when no session has run a turn yet.
+    /// </summary>
+    public Func<IReadOnlyList<Forge.Abstractions.ToolDescriptor>> ActiveSessionToolCatalog { get; set; } = static () => [];
+
+    /// <summary>
     /// The working directory (worktree or scratch folder) of the session in front, or null. The prompts page's project
     /// scope writes to its <c>.forge</c>, the same directory that session's runtime and composer read.
     /// </summary>
@@ -213,6 +222,12 @@ internal sealed class AppComposition : IAsyncDisposable
     /// overlay and the <c>extensions</c> settings section read it from here.
     /// </summary>
     public ApprovalServices? Approvals { get; private set; }
+
+    /// <summary>The one network stack every outbound connection goes through; set by <see cref="Create"/>.</summary>
+    public NetworkStack? Network { get; private set; }
+
+    /// <summary>Which fields of the <c>network</c> section were invalid and replaced by defaults at startup, or null.</summary>
+    public string? NetworkProblem { get; private set; }
 
     /// <summary>
     /// The one notification entry (toasts in the window, desktop notifications in the background). Created before the window
@@ -332,6 +347,22 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsGroups.System,
             "IconBell"));
 
+        // 0d. Network: ONE stack for every outbound connection (providers, model catalog, web tools, MCP over HTTP). The
+        //     `network` section is read before the first client exists, so the first connection already uses it; Apply on
+        //     the settings page changes the resolver and proxy of every handler from its next connection on.
+        var networkSettings = new NetworkSettingsStore(paths.SettingsPath);
+        var network = new NetworkStack(networkSettings.Current);
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Network,
+            NetworkStrings.SectionTitle,
+            SettingsSectionIds.NetworkOrder,
+            new NetworkSettingsSectionViewModel(
+                networkSettings,
+                network,
+                (candidate, host, ct) => network.CreateResolver(candidate).ResolveAsync(host, ct).AsTask()),
+            SettingsGroups.System,
+            "IconGlobe"));
+
         // 1. The approval database is owned by the extension host; the shell only reads its record count.
         var approvalsDatabasePath = Path.Combine(paths.HostDataDirectory, ApprovalStore.FileName);
 
@@ -371,7 +402,17 @@ internal sealed class AppComposition : IAsyncDisposable
         var mcpProblem = default(LocText);
         try
         {
-            mcp = McpServices.Create(paths, notifications);
+            // The MCP client mirrors the transport's own defaults (no cookies, 30 s connect, 5 min pooled lifetime, no
+            // decompression, no whole-response timeout) but resolves and proxies through the network stack.
+            var mcpHttp = new HttpClient(network.CreateHandler(new NetworkHandlerOptions
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(30),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            }))
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+            mcp = McpServices.Create(paths, notifications, mcpHttp);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -391,7 +432,7 @@ internal sealed class AppComposition : IAsyncDisposable
         }
 
         // 6. Providers: the stored definitions, the encrypted secret store behind them and the credential resolvers.
-        var httpClient = ProviderHttpClient.Create();
+        var httpClient = ProviderHttpClient.Create(network);
         var providers = new ProviderServices(paths.SettingsPath, paths.UserDataDirectory, httpClient);
         // The catalog refresh is one service with three callers (the daily automation, the startup check, the settings
         // button); it needs the provider list it also refreshes, so it is built here rather than inside automations.
@@ -399,6 +440,8 @@ internal sealed class AppComposition : IAsyncDisposable
         // The per-agent defaults live in the same settings.json; one instance is shared by the settings page (writes) and
         // the session runtimes (reads), so a saved default reaches the next session without a reload.
         var agentDefaults = new AgentDefaultsStore(paths.SettingsPath);
+        // The `compaction` section: edited next to the default context window, read by each session host when it is built.
+        var compactionSettings = new CompactionSettingsStore(paths.SettingsPath);
         // One template service: the settings pages edit it, the runtimes, PR tool and automations resolve it per use.
         var promptTemplates = new PromptTemplateService(AgentRuntimeServices.UserDirectory());
         settings.Add(new SettingsSection(
@@ -412,9 +455,21 @@ internal sealed class AppComposition : IAsyncDisposable
                 agentDefaults,
                 modelCatalogRefresh,
                 action => Avalonia.Threading.Dispatcher.UIThread.Post(action),
-                promptTemplates),
+                promptTemplates,
+                compactionSettings),
             SettingsGroups.Agent,
             "IconPlug"));
+
+        // --- web tools: settings section and tool factory ---
+        var webServices = new Forge.App.Web.WebServices(new Forge.App.Web.WebSettingsStore(paths.SettingsPath), providers.Secrets, network);
+        settings.Add(new SettingsSection(
+            Forge.App.Web.WebSettingsSectionViewModel.SectionId,
+            WebStrings.SectionTitle,
+            Forge.App.Web.WebSettingsSectionViewModel.SectionOrder,
+            new Forge.App.Web.WebSettingsSectionViewModel(webServices),
+            SettingsGroups.Agent,
+            "IconSearch"));
+        // --- end web tools ---
 
         // 7. Workbench storage: one forge.db under the data root for sessions, projects, todos, UI state and checkpoints.
         //    Every store runs the StorageSchema migration on its first use, so there is no separate initialize step.
@@ -471,11 +526,19 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.PromptTemplates = promptTemplates;
         runtimeServices.AgentDefaults = agentId => agentDefaults.Resolve(agentId, providers.Catalog);
         runtimeServices.PullRequestTools = pullRequestTools;
+        // Compaction thresholds follow each model's effective window: the same resolution chain the context gauge shows
+        // (catalog snapshot → provider report → default context window → per-model override).
+        runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
+        runtimeServices.MaxOutputTokens = model => providers.ModelCatalog.View.Find(null, model.Model)?.MaxOutputTokens;
+        runtimeServices.Compaction = () => compactionSettings.Current;
         // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
         // options are read through a factory, so a preference change (ripgrep path, shell, bash timeout) applies to the
         // next call without rebuilding the tool surface.
         var fileTools = new FileTools(() => ToolPreferences.From(preferences.Current));
         runtimeServices.FileTools = fileTools.All;
+        // Switched-off built-in tools: read before every turn, so a toggle applies from the next turn of every session.
+        runtimeServices.DisabledTools = () => preferences.Current.ToolsDisabled;
+        runtimeServices.WebTools = webServices.CreateTools; // web tools
         var stepCommitter = new StepCommitter(
             git,
             todos,
@@ -526,6 +589,9 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             initialization);
         composition.Approvals = approvals;
+        composition.Network = network;
+        composition.NetworkProblem = networkSettings.LoadProblem;
+        composition.webServices = webServices;
         composition.PromptTemplates = promptTemplates;
         composition.TodoStepCommitter = stepCommitter;
         composition.PullRequests = prPlatform;
@@ -791,6 +857,8 @@ internal sealed class AppComposition : IAsyncDisposable
         }
 
         httpClient.Dispose();
+        webServices?.Dispose();
+        Network?.Dispose();
 
         // Last of the services: a session may still have been finishing a turn while everything above was released.
         if (Notifications is { } notifications)

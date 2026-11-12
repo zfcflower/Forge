@@ -93,7 +93,7 @@ internal static class ModelCatalogStrings
         Loc.Register(LabelKey, "模型目录", "Model catalog");
         Loc.Register(UpdatedKey, "更新于 {0}", "Updated {0}");
         Loc.Register(NeverKey, "尚未更新", "Not updated yet");
-        Loc.Register(CountsKey, "{0} 个提供方 · {1} 个模型", "{0} providers · {1} models");
+        Loc.Register(CountsKey, "{0} 个提供商 · {1} 个模型", "{0} providers · {1} models");
         Loc.Register(UpdateKey, "立即更新", "Update now");
         Loc.Register(UpdatingKey, "正在更新…", "Updating…");
         Loc.Register(SourceLabelKey, "目录地址", "Catalog address");
@@ -105,8 +105,8 @@ internal static class ModelCatalogStrings
         Loc.Register(SkippedTodayKey, "今天已经更新过，跳过", "Already updated today — skipped");
         Loc.Register(UnchangedKey, "模型目录已是最新", "The model catalog is already up to date");
         Loc.Register(FailedKey, "模型目录更新失败：{0}", "The model catalog update failed: {0}");
-        Loc.Register(UpdatedSummaryKey, "模型目录已更新：{0} 个提供方 · {1} 个模型", "Model catalog updated: {0} providers · {1} models");
-        Loc.Register(ProviderListsKey, "；提供方模型列表 {0} 个", "; {0} provider model lists refreshed");
-        Loc.Register(ProviderProblemKey, "；{0} 个提供方的列表失败：{1}", "; {0} provider lists failed: {1}");
+        Loc.Register(UpdatedSummaryKey, "模型目录已更新：{0} 个提供商 · {1} 个模型", "Model catalog updated: {0} providers · {1} models");
+        Loc.Register(ProviderListsKey, "；提供商模型列表 {0} 个", "; {0} provider model lists refreshed");
+        Loc.Register(ProviderProblemKey, "；{0} 个提供商的列表失败：{1}", "; {0} provider lists failed: {1}");
     }
 }

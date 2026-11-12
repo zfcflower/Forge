@@ -47,6 +47,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject
     private string baseUrl = string.Empty;
     private bool keyIsSecret = true;
     private string keyText = string.Empty;
+    private string headersText = string.Empty;
     private ProviderTestState testState;
     private IReadOnlyList<string>? testedModels;
     private string? draftId;
@@ -93,6 +94,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject
             // An environment variable on the definition means the key lives there; otherwise it is the stored secret.
             keyIsSecret = definition.EnvironmentVariable is null;
             keyText = definition.EnvironmentVariable ?? string.Empty;
+            headersText = FormatHeaders(definition.Headers);
             testedModels = definition.Models;
             // Editing a provider that already works: saving needs no re-test until the URL or the key changes.
             testState = ProviderTestState.Passed;
@@ -125,6 +127,10 @@ internal sealed class ProviderEditorViewModel : ObservableObject
     public string BaseUrlLabel => Loc.Instance[ProviderStrings.EditorBaseUrlKey];
 
     public string KeyLabel => Loc.Instance[ProviderStrings.EditorSecretKey];
+
+    public string HeadersLabel => Loc.Instance[ProviderStrings.EditorHeadersKey];
+
+    public string HeadersHint => Loc.Instance[ProviderStrings.EditorHeadersHintKey];
 
     public string KeyAsSecretText => Loc.Instance[ProviderStrings.EditorKeyAsSecretKey];
 
@@ -210,6 +216,22 @@ internal sealed class ProviderEditorViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Extra request headers, one <c>Name: Value</c> per line; blank lines are ignored. A gateway may need them (OpenCode's
+    /// <c>x-opencode-session: {session}</c>), so a change invalidates the last test like the URL does.
+    /// </summary>
+    public string HeadersText
+    {
+        get => headersText;
+        set
+        {
+            if (Set(ref headersText, value ?? string.Empty))
+            {
+                MarkUntested();
+            }
+        }
+    }
+
     /// <summary>Whether a key is already stored for this provider (the box then keeps the old key when left empty).</summary>
     public bool HasStoredKey => original?.SecretReference is { Length: > 0 } reference && services.Secrets.Has(reference);
 
@@ -274,6 +296,12 @@ internal sealed class ProviderEditorViewModel : ObservableObject
             return null;
         }
 
+        if (!TryParseHeaders(HeadersText, out var headers, out var badLine))
+        {
+            Error = Loc.Instance.Format(ProviderStrings.EditorHeadersInvalidKey, badLine);
+            return null;
+        }
+
         Error = null;
         // The id is fixed at the first build: the key is stored under it, so a later rename must not orphan that key.
         var id = original?.Id ?? (draftId ??= ProviderIdentity.Unique(ProviderIdentity.Slug(trimmedName), existingIds));
@@ -297,8 +325,46 @@ internal sealed class ProviderEditorViewModel : ObservableObject
             Models = [.. models],
             DefaultModel = defaultModel,
             Thinking = original?.Thinking ?? DefaultThinking,
+            Headers = headers,
         };
     }
+
+    /// <summary>
+    /// Reads the header box: each non-blank line is <c>Name: Value</c>, split at the first colon; a later line of the same name
+    /// wins. A line without a colon, with an empty side or with whitespace in the name fails with its 1-based number.
+    /// </summary>
+    internal static bool TryParseHeaders(string text, out Dictionary<string, string> headers, out int badLine)
+    {
+        headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        badLine = 0;
+        var number = 0;
+        foreach (var raw in text.AsSpan().EnumerateLines())
+        {
+            number++;
+            var line = raw.Trim();
+            if (line.IsEmpty)
+            {
+                continue;
+            }
+
+            var colon = line.IndexOf(':');
+            var headerName = colon > 0 ? line[..colon].Trim() : default;
+            var value = colon > 0 ? line[(colon + 1)..].Trim() : default;
+            if (headerName.IsEmpty || value.IsEmpty || headerName.ContainsAnyWhiteSpace())
+            {
+                badLine = number;
+                headers.Clear();
+                return false;
+            }
+
+            headers[headerName.ToString()] = value.ToString();
+        }
+
+        return true;
+    }
+
+    private static string FormatHeaders(IReadOnlyDictionary<string, string> headers) =>
+        string.Join(Environment.NewLine, headers.Select(pair => pair.Key + ": " + pair.Value));
 
     /// <summary>The first button: test when nothing has passed, save when the last test passed.</summary>
     internal async Task TestOrSaveAsync()

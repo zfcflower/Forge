@@ -48,6 +48,9 @@ public class PromptCacheLoopTests
         Assert.Equal(parent.Id, provider.Requests[0].CacheRoutingKey);
         Assert.Equal(parent.Id, provider.Requests[1].CacheRoutingKey);
         Assert.NotEqual(child.Id, provider.Requests[1].CacheRoutingKey);
+        // The session header (x-opencode-session: {session}) names the session itself, not the lineage.
+        Assert.Equal(parent.Id, provider.Requests[0].SessionId);
+        Assert.Equal(child.Id, provider.Requests[1].SessionId);
     }
 
     [Fact]

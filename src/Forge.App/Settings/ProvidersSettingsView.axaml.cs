@@ -46,6 +46,18 @@ internal sealed partial class ProvidersSettingsView : UserControl
     /// </summary>
     private void OnDefaultWindowCommit(object? sender, RoutedEventArgs e) => _ = Model?.CommitDefaultContextWindowAsync();
 
+    /// <summary>The compaction percentages are saved on focus loss and Enter, like the context window, never per keystroke.</summary>
+    private void OnCompactionCommit(object? sender, RoutedEventArgs e) => Model?.Compaction.Commit();
+
+    private void OnCompactionKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.Enter)
+        {
+            e.Handled = true;
+            Model?.Compaction.Commit();
+        }
+    }
+
     private void OnDefaultWindowKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
         if (e.Key == Avalonia.Input.Key.Enter)

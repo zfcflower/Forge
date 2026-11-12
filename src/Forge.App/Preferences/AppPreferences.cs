@@ -101,6 +101,7 @@ internal sealed class AppPreferences : ObservableObject
     private string toolsShellPath = string.Empty;
     private string toolsRipgrepPath = string.Empty;
     private int toolsBashTimeoutSeconds = DefaultToolBashTimeoutSeconds;
+    private IReadOnlyList<string> toolsDisabled = [];
     private bool editorShowLineNumbers = true;
     private bool editorWordWrap;
     private bool editorShowSpaces;
@@ -255,6 +256,34 @@ internal sealed class AppPreferences : ObservableObject
     public string EditorTheme { get => editorTheme; set => Set(ref editorTheme, ThemeToken(value)); }
 
     /// <summary>
+    /// Names of the built-in tools the user switched off (sorted, deduplicated). Read before every turn of every session, so a
+    /// switch applies from the next turn; extension and MCP tools are governed by their own approval and enable state.
+    /// </summary>
+    public IReadOnlyList<string> ToolsDisabled
+    {
+        get => toolsDisabled;
+        set
+        {
+            var normalized = NormalizeNames(value);
+            if (!toolsDisabled.SequenceEqual(normalized, StringComparer.Ordinal))
+            {
+                toolsDisabled = normalized;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>Whether the named tool is switched on (absent from <see cref="ToolsDisabled"/>).</summary>
+    public bool IsToolEnabled(string name) => !toolsDisabled.Contains(name, StringComparer.Ordinal);
+
+    /// <summary>Switches one tool on or off; raises PropertyChanged for <see cref="ToolsDisabled"/> only when it moved.</summary>
+    public void SetToolEnabled(string name, bool enabled)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ToolsDisabled = enabled ? [.. toolsDisabled.Where(n => !string.Equals(n, name, StringComparison.Ordinal))] : [.. toolsDisabled, name];
+    }
+
+    /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
     /// Values go through the same validation as the setters.
@@ -289,6 +318,7 @@ internal sealed class AppPreferences : ObservableObject
         toolsBashTimeoutSeconds = section.ToolsBashTimeoutSeconds is { } bashTimeout
             ? Math.Clamp(bashTimeout, MinToolBashTimeoutSeconds, MaxToolBashTimeoutSeconds)
             : DefaultToolBashTimeoutSeconds;
+        toolsDisabled = NormalizeNames(section.ToolsDisabled);
         editorShowLineNumbers = section.EditorShowLineNumbers ?? true;
         editorWordWrap = section.EditorWordWrap ?? false;
         editorShowSpaces = section.EditorShowSpaces ?? false;
@@ -329,6 +359,7 @@ internal sealed class AppPreferences : ObservableObject
             ToolsShellPath = toolsShellPath,
             ToolsRipgrepPath = toolsRipgrepPath,
             ToolsBashTimeoutSeconds = toolsBashTimeoutSeconds,
+            ToolsDisabled = toolsDisabled.Count == 0 ? null : [.. toolsDisabled],
             EditorShowLineNumbers = editorShowLineNumbers,
             EditorWordWrap = editorWordWrap,
             EditorShowSpaces = editorShowSpaces,
@@ -407,6 +438,14 @@ internal sealed class AppPreferences : ObservableObject
             EditorThemeDark => EditorThemeDark,
             _ => EditorThemeAuto,
         };
+
+    private static string[] NormalizeNames(IEnumerable<string>? names) =>
+        names is null
+            ? []
+            : [.. names.Select(static n => n?.Trim() ?? string.Empty)
+                .Where(static n => n.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)];
 
     private static string Family(string? value, string fallback)
     {
@@ -493,6 +532,11 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("toolsBashTimeoutSeconds")]
     public int? ToolsBashTimeoutSeconds { get; set; }
+
+    /// <summary>Names of the built-in tools switched off; absent when every tool is on.</summary>
+    [JsonPropertyName("toolsDisabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? ToolsDisabled { get; set; }
 
     [JsonPropertyName("editorShowLineNumbers")]
     public bool? EditorShowLineNumbers { get; set; }

@@ -13,6 +13,24 @@ public sealed record ToolCallBlock(string Id, string Name, string ArgumentsJson)
 
 public sealed record ToolResultBlock(string CallId, string Content, bool IsError = false) : ContentBlock;
 
+/// <summary>
+/// An image the user attached (user messages only for now). <paramref name="MediaType"/> is one of <c>image/png</c>,
+/// <c>image/jpeg</c>, <c>image/gif</c>, <c>image/webp</c>; <paramref name="Data"/> is the encoded image as base64, already
+/// bounded by the attaching side (long edge, byte size). Providers write it in their own wire shape; a summary or a search
+/// view shows a placeholder instead of the data.
+/// </summary>
+public sealed record ImageBlock(string MediaType, string Data) : ContentBlock;
+
+/// <summary>
+/// A non-image binary file the user attached (user messages only): a PDF (<c>application/pdf</c>), audio
+/// (<c>audio/*</c>) or video (<c>video/*</c>). <paramref name="Data"/> is the file as base64, already bounded by the attaching
+/// side; <paramref name="Name"/> is the original file name when known (shown to the model where the wire format carries
+/// one). Text and source files are not a <see cref="FileBlock"/>: the attaching side inlines them as a <see cref="TextBlock"/>.
+/// Whether a model may receive a kind is decided from <see cref="ModelInputs"/> before sending; a provider whose wire format
+/// has no shape for a kind fails the request instead of dropping the block. A summary or a search view shows a placeholder.
+/// </summary>
+public sealed record FileBlock(string MediaType, string Data, string? Name = null) : ContentBlock;
+
 /// <summary>Reference to a large output stored outside the context; retrieved on demand by id.</summary>
 public sealed record ArtifactRefBlock(string ArtifactId, string Description, long SizeBytes) : ContentBlock;
 

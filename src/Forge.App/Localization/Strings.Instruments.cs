@@ -60,6 +60,18 @@ internal static class InstrumentsStrings
     public const string ToolsSectionEmptyKey = "settings.tools.empty";
     public const string ToolsSectionNoSessionKey = "settings.tools.noSession";
     public const string ToolsInventoryKey = "settings.tools.inventory";
+    public const string ToolsGroupFilesKey = "settings.tools.group.files";
+    public const string ToolsGroupGitKey = "settings.tools.group.git";
+    public const string ToolsGroupPullRequestsKey = "settings.tools.group.pr";
+    public const string ToolsGroupWebKey = "settings.tools.group.web";
+    public const string ToolsGroupSessionKey = "settings.tools.group.session";
+    public const string ToolsGroupAgentsKey = "settings.tools.group.agents";
+    public const string ToolsGroupRetrievalKey = "settings.tools.group.retrieval";
+    public const string ToolsGroupExtensionsKey = "settings.tools.group.extensions";
+    public const string ToolsGroupExtensionToolsKey = "settings.tools.group.extensionTools";
+    public const string ToolsGroupMcpKey = "settings.tools.group.mcp";
+    public const string ToolsRequiredKey = "settings.tools.required";
+    public const string ToolsFollowsSourceKey = "settings.tools.followsSource";
 
     [ModuleInitializer]
     internal static void Initialize() => Register();
@@ -164,6 +176,28 @@ internal static class InstrumentsStrings
 
     public static string ToolsSectionNoSession => Loc.Instance[ToolsSectionNoSessionKey];
 
+    /// <summary>Title of a built-in group (<see cref="Forge.Abstractions.ToolGroups"/>); an unknown group shows its id.</summary>
+    public static string ToolsGroup(string group) => group switch
+    {
+        Forge.Abstractions.ToolGroups.Files => Loc.Instance[ToolsGroupFilesKey],
+        Forge.Abstractions.ToolGroups.Git => Loc.Instance[ToolsGroupGitKey],
+        Forge.Abstractions.ToolGroups.PullRequests => Loc.Instance[ToolsGroupPullRequestsKey],
+        Forge.Abstractions.ToolGroups.Web => Loc.Instance[ToolsGroupWebKey],
+        Forge.Abstractions.ToolGroups.Session => Loc.Instance[ToolsGroupSessionKey],
+        Forge.Abstractions.ToolGroups.Agents => Loc.Instance[ToolsGroupAgentsKey],
+        Forge.Abstractions.ToolGroups.Retrieval => Loc.Instance[ToolsGroupRetrievalKey],
+        Forge.Abstractions.ToolGroups.Extensions => Loc.Instance[ToolsGroupExtensionsKey],
+        _ => group,
+    };
+
+    public static string ToolsGroupExtensionTools => Loc.Instance[ToolsGroupExtensionToolsKey];
+
+    public static string ToolsGroupMcp => Loc.Instance[ToolsGroupMcpKey];
+
+    public static string ToolsRequired => Loc.Instance[ToolsRequiredKey];
+
+    public static string ToolsFollowsSource => Loc.Instance[ToolsFollowsSourceKey];
+
     public static string ToolsInventory(int plugins, int tools, int commands) =>
         Loc.Instance.Format(
             ToolsInventoryKey,
@@ -250,14 +284,26 @@ internal static class InstrumentsStrings
 
         Loc.Register(
             ToolsSectionHintKey,
-            "当前会话可以调用的工具（只读）；计数里的分子是它在本次会话里调用过的种数。",
-            "The tools this session can call (read-only); the counter's numerator is how many of them it called.");
+            "当前会话注册的工具。内置工具可逐个关闭，从下一回合起对主 Agent 与子 Agent 生效；扩展工具随插件启停，MCP 工具随服务器启停。",
+            "The tools this session registers. Built-in tools can be switched off one by one; the change applies to the main agent and its sub-agents from the next turn. Extension tools follow their plugin, MCP tools their server.");
         Loc.Register(ToolsSectionEmptyKey, "没有可列出的工具", "No tools to list");
         Loc.Register(ToolsSectionNoSessionKey, "没有活动会话", "No active session");
         Loc.Register(
             ToolsInventoryKey,
             "应用内扩展宿主：插件 {0} · 工具 {1} · 命令 {2}",
             "Extension host: {0} plugins · {1} tools · {2} commands");
+        Loc.Register(ToolsGroupFilesKey, "内置 · 文件与命令", "Built-in · Files & shell");
+        Loc.Register(ToolsGroupGitKey, "内置 · Git", "Built-in · Git");
+        Loc.Register(ToolsGroupPullRequestsKey, "内置 · 拉取请求与评审", "Built-in · Pull requests & review");
+        Loc.Register(ToolsGroupWebKey, "内置 · 网络", "Built-in · Web");
+        Loc.Register(ToolsGroupSessionKey, "内置 · 会话", "Built-in · Session");
+        Loc.Register(ToolsGroupAgentsKey, "内置 · 子 Agent", "Built-in · Sub-agents");
+        Loc.Register(ToolsGroupRetrievalKey, "内置 · 历史与产物", "Built-in · History & artifacts");
+        Loc.Register(ToolsGroupExtensionsKey, "内置 · 扩展管理", "Built-in · Extension management");
+        Loc.Register(ToolsGroupExtensionToolsKey, "扩展工具（插件）", "Extension tools (plugins)");
+        Loc.Register(ToolsGroupMcpKey, "MCP 工具", "MCP tools");
+        Loc.Register(ToolsRequiredKey, "必需，不能关闭", "Required, cannot be switched off");
+        Loc.Register(ToolsFollowsSourceKey, "随插件或服务器启停", "Follows its plugin or server");
 
     }
 }

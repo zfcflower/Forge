@@ -158,6 +158,12 @@ internal static class ProviderStrings
     // ---------------------------------------------------------------- editor
     public const string EditorNewKey = "providers.editor.new";
 
+    public const string EditorHeadersKey = "providers.editor.headers";
+
+    public const string EditorHeadersHintKey = "providers.editor.headersHint";
+
+    public const string EditorHeadersInvalidKey = "providers.editor.headersInvalid";
+
     public const string EditorEditKey = "providers.editor.edit";
 
     public const string EditorNameKey = "providers.editor.name";
@@ -402,6 +408,12 @@ internal static class ProviderStrings
             EditorKeyHintVariableKey,
             "这里是环境变量名，运行时从该变量读取密钥。",
             "The name of an environment variable; the key is read from it at run time.");
+        Loc.Register(EditorHeadersKey, "请求头", "Request headers");
+        Loc.Register(
+            EditorHeadersHintKey,
+            "每行一个「名称: 值」，随每个请求发送。值里的 {session} 会替换为当前会话 id，例如 OpenCode Zen/Go 的 x-opencode-session: {session}。",
+            "One \"Name: Value\" per line, sent with every request. {session} in a value becomes the current session id, e.g. x-opencode-session: {session} for OpenCode Zen/Go.");
+        Loc.Register(EditorHeadersInvalidKey, "请求头第 {0} 行应为「名称: 值」", "Request header line {0} must be \"Name: Value\"");
         Loc.Register(EditorTestKey, "测试连接", "Test connection");
         Loc.Register(EditorTestingKey, "测试中…", "Testing…");
         Loc.Register(EditorTestPassedKey, "连接成功，已获取 {0} 个模型", "Connected — {0} models fetched");
