@@ -121,6 +121,9 @@
       </Grid>
     </DataTemplate>
 
+    <!-- Settings sections added by later waves: registered through SectionViewTemplate.Register from their composition module. -->
+    <views:SectionViewTemplate />
+
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
     <DataTemplate DataType="autoset:AutomationsSettingsViewModel" x:DataType="autoset:AutomationsSettingsViewModel">
       <autoset:AutomationsSettingsView />
