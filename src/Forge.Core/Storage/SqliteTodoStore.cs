@@ -22,6 +22,9 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
 
     private const string GroupColumns = "id, session_id, title, order_index, updated_at";
 
+    /// <summary>How many replaced plan summaries a session keeps; an older revision is dropped in the same write.</summary>
+    public const int PlanRevisionLimit = 50;
+
     private readonly SqliteWriter _writer;
     private readonly string _databasePath;
     private int _disposed;
@@ -316,7 +319,39 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
             ct);
     }
 
-    /// <summary>Upserts the session's plan summary and raises <see cref="Changed"/> after the commit.</summary>
+    /// <summary>
+    /// The session's replaced plan summaries, newest first, at most <paramref name="limit"/> (clamped to
+    /// 1..<see cref="PlanRevisionLimit"/>); empty when nothing was replaced yet.
+    /// </summary>
+    public Task<IReadOnlyList<PlanRevision>> ListPlanRevisionsAsync(string sessionId, int limit, CancellationToken ct)
+    {
+        StoragePaths.SafeSegment(sessionId, nameof(sessionId));
+        var take = Math.Clamp(limit, 1, PlanRevisionLimit);
+        return _writer.ReadAsync(
+            async connection =>
+            {
+                await using var command = StorageDb.Command(
+                    connection,
+                    "SELECT session_id, text, replaced_at FROM plan_summary_revisions WHERE session_id = $session ORDER BY id DESC LIMIT $limit");
+                command.Parameters.AddWithValue("$session", sessionId);
+                command.Parameters.AddWithValue("$limit", take);
+                var revisions = new List<PlanRevision>(take);
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    revisions.Add(ReadRevision(reader, sessionId));
+                }
+
+                return (IReadOnlyList<PlanRevision>)revisions;
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// Upserts the session's plan summary and raises <see cref="Changed"/> after the commit. When the stored text is
+    /// replaced by a different one, the old text is recorded as a <see cref="PlanRevision"/> in the same write;
+    /// writing the same text records nothing.
+    /// </summary>
     public async Task<PlanSummary> SetPlanSummaryAsync(string sessionId, string text, CancellationToken ct)
     {
         StoragePaths.SafeSegment(sessionId, nameof(sessionId));
@@ -325,6 +360,35 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
             async (connection, transaction) =>
             {
                 var written = new PlanSummary(sessionId, text, DateTimeOffset.UtcNow);
+                string? previous = null;
+                await using (var read = StorageDb.Command(
+                    connection,
+                    transaction,
+                    "SELECT text FROM plan_summaries WHERE session_id = $session"))
+                {
+                    read.Parameters.AddWithValue("$session", written.SessionId);
+                    previous = await read.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
+                }
+
+                if (previous is not null && !string.Equals(previous, text, StringComparison.Ordinal))
+                {
+                    await ExecuteAsync(
+                        connection,
+                        transaction,
+                        "INSERT INTO plan_summary_revisions (session_id, text, replaced_at) VALUES ($session, $text, $at)",
+                        ct,
+                        ("$session", written.SessionId),
+                        ("$text", previous),
+                        ("$at", StorageDb.FormatTimestamp(written.UpdatedAt))).ConfigureAwait(false);
+                    await ExecuteAsync(
+                        connection,
+                        transaction,
+                        "DELETE FROM plan_summary_revisions WHERE session_id = $session AND id NOT IN (SELECT id FROM plan_summary_revisions WHERE session_id = $session ORDER BY id DESC LIMIT $keep)",
+                        ct,
+                        ("$session", written.SessionId),
+                        ("$keep", PlanRevisionLimit)).ConfigureAwait(false);
+                }
+
                 await ExecuteAsync(
                     connection,
                     transaction,
@@ -596,6 +660,19 @@ public sealed class SqliteTodoStore : ITodoStore, IAsyncDisposable, IDisposable
             $"'{value}' is not one of agent, user",
             null),
     };
+
+    private PlanRevision ReadRevision(SqliteDataReader reader, string sessionId)
+    {
+        var row = $"plan revision of session {sessionId}";
+        return new PlanRevision(
+            StorageDb.ReadText(reader, 0, "session_id", _databasePath, row),
+            StorageDb.ReadText(reader, 1, "text", _databasePath, row),
+            StorageDb.ParseCanonicalTimestamp(
+                StorageDb.ReadText(reader, 2, "replaced_at", _databasePath, row),
+                "replaced_at",
+                _databasePath,
+                row));
+    }
 
     private TodoItem ReadItem(SqliteDataReader reader)
     {

@@ -32,7 +32,7 @@ public sealed class StorageSchemaV5To9MigrationTests
 
         await OpenAsync(directory);
 
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
         var sessionColumns = await TodoSchemaRaw.ColumnsAsync(directory, "sessions");
         foreach (var column in LifecycleSessionColumns)
         {
@@ -79,7 +79,7 @@ public sealed class StorageSchemaV5To9MigrationTests
         SqliteConnection.ClearAllPools();
         await OpenAsync(directory);
 
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal("Archived", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'older'"));
         Assert.Equal("Active", await TextAsync(directory, "SELECT status FROM sessions WHERE id = 'newer'"));
         Assert.Equal(OccupancyKey.Compute(null, repo), await TextAsync(directory, "SELECT occupancy_key FROM sessions WHERE id = 'older'"));
@@ -151,7 +151,7 @@ public sealed class StorageSchemaV5To9MigrationTests
         SqliteConnection.ClearAllPools();
         await OpenAsync(directory);
 
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.Equal(schema, await TodoSchemaRaw.SchemaSnapshotAsync(directory));
         Assert.Equal(1L, await TodoSchemaRaw.ScalarAsync<long>(directory, "SELECT count(*) FROM storage_notices"));
         Assert.Equal("Archived", await StatusAsync(directory, "x-1"));
