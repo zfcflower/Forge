@@ -333,6 +333,16 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsGroups.Interface,
             "IconBranch"));
 
+        // 0b2. Palette: how many rows a source lists and which directories its content search skips. It edits the live
+        //      preferences, so the next palette keystroke already applies the change.
+        settings.Add(new SettingsSection(
+            SettingsSectionIds.Palette,
+            PaletteSettingsSectionViewModel.SectionTitle,
+            SettingsSectionIds.PaletteOrder,
+            new PaletteSettingsSectionViewModel(preferences.Current),
+            SettingsGroups.Interface,
+            "IconSearch"));
+
         // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
         //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
         //     window; the overlay in MainWindow resolves it from NotificationCenter.Current.

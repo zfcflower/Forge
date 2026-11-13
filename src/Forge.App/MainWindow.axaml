@@ -27,6 +27,11 @@
   <Window.KeyBindings>
     <!-- Ctrl+` opens a terminal in the active session; a focused terminal leaves this gesture to the window. -->
     <KeyBinding Gesture="Ctrl+OemTilde" Command="{Binding NewTerminalCommand}" />
+    <!-- The global palette: Ctrl+P files, Ctrl+Shift+P commands, Ctrl+Shift+F workspace text. Every gesture toggles its
+         source, so pressing it again closes the palette instead of wiping the typed query. -->
+    <KeyBinding Gesture="Ctrl+P" Command="{Binding OpenFilePaletteCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding OpenCommandPaletteCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+F" Command="{Binding OpenSearchPaletteCommand}" />
   </Window.KeyBindings>
 
   <Grid RowDefinitions="Auto,*">
@@ -88,13 +93,20 @@
                     Margin="0,0,12,0"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center">
-          <wc:FluentIcon Data="{StaticResource IconSearch}"
-                         Width="16"
-                         Height="16"
-                         Foreground="{DynamicResource TextMutedBrush}"
-                         ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
-                         AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
-                         AutomationProperties.AutomationId="shell-search" />
+          <Button Classes="ghost icon"
+                  Width="28"
+                  Height="24"
+                  Command="{Binding OpenFilePaletteCommand}"
+                  ToolTip.Tip="{Binding [palette.shortcut], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="palette-open">
+            <wc:FluentIcon Data="{StaticResource IconSearch}"
+                           Width="16"
+                           Height="16"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                           AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
+                           AutomationProperties.AutomationId="shell-search" />
+          </Button>
           <StackPanel Orientation="Horizontal"
                       Spacing="6"
                       VerticalAlignment="Center"
@@ -171,5 +183,12 @@
     (below the 40 px title bar) so a toast never covers the title. The overlay resolves the shell's NotificationCenter from
     its own constructor, and it takes no pointer: the cards are display only. -->
     <views:NotificationOverlay Grid.Row="1" />
+
+    <!-- The global palette: the last child, so its scrim dims the workbench, the approvals and the toasts alike, and it
+         shows nothing at all while closed. The inner view takes the palette's own view model, so its bindings never reach
+         the window's. -->
+    <Panel Grid.Row="1" IsVisible="{Binding Palette.IsOpen}">
+      <views:PaletteView DataContext="{Binding Palette}" />
+    </Panel>
   </Grid>
 </Window>

@@ -450,6 +450,41 @@
     </DataTemplate>
 
     <!-- The git section: pull strategy, network timeout, step commits, the checks wait timing and the gh path, edited live on the preferences they belong to. Notifications are not a git preference any more; the notification section owns that switch. -->
+    <DataTemplate DataType="settings:PaletteSettingsSectionViewModel" x:DataType="settings:PaletteSettingsSectionViewModel">
+      <StackPanel Spacing="6">
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [palette.settings.limit], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinimumLimit}"
+                         Maximum="{Binding MaximumLimit}"
+                         Increment="5"
+                         FormatString="0"
+                         Value="{Binding ResultLimit, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="palette-settings-limit"
+                         AutomationProperties.Name="{Binding [palette.settings.limit], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [palette.settings.limitHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [palette.settings.exclude], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Grid.Column="1"
+                   Text="{Binding ExcludeDirectories, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="palette-settings-exclude"
+                   AutomationProperties.Name="{Binding [palette.settings.exclude], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [palette.settings.excludeHint], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+    </DataTemplate>
+
     <DataTemplate DataType="git:GitSettingsSectionViewModel" x:DataType="git:GitSettingsSectionViewModel">
       <StackPanel Spacing="6">
         <Grid ColumnDefinitions="150,*" Margin="0,3">

@@ -124,6 +124,9 @@ internal static class SettingsSectionIds
     /// <summary>Prompt templates: commands, agents and the built-in prompt slots, with the user's overrides.</summary>
     public const string Prompts = "prompts";
 
+    /// <summary>The palette: result limits and the directories its content search skips.</summary>
+    public const string Palette = "palette";
+
     public const int ProviderOrder = 100;
     public const int AppearanceOrder = 200;
     public const int LanguageOrder = 300;
@@ -154,4 +157,7 @@ internal static class SettingsSectionIds
 
     /// <summary>After the providers (100), before the automations (150).</summary>
     public const int PromptsOrder = 130;
+
+    /// <summary>Right after the editor (350): search behaviour is a display-and-keys choice, like the editor's.</summary>
+    public const int PaletteOrder = 360;
 }

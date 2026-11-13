@@ -63,6 +63,11 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxGitChecksMaxWaitMinutes = 180;
     public const int DefaultGitChecksMaxWaitMinutes = 30;
 
+    /// <summary>Rows one palette source may list; clamped to [<see cref="MinPaletteResultLimit"/>, <see cref="MaxPaletteResultLimit"/>].</summary>
+    public const int MinPaletteResultLimit = 5;
+    public const int MaxPaletteResultLimit = 200;
+    public const int DefaultPaletteResultLimit = 50;
+
     /// <summary>Whether any notification is shown at all (toast in the window, desktop notification in the background).</summary>
     public const bool DefaultNotifications = true;
 
@@ -98,6 +103,8 @@ internal sealed class AppPreferences : ObservableObject
     private bool gitStepCommits = DefaultGitStepCommits;
     private int gitChecksPollSeconds = DefaultGitChecksPollSeconds;
     private int gitChecksMaxWaitMinutes = DefaultGitChecksMaxWaitMinutes;
+    private int paletteResultLimit = DefaultPaletteResultLimit;
+    private string paletteExcludeDirectories = string.Empty;
     private bool notifications = DefaultNotifications;
     private string gitGhPath = string.Empty;
     private string toolsShellPath = string.Empty;
@@ -176,11 +183,31 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref gitChecksMaxWaitMinutes, Math.Clamp(value, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes));
     }
 
-    /// <summary>
-    /// Whether the user wants to be told about things at all: off means neither a toast in the window nor a desktop
+    /// <summary>Whether the user wants to be told about things at all: off means neither a toast in the window nor a desktop
     /// notification. Read at the start of every notification, so a change applies without a restart.
     /// </summary>
     public bool Notifications { get => notifications; set => Set(ref notifications, value); }
+
+    /// <summary>
+    /// How many rows one palette source may list; clamped to [<see cref="MinPaletteResultLimit"/>, <see cref="MaxPaletteResultLimit"/>].
+    /// Read when the palette builds a list, so a change applies to the next keystroke without a restart.
+    /// </summary>
+    public int PaletteResultLimit
+    {
+        get => paletteResultLimit;
+        set => Set(ref paletteResultLimit, Math.Clamp(value, MinPaletteResultLimit, MaxPaletteResultLimit));
+    }
+
+    /// <summary>
+    /// Comma-separated directory names the palette's content search leaves out, matched at any depth; empty (the default)
+    /// means the search only follows <c>.gitignore</c>. Stored as typed (only trimmed), like the editor's ruler list, and
+    /// parsed by <see cref="ParseDirectoryNames"/> where the search is built.
+    /// </summary>
+    public string PaletteExcludeDirectories
+    {
+        get => paletteExcludeDirectories;
+        set => Set(ref paletteExcludeDirectories, (value ?? string.Empty).Trim());
+    }
 
     /// <summary>
     /// The GitHub CLI executable; empty (default) means <c>gh</c> from PATH. Trimmed. Read at the start of every <c>gh</c>
@@ -313,6 +340,10 @@ internal sealed class AppPreferences : ObservableObject
         gitChecksMaxWaitMinutes = section.GitChecksMaxWaitMinutes is { } waitMinutes
             ? Math.Clamp(waitMinutes, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes)
             : DefaultGitChecksMaxWaitMinutes;
+        paletteResultLimit = section.PaletteResultLimit is { } paletteLimit
+            ? Math.Clamp(paletteLimit, MinPaletteResultLimit, MaxPaletteResultLimit)
+            : DefaultPaletteResultLimit;
+        paletteExcludeDirectories = (section.PaletteExcludeDirectories ?? string.Empty).Trim();
         notifications = section.Notifications ?? section.LegacyGitNotifications ?? DefaultNotifications;
         gitGhPath = (section.GitGhPath ?? string.Empty).Trim();
         toolsShellPath = (section.ToolsShellPath ?? string.Empty).Trim();
@@ -356,6 +387,8 @@ internal sealed class AppPreferences : ObservableObject
             GitStepCommits = gitStepCommits,
             GitChecksPollSeconds = gitChecksPollSeconds,
             GitChecksMaxWaitMinutes = gitChecksMaxWaitMinutes,
+            PaletteResultLimit = paletteResultLimit,
+            PaletteExcludeDirectories = paletteExcludeDirectories,
             Notifications = notifications,
             GitGhPath = gitGhPath,
             ToolsShellPath = toolsShellPath,
@@ -400,6 +433,32 @@ internal sealed class AppPreferences : ObservableObject
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The directory names of a comma-separated list (also accepting ';', a line break and whitespace), trimmed,
+    /// deduplicated case-insensitively and sorted; an empty entry is dropped, so a trailing comma is not an error.
+    /// </summary>
+    internal static IReadOnlyList<string> ParseDirectoryNames(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var names = new List<string>(4);
+        foreach (var part in value.Split([',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.Length == 0 || names.Contains(part, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            names.Add(part);
+        }
+
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
     }
 
     private static string LanguageToken(UiLanguage language) => language switch
@@ -511,6 +570,13 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("gitChecksMaxWaitMinutes")]
     public int? GitChecksMaxWaitMinutes { get; set; }
+
+    [JsonPropertyName("paletteResultLimit")]
+    public int? PaletteResultLimit { get; set; }
+
+    /// <summary>Comma-separated directory names the palette's content search skips; absent when the default applies.</summary>
+    [JsonPropertyName("paletteExcludeDirectories")]
+    public string? PaletteExcludeDirectories { get; set; }
 
     [JsonPropertyName("notifications")]
     public bool? Notifications { get; set; }
