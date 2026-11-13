@@ -91,6 +91,37 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     }
 
     [Fact]
+    public async Task The_chat_and_files_sections_draw_their_bodies()
+    {
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        async Task<string[]> TextsOf(string id)
+        {
+            await session.Dispatch(
+                () =>
+                {
+                    shell.ViewModel.Settings.SelectedSection =
+                        shell.ViewModel.Settings.Sections.Items.First(section => section.Id == id);
+                    SharedUi.Settle(shell.Window);
+                    return 0;
+                },
+                token);
+            return [.. await session.Dispatch(() => PanelShell.SelectedTexts(shell.Window), token)];
+        }
+
+        // A section whose data template is missing draws nothing at all, so the hint line proves the template resolved.
+        var chat = await TextsOf(SettingsSectionIds.Chat);
+        Assert.Contains(Loc.Instance[ChatStrings.SettingsHint], chat);
+        Assert.Contains(Loc.Instance[ChatStrings.SettingsSendToolImages], chat);
+
+        var files = await TextsOf(SettingsSectionIds.Files);
+        Assert.Contains(Loc.Instance[PreviewStrings.SettingsHintKey], files);
+        Assert.Contains(Loc.Instance[PreviewStrings.SettingsRowsKey], files);
+    }
+
+    [Fact]
     public async Task A_narrow_column_folds_itself_and_the_toggle_overrides_the_width()
     {
         var session = fixture.Session;
@@ -386,8 +417,10 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Prompts,
             Forge.App.Web.WebSettingsSectionViewModel.SectionId,
             SettingsSectionIds.Appearance,
+            SettingsSectionIds.Chat,
             SettingsSectionIds.Language,
             SettingsSectionIds.Editor,
+            SettingsSectionIds.Files,
             SettingsSectionIds.Terminal,
             SettingsSectionIds.Git,
             SettingsSectionIds.Extensions,

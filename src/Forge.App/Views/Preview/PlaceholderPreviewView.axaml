@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:preview="using:Forge.App.ViewModels.Preview"
+             x:Class="Forge.App.Views.Preview.PlaceholderPreviewView"
+             x:DataType="preview:PlaceholderFilePreviewViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <Border MaxWidth="560"
+            HorizontalAlignment="Left"
+            Margin="12"
+            Padding="14"
+            CornerRadius="6"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource BorderStrongBrush}"
+            Background="{DynamicResource SurfaceElevatedBrush}">
+      <StackPanel Spacing="6">
+        <TextBlock Classes="mono" FontSize="15" Text="{Binding Name}" TextWrapping="Wrap" />
+        <TextBlock Classes="label" Text="{Binding Caption}" />
+        <TextBlock Classes="caption" Text="{Binding ByteSizeText}" />
+        <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Reason}" />
+
+        <!-- The parsed Git LFS pointer lines, when the file was one. -->
+        <StackPanel Spacing="2" IsVisible="{Binding HasLfsOid}">
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Classes="caption" VerticalAlignment="Top"
+                       Text="{Binding [files.preview.lfs.oid], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="mono" Margin="8,0,0,0" Text="{Binding LfsOid}" TextWrapping="Wrap" />
+          </Grid>
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasLfsSize}">
+            <TextBlock Classes="caption" Text="{Binding [files.preview.lfs.size], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="mono" Margin="8,0,0,0" Text="{Binding LfsSizeText}" />
+          </Grid>
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasLfsVersion}">
+            <TextBlock Classes="caption" Text="{Binding [files.preview.lfs.version], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Grid.Column="1" Classes="mono" Margin="8,0,0,0" Text="{Binding LfsVersion}" TextWrapping="Wrap" />
+          </Grid>
+        </StackPanel>
+
+        <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                   IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
+                   AutomationProperties.AutomationId="file-preview-notice" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+          <Button Classes="primary"
+                  Command="{Binding OpenExternallyCommand}"
+                  Content="{Binding [files.preview.openExternal], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="file-preview-open-external" />
+          <Button Classes="ghost"
+                  IsVisible="{Binding HasShowSource}"
+                  Command="{Binding ShowSourceCommand}"
+                  Content="{Binding [files.preview.showSource], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="file-preview-show-source" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </ScrollViewer>
+</UserControl>

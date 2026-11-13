@@ -1,0 +1,62 @@
+using Forge.App.Preferences;
+using Forge.App.Settings;
+using Xunit;
+
+namespace Forge.App.Tests.Settings;
+
+/// <summary>
+/// Pins <see cref="ChatSettingsSectionViewModel"/>: both rows write through to the live preferences and read back
+/// from them (with the preference's clamp for the thumbnail edge), and the control bounds mirror the preference's.
+/// </summary>
+public sealed class ChatSettingsSectionTests
+{
+    [Fact]
+    public void Thumbnail_edge_and_the_send_switch_round_trip_through_the_preferences()
+    {
+        var preferences = new AppPreferences();
+        var section = new ChatSettingsSectionViewModel(preferences);
+        try
+        {
+            Assert.Equal(AppPreferences.DefaultToolImageThumbnailEdge, section.ThumbnailEdge);
+            Assert.True(section.SendToolImagesToModel);
+
+            section.ThumbnailEdge = 384;
+            Assert.Equal(384, preferences.ToolImageThumbnailEdge);
+            Assert.Equal(384, section.ThumbnailEdge);
+
+            // Out of range lands on the preference's clamp (the setter settles on 512).
+            section.ThumbnailEdge = 10_000;
+            Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, preferences.ToolImageThumbnailEdge);
+            Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, section.ThumbnailEdge);
+
+            section.SendToolImagesToModel = false;
+            Assert.False(preferences.SendToolImagesToModel);
+            Assert.False(section.SendToolImagesToModel);
+
+            // A fresh section built on the same preferences reads the edited values back.
+            var reread = new ChatSettingsSectionViewModel(preferences);
+            try
+            {
+                Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, reread.ThumbnailEdge);
+                Assert.False(reread.SendToolImagesToModel);
+            }
+            finally
+            {
+                reread.Dispose();
+            }
+        }
+        finally
+        {
+            section.Dispose();
+        }
+    }
+
+    [Fact]
+    public void The_control_bounds_mirror_the_preferences_thumbnail_clamp()
+    {
+        Assert.Equal(AppPreferences.MinToolImageThumbnailEdge, ChatSettingsSectionViewModel.MinThumbnailEdge);
+        Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, ChatSettingsSectionViewModel.MaxThumbnailEdge);
+        Assert.Equal(ChatSettingsSectionViewModel.MinThumbnailEdge, ChatSettingsSectionViewModel.MinThumbnailEdgeDecimal);
+        Assert.Equal(ChatSettingsSectionViewModel.MaxThumbnailEdge, ChatSettingsSectionViewModel.MaxThumbnailEdgeDecimal);
+    }
+}

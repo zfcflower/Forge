@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using Avalonia.Media.Imaging;
 using Forge.App.Editing;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.ViewModels.Preview;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
@@ -14,7 +16,7 @@ namespace Forge.App.ViewModels;
 internal sealed partial class FileDocumentViewModel
 {
     public const long MaxFileBytes = 8L * 1024 * 1024;
-    private readonly record struct FileRead(TextDocument? Document, bool Missing, long TooLargeBytes, string? Text = null);
+    private readonly record struct FileRead(TextDocument? Document, FilePreviewViewModel? Preview, bool Missing, long TooLargeBytes, string? Text = null);
     private LanguageSessionPool? sessions;
     private LanguageSession? session;
     private string? openWorkspace;
@@ -37,6 +39,10 @@ internal sealed partial class FileDocumentViewModel
     private LocText copyError;
     private RelayCommand? toggleWrapCommand;
     private RelayCommand? toggleEditCommand;
+    private RelayCommand? openExternallyCommand;
+    private FilePreviewViewModel? preview;
+    private FilePreviewSettings? previewSettings;
+    private Func<byte[], Bitmap?>? imageDecoder;
 
     public string? Workspace { get; set; }
 
@@ -121,10 +127,19 @@ internal sealed partial class FileDocumentViewModel
             SetSaveError(new LocText(InspectorStrings.FilesSaveFailed, LocText.Literal(exception.Message)));
         });
 
-    public static FileDocumentViewModel Create(GrammarRegistry? grammars = null, LanguageSessionPool? sessions = null) =>
-        new(grammars) { sessions = sessions };
+    /// <summary>
+    /// <paramref name="imageDecoder"/> gates the bitmap decoding of the image and notebook previews (the real Avalonia
+    /// decoder by default) so headless tests can skip decoding; <paramref name="previewSettings"/> pins the preview
+    /// limits instead of the ambient <see cref="FilePreviewSettings.Current"/>.
+    /// </summary>
+    public static FileDocumentViewModel Create(
+        GrammarRegistry? grammars = null,
+        LanguageSessionPool? sessions = null,
+        Func<byte[], Bitmap?>? imageDecoder = null,
+        FilePreviewSettings? previewSettings = null) =>
+        new(grammars) { sessions = sessions, imageDecoder = imageDecoder, previewSettings = previewSettings };
 
-    public async Task LoadAsync(string filePath, CancellationToken ct, bool discardEdits = false)
+    public async Task LoadAsync(string filePath, CancellationToken ct, bool discardEdits = false, bool forceText = false)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -161,21 +176,38 @@ internal sealed partial class FileDocumentViewModel
             SetLspStatus(default);
             ReportEditorNotice(default);
             IsLoading = true;
-            var read = await Task.Run(() => ReadFileAsync(full, token), token).ConfigureAwait(true);
-            token.ThrowIfCancellationRequested();
-            if (read.Missing)
+            var read = await Task.Run(() => ReadFileAsync(full, forceText, token), token).ConfigureAwait(true);
+            try
             {
-                SetError(InspectorStrings.FileMissing(filePath));
-                return;
-            }
+                token.ThrowIfCancellationRequested();
+                if (read.Missing)
+                {
+                    SetError(InspectorStrings.FileMissing(filePath));
+                    return;
+                }
 
-            if (read.Document is null)
+                if (read.Preview is not null)
+                {
+                    AttachPreview(read.Preview);
+                    return;
+                }
+
+                if (read.Document is null)
+                {
+                    SetError(InspectorStrings.FileTooLarge(read.TooLargeBytes));
+                    return;
+                }
+
+                AttachDocument(read.Document, read.Text ?? string.Empty);
+            }
+            finally
             {
-                SetError(InspectorStrings.FileTooLarge(read.TooLargeBytes));
-                return;
+                // A preview that lost the race (cancellation or a superseded load) must not keep its bitmaps.
+                if (read.Preview is not null && !ReferenceEquals(preview, read.Preview))
+                {
+                    read.Preview.Release();
+                }
             }
-
-            AttachDocument(read.Document, read.Text ?? string.Empty);
         }
         catch (OperationCanceledException) when (version != loadVersion && !ct.IsCancellationRequested)
         {
@@ -184,10 +216,6 @@ internal sealed partial class FileDocumentViewModel
         catch (Exception exception) when (version != loadVersion && exception is not OperationCanceledException)
         {
             AppLogs.File.ZLogWarning($"superseded load failed: {exception.Message}");
-        }
-        catch (NotSupportedException)
-        {
-            SetError(InspectorStrings.FileBinary(Path));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -219,6 +247,15 @@ internal sealed partial class FileDocumentViewModel
     private async Task ReleaseCoreAsync()
     {
         CancelLsp();
+        var oldPreview = preview;
+        if (oldPreview is not null)
+        {
+            preview = null;
+            OnPropertyChanged(nameof(Preview));
+            OnPropertyChanged(nameof(HasPreview));
+            oldPreview.Release();
+        }
+
         var doc = document;
         if (doc is null)
         {
@@ -246,22 +283,130 @@ internal sealed partial class FileDocumentViewModel
         }
     }
 
-    private static async Task<FileRead> ReadFileAsync(string full, CancellationToken ct)
+    private async Task<FileRead> ReadFileAsync(string full, bool forceText, CancellationToken ct)
     {
         var info = new FileInfo(full);
         if (!info.Exists)
         {
-            return new FileRead(null, true, 0);
+            return new FileRead(null, null, true, 0);
+        }
+
+        if (!forceText)
+        {
+            var firstBytes = ReadFirstBytes(full);
+            switch (FilePreviewClassifier.Classify(full, firstBytes))
+            {
+                case FilePreviewKind.Lfs:
+                    return new FileRead(null, PlaceholderFilePreviewViewModel.ForLfs(full, info.Length, firstBytes), false, 0);
+                case FilePreviewKind.Image:
+                    return ReadImagePreview(full, info);
+                case FilePreviewKind.Table:
+                    return new FileRead(
+                        null,
+                        TableFilePreviewViewModel.Build(full, info.Length, PreviewSettings.PreviewRows, FilePreviewClassifier.TableSeparator(full), ct),
+                        false,
+                        0);
+                case FilePreviewKind.Notebook:
+                    return new FileRead(
+                        null,
+                        NotebookFilePreviewViewModel.Build(full, info.Length, PreviewSettings.NotebookOutputChars, imageDecoder, ct),
+                        false,
+                        0);
+                case FilePreviewKind.Pdf:
+                    return new FileRead(null, PlaceholderFilePreviewViewModel.ForPdf(full, info.Length), false, 0);
+                case FilePreviewKind.Html:
+                    return new FileRead(null, PlaceholderFilePreviewViewModel.ForHtml(full, info.Length, ShowPreviewSourceAsync), false, 0);
+            }
         }
 
         if (info.Length > MaxFileBytes)
         {
-            return new FileRead(null, false, info.Length);
+            return new FileRead(null, null, false, info.Length);
         }
 
-        var loaded = await TextDocument.LoadAsync(full, ct).ConfigureAwait(false);
-        return new FileRead(loaded, false, 0, loaded.Snapshot.GetText());
+        try
+        {
+            var loaded = await TextDocument.LoadAsync(full, ct).ConfigureAwait(false);
+            return new FileRead(loaded, null, false, 0, loaded.Snapshot.GetText());
+        }
+        catch (NotSupportedException)
+        {
+            return new FileRead(null, PlaceholderFilePreviewViewModel.ForBinary(full, info.Length), false, 0);
+        }
     }
+
+    /// <summary>The first bytes of a file, enough for the LFS pointer marker; empty when the peek failed.</summary>
+    private static byte[] ReadFirstBytes(string full)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                full,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                4096,
+                FileOptions.SequentialScan);
+            var count = (int)Math.Min(FilePreviewClassifier.PeekBytes, stream.Length);
+            var buffer = new byte[count];
+            stream.ReadExactly(buffer);
+            return buffer;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Classification falls back to the extension; the text path will surface the error if it persists.
+            AppLogs.File.ZLogWarning($"peek failed: {exception.Message}");
+            return [];
+        }
+    }
+
+    private FileRead ReadImagePreview(string full, FileInfo info)
+    {
+        var limit = PreviewSettings.PreviewImageBytes;
+        if (info.Length > limit)
+        {
+            return new FileRead(null, PlaceholderFilePreviewViewModel.ForImageTooLarge(full, info.Length, limit), false, 0);
+        }
+
+        return new FileRead(null, ImageFilePreviewViewModel.Build(full, info.Length, imageDecoder), false, 0);
+    }
+
+    /// <summary>The live preview limits: the instance pinned by <see cref="Create"/>, or the ambient projection.</summary>
+    private FilePreviewSettings PreviewSettings => previewSettings ?? FilePreviewSettings.Current;
+
+    /// <summary>The read-only preview of the current file, or null while the editor document is open.</summary>
+    public FilePreviewViewModel? Preview => preview;
+
+    public bool HasPreview => preview is not null;
+
+    /// <summary>
+    /// The toolbar's permanently visible open-externally button: hands the current file to the OS default program for
+    /// any loaded file, preview or editor document alike.
+    /// </summary>
+    public RelayCommand OpenExternallyCommand => openExternallyCommand ??= new RelayCommand(OpenExternally);
+
+    private void OpenExternally()
+    {
+        if (path.Length == 0)
+        {
+            return;
+        }
+
+        if (PreviewOpener.TryOpen(path) is { } failure)
+        {
+            ReportEditorActionNotice(failure);
+        }
+    }
+
+    private void AttachPreview(FilePreviewViewModel value)
+    {
+        preview = value;
+        OnPropertyChanged(nameof(Preview));
+        OnPropertyChanged(nameof(HasPreview));
+    }
+
+    /// <summary>The HTML placeholder's "show the source": the same file, but classified as text.</summary>
+    internal Task ShowPreviewSourceAsync(CancellationToken ct) => LoadAsync(path, ct, forceText: true);
 
     private static bool IsLspFailure(Exception exception) =>
         exception is LspProtocolException or LanguageServerCrashedException or LanguageServerNotFoundException

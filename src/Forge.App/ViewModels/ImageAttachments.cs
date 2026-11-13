@@ -113,6 +113,13 @@ internal interface IImageCodec
 
     /// <summary>A small preview of an encoded image, or null when it cannot be decoded. Called off the UI thread.</summary>
     Bitmap? Thumbnail(byte[] data);
+
+    /// <summary>
+    /// A preview whose long edge is at most <paramref name="maxLongEdge"/> pixels, or null when it cannot be decoded.
+    /// The default member falls back to the codec's own default size, so existing implementors and test fakes keep
+    /// compiling and behave as before. Called off the UI thread.
+    /// </summary>
+    Bitmap? Thumbnail(byte[] data, int maxLongEdge) => Thumbnail(data);
 }
 
 /// <summary>The production codec: Avalonia's own bitmap decoding and encoding, no image library.</summary>
@@ -180,6 +187,36 @@ internal sealed class AvaloniaImageCodec : IImageCodec
             return null;
         }
     }
+
+    public Bitmap? Thumbnail(byte[] data, int maxLongEdge)
+    {
+        if (maxLongEdge <= 0)
+        {
+            // Zero means the caller wants the codec's own default size.
+            return Thumbnail(data);
+        }
+
+        try
+        {
+            // Bound the width while decoding, so a full-size bitmap is never held: a landscape image (the usual
+            // screenshot) is done in one pass. Only a portrait one keeps its height as the long edge, and only then is
+            // it decoded a second time — the first attempt already produced a small bitmap, not the full-size one.
+            using var byWidth = new MemoryStream(data, writable: false);
+            var decoded = Bitmap.DecodeToWidth(byWidth, maxLongEdge, BitmapInterpolationMode.MediumQuality);
+            if (Math.Max(decoded.PixelSize.Width, decoded.PixelSize.Height) <= maxLongEdge)
+            {
+                return decoded;
+            }
+
+            decoded.Dispose();
+            using var byHeight = new MemoryStream(data, writable: false);
+            return Bitmap.DecodeToHeight(byHeight, maxLongEdge, BitmapInterpolationMode.MediumQuality);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>
@@ -188,15 +225,21 @@ internal sealed class AvaloniaImageCodec : IImageCodec
 /// </summary>
 internal abstract class ImageThumbnailViewModel : ObservableObject
 {
+    private readonly int maxLongEdge;
     private Bitmap? thumbnail;
     private bool loading;
 
-    protected ImageThumbnailViewModel(ImageBlock block, long encodedBytes, Bitmap? thumbnail)
+    /// <summary>
+    /// <paramref name="maxLongEdge"/> bounds the long edge of the lazily decoded preview; 0 keeps the codec's own
+    /// default size. Subclasses that do not care pass nothing and keep working.
+    /// </summary>
+    protected ImageThumbnailViewModel(ImageBlock block, long encodedBytes, Bitmap? thumbnail, int maxLongEdge = 0)
     {
         ArgumentNullException.ThrowIfNull(block);
         Block = block;
         EncodedBytes = encodedBytes;
         this.thumbnail = thumbnail;
+        this.maxLongEdge = maxLongEdge;
     }
 
     /// <summary>The decoder behind lazily loaded previews; a test may replace it.</summary>
@@ -232,11 +275,13 @@ internal abstract class ImageThumbnailViewModel : ObservableObject
     {
         var data = Block.Data;
         var codec = Codec;
+        var maxEdge = maxLongEdge;
         var decoded = await Task.Run(() =>
         {
             try
             {
-                return codec.Thumbnail(Convert.FromBase64String(data));
+                var bytes = Convert.FromBase64String(data);
+                return maxEdge > 0 ? codec.Thumbnail(bytes, maxEdge) : codec.Thumbnail(bytes);
             }
             catch (FormatException)
             {

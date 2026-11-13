@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.Settings.FilesSettingsSectionView"
+             x:DataType="settings:FilesSettingsSectionViewModel">
+  <StackPanel Spacing="6">
+    <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}"
+               AutomationProperties.AutomationId="files-settings-hint" />
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding PreviewRowsLabel}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="50"
+                     Maximum="10000"
+                     Increment="100"
+                     FormatString="0"
+                     Value="{Binding PreviewRows, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="files-preview-rows"
+                     AutomationProperties.Name="{Binding PreviewRowsLabel}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding NotebookOutputCharsLabel}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="1000"
+                     Maximum="200000"
+                     Increment="1000"
+                     FormatString="0"
+                     Value="{Binding NotebookOutputChars, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="files-notebook-output"
+                     AutomationProperties.Name="{Binding NotebookOutputCharsLabel}" />
+    </Grid>
+    <Grid ColumnDefinitions="150,*" Margin="0,3">
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding ImageLimitLabel}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="1"
+                     Maximum="512"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding ImageLimitMiB, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="files-image-limit"
+                     AutomationProperties.Name="{Binding ImageLimitLabel}" />
+    </Grid>
+  </StackPanel>
+</UserControl>
