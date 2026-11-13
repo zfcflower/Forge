@@ -61,6 +61,23 @@
       <views:SpecTreeToolView />
     </DataTemplate>
 
+    <!-- Window overlays (MainWindowViewModel.Palette/Checks/Plan/Inspector/Onboarding): placeholders until their waves. -->
+    <DataTemplate DataType="vm:PaletteViewModel" x:DataType="vm:PaletteViewModel">
+      <views:PaletteView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ChecksPanelViewModel" x:DataType="vm:ChecksPanelViewModel">
+      <views:ChecksPanelView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:PlanPanelViewModel" x:DataType="vm:PlanPanelViewModel">
+      <views:PlanPanelView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ResourceInspectorViewModel" x:DataType="vm:ResourceInspectorViewModel">
+      <views:ResourceInspectorView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:OnboardingViewModel" x:DataType="vm:OnboardingViewModel">
+      <views:OnboardingView />
+    </DataTemplate>
+
     <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
     <DataTemplate DataType="term:TerminalViewModel" x:DataType="term:TerminalViewModel">
       <term:TerminalView />
@@ -613,7 +630,18 @@
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource TextPrimaryBrush}" />
         </Border>
-        <TextBlock Classes="caption" Text="{Binding Time}" HorizontalAlignment="Right" />
+        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+          <views:CopyTextButton Classes="ghost icon"
+                                Width="26"
+                                Height="22"
+                                IsVisible="{Binding HasText}"
+                                ToolTip.Tip="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}"
+                                AutomationProperties.AutomationId="message-copy"
+                                AutomationProperties.Name="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
+          </views:CopyTextButton>
+          <TextBlock Classes="caption" Text="{Binding Time}" VerticalAlignment="Center" />
+        </StackPanel>
       </StackPanel>
     </DataTemplate>
 
@@ -652,16 +680,7 @@
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnTextViewModel" x:DataType="vm:TurnTextViewModel">
-      <ItemsControl ItemsSource="{Binding Segments}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:TextSegmentViewModel">
-            <SelectableTextBlock Text="{Binding Text}"
-                                 TextWrapping="Wrap"
-                                 Margin="0,2"
-                                 Foreground="{DynamicResource TextPrimaryBrush}" />
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      <views:TurnTextView />
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnNoticeViewModel" x:DataType="vm:TurnNoticeViewModel">
@@ -671,40 +690,7 @@
     </DataTemplate>
 
     <DataTemplate DataType="vm:ToolRowViewModel" x:DataType="vm:ToolRowViewModel">
-      <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}">
-        <StackPanel Spacing="2">
-          <Button Classes="link"
-                  Command="{Binding ToggleCommand}"
-                  HorizontalAlignment="Stretch"
-                  HorizontalContentAlignment="Left">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto">
-              <TextBlock Classes="glyph" Text="▸" />
-              <TextBlock Grid.Column="1" Classes="mono" Margin="6,0,0,0" Text="{Binding Name}" />
-              <TextBlock Grid.Column="2"
-                         Classes="caption"
-                         Margin="8,0"
-                         Text="{Binding ArgumentSummary}" />
-              <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
-            </Grid>
-          </Button>
-          <StackPanel IsVisible="{Binding IsExpanded}" Spacing="4" Margin="14,2,0,2">
-            <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
-            <SelectableTextBlock Classes="mono"
-                                 Text="{Binding Arguments}"
-                                 TextWrapping="Wrap"
-                                 Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBlock Classes="label"
-                       Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
-                       IsVisible="{Binding HasResult}" />
-            <SelectableTextBlock Classes="mono"
-                                 Text="{Binding Result}"
-                                 TextWrapping="Wrap"
-                                 MaxHeight="240"
-                                 Foreground="{DynamicResource TextSecondaryBrush}"
-                                 IsVisible="{Binding HasResult}" />
-          </StackPanel>
-        </StackPanel>
-      </Border>
+      <views:ToolRowView />
     </DataTemplate>
   </Application.DataTemplates>
 

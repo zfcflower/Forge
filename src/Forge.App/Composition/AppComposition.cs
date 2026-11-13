@@ -702,6 +702,7 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsGroups.Agent,
             "IconWrench"));
 
+        FeatureComposition.RegisterAll(composition, settings);
         return composition;
     }
 
