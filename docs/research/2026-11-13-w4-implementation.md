@@ -82,7 +82,7 @@ dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localizat
 2. **`Text` 与 `Content` 两个读法**是对计划「`ToolResult` 保留 `string Content`」的细化:计划只说保留便捷构造;实测发现只有 `Content`(带占位)时,能内联图片的适配器会让模型把同一张图看两遍,故补 `Text`。
 3. **缩略图长边偏好**用「不要超界」语义:只在解码时约束,不重编码存下的字节(重编码会毁掉原图质量与动画 GIF)。
 4. **HTML 占位多一个「查看源码」**:计划只写占位 + OS 打开,但那样会丢掉原本能读 `.html` 源码的能力,等于回退;加一个按钮即不动「不引渲染器」的决定。
-5. **工具行模板留在 `App.axaml`**:计划让 W0 先把 `ToolRowViewModel` 的模板拆到 `Resources/ToolRow.axaml`(W4 缩略图 + W8 日志尾共用)。W0 未落地,而 W8 不在本轮,所以缩略图直接加在 `App.axaml` 现有的 `ToolRowViewModel` 模板里;将来 W8 要拆时按段拆即可(日志尾在结果区之后、缩略图之前)。
+5. **工具行缩略图落在 W0b 的槽里**:计划原来设想 `Resources/ToolRow.axaml`;W0b 后来把它拆成 `Views/ToolRowView.axaml`(外壳)+ `ToolRowImagesView.axaml`(W4)+ `ToolRowTailView.axaml`(W8)。本波先写进了 `App.axaml` 的内联模板,合并后按 W0b 的槽搬进 `Views/ToolRowImagesView.axaml`;两个设置分区同理搬进 `Composition/ViewerSettingsComposition.cs`(`FeatureComposition` 已注册它),`AppComposition.cs` 对本波只剩两行 `runtimeServices`(`ModelInputs`/`SendToolImages`),那是会话级接线、模块拿不到。
 6. **表格表头与数据行共用外层横向滚动**:计划未提,属实现细节;禁止横向滚动会让宽表右列不可达,按缺陷处理。
 
 ## 六、未做 / 已知限制
