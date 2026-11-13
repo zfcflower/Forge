@@ -80,7 +80,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 **工具结果的图片。** `ToolResult`/`ToolResultBlock` 是块列表,不只是字符串:`Blocks` 是工具交回的有序块,`Text` 是它自己的文本(只含 `TextBlock`,逐行),`Content` 是整份结果的文本视图(非文本块各占一行占位,如 `[image: image/png]`),`Images` 是在场图片。两个文本读法在构造时算一次并缓存在记录里:`Content` 给不认识图片的读者(存储、搜索、只用文本的适配器、界面),`Text` 给**自己把图片送上线路**的适配器——后者若还用 `Content` 就把同一张图说了两遍。块列表在构造时拷贝,`Equals` 按块逐项比较(数组本身是引用相等)。只有一层嵌套:工具结果里能放 `TextBlock`/`ImageBlock`/`FileBlock`/`ArtifactRefBlock`,不嵌套工具结果。
 
-三个适配器各自的形状,以及谁来决定发不发:`ChatRequest.IncludeToolImages`(默认 true)由 `AgentLoop.BuildRequest` 每请求算一次——`AgentOptions.SendToolImagesToModel`(用户开关)与 `AgentOptions.ModelInputs`(目录里该模型的输入种类;未知视为可收图,与输入框对用户附件的规则一致)。为 false 时**所有适配器都只写 `Content`**,图片仍在存下的消息里,界面照常显示,改回开关只影响下一次请求。
+三个适配器各自的形状,以及谁来决定发不发:`ChatRequest.IncludeToolImages`(默认 true)由 `AgentLoop.BuildRequest` 每请求算一次——`AgentOptions.SendToolImagesToModel`(一个 `Func<bool>`,每次请求现问,所以设置开关下一次回合就生效,不必重建宿主)与 `AgentOptions.ModelInputs`(目录里该模型的输入种类;未知视为可收图,与输入框对用户附件的规则一致)。为 false 时**所有适配器都只写 `Content`**,图片仍在存下的消息里,界面照常显示,改回开关只影响下一次请求。
 
 - **Anthropic**:`tool_result` 的 `content` 本来就收块数组。有图且有允许时写数组(`text`(取 `Text`)在前,随后每张 `image`),否则写字符串 `Content`——纯文本结果的线路字节与以前完全一致,提示词缓存的前缀不受影响。
 - **Responses**:`function_call_output.output` 收 `input_text`/`input_image` 数组。同上,有图写数组(文本取 `Text`),否则写字符串。

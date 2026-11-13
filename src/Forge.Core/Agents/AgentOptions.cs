@@ -32,10 +32,11 @@ public sealed record AgentOptions
     public int ArtifactPreviewChars { get; init; } = 2_000;
 
     /// <summary>
-    /// Whether a tool result's images may be sent to the model. The stored message keeps them either way — the transcript
-    /// shows what the tool produced — so turning this off changes only what the next request carries.
+    /// Whether a tool result's images may be sent to the model, asked once per request so the settings switch applies from
+    /// the next turn rather than the next host. The stored message keeps them either way — the transcript shows what the
+    /// tool produced — so turning this off changes only what the next request carries.
     /// </summary>
-    public bool SendToolImagesToModel { get; init; } = true;
+    public Func<bool> SendToolImagesToModel { get; init; } = static () => true;
 
     /// <summary>
     /// The input kinds of the catalogue entry for a model, or null when the catalogue says nothing. Used for one decision:

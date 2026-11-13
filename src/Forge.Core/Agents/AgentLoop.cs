@@ -363,7 +363,7 @@ public sealed class AgentLoop(AgentLoopServices services)
     /// </summary>
     private bool SendsToolImages(ModelSettings model)
     {
-        if (!services.Options.SendToolImagesToModel)
+        if (!services.Options.SendToolImagesToModel())
         {
             return false;
         }

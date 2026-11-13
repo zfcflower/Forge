@@ -86,10 +86,35 @@ public sealed class ToolImageTurnTests
     [Fact]
     public async Task The_switch_stops_the_images_from_reaching_the_model_but_keeps_them_in_the_record()
     {
-        var provider = await RunOneToolCallAsync(new AgentOptions { SendToolImagesToModel = false });
+        var provider = await RunOneToolCallAsync(new AgentOptions { SendToolImagesToModel = static () => false });
 
         Assert.False(provider.Requests[1].IncludeToolImages);
         Assert.Single(ToolResultOf(provider.Requests[1]).Images);
+    }
+
+    [Fact]
+    public async Task The_switch_is_asked_per_request_so_a_flip_applies_without_rebuilding_the_host()
+    {
+        var enabled = true;
+        var provider = new FakeProvider((request, index) =>
+        {
+            if (index > 0)
+            {
+                return Turn.Say("done");
+            }
+
+            // The user flips the switch while the turn is running: the next request must already obey it.
+            enabled = false;
+            return Turn.Call(("call-1", "shot", "{}"));
+        });
+        var host = AgentTestHost.Create(
+            provider,
+            [ShotTool()],
+            options: new AgentOptions { SendToolImagesToModel = () => enabled });
+
+        await AgentTestHost.RunRootAsync(host);
+
+        Assert.False(provider.Requests[1].IncludeToolImages);
     }
 
     [Fact]
