@@ -30,5 +30,10 @@ internal readonly record struct SubAgentLimits(int MaxParallel, bool Enabled)
     public static SubAgentLimits Default { get; } = new(DefaultParallel, Enabled: true);
 
     /// <summary>Clamps a stored or typed cap into [<see cref="MinParallel"/>, <see cref="MaxParallelCeiling"/>].</summary>
+    /// <remarks>
+    /// The bounds and the default live here and nowhere else: the <c>agents</c> settings section stores a raw integer and hands it
+    /// over, the runtime floors a host built from a hand-edited file, and both read these three constants instead of repeating
+    /// 1, 16 and 4. A second copy of the range is how the offered choices and the accepted range drift apart.
+    /// </remarks>
     public static int Clamp(int value) => Math.Clamp(value, MinParallel, MaxParallelCeiling);
 }

@@ -372,4 +372,15 @@ public class AgentLoopTests
         Assert.False(host.SetMaxParallelSubAgents(-5));
         Assert.Equal(1, host.MaxParallelSubAgents);
     }
+
+    [Fact]
+    public void A_host_built_with_a_cap_below_one_reports_the_cap_its_pool_honours()
+    {
+        // The options come from a settings file a user can edit by hand, so the floor has to be in the loop's own initial value
+        // too: reporting zero back while the pool hands out one permit would make the readout lie about the live cap.
+        var host = AgentTestHost.Create(new FakeProvider((_, _) => Turn.Say("unused")), options: new AgentOptions { MaxParallelSubAgents = 0 });
+
+        Assert.Equal(1, host.MaxParallelSubAgents);
+        Assert.False(host.SetMaxParallelSubAgents(1));
+    }
 }
