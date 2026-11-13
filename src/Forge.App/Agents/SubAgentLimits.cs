@@ -14,20 +14,30 @@ internal readonly record struct SubAgentLimits(int MaxParallel, bool Enabled)
     /// Smallest cap a host accepts. Zero would mean "never run an agent", which the switch says instead and more clearly,
     /// and a pool with no permit would deadlock the root agent itself.
     /// </summary>
-    public const int MinParallel = 1;
+    public const int MinParallel = Preferences.AppPreferences.MinAgentsMaxParallelSubAgents;
 
     /// <summary>
     /// Largest cap the settings offer. This is a safety bound rather than a measured optimum: every active agent costs a
     /// streaming request and its own tool processes, so a tree wider than this competes with itself for provider quota and
     /// for the machine, and the extra agents finish later than they would in a narrower tree.
     /// </summary>
-    public const int MaxParallelCeiling = 16;
+    public const int MaxParallelCeiling = Preferences.AppPreferences.MaxAgentsMaxParallelSubAgents;
 
     /// <summary>The cap <see cref="Forge.Core.Agents.AgentOptions.MaxParallelSubAgents"/> carried while it was hard-coded.</summary>
-    public const int DefaultParallel = 4;
+    public const int DefaultParallel = Preferences.AppPreferences.DefaultAgentsMaxParallelSubAgents;
 
     /// <summary>Spawning allowed at the historical cap: what a runtime assembled without the settings store uses.</summary>
     public static SubAgentLimits Default { get; } = new(DefaultParallel, Enabled: true);
+
+    /// <summary>
+    /// The dials the settings store holds. The cap goes through <see cref="Clamp"/> so a hand-edited
+    /// <c>settings.json</c> cannot hand the pool a value the settings page would never offer.
+    /// </summary>
+    public static SubAgentLimits From(Preferences.AppPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        return new SubAgentLimits(Clamp(preferences.AgentsMaxParallelSubAgents), preferences.AgentsSubAgentsEnabled);
+    }
 
     /// <summary>Clamps a stored or typed cap into [<see cref="MinParallel"/>, <see cref="MaxParallelCeiling"/>].</summary>
     /// <remarks>

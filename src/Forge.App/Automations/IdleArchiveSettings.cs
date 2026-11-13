@@ -18,6 +18,12 @@ internal enum IdleArchiveScope
 /// </summary>
 internal sealed record IdleArchiveSettings(bool Enabled, TimeSpan After, IdleArchiveScope Scope)
 {
+    /// <summary>The stored scope token of <see cref="IdleArchiveScope.AutomationSessions"/>; the default.</summary>
+    public const string AutomationScopeToken = "automation";
+
+    /// <summary>The stored scope token of <see cref="IdleArchiveScope.AllRootSessions"/>.</summary>
+    public const string AllScopeToken = "all";
+
     /// <summary>
     /// The behaviour the step had while it was hard-coded: enabled, a seven-day window
     /// (<see cref="HousekeepingRunner.ArchiveAfter"/>) and automation-created root sessions only. Kept as the default so an
@@ -25,4 +31,17 @@ internal sealed record IdleArchiveSettings(bool Enabled, TimeSpan After, IdleArc
     /// upgrade; a factory that returns other values overrides all three.
     /// </summary>
     public static IdleArchiveSettings Default { get; } = new(true, HousekeepingRunner.ArchiveAfter, IdleArchiveScope.AutomationSessions);
+
+    /// <summary>
+    /// The settings the automation service is handed: the stored days turn into the window here, and only the token
+    /// <see cref="AllScopeToken"/> widens the scope, so an unknown or missing token stays at the automation-only default.
+    /// </summary>
+    public static IdleArchiveSettings From(Preferences.AppPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        var scope = string.Equals(preferences.IdleArchiveScope, AllScopeToken, StringComparison.Ordinal)
+            ? IdleArchiveScope.AllRootSessions
+            : IdleArchiveScope.AutomationSessions;
+        return new IdleArchiveSettings(preferences.IdleArchiveEnabled, TimeSpan.FromDays(preferences.IdleArchiveDays), scope);
+    }
 }
