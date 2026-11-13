@@ -349,6 +349,10 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
 **`chat` 设置分区(`Settings/ChatSettingsSectionViewModel.cs`)。** 界面组,order 250(`SettingsSectionIds.ChatOrder`),图标 `IconChat`,在两个设置项之间:缩略图长边(数字框,范围即偏好的夹取范围)与「把工具结果的图片发给模型」开关。两者都直接写 `AppPreferences`,下一次工具行完成与下一次模型请求各自读取,不需要重启;持久化由偏好存储的防抖写完成。说明行写明缩略图不重编码存下的图片、开关只改变模型收到什么。
 
+**富文件查看器(`ViewModels/Preview/`、`Views/Preview/`)。** 文件标签先**分类再读**,分类是纯函数 `FilePreviewClassifier.Classify(path, firstBytes)`(无 IO,可单测),`LoadAsync` 只负责喂它前 512 字节。顺序有讲究:**Git LFS 指针最先**——被 LFS 管的 PNG 在磁盘上是文本指针,按扩展名会走错路;判据是内容以 `version https://git-lfs.github.com/spec/v1` 开头,不管扩展名。其后按扩展名:`.png/.jpg/.jpeg/.gif/.webp` → 图片;`.csv/.tsv` → 表格;`.ipynb` → 笔记本;`.pdf` → PDF 占位;`.html/.htm` → HTML 占位;其余走原有的文本路径,只有 `TextDocument.LoadAsync` 抛 `NotSupportedException`(二进制)时才改出二进制占位——超 `MaxFileBytes` 的仍是原来的“文件过大”错误。**预览是只读的**:`HasDocument` 保持 false,编辑器与工具条上的换行/保存/复制/编辑菜单一起隐藏,`IsDirty`/`CanSave` 恒 false;标签始终显示路径,并常驻一个“用默认程序打开”按钮(`AutomationProperties.AutomationId="file-open-external"`,`Process.Start(UseShellExecute)`),这就是 PDF/HTML 不做内部渲染的兑现方式——能交给 OS 的不引渲染器。HTML 占位卡另给一个“查看源码”,把同一个文件按文本重开(`LoadAsync(forceText: true)`),于是不渲染也不丢读的能力。图片预览在后台线程解码,长边超 4096 先缩放再释放原图;解码函数可注入(`Create(imageDecoder:)`),无头测试不碰真实渲染。表格是真 RFC 4180 读取器:引号字段、成对引号、CRLF/LF、字段内换行、参差行补齐;TSV 用制表符且不认引号;超过行数上限的行照常流式读完,只计数并于标题下说明跳过多少;列宽按前 200 行最宽单元格估算,行用 `VirtualizingStackPanel` 虚拟化,不把整张表画成一段等宽文本。笔记本读 `nbformat`:`stream`/`execute_result`/`display_data`/`error` 四种输出,每段输出按字符上限截断并标出截断,`image/png` 输出按需解码,坏 JSON 出提示不出异常。每个非文本预览都继承 `FilePreviewViewModel`(路径、名称、字节数、本地化标题、打开命令、失败提示),`Release()` 释放已解码的位图;换文件、取消、被后续加载顶掉的三条路径都释放——竞赛失败那一份也要释放,否则位图跟着看不见的 VM 一起活到 GC。分类、CSV/笔记本/LFS 解析都是纯逻辑,单测覆盖;真实解码与文件选择器在无头测试中不覆盖。
+
+**`files` 设置分区(`Settings/FilesSettingsSectionViewModel.cs`)。** 界面组,order 380(`SettingsSectionIds.FilesOrder`),图标 `IconEye`,在编辑器分区之后、终端之前:CSV/TSV 预览行数(50–10000,默认 1000)、`.ipynb` 单段输出字符数(1000–200000,默认 20480)、图片预览上限(以 MiB 编辑,默认 20 MiB,落盘仍是字节)。三者都直接写 `AppPreferences`,下一次预览即生效;`FilePreviewSettings`(与 `EditorSettings` 同一种投影,`Current` 由组合根绑定)把偏好透给查看器。
+
 ## 提示词模板
 
 **三种模板,一套分层。** `Forge.Abstractions/PromptTemplates.cs` 定契约,`Forge.Core/Prompts/Templates/` 实现,`Prompts/PromptTemplateServices.cs` 是 App 的入口(`AppComposition.PromptTemplates`,也挂在 `AgentRuntimeServices.PromptTemplates`)。种类:
@@ -366,7 +370,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
 ## 未决
 
-- 文件预览已支持编辑保存、TextMate 预览着色及 LSP 文档同步;编辑模式尚为无着色 TextBox,LSP 诊断、语义 token 叠加与补全尚未接到 UI。声明式插件面板渲染未做。
+- 文件预览已支持编辑保存、TextMate 预览着色及 LSP 文档同步,非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF/HTML 占位(见「富文件查看器」);编辑模式尚为无着色 TextBox,LSP 诊断、语义 token 叠加与补全尚未接到 UI。声明式插件面板渲染未做;富查看器不含 SVG 内部渲染(按文本打开)、图片 diff 与缩放/平移,SVG 渲染需要枚举之外的 Skia SVG 包。
 - git 写工具(`git_branch`/`git_sync`)按工具名划为写操作,经会话的审批队列逐次询问;读工具自动放行,且 git 工具不暴露给 `run_code` 脚本(脚本内调用不经逐次审批呈现)。
 - 搜索框暂无行为(占位)。
 - 会话交接的未决项:完整继承且继承前缀本身已超过触发线时,Core 的迟滞把重复压缩限制在两次无效尝试后停住(见 Core SPEC),根因(持久化压缩后的表示或历史边界)需要新的存储契约,归 T0,本阶段不引入。交接摘要不沿继承链取父会话消息;历史检索工具也不跟继承链。对话框的模型/推理档位初值、缓存剩余时间、接近压缩阈值、前缀指纹不符等提示未做。
