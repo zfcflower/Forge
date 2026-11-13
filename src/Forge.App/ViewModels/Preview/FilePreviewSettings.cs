@@ -17,6 +17,13 @@ internal sealed class FilePreviewSettings
     /// <summary>Characters per kilobyte: the notebook limit is a kilobyte preference and truncation counts characters.</summary>
     public const int CharsPerKilobyte = 1024;
 
+    /// <summary>
+    /// Advance of one character of the code font as a fraction of its size. The table preview lays cells out at a width
+    /// computed from the character count, so this is what keeps its columns aligned; Consolas and Cascadia Mono sit near
+    /// 0.55–0.6 em, and the slightly generous value below keeps a cell from clipping at the sizes the settings offer.
+    /// </summary>
+    public const double MonoAdvanceEm = 0.62;
+
     /// <summary>What a preview shows before the composition root binds the real preferences.</summary>
     private static FilePreviewSettings current = new();
 
@@ -51,6 +58,13 @@ internal sealed class FilePreviewSettings
     /// <summary>Characters kept from one <c>.ipynb</c> output (the preference is in kilobytes).</summary>
     public int NotebookOutputChars =>
         preferences is { } live ? live.FilesNotebookOutputKilobytes * CharsPerKilobyte : notebookOutputChars;
+
+    /// <summary>
+    /// Advance of one monospace character in device-independent pixels, for the table preview's column widths: it follows
+    /// the code font size, so a table stays aligned when the size changes in the appearance section.
+    /// </summary>
+    public double TableCharWidth =>
+        (preferences?.CodeFontSize ?? AppPreferences.DefaultCodeFontSize) * MonoAdvanceEm;
 
     /// <summary>Largest image (in bytes, on disk) the image preview decodes (the preference is in megabytes).</summary>
     public int PreviewImageBytes =>

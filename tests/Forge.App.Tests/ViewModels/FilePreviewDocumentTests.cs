@@ -153,6 +153,16 @@ public sealed class FilePreviewDocumentTests : IDisposable
     }
 
     [Fact]
+    public void The_table_column_width_follows_the_code_font_size()
+    {
+        var small = new FilePreviewSettings(new AppPreferences { CodeFontSize = 11 });
+        var large = new FilePreviewSettings(new AppPreferences { CodeFontSize = 18 });
+
+        Assert.True(large.TableCharWidth > small.TableCharWidth);
+        Assert.Equal(11 * FilePreviewSettings.MonoAdvanceEm, small.TableCharWidth, 3);
+    }
+
+    [Fact]
     public async Task Releasing_twice_is_counted_but_harmless()
     {
         var csv = Write("a.csv", "x\ny\n");

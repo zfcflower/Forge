@@ -303,7 +303,13 @@ internal sealed partial class FileDocumentViewModel
                 case FilePreviewKind.Table:
                     return new FileRead(
                         null,
-                        TableFilePreviewViewModel.Build(full, info.Length, PreviewSettings.PreviewRows, FilePreviewClassifier.TableSeparator(full), ct),
+                        TableFilePreviewViewModel.Build(
+                            full,
+                            info.Length,
+                            PreviewSettings.PreviewRows,
+                            FilePreviewClassifier.TableSeparator(full),
+                            PreviewSettings.TableCharWidth,
+                            ct),
                         false,
                         0);
                 case FilePreviewKind.Notebook:

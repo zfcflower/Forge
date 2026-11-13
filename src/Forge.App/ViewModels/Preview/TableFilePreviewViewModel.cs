@@ -56,7 +56,8 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
     /// <summary>The row summary under the caption: "1,000 rows" or "showing 50, 950 skipped".</summary>
     public string Summary => PreviewStrings.TableSummary(ShownRows, SkippedRows).Resolve();
 
-    public static TableFilePreviewViewModel Build(string path, long byteSize, int maxRows, char separator, CancellationToken ct = default)
+    public static TableFilePreviewViewModel Build(
+        string path, long byteSize, int maxRows, char separator, double charWidth, CancellationToken ct = default)
     {
         var name = System.IO.Path.GetFileName(path);
         var format = separator == '\t' ? "TSV" : "CSV";
@@ -68,12 +69,12 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
 
             var widths = ColumnWidths(parsed.Rows);
             var hasHeader = TablePreviewReader.HasHeaderRow(parsed.Rows);
-            var header = hasHeader ? new TablePreviewRowViewModel(CellsFor(parsed.Rows[0], widths), isHeader: true) : null;
+            var header = hasHeader ? new TablePreviewRowViewModel(CellsFor(parsed.Rows[0], widths, charWidth), isHeader: true) : null;
 
             var rows = new TablePreviewRowViewModel[parsed.Rows.Count - (hasHeader ? 1 : 0)];
             for (var r = 0; r < rows.Length; r++)
             {
-                rows[r] = new TablePreviewRowViewModel(CellsFor(parsed.Rows[r + (hasHeader ? 1 : 0)], widths), isHeader: false);
+                rows[r] = new TablePreviewRowViewModel(CellsFor(parsed.Rows[r + (hasHeader ? 1 : 0)], widths, charWidth), isHeader: false);
             }
 
             return new TableFilePreviewViewModel(path, name, byteSize, header, rows, rows.Length, parsed.SkippedRows, format);
@@ -107,12 +108,12 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
         return widths;
     }
 
-    private static IReadOnlyList<TablePreviewCellViewModel> CellsFor(IReadOnlyList<string> row, int[] widths)
+    private static IReadOnlyList<TablePreviewCellViewModel> CellsFor(IReadOnlyList<string> row, int[] widths, double charWidth)
     {
         var cells = new TablePreviewCellViewModel[widths.Length];
         for (var column = 0; column < widths.Length; column++)
         {
-            cells[column] = new TablePreviewCellViewModel(column < row.Count ? row[column] : string.Empty, widths[column]);
+            cells[column] = new TablePreviewCellViewModel(column < row.Count ? row[column] : string.Empty, widths[column], charWidth);
         }
 
         return cells;
@@ -136,13 +137,10 @@ internal sealed class TablePreviewRowViewModel
 /// <summary>One table cell: the text and its column width in monospace characters (times a fixed advance, capped).</summary>
 internal sealed class TablePreviewCellViewModel
 {
-    /// <summary>Average advance of one column of the monospace code font, in device-independent pixels.</summary>
-    internal const double MonoCharWidth = 7.8;
-
-    public TablePreviewCellViewModel(string text, int widthChars)
+    public TablePreviewCellViewModel(string text, int widthChars, double charWidth)
     {
         Text = text;
-        Width = widthChars * MonoCharWidth;
+        Width = widthChars * charWidth;
     }
 
     public string Text { get; }
