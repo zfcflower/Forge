@@ -179,7 +179,7 @@ public sealed class SqliteTodoStoreStepCommitTests
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 11";
+            command.CommandText = "PRAGMA user_version = 12";
             await command.ExecuteNonQueryAsync();
         }
 
