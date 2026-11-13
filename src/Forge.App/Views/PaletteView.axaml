@@ -166,10 +166,11 @@
                      Classes="palette-list"
                      ItemsSource="{Binding Items}"
                      SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-                     AutomationProperties.AutomationId="palette-results">
+                     AutomationProperties.AutomationId="palette-results"
+                     AutomationProperties.Name="{Binding HeaderText}">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="svc:PaletteItem">
-                  <Grid ColumnDefinitions="*,Auto">
+                  <Grid ColumnDefinitions="*,Auto" AutomationProperties.Name="{Binding Title}">
                     <StackPanel Spacing="1">
                       <TextBlock Classes="palette-title" Classes.notice="{Binding IsNotice}" Text="{Binding Title}" />
                       <TextBlock Classes="caption"

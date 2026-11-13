@@ -99,7 +99,7 @@ internal static class PaletteQuery
             return 3;
         }
 
-        return IsSubsequence(text, query) ? 4 : -1;
+        return ComposerSuggestions.IsSubsequence(text, query) ? 4 : -1;
     }
 
     /// <summary>
@@ -124,18 +124,4 @@ internal static class PaletteQuery
 
     private static bool IsSegmentStart(char previous) =>
         previous is '/' or '\\' or '.' or ':' or '-' or ' ' or '_' or '(';
-
-    private static bool IsSubsequence(string text, string query)
-    {
-        var at = 0;
-        foreach (var ch in text)
-        {
-            if (at < query.Length && char.ToLowerInvariant(ch) == char.ToLowerInvariant(query[at]))
-            {
-                at++;
-            }
-        }
-
-        return at == query.Length;
-    }
 }

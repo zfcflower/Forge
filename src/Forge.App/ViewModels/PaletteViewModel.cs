@@ -278,10 +278,15 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
         isLoadingSnapshot = false;
         preview.Clear();
         SetSelection(null);
-        Replace([]);
+        Replace([], keepSelection: false);
     }
 
-    /// <summary>Moves the selection by <paramref name="delta"/> rows, stopping at both ends.</summary>
+    /// <summary>
+    /// Moves the selection by <paramref name="delta"/> rows. The step lands on the next row Enter can act on and never on a
+    /// notice; without a selection it starts at the first row (down) or the last one (up). The current row is found by the
+    /// row's own value, because a rebuild after a refresh hands the list equal instances and the field may still hold the
+    /// previous one.
+    /// </summary>
     public void MoveSelection(int delta)
     {
         if (delta == 0 || rows.Count == 0)
@@ -289,18 +294,46 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        var current = -1;
+        var step = delta > 0 ? 1 : -1;
+        var current = IndexOfSelection();
+        var next = current < 0 ? StepTo(delta > 0 ? 0 : rows.Count - 1, step, inclusive: true) : StepTo(current, step, inclusive: false);
+        if (next >= 0 && next != current)
+        {
+            SelectedItem = rows[next];
+        }
+    }
+
+    /// <summary>The index of the selected row in <see cref="Items"/>, or -1 when nothing is selected or the row is gone.</summary>
+    private int IndexOfSelection()
+    {
+        if (selectedItem is null)
+        {
+            return -1;
+        }
+
         for (var index = 0; index < rows.Count; index++)
         {
-            if (ReferenceEquals(rows[index], selectedItem))
+            if (rows[index] == selectedItem)
             {
-                current = index;
-                break;
+                return index;
             }
         }
 
-        var next = Math.Clamp((current < 0 ? 0 : current) + delta, 0, rows.Count - 1);
-        SelectedItem = rows[next];
+        return -1;
+    }
+
+    /// <summary>The first row from <paramref name="from"/> in the given direction that Enter can act on; -1 when there is none.</summary>
+    private int StepTo(int from, int step, bool inclusive)
+    {
+        for (var index = inclusive ? from : from + step; index >= 0 && index < rows.Count; index += step)
+        {
+            if (rows[index].IsNavigable)
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -353,7 +386,7 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(Placeholder));
         OnPropertyChanged(nameof(EmptyText));
         OnPropertyChanged(nameof(StatusText));
-        Rebuild();
+        Rebuild(keepSelection: true);
     }
 
     private void OnQueryChanged()

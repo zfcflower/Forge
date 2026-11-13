@@ -40,6 +40,7 @@ internal sealed partial class PaletteViewModel
     private async Task LoadFilePreviewAsync(PaletteItem item, string title, CancellationTokenSource cts)
     {
         string? text = null;
+        var superseded = false;
         try
         {
             if (ResolveAbsolute(item.Path) is { } absolute)
@@ -49,7 +50,7 @@ internal sealed partial class PaletteViewModel
         }
         catch (OperationCanceledException)
         {
-            return;
+            superseded = true;
         }
         finally
         {
@@ -58,8 +59,18 @@ internal sealed partial class PaletteViewModel
                 previewCts = null;
                 IsPreviewLoading = false;
             }
+            else
+            {
+                // Another row (or a close) owns the pane now: a read that finished after it must not repaint it.
+                superseded = true;
+            }
 
             cts.Dispose();
+        }
+
+        if (superseded || !IsOpen)
+        {
+            return;
         }
 
         SetPreview(title, string.IsNullOrEmpty(text) ? Loc.Instance[PaletteStrings.PreviewEmpty] : text);

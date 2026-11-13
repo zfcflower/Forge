@@ -23,8 +23,13 @@ internal sealed partial class PaletteViewModel
     private string? excludedRaw;
     private IReadOnlyList<string> excluded = [];
 
-    /// <summary>The current source's rows for the current query; the one place every state change funnels into.</summary>
-    private void Rebuild() => Replace(Build(PaletteQuery.ClampLimit(preferences.PaletteResultLimit)));
+    /// <summary>
+    /// The current source's rows for the current query; the one place every state change funnels into. A query or source
+    /// change starts the selection at the best row; a rebuild that only refreshes the snapshot behind the same list (a
+    /// landing refresh, a language switch) keeps the row the user had.
+    /// </summary>
+    private void Rebuild(bool keepSelection = false) =>
+        Replace(Build(PaletteQuery.ClampLimit(preferences.PaletteResultLimit)), keepSelection);
 
     private IReadOnlyList<PaletteItem> Build(int limit) => source switch
     {
@@ -100,9 +105,14 @@ internal sealed partial class PaletteViewModel
         return excluded;
     }
 
-    /// <summary>Replaces the rows; the first navigable row is selected so Enter is always meaningful after a keystroke.</summary>
-    private void Replace(IReadOnlyList<PaletteItem> next)
+    /// <summary>
+    /// Replaces the rows. With <paramref name="keepSelection"/> the old selection is carried over to the equal row of the
+    /// new list (a landing refresh must not move the row under the user's finger); otherwise - and whenever the old row is
+    /// gone - the first navigable row is selected, so Enter is always meaningful after a keystroke.
+    /// </summary>
+    private void Replace(IReadOnlyList<PaletteItem> next, bool keepSelection)
     {
+        var previous = selectedItem;
         rows = next;
         itemsView = new ReadOnlyObservableCollection<PaletteItem>(
             next.Count == 0 ? [] : new ObservableCollection<PaletteItem>(next));
@@ -110,7 +120,11 @@ internal sealed partial class PaletteViewModel
         OnPropertyChanged(nameof(HasItems));
         OnPropertyChanged(nameof(IsEmpty));
         OnPropertyChanged(nameof(StatusText));
-        SetSelection(next.FirstOrDefault(static item => item.IsNavigable));
+
+        var kept = keepSelection && previous is not null
+            ? next.FirstOrDefault(item => item.IsNavigable && item == previous)
+            : null;
+        SetSelection(kept ?? next.FirstOrDefault(static item => item.IsNavigable));
     }
 
     /// <summary>
@@ -119,9 +133,18 @@ internal sealed partial class PaletteViewModel
     /// </summary>
     private void SetSelection(PaletteItem? item)
     {
+        if (ReferenceEquals(selectedItem, item))
+        {
+            return;
+        }
+
         if (SameTarget(selectedItem, item))
         {
-            Set(ref selectedItem, item, nameof(SelectedItem));
+            // The same target in a row instance of the new list: point at that instance, because the old one is no longer
+            // in Items and the list would then highlight nothing. The preview already shows this target, so it is not
+            // reloaded.
+            selectedItem = item;
+            OnPropertyChanged(nameof(SelectedItem));
             return;
         }
 
@@ -141,6 +164,13 @@ internal sealed partial class PaletteViewModel
             string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal) &&
             string.Equals(left.Title, right.Title, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Test seam: installs an exact row list. A source never emits a list that mixes a notice with a result - a notice is
+    /// the whole list - so the code that steps over rows cannot be proven for a mixed list through the palette's own
+    /// surface. Everything after installing the rows goes through the public members.
+    /// </summary>
+    internal void InstallRowsForTest(IReadOnlyList<PaletteItem> next) => Replace(next, keepSelection: false);
 
     /// <summary>Starts the snapshot refresh of <paramref name="target"/>; the cached snapshot is shown meanwhile.</summary>
     private void Refresh(PaletteSource target)
@@ -248,7 +278,7 @@ internal sealed partial class PaletteViewModel
         }
 
         isLoadingSnapshot = false;
-        Rebuild();
+        Rebuild(keepSelection: true);
     }
 
     /// <summary>Starts the debounced content search for the current query, cancelling the previous one.</summary>

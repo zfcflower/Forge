@@ -3,7 +3,6 @@ using Forge.App.Editing;
 using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.App.Workbench;
-using Forge.Core.Storage;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
 using Forge.IO;
@@ -87,7 +86,10 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
 
     async Task<IReadOnlyList<PaletteSessionSnapshot>> IPaletteHost.RefreshSessionsAsync(CancellationToken ct)
     {
-        var infos = await composition.Catalog.QueryAsync(new SessionQuery(), ct).ConfigureAwait(true);
+        // Main sessions only: a sub-agent session is not something the palette can open (the shell refuses it too), so the
+        // snapshot never carries one and the palette's own filter only has to defend against a foreign host.
+        var infos = await composition.Catalog.QueryAsync(new SessionQuery { ParentSessionId = string.Empty }, ct)
+            .ConfigureAwait(true);
         var sessions = new PaletteSessionSnapshot[infos.Count];
         for (var index = 0; index < infos.Count; index++)
         {
