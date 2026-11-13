@@ -34,6 +34,22 @@ public sealed class NotificationPermissionGuideTests
         Assert.Empty(notifier.Calls);
     }
 
+    [Fact]
+    public async Task A_notifier_that_throws_settles_denied_and_traces_the_failure()
+    {
+        // The shipped notifier swallows its own failures, so this is the defensive branch: a notifier that throws must still
+        // leave a state the page can show, never an exception in the click handler.
+        using var trace = new LogCapture();
+        var notifier = new GuideFakeNotifier { Failure = new InvalidOperationException("powershell.exe is gone") };
+        var guide = new SystemNotificationPermissionGuide(notifier, new GuideFakeOpener().OpenAsync, NotifyPlatform.Windows);
+
+        Assert.Equal(NotificationPermissionState.Denied, await guide.SendTestAsync(CancellationToken.None));
+        Assert.Equal(NotificationPermissionState.Denied, guide.State);
+        Assert.Contains(
+            trace.Lines,
+            static line => line.Contains("[notify] the test notification failed: powershell.exe is gone", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData(1, true)]
     [InlineData(2, true)]
@@ -233,6 +249,9 @@ public sealed class NotificationPermissionGuideTests
         /// <summary>What <see cref="TryNotifyAsync"/> reports; false is a notification the platform dropped.</summary>
         public bool Taken { get; set; } = true;
 
+        /// <summary>When set, the notifier throws it instead of answering, like a tool that vanished under the request.</summary>
+        public Exception? Failure { get; set; }
+
         public IReadOnlyList<(string Title, string Body)> Calls
         {
             get
@@ -254,7 +273,7 @@ public sealed class NotificationPermissionGuideTests
                 calls.Add((title, body));
             }
 
-            return Task.FromResult(Taken);
+            return Failure is { } failure ? Task.FromException<bool>(failure) : Task.FromResult(Taken);
         }
     }
 

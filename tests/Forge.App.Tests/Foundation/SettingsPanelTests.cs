@@ -67,6 +67,32 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Contains(shell.Composition.Paths.GeneralWorkspaceDirectory, pathsTexts);
     }
 
+    [Theory]
+    [InlineData(SettingsSectionIds.ModelsVisibility, "models-visibility-search")]
+    [InlineData(SettingsSectionIds.Agents, "agents-max-parallel")]
+    [InlineData(SettingsSectionIds.IdleArchive, "idle-archive-days")]
+    [InlineData(SettingsSectionIds.NotificationPermission, "notification-permission-state")]
+    public async Task A_wave_section_renders_its_own_body(string sectionId, string marker)
+    {
+        // The registry knows the four sections, but only a template in App.axaml gives them a body: without one the pane stays
+        // blank and every registry test still passes, so each section is selected and asked for an element of its own.
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        var shown = await session.Dispatch(
+            () =>
+            {
+                var section = shell.ViewModel.Settings.Sections.Items.Single(item => item.Id == sectionId);
+                shell.ViewModel.Settings.SelectedSection = section;
+                SharedUi.Settle(shell.Window);
+                return PanelShell.SelectedAutomationIds(shell.Window);
+            },
+            token);
+
+        Assert.Contains(marker, shown);
+    }
+
     [Fact]
     public async Task The_settings_window_groups_sections_agent_then_interface_then_system()
     {
@@ -323,6 +349,20 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                 : body.GetVisualDescendants()
                     .OfType<TextBlock>()
                     .Select(static block => block.Text ?? string.Empty)
+                    .ToList();
+        }
+
+        /// <summary>The automation ids inside the section body, so a test can prove which section rendered what.</summary>
+        public static IReadOnlyList<string> SelectedAutomationIds(Window window)
+        {
+            var body = window.GetVisualDescendants()
+                .FirstOrDefault(control => string.Equals(AutomationProperties.GetAutomationId(control), "settings-body", StringComparison.Ordinal));
+            return body is null
+                ? []
+                : body.GetVisualDescendants()
+                    .Select(AutomationProperties.GetAutomationId)
+                    .Where(static id => !string.IsNullOrEmpty(id))
+                    .Select(static id => id!)
                     .ToList();
         }
 

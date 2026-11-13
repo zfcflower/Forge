@@ -12,12 +12,15 @@ namespace Forge.App.Notifications;
 /// sentence saying what is known about the system's notification permission, two actions that change it (send a real test
 /// notification, open the platform's notification settings) and the "ask again" switch the first-run wizard reads.
 /// <para>It holds no state of its own beyond whether a test is running: the sentence reads
-/// <see cref="INotificationPermissionGuide.State"/> and the switch reads <see cref="AppPreferences"/> on every access, so a
-/// value changed anywhere else shows up here without a reload. The action labels and the sentence are computed in C#,
-/// which is why the section drops its <see cref="Loc.LanguageChanged"/> subscription in <see cref="Dispose"/> - the table
-/// is process-wide and would otherwise outlive the composition that owns this.</para>
+/// <see cref="INotificationPermissionGuide.State"/> and the switch reads <see cref="AppPreferences"/> on every access. The
+/// action labels and the sentence are computed in C#, which is why the section drops its <see cref="Loc.LanguageChanged"/>
+/// subscription in <see cref="Dispose"/> - the table is process-wide and would otherwise outlive the composition that owns
+/// this.</para>
+/// <para>The guide is shared with the first-run wizard and has no change event (its interface is a contract other waves read
+/// too), so the sentence is also re-read through <see cref="Reload"/> whenever the page shows the section: a test the
+/// wizard sent is reflected the next time the user looks at this page instead of staying stale until they press something.</para>
 /// </summary>
-internal sealed class NotificationPermissionSettingsViewModel : ObservableObject, IDisposable
+internal sealed class NotificationPermissionSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
 {
     private readonly AppPreferences preferences;
     private readonly INotificationPermissionGuide guide;
@@ -82,9 +85,18 @@ internal sealed class NotificationPermissionSettingsViewModel : ObservableObject
         }
     }
 
-    /// <summary>Drops the <see cref="Loc.LanguageChanged"/> subscription; idempotent.</summary>
-    public void Dispose()
+    /// <summary>
+    /// Re-reads what the guide knows: the page calls this when the section is shown, so a test notification the first-run
+    /// wizard sent through the same instance shows up here without a restart.
+    /// </summary>
+    public void Reload()
     {
+        OnPropertyChanged(nameof(StateText));
+        OnPropertyChanged(nameof(CanOpenSettings));
+    }
+
+    /// <summary>Drops the <see cref="Loc.LanguageChanged"/> subscription; idempotent.</summary>
+    public void Dispose()    {
         if (disposed)
         {
             return;

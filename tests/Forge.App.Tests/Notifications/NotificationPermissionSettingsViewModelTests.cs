@@ -165,6 +165,28 @@ public sealed class NotificationPermissionSettingsViewModelTests
     }
 
     [Fact]
+    public void Reload_re_reads_what_the_shared_guide_knows()
+    {
+        // The guide is one instance shared with the first-run wizard and its interface has no change event, so the sentence has
+        // to be re-raised when the page shows this section again: the text itself is computed, but a bound view never learns
+        // that it moved unless Reload says so.
+        using var _ = new LanguageScope(UiLanguage.English);
+        var guide = new FakeGuide { State = NotificationPermissionState.Unknown };
+        using var section = new NotificationPermissionSettingsViewModel(new AppPreferences(), guide);
+        var before = section.StateText;
+        var raised = new List<string?>();
+        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        guide.State = NotificationPermissionState.Allowed;
+        Assert.NotEqual(before, section.StateText);
+
+        section.Reload();
+
+        Assert.Contains(nameof(NotificationPermissionSettingsViewModel.StateText), raised);
+        Assert.Contains(nameof(NotificationPermissionSettingsViewModel.CanOpenSettings), raised);
+    }
+
+    [Fact]
     public void Dispose_drops_the_language_subscription()
     {
         using var chinese = new LanguageScope(UiLanguage.Chinese);

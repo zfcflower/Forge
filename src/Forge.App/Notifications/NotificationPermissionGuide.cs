@@ -204,15 +204,24 @@ internal sealed class SystemNotificationPermissionGuide : INotificationPermissio
     /// The default opener: the shell starts the protocol handler. The URI is a fixed constant of this class, never text
     /// from the user or a pull request, and it travels as one <see cref="ProcessStartInfo.FileName"/> - no command line is
     /// assembled anywhere.
+    /// <para>The launch runs on the pool, not on the caller's thread: <c>ShellExecuteEx</c> blocks until the handler accepts
+    /// the request, so a cold or wedged Settings app would otherwise freeze the click (and the UI thread under it) with no
+    /// way for <see cref="OpenTimeout"/> to cut it short.</para>
     /// </summary>
     private static Task<bool> OpenWithShellAsync(Uri uri, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        return Task.Run(
+            () =>
+            {
+                ct.ThrowIfCancellationRequested();
 
-        // The shell's verdict is "no exception": a shell-executed protocol handler may hand the request to an already
-        // running Settings app, and Process.Start then returns null even though the page opened. A scheme without a
-        // handler throws Win32Exception, which the caller traces and reports as false.
-        using var process = Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
-        return Task.FromResult(true);
+                // The shell's verdict is "no exception": a shell-executed protocol handler may hand the request to an
+                // already running Settings app, and Process.Start then returns null even though the page opened. A scheme
+                // without a handler throws Win32Exception, which the caller traces and reports as false.
+                using var process = Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                return true;
+            },
+            ct);
     }
 }
