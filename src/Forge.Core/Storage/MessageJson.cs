@@ -277,6 +277,21 @@ public static class MessageJson
                     writer.WriteBoolean("is_error", true);
                 }
 
+                // A text-only result is a single TextBlock, and its JSON is exactly the old shape — no "blocks"
+                // property — so everything written before this change stays byte-identical. The array appears only
+                // when the result carries more than one block or a non-text block, and reuses the same block shapes
+                // a message body uses.
+                if (result.Blocks.Count > 1 || (result.Blocks.Count == 1 && result.Blocks[0] is not TextBlock))
+                {
+                    writer.WriteStartArray("blocks");
+                    foreach (var nested in result.Blocks)
+                    {
+                        WriteBlock(writer, nested);
+                    }
+
+                    writer.WriteEndArray();
+                }
+
                 break;
             case ArtifactRefBlock artifact:
                 writer.WriteString(TypeKey, "artifact");
@@ -320,10 +335,7 @@ public static class MessageJson
                 RequiredString(block, "id"),
                 RequiredString(block, "name"),
                 RequiredString(block, "arguments")),
-            "tool_result" => new ToolResultBlock(
-                RequiredString(block, "call_id"),
-                RequiredString(block, "content"),
-                OptionalBool(block, "is_error")),
+            "tool_result" => ReadToolResult(block),
             "artifact" => new ArtifactRefBlock(
                 RequiredString(block, "artifact_id"),
                 RequiredString(block, "description"),
@@ -335,6 +347,27 @@ public static class MessageJson
                 OptionalString(block, "name")),
             _ => throw new JsonException($"Unknown content block type '{type}'."),
         };
+    }
+
+    private static ContentBlock ReadToolResult(JsonElement block)
+    {
+        var callId = RequiredString(block, "call_id");
+        var isError = OptionalBool(block, "is_error");
+        if (block.TryGetProperty("blocks", out var nested) && nested.ValueKind == JsonValueKind.Array)
+        {
+            // The same shapes a message body uses; an unknown nested type throws the existing JsonException
+            // instead of being dropped.
+            var blocks = new List<ContentBlock>(nested.GetArrayLength());
+            foreach (var item in nested.EnumerateArray())
+            {
+                blocks.Add(ReadBlock(item));
+            }
+
+            return new ToolResultBlock(callId, blocks, isError);
+        }
+
+        // Old shape: the flat text form written before "blocks" existed.
+        return new ToolResultBlock(callId, RequiredString(block, "content"), isError);
     }
 
     private static string RequiredString(JsonElement element, string name)

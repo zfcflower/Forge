@@ -50,7 +50,7 @@ public sealed class ApproximateTokenCounter : ITokenCounter
                     TextBlock text => text.Text.Length,
                     ThinkingBlock thinking => thinking.Text.Length,
                     ToolCallBlock call => call.Name.Length + call.ArgumentsJson.Length,
-                    ToolResultBlock result => result.Content.Length,
+                    ToolResultBlock result => result.Content.Length + (long)result.Images.Count * ImageTokens * CharsPerToken,
                     ArtifactRefBlock artifact => artifact.Description.Length + 32,
                     ImageBlock => (long)ImageTokens * CharsPerToken,
                     FileBlock file => FileTokens(file) * CharsPerToken,

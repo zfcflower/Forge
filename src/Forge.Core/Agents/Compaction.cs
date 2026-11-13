@@ -764,7 +764,7 @@ public sealed class SummaryCompactor : IContextCompactor
                         switch (block)
                         {
                             case ToolResultBlock result:
-                                AppendLine(builder, result.IsError ? "[Tool result (error)]: " : "[Tool result]: ", Truncate(result.Content, MaxToolResultChars));
+                                AppendLine(builder, result.IsError ? "[Tool result (error)]: " : "[Tool result]: ", Truncate(ToolResultText(result), MaxToolResultChars));
                                 break;
                             case ArtifactRefBlock artifact:
                                 AppendLine(builder, "[Tool result]: ", ArtifactPlaceholder(artifact));
@@ -793,6 +793,47 @@ public sealed class SummaryCompactor : IContextCompactor
         }
 
         builder.Append(label).Append(text);
+    }
+
+    /// <summary>
+    /// The summarizer's text for a tool result. A result without images keeps <see cref="ToolResultBlock.Content"/>
+    /// untouched, so every result written before tool-result images existed is serialized exactly as before. A result
+    /// carrying images renders its blocks in order, each image as the standard <see cref="MessageJson.ImagePlaceholder"/>
+    /// placeholder — the summarizer sees that a picture arrived (with its size, never its base64) instead of the image
+    /// being dropped from the prompt.
+    /// </summary>
+    private static string ToolResultText(ToolResultBlock result)
+    {
+        if (result.Images.Count == 0)
+        {
+            return result.Content;
+        }
+
+        var builder = new StringBuilder(result.Content.Length + 32);
+        foreach (var block in result.Blocks)
+        {
+            var text = block switch
+            {
+                TextBlock value => value.Text,
+                ImageBlock image => MessageJson.ImagePlaceholder(image),
+                FileBlock file => MessageJson.FilePlaceholder(file),
+                ArtifactRefBlock artifact => ArtifactPlaceholder(artifact),
+                _ => string.Empty,
+            };
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append('\n');
+            }
+
+            builder.Append(text);
+        }
+
+        return builder.ToString();
     }
 
     private static string Prose(ChatMessage message)

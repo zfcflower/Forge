@@ -6,6 +6,14 @@ namespace Forge.Mcp;
 /// <summary>Turns MCP content blocks into the single text a model sees, keeping non-text blocks legible.</summary>
 internal static class McpContentFlattener
 {
+    /// <summary>
+    /// The largest image this side keeps as payload, in estimated decoded bytes. A safety boundary, not a quality
+    /// one: an MCP server can hand back an unbounded <c>data</c> string, and everything kept rides through the
+    /// storage, the agent context and the provider wire — five megabytes keeps screenshots and diagrams while
+    /// capping how much one tool call can inflate a session. Larger images stay legible as their placeholder text.
+    /// </summary>
+    public const int MaxKeptImageBytes = 5 * 1024 * 1024;
+
     public static McpToolCallResult ToolResult(JsonElement result)
     {
         var content = ReadContent(result, "content");
@@ -129,6 +137,17 @@ internal static class McpContentFlattener
                 return new McpContent("text", block.TryGetProperty("text", out var text) ? text.GetString() ?? string.Empty : string.Empty);
 
             case "image":
+            {
+                var mimeType = ReadString(block, "mimeType");
+                var size = EstimateBase64Bytes(ReadString(block, "data"));
+                // Keep the payload only for a media type the app can display, within the size cap; everything
+                // else (svg, oversized bitmaps, anything the server mislabels) stays placeholder-only.
+                var data = mimeType is "image/png" or "image/jpeg" or "image/gif" or "image/webp" && size <= MaxKeptImageBytes
+                    ? ReadString(block, "data")
+                    : null;
+                return new McpContent(type, $"[{type}: {mimeType ?? "unknown type"}, {FormatSize(size)}]", mimeType, null, size, data);
+            }
+
             case "audio":
             {
                 var mimeType = ReadString(block, "mimeType");
