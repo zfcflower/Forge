@@ -406,6 +406,8 @@ public sealed class HousekeepingTests : IDisposable
 
         var outcome = await Runner(archive: Settings(scope: IdleArchiveScope.AllRootSessions)).RunAsync(Context(), CancellationToken.None).Within();
 
+        // Only the automation condition is dropped: the open session, the child of another session and the branch a weekly
+        // automation reuses stay, whatever the scope, and the automation-created session is archived like the user's.
         Assert.Equal(["user", "automation"], catalog.StatusChanges.Select(static c => c.Id));
         Assert.Equal(["user", "automation"], Assert.Single(archiveNotices));
         Assert.Equal(Summary(0, 0, 0, 2), outcome.Message);
@@ -444,28 +446,6 @@ public sealed class HousekeepingTests : IDisposable
         // Only LastActiveAt > cutoff is exempt, so equality is still inside the window: the configured cutoff is inclusive.
         Assert.Equal(["edge"], catalog.StatusChanges.Select(static c => c.Id));
         Assert.Equal(["edge"], Assert.Single(archiveNotices));
-        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
-    }
-
-    [Fact]
-    public async Task The_wide_scope_keeps_every_exemption_of_the_narrow_one()
-    {
-        definitions.Items.Add(new AutomationDefinition("weekly", "Weekly"));
-        await runs.SetStateAsync(CatalogAutomationSessions.ForkStatePrefix + "weekly", "fork", CancellationToken.None);
-        catalog.Sessions =
-        [
-            Session("user", "/w/user", TimeSpan.FromDays(30), automation: null),
-            Session("open", "/w/open", TimeSpan.FromDays(30), automation: null),
-            Session("child", "/w/child", TimeSpan.FromDays(30), automation: null, parent: "user"),
-            Session("fork", "/w/fork", TimeSpan.FromDays(30), automation: null),
-        ];
-        open.Add("open");
-
-        var outcome = await Runner(archive: Settings(scope: IdleArchiveScope.AllRootSessions)).RunAsync(Context(), CancellationToken.None).Within();
-
-        // The open session, the child of another session and the branch a weekly automation reuses stay, whatever the scope.
-        Assert.Equal(["user"], catalog.StatusChanges.Select(static c => c.Id));
-        Assert.Equal(["user"], Assert.Single(archiveNotices));
         Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
     }
 

@@ -42,7 +42,7 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
     /// Assembles the runtime the way the composition root does: the sub-agent dials come from settings and the tools store is
     /// wired (an empty switch list), because the session re-applies the stored switches whenever the sub-agent switch moves.
     /// </summary>
-    private SessionRuntimeRig NewRig(bool withSubAgents = true) => new(
+    private SessionRuntimeRig NewRig(bool withSubAgents = true, IReadOnlyList<string>? storedDisabled = null) => new(
         root,
         services =>
         {
@@ -51,7 +51,7 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
                 services.SubAgents = () => limits;
             }
 
-            services.DisabledTools = () => [];
+            services.DisabledTools = () => storedDisabled ?? [];
         });
 
     /// <summary>Holds every child request at the model until <see cref="ChildGates.Release"/> is called for its task.</summary>
@@ -79,6 +79,18 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
         Assert.True(await queued.WaitAsync(TimeSpan.FromSeconds(60)), "no child was queued behind the cap");
 
     private static string[] ToolNames(ChatRequest request) => [.. request.Tools.Select(static tool => tool.Name)];
+
+    /// <summary>
+    /// Asserts that what the model was offered and what the session publishes agree on <c>spawn_agent</c>: a tool list the
+    /// registry does not hold would be a prompt the request cannot honour.
+    /// </summary>
+    private static void AssertSpawnAgentOffered(SessionRuntimeRig rig, bool expected)
+    {
+        Assert.Equal(expected, ToolNames(rig.Provider.Requests[^1]).Contains(SpawnAgentTool.Name));
+        var published = rig.Runtime.PublishedTools;
+        Assert.NotNull(published);
+        Assert.Equal(expected, published.Definitions.Any(static definition => definition.Name == SpawnAgentTool.Name));
+    }
 
     private static string LastUserText(ChatRequest request)
     {
@@ -182,49 +194,56 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
 
         await rig.TurnAsync();
 
+        AssertSpawnAgentOffered(rig, expected: false);
+
+        // The steer, follow-up and stop tools a parent already needs stay, so a child started before the switch can still be
+        // steered and stopped while nothing new can be spawned.
         var offered = ToolNames(rig.Provider.Requests[^1]);
-        Assert.DoesNotContain(SpawnAgentTool.Name, offered);
         Assert.Contains(SubAgentSteerTool.Name, offered);
         Assert.Contains(SubAgentFollowUpTool.Name, offered);
         Assert.Contains(SubAgentStopTool.Name, offered);
-
-        // The registry the session publishes matches what the model was offered, so a child started before the switch can
-        // still be steered and stopped while nothing new can be spawned.
-        var published = rig.Runtime.PublishedTools;
-        Assert.NotNull(published);
-        Assert.DoesNotContain(SpawnAgentTool.Name, published.Definitions.Select(static definition => definition.Name));
     }
 
-    [Fact]
-    public async Task Switching_spawning_back_on_restores_spawn_agent_on_the_next_turn()
+    /// <summary>
+    /// Switching spawning back on restores <c>spawn_agent</c> on the next turn, with and without a tools store: a runtime
+    /// assembled without one has no stored switches to re-apply, so the sub-agent switch alone has to set the disabled set in
+    /// both directions (restoring it was a defect this pins).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Switching_spawning_back_on_restores_spawn_agent_on_the_next_turn(bool withToolsStore)
     {
         limits = new SubAgentLimits(2, Enabled: false);
-        await using var rig = NewRig();
+        await using var rig = withToolsStore
+            ? NewRig()
+            : new SessionRuntimeRig(root, services => services.SubAgents = () => limits);
         await rig.TurnAsync();
-        Assert.DoesNotContain(SpawnAgentTool.Name, ToolNames(rig.Provider.Requests[^1]));
+        AssertSpawnAgentOffered(rig, expected: false);
 
         limits = new SubAgentLimits(2, Enabled: true);
 
         await rig.TurnAsync();
-        Assert.Contains(SpawnAgentTool.Name, ToolNames(rig.Provider.Requests[^1]));
-        Assert.Contains(SpawnAgentTool.Name, rig.Runtime.PublishedTools!.Definitions.Select(static definition => definition.Name));
+        AssertSpawnAgentOffered(rig, expected: true);
     }
 
     [Fact]
-    public async Task Switching_spawning_back_on_restores_spawn_agent_without_a_tools_store()
+    public async Task Switching_spawning_off_keeps_the_users_own_switches_and_the_required_control_tools()
     {
-        // A runtime assembled without the tools store (a unit test shape) has no stored switches to re-apply, so the
-        // sub-agent switch alone has to set the disabled set in both directions; restoring it was the defect this pins.
         limits = new SubAgentLimits(2, Enabled: false);
-        await using var rig = new SessionRuntimeRig(root, services => services.SubAgents = () => limits);
-        await rig.TurnAsync();
-        Assert.DoesNotContain(SpawnAgentTool.Name, ToolNames(rig.Provider.Requests[^1]));
 
-        limits = new SubAgentLimits(2, Enabled: true);
+        // A stored switch for the steer tool is the interesting half: it must be ignored (a parent still needs it), while the
+        // switch for an ordinary tool keeps working, so disabling spawning cannot silently reset the user's tool list.
+        await using var rig = NewRig(storedDisabled: [SubAgentSteerTool.Name, SearchHistoryTool.Name]);
 
         await rig.TurnAsync();
-        Assert.Contains(SpawnAgentTool.Name, ToolNames(rig.Provider.Requests[^1]));
-        Assert.Contains(SpawnAgentTool.Name, rig.Runtime.PublishedTools!.Definitions.Select(static definition => definition.Name));
+
+        var offered = ToolNames(rig.Provider.Requests[^1]);
+        Assert.DoesNotContain(SpawnAgentTool.Name, offered);
+        Assert.DoesNotContain(SearchHistoryTool.Name, offered);
+        Assert.Contains(SubAgentSteerTool.Name, offered);
+        Assert.Contains(SubAgentFollowUpTool.Name, offered);
+        Assert.Contains(SubAgentStopTool.Name, offered);
     }
 
     [Fact]
@@ -266,10 +285,16 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task An_unchanged_switch_publishes_no_new_tool_set()
+    /// <summary>
+    /// Re-applying an unchanged switch republishes nothing, whichever way the switch is set: every turn of a session would
+    /// otherwise break its own prompt cache.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_unchanged_switch_publishes_no_new_tool_set(bool enabled)
     {
-        limits = new SubAgentLimits(2, Enabled: true);
+        limits = new SubAgentLimits(2, enabled);
         await using var rig = NewRig();
         await rig.TurnAsync();
         var published = rig.Runtime.PublishedTools;
@@ -283,22 +308,6 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
         var requests = rig.Provider.Requests;
         Assert.Equal(2, requests.Count);
         Assert.Equal(ToolNames(requests[0]), ToolNames(requests[1]));
-    }
-
-    [Fact]
-    public async Task A_steady_off_switch_publishes_no_new_tool_set_on_a_later_turn()
-    {
-        limits = new SubAgentLimits(2, Enabled: false);
-        await using var rig = NewRig();
-        await rig.TurnAsync();
-        var published = rig.Runtime.PublishedTools;
-        Assert.NotNull(published);
-
-        await rig.TurnAsync();
-
-        // Re-applying the same switch must not republish the tool set either, or every turn of a session with spawning off
-        // would break its prompt cache.
-        Assert.Same(published, rig.Runtime.PublishedTools);
     }
 
     /// <summary>

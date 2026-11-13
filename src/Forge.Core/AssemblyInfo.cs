@@ -1,8 +1,7 @@
 using System.Runtime.CompilerServices;
 
-// Debug-only, like Forge.Scripting, Forge.Approval and Forge.HostClient: the agent slot pool is internal (it has no
-// public host surface yet), so the concurrency contract of its dynamic limit is pinned by direct unit tests rather
-// than through AgentHost. A Release build exposes nothing.
-#if DEBUG
+// Unconditional, unlike Forge.Approval and Forge.Scripting: the agent slot pool tests are compiled in every configuration
+// (they pin the pool's locking and permit accounting, so they must run in Release too), and a Release build therefore has
+// to expose the internal pool to them or the solution does not compile. The grant names a test assembly that is never
+// shipped.
 [assembly: InternalsVisibleTo("Forge.Core.Tests")]
-#endif

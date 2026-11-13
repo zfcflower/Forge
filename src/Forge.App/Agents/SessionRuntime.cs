@@ -97,7 +97,8 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>
     /// Names of the tools the user switched off in the Tools settings section; read before every turn and handed to
-    /// <see cref="AgentHost.SetDisabledTools"/> (a no-op when unchanged). Null = every tool on (a unit test).
+    /// <see cref="AgentHost.SetDisabledTools"/> (a no-op when unchanged). Null = no stored switch (a unit test), in which case
+    /// only <see cref="SubAgents"/>' switch can disable anything.
     /// </summary>
     public Func<IReadOnlyList<string>>? DisabledTools { get; set; }
 

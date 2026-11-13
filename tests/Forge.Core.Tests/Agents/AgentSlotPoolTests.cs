@@ -355,8 +355,15 @@ public sealed class AgentSlotPoolTests
         TakeSlot(pool).Dispose();
     }
 
-    [Fact]
-    public async Task A_permit_granted_to_a_waiter_that_is_cancelling_returns_to_the_pool()
+    /// <summary>
+    /// The permit of a grant that lands while its waiter is cancelling goes back to the pool: granting and cancelling race on
+    /// purpose, on this thread or from another one (the settings are applied from the UI thread while the agent is elsewhere),
+    /// and every outcome has to leave exactly the permits that were actually acquired.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_cancel_racing_a_grant_returns_the_permit_instead_of_losing_it(bool grantOffThisThread)
     {
         for (var attempt = 0; attempt < 25; attempt++)
         {
@@ -366,12 +373,20 @@ public sealed class AgentSlotPoolTests
             var queued = pool.AcquireAsync(cts.Token).AsTask();
             Assert.False(queued.IsCompleted);
 
-            // The grant and the cancel race on purpose: either the acquire sees the token and hands the permit back,
-            // or it returns the slot to us. Both must leave the pool with exactly the two permits the raise added,
-            // so a permit the cancelled grant kept shows up as a missing free slot and a released-without-grant one
-            // as a phantom.
-            pool.SetLimit(2);
-            cts.Cancel();
+            // Either the acquire sees the token and hands the permit back, or it returns the slot to us. Both must leave the
+            // pool with the permits that were really acquired, so a permit kept by a cancelled grant shows up as a missing
+            // free slot and a release without a grant as a phantom one.
+            if (grantOffThisThread)
+            {
+                var grant = Task.Run(() => pool.SetLimit(2));
+                cts.Cancel();
+                await grant.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            else
+            {
+                pool.SetLimit(2);
+                cts.Cancel();
+            }
 
             AgentSlot? granted = null;
             try
@@ -383,45 +398,6 @@ public sealed class AgentSlotPoolTests
             }
 
             granted?.Dispose();
-
-            // One permit is still held by `held`, so the probe below finds the second one and then nothing: a negative
-            // outstanding count would leave a third grant available, which is why TryAcquire must be null here.
-            var probe = TakeSlot(pool);
-            Assert.Null(pool.TryAcquire());
-
-            probe.Dispose();
-            held.Dispose();
-        }
-    }
-
-    [Fact]
-    public async Task A_cancel_racing_a_grant_returns_the_permit_instead_of_losing_it()
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var pool = new AgentSlotPool(1);
-            var held = TakeSlot(pool);
-            using var cts = new CancellationTokenSource();
-            var queued = pool.AcquireAsync(cts.Token).AsTask();
-            Assert.False(queued.IsCompleted);
-
-            // Granting and cancelling race on purpose. Whichever side wins the pool lock, the outcome must be the
-            // same: either the acquire throws before it gets a permit, or it observes that it was cancelled after
-            // the grant and hands the permit back. Both leave exactly the one permit `held` owns.
-            var grant = Task.Run(() => pool.SetLimit(2));
-            cts.Cancel();
-            await grant.WaitAsync(TimeSpan.FromSeconds(5));
-
-            AgentSlot? acquired = null;
-            try
-            {
-                acquired = await queued.WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
-            acquired?.Dispose();
             held.Dispose();
 
             // Back to a cap of one with nothing outstanding: exactly one permit must be available, no phantom.

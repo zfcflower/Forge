@@ -74,7 +74,7 @@ public sealed class AgentLoop(AgentLoopServices services)
     private readonly SemaphoreSlim approvalGate = new(1, 1);
     private readonly AgentSlotPool slots = new(services.Options.MaxParallelSubAgents);
     private CompactionPolicy compactionPolicy = services.Options.Compaction;
-    private int maxParallelSubAgents = services.Options.MaxParallelSubAgents;
+    private int maxParallelSubAgents = Math.Max(SubAgentLimitsHardFloor, services.Options.MaxParallelSubAgents);
 
     /// <summary>
     /// Replaces the cap on how many agents of this tree may run at once (the <c>agents</c> settings section). Raising it lets
