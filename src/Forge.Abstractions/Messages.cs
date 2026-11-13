@@ -11,49 +11,36 @@ public sealed record ThinkingBlock(string Text, string? Signature = null) : Cont
 
 public sealed record ToolCallBlock(string Id, string Name, string ArgumentsJson) : ContentBlock;
 
-public sealed record ToolResultBlock : ContentBlock
+/// <summary>The answer to one <see cref="ToolCallBlock"/>: text and images in order, like <see cref="ToolResult"/>.</summary>
+public sealed record ToolResultBlock(string CallId, IReadOnlyList<ContentBlock> Blocks, bool IsError = false) : ContentBlock
 {
-    /// <summary>A text-only tool result; the shape every existing call site builds.</summary>
     public ToolResultBlock(string CallId, string Content, bool IsError = false)
         : this(CallId, [new TextBlock(Content)], IsError)
     {
     }
 
-    public ToolResultBlock(string CallId, IReadOnlyList<ContentBlock> Blocks, bool IsError = false)
+    private readonly IReadOnlyList<ContentBlock> blocks = ToolResultBlocks.Validate(Blocks);
+
+    /// <summary>Text and image blocks only; a <c>with</c> expression is validated too.</summary>
+    public IReadOnlyList<ContentBlock> Blocks
     {
-        ArgumentNullException.ThrowIfNull(Blocks);
-        this.CallId = CallId;
-        this.Blocks = Blocks.Count == 0 ? [] : [.. Blocks];
-        Text = ToolPayload.Text(this.Blocks);
-        Content = ToolPayload.HasNonText(this.Blocks) ? ToolPayload.WithPlaceholders(this.Blocks) : Text;
-        Images = ToolPayload.Images(this.Blocks);
-        this.IsError = IsError;
+        get => blocks;
+        init => blocks = ToolResultBlocks.Validate(value);
     }
 
-    public string CallId { get; }
+    /// <summary>The flattened text of <see cref="Blocks"/>; see <see cref="ToolResultBlocks.Flatten"/>.</summary>
+    public string Content => ToolResultBlocks.Flatten(Blocks);
 
-    /// <summary>The blocks the tool returned: text, images, or both (see <see cref="ToolResult"/>).</summary>
-    public IReadOnlyList<ContentBlock> Blocks { get; }
+    /// <summary>The tool's own words, without a placeholder for its images; see <see cref="ToolResultBlocks.TextOnly"/>.</summary>
+    public string Text => ToolResultBlocks.TextOnly(Blocks);
 
-    /// <summary>The tool's own text, without the stand-ins for blocks that carry no text.</summary>
-    public string Text { get; }
+    /// <summary>Whether the result carries a picture, without building a list of them.</summary>
+    public bool HasImages => ToolResultBlocks.HasImage(Blocks);
 
-    /// <summary>
-    /// The text view of <see cref="Blocks"/>, placeholders included; what a transcript, the search index and a provider that
-    /// does not send the images itself sees.
-    /// </summary>
-    public string Content { get; }
-
-    /// <summary>The images this result carried; a provider that cannot carry them, and every text reader, sees <see cref="Content"/> instead.</summary>
-    public IReadOnlyList<ImageBlock> Images { get; }
-
-    public bool IsError { get; }
-
-    /// <summary>Value equality over the blocks themselves, in order (the list is an array, which compares by reference).</summary>
     public bool Equals(ToolResultBlock? other) =>
-        other is not null && CallId == other.CallId && IsError == other.IsError && ToolPayload.Same(Blocks, other.Blocks);
+        other is not null && CallId == other.CallId && IsError == other.IsError && ToolResultBlocks.SequenceEqual(Blocks, other.Blocks);
 
-    public override int GetHashCode() => HashCode.Combine(CallId, IsError, Blocks.Count);
+    public override int GetHashCode() => HashCode.Combine(CallId, IsError, ToolResultBlocks.Hash(Blocks));
 }
 
 /// <summary>

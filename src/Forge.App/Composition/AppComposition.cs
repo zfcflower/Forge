@@ -305,7 +305,7 @@ internal sealed class AppComposition : IAsyncDisposable
         // when a document or a tool row is built, so a change in the settings page applies to the next one. Bound before
         // the first window opens; a host without preferences keeps the built-in defaults.
         FilePreviewSettings.Current = new FilePreviewSettings(preferences.Current);
-        ToolImageSettings.ThumbnailEdge = () => preferences.Current.ToolImageThumbnailEdge;
+        ToolImageSettings.ThumbnailEdge = () => preferences.Current.ChatToolImageThumbnailPixels;
 
         var settings = new SettingsSections();
         var appearance = AppearanceFeature.Create(preferences.Current, settings);
@@ -581,7 +581,7 @@ internal sealed class AppComposition : IAsyncDisposable
         // "may take images", the same rule the composer applies to a user attachment.
         runtimeServices.ModelInputs = model =>
             providers.Catalog.MetadataFor(model.Model, model.ProviderId).Capabilities?.Inputs;
-        runtimeServices.SendToolImages = () => preferences.Current.SendToolImagesToModel;
+        runtimeServices.SendToolImages = () => preferences.Current.ChatToolImagesToModel;
         // Read before every turn and re-applied to every live session on each save, so a change reaches a running turn at
         // its next model request.
         runtimeServices.CompactionChanges = compactionSettings;

@@ -4,7 +4,7 @@ using Xunit;
 namespace Forge.App.Tests.Foundation;
 
 /// <summary>
-/// The two preference groups W4 added (chat and files) through the persistence mapping: every value set on
+/// The two preference groups W0 registered for W4 (chat and files) through the persistence mapping: every value set on
 /// <see cref="AppPreferences"/> must reach <c>settings.json</c> via <c>ToSection</c> and come back through
 /// <c>ApplyLoaded</c>, and an out-of-range value written by hand must land on the documented bound rather than survive.
 /// A property missing from either side of that mapping is silent data loss, which is what this pins.
@@ -21,12 +21,12 @@ public sealed class ToolAndFilePreferencesTests
     [Fact]
     public void The_chat_group_survives_a_round_trip()
     {
-        var source = new AppPreferences { ToolImageThumbnailEdge = 320, SendToolImagesToModel = false };
+        var source = new AppPreferences { ChatToolImageThumbnailPixels = 320, ChatToolImagesToModel = false };
 
         var reloaded = Reloaded(source);
 
-        Assert.Equal(320, reloaded.ToolImageThumbnailEdge);
-        Assert.False(reloaded.SendToolImagesToModel);
+        Assert.Equal(320, reloaded.ChatToolImageThumbnailPixels);
+        Assert.False(reloaded.ChatToolImagesToModel);
     }
 
     [Fact]
@@ -34,16 +34,16 @@ public sealed class ToolAndFilePreferencesTests
     {
         var source = new AppPreferences
         {
-            FilePreviewRows = 250,
-            NotebookOutputChars = 4_096,
-            PreviewImageBytes = 32 * 1024 * 1024,
+            FilesCsvMaxRows = 250,
+            FilesNotebookOutputKilobytes = 4,
+            FilesImagePreviewMaxMegabytes = 32,
         };
 
         var reloaded = Reloaded(source);
 
-        Assert.Equal(250, reloaded.FilePreviewRows);
-        Assert.Equal(4_096, reloaded.NotebookOutputChars);
-        Assert.Equal(32 * 1024 * 1024, reloaded.PreviewImageBytes);
+        Assert.Equal(250, reloaded.FilesCsvMaxRows);
+        Assert.Equal(4, reloaded.FilesNotebookOutputKilobytes);
+        Assert.Equal(32, reloaded.FilesImagePreviewMaxMegabytes);
     }
 
     [Fact]
@@ -51,11 +51,11 @@ public sealed class ToolAndFilePreferencesTests
     {
         var reloaded = Reloaded(new AppPreferences());
 
-        Assert.Equal(AppPreferences.DefaultToolImageThumbnailEdge, reloaded.ToolImageThumbnailEdge);
-        Assert.Equal(AppPreferences.DefaultSendToolImagesToModel, reloaded.SendToolImagesToModel);
-        Assert.Equal(AppPreferences.DefaultFilePreviewRows, reloaded.FilePreviewRows);
-        Assert.Equal(AppPreferences.DefaultNotebookOutputChars, reloaded.NotebookOutputChars);
-        Assert.Equal(AppPreferences.DefaultPreviewImageBytes, reloaded.PreviewImageBytes);
+        Assert.Equal(AppPreferences.DefaultChatToolImageThumbnailPixels, reloaded.ChatToolImageThumbnailPixels);
+        Assert.Equal(AppPreferences.DefaultChatToolImagesToModel, reloaded.ChatToolImagesToModel);
+        Assert.Equal(AppPreferences.DefaultFilesCsvMaxRows, reloaded.FilesCsvMaxRows);
+        Assert.Equal(AppPreferences.DefaultFilesNotebookOutputKilobytes, reloaded.FilesNotebookOutputKilobytes);
+        Assert.Equal(AppPreferences.DefaultFilesImagePreviewMaxMegabytes, reloaded.FilesImagePreviewMaxMegabytes);
     }
 
     [Fact]
@@ -63,29 +63,29 @@ public sealed class ToolAndFilePreferencesTests
     {
         var section = new PreferencesSection
         {
-            ToolImageThumbnailEdge = 10_000,
-            FilePreviewRows = 1,
-            NotebookOutputChars = 10,
-            PreviewImageBytes = 1,
+            ChatToolImageThumbnailPixels = 100_000,
+            FilesCsvMaxRows = 1,
+            FilesNotebookOutputKilobytes = 0,
+            FilesImagePreviewMaxMegabytes = 100_000,
         };
 
         var reloaded = new AppPreferences();
         reloaded.ApplyLoaded(section, UiLanguage.English);
 
-        Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, reloaded.ToolImageThumbnailEdge);
-        Assert.Equal(AppPreferences.MinFilePreviewRows, reloaded.FilePreviewRows);
-        Assert.Equal(AppPreferences.MinNotebookOutputChars, reloaded.NotebookOutputChars);
-        Assert.Equal(AppPreferences.MinPreviewImageBytes, reloaded.PreviewImageBytes);
+        Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, reloaded.ChatToolImageThumbnailPixels);
+        Assert.Equal(AppPreferences.MinFilesCsvMaxRows, reloaded.FilesCsvMaxRows);
+        Assert.Equal(AppPreferences.MinFilesNotebookOutputKilobytes, reloaded.FilesNotebookOutputKilobytes);
+        Assert.Equal(AppPreferences.MaxFilesImagePreviewMaxMegabytes, reloaded.FilesImagePreviewMaxMegabytes);
     }
 
     [Fact]
-    public void The_defaults_are_the_documented_ones()
+    public void The_defaults_are_the_registry_ones()
     {
         // The plan's registry: 256 px, sending on, 1000 rows, 20 KB of notebook output, 20 MB image limit.
-        Assert.Equal(256, AppPreferences.DefaultToolImageThumbnailEdge);
-        Assert.True(AppPreferences.DefaultSendToolImagesToModel);
-        Assert.Equal(1_000, AppPreferences.DefaultFilePreviewRows);
-        Assert.Equal(20_480, AppPreferences.DefaultNotebookOutputChars);
-        Assert.Equal(20 * 1024 * 1024, AppPreferences.DefaultPreviewImageBytes);
+        Assert.Equal(256, AppPreferences.DefaultChatToolImageThumbnailPixels);
+        Assert.True(AppPreferences.DefaultChatToolImagesToModel);
+        Assert.Equal(1_000, AppPreferences.DefaultFilesCsvMaxRows);
+        Assert.Equal(20, AppPreferences.DefaultFilesNotebookOutputKilobytes);
+        Assert.Equal(20, AppPreferences.DefaultFilesImagePreviewMaxMegabytes);
     }
 }

@@ -28,7 +28,7 @@
                      Maximum="200000"
                      Increment="1000"
                      FormatString="0"
-                     Value="{Binding NotebookOutputChars, Mode=TwoWay}"
+                     Value="{Binding NotebookOutputKilobytes, Mode=TwoWay}"
                      AutomationProperties.AutomationId="files-notebook-output"
                      AutomationProperties.Name="{Binding NotebookOutputCharsLabel}" />
     </Grid>

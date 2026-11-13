@@ -242,19 +242,24 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
             writer.WriteStartObject();
             writer.WriteString("type", "function_call_output");
             writer.WriteString("call_id", result.CallId);
-            if (includeToolImages && result.Images.Count > 0)
+            if (includeToolImages && result.HasImages)
             {
                 writer.WriteStartArray("output");
-                if (result.Text.Length > 0)
+                if (result.Text is { Length: > 0 } text)
                 {
                     writer.WriteStartObject();
                     writer.WriteString("type", "input_text");
-                    writer.WriteString("text", result.Text);
+                    writer.WriteString("text", text);
                     writer.WriteEndObject();
                 }
 
-                foreach (var image in result.Images)
+                foreach (var block in result.Blocks)
                 {
+                    if (block is not ImageBlock image)
+                    {
+                        continue;
+                    }
+
                     writer.WriteStartObject();
                     writer.WriteString("type", "input_image");
                     writer.WriteString("image_url", ProviderJson.DataUrl(image));

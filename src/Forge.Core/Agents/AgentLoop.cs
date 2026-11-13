@@ -359,7 +359,7 @@ public sealed class AgentLoop(AgentLoopServices services)
 
     /// <summary>
     /// Whether this turn's tool results may carry their images to the model: the user's switch, and a model whose catalogue
-    /// entry is known not to take image input. Both are read here, once per request, so a change applies from the next turn.
+    /// entry is known not to take image input. Both are asked here, once per request, so a change applies from the next turn.
     /// </summary>
     private bool SendsToolImages(ModelSettings model)
     {
@@ -894,10 +894,11 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         sink.Emit(new AgentToolStarted(instance.Id, call));
+        var callContext = context with { Progress = tail => sink.Emit(new AgentToolProgress(instance.Id, call, tail)) };
         ToolResult result;
         try
         {
-            result = await tool.InvokeAsync(call, context, ct).ConfigureAwait(false);
+            result = await tool.InvokeAsync(call, callContext, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -940,7 +941,7 @@ public sealed class AgentLoop(AgentLoopServices services)
     private async Task<ToolResult> SpillAsync(AgentInstance instance, ITool tool, ToolResult result, CancellationToken ct)
     {
         var threshold = services.Options.ArtifactThresholdChars;
-        if (services.Artifacts is not { } artifacts || result.IsError || threshold <= 0 || result.Content.Length <= threshold)
+        if (services.Artifacts is not { } artifacts || result.IsError || threshold <= 0)
         {
             return result;
         }
@@ -950,26 +951,26 @@ public sealed class AgentLoop(AgentLoopServices services)
             return result;
         }
 
-        var bytes = Encoding.UTF8.GetBytes(result.Content);
+        // Only the text is stored: an image is already bounded by whoever produced it, and it stays a block of the result (the provider adapters decide how the model receives it).
+        var text = result.Blocks is [TextBlock only] ? only.Text : string.Join('\n', result.Blocks.OfType<TextBlock>().Select(static block => block.Text));
+        if (text.Length <= threshold)
+        {
+            return result;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(text);
         var info = await artifacts
             .PutAsync(instance.SessionId, string.Concat(tool.Definition.Name, "-", instance.Id), bytes, ct)
             .ConfigureAwait(false);
-        var preview = Math.Clamp(services.Options.ArtifactPreviewChars, 0, result.Content.Length);
+        var preview = Math.Clamp(services.Options.ArtifactPreviewChars, 0, text.Length);
         var builder = new StringBuilder(preview + 256);
-        builder.Append(result.Content, 0, preview);
+        builder.Append(text, 0, preview);
         builder.Append("\n\n[output truncated: ").Append(bytes.Length).Append(" bytes stored as artifact '").Append(info.Id)
             .Append("'. Read it with the read_artifact tool: artifact_id \"").Append(info.Id)
             .Append("\", offset, length.]");
-
-        // Only the text moves into the artifact; a picture the tool produced stays with its result either way.
-        if (result.Images.Count == 0)
-        {
-            return new ToolResult(builder.ToString(), result.IsError);
-        }
-
-        var blocks = new List<ContentBlock>(result.Images.Count + 1) { new TextBlock(builder.ToString()) };
-        blocks.AddRange(result.Images);
-        return new ToolResult(blocks, result.IsError);
+        var spilled = new List<ContentBlock> { new TextBlock(builder.ToString()) };
+        spilled.AddRange(result.Blocks.OfType<ImageBlock>());
+        return new ToolResult(spilled, result.IsError);
     }
 
     private async Task PersistAsync(AgentInstance instance, ChatMessage message, TokenUsage? usage, CancellationToken ct)

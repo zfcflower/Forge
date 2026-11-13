@@ -1,7 +1,6 @@
 using Avalonia.Media.Imaging;
 using Forge.Abstractions;
 using Forge.App.ViewModels;
-using Forge.Core.Storage;
 using Xunit;
 
 namespace Forge.App.Tests.ViewModels;
@@ -27,12 +26,12 @@ public sealed class TranscriptToolImagesTests
         Assert.IsType<ToolImageViewModel>(image);
         Assert.Equal("image/png", image.Block.MediaType);
         Assert.Equal(ScreenshotData, image.Block.Data);
-        Assert.Equal(MessageJson.DecodedLength(ScreenshotData), image.EncodedBytes);
+        Assert.Equal(ContentPlaceholders.DecodedLength(ScreenshotData), image.EncodedBytes);
         Assert.Equal("PNG · 1 KB", image.Caption);
 
         Assert.True(row.HasImages);
         Assert.True(row.HasResult);
-        Assert.Equal("saved to shots/1.png\n[image: image/png]", row.Result);
+        Assert.Equal("saved to shots/1.png\n[image: image/png, 1 KB]", row.Result);
     }
 
     [Fact]

@@ -116,12 +116,6 @@ internal static class SettingsSectionIds
 
     public const string Mcp = "mcp";
 
-    /// <summary>How a chat reads: tool-result thumbnails and whether they reach the model.</summary>
-    public const string Chat = "chat";
-
-    /// <summary>How the file viewer reads a document: table rows, notebook output, image preview limits.</summary>
-    public const string Files = "files";
-
     public const string Tools = "tools";
 
     /// <summary>The automations page: built-ins, user definitions and their run history (the title-bar entry opens it).</summary>
@@ -130,18 +124,45 @@ internal static class SettingsSectionIds
     /// <summary>Prompt templates: commands, agents and the built-in prompt slots, with the user's overrides.</summary>
     public const string Prompts = "prompts";
 
+    // The sections of the thinkrail-gap waves. The ids and orders are allocated here once so no wave edits this file; the
+    // wave that owns a section registers it (its Composition module) and picks the group.
+
+    /// <summary>Which models the picker lists (wave W1).</summary>
+    public const string ModelsVisibility = "models-visibility";
+
+    /// <summary>Sub-agent limits (wave W1).</summary>
+    public const string Agents = "agents";
+
+    /// <summary>Idle-workspace archiving (wave W1).</summary>
+    public const string IdleArchive = "idle-archive";
+
+    /// <summary>Notification permission guidance (wave W1).</summary>
+    public const string NotificationPermission = "notification-permission";
+
+    /// <summary>Palette sources and limits (wave W3).</summary>
+    public const string Palette = "palette";
+
+    /// <summary>Chat display: tool images, Markdown, diagrams (waves W4, W4b, W11).</summary>
+    public const string Chat = "chat";
+
+    /// <summary>File viewers: CSV, notebooks, images (wave W4).</summary>
+    public const string Files = "files";
+
+    /// <summary>The resource inspector (wave W8).</summary>
+    public const string Inspector = "inspector";
+
+    /// <summary>Cloning and creating projects (wave W9).</summary>
+    public const string Projects = "projects";
+
+    /// <summary>Update checks and channel (wave W10).</summary>
+    public const string Updates = "updates";
+
     public const int ProviderOrder = 100;
     public const int AppearanceOrder = 200;
     public const int LanguageOrder = 300;
 
     /// <summary>The editor sits between the language choice and the terminal: it is a display choice like appearance, not a tool.</summary>
     public const int EditorOrder = 350;
-    /// <summary>The chat section sits right after appearance: both are about what the workbench shows.</summary>
-    public const int ChatOrder = 250;
-
-    /// <summary>The file viewer's limits sit right after the editor section, which is the other way a file is read.</summary>
-    public const int FilesOrder = 380;
-
     public const int TerminalOrder = 400;
     public const int GitOrder = 500;
 
@@ -165,4 +186,15 @@ internal static class SettingsSectionIds
 
     /// <summary>After the providers (100), before the automations (150).</summary>
     public const int PromptsOrder = 130;
+
+    public const int ModelsVisibilityOrder = 110;
+    public const int AgentsOrder = 120;
+    public const int ChatOrder = 320;
+    public const int FilesOrder = 360;
+    public const int PaletteOrder = 380;
+    public const int ProjectsOrder = 510;
+    public const int NotificationPermissionOrder = 560;
+    public const int IdleArchiveOrder = 570;
+    public const int InspectorOrder = 740;
+    public const int UpdatesOrder = 800;
 }

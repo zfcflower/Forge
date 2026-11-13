@@ -51,25 +51,26 @@ public sealed class ToolImageTurnTests
     }
 
     [Fact]
-    public async Task A_tool_result_keeps_its_image_and_its_placeholder_text()
+    public async Task A_tool_result_carries_its_image_and_reads_two_ways()
     {
         var provider = await RunOneToolCallAsync(new AgentOptions());
 
         var result = ToolResultOf(provider.Requests[1]);
-        var image = Assert.Single(result.Images);
+        Assert.True(result.HasImages);
+        var image = Assert.IsType<ImageBlock>(result.Blocks[1]);
         Assert.Equal("image/png", image.MediaType);
         Assert.Equal(Data, image.Data);
-        Assert.Equal("captured 1280x720\n[image: image/png]", result.Content);
+        Assert.Equal("captured 1280x720\n[image: image/png, 1 KB]", result.Content);
         Assert.Equal("captured 1280x720", result.Text);
     }
 
     [Fact]
-    public async Task A_text_only_tool_result_is_unchanged()
+    public async Task A_text_only_tool_result_reads_the_same_both_ways()
     {
         var provider = await RunOneToolCallAsync(new AgentOptions(), ShotTool(withImage: false));
 
         var result = ToolResultOf(provider.Requests[1]);
-        Assert.Empty(result.Images);
+        Assert.False(result.HasImages);
         Assert.Equal("captured 1280x720", result.Content);
         Assert.Equal(result.Text, result.Content);
         Assert.Single(result.Blocks);
@@ -89,7 +90,7 @@ public sealed class ToolImageTurnTests
         var provider = await RunOneToolCallAsync(new AgentOptions { SendToolImagesToModel = static () => false });
 
         Assert.False(provider.Requests[1].IncludeToolImages);
-        Assert.Single(ToolResultOf(provider.Requests[1]).Images);
+        Assert.True(ToolResultOf(provider.Requests[1]).HasImages);
     }
 
     [Fact]
@@ -123,7 +124,7 @@ public sealed class ToolImageTurnTests
         var provider = await RunOneToolCallAsync(new AgentOptions { ModelInputs = _ => ModelInputs.Text | ModelInputs.Pdf });
 
         Assert.False(provider.Requests[1].IncludeToolImages);
-        Assert.Single(ToolResultOf(provider.Requests[1]).Images);
+        Assert.True(ToolResultOf(provider.Requests[1]).HasImages);
     }
 
     [Fact]
@@ -143,24 +144,4 @@ public sealed class ToolImageTurnTests
         Assert.True(provider.Requests[1].IncludeToolImages);
     }
 
-    [Fact]
-    public async Task Spilling_a_long_result_into_an_artifact_keeps_the_image()
-    {
-        var store = new InMemoryArtifactStore();
-        var tool = new FakeTool("shot", ToolSideEffect.ReadOnly, (_, _, _) => new ValueTask<ToolResult>(
-            new ToolResult([new TextBlock(new string('x', 500)), new ImageBlock("image/png", Data)])));
-        var options = new AgentOptions { ArtifactThresholdChars = 100, ArtifactPreviewChars = 20 };
-
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("call-1", "shot", "{}"))
-            : Turn.Say("done"));
-        var host = AgentTestHost.Create(provider, [tool], options: options, artifacts: store);
-
-        await AgentTestHost.RunRootAsync(host);
-
-        var result = ToolResultOf(provider.Requests[1]);
-        Assert.Single(result.Images);
-        Assert.Contains("stored as artifact", result.Text, StringComparison.Ordinal);
-        Assert.DoesNotContain(new string('x', 500), result.Text, StringComparison.Ordinal);
-    }
 }

@@ -313,4 +313,4 @@ internal sealed class PendingImageViewModel : ImageThumbnailViewModel
 
 /// <summary>One image of a sent user message in the transcript.</summary>
 internal sealed class TranscriptImageViewModel(ImageBlock block)
-    : ImageThumbnailViewModel(block, Forge.Core.Storage.MessageJson.DecodedLength(block.Data), thumbnail: null);
+    : ImageThumbnailViewModel(block, ContentPlaceholders.DecodedLength(block.Data), thumbnail: null);

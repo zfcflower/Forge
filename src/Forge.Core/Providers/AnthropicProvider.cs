@@ -542,23 +542,28 @@ public sealed class AnthropicProvider : HttpChatProvider
     /// </summary>
     private static void WriteToolResultContent(Utf8JsonWriter writer, ToolResultBlock result, bool includeToolImages)
     {
-        if (!includeToolImages || result.Images.Count == 0)
+        if (!includeToolImages || !result.HasImages)
         {
             writer.WriteString("content", result.Content);
             return;
         }
 
         writer.WriteStartArray("content");
-        if (result.Text.Length > 0)
+        if (result.Text is { Length: > 0 } text)
         {
             writer.WriteStartObject();
             writer.WriteString("type", "text");
-            writer.WriteString("text", result.Text);
+            writer.WriteString("text", text);
             writer.WriteEndObject();
         }
 
-        foreach (var image in result.Images)
+        foreach (var block in result.Blocks)
         {
+            if (block is not ImageBlock image)
+            {
+                continue;
+            }
+
             writer.WriteStartObject();
             WriteImageProperties(writer, image);
             writer.WriteEndObject();

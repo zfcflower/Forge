@@ -42,34 +42,32 @@ internal sealed class FilesSettingsSectionViewModel : ObservableObject, IDisposa
     /// <summary>Rows a CSV/TSV preview parses before it stops.</summary>
     public int PreviewRows
     {
-        get => preferences.FilePreviewRows;
+        get => preferences.FilesCsvMaxRows;
         set
         {
-            preferences.FilePreviewRows = value;
+            preferences.FilesCsvMaxRows = value;
             OnPropertyChanged();
         }
     }
 
     /// <summary>Characters kept from one <c>.ipynb</c> output.</summary>
-    public int NotebookOutputChars
+    public int NotebookOutputKilobytes
     {
-        get => preferences.NotebookOutputChars;
+        get => preferences.FilesNotebookOutputKilobytes;
         set
         {
-            preferences.NotebookOutputChars = value;
+            preferences.FilesNotebookOutputKilobytes = value;
             OnPropertyChanged();
         }
     }
 
-    /// <summary>The image preview limit in MiB; the byte preference is divided and multiplied on the way through.</summary>
+    /// <summary>The image preview limit in MiB; the preference itself is stored in megabytes, so no conversion is needed.</summary>
     public int ImageLimitMiB
     {
-        get => preferences.PreviewImageBytes / FilePreviewSettings.BytesPerMiB;
+        get => preferences.FilesImagePreviewMaxMegabytes;
         set
         {
-            // Multiply in 64-bit: a nonsense edit must clamp in the preference setter, not overflow first.
-            var bytes = (long)value * FilePreviewSettings.BytesPerMiB;
-            preferences.PreviewImageBytes = bytes > int.MaxValue ? int.MaxValue : (int)bytes;
+            preferences.FilesImagePreviewMaxMegabytes = value;
             OnPropertyChanged();
         }
     }

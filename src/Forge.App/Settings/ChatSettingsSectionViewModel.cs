@@ -16,8 +16,8 @@ namespace Forge.App.Settings;
 internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposable
 {
     /// <summary>Bounds of the thumbnail-edge control, mirrored from the preference's clamp so both stay one number.</summary>
-    public const int MinThumbnailEdge = AppPreferences.MinToolImageThumbnailEdge;
-    public const int MaxThumbnailEdge = AppPreferences.MaxToolImageThumbnailEdge;
+    public const int MinThumbnailEdge = AppPreferences.MinChatToolImageThumbnailPixels;
+    public const int MaxThumbnailEdge = AppPreferences.MaxChatToolImageThumbnailPixels;
 
     /// <summary>
     /// Decimal mirrors of the bounds for the numeric-up-down: its range properties are <c>decimal?</c> and the XAML
@@ -59,10 +59,10 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposab
     /// </summary>
     public int ThumbnailEdge
     {
-        get => preferences.ToolImageThumbnailEdge;
+        get => preferences.ChatToolImageThumbnailPixels;
         set
         {
-            preferences.ToolImageThumbnailEdge = value;
+            preferences.ChatToolImageThumbnailPixels = value;
 
             // The control also has to re-read the clamped value the setter settled on.
             OnPropertyChanged();
@@ -75,10 +75,10 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposab
     /// </summary>
     public bool SendToolImagesToModel
     {
-        get => preferences.SendToolImagesToModel;
+        get => preferences.ChatToolImagesToModel;
         set
         {
-            preferences.SendToolImagesToModel = value;
+            preferences.ChatToolImagesToModel = value;
             OnPropertyChanged();
         }
     }

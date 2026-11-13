@@ -27,7 +27,7 @@ public sealed class McpToolAdapterImageTests
         Assert.Equal(base64, image.Data);
         // The derived text still shows a placeholder (a text-only reader knows an image arrived), but the model-facing
         // blocks carry the picture itself and do not repeat the placeholder.
-        Assert.Equal("[image: image/png]", result.Content);
+        Assert.Equal("[image: image/png, 1 KB]", result.Content);
         Assert.False(result.IsError);
     }
 
@@ -94,7 +94,7 @@ public sealed class McpToolAdapterImageTests
         Assert.Equal("hello\nworld", text.Text);
         Assert.Equal("hello\nworld", result.Content);
         Assert.False(result.IsError);
-        Assert.Empty(result.Images);
+        Assert.False(result.HasImages);
     }
 
     [Fact]

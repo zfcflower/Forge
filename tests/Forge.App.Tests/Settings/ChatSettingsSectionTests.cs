@@ -17,27 +17,27 @@ public sealed class ChatSettingsSectionTests
         var section = new ChatSettingsSectionViewModel(preferences);
         try
         {
-            Assert.Equal(AppPreferences.DefaultToolImageThumbnailEdge, section.ThumbnailEdge);
+            Assert.Equal(AppPreferences.DefaultChatToolImageThumbnailPixels, section.ThumbnailEdge);
             Assert.True(section.SendToolImagesToModel);
 
             section.ThumbnailEdge = 384;
-            Assert.Equal(384, preferences.ToolImageThumbnailEdge);
+            Assert.Equal(384, preferences.ChatToolImageThumbnailPixels);
             Assert.Equal(384, section.ThumbnailEdge);
 
-            // Out of range lands on the preference's clamp (the setter settles on 512).
+            // Out of range lands on the preference's clamp (1024 is the registry's upper bound).
             section.ThumbnailEdge = 10_000;
-            Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, preferences.ToolImageThumbnailEdge);
-            Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, section.ThumbnailEdge);
+            Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, preferences.ChatToolImageThumbnailPixels);
+            Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, section.ThumbnailEdge);
 
             section.SendToolImagesToModel = false;
-            Assert.False(preferences.SendToolImagesToModel);
+            Assert.False(preferences.ChatToolImagesToModel);
             Assert.False(section.SendToolImagesToModel);
 
             // A fresh section built on the same preferences reads the edited values back.
             var reread = new ChatSettingsSectionViewModel(preferences);
             try
             {
-                Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, reread.ThumbnailEdge);
+                Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, reread.ThumbnailEdge);
                 Assert.False(reread.SendToolImagesToModel);
             }
             finally
@@ -54,8 +54,8 @@ public sealed class ChatSettingsSectionTests
     [Fact]
     public void The_control_bounds_mirror_the_preferences_thumbnail_clamp()
     {
-        Assert.Equal(AppPreferences.MinToolImageThumbnailEdge, ChatSettingsSectionViewModel.MinThumbnailEdge);
-        Assert.Equal(AppPreferences.MaxToolImageThumbnailEdge, ChatSettingsSectionViewModel.MaxThumbnailEdge);
+        Assert.Equal(AppPreferences.MinChatToolImageThumbnailPixels, ChatSettingsSectionViewModel.MinThumbnailEdge);
+        Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, ChatSettingsSectionViewModel.MaxThumbnailEdge);
         Assert.Equal(ChatSettingsSectionViewModel.MinThumbnailEdge, ChatSettingsSectionViewModel.MinThumbnailEdgeDecimal);
         Assert.Equal(ChatSettingsSectionViewModel.MaxThumbnailEdge, ChatSettingsSectionViewModel.MaxThumbnailEdgeDecimal);
     }

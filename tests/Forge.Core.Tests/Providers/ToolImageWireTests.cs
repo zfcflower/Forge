@@ -75,7 +75,7 @@ public sealed class ToolImageWireTests
         var result = FindToolResult(handler.Last.Root);
         var content = result.GetProperty("content");
         Assert.Equal(JsonValueKind.String, content.ValueKind);
-        Assert.Contains("[image: image/png]", content.GetString()!, StringComparison.Ordinal);
+        Assert.Contains("[image: image/png, 1 KB]", content.GetString()!, StringComparison.Ordinal);
         Assert.DoesNotContain(Data, handler.Last.Body!, StringComparison.Ordinal);
     }
 
@@ -153,7 +153,7 @@ public sealed class ToolImageWireTests
         var output = FindFunctionCallOutput(handler.Last.Root);
         var value = output.GetProperty("output");
         Assert.Equal(JsonValueKind.String, value.ValueKind);
-        Assert.Contains("[image: image/png]", value.GetString()!, StringComparison.Ordinal);
+        Assert.Contains("[image: image/png, 1 KB]", value.GetString()!, StringComparison.Ordinal);
         Assert.DoesNotContain(Data, handler.Last.Body!, StringComparison.Ordinal);
     }
 
@@ -182,7 +182,7 @@ public sealed class ToolImageWireTests
         var messages = handler.Last.Root.GetProperty("messages").EnumerateArray().ToList();
         var tool = Assert.Single(messages, static m => m.GetProperty("role").GetString() == "tool");
         Assert.Equal("call-1", tool.GetProperty("tool_call_id").GetString());
-        Assert.Equal("captured 1280x720\n[image: image/png]", tool.GetProperty("content").GetString());
+        Assert.Equal("captured 1280x720\n[image: image/png, 1 KB]", tool.GetProperty("content").GetString());
 
         var followUp = messages[^1];
         Assert.Equal("user", followUp.GetProperty("role").GetString());
@@ -214,7 +214,7 @@ public sealed class ToolImageWireTests
 
         var messages = handler.Last.Root.GetProperty("messages").EnumerateArray().ToList();
         Assert.Equal("tool", messages[^1].GetProperty("role").GetString());
-        Assert.Contains("[image: image/png]", messages[^1].GetProperty("content").GetString()!, StringComparison.Ordinal);
+        Assert.Contains("[image: image/png, 1 KB]", messages[^1].GetProperty("content").GetString()!, StringComparison.Ordinal);
         Assert.DoesNotContain("image_url", handler.Last.Body!, StringComparison.Ordinal);
     }
 

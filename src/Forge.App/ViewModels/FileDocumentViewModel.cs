@@ -1,5 +1,14 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
+using Avalonia;
+using Avalonia.Media;
+using Avalonia.Threading;
+using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.Services;
+using Forge.Editor.Highlighting;
 using Forge.Editor.TextMate;
+using Forge.Workspace;
 
 namespace Forge.App.ViewModels;
 

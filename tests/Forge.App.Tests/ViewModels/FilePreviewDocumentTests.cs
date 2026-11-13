@@ -121,7 +121,7 @@ public sealed class FilePreviewDocumentTests : IDisposable
             stream.SetLength(3 * FilePreviewSettings.BytesPerMiB);
         }
 
-        var settings = new FilePreviewSettings(new AppPreferences { PreviewImageBytes = 1 * FilePreviewSettings.BytesPerMiB });
+        var settings = new FilePreviewSettings(new AppPreferences { FilesImagePreviewMaxMegabytes = 1 });
         var model = FileDocumentViewModel.Create(previewSettings: settings, imageDecoder: _ => throw new InvalidOperationException("must not decode"));
 
         await model.LoadAsync(path, CancellationToken.None);

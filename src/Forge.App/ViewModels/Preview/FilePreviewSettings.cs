@@ -11,16 +11,19 @@ namespace Forge.App.ViewModels.Preview;
 /// </summary>
 internal sealed class FilePreviewSettings
 {
-    /// <summary>Bytes per MiB: the unit the image limit is edited in.</summary>
+    /// <summary>Bytes per MiB: the image limit is a megabyte preference and the preview works in bytes.</summary>
     public const int BytesPerMiB = 1024 * 1024;
+
+    /// <summary>Characters per kilobyte: the notebook limit is a kilobyte preference and truncation counts characters.</summary>
+    public const int CharsPerKilobyte = 1024;
 
     /// <summary>What a preview shows before the composition root binds the real preferences.</summary>
     private static FilePreviewSettings current = new();
 
     private readonly AppPreferences? preferences;
-    private readonly int filePreviewRows = AppPreferences.DefaultFilePreviewRows;
-    private readonly int notebookOutputChars = AppPreferences.DefaultNotebookOutputChars;
-    private readonly int previewImageBytes = AppPreferences.DefaultPreviewImageBytes;
+    private readonly int filePreviewRows = AppPreferences.DefaultFilesCsvMaxRows;
+    private readonly int notebookOutputChars = AppPreferences.DefaultFilesNotebookOutputKilobytes * CharsPerKilobyte;
+    private readonly int previewImageBytes = AppPreferences.DefaultFilesImagePreviewMaxMegabytes * BytesPerMiB;
 
     public FilePreviewSettings(AppPreferences? preferences = null)
     {
@@ -30,9 +33,9 @@ internal sealed class FilePreviewSettings
             return;
         }
 
-        filePreviewRows = preferences.FilePreviewRows;
-        notebookOutputChars = preferences.NotebookOutputChars;
-        previewImageBytes = preferences.PreviewImageBytes;
+        filePreviewRows = preferences.FilesCsvMaxRows;
+        notebookOutputChars = preferences.FilesNotebookOutputKilobytes * CharsPerKilobyte;
+        previewImageBytes = preferences.FilesImagePreviewMaxMegabytes * BytesPerMiB;
     }
 
     /// <summary>The instance every preview reads; replaced once by the composition root.</summary>
@@ -43,11 +46,13 @@ internal sealed class FilePreviewSettings
     }
 
     /// <summary>Rows a CSV/TSV preview parses before it stops.</summary>
-    public int PreviewRows => preferences?.FilePreviewRows ?? filePreviewRows;
+    public int PreviewRows => preferences?.FilesCsvMaxRows ?? filePreviewRows;
 
-    /// <summary>Characters kept from one <c>.ipynb</c> output.</summary>
-    public int NotebookOutputChars => preferences?.NotebookOutputChars ?? notebookOutputChars;
+    /// <summary>Characters kept from one <c>.ipynb</c> output (the preference is in kilobytes).</summary>
+    public int NotebookOutputChars =>
+        preferences is { } live ? live.FilesNotebookOutputKilobytes * CharsPerKilobyte : notebookOutputChars;
 
-    /// <summary>Largest image (in bytes, on disk) the image preview decodes.</summary>
-    public int PreviewImageBytes => preferences?.PreviewImageBytes ?? previewImageBytes;
+    /// <summary>Largest image (in bytes, on disk) the image preview decodes (the preference is in megabytes).</summary>
+    public int PreviewImageBytes =>
+        preferences is { } live ? live.FilesImagePreviewMaxMegabytes * BytesPerMiB : previewImageBytes;
 }

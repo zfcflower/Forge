@@ -76,6 +76,10 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 <前缀摘要>`(无更早历史时只有后半)。前缀超出预算时同样分批,后续批用 TURN-PREFIX 的续写指令(同样三段格式、带 `<previous-summary>`)。新摘要至多含一段 Turn Context:上一份摘要带旧的 Turn Context 段时,UPDATE 指令追加“把该段并入常规各节、不再复现标题与分隔线”的要求;没有新历史但出现新拆分时,单独发一次 `(no new messages)` 的 UPDATE 请求完成合并;模型仍复现旧段时,代码把旧标题降级为 `**Earlier turn context:**`、去掉其前的 `---`,只有本次前缀带正式标题。任何一批失败即整次压缩失败(另一条链经联动取消立即停止),只在全部成功后写入唯一一条会话层摘要。摘要请求不带工具、Thinking 关闭、带 SessionId,输出上限取模型自身值与 8192(前缀 4096)中较小者。回复以 MaxTokens 截断、发起工具调用、提供商报错、没有完成消息或正文为空时拒绝该摘要,抛 `CompactionFailedException`,什么也不写;取消照常传播。自动与溢出路径把拒绝当作“没腾出空间”(计入无效尝试,不让回合失败)。
 
+**工具结果多块。** `ToolResult`/`ToolResultBlock` 持有 `Blocks`(只允许 `TextBlock`/`ImageBlock`,构造与 `with` 都校验;传入后视为不可变),`(string, IsError)` 便捷构造保留;`Content` 是拉平文本(单文本块即原串,多块按行拼接,图片为占位文案),相等按元素比较。持久化:`tool_result` 恒写拉平后的 `content`,仅当块不是“恰好一个文本块”时多写 `blocks` 数组;旧行与旧读者照常工作,不升 schema。`AgentLoop` 的溢出归档只处理文本、图片块原样保留;`TokenCounter` 对工具结果里的每张图按附件图同一口径(1600 token)估算。**适配器目前只发拉平后的 `Content`(图片以占位文案到模型),按协议发送工具结果图片是后续工作(见 `docs/research/2026-11-13-thinkrail-gap-plan.md` W4),估算在那之前会偏大,但当前没有任何工具产出图片。**
+
+**工具进度。** `ToolContext.Progress`(`Action<string>?`)收到的是长任务实时输出的**最新尾部快照**(不是增量);`AgentLoop` 为每次调用派生独立 context,把它转成 `AgentToolProgress(AgentId, Call, Tail)`,夹在 `AgentToolStarted`/`Finished` 之间,不落库。监听者必须不阻塞(生产者在持锁时调用它以保证有序)。目前只有 `bash` 产出;`SessionWorkspace` 暂不消费。
+
 **图片输入。** `ImageBlock(MediaType, Data)` 是用户消息的内容块(base64),`AgentHost.RunAsync(instance, ChatMessage, ct)` 接收带图片的用户消息。三个适配器按各自协议编码(Anthropic `image` source、OpenAI 兼容 `image_url` data URL、Responses `input_image`);`MessageJson` 原样持久化。`TokenCounter` 每张图按固定 1600 token 估算。压缩器给摘要模型的永远只是占位文本 `[image: <type>, <n> KB]`(文件为 `[file: <name>, <type>, <n> KB]`),原图与文件内容不进摘要请求。
 
 **工具结果的图片。** `ToolResult`/`ToolResultBlock` 是块列表,不只是字符串:`Blocks` 是工具交回的有序块,`Text` 是它自己的文本(只含 `TextBlock`,逐行),`Content` 是整份结果的文本视图(非文本块各占一行占位,如 `[image: image/png]`),`Images` 是在场图片。两个文本读法在构造时算一次并缓存在记录里:`Content` 给不认识图片的读者(存储、搜索、只用文本的适配器、界面),`Text` 给**自己把图片送上线路**的适配器——后者若还用 `Content` 就把同一张图说了两遍。块列表在构造时拷贝,`Equals` 按块逐项比较(数组本身是引用相等)。只有一层嵌套:工具结果里能放 `TextBlock`/`ImageBlock`/`FileBlock`/`ArtifactRefBlock`,不嵌套工具结果。

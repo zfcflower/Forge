@@ -5,57 +5,39 @@ public enum ToolSideEffect { ReadOnly, Write, Execute }
 public sealed record ToolCall(string Id, string Name, string ArgumentsJson);
 
 /// <summary>
-/// What a tool returns: a list of content blocks. Text is the default and the only shape a text-only tool ever builds; an
-/// image block is how a tool that produced a picture (a screenshot, an MCP server's <c>image</c> content) hands it over
-/// instead of describing it. <see cref="Content"/> is the text view of the whole payload — placeholders included, never the
-/// base64 itself — and <see cref="Text"/> is the tool's own words without them.
+/// What a tool returns: text and images in order. A text-only tool writes <c>new ToolResult("text")</c>; <see cref="Content"/> is
+/// the flattened text for every consumer that reads text (an image shows as its placeholder, never as base64). Only
+/// <see cref="TextBlock"/> and <see cref="ImageBlock"/> are allowed in <paramref name="Blocks"/>, and the list is treated as immutable once passed in.
 /// </summary>
-/// <remarks>
-/// <see cref="Blocks"/> is copied on construction and read-only afterwards, so the property can be kept and re-read on any
-/// thread. The derived members are computed once here rather than per read: the pipeline asks for <see cref="Content"/> in
-/// several places per tool call (storage, search text, provider wire, UI).
-/// </remarks>
-public sealed record ToolResult
+public sealed record ToolResult(IReadOnlyList<ContentBlock> Blocks, bool IsError = false)
 {
-    /// <summary>A text-only result, the shape of every tool that returns words.</summary>
     public ToolResult(string Content, bool IsError = false)
         : this([new TextBlock(Content)], IsError)
     {
     }
 
-    public ToolResult(IReadOnlyList<ContentBlock> Blocks, bool IsError = false)
+    private readonly IReadOnlyList<ContentBlock> blocks = ToolResultBlocks.Validate(Blocks);
+
+    /// <summary>Text and image blocks only; a <c>with</c> expression is validated too.</summary>
+    public IReadOnlyList<ContentBlock> Blocks
     {
-        ArgumentNullException.ThrowIfNull(Blocks);
-        this.Blocks = Blocks.Count == 0 ? [] : [.. Blocks];
-        Text = ToolPayload.Text(this.Blocks);
-        Content = ToolPayload.HasNonText(this.Blocks) ? ToolPayload.WithPlaceholders(this.Blocks) : Text;
-        Images = ToolPayload.Images(this.Blocks);
-        this.IsError = IsError;
+        get => blocks;
+        init => blocks = ToolResultBlocks.Validate(value);
     }
 
-    /// <summary>The blocks the tool returned, in order; empty when it returned nothing.</summary>
-    public IReadOnlyList<ContentBlock> Blocks { get; }
+    /// <summary>The flattened text of <see cref="Blocks"/>; see <see cref="ToolResultBlocks.Flatten"/>.</summary>
+    public string Content => ToolResultBlocks.Flatten(Blocks);
 
-    /// <summary>The tool's own text, one text block per line, with nothing standing in for the blocks that carry no text.</summary>
-    public string Text { get; }
+    /// <summary>The tool's own words, without a placeholder for its images; see <see cref="ToolResultBlocks.TextOnly"/>.</summary>
+    public string Text => ToolResultBlocks.TextOnly(Blocks);
 
-    /// <summary>
-    /// The text view of the whole result: <see cref="Text"/> with a placeholder for each block that carries no text, such as
-    /// <c>[image: image/png]</c>. This is what a transcript, the search index and a provider that is not sending the images
-    /// itself shows; it is never the base64.
-    /// </summary>
-    public string Content { get; }
+    /// <summary>Whether the result carries a picture, without building a list of them.</summary>
+    public bool HasImages => ToolResultBlocks.HasImage(Blocks);
 
-    /// <summary>The images of this result, in order; empty for a text-only tool.</summary>
-    public IReadOnlyList<ImageBlock> Images { get; }
-
-    public bool IsError { get; }
-
-    /// <summary>Value equality over the blocks themselves, in order (the list is an array, which compares by reference).</summary>
     public bool Equals(ToolResult? other) =>
-        other is not null && IsError == other.IsError && ToolPayload.Same(Blocks, other.Blocks);
+        other is not null && IsError == other.IsError && ToolResultBlocks.SequenceEqual(Blocks, other.Blocks);
 
-    public override int GetHashCode() => HashCode.Combine(IsError, Blocks.Count);
+    public override int GetHashCode() => HashCode.Combine(IsError, ToolResultBlocks.Hash(Blocks));
 }
 
 /// <summary>Execution context handed to every tool; the workspace root bounds file access.</summary>
@@ -66,6 +48,13 @@ public sealed record ToolContext(string SessionId, string WorkingDirectory, int 
 
     /// <summary>The calling agent's display name (its definition name, e.g. "main", "scout"); null like <see cref="AgentId"/>.</summary>
     public string? AgentName { get; init; }
+
+    /// <summary>
+    /// Where a long-running tool reports what it is doing: each call carries the <em>latest tail</em> of its live output (a
+    /// snapshot, not a delta, so a listener may drop calls without losing state). Bounded by the producer, throttled by the
+    /// producer, callable from any thread. Null when nobody watches; a tool must not require it.
+    /// </summary>
+    public Action<string>? Progress { get; init; }
 }
 
 /// <summary>Where a tool comes from. Declared by whoever registers the tool, never reported by the tool itself.</summary>

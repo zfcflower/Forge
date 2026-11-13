@@ -1,6 +1,5 @@
 using Forge.App.Preferences;
 using Forge.App.Settings;
-using Forge.App.ViewModels.Preview;
 using Xunit;
 
 namespace Forge.App.Tests.Settings;
@@ -8,29 +7,29 @@ namespace Forge.App.Tests.Settings;
 public sealed class FilesSettingsSectionViewModelTests
 {
     [Fact]
-    public void Rows_and_notebook_chars_round_trip_through_the_preferences()
+    public void Rows_and_notebook_kilobytes_round_trip_through_the_preferences()
     {
         var preferences = new AppPreferences();
         using var section = new FilesSettingsSectionViewModel(preferences);
 
         section.PreviewRows = 1500;
-        section.NotebookOutputChars = 50000;
+        section.NotebookOutputKilobytes = 50;
 
-        Assert.Equal(1500, preferences.FilePreviewRows);
-        Assert.Equal(50000, preferences.NotebookOutputChars);
+        Assert.Equal(1500, preferences.FilesCsvMaxRows);
+        Assert.Equal(50, preferences.FilesNotebookOutputKilobytes);
         Assert.Equal(1500, section.PreviewRows);
-        Assert.Equal(50000, section.NotebookOutputChars);
+        Assert.Equal(50, section.NotebookOutputKilobytes);
     }
 
     [Fact]
-    public void The_MiB_conversion_is_exact_for_20_MiB()
+    public void The_image_limit_is_edited_in_the_megabytes_the_preference_stores()
     {
         var preferences = new AppPreferences();
         using var section = new FilesSettingsSectionViewModel(preferences);
 
         section.ImageLimitMiB = 20;
 
-        Assert.Equal(20 * FilePreviewSettings.BytesPerMiB, preferences.PreviewImageBytes);
+        Assert.Equal(20, preferences.FilesImagePreviewMaxMegabytes);
         Assert.Equal(20, section.ImageLimitMiB);
     }
 
@@ -41,18 +40,18 @@ public sealed class FilesSettingsSectionViewModelTests
         using var section = new FilesSettingsSectionViewModel(preferences);
 
         section.PreviewRows = 1;
-        Assert.Equal(AppPreferences.MinFilePreviewRows, preferences.FilePreviewRows);
+        Assert.Equal(AppPreferences.MinFilesCsvMaxRows, preferences.FilesCsvMaxRows);
 
-        section.NotebookOutputChars = 1;
-        Assert.Equal(AppPreferences.MinNotebookOutputChars, preferences.NotebookOutputChars);
+        section.NotebookOutputKilobytes = 0;
+        Assert.Equal(AppPreferences.MinFilesNotebookOutputKilobytes, preferences.FilesNotebookOutputKilobytes);
 
-        section.ImageLimitMiB = 100000;
-        Assert.Equal(AppPreferences.MaxPreviewImageBytes, preferences.PreviewImageBytes);
-        Assert.Equal(AppPreferences.MaxPreviewImageBytes / FilePreviewSettings.BytesPerMiB, section.ImageLimitMiB);
+        section.ImageLimitMiB = 100_000;
+        Assert.Equal(AppPreferences.MaxFilesImagePreviewMaxMegabytes, preferences.FilesImagePreviewMaxMegabytes);
+        Assert.Equal(AppPreferences.MaxFilesImagePreviewMaxMegabytes, section.ImageLimitMiB);
 
         section.ImageLimitMiB = 0;
-        Assert.Equal(AppPreferences.MinPreviewImageBytes, preferences.PreviewImageBytes);
-        Assert.Equal(1, section.ImageLimitMiB);
+        Assert.Equal(AppPreferences.MinFilesImagePreviewMaxMegabytes, preferences.FilesImagePreviewMaxMegabytes);
+        Assert.Equal(AppPreferences.MinFilesImagePreviewMaxMegabytes, section.ImageLimitMiB);
     }
 
     [Fact]
@@ -61,7 +60,7 @@ public sealed class FilesSettingsSectionViewModelTests
         var preferences = new AppPreferences();
         using var section = new FilesSettingsSectionViewModel(preferences);
 
-        preferences.PreviewImageBytes = 40 * FilePreviewSettings.BytesPerMiB;
+        preferences.FilesImagePreviewMaxMegabytes = 40;
 
         Assert.Equal(40, section.ImageLimitMiB);
     }

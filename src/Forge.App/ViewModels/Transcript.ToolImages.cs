@@ -1,19 +1,18 @@
 using Forge.Abstractions;
 using Forge.App.Preferences;
-using Forge.Core.Storage;
 
 namespace Forge.App.ViewModels;
 
 /// <summary>
 /// The live preference a tool-row image reads, ambient like <c>EditorSettings.Current</c>: transcript rows are built by
 /// a data template deep inside a session and cannot be handed the composition root, so the composition root replaces
-/// <see cref="ThumbnailEdge"/> with a read of <see cref="AppPreferences.ToolImageThumbnailEdge"/> before the first
+/// <see cref="ThumbnailEdge"/> with a read of <see cref="AppPreferences.ChatToolImageThumbnailPixels"/> before the first
 /// window opens. Tests and any host without preferences keep the built-in default.
 /// </summary>
 internal static class ToolImageSettings
 {
     /// <summary>Longest edge a tool-row thumbnail is decoded to, in device-independent pixels.</summary>
-    internal static Func<int> ThumbnailEdge { get; set; } = static () => AppPreferences.DefaultToolImageThumbnailEdge;
+    internal static Func<int> ThumbnailEdge { get; set; } = static () => AppPreferences.DefaultChatToolImageThumbnailPixels;
 }
 
 /// <summary>
@@ -23,7 +22,7 @@ internal static class ToolImageSettings
 internal sealed class ToolImageViewModel : ImageThumbnailViewModel
 {
     public ToolImageViewModel(ImageBlock block, int maxLongEdge)
-        : base(block, MessageJson.DecodedLength(block.Data), thumbnail: null, maxLongEdge)
+        : base(block, ContentPlaceholders.DecodedLength(block.Data), thumbnail: null, maxLongEdge)
     {
         ThumbnailEdge = maxLongEdge;
     }
@@ -43,19 +42,28 @@ internal sealed partial class ToolRowViewModel
     public bool HasImages => images.Count > 0;
 
     /// <summary>
-    /// Takes the images of a finished result into the row. The transcript always shows what the tool produced:
-    /// <see cref="AppPreferences.SendToolImagesToModel"/> only governs what the model receives, never what this row
-    /// displays. The list is replaced (and notified) because the row is already on screen when the result lands.
+    /// Takes the image blocks of a finished result into the row. The transcript always shows what the tool produced:
+    /// <see cref="AppPreferences.ChatToolImagesToModel"/> only governs what the model receives, never what this row displays.
+    /// The list is replaced (and notified) because the row is already on screen when the result lands.
     /// </summary>
-    partial void ApplyImages(ToolResult toolResult)
+    partial void CaptureImages(IReadOnlyList<ContentBlock> blocks)
     {
-        if (toolResult.Images.Count == 0)
+        List<ToolImageViewModel>? found = null;
+        var edge = ToolImageSettings.ThumbnailEdge();
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (blocks[index] is ImageBlock image)
+            {
+                (found ??= []).Add(new ToolImageViewModel(image, edge));
+            }
+        }
+
+        if (found is null)
         {
             return;
         }
 
-        var edge = ToolImageSettings.ThumbnailEdge();
-        images = toolResult.Images.Select(block => new ToolImageViewModel(block, edge)).ToArray();
+        images = found;
         OnPropertyChanged(nameof(Images));
         OnPropertyChanged(nameof(HasImages));
     }

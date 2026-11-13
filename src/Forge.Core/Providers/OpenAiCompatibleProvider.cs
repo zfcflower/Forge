@@ -437,24 +437,23 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
             writer.WriteEndObject();
         }
 
-        if (includeToolImages && CountImages(blocks) > 0)
+        if (includeToolImages && CarriesImages(blocks))
         {
             WriteToolImagesTurn(writer, blocks);
         }
     }
 
-    private static int CountImages(IReadOnlyList<ContentBlock> blocks)
+    private static bool CarriesImages(IReadOnlyList<ContentBlock> blocks)
     {
-        var count = 0;
         for (var index = 0; index < blocks.Count; index++)
         {
-            if (blocks[index] is ToolResultBlock result)
+            if (blocks[index] is ToolResultBlock result && result.HasImages)
             {
-                count += result.Images.Count;
+                return true;
             }
         }
 
-        return count;
+        return false;
     }
 
     /// <summary>One user turn carrying every image the tool results produced, with a line saying where they came from.</summary>
@@ -474,9 +473,12 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
                 continue;
             }
 
-            foreach (var image in result.Images)
+            foreach (var block in result.Blocks)
             {
-                WriteImagePart(writer, image);
+                if (block is ImageBlock image)
+                {
+                    WriteImagePart(writer, image);
+                }
             }
         }
 
