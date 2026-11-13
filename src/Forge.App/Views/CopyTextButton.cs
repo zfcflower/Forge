@@ -29,7 +29,7 @@ internal sealed class CopyTextButton : Button
         {
             await clipboard.SetTextAsync(text).ConfigureAwait(true);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or System.Runtime.InteropServices.ExternalException)
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             AppLogs.Session.ZLogWarning($"copy failed: {exception.Message}");
         }

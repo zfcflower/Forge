@@ -12,7 +12,6 @@
              xmlns:editing="using:Forge.App.Editing"
              xmlns:set="using:Forge.App.ViewModels.Settings"
              xmlns:settings="using:Forge.App.Settings"
-             xmlns:setviews="using:Forge.App.Views.Settings"
              xmlns:autoset="using:Forge.App.Automations.Settings"
              xmlns:promptset="using:Forge.App.Settings.Prompts"
              xmlns:webset="using:Forge.App.Web"
@@ -121,6 +120,9 @@
                    Text="{Binding Hint}" />
       </Grid>
     </DataTemplate>
+
+    <!-- Settings sections added by later waves: registered through SectionViewTemplate.Register from their composition module. -->
+    <views:SectionViewTemplate />
 
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
     <DataTemplate DataType="autoset:AutomationsSettingsViewModel" x:DataType="autoset:AutomationsSettingsViewModel">
@@ -465,16 +467,6 @@
         </StackPanel>
         <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding StatusText}" />
       </StackPanel>
-    </DataTemplate>
-
-    <!-- The chat section: how large a tool result's images render in the transcript and whether the model receives them. -->
-    <DataTemplate DataType="settings:ChatSettingsSectionViewModel" x:DataType="settings:ChatSettingsSectionViewModel">
-      <setviews:ChatSettingsSectionView />
-    </DataTemplate>
-
-    <!-- The files section: what the rich viewer parses (CSV rows, notebook output, image size limit). -->
-    <DataTemplate DataType="settings:FilesSettingsSectionViewModel" x:DataType="settings:FilesSettingsSectionViewModel">
-      <setviews:FilesSettingsSectionView />
     </DataTemplate>
 
     <!-- The git section: pull strategy, network timeout, step commits, the checks wait timing and the gh path, edited live on the preferences they belong to. Notifications are not a git preference any more; the notification section owns that switch. -->

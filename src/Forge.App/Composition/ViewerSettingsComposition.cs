@@ -3,6 +3,8 @@ using Forge.App.Preferences;
 using Forge.App.Settings;
 using Forge.App.ViewModels;
 using Forge.App.ViewModels.Preview;
+using Forge.App.Views;
+using Forge.App.Views.Settings;
 
 namespace Forge.App.Composition;
 
@@ -25,6 +27,11 @@ internal static class ViewerSettingsComposition
         // Bound here, before the first window opens; a host without preferences keeps the built-in defaults.
         FilePreviewSettings.Current = new FilePreviewSettings(preferences);
         ToolImageSettings.ThumbnailEdge = () => preferences.ChatToolImageThumbnailPixels;
+
+        // The section bodies come from this module's own views: SectionViewTemplate is the one data template App.axaml keeps
+        // for the waves' settings sections, so registering the factory here is what replaced editing that frozen file.
+        SectionViewTemplate.Register<ChatSettingsSectionViewModel>(static () => new ChatSettingsSectionView());
+        SectionViewTemplate.Register<FilesSettingsSectionViewModel>(static () => new FilesSettingsSectionView());
 
         // The chat section: how large a tool result's images render and whether the model receives them.
         settings.Add(new SettingsSection(
