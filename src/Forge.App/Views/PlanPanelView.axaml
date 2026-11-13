@@ -1,7 +1,541 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:views="using:Forge.App.Views"
              x:Class="Forge.App.Views.PlanPanelView"
-             x:DataType="vm:PlanPanelViewModel">
-  <!-- Placeholder: wave W7 owns this file. -->
+             x:DataType="vm:PlanPanelViewModel"
+             AutomationProperties.AutomationId="plan-panel">
+
+  <UserControl.Styles>
+    <!-- Markdown presentation is shared with the diff preview; this control only adds the panel's own frame. -->
+    <StyleInclude Source="avares://Forge.App/Resources/MarkdownStyles.axaml" />
+
+    <!-- The scrim covers the whole workbench row: it dims what is behind the panel and takes the click that closes it. -->
+    <Style Selector="Grid.plan-scrim">
+      <Setter Property="Background" Value="#55000000" />
+    </Style>
+
+    <!-- One card, centred and capped: it takes the row's width up to 1120 (a narrow window shrinks it instead of
+         clipping), and the inner grid's star rows keep the card inside the row's height. -->
+    <Style Selector="Border.plan-card">
+      <Setter Property="MaxWidth" Value="1120" />
+      <Setter Property="MaxHeight" Value="760" />
+      <Setter Property="Margin" Value="16,0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
+      <Setter Property="BoxShadow" Value="{DynamicResource ShadowMd}" />
+    </Style>
+
+    <!-- The right rail: one flat column, separated from the plan by a single rule. -->
+    <Style Selector="Border.plan-rail">
+      <Setter Property="BorderThickness" Value="1,0,0,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Padding" Value="14,12" />
+    </Style>
+
+    <!-- Section headings inside the panel and the rail. -->
+    <Style Selector="TextBlock.plan-heading">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- The step list: no chrome of its own, no selection tint. Rows are virtualized by the ListBox. -->
+    <Style Selector="ListBox.plan-rows">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.plan-rows ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+    </Style>
+    <Style Selector="ListBox.plan-rows ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- A step row: a transparent band with a 2 px leading edge the "next step" mark colours. -->
+    <Style Selector="Border.plan-row">
+      <Setter Property="Padding" Value="4,4,8,4" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="2,0,0,0" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.plan-row.next">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <Style Selector="Border.plan-group-row">
+      <Setter Property="Padding" Value="4,8,8,2" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- The next-step card, and the revision banner which borrows the same frame. -->
+    <Style Selector="Border.plan-next">
+      <Setter Property="BorderThickness" Value="2,0,0,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Padding" Value="10,6,8,6" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+
+    <!-- The "next step" mark beside a step's title in the list. -->
+    <Style Selector="Border.plan-next-chip">
+      <Setter Property="Padding" Value="5,0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.plan-next-chip TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+
+    <!-- The actions under the rail: one flat row each, the icon ahead of the word. -->
+    <Style Selector="Button.plan-action">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.plan-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource IconButtonHoverBrush}" />
+    </Style>
+    <Style Selector="Button.plan-action:disabled">
+      <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="Button.plan-action:disabled TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+
+    <!-- The hand-off button: the panel's one action that reaches the agent, so it is the accent-coloured one. -->
+    <Style Selector="Button.plan-handoff">
+      <Setter Property="MinHeight" Value="26" />
+      <Setter Property="Padding" Value="10,3" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.plan-handoff:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <!-- A revision row: the row is the button that previews it; the copy button sits at its right end. -->
+    <Style Selector="Button.plan-revision">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="6,4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.plan-revision:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+
+    <!-- The panel's one line of feedback: muted as a rule, danger when it reports a failure. -->
+    <Style Selector="TextBlock.plan-status">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.plan-status.failure">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid x:Name="Scrim" Classes="plan-scrim" Focusable="True"
+        PointerPressed="OnScrimPressed"
+        KeyDown="OnKeyDown">
+    <Border Classes="plan-card">
+      <Grid RowDefinitions="Auto,Auto,*">
+
+        <!-- Header: the panel's name, the session it reads, and the two ways to leave it. -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Margin="16,12,12,8">
+          <wc:FluentIcon Grid.Column="0"
+                         Data="{StaticResource IconPlan}"
+                         Width="16" Height="16"
+                         Margin="0,0,8,0"
+                         VerticalAlignment="Center"
+                         Foreground="{DynamicResource AccentBrush}" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <TextBlock FontSize="{DynamicResource FontSizeMd}"
+                       FontWeight="SemiBold"
+                       Text="{Binding [plan.title], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       IsVisible="{Binding HasSession}"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"
+                       Text="{Binding SessionTitle}"
+                       AutomationProperties.AutomationId="plan-session-title" />
+          </StackPanel>
+          <Button Grid.Column="2"
+                  Classes="ghost icon"
+                  Width="28" Height="24"
+                  Command="{Binding RefreshCommand}"
+                  ToolTip.Tip="{Binding [plan.refresh], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="plan-refresh"
+                  AutomationProperties.Name="{Binding [plan.refresh], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconRefresh}" Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+          </Button>
+          <Button Grid.Column="3"
+                  x:Name="CloseButton"
+                  Classes="ghost icon"
+                  Width="28" Height="24"
+                  Command="{Binding CloseCommand}"
+                  ToolTip.Tip="{Binding [plan.close], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="plan-close"
+                  AutomationProperties.Name="{Binding [plan.close], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" Foreground="{DynamicResource TextMutedBrush}" />
+          </Button>
+        </Grid>
+
+        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}" />
+
+        <Grid Grid.Row="2" ColumnDefinitions="*,320">
+
+          <!-- Left: the plan summary above the steps. Both scroll, and neither tries to scroll the other. -->
+          <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="16,10,16,12">
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,0,0,6">
+              <TextBlock Grid.Column="0" Classes="plan-heading" Text="{Binding [plan.summary], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="2"
+                         Classes="caption"
+                         IsVisible="{Binding HasSummaryStamp}"
+                         Margin="0,0,8,0"
+                         Text="{Binding SummaryUpdatedText}"
+                         AutomationProperties.AutomationId="plan-summary-stamp" />
+              <Button Grid.Column="3"
+                      Classes="plan-handoff"
+                      IsVisible="{Binding IsViewingRevision}"
+                      Command="{Binding BackToSummaryCommand}"
+                      Content="{Binding [plan.revision.back], Source={x:Static loc:Loc.Instance}}"
+                      AutomationProperties.AutomationId="plan-revision-back" />
+            </Grid>
+
+            <!-- Which old version is on screen, and when it was replaced. -->
+            <Border Grid.Row="1" Classes="plan-next" IsVisible="{Binding IsViewingRevision}" Margin="0,0,0,6">
+              <TextBlock Classes="caption"
+                         Text="{Binding RevisionBanner}"
+                         TextWrapping="Wrap"
+                         AutomationProperties.AutomationId="plan-revision-banner" />
+            </Border>
+
+            <ScrollViewer Grid.Row="2"
+                          MaxHeight="280"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Margin="0,0,0,8">
+              <Panel>
+                <StackPanel x:Name="SummaryHost" Spacing="6" />
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding !HasSummary}"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           TextWrapping="Wrap"
+                           Text="{Binding [plan.summary.empty], Source={x:Static loc:Loc.Instance}}"
+                           AutomationProperties.AutomationId="plan-summary-empty" />
+              </Panel>
+            </ScrollViewer>
+
+            <Grid Grid.Row="3" RowDefinitions="Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,4">
+                <TextBlock Grid.Column="0" Classes="plan-heading" Text="{Binding [plan.steps], Source={x:Static loc:Loc.Instance}}" />
+                <TextBlock Grid.Column="2"
+                           Classes="caption"
+                           IsVisible="{Binding HasProgress}"
+                           Text="{Binding ProgressText}"
+                           AutomationProperties.AutomationId="plan-progress" />
+              </Grid>
+              <Panel Grid.Row="1">
+                <ListBox Classes="plan-rows" ItemsSource="{Binding Rows}" AutomationProperties.AutomationId="plan-rows">
+                  <ListBox.ItemTemplate>
+                    <!-- One row type, two shapes: a group's band above its steps, then a step with what the agent recorded. -->
+                    <DataTemplate x:DataType="vm:PlanRowViewModel">
+                      <Panel>
+                        <Border Classes="plan-group-row" IsVisible="{Binding IsGroupRow}" AutomationProperties.AutomationId="plan-group-row">
+                          <Grid ColumnDefinitions="28,*,Auto" VerticalAlignment="Center">
+                            <Panel Grid.Column="0" Width="14" Height="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   AutomationProperties.Name="{Binding StatusName}">
+                              <wc:FluentIcon Data="{StaticResource IconTodoPending}" IsVisible="{Binding IsPending}"
+                                             Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+                              <wc:FluentIcon Data="{StaticResource IconTodoInProgress}" IsVisible="{Binding IsInProgress}"
+                                             Width="14" Height="14" Foreground="{DynamicResource AccentBrush}" />
+                              <wc:FluentIcon Data="{StaticResource IconTodoPaused}" IsVisible="{Binding IsPaused}"
+                                             Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+                              <wc:FluentIcon Data="{StaticResource IconTodoDone}" IsVisible="{Binding IsDone}"
+                                             Width="14" Height="14" Foreground="{DynamicResource SuccessBrush}" />
+                            </Panel>
+                            <TextBlock Grid.Column="1"
+                                       Margin="0,0,8,0"
+                                       FontSize="{DynamicResource FontSizeBase}"
+                                       FontWeight="Bold"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="{Binding Title}"
+                                       AutomationProperties.AutomationId="plan-group-title" />
+                            <TextBlock Grid.Column="2"
+                                       Classes="caption"
+                                       IsVisible="{Binding HasProgress}"
+                                       Text="{Binding ProgressText}"
+                                       AutomationProperties.AutomationId="plan-group-progress" />
+                          </Grid>
+                        </Border>
+
+                        <Border Classes="plan-row" Classes.next="{Binding IsNext}"
+                                IsVisible="{Binding IsStepRow}"
+                                AutomationProperties.AutomationId="plan-step-row">
+                          <Grid ColumnDefinitions="28,*,Auto" RowDefinitions="Auto,Auto">
+                            <Panel Grid.Row="0" Grid.Column="0" Width="14" Height="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   AutomationProperties.Name="{Binding StatusName}">
+                              <wc:FluentIcon Data="{StaticResource IconTodoPending}" IsVisible="{Binding IsPending}"
+                                             Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+                              <wc:FluentIcon Data="{StaticResource IconTodoInProgress}" IsVisible="{Binding IsInProgress}"
+                                             Width="14" Height="14" Foreground="{DynamicResource AccentBrush}" />
+                              <wc:FluentIcon Data="{StaticResource IconTodoPaused}" IsVisible="{Binding IsPaused}"
+                                             Width="14" Height="14" Foreground="{DynamicResource TextMutedBrush}" />
+                              <wc:FluentIcon Data="{StaticResource IconTodoDone}" IsVisible="{Binding IsDone}"
+                                             Width="14" Height="14" Foreground="{DynamicResource SuccessBrush}" />
+                            </Panel>
+
+                            <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                              <TextBlock Grid.Column="0"
+                                         FontSize="{DynamicResource FontSizeBase}"
+                                         TextWrapping="NoWrap"
+                                         TextTrimming="CharacterEllipsis"
+                                         Text="{Binding Title}"
+                                         AutomationProperties.AutomationId="plan-step-title" />
+                              <Border Grid.Column="1" Classes="plan-next-chip" IsVisible="{Binding IsNext}" Margin="6,0,0,0">
+                                <TextBlock Classes="caption" Text="{Binding [plan.next], Source={x:Static loc:Loc.Instance}}" />
+                              </Border>
+                            </Grid>
+
+                            <Button Grid.Row="0" Grid.Column="2"
+                                    Classes="ghost icon"
+                                    Width="24" Height="22"
+                                    IsVisible="{Binding CanHandoff}"
+                                    Command="{Binding HandoffCommand}"
+                                    ToolTip.Tip="{Binding [plan.handoff], Source={x:Static loc:Loc.Instance}}"
+                                    AutomationProperties.AutomationId="plan-handoff"
+                                    AutomationProperties.Name="{Binding [plan.handoff], Source={x:Static loc:Loc.Instance}}">
+                              <wc:FluentIcon Data="{StaticResource IconSend}" Width="13" Height="13" Foreground="{DynamicResource TextMutedBrush}" />
+                            </Button>
+
+                            <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Spacing="1" Margin="0,2,0,0">
+                              <TextBlock Classes="caption"
+                                         IsVisible="{Binding HasSummary}"
+                                         TextWrapping="Wrap"
+                                         Foreground="{DynamicResource TextSecondaryBrush}"
+                                         Text="{Binding SummaryText}"
+                                         AutomationProperties.AutomationId="plan-step-summary" />
+                              <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasVerification}">
+                                <wc:FluentIcon Grid.Column="0"
+                                               Data="{StaticResource IconCheck}"
+                                               Width="10" Height="10"
+                                               Margin="0,0,6,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource SuccessBrush}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="caption"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding VerificationText}"
+                                           AutomationProperties.AutomationId="plan-step-verification" />
+                              </Grid>
+                              <TextBlock Classes="caption"
+                                         IsVisible="{Binding HasNote}"
+                                         TextWrapping="Wrap"
+                                         Foreground="{DynamicResource TextMutedBrush}"
+                                         Text="{Binding Note}" />
+                              <TextBlock Classes="caption mono"
+                                         IsVisible="{Binding HasCommitId}"
+                                         Text="{Binding CommitShort}"
+                                         ToolTip.Tip="{Binding CommitId}"
+                                         AutomationProperties.AutomationId="plan-step-commit" />
+                              <TextBlock Classes="caption"
+                                         IsVisible="{Binding HasCommitError}"
+                                         TextWrapping="Wrap"
+                                         Foreground="{DynamicResource DangerBrush}"
+                                         Text="{Binding CommitError}"
+                                         AutomationProperties.AutomationId="plan-step-commit-error" />
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </Panel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding !HasSteps}"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           TextWrapping="Wrap"
+                           Text="{Binding [plan.steps.empty], Source={x:Static loc:Loc.Instance}}"
+                           AutomationProperties.AutomationId="plan-steps-empty" />
+              </Panel>
+            </Grid>
+
+            <!-- The one line of feedback: a failed read, a hand-off, an export. -->
+            <TextBlock Grid.Row="4"
+                       Classes="caption plan-status"
+                       Classes.failure="{Binding StatusIsFailure}"
+                       IsVisible="{Binding HasStatus}"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0"
+                       Text="{Binding StatusText}"
+                       AutomationProperties.AutomationId="plan-status" />
+          </Grid>
+
+          <!-- Right rail: what to do next, the ways out of the panel, and the edit history of the summary. -->
+          <Border Grid.Column="1" Classes="plan-rail">
+            <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+              <StackPanel Grid.Row="0" Spacing="4">
+                <TextBlock Classes="plan-heading" Text="{Binding [plan.next], Source={x:Static loc:Loc.Instance}}" />
+                <Border Classes="plan-next" IsVisible="{Binding HasNextStep}">
+                  <StackPanel Spacing="3">
+                    <TextBlock FontSize="{DynamicResource FontSizeBase}"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Text="{Binding NextStep.Title}"
+                               AutomationProperties.AutomationId="plan-next-title" />
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding NextStep.HasGroupTitle}"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               TextWrapping="Wrap"
+                               Text="{Binding NextStep.GroupTitle}" />
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding NextStep.HasNote}"
+                               Foreground="{DynamicResource TextMutedBrush}"
+                               TextWrapping="Wrap"
+                               Text="{Binding NextStep.Note}" />
+                    <Button Classes="plan-handoff"
+                            HorizontalAlignment="Left"
+                            Margin="0,4,0,0"
+                            Command="{Binding NextStep.HandoffCommand}"
+                            Content="{Binding [plan.handoff], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="plan-next-handoff" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="caption"
+                           IsVisible="{Binding !HasNextStep}"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           TextWrapping="Wrap"
+                           Text="{Binding [plan.next.none], Source={x:Static loc:Loc.Instance}}"
+                           AutomationProperties.AutomationId="plan-next-none" />
+              </StackPanel>
+
+              <StackPanel Grid.Row="1" Spacing="1" Margin="0,12,0,0">
+                <views:CopyTextButton Classes="plan-action"
+                                      IsEnabled="{Binding HasSession}"
+                                      AutomationProperties.AutomationId="plan-copy">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" Foreground="{DynamicResource TextMutedBrush}" />
+                    <TextBlock Classes="caption" Text="{Binding [plan.copy], Source={x:Static loc:Loc.Instance}}" />
+                  </StackPanel>
+                </views:CopyTextButton>
+                <Button Classes="plan-action"
+                        IsEnabled="{Binding HasSession}"
+                        Click="OnExportClick"
+                        AutomationProperties.AutomationId="plan-export">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <wc:FluentIcon Data="{StaticResource IconSave}" Width="13" Height="13" Foreground="{DynamicResource TextMutedBrush}" />
+                    <TextBlock Classes="caption" Text="{Binding [plan.export], Source={x:Static loc:Loc.Instance}}" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="plan-action"
+                        Command="{Binding OpenPullRequestCommand}"
+                        ToolTip.Tip="{Binding [plan.pr.hint], Source={x:Static loc:Loc.Instance}}"
+                        AutomationProperties.AutomationId="plan-open-pr">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <wc:FluentIcon Data="{StaticResource IconGitPush}" Width="13" Height="13" Foreground="{DynamicResource TextMutedBrush}" />
+                    <TextBlock Classes="caption" Text="{Binding [plan.pr], Source={x:Static loc:Loc.Instance}}" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+
+              <Border Grid.Row="2" Height="1" Margin="0,12,0,8" Background="{DynamicResource BorderBrush}" />
+
+              <Grid Grid.Row="3" RowDefinitions="Auto,*">
+                <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,4">
+                  <TextBlock Grid.Column="0" Classes="plan-heading" Text="{Binding [plan.revisions], Source={x:Static loc:Loc.Instance}}" />
+                  <TextBlock Grid.Column="2"
+                             Classes="caption"
+                             IsVisible="{Binding HasRevisions}"
+                             Text="{Binding RevisionsCountText}"
+                             AutomationProperties.AutomationId="plan-revisions-count" />
+                </Grid>
+                <Panel Grid.Row="1">
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Revisions}" AutomationProperties.AutomationId="plan-revisions">
+                      <ItemsControl.ItemTemplate>
+                        <!-- A replaced version: when it was replaced, its first line, and the copy button at its end. -->
+                        <DataTemplate x:DataType="vm:PlanRevisionViewModel">
+                          <Grid ColumnDefinitions="*,Auto" AutomationProperties.AutomationId="plan-revision">
+                            <Button Grid.Column="0"
+                                    Classes="plan-revision"
+                                    Command="{Binding ViewCommand}"
+                                    ToolTip.Tip="{Binding [plan.revisions.view], Source={x:Static loc:Loc.Instance}}"
+                                    AutomationProperties.Name="{Binding [plan.revisions.view], Source={x:Static loc:Loc.Instance}}">
+                              <Grid ColumnDefinitions="Auto,*">
+                                <TextBlock Grid.Column="0"
+                                           Classes="caption mono"
+                                           Margin="0,0,8,0"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding TimeText}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="caption"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           Text="{Binding PreviewText}" />
+                              </Grid>
+                            </Button>
+                            <views:CopyTextButton Grid.Column="1"
+                                                  Classes="ghost icon"
+                                                  Width="22" Height="22"
+                                                  ToolTip.Tip="{Binding [plan.copy], Source={x:Static loc:Loc.Instance}}"
+                                                  AutomationProperties.Name="{Binding [plan.copy], Source={x:Static loc:Loc.Instance}}">
+                              <wc:FluentIcon Data="{StaticResource IconCopy}" Width="12" Height="12" Foreground="{DynamicResource TextMutedBrush}" />
+                            </views:CopyTextButton>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                  <TextBlock Classes="caption"
+                             IsVisible="{Binding !HasRevisions}"
+                             Foreground="{DynamicResource TextMutedBrush}"
+                             TextWrapping="Wrap"
+                             Text="{Binding [plan.revisions.empty], Source={x:Static loc:Loc.Instance}}"
+                             AutomationProperties.AutomationId="plan-revisions-empty" />
+                </Panel>
+              </Grid>
+
+              <TextBlock Grid.Row="4"
+                         Classes="caption"
+                         IsVisible="{Binding !HasSession}"
+                         Foreground="{DynamicResource TextMutedBrush}"
+                         TextWrapping="Wrap"
+                         Margin="0,8,0,0"
+                         Text="{Binding [plan.noSession], Source={x:Static loc:Loc.Instance}}" />
+            </Grid>
+          </Border>
+        </Grid>
+      </Grid>
+    </Border>
+  </Grid>
 </UserControl>

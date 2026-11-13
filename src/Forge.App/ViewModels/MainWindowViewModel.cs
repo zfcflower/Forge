@@ -313,6 +313,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             () => true,
             OnCommandFailed);
 
+        // The plan panel's view model and the command that opens it (wave W7). Created before the window binds, so the
+        // overlay in MainWindow.axaml has its data context from the first frame.
+        InitializePlan();
+
         clock = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         clock.Tick += OnClockTick;
         clock.Start();
@@ -3182,6 +3186,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Todos.Dispose();
         Reviews.Dispose();
         Specs.Dispose();
+        plan?.Dispose();
+        PropertyChanged -= OnPlanActiveSessionChanged;
         Workbench.Dispose();
 
         // The final layout capture and the disposals above can still raise a layout change, which restarts the save

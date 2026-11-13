@@ -100,6 +100,20 @@
                            Height="16"
                            Foreground="{DynamicResource TextMutedBrush}" />
           </Button>
+          <!-- The plan panel of the active session: one click opens the plan summary, the steps and the revision
+               history, and a second click closes it again. Disabled while no session is open, because there is no plan. -->
+          <Button Classes="ghost icon"
+                  Width="30"
+                  Height="26"
+                  Command="{Binding OpenPlanCommand}"
+                  ToolTip.Tip="{Binding [plan.tooltip], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="plan-open"
+                  AutomationProperties.Name="{Binding [plan.title], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconPlan}"
+                           Width="16"
+                           Height="16"
+                           Foreground="{DynamicResource TextMutedBrush}" />
+          </Button>
           <StackPanel Orientation="Horizontal"
                       Spacing="6"
                       VerticalAlignment="Center"
