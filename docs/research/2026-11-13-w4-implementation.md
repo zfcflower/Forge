@@ -67,7 +67,7 @@ dotnet test tests/Forge.Core.Tests                        → 2136 通过 / 0 �
 dotnet test tests/Forge.Mcp.Tests                         → 190 通过 / 1 失败(既有环境问题,见下)
 dotnet test tests/Forge.Workspace.Tests                   → 1312 通过 / 0 失败
 dotnet test tests/Forge.Integration.Tests                 → 265 通过 / 0 失败
-dotnet test tests/Forge.App.Tests                          → 见「全量 App 套件」一行
+dotnet test tests/Forge.App.Tests(全量)                    → 3662 通过 / 0 失败(11m54s)
 dotnet test tests/Forge.App.Tests --filter Workbench      → 575 通过 / 0 失败
 dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localization|MinorRegression → 590 通过 / 0 失败
 ```
