@@ -85,6 +85,40 @@ internal sealed class AppPreferences : ObservableObject
     public const string EditorThemeDark = "dark";
     public const string DefaultEditorTheme = EditorThemeAuto;
 
+    /// <summary>
+    /// Longest edge of a thumbnail in a chat tool row, in device-independent pixels; clamped to
+    /// [<see cref="MinToolImageThumbnailEdge"/>, <see cref="MaxToolImageThumbnailEdge"/>]. The stored image is never re-encoded for
+    /// this — it only bounds what is decoded for the row.
+    /// </summary>
+    public const int MinToolImageThumbnailEdge = 64;
+    public const int MaxToolImageThumbnailEdge = 512;
+    public const int DefaultToolImageThumbnailEdge = 256;
+
+    /// <summary>
+    /// Whether a tool result's images are sent to the model (default on). Off keeps them in the transcript and sends the text
+    /// placeholder the result already carries, which is what a text-only model or a cost-conscious user wants.
+    /// </summary>
+    public const bool DefaultSendToolImagesToModel = true;
+
+    /// <summary>Rows a CSV/TSV preview parses before it stops; clamped to [<see cref="MinFilePreviewRows"/>, <see cref="MaxFilePreviewRows"/>].</summary>
+    public const int MinFilePreviewRows = 50;
+    public const int MaxFilePreviewRows = 10_000;
+    public const int DefaultFilePreviewRows = 1_000;
+
+    /// <summary>Characters kept from one <c>.ipynb</c> output; clamped to [<see cref="MinNotebookOutputChars"/>, <see cref="MaxNotebookOutputChars"/>].</summary>
+    public const int MinNotebookOutputChars = 1_000;
+    public const int MaxNotebookOutputChars = 200_000;
+    public const int DefaultNotebookOutputChars = 20_480;
+
+    /// <summary>
+    /// Largest image (in bytes, on disk) the image preview opens; clamped to
+    /// [<see cref="MinPreviewImageBytes"/>, <see cref="MaxPreviewImageBytes"/>]. Beyond it the document shows the placeholder card and
+    /// offers the system's own viewer, which streams instead of holding the whole file in memory.
+    /// </summary>
+    public const int MinPreviewImageBytes = 1 * 1024 * 1024;
+    public const int MaxPreviewImageBytes = 512 * 1024 * 1024;
+    public const int DefaultPreviewImageBytes = 20 * 1024 * 1024;
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
@@ -118,6 +152,11 @@ internal sealed class AppPreferences : ObservableObject
     private bool editorTabsToSpaces = true;
     private string editorColumnRulers = string.Empty;
     private string editorTheme = DefaultEditorTheme;
+    private int toolImageThumbnailEdge = DefaultToolImageThumbnailEdge;
+    private bool sendToolImagesToModel = DefaultSendToolImagesToModel;
+    private int filePreviewRows = DefaultFilePreviewRows;
+    private int notebookOutputChars = DefaultNotebookOutputChars;
+    private int previewImageBytes = DefaultPreviewImageBytes;
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -276,6 +315,37 @@ internal sealed class AppPreferences : ObservableObject
     }
 
     /// <summary>Whether the named tool is switched on (absent from <see cref="ToolsDisabled"/>).</summary>
+    /// <summary>Longest edge of a tool row's thumbnail, in device-independent pixels; clamped to [<see cref="MinToolImageThumbnailEdge"/>, <see cref="MaxToolImageThumbnailEdge"/>].</summary>
+    public int ToolImageThumbnailEdge
+    {
+        get => toolImageThumbnailEdge;
+        set => Set(ref toolImageThumbnailEdge, Math.Clamp(value, MinToolImageThumbnailEdge, MaxToolImageThumbnailEdge));
+    }
+
+    /// <summary>Whether a tool result's images reach the model (default on); read when each request is built.</summary>
+    public bool SendToolImagesToModel { get => sendToolImagesToModel; set => Set(ref sendToolImagesToModel, value); }
+
+    /// <summary>Rows a CSV/TSV preview parses; clamped to [<see cref="MinFilePreviewRows"/>, <see cref="MaxFilePreviewRows"/>].</summary>
+    public int FilePreviewRows
+    {
+        get => filePreviewRows;
+        set => Set(ref filePreviewRows, Math.Clamp(value, MinFilePreviewRows, MaxFilePreviewRows));
+    }
+
+    /// <summary>Characters kept from one <c>.ipynb</c> output; clamped to [<see cref="MinNotebookOutputChars"/>, <see cref="MaxNotebookOutputChars"/>].</summary>
+    public int NotebookOutputChars
+    {
+        get => notebookOutputChars;
+        set => Set(ref notebookOutputChars, Math.Clamp(value, MinNotebookOutputChars, MaxNotebookOutputChars));
+    }
+
+    /// <summary>Largest image the image preview opens, in bytes; clamped to [<see cref="MinPreviewImageBytes"/>, <see cref="MaxPreviewImageBytes"/>].</summary>
+    public int PreviewImageBytes
+    {
+        get => previewImageBytes;
+        set => Set(ref previewImageBytes, Math.Clamp(value, MinPreviewImageBytes, MaxPreviewImageBytes));
+    }
+
     public bool IsToolEnabled(string name) => !toolsDisabled.Contains(name, StringComparer.Ordinal);
 
     /// <summary>Switches one tool on or off; raises PropertyChanged for <see cref="ToolsDisabled"/> only when it moved.</summary>
@@ -337,6 +407,19 @@ internal sealed class AppPreferences : ObservableObject
         editorTabsToSpaces = section.EditorTabsToSpaces ?? true;
         editorColumnRulers = (section.EditorColumnRulers ?? string.Empty).Trim();
         editorTheme = ThemeToken(section.EditorTheme);
+        toolImageThumbnailEdge = section.ToolImageThumbnailEdge is { } thumbnailEdge
+            ? Math.Clamp(thumbnailEdge, MinToolImageThumbnailEdge, MaxToolImageThumbnailEdge)
+            : DefaultToolImageThumbnailEdge;
+        sendToolImagesToModel = section.SendToolImagesToModel ?? DefaultSendToolImagesToModel;
+        filePreviewRows = section.FilePreviewRows is { } previewRows
+            ? Math.Clamp(previewRows, MinFilePreviewRows, MaxFilePreviewRows)
+            : DefaultFilePreviewRows;
+        notebookOutputChars = section.NotebookOutputChars is { } outputChars
+            ? Math.Clamp(outputChars, MinNotebookOutputChars, MaxNotebookOutputChars)
+            : DefaultNotebookOutputChars;
+        previewImageBytes = section.PreviewImageBytes is { } imageBytes
+            ? Math.Clamp(imageBytes, MinPreviewImageBytes, MaxPreviewImageBytes)
+            : DefaultPreviewImageBytes;
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -376,6 +459,11 @@ internal sealed class AppPreferences : ObservableObject
             EditorTabsToSpaces = editorTabsToSpaces,
             EditorColumnRulers = editorColumnRulers,
             EditorTheme = editorTheme,
+            ToolImageThumbnailEdge = toolImageThumbnailEdge,
+            SendToolImagesToModel = sendToolImagesToModel,
+            FilePreviewRows = filePreviewRows,
+            NotebookOutputChars = notebookOutputChars,
+            PreviewImageBytes = previewImageBytes,
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -581,6 +669,21 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("editorTheme")]
     public string? EditorTheme { get; set; }
+
+    [JsonPropertyName("toolImageThumbnailEdge")]
+    public int? ToolImageThumbnailEdge { get; set; }
+
+    [JsonPropertyName("sendToolImagesToModel")]
+    public bool? SendToolImagesToModel { get; set; }
+
+    [JsonPropertyName("filePreviewRows")]
+    public int? FilePreviewRows { get; set; }
+
+    [JsonPropertyName("notebookOutputChars")]
+    public int? NotebookOutputChars { get; set; }
+
+    [JsonPropertyName("previewImageBytes")]
+    public int? PreviewImageBytes { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>

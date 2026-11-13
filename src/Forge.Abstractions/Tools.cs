@@ -4,7 +4,45 @@ public enum ToolSideEffect { ReadOnly, Write, Execute }
 
 public sealed record ToolCall(string Id, string Name, string ArgumentsJson);
 
-public sealed record ToolResult(string Content, bool IsError = false);
+/// <summary>
+/// What a tool returns: a list of content blocks. Text is the default and the only shape a text-only tool ever builds; an
+/// image block is how a tool that produced a picture (a screenshot, an MCP server's <c>image</c> content) hands it over
+/// instead of describing it. <see cref="Content"/> is the text view of the same payload — what a transcript, the search
+/// index and a provider without image support show — and never the base64 itself.
+/// </summary>
+/// <remarks>
+/// <see cref="Blocks"/> is copied on construction and read-only afterwards, so the property can be kept and re-read on any
+/// thread. Both derived lists are computed once here rather than per read: the pipeline asks for <see cref="Content"/> in
+/// several places per tool call (storage, search text, provider wire, UI).
+/// </remarks>
+public sealed record ToolResult
+{
+    /// <summary>A text-only result, the shape of every tool that returns words.</summary>
+    public ToolResult(string Content, bool IsError = false)
+        : this([new TextBlock(Content)], IsError)
+    {
+    }
+
+    public ToolResult(IReadOnlyList<ContentBlock> Blocks, bool IsError = false)
+    {
+        ArgumentNullException.ThrowIfNull(Blocks);
+        this.Blocks = Blocks.Count == 0 ? [] : [.. Blocks];
+        Content = ToolPayload.Text(this.Blocks);
+        Images = ToolPayload.Images(this.Blocks);
+        this.IsError = IsError;
+    }
+
+    /// <summary>The blocks the tool returned, in order; empty when it returned nothing.</summary>
+    public IReadOnlyList<ContentBlock> Blocks { get; }
+
+    /// <summary>The text of this result; placeholders stand in for blocks that carry no text.</summary>
+    public string Content { get; }
+
+    /// <summary>The images of this result, in order; empty for a text-only tool.</summary>
+    public IReadOnlyList<ImageBlock> Images { get; }
+
+    public bool IsError { get; }
+}
 
 /// <summary>Execution context handed to every tool; the workspace root bounds file access.</summary>
 public sealed record ToolContext(string SessionId, string WorkingDirectory, int AgentDepth = 0)

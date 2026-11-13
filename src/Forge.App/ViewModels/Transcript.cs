@@ -221,7 +221,7 @@ internal sealed class TurnNoticeViewModel(LocText text, bool isError) : TurnBloc
 /// <summary>
 /// One tool call: "▸ name · argument summary · ✓" collapsed, full arguments and result when expanded.
 /// </summary>
-internal sealed class ToolRowViewModel(string name, string argumentsJson) : TurnBlockViewModel
+internal sealed partial class ToolRowViewModel(string name, string argumentsJson) : TurnBlockViewModel
 {
     private const int SummaryLimit = 160;
 
@@ -262,7 +262,17 @@ internal sealed class ToolRowViewModel(string name, string argumentsJson) : Turn
 
     public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
 
-    public void Complete(ToolResult toolResult) => Complete(LocText.Literal(toolResult.Content), toolResult.IsError);
+    public void Complete(ToolResult toolResult)
+    {
+        Complete(LocText.Literal(toolResult.Content), toolResult.IsError);
+        ApplyImages(toolResult);
+    }
+
+    /// <summary>
+    /// Takes the images of a finished result into the row. Declared here and implemented in
+    /// <c>Transcript.ToolImages.cs</c>, so the row's text half and its picture half never edit one file.
+    /// </summary>
+    partial void ApplyImages(ToolResult toolResult);
 
     /// <summary>
     /// Closes the row with a result that is not the tool's own text - the placeholder of a call that never came back - so a

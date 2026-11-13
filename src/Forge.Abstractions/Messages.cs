@@ -11,7 +11,37 @@ public sealed record ThinkingBlock(string Text, string? Signature = null) : Cont
 
 public sealed record ToolCallBlock(string Id, string Name, string ArgumentsJson) : ContentBlock;
 
-public sealed record ToolResultBlock(string CallId, string Content, bool IsError = false) : ContentBlock;
+public sealed record ToolResultBlock : ContentBlock
+{
+    /// <summary>A text-only tool result; the shape every existing call site builds.</summary>
+    public ToolResultBlock(string CallId, string Content, bool IsError = false)
+        : this(CallId, [new TextBlock(Content)], IsError)
+    {
+    }
+
+    public ToolResultBlock(string CallId, IReadOnlyList<ContentBlock> Blocks, bool IsError = false)
+    {
+        ArgumentNullException.ThrowIfNull(Blocks);
+        this.CallId = CallId;
+        this.Blocks = Blocks.Count == 0 ? [] : [.. Blocks];
+        Content = ToolPayload.Text(this.Blocks);
+        Images = ToolPayload.Images(this.Blocks);
+        this.IsError = IsError;
+    }
+
+    public string CallId { get; }
+
+    /// <summary>The blocks the tool returned: text, images, or both (see <see cref="ToolResult"/>).</summary>
+    public IReadOnlyList<ContentBlock> Blocks { get; }
+
+    /// <summary>The text view of <see cref="Blocks"/>; placeholders stand in for the blocks that carry no text.</summary>
+    public string Content { get; }
+
+    /// <summary>The images this result carried; a provider that cannot carry them, and every text reader, sees <see cref="Content"/> instead.</summary>
+    public IReadOnlyList<ImageBlock> Images { get; }
+
+    public bool IsError { get; }
+}
 
 /// <summary>
 /// An image the user attached (user messages only for now). <paramref name="MediaType"/> is one of <c>image/png</c>,

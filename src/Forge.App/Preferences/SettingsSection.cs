@@ -116,6 +116,12 @@ internal static class SettingsSectionIds
 
     public const string Mcp = "mcp";
 
+    /// <summary>How a chat reads: tool-result thumbnails and whether they reach the model.</summary>
+    public const string Chat = "chat";
+
+    /// <summary>How the file viewer reads a document: table rows, notebook output, image preview limits.</summary>
+    public const string Files = "files";
+
     public const string Tools = "tools";
 
     /// <summary>The automations page: built-ins, user definitions and their run history (the title-bar entry opens it).</summary>
@@ -130,6 +136,11 @@ internal static class SettingsSectionIds
 
     /// <summary>The editor sits between the language choice and the terminal: it is a display choice like appearance, not a tool.</summary>
     public const int EditorOrder = 350;
+    /// <summary>The chat section sits right after appearance: both are about what the workbench shows.</summary>
+    public const int ChatOrder = 250;
+
+    /// <summary>The file viewer's limits sit right after the editor section, which is the other way a file is read.</summary>
+    public const int FilesOrder = 380;
 
     public const int TerminalOrder = 400;
     public const int GitOrder = 500;
