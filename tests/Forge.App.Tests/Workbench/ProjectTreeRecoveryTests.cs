@@ -29,19 +29,8 @@ public sealed class ProjectTreeRecoveryTests
         await session.Dispatch(
             async () =>
             {
-                var root = Path.Combine(Path.GetTempPath(), "forge-tree-recovery-" + Guid.NewGuid().ToString("N"));
+                var (root, previous) = TempDataRoot.Redirect("forge-tree-recovery-");
                 var data = Path.Combine(root, "data");
-                var general = Path.Combine(root, "general");
-                var workspace = Path.Combine(root, "workspace");
-                foreach (var directory in new[] { data, general, workspace })
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                var previous = (
-                    Data: Environment.GetEnvironmentVariable(AppPaths.DataVariable),
-                    General: Environment.GetEnvironmentVariable(AppPaths.GeneralVariable),
-                    Workspace: Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable));
                 try
                 {
                     var repository = Directory.CreateDirectory(Path.Combine(root, "demo")).FullName;
@@ -51,10 +40,6 @@ public sealed class ProjectTreeRecoveryTests
                     }
 
                     await RestampAsVersion2FileAsync(Path.Combine(data, StorageFileName));
-
-                    Environment.SetEnvironmentVariable(AppPaths.DataVariable, data);
-                    Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, general);
-                    Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, workspace);
 
                     var composition = AppComposition.Create();
                     try
@@ -74,10 +59,8 @@ public sealed class ProjectTreeRecoveryTests
                 }
                 finally
                 {
-                    Environment.SetEnvironmentVariable(AppPaths.DataVariable, previous.Data);
-                    Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, previous.General);
-                    Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, previous.Workspace);
-                    DeleteTree(root);
+                    previous.Restore();
+                    TestTempFiles.DeleteTree(root);
                 }
             },
             CancellationToken.None);
@@ -114,22 +97,5 @@ public sealed class ProjectTreeRecoveryTests
             $"UPDATE projects SET added_at = '{ForeignTimestamp}';\n" +
             "PRAGMA user_version = 2;";
         await command.ExecuteNonQueryAsync();
-    }
-
-    private static void DeleteTree(string path)
-    {
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            // A leftover temp directory never fails the assertion the test is actually about.
-        }
     }
 }

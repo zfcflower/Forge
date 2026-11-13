@@ -27,8 +27,7 @@ public sealed class FileLoadRobustnessTests : IDisposable
         var path = Write("many.txt", string.Concat(Enumerable.Range(0, 25000).Select(static i => "l" + i.ToString(CultureInfo.InvariantCulture) + "\n")));
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             Assert.False(model.HasError, model.Error);
             Assert.Equal(25000, model.EditText.Count(static c => c == '\n'));
             Assert.Equal("l24999\n", model.GetLinesText(25000, 25000));
@@ -46,16 +45,14 @@ public sealed class FileLoadRobustnessTests : IDisposable
 
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             Assert.True(model.HasError);
             Assert.False(string.IsNullOrWhiteSpace(model.Error));
             Assert.False(model.HasDocument);
             Assert.Null(model.EditorDocument);
             Assert.False(model.IsLoading);
             var view = new FileDocumentView { DataContext = model };
-            var window = new Window { Width = 600, Height = 300, Content = view };
-            window.Show();
+            var window = SharedUi.Show(view, 600, 300);
             WorkbenchUi.Settle(window);
             Assert.True(WorkbenchUi.Find<TextBlock>(window, "file-error").IsVisible);
             window.Close();
@@ -132,8 +129,7 @@ public sealed class FileLoadRobustnessTests : IDisposable
         var second = Write("second.txt", "two\n");
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(first, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(first);
             model.IsEditing = true;
             model.EditText = "one edited\n";
             await model.LoadAsync(second, CancellationToken.None);
@@ -144,17 +140,11 @@ public sealed class FileLoadRobustnessTests : IDisposable
         });
     }
 
-    private static async Task Ui(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-file-load-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-file-load-");
         roots.Add(root);
         return root;
     }

@@ -112,7 +112,7 @@ public sealed class WindowCaptionTests
                     var at = new Point(scene.Window.Bounds.Width / 4, TitleBarPressY);
                     scene.Window.MouseDown(at, MouseButton.Left);
                     scene.Window.MouseUp(at, MouseButton.Left);
-                    Settle();
+                    SharedUi.Settle();
                     return (scene.Window, Moved: moved.ToArray());
                 }
                 finally
@@ -145,7 +145,7 @@ public sealed class WindowCaptionTests
                     var bounds = dock.Bounds;
                     scene.Window.MouseDown(centre, MouseButton.Left);
                     scene.Window.MouseUp(centre, MouseButton.Left);
-                    Settle();
+                    SharedUi.Settle();
                     return (DockBounds: bounds, Moved: moved.ToArray(), Docked: !scene.Layout.Floating.Contains(scene.Item));
                 }
                 finally
@@ -187,7 +187,7 @@ public sealed class WindowCaptionTests
                     scene.Window.MouseUp(at, MouseButton.Left);
                     scene.Window.MouseDown(at, MouseButton.Left);
                     scene.Window.MouseUp(at, MouseButton.Left);
-                    Settle();
+                    SharedUi.Settle();
                     return (
                         Clicks: clicks.ToArray(),
                         State: scene.Window.WindowState,
@@ -231,12 +231,12 @@ public sealed class WindowCaptionTests
                     // The preview group's tab strip is a body element: its blank space must keep the tab gestures.
                     scene.Window.MouseDown(stripPoint, MouseButton.Left);
                     scene.Window.MouseUp(stripPoint, MouseButton.Left);
-                    Settle();
+                    SharedUi.Settle();
                     var afterStrip = moved.ToArray();
 
                     scene.Window.MouseDown(titlePoint, MouseButton.Left);
                     scene.Window.MouseUp(titlePoint, MouseButton.Left);
-                    Settle();
+                    SharedUi.Settle();
                     return (StripBounds: strip.Bounds, AfterStrip: afterStrip, AfterTitle: moved.ToArray());
                 }
                 finally
@@ -267,7 +267,7 @@ public sealed class WindowCaptionTests
                 try
                 {
                     window.Show();
-                    Settle();
+                    SharedUi.Settle();
                     var bar = window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "TitleBar");
                     var terminal = WorkbenchUi.Find<Button>(window, "terminal-open");
                     WindowCaption.BeginMove = (movedWindow, _) => moved.Add(movedWindow);
@@ -301,7 +301,7 @@ public sealed class WindowCaptionTests
         var item = layout.FloatTab(tab);
         var window = new FloatingPanelWindow(layout, item);
         window.Show(owner);
-        Settle();
+        SharedUi.Settle();
         return (owner, window, item, layout);
     }
 
@@ -317,7 +317,7 @@ public sealed class WindowCaptionTests
         var item = layout.FloatFilesPanel();
         var window = new FloatingPanelWindow(layout, item);
         window.Show(owner);
-        Settle();
+        SharedUi.Settle();
         return (owner, window, item, layout);
     }
 
@@ -357,18 +357,4 @@ public sealed class WindowCaptionTests
         return args;
     }
 
-    /// <summary>
-    /// Drains the dispatcher and renders, twice: hit testing sees a control only after a render pass, and a layout change
-    /// can post follow-up work that only exists after the first pass. Headless rendering runs only when this is called.
-    /// </summary>
-    private static void Settle()
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
 }

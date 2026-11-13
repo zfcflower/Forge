@@ -101,9 +101,7 @@ public class AutomationHostSupportTests
             retryable: true,
             statusCode: 429));
         var host = AgentTestHost.Create(provider);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         var quotaIndex = events.FindIndex(static e => e is AgentQuotaExhausted);
         var failedIndex = events.FindIndex(static e => e is AgentFailed);
@@ -118,9 +116,7 @@ public class AutomationHostSupportTests
     {
         var provider = new FakeProvider((_, _) => throw new ProviderException("fake returned 500: boom", retryable: false, statusCode: 500));
         var host = AgentTestHost.Create(provider);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentQuotaExhausted>());
         Assert.Single(events.OfType<AgentFailed>());

@@ -17,7 +17,7 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "gated", "1.0.0");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "gated", "1.0.0");
 
         await fx.Client.DisablePluginAsync("gated", "1.0.0", fx.Ct);
         Assert.Equal("Disabled", fx.ReadRecord("gated", "1.0.0")!.Status);
@@ -34,7 +34,9 @@ public sealed class ExtensionBlocklistTests
     {
         await using var host = RestartableHost.Create();
         var client = await host.StartAsync();
-        await CommitAsync(host, "gone", "1.0.0");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(client, host.Ct, "gone", "1.0.0");
+        await host.WaitUntilAsync(
+            () => host.Client.ToolsByPlugin.TryGetValue("gone", out var tools) && tools.Count == 6, "gone tools");
 
         await client.DeletePluginAsync("gone", "1.0.0", host.Ct);
 
@@ -56,7 +58,7 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "flip", "1.0.0");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "flip", "1.0.0");
         await fx.Client.DisablePluginAsync("flip", "1.0.0", fx.Ct);
 
         await fx.Client.EnablePluginAsync("flip", "1.0.0", fx.Ct);
@@ -86,14 +88,14 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "halt", "1.0.0");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("halt").Count == 6, "halt tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "halt", "1.0.0");
+        await fx.WaitForToolsAsync("halt", 6, "halt tools");
         var staleEcho = fx.ToolOf("halt", "echo");
         var pid = await fx.WorkerPidAsync("halt");
 
         await fx.Client.DisablePluginAsync("halt", "1.0.0", fx.Ct);
 
-        await fx.WaitUntilAsync(() => fx.ToolsOf("halt").Count == 0, "halt tools to be unregistered");
+        await fx.WaitForToolsAsync("halt", 0, "halt tools to be unregistered");
         await fx.WaitForExitAsync(pid, "the disabled worker");
         Assert.Equal("Disabled", fx.ReadRecord("halt", "1.0.0")!.Status);
 
@@ -110,18 +112,16 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "resume", "1.0.0");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("resume").Count == 6, "resume tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "resume", "1.0.0");
+        await fx.WaitForToolsAsync("resume", 6, "resume tools");
 
         await fx.Client.DisablePluginAsync("resume", "1.0.0", fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("resume").Count == 0, "resume tools to be unregistered");
+        await fx.WaitForToolsAsync("resume", 0, "resume tools to be unregistered");
 
         await fx.Client.EnablePluginAsync("resume", "1.0.0", fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("resume").Count == 6, "resume tools after enable");
+        await fx.WaitForToolsAsync("resume", 6, "resume tools after enable");
 
-        var echo = await fx.InvokeAsync("resume", "echo", """{"text":"back"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("x:back", echo.Content);
+        await fx.AssertToolContentAsync("resume", "echo", """{"text":"back"}""", "x:back");
     }
 
     [Fact]
@@ -129,11 +129,11 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "drift", "1.0.0");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("drift").Count == 6, "drift tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "drift", "1.0.0");
+        await fx.WaitForToolsAsync("drift", 6, "drift tools");
 
         await fx.Client.DisablePluginAsync("drift", "1.0.0", fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("drift").Count == 0, "drift tools to be unregistered");
+        await fx.WaitForToolsAsync("drift", 0, "drift tools to be unregistered");
 
         fx.EditSource("drift", PluginSources.Standard("drift", echoPrefix: "changed"));
         await fx.Client.RefreshPluginsAsync(fx.Ct);
@@ -151,8 +151,8 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "bye", "1.0.0");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("bye").Count == 6, "bye tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "bye", "1.0.0");
+        await fx.WaitForToolsAsync("bye", 6, "bye tools");
 
         // A staged update is discarded together with the live directory.
         var update = await fx.Client.StageExtensionAsync(
@@ -188,7 +188,7 @@ public sealed class ExtensionBlocklistTests
     {
         await using var fx = new E2eFixture();
         await fx.StartAsync();
-        await CommitAsync(fx, "ver", "1.0.0");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "ver", "1.0.0");
 
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
             () => fx.Client.DisablePluginAsync("ver", "9.9.9", fx.Ct), "version_mismatch");
@@ -198,30 +198,6 @@ public sealed class ExtensionBlocklistTests
             () => fx.Client.DeletePluginAsync("ver", "9.9.9", fx.Ct), "version_mismatch");
 
         // The installed version is untouched and still runnable.
-        var echo = await fx.InvokeAsync("ver", "echo", """{"text":"ok"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("x:ok", echo.Content);
-    }
-
-    private static async Task CommitAsync(E2eFixture fx, string id, string version)
-    {
-        var staged = await fx.Client.StageExtensionAsync(
-            ExtensionAuthoringSupport.StagePluginRequest(id, version: version), fx.Ct);
-        Assert.Empty(staged.Diagnostics);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest(id, staged.SourceHash, staged.DependencyHash, staged.SdkVersion),
-            fx.Ct);
-    }
-
-    private static async Task CommitAsync(RestartableHost host, string id, string version)
-    {
-        var staged = await host.Client.StageExtensionAsync(
-            ExtensionAuthoringSupport.StagePluginRequest(id, version: version), host.Ct);
-        Assert.Empty(staged.Diagnostics);
-        await host.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest(id, staged.SourceHash, staged.DependencyHash, staged.SdkVersion),
-            host.Ct);
-        await host.WaitUntilAsync(
-            () => host.Client.ToolsByPlugin.TryGetValue(id, out var tools) && tools.Count == 6, id + " tools");
+        await fx.AssertToolContentAsync("ver", "echo", """{"text":"ok"}""", "x:ok");
     }
 }

@@ -15,9 +15,8 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class CopilotKeyRouteTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-copilot-key-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-copilot-key-");
 
-    public CopilotKeyRouteTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void The_preset_offers_a_key_beside_the_device_code_sign_in()
@@ -117,13 +116,7 @@ public sealed class CopilotKeyRouteTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private static ProviderPreset Copilot => ProviderPresets.Find(ProviderPresets.CopilotId)!;

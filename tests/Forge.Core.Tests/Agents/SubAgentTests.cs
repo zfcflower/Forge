@@ -53,9 +53,7 @@ public class SubAgentTests
                     ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "inspect")))
                     : Turn.Say("parent done"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var started = Assert.Single(events.OfType<AgentSubAgentStarted>());
@@ -104,9 +102,7 @@ public class SubAgentTests
             ? Turn.Call(("call", "spawn_agent", Spawn("Scout", "inspect")))
             : Turn.Say("leaf"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var instances = host.SubAgents.Instances;
@@ -160,9 +156,7 @@ public class SubAgentTests
             return Turn.Say("parent done");
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(maxParallel: 4), agents: [Scout]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.InRange(peak, 2, 4);
@@ -219,9 +213,7 @@ public class SubAgentTests
             agents: [Scout, Worker]);
         var root = host.CreateRoot("session", Workspace);
 
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(20));
-
-        Assert.Empty(events.OfType<AgentFailed>());
+        var events = await host.RunToCompletionAsync(root, timeoutSeconds: 20);
         Assert.InRange(peak, 2, 4);
         var instances = host.SubAgents.Instances;
         Assert.Equal(16, instances.Count);
@@ -269,9 +261,7 @@ public class SubAgentTests
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(maxParallel: 4), agents: [Scout]);
         var root = host.CreateRoot("session", Workspace);
 
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(20));
-
-        Assert.Empty(events.OfType<AgentFailed>());
+        var events = await host.RunToCompletionAsync(root, timeoutSeconds: 20);
         Assert.Equal(4, host.Options.MaxParallelSubAgents);
         Assert.InRange(peak, 2, 4);
         Assert.Equal(8, host.SubAgents.Instances.Count);
@@ -307,9 +297,7 @@ public class SubAgentTests
         });
         var worker = new AgentDefinition("Worker", "worker kind", "worker role", new ModelSettings("worker-model"), ["read"]);
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout, worker]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var child = Assert.Single(host.SubAgents.Instances);
@@ -344,9 +332,7 @@ public class SubAgentTests
             };
         });
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         var child = Assert.Single(host.SubAgents.Instances);
@@ -362,9 +348,7 @@ public class SubAgentTests
             ? Turn.Call(("call-1", "spawn_agent", Spawn("Nope", "task")))
             : Turn.Say("done"));
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session", Workspace);
-
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go"));
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
 
         Assert.Empty(events.OfType<AgentFailed>());
         Assert.Empty(host.SubAgents.Instances);

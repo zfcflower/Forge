@@ -13,7 +13,7 @@ namespace Forge.App.Automations.Settings;
 /// are callbacks, so the model is testable without an Avalonia application. The engine raises <c>Changed</c> off the UI
 /// thread; every refresh goes through <c>post</c>.
 /// </summary>
-internal sealed class AutomationsSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
+internal sealed class AutomationsSettingsViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
     private const int RunHistoryLimit = 100;
     private const int LastStatusScan = 500;
@@ -111,9 +111,8 @@ internal sealed class AutomationsSettingsViewModel : ObservableObject, IDisposab
         get => isRunning;
         set
         {
-            if (Set(ref isRunning, value))
+            if (SetAndNotify(ref isRunning, value, nameof(GlobalStatusText)))
             {
-                OnPropertyChanged(nameof(GlobalStatusText));
                 Track(SetPausedAsync(!value));
             }
         }
@@ -135,13 +134,7 @@ internal sealed class AutomationsSettingsViewModel : ObservableObject, IDisposab
     public string? Problem
     {
         get => problem;
-        private set
-        {
-            if (Set(ref problem, value))
-            {
-                OnPropertyChanged(nameof(HasProblem));
-            }
-        }
+        private set => SetAndNotify(ref problem, value, nameof(HasProblem));
     }
 
     public bool HasProblem => Problem is { Length: > 0 };

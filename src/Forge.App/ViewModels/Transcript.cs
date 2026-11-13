@@ -5,7 +5,7 @@ using Forge.App.Localization;
 
 namespace Forge.App.ViewModels;
 
-internal abstract class TranscriptItemViewModel : ObservableObject
+internal abstract class TranscriptItemViewModel : NotifyingObject
 {
     /// <summary>
     /// Re-raises the item's text properties in the current UI language. The owning session calls this after a language
@@ -366,13 +366,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     public bool IsExpanded
     {
         get => isExpanded;
-        set
-        {
-            if (Set(ref isExpanded, value))
-            {
-                OnPropertyChanged(nameof(ExpandGlyph));
-            }
-        }
+        set => SetAndNotify(ref isExpanded, value, nameof(ExpandGlyph));
     }
 
     public string ExpandGlyph => isExpanded ? "▾" : "▸";

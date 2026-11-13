@@ -59,25 +59,13 @@ public class AnthropicProviderTests
 
         var events = await provider.CollectAsync(TestData.Request(tools: [TestData.ReadFileTool()]));
 
-        var started = Assert.Single(events.OfType<ToolCallStarted>());
-        Assert.Equal("toolu_1", started.Id);
-        Assert.Equal("read_file", started.Name);
-
-        var deltas = events.OfType<ToolCallArgumentsDelta>().ToList();
-        Assert.Equal(2, deltas.Count);
-        Assert.All(deltas, d => Assert.Equal("toolu_1", d.Id));
-        Assert.Equal("{\"path\":\"a.txt\"}", string.Concat(deltas.Select(d => d.Json)));
-
-        var completed = events.Completed();
-        Assert.Equal(StopReason.ToolUse, completed.Stop);
-        Assert.Equal(new ToolCallBlock("toolu_1", "read_file", "{\"path\":\"a.txt\"}"), Assert.Single(completed.Message.Content));
+        events.AssertFragmentedReadFileCall("toolu_1");
     }
 
     [Fact]
     public async Task Places_cache_breakpoints_on_system_tools_and_message_index()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         var request = TestData.Request(
             tools: [TestData.ReadFileTool(), new ToolDefinition("write_file", "Writes", """{"type":"object"}""")],
@@ -113,8 +101,7 @@ public class AnthropicProviderTests
     [Fact]
     public async Task Places_cache_breakpoint_on_last_block_of_merged_message()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         var request = TestData.Request(
             messages:
@@ -202,8 +189,7 @@ public class AnthropicProviderTests
     [Fact]
     public async Task Does_not_send_unsigned_thinking_blocks_back()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         var request = TestData.Request(messages:
         [
@@ -229,8 +215,7 @@ public class AnthropicProviderTests
     [Fact]
     public async Task Sends_tool_results_in_user_role_messages()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         var request = TestData.Request(messages:
         [

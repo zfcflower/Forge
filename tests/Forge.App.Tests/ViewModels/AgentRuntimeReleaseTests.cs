@@ -23,8 +23,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class AgentRuntimeReleaseTests
 {
-    private const int PumpIterations = 400;
-    private const int PumpDelayMilliseconds = 5;
     private const string SessionTitle = "session under test";
 
     [Fact]
@@ -166,9 +164,9 @@ public sealed class AgentRuntimeReleaseTests
         new(
             static _ => new MissingCredentialProvider("unconfigured", Forge.App.Localization.ProviderStrings.SectionMissingText()),
             HostClient: null,
-            new EmptyStore(),
-            new EmptyCatalog(),
-            new EmptyTodoStore(),
+            new EmptySessionStore(DateTimeOffset.UnixEpoch),
+            new EmptySessionCatalog(DateTimeOffset.UnixEpoch),
+            new EmptyTodoStore("t1", DateTimeOffset.UnixEpoch),
             new ModelSettings("model"));
 
     private static async Task RunAsync(Func<Harness, Task> body)
@@ -192,20 +190,7 @@ public sealed class AgentRuntimeReleaseTests
             CancellationToken.None);
     }
 
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
     /// <summary>One throw-away data root, a real composition root and the root view model restored over one session tab.</summary>
     private sealed class Harness : IAsyncDisposable
@@ -231,20 +216,8 @@ public sealed class AgentRuntimeReleaseTests
 
         public static async Task<Harness> CreateAsync()
         {
-            var root = Path.Combine(Path.GetTempPath(), "forge-runtime-release-" + Guid.NewGuid().ToString("N"));
-            var data = Path.Combine(root, "data");
-            var workspace = Path.Combine(root, "workspace");
-            var general = Path.Combine(root, "general");
+            var (root, previous) = TempDataRoot.Redirect("forge-runtime-release-", "work");
             var work = Path.Combine(root, "work");
-            foreach (var directory in new[] { data, workspace, general, work })
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var previous = EnvironmentSnapshot.Capture();
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, data);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, general);
 
             var composition = AppComposition.Create();
             var info = await Task.Run(() => composition.Sessions.CreateSessionAsync(work, SessionTitle, CancellationToken.None));
@@ -290,110 +263,8 @@ public sealed class AgentRuntimeReleaseTests
 
             previous.Restore();
 
-            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
-
-            try
-            {
-                Directory.Delete(root, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
+            TestTempFiles.DeleteTree(root);
         }
     }
 
-    private readonly record struct EnvironmentSnapshot(string DataRoot, string Workspace, string GeneralWorkspace)
-    {
-        public static EnvironmentSnapshot Capture() =>
-            new(
-                Environment.GetEnvironmentVariable(AppPaths.DataVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable) ?? string.Empty,
-                Environment.GetEnvironmentVariable(AppPaths.GeneralVariable) ?? string.Empty);
-
-        public void Restore()
-        {
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, DataRoot);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Workspace);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, GeneralWorkspace);
-        }
-    }
-
-    private sealed class EmptyStore : ISessionStore
-    {
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", workspacePath, title, DateTimeOffset.UnixEpoch));
-
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult<SessionInfo?>(null);
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
-            Task.FromResult(1L);
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
-            Empty();
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Task.FromResult(0L);
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
-
-        private static async IAsyncEnumerable<StoredMessage> Empty()
-        {
-            await Task.Yield();
-            yield break;
-        }
-    }
-
-    private sealed class EmptyCatalog : ISessionCatalog
-    {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, DateTimeOffset.UnixEpoch));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class EmptyTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("t1", sessionId, title, TodoStatus.Pending, note, 0, DateTimeOffset.UnixEpoch));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

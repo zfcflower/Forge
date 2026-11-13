@@ -41,13 +41,8 @@ internal sealed class OpenRouterAuthentication
     /// <summary>The whole sign-in gives up here, so a browser tab left open cannot hold the dialog forever.</summary>
     internal static readonly TimeSpan LoginTimeout = TimeSpan.FromMinutes(5);
 
-    /// <summary>A stalled exchange must not outlive the dialog's patience.</summary>
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
-
     /// <summary>Another process can take a probed port between the probe and the bind, so a few candidates are tried.</summary>
     private const int PortAttempts = 8;
-
-    private const int MaxErrorBodyLength = 1024;
 
     /// <summary>
     /// The page the browser lands on. A static string on purpose: the callback runs before the UI is involved, and an asset
@@ -153,7 +148,7 @@ internal sealed class OpenRouterAuthentication
                 status);
         }
 
-        if (Text(document!.RootElement, "key") is not { } key)
+        if (ProviderSignInJson.Text(document!.RootElement, "key") is not { } key)
         {
             throw new ProviderException(
                 "OpenRouter: the key exchange response carried no key.",
@@ -311,87 +306,14 @@ internal sealed class OpenRouterAuthentication
     }
 
     /// <summary>
-    /// Sends one request and reads its body once. The body comes back as text plus a parsed document (null when it is not
-    /// JSON), because a failure still has to report the status and what the server said, JSON or not.
+    /// Sends one sign-in request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
+    /// mapping and the single body read, this class only names the provider and the step.
     /// </summary>
-    private async Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
+    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
         HttpRequestMessage message,
         string operation,
-        CancellationToken ct)
-    {
-        // The shared client has no timeout of its own: each step gets its own, so a stalled connection cannot outlive the
-        // five-minute sign-in.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await http
-                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new ProviderException("OpenRouter: the sign-in request timed out.", retryable: true);
-        }
-        catch (Exception exception) when (exception is HttpRequestException or IOException)
-        {
-            throw new ProviderException(
-                $"OpenRouter: the sign-in request failed: {exception.Message}",
-                retryable: true,
-                inner: exception);
-        }
-
-        using (response)
-        {
-            var status = (int)response.StatusCode;
-            string body;
-            try
-            {
-                body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is IOException or HttpRequestException)
-            {
-                throw new ProviderException(
-                    $"OpenRouter: the {operation} response could not be read.",
-                    retryable: true,
-                    status,
-                    exception);
-            }
-
-            if (status is >= 200 and < 300)
-            {
-                try
-                {
-                    return (status, JsonDocument.Parse(body), string.Empty);
-                }
-                catch (JsonException exception)
-                {
-                    throw new ProviderException(
-                        $"OpenRouter: the {operation} response is not JSON.",
-                        retryable: false,
-                        status,
-                        exception);
-                }
-            }
-
-            // A failure body is only shown to explain a failure; a successful one is parsed and never echoed.
-            return (status, TryParse(body), body.Length <= MaxErrorBodyLength ? body : body[..MaxErrorBodyLength]);
-        }
-    }
-
-    private static JsonDocument? TryParse(string body)
-    {
-        try
-        {
-            return JsonDocument.Parse(body);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+        CancellationToken ct) =>
+        ProviderSignInHttp.SendForJsonAsync(http, message, "OpenRouter", "sign-in", operation, ct);
 
     /// <summary>
     /// The tail of a failed exchange: the server's own explanation when the body carries one, otherwise what it said
@@ -400,7 +322,7 @@ internal sealed class OpenRouterAuthentication
     private static string Detail(JsonDocument? document, string body)
     {
         var element = document?.RootElement ?? default;
-        var detail = Text(element, "error_description") ?? Text(element, "message") ?? ErrorText(element);
+        var detail = ProviderSignInJson.Text(element, "error_description") ?? ProviderSignInJson.Text(element, "message") ?? ErrorText(element);
         if (detail is not null)
         {
             return ": " + detail;
@@ -420,16 +342,8 @@ internal sealed class OpenRouterAuthentication
         return error.ValueKind switch
         {
             JsonValueKind.String => error.GetString() is { Length: > 0 } text ? text : null,
-            JsonValueKind.Object => Text(error, "message") ?? Text(error, "type"),
+            JsonValueKind.Object => ProviderSignInJson.Text(error, "message") ?? ProviderSignInJson.Text(error, "type"),
             _ => null,
         };
     }
-
-    private static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(name, out var value)
-        && value.ValueKind == JsonValueKind.String
-        && value.GetString() is { Length: > 0 } text
-            ? text
-            : null;
 }

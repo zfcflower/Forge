@@ -58,7 +58,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             () =>
             {
                 shell.ViewModel.Settings.SelectedSection = shell.ViewModel.Settings.Sections.Items[^1];
-                PanelShell.Settle(shell.Window);
+                SharedUi.Settle(shell.Window);
                 return 0;
             },
             token);
@@ -145,7 +145,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                 () =>
                 {
                     shell.ViewModel.Settings.SelectedSection = shell.ViewModel.Settings.Sections.Items[^1];
-                    PanelShell.Settle(shell.Window);
+                    SharedUi.Settle(shell.Window);
                     return 0;
                 },
                 token);
@@ -189,7 +189,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             () =>
             {
                 Loc.Instance.Language = language;
-                PanelShell.Settle(window);
+                SharedUi.Settle(window);
                 return 0;
             },
             token);
@@ -206,7 +206,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             {
                 for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
                 {
-                    PanelShell.Settle(shell.Window);
+                    SharedUi.Settle(shell.Window);
                     if (PanelShell.RenderedSectionIds(shell.Window).Count == shell.ViewModel.Settings.Sections.Items.Count)
                     {
                         break;
@@ -230,12 +230,12 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
 
         private readonly HeadlessUnitTestSession session;
         private readonly string root;
-        private readonly (string? Data, string? General, string? Workspace) saved;
+        private readonly EnvironmentSnapshot saved;
 
         private PanelShell(
             HeadlessUnitTestSession session,
             string root,
-            (string? Data, string? General, string? Workspace) saved,
+            EnvironmentSnapshot saved,
             AppComposition composition,
             MainWindowViewModel viewModel,
             SettingsWindow window)
@@ -256,15 +256,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
 
         public static async Task<PanelShell> OpenAsync(HeadlessUnitTestSession session)
         {
-            var root = Path.Combine(Path.GetTempPath(), "forge-settings-panel-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path.Combine(root, "workspace"));
-            var saved = (
-                Data: Environment.GetEnvironmentVariable(AppPaths.DataVariable),
-                General: Environment.GetEnvironmentVariable(AppPaths.GeneralVariable),
-                Workspace: Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable));
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, Path.Combine(root, "data"));
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, Path.Combine(root, "general"));
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Path.Combine(root, "workspace"));
+            var (root, previous) = TempDataRoot.Redirect("forge-settings-panel-");
 
             try
             {
@@ -275,19 +267,19 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                         var model = new MainWindowViewModel(composed);
                         var settings = new SettingsWindow(model.Settings);
                         settings.Show();
-                        Settle(settings);
+                        SharedUi.Settle(settings);
                         return (composed, model, settings);
                     },
                     new CancellationTokenSource(StepBudget).Token);
 
-                var panel = new PanelShell(session, root, saved, composition, viewModel, window);
+                var panel = new PanelShell(session, root, previous, composition, viewModel, window);
                 await panel.WaitForStartupAsync();
                 return panel;
             }
             catch (Exception)
             {
-                Restore(saved);
-                DeleteTree(root);
+                previous.Restore();
+                TestTempFiles.DeleteTree(root);
                 throw;
             }
         }
@@ -358,17 +350,6 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                 .Distinct()
                 .ToList();
 
-        /// <summary>Drains the dispatcher and renders, twice: layout can post follow-up work that only exists after a pass.</summary>
-        public static void Settle(Window window)
-        {
-            for (var pass = 0; pass < SettlePasses; pass++)
-            {
-                Dispatcher.UIThread.RunJobs();
-                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-            }
-
-            Dispatcher.UIThread.RunJobs();
-        }
 
         public async ValueTask DisposeAsync()
         {
@@ -392,8 +373,8 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             }
             finally
             {
-                Restore(saved);
-                DeleteTree(root);
+                saved.Restore();
+                TestTempFiles.DeleteTree(root);
             }
         }
 
@@ -424,34 +405,6 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                 .OfType<Button>()
                 .FirstOrDefault(button => string.Equals(AutomationProperties.GetAutomationId(button), id, StringComparison.Ordinal));
 
-        private static void Restore((string? Data, string? General, string? Workspace) saved)
-        {
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, saved.Data);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, saved.General);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, saved.Workspace);
-        }
-
-        private static void DeleteTree(string path)
-        {
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
-
-            try
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
     }
 }
 

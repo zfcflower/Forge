@@ -15,9 +15,8 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Invoke_sends_plugin_execute_with_parsed_arguments_and_the_call_context()
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) => Task.FromResult(Json.Element("""{"content":"hi","isError":false}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", """{"content":"hi","isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -43,9 +42,8 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Blank_arguments_are_sent_as_an_empty_object(string arguments)
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) => Task.FromResult(Json.Element("""{"content":"ok","isError":false}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", """{"content":"ok","isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -60,8 +58,7 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Malformed_arguments_are_rejected_locally_without_any_request()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -77,9 +74,8 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Error_flag_and_content_from_the_host_are_returned_unchanged()
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) => Task.FromResult(Json.Element("""{"content":"bad input","isError":true}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", """{"content":"bad input","isError":true}""");
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -93,8 +89,7 @@ public sealed class ExtensionHostToolProxyTests
     {
         await using var host = new FakeHost();
         host.On("plugin.execute", (_, _) => throw new FakeHostError("denied", "the plugin lacks ReadFile"));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -110,9 +105,8 @@ public sealed class ExtensionHostToolProxyTests
     public async Task A_result_that_is_not_an_object_becomes_an_error_result()
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) => Task.FromResult(Json.Element("\"just text\"")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", "\"just text\"");
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -126,9 +120,8 @@ public sealed class ExtensionHostToolProxyTests
     public async Task A_malformed_result_object_becomes_an_error_result()
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) => Task.FromResult(Json.Element("""{"content":5,"isError":false}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", """{"content":5,"isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -148,8 +141,7 @@ public sealed class ExtensionHostToolProxyTests
             await Task.Delay(Timeout.Infinite, ct);
             return Json.Element("{}");
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var cancel = new CancellationTokenSource();
 
@@ -176,8 +168,7 @@ public sealed class ExtensionHostToolProxyTests
             return Task.FromResult(Json.Element("""{"content":"second","isError":false}"""));
         });
         var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(300) };
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -206,8 +197,7 @@ public sealed class ExtensionHostToolProxyTests
             var n = message.Arguments!.Value.GetProperty("args").GetProperty("n").GetInt32();
             return Json.Element($$"""{"content":"n={{n}}","isError":false}""");
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -228,8 +218,7 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Invoking_a_proxy_after_the_client_stopped_fails_without_a_request()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
         await client.StopAsync(limit.Token);
@@ -245,8 +234,7 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Invoke_rejects_null_arguments()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 

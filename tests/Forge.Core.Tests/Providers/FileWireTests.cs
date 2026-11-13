@@ -75,8 +75,7 @@ public sealed class FileWireTests
     [Fact]
     public async Task Anthropic_writes_a_pdf_as_a_base64_document_block()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         await provider.CollectAsync(TestData.Request(messages: [UserWith("summarise", Pdf)]));
 
@@ -94,8 +93,7 @@ public sealed class FileWireTests
     [Fact]
     public async Task Anthropic_drops_a_file_block_outside_a_user_message()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         await provider.CollectAsync(TestData.Request(messages:
         [
@@ -111,8 +109,7 @@ public sealed class FileWireTests
     [InlineData("video/mp4")]
     public async Task Anthropic_refuses_audio_and_video_before_sending(string mediaType)
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
         var file = new FileBlock(mediaType, "AAAA", "media.bin");
 
         var error = await Assert.ThrowsAsync<ProviderException>(() =>
@@ -129,8 +126,7 @@ public sealed class FileWireTests
     [Fact]
     public async Task OpenAi_compatible_writes_a_pdf_as_a_file_part_with_a_data_url()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages: [UserWith("read", Pdf, UnnamedPdf)]));
 
@@ -149,8 +145,7 @@ public sealed class FileWireTests
     [Fact]
     public async Task OpenAi_compatible_writes_wav_and_mp3_as_input_audio()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
 
         await provider.CollectAsync(TestData.Request(messages: [new ChatMessage(MessageRole.User, [Wav, Mp3])]));
 
@@ -167,8 +162,7 @@ public sealed class FileWireTests
     [InlineData("mp4")]
     public async Task OpenAi_compatible_refuses_other_audio_and_video_before_sending(string which)
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[DONE]"));
-        var provider = new OpenAiCompatibleProvider(TestData.OpenAiConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
         var file = which == "ogg" ? Ogg : Mp4;
 
         var error = await Assert.ThrowsAsync<ProviderException>(() =>

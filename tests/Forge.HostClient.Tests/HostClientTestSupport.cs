@@ -122,6 +122,28 @@ internal static class ClientFactory
         TimeSpan? startTimeout = null) =>
         new(Connection(host, startTimeout), resolver, approval, options);
 
+    /// <summary>Creates a client for <paramref name="host"/> and returns it once connected, so tests do not repeat
+    /// the accept-then-start ordering. The caller disposes it before the host.</summary>
+    public static async Task<ExtensionHostClient> StartAsync(
+        FakeHost host,
+        Func<string, ITool?>? resolver = null,
+        Func<ApprovalRequest, CancellationToken, ValueTask<ApprovalDecision>>? approval = null,
+        ExtensionHostClientOptions? options = null,
+        TimeSpan? startTimeout = null)
+    {
+        var client = Create(host, resolver, approval, options, startTimeout);
+        try
+        {
+            await client.StartConnectedAsync(host).ConfigureAwait(false);
+            return client;
+        }
+        catch
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
     /// <summary>Starts <paramref name="client"/> against <paramref name="host"/> and returns the accepted server peer.</summary>
     public static async Task<IpcPeer> StartConnectedAsync(this ExtensionHostClient client, FakeHost host)
     {
@@ -132,14 +154,102 @@ internal static class ClientFactory
     }
 }
 
+/// <summary>Prefabricated subscriptions on <see cref="ExtensionHostClient"/>: every helper returns the log it has
+/// already attached, so the events of a fresh client are recorded from its first transition on.</summary>
+internal static class ClientEvents
+{
+    /// <summary>Records every status transition of <paramref name="client"/>, in arrival order.</summary>
+    public static EventLog<(HostStatus Status, string? Detail)> TrackStatus(this ExtensionHostClient client)
+    {
+        var log = new EventLog<(HostStatus Status, string? Detail)>();
+        client.StatusChanged += (status, detail) => log.Add((status, detail));
+        return log;
+    }
+
+    /// <summary>Drops the host side of the pipe, as a crashed host would, and returns once
+    /// <paramref name="statuses"/> recorded the Failed transition.</summary>
+    public static async Task<IReadOnlyList<(HostStatus Status, string? Detail)>> DropAndAwaitFailedAsync(
+        this FakeHost host, EventLog<(HostStatus Status, string? Detail)> statuses)
+    {
+        await host.DropConnectionAsync().ConfigureAwait(false);
+        return await statuses.UntilAsync(seen => seen.Any(entry => entry.Status == HostStatus.Failed))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Counts <see cref="ExtensionHostClient.ToolsChanged"/> notifications of <paramref name="client"/>.</summary>
+    public static EventLog<int> TrackToolsChanged(this ExtensionHostClient client)
+    {
+        var log = new EventLog<int>();
+        client.ToolsChanged += () => log.Add(1);
+        return log;
+    }
+
+    /// <summary>Counts <see cref="ExtensionHostClient.ContributionsChanged"/> notifications of <paramref name="client"/>.</summary>
+    public static EventLog<int> TrackContributionsChanged(this ExtensionHostClient client)
+    {
+        var log = new EventLog<int>();
+        client.ContributionsChanged += () => log.Add(1);
+        return log;
+    }
+}
+
+/// <summary>Records that a collaborator was not supposed to be reached: the spies count their calls (and the
+/// approval spy keeps the last request), so a test can assert the count stayed zero instead of re-declaring a
+/// counter and a lambda in every case.</summary>
+internal sealed class ResolverSpy
+{
+    private int calls;
+
+    /// <summary>How many times <see cref="Resolve"/> was asked.</summary>
+    public int Calls => Volatile.Read(ref calls);
+
+    /// <summary>A resolver that never finds a tool.</summary>
+    public ITool? Resolve(string name)
+    {
+        Interlocked.Increment(ref calls);
+        return null;
+    }
+}
+
+/// <summary>An approval path that answers with the decision given at construction, counts the calls and keeps
+/// the last request.</summary>
+internal sealed class ApprovalSpy(ApprovalDecision decision = ApprovalDecision.Allow)
+{
+    private int calls;
+    private ApprovalRequest? last;
+
+    /// <summary>How many times <see cref="Approve"/> was called.</summary>
+    public int Calls => Volatile.Read(ref calls);
+
+    /// <summary>The request of the last call, or <c>null</c> when it was never called.</summary>
+    public ApprovalRequest? Last => Volatile.Read(ref last);
+
+    public ValueTask<ApprovalDecision> Approve(ApprovalRequest request, CancellationToken ct)
+    {
+        Volatile.Write(ref last, request);
+        Interlocked.Increment(ref calls);
+        return ValueTask.FromResult(decision);
+    }
+}
+
 internal static class ToolFixtures
 {
+    /// <summary>Registers one prompt contributor and returns the proxy the client built for it.</summary>
+    public static async Task<PluginPromptReference> RegisterPromptAsync(
+        FakeHost host, ExtensionHostClient client, string pluginId, string contributorId)
+    {
+        await host.NotifyAndSyncAsync("contributions.register",
+            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"promptContributors\":[{\"id\":\""
+            + contributorId + "\"}]}}");
+        return client.PromptContributors.Single(p =>
+            p.PluginId == pluginId && p.ContributorId == contributorId);
+    }
+
     /// <summary>Registers plugin "alpha" with one read-only tool "echo" and waits until the client has processed it.</summary>
     public static async Task<ExtensionHostTool> RegisterEchoAsync(ExtensionHostClient client, FakeHost host)
     {
-        await host.NotifyClientAsync("tools.register",
+        await host.NotifyAndSyncAsync("tools.register",
             """{"pluginId":"alpha","tools":[{"name":"echo","description":"Echoes","inputSchemaJson":"{}","sideEffect":0}]}""");
-        await host.SyncAsync();
         return Assert.IsType<ExtensionHostTool>(Assert.Single(client.Tools));
     }
 }
@@ -256,10 +366,15 @@ internal static class TerminalFixtures
     public static string ExitJson(string terminalId, int exitCode) =>
         "{\"terminalId\":\"" + terminalId + "\",\"exitCode\":" + exitCode + "}";
 
-    /// <summary>Starts one terminal against a connected client; the host must already answer start.</summary>
-    public static async Task<ITerminalSession> StartTerminalAsync(
-        ExtensionHostClient client, TerminalStartRequest request, CancellationToken ct) =>
-        await client.StartAsync(request, ct).ConfigureAwait(false);
+    /// <summary>Answers <c>terminal.start</c> with <paramref name="terminalId"/> and starts one terminal against
+    /// the connected client.</summary>
+    public static async Task<ITerminalSession> StartSessionAsync(
+        FakeHost host, ExtensionHostClient client, string terminalId, CancellationToken ct,
+        TerminalStartRequest? request = null)
+    {
+        AnswerStart(host, terminalId);
+        return await client.StartAsync(request ?? Request(), ct).ConfigureAwait(false);
+    }
 
     /// <summary>Decodes the base64 <c>data</c> of a captured <c>terminal.input</c>/<c>terminal.output</c> frame.</summary>
     public static byte[] DecodeData(IpcMessage message) =>

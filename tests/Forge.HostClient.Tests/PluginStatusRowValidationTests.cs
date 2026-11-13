@@ -62,8 +62,8 @@ public sealed class PluginStatusRowValidationTests
             "{\"plugins\":[" + ValidFirstRow + "," +
             "{\"pluginId\":\"second\",\"version\":\"2.0.0\",\"status\":\"approved\",\"sourceHash\":\"s2\"," +
             "\"dependencyHash\":\"d2\",\"sdkVersion\":\"sdk-2\",\"permissions\":[],\"error\":null}]}";
-        var resolved = 0;
-        var approved = 0;
+        var resolver = new ResolverSpy();
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
         var calls = 0;
         host.On("plugins.status", (_, _) =>
@@ -73,19 +73,10 @@ public sealed class PluginStatusRowValidationTests
                 ? "{\"plugins\":[" + ValidFirstRow + "," + malformedSecond + "]}"
                 : validAnswer));
         });
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
-            resolver: _ =>
-            {
-                Interlocked.Increment(ref resolved);
-                return null;
-            },
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approved);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+            resolver: resolver.Resolve,
+            approval: approval.Approve);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -97,8 +88,8 @@ public sealed class PluginStatusRowValidationTests
 
         Assert.Equal(["first", "second"], statuses.Select(status => status.PluginId));
         Assert.Equal(2, calls);
-        Assert.Equal(0, resolved);
-        Assert.Equal(0, approved);
+        Assert.Equal(0, resolver.Calls);
+        Assert.Equal(0, approval.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
         AssertNoExecutionSideEffects(host);
     }
@@ -110,26 +101,17 @@ public sealed class PluginStatusRowValidationTests
     [InlineData("uninstalled")]
     public async Task Documented_status_with_complete_metadata_is_valid(string status)
     {
-        var resolved = 0;
-        var approved = 0;
+        var resolver = new ResolverSpy();
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
         host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(
             "{\"plugins\":[{\"pluginId\":\"alpha\",\"version\":\"1.2.0\",\"status\":\"" + status + "\"," +
             "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-2.0\"," +
             "\"permissions\":[{\"kind\":2,\"scope\":\"run\"}],\"error\":null}]}")));
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
-            resolver: _ =>
-            {
-                Interlocked.Increment(ref resolved);
-                return null;
-            },
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approved);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+            resolver: resolver.Resolve,
+            approval: approval.Approve);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -142,8 +124,8 @@ public sealed class PluginStatusRowValidationTests
         Assert.Equal("d", single.DependencyHash);
         Assert.Equal("sdk-2.0", single.SdkVersion);
         Assert.Equal([new Sdk.Permission(Sdk.PermissionKind.ExecuteCommand, "run")], single.Permissions);
-        Assert.Equal(0, resolved);
-        Assert.Equal(0, approved);
+        Assert.Equal(0, resolver.Calls);
+        Assert.Equal(0, approval.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
         AssertNoExecutionSideEffects(host);
     }
@@ -158,8 +140,7 @@ public sealed class PluginStatusRowValidationTests
             "{\"plugins\":[{\"pluginId\":\"alpha\",\"version\":\"1.0\",\"status\":\"" + status + "\"," +
             "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk\"," +
             "\"permissions\":[],\"error\":null}]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -177,8 +158,7 @@ public sealed class PluginStatusRowValidationTests
         host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(
             "{\"plugins\":[{\"pluginId\":\"broken\",\"status\":\"invalid\"," +
             "\"permissions\":[],\"error\":\"load failed\"}]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -197,8 +177,7 @@ public sealed class PluginStatusRowValidationTests
         host.On("plugins.status", (_, _) => Task.FromResult(Json.Element(
             "{\"plugins\":[{\"pluginId\":\"broken\",\"status\":\"invalid\"," +
             "\"permissions\":[],\"error\":\"load failed\"}]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -222,8 +201,7 @@ public sealed class PluginStatusRowValidationTests
             "{\"plugins\":[{\"pluginId\":\"alpha\",\"version\":\"1.0\",\"status\":\"approved\"," +
             "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk\"," +
             "\"permissions\":[{\"kind\":0},{\"kind\":1,\"scope\":null}],\"error\":null}]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
@@ -237,38 +215,29 @@ public sealed class PluginStatusRowValidationTests
     [Fact]
     public async Task Empty_registry_decodes_to_an_empty_list()
     {
-        var resolved = 0;
-        var approved = 0;
+        var resolver = new ResolverSpy();
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
         host.On("plugins.status", (_, _) => Task.FromResult(Json.Element("{\"plugins\":[]}")));
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
-            resolver: _ =>
-            {
-                Interlocked.Increment(ref resolved);
-                return null;
-            },
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approved);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+            resolver: resolver.Resolve,
+            approval: approval.Approve);
         using var limit = TestLimit.Create();
 
         var statuses = await client.GetPluginStatusesAsync(limit.Token);
 
         Assert.Empty(statuses);
-        Assert.Equal(0, resolved);
-        Assert.Equal(0, approved);
+        Assert.Equal(0, resolver.Calls);
+        Assert.Equal(0, approval.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
         AssertNoExecutionSideEffects(host);
     }
 
     private static async Task AssertSecondRowRejectedAsync(string secondRow, bool knownIdentity)
     {
-        var resolved = 0;
-        var approved = 0;
+        var resolver = new ResolverSpy();
+        var approval = new ApprovalSpy();
         await using var host = new FakeHost();
         var calls = 0;
         host.On("plugins.status", (_, _) =>
@@ -276,19 +245,10 @@ public sealed class PluginStatusRowValidationTests
             Interlocked.Increment(ref calls);
             return Task.FromResult(Json.Element("{\"plugins\":[" + ValidFirstRow + "," + secondRow + "]}"));
         });
-        await using var client = ClientFactory.Create(
+        await using var client = await ClientFactory.StartAsync(
             host,
-            resolver: _ =>
-            {
-                Interlocked.Increment(ref resolved);
-                return null;
-            },
-            approval: (_, _) =>
-            {
-                Interlocked.Increment(ref approved);
-                return ValueTask.FromResult(ApprovalDecision.Allow);
-            });
-        await client.StartConnectedAsync(host);
+            resolver: resolver.Resolve,
+            approval: approval.Approve);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(
@@ -306,8 +266,8 @@ public sealed class PluginStatusRowValidationTests
         }
 
         Assert.Equal(1, calls);
-        Assert.Equal(0, resolved);
-        Assert.Equal(0, approved);
+        Assert.Equal(0, resolver.Calls);
+        Assert.Equal(0, approval.Calls);
         Assert.Equal(HostStatus.Running, client.Status);
         AssertNoExecutionSideEffects(host);
         var diagnostic = Assert.Single(

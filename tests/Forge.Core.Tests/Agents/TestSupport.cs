@@ -476,6 +476,20 @@ internal static class AgentTestHost
         return items;
     }
 
+    /// <summary>Opens the <paramref name="sessionId"/> root under the temp workspace, runs
+    /// <paramref name="prompt"/> to completion and returns the session with every event it emitted;
+    /// when <paramref name="timeout"/> is given the run is bounded by it.</summary>
+    public static async Task<(AgentInstance Root, List<AgentEvent> Events)> RunRootAsync(
+        AgentHost host,
+        string sessionId = "session",
+        string prompt = "go",
+        TimeSpan? timeout = null)
+    {
+        var root = host.CreateRoot(sessionId, Path.GetTempPath());
+        var run = CollectAsync(host.RunAsync(root, prompt));
+        return (root, timeout is { } limit ? await run.WaitAsync(limit) : await run);
+    }
+
     public static AgentDefinition Definition(string name, ModelSettings? model = null, IReadOnlyList<string>? tools = null) =>
         new(name, $"{name} kind.", $"{name} role prompt.", model ?? new ModelSettings("default"), tools);
 }

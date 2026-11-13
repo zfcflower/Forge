@@ -690,7 +690,7 @@ public sealed class SessionViewAttachmentTests
             System.IO.Directory.CreateDirectory(directory);
             var toasts = new ComposerAttachmentTests.RecordingNotifications();
             var info = new SessionInfo(SessionId, root, "attach", At);
-            var store = new EmptyStore();
+            var store = new EmptySessionStore(At);
             var workspace = new SessionWorkspaceViewModel(
                 info,
                 new SessionRuntime(
@@ -698,8 +698,8 @@ public sealed class SessionViewAttachmentTests
                         static _ => new MissingCredentialProvider("unconfigured", ProviderStrings.SectionMissingText()),
                         HostClient: null,
                         store,
-                        new EmptyCatalog(),
-                        new EmptyTodoStore(),
+                        new EmptySessionCatalog(At),
+                        new EmptyTodoStore("todo-1", At),
                         new ModelSettings("model")),
                     info),
                 checkpoints: null,
@@ -840,74 +840,5 @@ public sealed class SessionViewAttachmentTests
 
         public static IStorageItem Folder(string path) =>
             (IStorageItem)Activator.CreateInstance(FolderType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [new DirectoryInfo(path)], null)!;
-    }
-    private sealed class EmptyStore : ISessionStore
-    {
-        public Task<SessionInfo> CreateSessionAsync(string workspacePath, string title, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", workspacePath, title, At));
-
-        public Task<SessionInfo?> GetSessionAsync(string sessionId, CancellationToken ct) => Task.FromResult<SessionInfo?>(null);
-
-        public Task<IReadOnlyList<SessionInfo>> ListSessionsAsync(string? workspacePath, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<long> AppendAsync(string sessionId, ChatMessage message, TokenUsage? usage, CancellationToken ct) =>
-            Task.FromResult(1L);
-
-        public IAsyncEnumerable<StoredMessage> ReadAsync(string sessionId, long fromSeq, long? toSeq, CancellationToken ct) =>
-            Empty();
-
-        public Task<long> LastSeqAsync(string sessionId, CancellationToken ct) => Task.FromResult(0L);
-
-        public Task PutSummaryAsync(SummaryRecord summary, CancellationToken ct) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<SummaryRecord>> GetSummariesAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SummaryRecord>>([]);
-
-        public Task<IReadOnlyList<SearchHit>> SearchAsync(string sessionId, string query, int limit, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SearchHit>>([]);
-
-        private static async IAsyncEnumerable<StoredMessage> Empty()
-        {
-            await Task.Yield();
-            yield break;
-        }
-    }
-
-    private sealed class EmptyCatalog : ISessionCatalog
-    {
-        public Task<SessionInfo> CreateAsync(SessionCreate request, CancellationToken ct) =>
-            Task.FromResult(new SessionInfo("created", request.WorkspacePath, request.Title, At));
-
-        public Task<IReadOnlyList<SessionInfo>> QueryAsync(SessionQuery query, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<SessionInfo>>([]);
-
-        public Task<bool> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct) => Task.FromResult(true);
-
-        public Task<bool> RenameAsync(string sessionId, string title, CancellationToken ct) => Task.FromResult(true);
-
-        public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
-    }
-
-    private sealed class EmptyTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("todo-1", sessionId, title, TodoStatus.Pending, note, 0, At));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
     }
 }

@@ -198,15 +198,14 @@ internal static class ShellStrings
 
     public static string PluginsUnknown => Loc.Instance[PluginsUnknownKey];
 
-    public static string Plugins(int plugins, int tools) =>
-        Loc.Instance.Format(PluginsKey, TextFormat.Number(plugins), TextFormat.Number(tools));
+    public static string Plugins(int plugins, int tools) => Loc.Instance.FormatCounts(PluginsKey, plugins, tools);
 
     public static string McpNone => Loc.Instance[McpNoneKey];
 
     public static string Mcp(int configured) => Loc.Instance.Format(McpKey, TextFormat.Number(configured));
 
     public static string McpState(int configured, int ready) =>
-        Loc.Instance.Format(McpStateKey, TextFormat.Number(configured), TextFormat.Number(ready));
+        Loc.Instance.FormatCounts(McpStateKey, configured, ready);
 
     public static string ApprovalsUnknown => Loc.Instance[ApprovalsUnknownKey];
 
@@ -270,7 +269,7 @@ internal static class ShellStrings
     public static LocText InitializationFailed(string message) => new(InitializationFailedKey, message);
 
     public static string McpDetail(int configured, int diagnostics) =>
-        Loc.Instance.Format(McpDetailKey, TextFormat.Number(configured), TextFormat.Number(diagnostics));
+        Loc.Instance.FormatCounts(McpDetailKey, configured, diagnostics);
 
     public static string EditorDetail(int languages, int grammars, string? problem) =>
         problem is null

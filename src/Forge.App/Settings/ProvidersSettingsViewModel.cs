@@ -13,7 +13,7 @@ namespace Forge.App.Settings;
 /// actions. It owns no window: the view's code-behind opens the dialogs and calls back into <see cref="SaveAsync"/>, so the
 /// page model stays testable without an Avalonia application.
 /// </summary>
-internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
+internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
     private readonly ProviderServices services;
     private readonly AgentDefaultsStore agentDefaults;
@@ -122,13 +122,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     public string? AgentsProblem
     {
         get => agentsProblem;
-        private set
-        {
-            if (Set(ref agentsProblem, value))
-            {
-                OnPropertyChanged(nameof(HasAgentsProblem));
-            }
-        }
+        private set => SetAndNotify(ref agentsProblem, value, nameof(HasAgentsProblem));
     }
 
     public bool HasAgentsProblem => AgentsProblem is { Length: > 0 };
@@ -184,13 +178,7 @@ internal sealed class ProvidersSettingsViewModel : ObservableObject, IDisposable
     public string? CatalogProblem
     {
         get => catalogProblem;
-        private set
-        {
-            if (Set(ref catalogProblem, value))
-            {
-                OnPropertyChanged(nameof(HasCatalogProblem));
-            }
-        }
+        private set => SetAndNotify(ref catalogProblem, value, nameof(HasCatalogProblem));
     }
 
     public bool HasCatalogProblem => CatalogProblem is { Length: > 0 };

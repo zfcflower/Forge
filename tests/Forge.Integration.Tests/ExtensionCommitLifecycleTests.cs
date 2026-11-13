@@ -27,9 +27,7 @@ public sealed class ExtensionCommitLifecycleTests
         var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest("mm", staged.SourceHash, staged.DependencyHash, staged.SdkVersion),
-                fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, staged),
             "approval_mismatch");
 
         ExtensionAuthoringSupport.AssertSameTree(
@@ -46,11 +44,8 @@ public sealed class ExtensionCommitLifecycleTests
         await using var fx = new E2eFixture();
         await fx.StartAsync();
 
-        var first = await fx.Client.StageExtensionAsync(
-            ExtensionAuthoringSupport.StagePluginRequest("keep", version: "1.0.0"), fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("keep", first.SourceHash, first.DependencyHash, first.SdkVersion), fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("keep").Count == 6, "keep tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "keep", version: "1.0.0");
+        await fx.WaitForToolsAsync("keep", 6, "keep tools");
         var liveBefore = ExtensionAuthoringSupport.SnapshotTree(
             ExtensionAuthoringSupport.LiveDirectory(fx.PluginsDirectory, "keep"));
         var recordBefore = fx.ReadRecord("keep", "1.0.0")!;
@@ -62,9 +57,7 @@ public sealed class ExtensionCommitLifecycleTests
             Path.Combine(fx.PluginsDirectory, ".pending", "keep", "Plugin.cs"), "\n// tampered\n");
 
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest("keep", second.SourceHash, second.DependencyHash, second.SdkVersion),
-                fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, second),
             "approval_mismatch");
 
         ExtensionAuthoringSupport.AssertSameTree(
@@ -74,9 +67,7 @@ public sealed class ExtensionCommitLifecycleTests
         var recordAfter = fx.ReadRecord("keep", "1.0.0")!;
         Assert.Equal("Approved", recordAfter.Status);
         Assert.Equal(recordBefore.SourceHash, recordAfter.SourceHash);
-        var echo = await fx.InvokeAsync("keep", "echo", """{"text":"still-here"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("x:still-here", echo.Content);
+        await fx.AssertToolContentAsync("keep", "echo", """{"text":"still-here"}""", "x:still-here");
     }
 
     [Fact]
@@ -95,9 +86,7 @@ public sealed class ExtensionCommitLifecycleTests
         var before = ExtensionAuthoringSupport.SnapshotTree(fx.PluginsDirectory);
 
         await ExtensionAuthoringSupport.AssertHostErrorAsync(
-            () => fx.Client.CommitExtensionAsync(
-                new Sdk.ExtensionCommitRequest("broken", staged.SourceHash, staged.DependencyHash, staged.SdkVersion),
-                fx.Ct),
+            () => ExtensionAuthoringSupport.CommitAsync(fx, staged),
             "invalid_extension");
 
         ExtensionAuthoringSupport.AssertSameTree(
@@ -119,24 +108,20 @@ public sealed class ExtensionCommitLifecycleTests
             ExtensionAuthoringSupport.StagePluginRequest("ship"), fx.Ct);
         Assert.Empty(staged.Diagnostics);
 
-        var result = await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("ship", staged.SourceHash, staged.DependencyHash, staged.SdkVersion),
-            fx.Ct);
+        var result = await ExtensionAuthoringSupport.CommitAsync(fx, staged);
 
         Assert.Equal("ship", result.Status.PluginId);
         Assert.Equal("1.0.0", result.Status.Version);
         Assert.Equal(
             PluginSources.AllTools.OrderBy(name => name, StringComparer.Ordinal),
             result.ToolNames.OrderBy(name => name, StringComparer.Ordinal));
-        await fx.WaitUntilAsync(() => fx.ToolsOf("ship").Count == PluginSources.AllTools.Length, "ship tools");
+        await fx.WaitForToolsAsync("ship", PluginSources.AllTools.Length, "ship tools");
         Assert.True(Volatile.Read(ref changes) >= 1);
         Assert.Empty(ExtensionAuthoringSupport.TrashEntries(fx.PluginsDirectory));
         Assert.False(Directory.Exists(ExtensionAuthoringSupport.PendingDirectory(fx.PluginsDirectory, "ship")));
         Assert.Equal("Approved", fx.ReadRecord("ship", "1.0.0")!.Status);
 
-        var echo = await fx.InvokeAsync("ship", "echo", """{"text":"live"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("x:live", echo.Content);
+        await fx.AssertToolContentAsync("ship", "echo", """{"text":"live"}""", "x:live");
     }
 
     [Fact]
@@ -146,38 +131,20 @@ public sealed class ExtensionCommitLifecycleTests
         await fx.StartAsync();
 
         var v1Files = ExtensionAuthoringSupport.PluginFiles("upd", "1.0.0", echoPrefix: "v1");
-        var first = await fx.Client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest(
-                "upd",
-                "1.0.0",
-                Sdk.ExtensionKinds.Plugin,
-                v1Files,
-                [],
-                []),
-            fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("upd", first.SourceHash, first.DependencyHash, first.SdkVersion), fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("upd").Count == 6, "upd v1 tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "upd", echoPrefix: "v1");
+        await fx.WaitForToolsAsync("upd", 6, "upd v1 tools");
 
         var second = await fx.Client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest(
-                "upd",
-                "1.0.0",
-                Sdk.ExtensionKinds.Plugin,
-                ExtensionAuthoringSupport.PluginFiles("upd", "1.0.0", echoPrefix: "v2"),
-                [],
-                []),
+            ExtensionAuthoringSupport.StagePluginRequest(
+                "upd", files: ExtensionAuthoringSupport.PluginFiles("upd", "1.0.0", echoPrefix: "v2")),
             fx.Ct);
         Assert.True(second.IsUpdate);
         Assert.Equal("1.0.0", second.LiveVersion);
         var previous = Assert.Single(second.Files, file => file.Path == "Plugin.cs").PreviousText;
         Assert.Equal(v1Files["Plugin.cs"], previous);
 
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("upd", second.SourceHash, second.DependencyHash, second.SdkVersion),
-            fx.Ct);
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("upd").Count == 6, "upd v2 tools");
+        await ExtensionAuthoringSupport.CommitAsync(fx, second);
+        await fx.WaitForToolsAsync("upd", 6, "upd v2 tools");
 
         Assert.Equal("Approved", fx.ReadRecord("upd", "1.0.0")!.Status);
         Assert.Empty(ExtensionAuthoringSupport.TrashEntries(fx.PluginsDirectory));
@@ -189,27 +156,17 @@ public sealed class ExtensionCommitLifecycleTests
         await using var fx = new E2eFixture();
         await fx.StartAsync();
 
-        var v1Files = ExtensionAuthoringSupport.PluginFiles("upd2", "1.0.0", echoPrefix: "v1");
-        var first = await fx.Client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest("upd2", "1.0.0", Sdk.ExtensionKinds.Plugin, v1Files, [], []),
-            fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("upd2", first.SourceHash, first.DependencyHash, first.SdkVersion), fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("upd2").Count == 6, "upd2 v1 tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "upd2", echoPrefix: "v1");
+        await fx.WaitForToolsAsync("upd2", 6, "upd2 v1 tools");
 
         var second = await fx.Client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest(
-                "upd2", "1.0.0", Sdk.ExtensionKinds.Plugin,
-                ExtensionAuthoringSupport.PluginFiles("upd2", "1.0.0", echoPrefix: "v2"), [], []),
+            ExtensionAuthoringSupport.StagePluginRequest(
+                "upd2", files: ExtensionAuthoringSupport.PluginFiles("upd2", "1.0.0", echoPrefix: "v2")),
             fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("upd2", second.SourceHash, second.DependencyHash, second.SdkVersion),
-            fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("upd2").Count == 6, "upd2 v2 tools");
+        await ExtensionAuthoringSupport.CommitAsync(fx, second);
+        await fx.WaitForToolsAsync("upd2", 6, "upd2 v2 tools");
 
-        var echo = await fx.InvokeAsync("upd2", "echo", """{"text":"after"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("v2:after", echo.Content);
+        await fx.AssertToolContentAsync("upd2", "echo", """{"text":"after"}""", "v2:after");
     }
 
     [Fact]
@@ -218,31 +175,21 @@ public sealed class ExtensionCommitLifecycleTests
         await using var fx = new E2eFixture();
         await fx.StartAsync();
 
-        var first = await fx.Client.StageExtensionAsync(
-            ExtensionAuthoringSupport.StagePluginRequest("cross", version: "1.0.0"), fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("cross", first.SourceHash, first.DependencyHash, first.SdkVersion),
-            fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("cross").Count == 6, "cross v1 tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "cross", version: "1.0.0");
+        await fx.WaitForToolsAsync("cross", 6, "cross v1 tools");
 
         var second = await fx.Client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest(
-                "cross",
-                "2.0.0",
-                Sdk.ExtensionKinds.Plugin,
-                ExtensionAuthoringSupport.PluginFiles("cross", "2.0.0", echoPrefix: "v2"),
-                [],
-                []),
+            ExtensionAuthoringSupport.StagePluginRequest(
+                "cross", version: "2.0.0",
+                files: ExtensionAuthoringSupport.PluginFiles("cross", "2.0.0", echoPrefix: "v2")),
             fx.Ct);
         Assert.True(second.IsUpdate);
         Assert.Equal("1.0.0", second.LiveVersion);
         var previousCross = second.Files.Single(file => file.Path == "Plugin.cs").PreviousText;
         Assert.NotNull(previousCross);
 
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("cross", second.SourceHash, second.DependencyHash, second.SdkVersion),
-            fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("cross").Count == 6, "cross v2 tools");
+        await ExtensionAuthoringSupport.CommitAsync(fx, second);
+        await fx.WaitForToolsAsync("cross", 6, "cross v2 tools");
 
         var oldRecord = fx.ReadRecord("cross", "1.0.0")!;
         Assert.NotEqual("Approved", oldRecord.Status);
@@ -256,22 +203,16 @@ public sealed class ExtensionCommitLifecycleTests
         await using var host = RestartableHost.Create();
         var client = await host.StartAsync();
 
-        var first = await client.StageExtensionAsync(
-            ExtensionAuthoringSupport.StagePluginRequest("keepr", version: "1.0.0"), host.Ct);
-        await client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("keepr", first.SourceHash, first.DependencyHash, first.SdkVersion),
-            host.Ct);
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(client, host.Ct, "keepr", version: "1.0.0");
         await host.WaitUntilAsync(
             () => host.Client.ToolsByPlugin.TryGetValue("keepr", out var tools) && tools.Count == 6, "keepr v1 tools");
 
         var secondStaged = await client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest(
-                "keepr", "2.0.0", Sdk.ExtensionKinds.Plugin,
-                ExtensionAuthoringSupport.PluginFiles("keepr", "2.0.0", echoPrefix: "v2"), [], []),
+            ExtensionAuthoringSupport.StagePluginRequest(
+                "keepr", version: "2.0.0",
+                files: ExtensionAuthoringSupport.PluginFiles("keepr", "2.0.0", echoPrefix: "v2")),
             host.Ct);
-        await client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("keepr", secondStaged.SourceHash, secondStaged.DependencyHash, secondStaged.SdkVersion),
-            host.Ct);
+        await ExtensionAuthoringSupport.CommitAsync(client, host.Ct, secondStaged);
         await host.WaitUntilAsync(
             () => host.Client.ToolsByPlugin.TryGetValue("keepr", out var tools) && tools.Count == 6, "keepr v2 tools");
 
@@ -291,25 +232,17 @@ public sealed class ExtensionCommitLifecycleTests
         await using var fx = new E2eFixture();
         await fx.StartAsync();
 
-        var first = await fx.Client.StageExtensionAsync(
-            ExtensionAuthoringSupport.StagePluginRequest("cross2", version: "1.0.0"), fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("cross2", first.SourceHash, first.DependencyHash, first.SdkVersion),
-            fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("cross2").Count == 6, "cross2 v1 tools");
+        await ExtensionAuthoringSupport.StageAndCommitPluginAsync(fx, "cross2", version: "1.0.0");
+        await fx.WaitForToolsAsync("cross2", 6, "cross2 v1 tools");
 
         var second = await fx.Client.StageExtensionAsync(
-            new Sdk.ExtensionStageRequest(
-                "cross2", "2.0.0", Sdk.ExtensionKinds.Plugin,
-                ExtensionAuthoringSupport.PluginFiles("cross2", "2.0.0", echoPrefix: "v2"), [], []),
+            ExtensionAuthoringSupport.StagePluginRequest(
+                "cross2", version: "2.0.0",
+                files: ExtensionAuthoringSupport.PluginFiles("cross2", "2.0.0", echoPrefix: "v2")),
             fx.Ct);
-        await fx.Client.CommitExtensionAsync(
-            new Sdk.ExtensionCommitRequest("cross2", second.SourceHash, second.DependencyHash, second.SdkVersion),
-            fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("cross2").Count == 6, "cross2 v2 tools");
+        await ExtensionAuthoringSupport.CommitAsync(fx, second);
+        await fx.WaitForToolsAsync("cross2", 6, "cross2 v2 tools");
 
-        var echo = await fx.InvokeAsync("cross2", "echo", """{"text":"new"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("v2:new", echo.Content);
+        await fx.AssertToolContentAsync("cross2", "echo", """{"text":"new"}""", "v2:new");
     }
 }

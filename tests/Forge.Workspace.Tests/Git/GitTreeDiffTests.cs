@@ -16,8 +16,7 @@ public sealed class GitTreeDiffTests
         using var repo = new TestRepo();
         repo.Write("keep.txt", "keep\n");
         repo.Write("change.txt", "before\n");
-        repo.Write("gone.txt", "gone\n");
-        repo.Commit("base");
+        repo.CommitFile("gone.txt", "gone\n", "base");
 
         var cli = Cli();
         var first = await cli.SnapshotTreeAsync(repo.Root);
@@ -43,8 +42,7 @@ public sealed class GitTreeDiffTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("old.txt", "line1\nline2\nline3\nline4\n");
-        repo.Commit("base");
+        repo.CommitFile("old.txt", "line1\nline2\nline3\nline4\n", "base");
 
         var cli = Cli();
         var first = await cli.SnapshotTreeAsync(repo.Root);
@@ -63,8 +61,7 @@ public sealed class GitTreeDiffTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "one\ntwo\nthree\nfour\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "one\ntwo\nthree\nfour\n", "base");
 
         var cli = Cli();
         var first = await cli.SnapshotTreeAsync(repo.Root);
@@ -93,8 +90,7 @@ public sealed class GitTreeDiffTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "one\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "one\n", "base");
 
         var cli = Cli();
         var first = await cli.SnapshotTreeAsync(repo.Root);
@@ -111,8 +107,7 @@ public sealed class GitTreeDiffTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "one\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "one\n", "base");
 
         var cli = Cli();
         var tree = await cli.SnapshotTreeAsync(repo.Root);

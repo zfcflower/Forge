@@ -79,8 +79,7 @@ public sealed class RunCodeLiveRegistryTests
         }
 
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
         // The proxy lives inside the very registry it describes: pre-fix Definition -> Fingerprint
         // re-enters the proxy's own Definition and overflows the stack right here.

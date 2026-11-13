@@ -502,8 +502,7 @@ public sealed class ComposerAttachmentTests
         Func<string?, string?, ModelInputs?>? inputs = null,
         Func<string?, string, bool>? wire = null)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-attachments-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-attachments-");
         try
         {
             await SharedUi.Session.Dispatch(

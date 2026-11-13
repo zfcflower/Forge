@@ -105,7 +105,7 @@ internal sealed class ComposerModelOption : ObservableObject
 }
 
 /// <summary>One bar of the composer's effort readout: the accepted steps of the current model, filled up to the chosen one.</summary>
-internal sealed class ComposerEffortBarViewModel : ObservableObject
+internal sealed class ComposerEffortBarViewModel : NotifyingObject
 {
     private bool isActive;
 
@@ -121,13 +121,7 @@ internal sealed class ComposerEffortBarViewModel : ObservableObject
     public bool IsActive
     {
         get => isActive;
-        set
-        {
-            if (Set(ref isActive, value))
-            {
-                OnPropertyChanged(nameof(Opacity));
-            }
-        }
+        set => SetAndNotify(ref isActive, value, nameof(Opacity));
     }
 
     public double Opacity => isActive ? 1 : 0.3;
@@ -246,7 +240,7 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 /// model or effort is handed to <paramref name="apply"/> as the root definition for the next turn; the default agent with
 /// the configured model and effort hands over null, so a session nobody touched runs exactly as before.
 /// </summary>
-internal sealed partial class ComposerViewModel : ObservableObject
+internal sealed partial class ComposerViewModel : NotifyingObject
 {
     private readonly Action<AgentDefinition?> apply;
     private readonly ComposerPreferences preferences;
@@ -473,13 +467,7 @@ internal sealed partial class ComposerViewModel : ObservableObject
     public string? Status
     {
         get => status;
-        private set
-        {
-            if (Set(ref status, value))
-            {
-                OnPropertyChanged(nameof(HasStatus));
-            }
-        }
+        private set => SetAndNotify(ref status, value, nameof(HasStatus));
     }
 
     public bool HasStatus => !string.IsNullOrEmpty(status);

@@ -17,6 +17,17 @@ public sealed class NotificationCenterTests
     private static readonly TimeSpan InfoStay = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan Exit = TimeSpan.FromMilliseconds(180);
 
+    /// <summary>A center over the fake clock and notifier with an inline post, plus the clock and notifier it uses.</summary>
+    private static NotificationCenter NewCenter(
+        out NotificationFakeTime time,
+        out NotificationFakeNotifier desktop,
+        bool enabled = true)
+    {
+        time = new NotificationFakeTime();
+        desktop = new NotificationFakeNotifier();
+        return new NotificationCenter(() => enabled, desktop, post: action => action(), time: time);
+    }
+
     [Fact]
     public async Task Disposing_from_a_pool_thread_leaves_the_toast_list_to_the_ui_thread()
     {
@@ -75,9 +86,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Switch_off_shows_nothing_and_calls_no_desktop_notifier()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => false, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop, enabled: false);
 
         await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("t"), LocText.Literal("b"));
 
@@ -94,9 +103,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Foreground_inserts_newest_first()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("first"), LocText.Literal("one"));
         Assert.Single(center.Items);
@@ -112,9 +119,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Repeat_collapses_and_restarts_the_stay()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("same"), LocText.Literal("body"));
         await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("same"), LocText.Literal("body"));
@@ -142,9 +147,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Explicit_key_merges_texts_that_differ()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(NotificationLevel.Warning, LocText.Literal("a-title"), LocText.Literal("a-body"), key: "k");
         await center.NotifyAsync(NotificationLevel.Warning, LocText.Literal("b-title"), LocText.Literal("b-body"), key: "k");
@@ -158,9 +161,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Repeat_reclaims_an_item_that_was_already_leaving()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("t"), LocText.Literal("b"));
         var item = Assert.Single(center.Items);
@@ -190,9 +191,7 @@ public sealed class NotificationCenterTests
         // 0 = Info, 1 = Success, 2 = Warning, 3 = Error; the numbers are the enum order, not a contract.
         var level = (NotificationLevel)levelValue;
         var stay = TimeSpan.FromSeconds(staySeconds);
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(level, LocText.Literal("t"), LocText.Literal("b"));
         var item = Assert.Single(center.Items);
@@ -214,9 +213,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Six_distinct_notifications_evict_the_oldest()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         for (var i = 0; i < 6; i++)
         {
@@ -240,9 +237,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Background_goes_to_the_desktop_notifier_with_resolved_text()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         center.IsBackground = true;
         var title = new LocText(NotificationsStrings.TerminalExitedTitleKey);
@@ -262,9 +257,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Cancelled_token_throws_and_shows_nothing()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
 
@@ -279,9 +272,7 @@ public sealed class NotificationCenterTests
     public async Task Language_switch_re_resolves_visible_items()
     {
         using var _ = new LanguageScope(UiLanguage.Chinese);
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        using var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(NotificationLevel.Info, new LocText(NotificationsStrings.EnabledLabel), new LocText(NotificationsStrings.EnabledHint));
         await center.NotifyAsync(NotificationLevel.Success, new LocText(NotificationsStrings.ApprovalWaitingBody, "a", "b"), LocText.Literal("stable"));
@@ -311,9 +302,7 @@ public sealed class NotificationCenterTests
     [Fact]
     public async Task Dispose_is_idempotent_and_clears_current()
     {
-        var time = new NotificationFakeTime();
-        var desktop = new NotificationFakeNotifier();
-        var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+        var center = NewCenter(out var time, out var desktop);
 
         await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("t"), LocText.Literal("b"));
         Assert.Single(center.Items);

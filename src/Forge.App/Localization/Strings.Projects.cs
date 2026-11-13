@@ -136,8 +136,7 @@ internal static class ProjectStrings
     public static LocText EmptyProjects => new(EmptyProjectsKey);
 
     /// <summary>How many regions the tree has; a count-dependent English noun, so the key splits into <c>.one</c>/<c>.other</c>.</summary>
-    public static string ProjectCount(long count) =>
-        Loc.Instance.Format(LocText.PluralKey(ProjectCountKeyBase, count), TextFormat.Number(count));
+    public static string ProjectCount(long count) => Loc.Instance.FormatPlural(ProjectCountKeyBase, count);
 
     /// <summary>The collapsible history group of a worktree, with its archived session count.</summary>
     public static string HistoryTitle(long count) => Loc.Instance.Format(HistoryTitleKey, TextFormat.Number(count));

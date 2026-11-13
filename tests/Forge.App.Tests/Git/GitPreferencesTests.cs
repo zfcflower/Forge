@@ -20,8 +20,7 @@ public sealed class GitPreferencesTests : IDisposable
 
     public GitPreferencesTests()
     {
-        directory = Path.Combine(Path.GetTempPath(), "forge-git-preferences-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        directory = TestTempFiles.NewDirectory("forge-git-preferences-");
         settingsPath = Path.Combine(directory, "settings.json");
     }
 

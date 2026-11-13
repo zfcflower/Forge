@@ -9,10 +9,7 @@ public sealed class StopLifecycleTests
     public async Task Stop_ends_host_and_worker_processes_and_releases_the_pipe()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var workerPid = await fx.WorkerPidAsync("alpha");
         var hostPid = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
@@ -33,10 +30,7 @@ public sealed class StopLifecycleTests
     public async Task Client_started_again_after_a_clean_stop_gets_a_fresh_host_and_republished_tools()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
         var firstHost = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
 
         await fx.Client.StopAsync(fx.Ct);
@@ -46,11 +40,9 @@ public sealed class StopLifecycleTests
         Assert.Equal(HostStatus.Running, fx.Client.Status);
         Assert.NotEqual(firstHost, fx.Client.HostProcessId);
         Assert.Null(fx.Client.HostExitCode);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools after restart");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "alpha tools after restart");
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"again"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:again", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"again"}""", "a:again");
     }
 
     [Fact]
@@ -66,10 +58,7 @@ public sealed class StopLifecycleTests
     public async Task Stop_request_lets_the_host_exit_on_its_own_with_code_zero()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
         Assert.Null(fx.Client.HostExitCode);
 
         var clock = System.Diagnostics.Stopwatch.StartNew();

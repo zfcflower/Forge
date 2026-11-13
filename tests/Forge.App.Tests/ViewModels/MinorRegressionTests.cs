@@ -20,8 +20,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class MinorRegressionTests
 {
-    private const int PumpIterations = 400;
-    private const int PumpDelayMilliseconds = 5;
     private const string SessionId = "session";
     private const string AgentId = "agent";
     private const string ChildSessionId = "child";
@@ -380,20 +378,7 @@ public sealed class MinorRegressionTests
             _ => Task.CompletedTask,
             _ => Task.CompletedTask);
 
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
     private sealed class EmptyRegistry : IProjectRegistry
     {

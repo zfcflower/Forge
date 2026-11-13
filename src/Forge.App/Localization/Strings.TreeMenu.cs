@@ -116,11 +116,9 @@ internal static class TreeMenuStrings
 
     public static string LinkNone => Loc.Instance[LinkNoneKey];
 
-    public static string LinkLocked(string? reason) =>
-        Loc.Instance.Format(LinkLockedKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string LinkLocked(string? reason) => Loc.Instance.FormatReason(LinkLockedKey, reason);
 
-    public static string LinkPrunable(string? reason) =>
-        Loc.Instance.Format(LinkPrunableKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string LinkPrunable(string? reason) => Loc.Instance.FormatReason(LinkPrunableKey, reason);
 
     public static string LinkDetachedLabel => Loc.Instance[LinkDetachedLabelKey];
 

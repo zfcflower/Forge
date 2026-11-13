@@ -12,9 +12,8 @@ namespace Forge.App.Tests.Agents;
 /// </summary>
 public sealed class CompactionSettingsStoreTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-compaction-settings-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-compaction-settings-");
 
-    public CompactionSettingsStoreTests() => Directory.CreateDirectory(root);
 
     private string SettingsPath => Path.Combine(root, "settings.json");
 

@@ -24,9 +24,7 @@ public sealed class ProcessOwnershipTests
         await using var fx = new E2eFixture();
         var marker = Path.Combine(fx.Root, "grandchild.pid");
         fx.WritePlugin("alpha", PluginSources.Spawnable("alpha"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.SpawnableTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.SpawnableTools.Length);
 
         var crashed = await fx.InvokeAsync(
             "alpha",
@@ -37,9 +35,7 @@ public sealed class ProcessOwnershipTests
         var grandchild = await ReadPidAsync(fx, marker);
         await WaitForDeathAsync(fx, grandchild, "the child of the crashed worker");
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"after"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:after", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"after"}""", "a:after");
     }
 
     [Fact]
@@ -47,9 +43,7 @@ public sealed class ProcessOwnershipTests
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Spawnable("alpha"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.SpawnableTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.SpawnableTools.Length);
 
         var grandchild = await SpawnAsync(fx, "alpha");
         Assert.True(E2eFixture.IsRunning(grandchild), $"the child process of the worker (pid {grandchild}) is not running");
@@ -64,9 +58,7 @@ public sealed class ProcessOwnershipTests
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Spawnable("alpha"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.SpawnableTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.SpawnableTools.Length);
 
         var grandchild = await SpawnAsync(fx, "alpha");
         Assert.True(E2eFixture.IsRunning(grandchild), $"the child process of the worker (pid {grandchild}) is not running");
@@ -87,9 +79,7 @@ public sealed class ProcessOwnershipTests
 
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Spawnable("alpha"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.SpawnableTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.SpawnableTools.Length);
 
         var grandchild = await SpawnAsync(fx, "alpha");
         var workerPid = await fx.WorkerPidAsync("alpha");
@@ -108,9 +98,7 @@ public sealed class ProcessOwnershipTests
         await using var fx = new E2eFixture(["--tool-timeout", "3"]);
         var marker = Path.Combine(fx.Root, "grandchild.pid");
         fx.WritePlugin("alpha", PluginSources.Spawnable("alpha"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.SpawnableTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.SpawnableTools.Length);
 
         var timedOut = await fx.InvokeAsync(
             "alpha",
@@ -122,45 +110,43 @@ public sealed class ProcessOwnershipTests
         var grandchild = await ReadPidAsync(fx, marker);
         await WaitForDeathAsync(fx, grandchild, "the child of the worker that timed out");
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"next"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:next", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"next"}""", "a:next");
     }
 
     [Fact]
     public async Task A_worker_that_cannot_be_contained_is_killed_and_the_start_fails()
     {
         HostTestHooks.Require();
-        var root = Path.Combine(Path.GetTempPath(), "forge-e2e-owner-" + Guid.NewGuid().ToString("N")[..10]);
-        var plugins = Path.Combine(root, "plugins");
-        var data = Path.Combine(root, "data");
-        var plugin = Path.Combine(plugins, "alpha");
-        var marker = Path.Combine(root, "grandchild.pid");
-        var pipe = "forge-e2e-owner-" + Guid.NewGuid().ToString("N")[..20];
+        var layout = RawHostLayout.Create("forge-e2e-owner-");
+        var plugin = Path.Combine(layout.Plugins, "alpha");
+        var marker = Path.Combine(layout.Root, "grandchild.pid");
         Directory.CreateDirectory(plugin);
-        Directory.CreateDirectory(data);
         File.WriteAllText(Path.Combine(plugin, "manifest.json"), """{"id":"alpha","version":"1.0.0","source":"Plugin.cs"}""");
         File.WriteAllText(Path.Combine(plugin, "Plugin.cs"), PluginSources.Spawnable("alpha"));
 
         using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
         var output = new List<string>();
-        using var host = StartRawHost(pipe, plugins, data, output, new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["FORGE_HOST_TEST_FAIL_JOB_ASSIGN"] = "1",
-        });
-        await using var transport = await ConnectRawAsync(pipe, ct);
+        await using var host = RawHost.Start(
+            layout,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["FORGE_HOST_TEST_FAIL_JOB_ASSIGN"] = "1",
+            },
+            output);
+        await using var transport = await RawHost.ConnectTransportAsync(layout.Pipe, ct);
         await using var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
         await peer.StartAsync(ct);
         try
         {
-            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, Empty(), ct);
-            var record = ApprovalDatabase.ReadRecord(data, "alpha", "1.0.0")
+            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), ct);
+            var record = ApprovalDatabase.ReadRecord(layout.Data, "alpha", "1.0.0")
                 ?? throw new InvalidOperationException("the host persisted no approval record for alpha 1.0.0");
             await peer.SendRequestAsync(ExtensionProtocol.PluginApprove, ApproveArgs(record), ct);
 
             var failed = await Assert.ThrowsAsync<IpcRemoteException>(() =>
-                ExecuteRequestAsync(peer, "alpha", PluginSources.SpawnTool, JsonSerializer.Serialize(new { marker }), root, ct));
+                ExecuteRequestAsync(
+                    peer, "alpha", PluginSources.SpawnTool, JsonSerializer.Serialize(new { marker }), layout.Root, ct));
             Assert.Equal("worker_start_failed", failed.Code);
 
             Assert.False(File.Exists(marker), "plugin code ran although the worker could not be contained");
@@ -169,9 +155,7 @@ public sealed class ProcessOwnershipTests
         finally
         {
             await peer.StopAsync(CancellationToken.None);
-            KillQuietly(host);
-            await host.WaitForExitAsync(CancellationToken.None);
-            TryDeleteDirectory(root);
+            await host.StopAsync();
         }
     }
 
@@ -238,8 +222,6 @@ public sealed class ProcessOwnershipTests
         }
     }
 
-    private static JsonElement Empty() => JsonDocument.Parse("{}").RootElement.Clone();
-
     private static JsonElement ApproveArgs(ApprovalRecord record) => JsonSerializer.SerializeToElement(new
     {
         pluginId = "alpha",
@@ -261,79 +243,5 @@ public sealed class ProcessOwnershipTests
             depth = 0,
         });
         return peer.SendRequestAsync(ExtensionProtocol.PluginExecute, args, ct);
-    }
-
-    private static Process StartRawHost(
-        string pipe,
-        string plugins,
-        string data,
-        List<string> output,
-        IReadOnlyDictionary<string, string> environment)
-    {
-        var info = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        info.ArgumentList.Add(E2eFixture.HostAssemblyPath);
-        info.ArgumentList.Add("--pipe");
-        info.ArgumentList.Add(pipe);
-        info.ArgumentList.Add("--plugins");
-        info.ArgumentList.Add(plugins);
-        info.ArgumentList.Add("--data");
-        info.ArgumentList.Add(data);
-        foreach (var pair in environment)
-        {
-            info.Environment[pair.Key] = pair.Value;
-        }
-
-        var process = Process.Start(info) ?? throw new InvalidOperationException("The raw host did not start.");
-        void Append(object _, DataReceivedEventArgs args)
-        {
-            if (!string.IsNullOrEmpty(args.Data))
-            {
-                lock (output)
-                {
-                    output.Add(args.Data);
-                }
-            }
-        }
-
-        process.OutputDataReceived += Append;
-        process.ErrorDataReceived += Append;
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return process;
-    }
-
-    private static Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct) =>
-        PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
-
-    private static void KillQuietly(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
     }
 }

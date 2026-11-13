@@ -48,9 +48,7 @@ public sealed class EntryLifecycleTests
         using var hook = EntryCaptureHook.Activate(fx.Root, fx.PipeName);
         var loadLog = Path.Combine(fx.Root, "loads.txt");
         fx.WritePlugin("alpha", TrackedSource("alpha", "a", loadLog));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 1, "the tools of alpha");
+        await fx.StartAndApproveAsync("alpha", 1, "the tools of alpha");
 
         await fx.WaitUntilAsync(() => File.Exists(loadLog), "the worker of alpha to load the plugin");
         var workerPid = PidOf(Assert.Single(await ReadLinesAsync(loadLog)));
@@ -61,7 +59,7 @@ public sealed class EntryLifecycleTests
 
         File.Delete(Path.Combine(fx.PluginDirectory("alpha"), "manifest.json"));
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "the tools of the removed plugin to be unregistered");
+        await fx.WaitForToolsAsync("alpha", 0, "the tools of the removed plugin to be unregistered");
         await fx.WaitForExitAsync(workerPid, "the worker of the removed plugin");
 
         hook.Release(capture);
@@ -96,9 +94,7 @@ public sealed class EntryLifecycleTests
 
         await fx.Client.RefreshPluginsAsync(fx.Ct);
         await fx.ApproveAsync("alpha", "1.0.0");
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length,
-            "the tools of alpha 1.0.0");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "the tools of alpha 1.0.0");
 
         var first = await fx.InvokeAsync("alpha", PluginSources.EchoTool, """{"text":"x"}""");
         Assert.False(first.IsError, first.Content);
@@ -110,9 +106,7 @@ public sealed class EntryLifecycleTests
 
         WritePrebuiltManifest(fx, "alpha", "2.0.0");
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("alpha").Count == 0,
-            "the tools of the superseded version to be unregistered");
+        await fx.WaitForToolsAsync("alpha", 0, "the tools of the superseded version to be unregistered");
 
         hook.Release(capture);
 
@@ -123,9 +117,7 @@ public sealed class EntryLifecycleTests
         Assert.DoesNotContain("old:", result.Content, StringComparison.Ordinal);
 
         await fx.ApproveAsync("alpha", "2.0.0");
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length,
-            "the tools of alpha 2.0.0");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "the tools of alpha 2.0.0");
 
         var second = await fx.InvokeAsync("alpha", PluginSources.EchoTool, """{"text":"z"}""");
         Assert.False(second.IsError, second.Content);
@@ -137,9 +129,7 @@ public sealed class EntryLifecycleTests
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "the tools of alpha");
+        await fx.StartAndApproveAsync("alpha", PluginSources.AllTools.Length, "the tools of alpha");
 
         var staleEcho = fx.ToolOf("alpha", PluginSources.EchoTool);
         var (limit, perRound) = await MeasureChurnAsync(fx, staleEcho);
@@ -171,9 +161,7 @@ public sealed class EntryLifecycleTests
         Assert.NotNull(record);
         if (string.Equals(record.Status, "Approved", StringComparison.Ordinal))
         {
-            await fx.WaitUntilAsync(
-                () => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length,
-                "the tools of the approved plugin");
+            await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "the tools of the approved plugin");
             var allowed = await fx.InvokeAsync("alpha", PluginSources.EchoTool, """{"text":"final"}""");
             Assert.False(allowed.IsError, allowed.Content);
             Assert.Equal("a:final", allowed.Content);
@@ -181,7 +169,7 @@ public sealed class EntryLifecycleTests
         }
 
         Assert.Equal("Draft", record.Status);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "no tools for the plugin that is not approved");
+        await fx.WaitForToolsAsync("alpha", 0, "no tools for the plugin that is not approved");
         var blocked = await fx.InvokeAsync(staleEcho, """{"text":"final"}""");
         Assert.True(blocked.IsError, blocked.Content);
         Assert.Equal("plugin_not_approved", ErrorCode(blocked.Content));
@@ -209,9 +197,7 @@ public sealed class EntryLifecycleTests
 
         // The probes end with the plugin revoked; the churn starts from the approved state it was set up in.
         await ApproveAsync(fx, fx.Ct);
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length,
-            "the tools of alpha after the calibration");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "the tools of alpha after the calibration");
 
         samples.Sort();
         var perRound = samples[samples.Count / 2];

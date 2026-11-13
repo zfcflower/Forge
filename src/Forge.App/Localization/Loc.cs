@@ -80,6 +80,21 @@ internal sealed class Loc : INotifyPropertyChanged
     public string Format(string key, params ReadOnlySpan<object?> args) =>
         string.Format(CultureInfo.InvariantCulture, this[key], args);
 
+    /// <summary>
+    /// Formats a count-dependent text (see <see cref="LocText.PluralKey"/>) with its count grouped, so every counted
+    /// sentence shows the number the same way.
+    /// </summary>
+    public string FormatPlural(string keyBase, long count) =>
+        Format(LocText.PluralKey(keyBase, count), TextFormat.Number(count));
+
+    /// <summary>Formats a text whose two placeholders are both counts (<c>kept {0}/{1}</c>), each grouped.</summary>
+    public string FormatCounts(string key, long first, long second) =>
+        Format(key, TextFormat.Number(first), TextFormat.Number(second));
+
+    /// <summary>Formats a text whose argument is a diagnostic that git may not have given; it shows as <c>-</c> then.</summary>
+    public string FormatReason(string key, string? reason) =>
+        Format(key, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+
     public static void Register(string key, string chinese, string english)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);

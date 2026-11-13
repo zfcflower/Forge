@@ -158,8 +158,7 @@ internal static class RemovalStrings
 
     public static string Reasons => Loc.Instance[ReasonsKey];
 
-    public static string Children(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(ChildrenKeyBase, count), TextFormat.Number(count));
+    public static string Children(int count) => Loc.Instance.FormatPlural(ChildrenKeyBase, count);
 
     public static string UnmergedForks(IEnumerable<string> branches) =>
         Loc.Instance.Format(UnmergedForksKey, string.Join(", ", branches));
@@ -193,23 +192,19 @@ internal static class RemovalStrings
 
     public static string CheckFailed(string reason) => Loc.Instance.Format(CheckFailedKey, reason);
 
-    public static string GuardPrunable(string? reason) =>
-        Loc.Instance.Format(GuardPrunableKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string GuardPrunable(string? reason) => Loc.Instance.FormatReason(GuardPrunableKey, reason);
 
     public static string GuardUnregistered => Loc.Instance[GuardUnregisteredKey];
 
-    public static string GuardUnverified(string? reason) =>
-        Loc.Instance.Format(GuardUnverifiedKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string GuardUnverified(string? reason) => Loc.Instance.FormatReason(GuardUnverifiedKey, reason);
 
     public static string WorktreeListEmpty => Loc.Instance[WorktreeListEmptyKey];
 
     /// <summary>The guard's git check failed outright: neither changes nor commits could be checked.</summary>
-    public static string GuardCheckFailed(string? reason) =>
-        Loc.Instance.Format(GuardCheckFailedKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string GuardCheckFailed(string? reason) => Loc.Instance.FormatReason(GuardCheckFailedKey, reason);
 
     /// <summary>Git could not run inside the worktree, but its commits were checked from the repository.</summary>
-    public static string GuardChangesUnchecked(string? reason) =>
-        Loc.Instance.Format(GuardChangesUncheckedKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string GuardChangesUnchecked(string? reason) => Loc.Instance.FormatReason(GuardChangesUncheckedKey, reason);
 
     public static string Cancelled => Loc.Instance[CancelledKey];
 
@@ -239,8 +234,7 @@ internal static class RemovalStrings
 
     public static string PurgeQuestion(string title) => Loc.Instance.Format(PurgeQuestionKey, title);
 
-    public static string PurgeAllQuestion(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(PurgeAllQuestionKeyBase, count), TextFormat.Number(count));
+    public static string PurgeAllQuestion(int count) => Loc.Instance.FormatPlural(PurgeAllQuestionKeyBase, count);
 
     public static string PurgeConfirm => Loc.Instance[PurgeConfirmKey];
 

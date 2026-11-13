@@ -305,13 +305,8 @@ public sealed partial class SqliteSessionStore
         return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
-    private static SqliteCommand Command(SqliteConnection connection, SqliteTransaction transaction, string sql)
-    {
-        var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        return command;
-    }
+    private static SqliteCommand Command(SqliteConnection connection, SqliteTransaction transaction, string sql) =>
+        StorageDb.Command(connection, transaction, sql);
 
     private static async Task<string?> FindHolderAsync(SqliteConnection connection, SqliteTransaction transaction, string key)
     {

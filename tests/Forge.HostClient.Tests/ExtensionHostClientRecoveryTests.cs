@@ -38,8 +38,7 @@ public sealed class ExtensionHostClientRecoveryTests
             new[] { "a1", "b1" },
             client.Tools.Select(tool => tool.Definition.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray());
 
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        await host.DropAndAwaitFailedAsync(statuses);
 
         host.NotifyOnAccept("tools.register", Register("gamma", "g1"));
         var accepting = host.AcceptAsync();
@@ -57,24 +56,17 @@ public sealed class ExtensionHostClientRecoveryTests
     public async Task Recovery_transition_drops_every_stale_entry_with_exactly_one_ToolsChanged()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         await host.NotifyClientAsync("tools.register", Register("alpha", "a1"));
         await host.NotifyClientAsync("tools.register", Register("beta", "b1"));
         await host.SyncAsync();
         Assert.Equal(2, client.Tools.Count);
 
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await host.DropAndAwaitFailedAsync(statuses);
+        var changes = client.TrackToolsChanged();
         using var limit = TestLimit.Create();
 
-        var accepting = host.AcceptAsync();
-        await client.StartAsync(limit.Token).Bounded();
-        await accepting.Bounded();
+        await client.ReconnectAsync(host, limit.Token);
 
         Assert.Equal(HostStatus.Running, client.Status);
         Assert.Empty(client.Tools);
@@ -87,14 +79,9 @@ public sealed class ExtensionHostClientRecoveryTests
     public async Task Stop_during_recovery_with_a_window_registration_still_leaves_the_client_stopped_with_no_tools()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromSeconds(10));
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
-        await host.NotifyClientAsync("tools.register", Register("alpha", "a1"));
-        await host.SyncAsync();
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        await using var client = await host.StartTrackedAsync(out var statuses, startTimeout: TimeSpan.FromSeconds(10));
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", "a1"));
+        await host.DropAndAwaitFailedAsync(statuses);
         host.NotifyOnAccept("tools.register", Register("gamma", "g1"));
         using var limit = TestLimit.Create();
 
@@ -119,20 +106,16 @@ public sealed class ExtensionHostClientRecoveryTests
         await using var host = new FakeHost();
         var options = new ExtensionHostClientOptions { ProcessExitTimeout = TimeSpan.FromSeconds(1) };
         await using var client = new ExtensionHostClient(SleeperHost.Connection(host, directory), options: options);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         try
         {
             using var limit = TestLimit.Create();
-            var accepting = host.AcceptAsync();
-            await client.StartAsync(limit.Token).Bounded();
-            await accepting.Bounded();
+            await client.ReconnectAsync(host, limit.Token);
             var firstHost = client.HostProcessId ??
                 throw new InvalidOperationException("The client did not start a host process.");
             Assert.True(SleeperHost.IsRunning(firstHost));
 
-            await host.DropConnectionAsync();
-            await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+            await host.DropAndAwaitFailedAsync(statuses);
             Assert.True(
                 SleeperHost.IsRunning(firstHost),
                 "The first host process outlived its connection; recovery has to end it.");
@@ -167,27 +150,19 @@ public sealed class ExtensionHostClientRecoveryTests
     public async Task Recovery_keeps_the_new_connection_usable_and_reports_no_Failed_after_it_starts_again()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
-        await host.NotifyClientAsync("tools.register", Register("alpha", "a1"));
-        await host.SyncAsync();
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        await using var client = await host.StartTrackedAsync(out var statuses);
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", "a1"));
+        await host.DropAndAwaitFailedAsync(statuses);
         var failuresAfterTheCrash = statuses.Snapshot().Count(entry => entry.Status == HostStatus.Failed);
         using var limit = TestLimit.Create();
 
-        var accepting = host.AcceptAsync();
-        await client.StartAsync(limit.Token).Bounded();
-        await accepting.Bounded();
+        await client.ReconnectAsync(host, limit.Token);
 
         Assert.Equal(HostStatus.Running, client.Status);
         Assert.Equal(failuresAfterTheCrash, statuses.Snapshot().Count(entry => entry.Status == HostStatus.Failed));
         await client.RefreshPluginsAsync(limit.Token);
         Assert.Single(host.Requests("plugins.refresh"));
-        await host.NotifyClientAsync("tools.register", Register("gamma", "g1"));
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", Register("gamma", "g1"));
         Assert.Equal("g1", Assert.Single(client.Tools).Definition.Name);
     }
 
@@ -196,8 +171,7 @@ public sealed class ExtensionHostClientRecoveryTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromMilliseconds(300));
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<TimeoutException>(() => client.StartAsync(limit.Token));
@@ -216,8 +190,7 @@ public sealed class ExtensionHostClientRecoveryTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         using var limit = TestLimit.Create();
         client.AfterConnectedHook = async () =>
         {

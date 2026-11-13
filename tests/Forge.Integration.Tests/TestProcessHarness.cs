@@ -5,6 +5,38 @@ using Forge.Ipc;
 
 namespace Forge.Integration.Tests;
 
+/// <summary>Caller-owned temp directories and a unique pipe name for a raw host, created before the process starts so a
+/// test can seed the plugins directory (and read the data directory) itself.</summary>
+internal sealed class RawHostLayout
+{
+    private RawHostLayout(string root, string pipe)
+    {
+        Root = root;
+        Plugins = Path.Combine(root, "plugins");
+        Data = Path.Combine(root, "data");
+        Pipe = pipe;
+    }
+
+    public string Root { get; }
+
+    public string Plugins { get; }
+
+    public string Data { get; }
+
+    public string Pipe { get; }
+
+    /// <summary>Creates the temp root/plugins/data directories and a pipe name under <paramref name="prefix"/>.</summary>
+    public static RawHostLayout Create(string prefix = "forge-e2e-raw-")
+    {
+        var layout = new RawHostLayout(
+            Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N")[..10]),
+            prefix + Guid.NewGuid().ToString("N")[..20]);
+        Directory.CreateDirectory(layout.Plugins);
+        Directory.CreateDirectory(layout.Data);
+        return layout;
+    }
+}
+
 /// <summary>Starts real product processes for tests that must observe behavior outside the fixture client:
 /// a raw host whose stderr is captured, and a single-use script executor spoken to directly over its pipe.
 /// Everything started here is torn down by the test; no foreign processes are ever touched.</summary>
@@ -14,13 +46,13 @@ internal sealed class RawHost : IAsyncDisposable
     private readonly ConcurrentQueue<string> stderr = new();
     private bool disposed;
 
-    private RawHost(Process process, string root, string pipe)
+    private RawHost(Process process, RawHostLayout layout)
     {
         this.process = process;
-        Root = root;
-        Pipe = pipe;
-        Plugins = Path.Combine(root, "plugins");
-        Data = Path.Combine(root, "data");
+        Root = layout.Root;
+        Pipe = layout.Pipe;
+        Plugins = layout.Plugins;
+        Data = layout.Data;
     }
 
     public string Root { get; }
@@ -31,14 +63,15 @@ internal sealed class RawHost : IAsyncDisposable
 
     public string Data { get; }
 
-    public static RawHost StartNew()
+    public static RawHost StartNew() => Start(RawHostLayout.Create());
+
+    /// <summary>Starts a raw host on <paramref name="layout"/>; <paramref name="environment"/> entries are added to its
+    /// environment and every stdout/stderr line is also appended to <paramref name="output"/> when given.</summary>
+    public static RawHost Start(
+        RawHostLayout layout,
+        IReadOnlyDictionary<string, string>? environment = null,
+        List<string>? output = null)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-e2e-raw-" + Guid.NewGuid().ToString("N")[..10]);
-        var plugins = Path.Combine(root, "plugins");
-        var data = Path.Combine(root, "data");
-        Directory.CreateDirectory(plugins);
-        Directory.CreateDirectory(data);
-        var pipe = "forge-e2e-raw-" + Guid.NewGuid().ToString("N")[..20];
         var info = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -49,20 +82,46 @@ internal sealed class RawHost : IAsyncDisposable
         };
         info.ArgumentList.Add(E2eFixture.HostAssemblyPath);
         info.ArgumentList.Add("--pipe");
-        info.ArgumentList.Add(pipe);
+        info.ArgumentList.Add(layout.Pipe);
         info.ArgumentList.Add("--plugins");
-        info.ArgumentList.Add(plugins);
+        info.ArgumentList.Add(layout.Plugins);
         info.ArgumentList.Add("--data");
-        info.ArgumentList.Add(data);
+        info.ArgumentList.Add(layout.Data);
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+            {
+                info.Environment[pair.Key] = pair.Value;
+            }
+        }
+
         var process = Process.Start(info) ?? throw new InvalidOperationException("The raw host did not start.");
-        var host = new RawHost(process, root, pipe);
+        var host = new RawHost(process, layout);
+        void Capture(string? data)
+        {
+            if (data is not null && output is not null)
+            {
+                lock (output)
+                {
+                    output.Add(data);
+                }
+            }
+        }
+
         process.ErrorDataReceived += (_, args) =>
         {
             if (args.Data is not null)
             {
                 host.stderr.Enqueue(args.Data);
             }
+
+            Capture(args.Data);
         };
+        if (output is not null)
+        {
+            process.OutputDataReceived += (_, args) => Capture(args.Data);
+        }
+
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         return host;
@@ -71,11 +130,16 @@ internal sealed class RawHost : IAsyncDisposable
     /// <summary>Connects a raw peer to the host, retrying while the host is still coming up.</summary>
     public static async Task<IpcPeer> ConnectAsync(string pipe, CancellationToken ct)
     {
-        var transport = await PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
+        var transport = await ConnectTransportAsync(pipe, ct);
         var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
         await peer.StartAsync(ct);
         return peer;
     }
+
+    /// <summary>Connects a raw transport to the host, retrying while the host is still coming up, for a test that builds
+    /// its own peer around it.</summary>
+    public static Task<NamedPipeClientTransport> ConnectTransportAsync(string pipe, CancellationToken ct) =>
+        PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
 
     public static JsonElement EmptyObject() => JsonDocument.Parse("{}").RootElement.Clone();
 
@@ -99,7 +163,8 @@ internal sealed class RawHost : IAsyncDisposable
             $"Timed out after {limit.TotalSeconds:0} s waiting for host stderr to contain '{needle}'.");
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>Kills the host, waits for it to exit, and removes its temp root - the teardown every test owes it.</summary>
+    public async Task StopAsync()
     {
         if (disposed)
         {
@@ -120,6 +185,8 @@ internal sealed class RawHost : IAsyncDisposable
         TryDeleteDirectory(Root);
     }
 
+    public async ValueTask DisposeAsync() => await StopAsync();
+
     public static void Kill(Process process)
     {
         try
@@ -134,7 +201,8 @@ internal sealed class RawHost : IAsyncDisposable
         }
     }
 
-    private static void TryDeleteDirectory(string path)
+    /// <summary>Deletes <paramref name="path"/> recursively, leaving a directory the OS still holds open behind.</summary>
+    internal static void TryDeleteDirectory(string path)
     {
         try
         {

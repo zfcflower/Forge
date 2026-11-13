@@ -34,8 +34,7 @@ internal sealed class StepCommitRepo : IDisposable
     /// <summary>A new temp directory (not yet a repository), for tests that need a path next to a repository.</summary>
     public static string NewRoot()
     {
-        var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "forge-step-commit-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-step-commit-");
         return root;
     }
 

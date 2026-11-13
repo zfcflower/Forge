@@ -49,10 +49,8 @@ public sealed class SameRootResourceCycleTests
     public async Task Same_root_cross_branch_wait_cycle_refuses_the_closing_edge_and_the_other_branch_drains()
     {
         SameRootResourceCycleRelay? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1"],
-            toolResolver: name => name == SameRootResourceCycleRelay.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == SameRootResourceCycleRelay.Name ? relay : null, ["--concurrency", "1"]);
         relay = new SameRootResourceCycleRelay(fx);
         try
         {
@@ -95,10 +93,8 @@ public sealed class SameRootResourceCycleTests
     public async Task Same_root_fanout_of_five_siblings_on_a_capacity_one_plugin_all_queue_and_return_their_own_results()
     {
         SameRootResourceCycleRelay? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1"],
-            toolResolver: name => name == SameRootResourceCycleRelay.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == SameRootResourceCycleRelay.Name ? relay : null, ["--concurrency", "1"]);
         relay = new SameRootResourceCycleRelay(fx);
         await StartPluginsAsync(fx, "pa");
         var runCode = fx.Client.CreateRunCodeTool(new CycleRegistry(relay));
@@ -112,10 +108,8 @@ public sealed class SameRootResourceCycleTests
     public async Task Cancelled_root_with_queued_siblings_leaves_no_wait_edge_for_an_equivalent_root()
     {
         SameRootResourceCycleRelay? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1"],
-            toolResolver: name => name == SameRootResourceCycleRelay.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == SameRootResourceCycleRelay.Name ? relay : null, ["--concurrency", "1"]);
         relay = new SameRootResourceCycleRelay(fx);
         await StartPluginsAsync(fx, "pa");
         var runCode = fx.Client.CreateRunCodeTool(new CycleRegistry(relay));
@@ -163,10 +157,8 @@ public sealed class SameRootResourceCycleTests
     public async Task Repeated_same_edge_nesting_from_one_root_queues_on_the_caller_and_never_reports_a_cycle()
     {
         SameRootResourceCycleRelay? relay = null;
-        await using var fx = new E2eFixture(
-            hostArguments: ["--concurrency", "1"],
-            toolResolver: name => name == SameRootResourceCycleRelay.Name ? relay : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name == SameRootResourceCycleRelay.Name ? relay : null, ["--concurrency", "1"]);
         relay = new SameRootResourceCycleRelay(fx);
         await StartPluginsAsync(fx, "pa", "pb");
         var runCode = fx.Client.CreateRunCodeTool(new CycleRegistry(relay));
@@ -222,7 +214,7 @@ public sealed class SameRootResourceCycleTests
 
         foreach (var id in pluginIds)
         {
-            await fx.WaitUntilAsync(() => fx.ToolsOf(id).Count == PluginSources.AllTools.Length, $"the tools of {id}");
+            await fx.WaitForToolsAsync(id, PluginSources.AllTools.Length, $"the tools of {id}");
         }
     }
 

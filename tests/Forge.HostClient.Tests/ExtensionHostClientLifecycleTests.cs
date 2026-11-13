@@ -23,11 +23,8 @@ public sealed class ExtensionHostClientLifecycleTests
     public async Task Start_connects_to_a_running_host_and_reports_Starting_then_Running()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        await using var client = await host.StartTrackedAsync(out var statuses);
 
-        await client.StartConnectedAsync(host);
         var seen = await statuses.UntilAsync(events => events.Any(e => e.Status == HostStatus.Running));
 
         Assert.Equal(HostStatus.Running, client.Status);
@@ -43,8 +40,7 @@ public sealed class ExtensionHostClientLifecycleTests
     public async Task Start_while_running_is_rejected_and_keeps_the_connection()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync(CancellationToken.None));
 
@@ -59,8 +55,7 @@ public sealed class ExtensionHostClientLifecycleTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromMilliseconds(300));
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<TimeoutException>(() => client.StartAsync(limit.Token));
@@ -114,8 +109,7 @@ public sealed class ExtensionHostClientLifecycleTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         using var limit = TestLimit.Create();
 
         await client.StopAsync(limit.Token);
@@ -129,10 +123,7 @@ public sealed class ExtensionHostClientLifecycleTests
     public async Task Stop_sends_host_stop_and_reports_Stopped_without_a_failure()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         using var limit = TestLimit.Create();
 
         await client.StopAsync(limit.Token);
@@ -151,8 +142,7 @@ public sealed class ExtensionHostClientLifecycleTests
         await using var host = new FakeHost();
         host.On("host.stop", FakeHost.NeverAnswer);
         var options = new ExtensionHostClientOptions { StopRequestTimeout = TimeSpan.FromMilliseconds(300) };
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
 
         var stopwatch = Stopwatch.StartNew();
@@ -177,8 +167,7 @@ public sealed class ExtensionHostClientLifecycleTests
     public async Task Dispose_of_a_running_client_stops_the_host_and_rejects_later_use()
     {
         await using var host = new FakeHost();
-        var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        var client = await ClientFactory.StartAsync(host);
 
         await client.DisposeAsync().AsTask().Bounded();
 
@@ -196,8 +185,7 @@ public sealed class ExtensionHostClientLifecycleTests
         await using var host = new FakeHost();
         host.On("host.stop", FakeHost.NeverAnswer);
         var options = new ExtensionHostClientOptions { StopRequestTimeout = TimeSpan.FromMilliseconds(300) };
-        var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        var client = await ClientFactory.StartAsync(host, options: options);
 
         await client.DisposeAsync().AsTask().Bounded();
 
@@ -209,8 +197,7 @@ public sealed class ExtensionHostClientLifecycleTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromSeconds(10));
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         using var limit = TestLimit.Create();
 
         var starting = client.StartAsync(limit.Token);
@@ -228,8 +215,7 @@ public sealed class ExtensionHostClientLifecycleTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromMilliseconds(300));
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
+        var statuses = client.TrackStatus();
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<TimeoutException>(() => client.StartAsync(limit.Token));

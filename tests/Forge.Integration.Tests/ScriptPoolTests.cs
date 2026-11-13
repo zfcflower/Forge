@@ -19,12 +19,8 @@ public sealed class ScriptPoolTests
     [Fact]
     public async Task Infinite_loop_timeout_then_recovers_without_failing_concurrent_script()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals();
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry();
 
         var burning = RunScriptAsync(fx.Client, registry, "while (true) {}", "burn", fx.Root, fx.Ct, timeoutSeconds: 3);
@@ -54,12 +50,8 @@ public sealed class ScriptPoolTests
                 entered.Enqueue("yes");
                 return ValueTask.FromResult(new ToolResult("go"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == enteredTool.Definition.Name ? enteredTool : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(enteredTool);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry(enteredTool);
 
         using var runBudget = CancellationTokenSource.CreateLinkedTokenSource(fx.Ct);
@@ -100,13 +92,9 @@ public sealed class ScriptPoolTests
             },
             ToolSideEffect.Execute);
 
-        await using var fx = new E2eFixture(
-            hostArguments: ["--script-workers", "1"],
-            toolResolver: name => name is "gate" or "probeB" ? Gate(name) : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(
+            name => name is "gate" or "probeB" ? Gate(name) : null, ["--script-workers", "1"]);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry(Gate("gate"), Gate("probeB"));
 
         var holder = RunScriptAsync(
@@ -137,12 +125,8 @@ public sealed class ScriptPoolTests
                 Interlocked.Increment(ref probeCalls);
                 return ValueTask.FromResult(new ToolResult("probe-ran"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(probe);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry(probe);
 
         using var alreadyCancelled = new CancellationTokenSource();
@@ -176,13 +160,8 @@ public sealed class ScriptPoolTests
                 }
             },
             ToolSideEffect.Execute);
-        await using var fx = new E2eFixture(
-            hostArguments: ["--script-workers", "1"],
-            toolResolver: name => name == gate.Definition.Name ? gate : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(gate, ["--script-workers", "1"]);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry(gate);
         var hostPid = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
 
@@ -210,12 +189,8 @@ public sealed class ScriptPoolTests
     [Fact]
     public async Task Short_caller_budget_stops_long_script()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals();
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry();
 
         var clock = Stopwatch.StartNew();
@@ -227,9 +202,7 @@ public sealed class ScriptPoolTests
         Assert.Contains("2 s", stopped.Content, StringComparison.Ordinal);
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"the short budget took {clock.Elapsed}");
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"after"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:after", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"after"}""", "a:after");
     }
 
     [Fact]
@@ -325,12 +298,8 @@ public sealed class ScriptPoolTests
         var big = new ScriptMainTool(
             "big",
             (_, _, _) => ValueTask.FromResult(new ToolResult(new string('x', 500))));
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == big.Definition.Name ? big : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals(big);
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var options = new RunCodeProxyOptions
         {
             Execution = new Sdk.CodeExecutionOptions { MaxResultChars = 64, MaxInnerResultChars = 16 },
@@ -358,12 +327,8 @@ public sealed class ScriptPoolTests
     [Fact]
     public async Task Failed_compile_does_not_poison_next_call()
     {
-        await using var fx = new E2eFixture(
-            toolResolver: _ => null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("alpha");
+        await using var fx = E2eFixture.AllowingApprovals();
+        await fx.StartWithStatusApprovedPluginAsync("alpha", "a");
         var registry = new ScriptRegistry();
 
         var first = await RunScriptAsync(fx.Client, registry, "var x = ;\nreturn 1;", "bad", fx.Root, fx.Ct);

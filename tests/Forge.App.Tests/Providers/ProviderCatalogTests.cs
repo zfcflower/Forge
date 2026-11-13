@@ -15,7 +15,7 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class ProviderCatalogTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-provider-catalog-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-provider-catalog-");
     private readonly ProviderSecretStore secrets;
     private readonly ProviderCredentials credentials;
 
@@ -258,13 +258,7 @@ public sealed class ProviderCatalogTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private static async Task ConsumeAsync(IChatProvider provider)
@@ -307,9 +301,8 @@ public sealed class ProviderCatalogTests : IDisposable
 /// </summary>
 public sealed class ProviderEditorTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-provider-editor-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-provider-editor-");
 
-    public ProviderEditorTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void An_incomplete_form_reports_why_it_cannot_be_saved()
@@ -700,13 +693,7 @@ public sealed class ProviderEditorTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private ProviderServices Services() =>

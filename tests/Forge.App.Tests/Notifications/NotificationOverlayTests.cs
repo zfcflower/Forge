@@ -31,9 +31,8 @@ public sealed class NotificationOverlayTests
                 var overlay = new NotificationOverlay();
                 Assert.False(overlay.IsVisible);
 
-                var window = new Window { Width = 500, Height = 500, Content = overlay };
-                window.Show();
-                Settle();
+                var window = SharedUi.Show(overlay, 500, 500);
+                SharedUi.Settle();
 
                 Assert.False(overlay.IsVisible);
 
@@ -75,9 +74,8 @@ public sealed class NotificationOverlayTests
                 var overlay = new NotificationOverlay();
                 Assert.False(overlay.IsVisible);
 
-                var window = new Window { Width = 500, Height = 500, Content = overlay };
-                window.Show();
-                Settle();
+                var window = SharedUi.Show(overlay, 500, 500);
+                SharedUi.Settle();
 
                 Assert.False(overlay.IsVisible);
 
@@ -112,17 +110,6 @@ public sealed class NotificationOverlayTests
                 Assert.Equal(expected[2], third.Bounds.Y, 3);
             },
             CancellationToken.None);
-    }
-
-    private static void Settle()
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
     }
 
     private sealed class OverlayFakeTime : TimeProvider

@@ -26,8 +26,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
 
     public GitSettingsSectionGitTests()
     {
-        directory = Path.Combine(Path.GetTempPath(), "forge-git-settings-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        directory = TestTempFiles.NewDirectory("forge-git-settings-");
         settingsPath = Path.Combine(directory, "settings.json");
     }
 

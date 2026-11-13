@@ -10,8 +10,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     public async Task Refresh_sends_plugins_refresh_with_an_empty_object()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await client.RefreshPluginsAsync(limit.Token);
@@ -25,8 +24,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     public async Task Approve_sends_every_field_of_the_approval_under_the_documented_names()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await client.ApprovePluginAsync("alpha", "1.2.0", "src-hash", "dep-hash", "sdk-1.0", limit.Token);
@@ -46,8 +44,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     public async Task Revoke_sends_plugin_id_and_version_under_the_documented_names()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await client.RevokePluginAsync("alpha", "1.2.0", limit.Token);
@@ -66,8 +63,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     public async Task Approve_rejects_blank_identity_locally(string pluginId, string version)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -82,8 +78,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     public async Task Revoke_rejects_blank_identity_locally(string pluginId, string version)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(() => client.RevokePluginAsync(pluginId, version, limit.Token));
@@ -109,8 +104,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     {
         await using var host = new FakeHost();
         host.On("plugin.approve", (_, _) => throw new FakeHostError("unknown_version", "version 1.0 is not installed"));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(() =>

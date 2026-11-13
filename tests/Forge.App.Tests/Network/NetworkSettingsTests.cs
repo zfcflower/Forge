@@ -9,9 +9,8 @@ namespace Forge.App.Tests.Network;
 
 public sealed class NetworkSettingsStoreTests : IDisposable
 {
-    private readonly string dir = Path.Combine(Path.GetTempPath(), "forge-net-" + Guid.NewGuid().ToString("N"));
+    private readonly string dir = TestTempFiles.NewDirectory("forge-net-");
 
-    public NetworkSettingsStoreTests() => Directory.CreateDirectory(dir);
 
     private string SettingsPath => Path.Combine(dir, "settings.json");
 
@@ -186,10 +185,9 @@ public sealed class NetworkSettingsStoreTests : IDisposable
 [Collection("forge-app-ui")]
 public sealed class NetworkSettingsSectionViewModelTests : IDisposable
 {
-    private readonly string dir = Path.Combine(Path.GetTempPath(), "forge-netvm-" + Guid.NewGuid().ToString("N"));
+    private readonly string dir = TestTempFiles.NewDirectory("forge-netvm-");
     private readonly List<(NetworkSettings Settings, string Host)> probes = [];
 
-    public NetworkSettingsSectionViewModelTests() => Directory.CreateDirectory(dir);
 
     private string SettingsPath => Path.Combine(dir, "settings.json");
 

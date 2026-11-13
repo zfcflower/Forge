@@ -16,8 +16,7 @@ public sealed class EditorPreferencesTests : IDisposable
 
     public EditorPreferencesTests()
     {
-        directory = Path.Combine(Path.GetTempPath(), "forge-editor-preferences-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        directory = TestTempFiles.NewDirectory("forge-editor-preferences-");
         settingsPath = Path.Combine(directory, "settings.json");
     }
 

@@ -12,13 +12,11 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Register_builds_one_proxy_per_declaration_grouped_by_plugin()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register", Register("alpha",
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha",
             Declaration("search", "Searches the workspace", EchoSchema, 0),
             Declaration("write", "Writes a file", null, 1)));
-        await host.SyncAsync();
 
         Assert.Equal(2, client.Tools.Count);
         var search = Assert.IsType<ExtensionHostTool>(client.Tools.Single(tool => tool.Definition.Name == "search"));
@@ -43,11 +41,9 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Blank_input_schema_is_exposed_as_an_empty_object_schema(string? schema)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("noargs", "d", schema, 0)));
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("noargs", "d", schema, 0)));
 
         Assert.Equal("{}", Assert.Single(client.Tools).Definition.InputSchemaJson);
     }
@@ -67,12 +63,10 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Side_effect_accepts_ordinal_or_name_and_unknown_values_map_to_Execute(string rawSideEffect, ToolSideEffect expected)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register",
+        await host.NotifyAndSyncAsync("tools.register",
             $$"""{"pluginId":"alpha","tools":[{"name":"t","description":"d","inputSchemaJson":"{}","sideEffect":{{rawSideEffect}}}]}""");
-        await host.SyncAsync();
 
         Assert.Equal(expected, Assert.Single(client.Tools).SideEffect);
     }
@@ -81,12 +75,10 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Missing_side_effect_maps_to_Execute()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register",
+        await host.NotifyAndSyncAsync("tools.register",
             """{"pluginId":"alpha","tools":[{"name":"t","description":"d","inputSchemaJson":"{}"}]}""");
-        await host.SyncAsync();
 
         Assert.Equal(ToolSideEffect.Execute, Assert.Single(client.Tools).SideEffect);
     }
@@ -95,10 +87,8 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Registering_a_new_plugin_fires_ToolsChanged_once_and_keeps_other_plugins()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
 
         await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
         await host.NotifyClientAsync("tools.register", Register("beta", Declaration("b1", "d", null, 0), Declaration("b2", "d", null, 0)));
@@ -113,16 +103,12 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Re_registering_a_plugin_replaces_its_previous_set_and_fires_ToolsChanged()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("old", "d", null, 0), Declaration("older", "d", null, 0)));
-        await host.SyncAsync();
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("old", "d", null, 0), Declaration("older", "d", null, 0)));
         var previous = client.Tools;
 
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("fresh", "d", null, 1)));
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("fresh", "d", null, 1)));
 
         Assert.Equal(2, changes.Snapshot().Count);
         Assert.Equal("fresh", Assert.Single(client.Tools).Definition.Name);
@@ -134,16 +120,12 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Identical_re_registration_does_not_fire_ToolsChanged()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
         var payload = Register("alpha", Declaration("echo", "d", EchoSchema, 0));
-        await host.NotifyClientAsync("tools.register", payload);
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", payload);
 
-        await host.NotifyClientAsync("tools.register", payload);
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", payload);
 
         Assert.Single(changes.Snapshot());
     }
@@ -152,16 +134,13 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Unregister_removes_the_plugin_tools_and_fires_ToolsChanged()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
         await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
         await host.NotifyClientAsync("tools.register", Register("beta", Declaration("b1", "d", null, 0)));
         await host.SyncAsync();
 
-        await host.NotifyClientAsync("tools.unregister", """{"pluginId":"alpha"}""");
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.unregister", """{"pluginId":"alpha"}""");
 
         Assert.Equal(3, changes.Snapshot().Count);
         Assert.Equal("b1", Assert.Single(client.Tools).Definition.Name);
@@ -172,15 +151,11 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Unregister_of_an_unknown_plugin_fires_nothing()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.SyncAsync();
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
+        var changes = client.TrackToolsChanged();
 
-        await host.NotifyClientAsync("tools.unregister", """{"pluginId":"ghost"}""");
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.unregister", """{"pluginId":"ghost"}""");
 
         Assert.Empty(changes.Snapshot());
         Assert.Equal("a1", Assert.Single(client.Tools).Definition.Name);
@@ -190,15 +165,11 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Registering_an_empty_tool_list_removes_the_plugin()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.SyncAsync();
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
 
-        await host.NotifyClientAsync("tools.register", """{"pluginId":"alpha","tools":[]}""");
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", """{"pluginId":"alpha","tools":[]}""");
 
         Assert.Equal(2, changes.Snapshot().Count);
         Assert.Empty(client.Tools);
@@ -209,13 +180,10 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Empty_registration_for_an_unknown_plugin_fires_nothing()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
 
-        await host.NotifyClientAsync("tools.register", """{"pluginId":"ghost","tools":[]}""");
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", """{"pluginId":"ghost","tools":[]}""");
 
         Assert.Empty(changes.Snapshot());
         Assert.Empty(client.Tools);
@@ -225,10 +193,8 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task A_tools_snapshot_taken_before_a_change_is_not_modified_by_it()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.SyncAsync();
+        await using var client = await ClientFactory.StartAsync(host);
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
         var before = client.Tools;
 
         await host.NotifyClientAsync("tools.register", Register("beta", Declaration("b1", "d", null, 0)));
@@ -243,10 +209,9 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Invalid_entries_are_dropped_while_valid_siblings_are_kept()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register", """
+        await host.NotifyAndSyncAsync("tools.register", """
             {"pluginId":"alpha","tools":[
               {"name":"first","description":"d","inputSchemaJson":"{}","sideEffect":0},
               null,
@@ -255,7 +220,6 @@ public sealed class ExtensionHostClientToolRegistryTests
               {"name":"second","description":"d","inputSchemaJson":"{}","sideEffect":1}
             ]}
             """);
-        await host.SyncAsync();
 
         Assert.Equal(new[] { "first", "second" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
         Assert.Equal(ToolSideEffect.Write, client.Tools[1].SideEffect);
@@ -275,20 +239,16 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Malformed_registration_payloads_are_ignored_and_the_client_keeps_running(string payload)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
 
-        await host.NotifyClientAsync("tools.register", payload);
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", payload);
 
         Assert.Empty(changes.Snapshot());
         Assert.Empty(client.Tools);
         Assert.Equal(HostStatus.Running, client.Status);
 
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("after", "d", null, 0)));
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("after", "d", null, 0)));
         Assert.Equal("after", Assert.Single(client.Tools).Definition.Name);
     }
 
@@ -301,13 +261,10 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Malformed_unregister_payloads_are_ignored(string payload)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.SyncAsync();
+        await using var client = await ClientFactory.StartAsync(host);
+        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
 
-        await host.NotifyClientAsync("tools.unregister", payload);
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.unregister", payload);
 
         Assert.Equal("a1", Assert.Single(client.Tools).Definition.Name);
         Assert.Equal(HostStatus.Running, client.Status);
@@ -317,13 +274,10 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Unknown_notification_operations_are_ignored()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
-        var changes = new EventLog<int>();
-        client.ToolsChanged += () => changes.Add(1);
+        await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
 
-        await host.NotifyClientAsync("tools.rename", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.SyncAsync();
+        await host.NotifyAndSyncAsync("tools.rename", Register("alpha", Declaration("a1", "d", null, 0)));
 
         Assert.Empty(changes.Snapshot());
         Assert.Empty(client.Tools);
@@ -334,16 +288,14 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task Declaration_with_a_wrongly_typed_field_does_not_drop_its_valid_siblings()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register", """
+        await host.NotifyAndSyncAsync("tools.register", """
             {"pluginId":"alpha","tools":[
               {"name":"valid","description":"d","inputSchemaJson":"{}","sideEffect":0},
               {"name":5,"description":"wrong type","sideEffect":0}
             ]}
             """);
-        await host.SyncAsync();
 
         Assert.Equal(new[] { "valid" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
     }
@@ -352,16 +304,14 @@ public sealed class ExtensionHostClientToolRegistryTests
     public async Task A_wrongly_typed_description_keeps_the_declaration_with_an_empty_description()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyClientAsync("tools.register", """
+        await host.NotifyAndSyncAsync("tools.register", """
             {"pluginId":"alpha","tools":[
               {"name":"odd","description":5,"inputSchemaJson":"{}","sideEffect":0},
               {"name":"valid","description":"d","sideEffect":1}
             ]}
             """);
-        await host.SyncAsync();
 
         Assert.Equal(new[] { "odd", "valid" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
         Assert.Equal(string.Empty, client.Tools[0].Definition.Description);

@@ -19,8 +19,7 @@ public sealed class ExtensionHostClientCrashTests
             await Task.Delay(Timeout.Infinite, ct);
             return Json.Element("{}");
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
@@ -36,10 +35,8 @@ public sealed class ExtensionHostClientCrashTests
     {
         await using var host = new FakeHost();
         await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        var toolChanges = new EventLog<int>();
-        client.ToolsChanged += () => toolChanges.Add(1);
+        var statuses = client.TrackStatus();
+        var toolChanges = client.TrackToolsChanged();
         await client.StartConnectedAsync(host);
         await RegisterEchoAsync(client, host);
         var changesBeforeCrash = toolChanges.Snapshot().Count;
@@ -62,13 +59,9 @@ public sealed class ExtensionHostClientCrashTests
     public async Task After_a_crash_calls_fail_with_connection_closed_while_the_client_is_Failed()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         var tool = await RegisterEchoAsync(client, host);
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        await host.DropAndAwaitFailedAsync(statuses);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() =>
@@ -84,13 +77,9 @@ public sealed class ExtensionHostClientCrashTests
     public async Task StopAsync_after_a_crash_is_clean_sends_no_host_stop_and_clears_the_tools()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         await RegisterEchoAsync(client, host);
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        await host.DropAndAwaitFailedAsync(statuses);
         using var limit = TestLimit.Create();
 
         await client.StopAsync(limit.Token);
@@ -106,20 +95,13 @@ public sealed class ExtensionHostClientCrashTests
     public async Task StartAsync_after_a_crash_recovers_on_the_same_instance_and_drops_the_stale_snapshot()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses);
         await RegisterEchoAsync(client, host);
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
-        var toolChanges = new EventLog<int>();
-        client.ToolsChanged += () => toolChanges.Add(1);
+        await host.DropAndAwaitFailedAsync(statuses);
+        var toolChanges = client.TrackToolsChanged();
         using var limit = TestLimit.Create();
 
-        var accepting = host.AcceptAsync();
-        await client.StartAsync(limit.Token).Bounded();
-        await accepting.Bounded();
+        await client.ReconnectAsync(host, limit.Token);
 
         Assert.Equal(HostStatus.Running, client.Status);
         Assert.Empty(client.Tools);
@@ -135,13 +117,9 @@ public sealed class ExtensionHostClientCrashTests
     public async Task StopAsync_during_a_recovery_start_leaves_the_client_stopped()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host, startTimeout: TimeSpan.FromSeconds(10));
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
+        await using var client = await host.StartTrackedAsync(out var statuses, startTimeout: TimeSpan.FromSeconds(10));
         await RegisterEchoAsync(client, host);
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        await host.DropAndAwaitFailedAsync(statuses);
         using var limit = TestLimit.Create();
 
         var recovering = client.StartAsync(limit.Token);
@@ -164,11 +142,9 @@ public sealed class ExtensionHostClientCrashTests
     public async Task StopAsync_on_a_deliberate_stop_clears_the_tools_and_fires_ToolsChanged()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         await RegisterEchoAsync(client, host);
-        var toolChanges = new EventLog<int>();
-        client.ToolsChanged += () => toolChanges.Add(1);
+        var toolChanges = client.TrackToolsChanged();
         using var limit = TestLimit.Create();
 
         await client.StopAsync(limit.Token);
@@ -183,12 +159,8 @@ public sealed class ExtensionHostClientCrashTests
     public async Task Dispose_after_a_crash_completes_without_error()
     {
         await using var host = new FakeHost();
-        var client = ClientFactory.Create(host);
-        var statuses = new EventLog<(HostStatus Status, string? Detail)>();
-        client.StatusChanged += (status, detail) => statuses.Add((status, detail));
-        await client.StartConnectedAsync(host);
-        await host.DropConnectionAsync();
-        await statuses.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
+        var client = await host.StartTrackedAsync(out var statuses);
+        await host.DropAndAwaitFailedAsync(statuses);
 
         await client.DisposeAsync().AsTask().Bounded();
 

@@ -23,8 +23,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class BackgroundBuildTests
 {
-    private const int PumpIterations = 600;
-    private const int PumpDelayMilliseconds = 5;
     private const int SpecCount = 220;
     private const int DiffFileCount = 120;
     private const int DiffLinesPerFile = 200;
@@ -71,7 +69,7 @@ public sealed class BackgroundBuildTests
                 }
                 finally
                 {
-                    DeleteTree(root);
+                    TestTempFiles.DeleteTree(root);
                 }
             },
             CancellationToken.None);
@@ -102,7 +100,7 @@ public sealed class BackgroundBuildTests
                 }
                 finally
                 {
-                    DeleteTree(root);
+                    TestTempFiles.DeleteTree(root);
                 }
             },
             CancellationToken.None);
@@ -146,7 +144,7 @@ public sealed class BackgroundBuildTests
         }
         finally
         {
-            DeleteTree(root);
+            TestTempFiles.DeleteTree(root);
         }
     }
 
@@ -181,7 +179,7 @@ public sealed class BackgroundBuildTests
                 }
                 finally
                 {
-                    DeleteTree(root);
+                    TestTempFiles.DeleteTree(root);
                 }
             },
             CancellationToken.None);
@@ -190,8 +188,7 @@ public sealed class BackgroundBuildTests
     /// <summary>One parent spec plus <see cref="SpecCount"/> - 1 children, spread over two levels of depth.</summary>
     private static string NewSpecRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-spec-tree-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-spec-tree-");
         for (var index = 0; index < SpecCount; index++)
         {
             var id = "spec-" + index.ToString(CultureInfo.InvariantCulture);
@@ -226,8 +223,7 @@ public sealed class BackgroundBuildTests
     /// <summary>A repository whose working tree has one committed file per diff target, all of them modified again.</summary>
     private static async Task<string> NewDiffRepositoryAsync()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-diff-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-diff-");
 
         var git = new GitCli();
         foreach (var arguments in new[] { new[] { "init" }, ["config", "user.email", "forge@example.invalid"], ["config", "user.name", "Forge Tests"] })
@@ -261,52 +257,6 @@ public sealed class BackgroundBuildTests
         }
     }
 
-    private static void DeleteTree(string path)
-    {
-        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition, 600);
 
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
-
-    private sealed class EmptyCheckpointStore : ITurnCheckpointStore
-    {
-        public Task BeginAsync(string sessionId, int turn, string worktreePath, string treeBefore, DateTimeOffset at, CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task<bool> CompleteAsync(string sessionId, int turn, string treeAfter, DateTimeOffset at, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<IReadOnlyList<TurnCheckpoint>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TurnCheckpoint>>([]);
-    }
 }

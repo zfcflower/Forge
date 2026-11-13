@@ -19,8 +19,7 @@ public sealed class WorktreeManagerStartPointTests
     {
         var sandbox = new TempDirectory();
         var repo = new TestRepo(sandbox);
-        repo.Write("README.md", "# repo\n");
-        repo.Commit("initial");
+        repo.CommitFile("README.md", "# repo\n", "initial");
         return (sandbox, repo);
     }
 
@@ -109,8 +108,7 @@ public sealed class WorktreeManagerStartPointTests
         {
             repo.Write("first.txt", "first\n");
             var first = repo.Commit("first");
-            repo.Write("second.txt", "second\n");
-            repo.Commit("second");
+            repo.CommitFile("second.txt", "second\n", "second");
 
             var session = await new WorktreeManager(new GitCli()).CreateAsync(repo.Root, "At sha", "feature/at-sha", first);
 
@@ -132,8 +130,7 @@ public sealed class WorktreeManagerStartPointTests
             repo.Write("tagged.txt", "tagged\n");
             var tagged = repo.Commit("tagged");
             repo.RunGit("tag", "-a", "v1", "-m", "release");
-            repo.Write("later.txt", "later\n");
-            repo.Commit("later");
+            repo.CommitFile("later.txt", "later\n", "later");
 
             var session = await new WorktreeManager(new GitCli()).CreateAsync(repo.Root, "At tag", "feature/at-tag", "v1");
 

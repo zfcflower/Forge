@@ -116,11 +116,6 @@ internal sealed class ChatGptAuthentication
 
     public const string AcceptValue = "text/event-stream";
 
-    private const int MaxErrorBodyLength = 1024;
-
-    /// <summary>Each step stands alone, so a stalled connection must not hold the dialog for the whole code lifetime.</summary>
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
-
     /// <summary>The user-code request body: fixed, so it is written once instead of serialized.</summary>
     private static readonly string UserCodeBody = "{\"client_id\":\"" + ClientId + "\"}";
 
@@ -177,8 +172,8 @@ internal sealed class ChatGptAuthentication
         }
 
         var element = document!.RootElement;
-        var deviceAuthId = Text(element, "device_auth_id");
-        var userCode = Text(element, "user_code");
+        var deviceAuthId = ProviderSignInJson.Text(element, "device_auth_id");
+        var userCode = ProviderSignInJson.Text(element, "user_code");
         if (deviceAuthId is null || userCode is null)
         {
             throw new ProviderException(
@@ -229,8 +224,8 @@ internal sealed class ChatGptAuthentication
         var element = document?.RootElement ?? default;
         if (status is >= 200 and < 300)
         {
-            var authorizationCode = Text(element, "authorization_code");
-            var codeVerifier = Text(element, "code_verifier");
+            var authorizationCode = ProviderSignInJson.Text(element, "authorization_code");
+            var codeVerifier = ProviderSignInJson.Text(element, "code_verifier");
             if (authorizationCode is not null && codeVerifier is not null)
             {
                 return ChatGptPollResult.Complete(authorizationCode, codeVerifier, waited);
@@ -373,8 +368,8 @@ internal sealed class ChatGptAuthentication
     /// </summary>
     private ChatGptTokenBundle Bundle(JsonElement root, string operation)
     {
-        var access = Text(root, "access_token");
-        var refresh = Text(root, "refresh_token");
+        var access = ProviderSignInJson.Text(root, "access_token");
+        var refresh = ProviderSignInJson.Text(root, "refresh_token");
         var expiresIn = PositiveInt(root, "expires_in");
         if (access is null || refresh is null || expiresIn is null)
         {
@@ -421,7 +416,7 @@ internal sealed class ChatGptAuthentication
         {
             return document.RootElement.ValueKind == JsonValueKind.Object
                    && document.RootElement.TryGetProperty(AuthClaim, out var auth)
-                   && Text(auth, AccountIdClaim) is { Length: > 0 } accountId
+                   && ProviderSignInJson.Text(auth, AccountIdClaim) is { Length: > 0 } accountId
                 ? accountId
                 : null;
         }
@@ -455,95 +450,17 @@ internal sealed class ChatGptAuthentication
     }
 
     /// <summary>
-    /// Sends one request and reads its body once. The body comes back as text plus a parsed document (null when it is not
-    /// JSON), because a failure still has to report the status and what the server said, JSON or not.
+    /// Sends one authorization request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
+    /// mapping and the single body read, this class only names the provider and the step.
     /// </summary>
-    private async Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
+    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
         HttpRequestMessage message,
         string operation,
-        CancellationToken ct)
-    {
-        // The shared client has no timeout of its own: each step gets its own, so a stalled connection cannot outlive the
-        // device-code lifetime.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await http
-                .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new ProviderException("ChatGPT: the authorization request timed out.", retryable: true);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or IOException)
-        {
-            throw new ProviderException($"ChatGPT: the authorization request failed: {ex.Message}", retryable: true, inner: ex);
-        }
-
-        using (response)
-        {
-            var status = (int)response.StatusCode;
-            string body;
-            try
-            {
-                body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is IOException or HttpRequestException)
-            {
-                throw new ProviderException(
-                    $"ChatGPT: the {operation} response could not be read.",
-                    retryable: true,
-                    status,
-                    ex);
-            }
-
-            if (status is >= 200 and < 300)
-            {
-                try
-                {
-                    return (status, JsonDocument.Parse(body), string.Empty);
-                }
-                catch (JsonException ex)
-                {
-                    throw new ProviderException(
-                        $"ChatGPT: the {operation} response is not JSON.",
-                        retryable: false,
-                        status,
-                        ex);
-                }
-            }
-
-            // A failure body is only shown to explain a failure; a successful one is parsed and never echoed.
-            return (status, TryParse(body), body.Length <= MaxErrorBodyLength ? body : body[..MaxErrorBodyLength]);
-        }
-    }
-
-    private static JsonDocument? TryParse(string body)
-    {
-        try
-        {
-            return JsonDocument.Parse(body);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+        CancellationToken ct) =>
+        ProviderSignInHttp.SendForJsonAsync(http, message, "ChatGPT", "authorization", operation, ct);
 
     /// <summary>The tail of a failed request's error message: what the server said, if it said anything.</summary>
     private static string Describe(string body) => body.Length == 0 ? string.Empty : ": " + body;
-
-    private static string? Text(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(name, out var value)
-        && value.ValueKind == JsonValueKind.String
-        && value.GetString() is { Length: > 0 } text
-            ? text
-            : null;
 
     /// <summary>
     /// The error code a poll answer carries. The endpoint spells it either as a bare <c>error</c> string or inside an
@@ -559,20 +476,20 @@ internal sealed class ChatGptAuthentication
         return error.ValueKind switch
         {
             JsonValueKind.String => error.GetString() is { Length: > 0 } text ? text : null,
-            JsonValueKind.Object => Text(error, "code") ?? Text(error, "type"),
+            JsonValueKind.Object => ProviderSignInJson.Text(error, "code") ?? ProviderSignInJson.Text(error, "type"),
             _ => null,
         };
     }
 
     /// <summary>What the server said about a failure, from whichever field it filled.</summary>
     private static string? Detail(JsonElement element) =>
-        Text(element, "error_description")
-        ?? Text(element, "detail")
-        ?? Text(element, "message")
+        ProviderSignInJson.Text(element, "error_description")
+        ?? ProviderSignInJson.Text(element, "detail")
+        ?? ProviderSignInJson.Text(element, "message")
         ?? (element.ValueKind == JsonValueKind.Object
             && element.TryGetProperty("error", out var error)
             && error.ValueKind == JsonValueKind.Object
-                ? Text(error, "message")
+                ? ProviderSignInJson.Text(error, "message")
                 : null);
 
     /// <summary>

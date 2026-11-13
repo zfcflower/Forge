@@ -103,8 +103,7 @@ public sealed class HostToolCallRouterTests
         hold.Release();
         await rootTask.Bounded();
 
-        var (content, isError) = BoundRoots.OutputOf(response);
-        Assert.True(isError);
+        var content = BoundRoots.RefusedContent(response);
         Assert.Contains("denied", content);
         Assert.Equal(0, tool.InvocationCount);
     }

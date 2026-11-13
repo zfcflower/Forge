@@ -42,11 +42,10 @@ public sealed class TextEditorRenderingTests : IDisposable
         var path = Write(name, text, new UTF8Encoding(false));
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, width: 900, height: 600);
-            Assert.Equal(text.Split('\n'), RenderedLines(host.Editor).Take(text.Split('\n').Length).ToArray());
-            await WaitUntil(() => host.Editor.TextArea.TextView is var view && ForegroundColors(view).Count >= 2);
+            Assert.Equal(text.Split('\n'), EditorUi.RenderedLines(host.Editor).Take(text.Split('\n').Length).ToArray());
+            await WaitUntil(() => EditorUi.TokenColors(host.Editor).Count >= 2);
             host.Window.Close();
         });
     }
@@ -66,8 +65,7 @@ public sealed class TextEditorRenderingTests : IDisposable
             foreach (var (name, encoding, text) in cases)
             {
                 var path = Write(name + ".txt", text, encoding);
-                var model = FileDocumentViewModel.Create();
-                await model.LoadAsync(path, CancellationToken.None);
+                var model = await TestDocuments.LoadAsync(path);
                 var host = Show(model, width: 600);
                 model.IsEditing = true;
                 WorkbenchUi.Settle(host.Window);
@@ -75,7 +73,7 @@ public sealed class TextEditorRenderingTests : IDisposable
                 host.Editor.CaretOffset = 0;
                 host.Window.KeyTextInput("X");
                 WorkbenchUi.Settle(host.Window);
-                Assert.StartsWith("X", RenderedLines(host.Editor)[0], StringComparison.Ordinal);
+                Assert.StartsWith("X", EditorUi.RenderedLines(host.Editor)[0], StringComparison.Ordinal);
                 host.Window.KeyPressQwerty(PhysicalKey.S, RawInputModifiers.Control);
                 await WaitUntil(() => !model.IsDirty && !model.IsSaving);
                 byte[] expected = [.. encoding.GetPreamble(), .. encoding.GetBytes("X" + text)];
@@ -91,8 +89,7 @@ public sealed class TextEditorRenderingTests : IDisposable
         var path = Write("undo.txt", "alpha\nbeta\n", new UTF8Encoding(false));
         await Ui(async () =>
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, width: 600);
             model.IsEditing = true;
             WorkbenchUi.Settle(host.Window);
@@ -104,50 +101,19 @@ public sealed class TextEditorRenderingTests : IDisposable
             host.Window.KeyPressQwerty(PhysicalKey.Z, RawInputModifiers.Control);
             WorkbenchUi.Settle(host.Window);
             Assert.Equal("alpha\nbeta\n", host.Editor.Document.Text);
-            Assert.Equal(new[] { "alpha", "beta", "" }, RenderedLines(host.Editor).Take(3).ToArray());
+            Assert.Equal(new[] { "alpha", "beta", "" }, EditorUi.RenderedLines(host.Editor).Take(3).ToArray());
             host.Window.KeyPressQwerty(PhysicalKey.Y, RawInputModifiers.Control);
             WorkbenchUi.Settle(host.Window);
             Assert.Equal("Xalpha\nbeta\n", host.Editor.Document.Text);
-            Assert.Equal("Xalpha", RenderedLines(host.Editor)[0]);
+            Assert.Equal("Xalpha", EditorUi.RenderedLines(host.Editor)[0]);
             host.Window.Close();
         });
     }
 
-    private static string[] RenderedLines(TextEditor editor)
-    {
-        var textView = editor.TextArea.TextView;
-        textView.EnsureVisualLines();
-        return [.. textView.VisualLines.Select(static line => string.Concat(
-            line.TextLines.SelectMany(static t => t.TextRuns).Where(static r => r is not TextEndOfLine).Select(static r => r.Text.ToString())))];
-    }
+    private static EditorHost Show(FileDocumentViewModel model, double width = 240, double height = 400) =>
+        EditorUi.Show(model, width, height);
 
-    private static HashSet<Color> ForegroundColors(AvaloniaEdit.Rendering.TextView textView)
-    {
-        textView.Redraw();
-        textView.EnsureVisualLines();
-        return [.. textView.VisualLines
-            .SelectMany(static l => l.TextLines).SelectMany(static t => t.TextRuns)
-            .Where(static r => r is not TextEndOfLine && !string.IsNullOrWhiteSpace(r.Text.ToString()))
-            .Select(static r => r.Properties?.ForegroundBrush as ISolidColorBrush)
-            .OfType<ISolidColorBrush>().Select(static b => b.Color)];
-    }
-
-    private sealed record EditorHost(Window Window, FileDocumentView View, TextEditor Editor);
-
-    private static EditorHost Show(FileDocumentViewModel model, double width = 240, double height = 400)
-    {
-        var view = new FileDocumentView { DataContext = model };
-        var window = new Window { Width = width, Height = height, Content = view };
-        window.Show();
-        WorkbenchUi.Settle(window);
-        return new EditorHost(window, view, view.GetVisualDescendants().OfType<TextEditor>().Single());
-    }
-
-    private static async Task Ui(Func<Task> body)
-    {
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await SharedUi.Session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntil(Func<bool> condition)
     {
@@ -161,8 +127,7 @@ public sealed class TextEditorRenderingTests : IDisposable
 
     private string Write(string name, string content, Encoding encoding)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-text-editor-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-text-editor-");
         roots.Add(root);
         var path = Path.Combine(root, name);
         File.WriteAllBytes(path, [.. encoding.GetPreamble(), .. encoding.GetBytes(content)]);

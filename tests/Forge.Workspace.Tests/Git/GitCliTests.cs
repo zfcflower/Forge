@@ -15,8 +15,7 @@ public sealed class GitCliTests
         using var repo = new TestRepo();
         repo.Write("a.txt", "a\n");
         repo.Write("b.txt", "b\n");
-        repo.Write("c.txt", "c\n");
-        repo.Commit("base");
+        repo.CommitFile("c.txt", "c\n", "base");
 
         repo.Write("a.txt", "a changed\n");
         repo.Write("b.txt", "b changed\n");
@@ -62,8 +61,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("tracked.txt", "1\n");
-        repo.Commit("base");
+        repo.CommitFile("tracked.txt", "1\n", "base");
         repo.Write("untracked.txt", "u\n");
 
         var entries = await new GitCli().GetStatusAsync(repo.Root, includeUntracked: false);
@@ -76,8 +74,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("tracked.txt", "1\n");
-        repo.Commit("base");
+        repo.CommitFile("tracked.txt", "1\n", "base");
 
         Assert.Empty(await new GitCli().GetStatusAsync(repo.Root));
     }
@@ -88,8 +85,7 @@ public sealed class GitCliTests
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
         repo.Write("a.txt", "a\n");
-        repo.Write("b.txt", "b\n");
-        repo.Commit("base");
+        repo.CommitFile("b.txt", "b\n", "base");
         repo.Write("a.txt", "a2\n");
         repo.Write("b.txt", "b2\n");
 
@@ -107,8 +103,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
         repo.Write("a.txt", "a2\n");
         repo.Write("fresh.txt", "f\n");
 
@@ -125,8 +120,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
         repo.Write("a.txt", "a2\n");
 
         var commit = await new GitCli().CommitAsync(repo.Root, [], "--amend everything");
@@ -139,8 +133,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("base.txt", "b\n");
-        repo.Commit("base");
+        repo.CommitFile("base.txt", "b\n", "base");
         repo.Write("--dash-name.txt", "d\n");
 
         var commit = await new GitCli().CommitAsync(repo.Root, ["--dash-name.txt"], "dash file");
@@ -156,12 +149,9 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
-        repo.Write("f.txt", "2\n");
-        repo.Commit("second\n\nBody line one\nBody line two");
-        repo.Write("f.txt", "3\n");
-        repo.Commit("third");
+        repo.CommitFile("f.txt", "1\n", "first");
+        repo.CommitFile("f.txt", "2\n", "second\n\nBody line one\nBody line two");
+        repo.CommitFile("f.txt", "3\n", "third");
 
         var cli = new GitCli();
         var page = await cli.GetLogAsync(repo.Root, new GitLogOptions { Limit = 2, Skip = 1 });
@@ -182,8 +172,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
 
         var error = await Assert.ThrowsAsync<GitException>(() => new GitCli().GetLogAsync(repo.Root, new GitLogOptions { Revision = "no-such-ref" }));
 
@@ -209,8 +198,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("keep.txt", "one\ntwo\n");
-        repo.Commit("base");
+        repo.CommitFile("keep.txt", "one\ntwo\n", "base");
         repo.Write("keep.txt", "one\nTWO\nthree\n");
         repo.Write("added.txt", "brand new\n");
 
@@ -232,8 +220,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "old\n");
-        repo.Commit("base");
+        repo.CommitFile("f.txt", "old\n", "base");
         repo.Write("f.txt", "new\n");
         repo.RunGit("add", "f.txt");
         repo.Write("f.txt", "newer\n");
@@ -254,8 +241,7 @@ public sealed class GitCliTests
         repo.Write("b.txt", "b1\n");
         var first = repo.Commit("first");
         repo.Write("a.txt", "a2\n");
-        repo.Write("b.txt", "b2\n");
-        repo.Commit("second");
+        repo.CommitFile("b.txt", "b2\n", "second");
 
         var files = await new GitCli().GetDiffAsync(repo.Root, new GitDiffOptions { From = first, To = "HEAD", Paths = ["a.txt"] });
 
@@ -267,8 +253,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         await Assert.ThrowsAsync<GitException>(() => new GitCli().GetDiffTextAsync(repo.Root, new GitDiffOptions { From = "missing-rev", To = "HEAD" }));
     }
@@ -278,8 +263,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("cr.txt", "base\n");
-        repo.Commit("base");
+        repo.CommitFile("cr.txt", "base\n", "base");
         repo.WriteBytes("cr.txt", "base\na\rb\n"u8.ToArray());
 
         var files = await new GitCli().GetDiffAsync(repo.Root);
@@ -294,8 +278,7 @@ public sealed class GitCliTests
         using var repo = new TestRepo();
         repo.Write("doc.md", "version one\n");
         var first = repo.Commit("first");
-        repo.Write("doc.md", "version two\n");
-        repo.Commit("second");
+        repo.CommitFile("doc.md", "version two\n", "second");
 
         var cli = new GitCli();
         Assert.Equal("version one\n", await cli.GetFileAtRevisionAsync(repo.Root, first, "doc.md"));
@@ -308,8 +291,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("win.txt", "first\r\nsecond\r\n");
-        repo.Commit("crlf");
+        repo.CommitFile("win.txt", "first\r\nsecond\r\n", "crlf");
 
         var content = await new GitCli().GetFileAtRevisionAsync(repo.Root, "HEAD", "win.txt");
 
@@ -324,8 +306,7 @@ public sealed class GitCliTests
         repo.Write("f.txt", "base\n");
         var fork = repo.Commit("fork");
         repo.RunGit("checkout", "-q", "-b", "feature");
-        repo.Write("f.txt", "feature\n");
-        repo.Commit("feature work");
+        repo.CommitFile("f.txt", "feature\n", "feature work");
         repo.RunGit("checkout", "-q", "main");
         repo.Write("g.txt", "main\n");
         var mainHead = repo.Commit("main work");
@@ -357,8 +338,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
         var cli = new GitCli();
 
         var error = await Assert.ThrowsAsync<ArgumentException>(() => cli.RevParseAsync(repo.Root, "--show-toplevel"));
@@ -373,8 +353,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("sub/dir/file.txt", "x\n");
-        repo.Commit("base");
+        repo.CommitFile("sub/dir/file.txt", "x\n", "base");
         var cli = new GitCli();
 
         Assert.True(await cli.IsRepositoryAsync(repo.FullPath("sub/dir")));
@@ -452,8 +431,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
         var cli = new GitCli();
 
         Assert.Equal("main", await cli.GetDefaultBranchAsync(repo.Root));
@@ -467,13 +445,10 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
         repo.RunGit("checkout", "-q", "-b", "feature");
-        repo.Write("f.txt", "2\n");
-        repo.Commit("two");
-        repo.Write("f.txt", "3\n");
-        repo.Commit("three");
+        repo.CommitFile("f.txt", "2\n", "two");
+        repo.CommitFile("f.txt", "3\n", "three");
 
         Assert.Equal(2, await new GitCli().CountCommitsAheadAsync(repo.Root, "HEAD", "main"));
         Assert.Equal(0, await new GitCli().CountCommitsAheadAsync(repo.Root, "main", "HEAD"));
@@ -484,8 +459,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
         using var external = new TempDirectory();
         var target = Path.Combine(external.Path, "wt");
         var cli = new GitCli();
@@ -505,8 +479,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
         using var external = new TempDirectory();
         var real = Path.Combine(external.Path, "real");
         Directory.CreateDirectory(real);
@@ -614,8 +587,7 @@ public sealed class GitCliTests
             builder.Append("line-").Append(i.ToString("D5")).Append('\n');
         }
 
-        repo.Write("big.txt", builder.ToString());
-        repo.Commit("big");
+        repo.CommitFile("big.txt", builder.ToString(), "big");
         var streamed = 0;
         var options = new GitRunOptions
         {
@@ -636,10 +608,8 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
-        repo.Write("f.txt", "2\n");
-        repo.Commit("second");
+        repo.CommitFile("f.txt", "1\n", "first");
+        repo.CommitFile("f.txt", "2\n", "second");
         var cli = new GitCli();
 
         var lines = new List<string>();
@@ -662,8 +632,7 @@ public sealed class GitCliTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("f.txt", "1\n");
-        repo.Commit("first");
+        repo.CommitFile("f.txt", "1\n", "first");
         var cli = new GitCli();
 
         var records = new List<string>();

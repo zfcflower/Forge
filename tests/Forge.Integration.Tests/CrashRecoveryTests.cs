@@ -13,10 +13,7 @@ public sealed class CrashRecoveryTests
     public async Task Worker_crash_fails_the_inflight_call_and_the_next_call_runs_on_a_restarted_worker()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var crashedPid = await fx.WorkerPidAsync("alpha");
 
@@ -25,9 +22,7 @@ public sealed class CrashRecoveryTests
         Assert.Contains("exited", crashed.Content, StringComparison.Ordinal);
         await fx.WaitForExitAsync(crashedPid, "the crashed worker");
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"ok"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:ok", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"ok"}""", "a:ok");
 
         var restartedPid = await fx.WorkerPidAsync("alpha");
         Assert.NotEqual(crashedPid, restartedPid);
@@ -38,10 +33,7 @@ public sealed class CrashRecoveryTests
     public async Task Repeated_worker_crashes_disable_the_worker_with_a_clear_error()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         for (var attempt = 0; attempt < 4; attempt++)
         {
@@ -58,21 +50,16 @@ public sealed class CrashRecoveryTests
     [Fact]
     public async Task Refresh_re_enables_a_worker_disabled_by_repeated_crashes_and_republishes_its_tools()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-e2e-refresh-" + Guid.NewGuid().ToString("N")[..10]);
-        var plugins = Path.Combine(root, "plugins");
-        var data = Path.Combine(root, "data");
-        var pipe = "forge-e2e-refresh-" + Guid.NewGuid().ToString("N")[..20];
-        Directory.CreateDirectory(plugins);
-        Directory.CreateDirectory(data);
-        var plugin = Path.Combine(plugins, "alpha");
+        var layout = RawHostLayout.Create("forge-e2e-refresh-");
+        var plugin = Path.Combine(layout.Plugins, "alpha");
         Directory.CreateDirectory(plugin);
         File.WriteAllText(Path.Combine(plugin, "manifest.json"), """{"id":"alpha","version":"1.0.0","source":"Plugin.cs"}""");
         File.WriteAllText(Path.Combine(plugin, "Plugin.cs"), PluginSources.Standard("alpha", echoPrefix: "a"));
 
         using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(150), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
-        using var hostProcess = StartRawHost(pipe, plugins, data);
-        await using var transport = await ConnectRawAsync(pipe, ct);
+        await using var host = RawHost.Start(layout);
+        await using var transport = await RawHost.ConnectTransportAsync(layout.Pipe, ct);
         await using var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
         var registers = new List<IpcMessage>();
         peer.NotificationReceived += message =>
@@ -88,42 +75,40 @@ public sealed class CrashRecoveryTests
         await peer.StartAsync(ct);
         try
         {
-            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, Empty(), ct);
-            var record = ApprovalDatabase.ReadRecord(data, "alpha", "1.0.0")
+            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), ct);
+            var record = ApprovalDatabase.ReadRecord(layout.Data, "alpha", "1.0.0")
                 ?? throw new InvalidOperationException("the host persisted no approval record for alpha 1.0.0");
             await peer.SendRequestAsync(ExtensionProtocol.PluginApprove, ApproveArgs(record), ct);
             await WaitForCountAsync(registers, 1, ct, "the first tools.register");
             Assert.Equal(PluginSources.AllTools.Length, DeclaredTools(registers[0]));
-            var pidBefore = await ExecuteAsync(peer, "alpha", "pid", "{}", root, ct);
+            var pidBefore = await ExecuteAsync(peer, "alpha", "pid", "{}", layout.Root, ct);
 
             for (var attempt = 0; attempt < 4; attempt++)
             {
                 var crashed = await Assert.ThrowsAsync<IpcRemoteException>(() =>
-                    ExecuteRequestAsync(peer, "alpha", "crash", "{}", root, ct));
+                    ExecuteRequestAsync(peer, "alpha", "crash", "{}", layout.Root, ct));
                 Assert.Equal("worker_failed", crashed.Code);
             }
 
             var disabled = await Assert.ThrowsAsync<IpcRemoteException>(() =>
-                ExecuteRequestAsync(peer, "alpha", "echo", """{"text":"x"}""", root, ct));
+                ExecuteRequestAsync(peer, "alpha", "echo", """{"text":"x"}""", layout.Root, ct));
             Assert.Equal("worker_disabled", disabled.Code);
             lock (registers)
             {
                 Assert.Single(registers);
             }
 
-            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, Empty(), ct);
+            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), ct);
             await WaitForCountAsync(registers, 2, ct, "the tools.register republished by the refresh");
             Assert.Equal(PluginSources.AllTools.Length, DeclaredTools(registers[1]));
 
-            Assert.Equal("a:revived", await ExecuteAsync(peer, "alpha", "echo", """{"text":"revived"}""", root, ct));
-            Assert.NotEqual(pidBefore, await ExecuteAsync(peer, "alpha", "pid", "{}", root, ct));
+            Assert.Equal("a:revived", await ExecuteAsync(peer, "alpha", "echo", """{"text":"revived"}""", layout.Root, ct));
+            Assert.NotEqual(pidBefore, await ExecuteAsync(peer, "alpha", "pid", "{}", layout.Root, ct));
         }
         finally
         {
             await peer.StopAsync(CancellationToken.None);
-            KillQuietly(hostProcess);
-            await hostProcess.WaitForExitAsync(CancellationToken.None);
-            TryDeleteDirectory(root);
+            await host.StopAsync();
         }
     }
 
@@ -132,10 +117,7 @@ public sealed class CrashRecoveryTests
     {
         await using var fx = new E2eFixture();
         var marker = Path.Combine(fx.Root, "sleep-started.txt");
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var workerPid = await fx.WorkerPidAsync("alpha");
         var hostPid = fx.Client.HostProcessId ?? throw new InvalidOperationException("The client did not start a host.");
@@ -183,8 +165,6 @@ public sealed class CrashRecoveryTests
         Assert.False(E2eFixture.IsRunning(hostPid));
         Assert.False(E2eFixture.IsRunning(workerPid));
     }
-
-    private static JsonElement Empty() => JsonDocument.Parse("{}").RootElement.Clone();
 
     private static JsonElement ApproveArgs(ApprovalRecord record) => JsonSerializer.SerializeToElement(new
     {
@@ -252,57 +232,6 @@ public sealed class CrashRecoveryTests
                     $"waited {Stopwatch.GetElapsedTime(start).TotalSeconds:0.###} s for {what}; the host published " +
                     $"{registers.Count} of {expected}.");
             }
-        }
-    }
-
-    private static Process StartRawHost(string pipe, string plugins, string data)
-    {
-        var info = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        info.ArgumentList.Add(E2eFixture.HostAssemblyPath);
-        info.ArgumentList.Add("--pipe");
-        info.ArgumentList.Add(pipe);
-        info.ArgumentList.Add("--plugins");
-        info.ArgumentList.Add(plugins);
-        info.ArgumentList.Add("--data");
-        info.ArgumentList.Add(data);
-        var process = Process.Start(info) ?? throw new InvalidOperationException("The raw host did not start.");
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return process;
-    }
-
-    private static Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct) =>
-        PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
-
-    private static void KillQuietly(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
         }
     }
 }

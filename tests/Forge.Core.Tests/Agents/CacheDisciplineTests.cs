@@ -29,9 +29,7 @@ public class CacheDisciplineTests
     [Fact]
     public async Task SystemPrompt_is_the_stable_prefix_only_and_tools_are_sorted()
     {
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("1", "read", "{}"))
-            : Turn.Say("done"));
+        var provider = AgentTestScripts.OneToolCallThenSay("read", "done", "1");
         var host = AgentTestHost.Create(provider, Tools(), layers: Layers);
         var root = host.CreateRoot("session", Workspace);
 
@@ -54,9 +52,7 @@ public class CacheDisciplineTests
     [Fact]
     public async Task DynamicContext_is_a_trailing_user_message_that_never_enters_history()
     {
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("1", "read", "{}"))
-            : Turn.Say("done"));
+        var provider = AgentTestScripts.OneToolCallThenSay("read", "done", "1");
         var host = AgentTestHost.Create(provider, Tools(), layers: Layers, dynamicContext: () => "DYNAMIC-MARKER");
         var root = host.CreateRoot("session", Workspace);
 
@@ -81,9 +77,7 @@ public class CacheDisciplineTests
     {
         var store = new InMemorySessionStore();
         var session = await store.CreateSessionAsync(Workspace, "dynamic", CancellationToken.None);
-        var provider = new FakeProvider((request, index) => index == 0
-            ? Turn.Call(("1", "read", "{}"))
-            : Turn.Say("done"));
+        var provider = AgentTestScripts.OneToolCallThenSay("read", "done", "1");
         var host = AgentTestHost.Create(
             provider,
             Tools(),

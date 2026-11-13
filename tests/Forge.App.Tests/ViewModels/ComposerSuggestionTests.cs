@@ -100,7 +100,7 @@ public sealed class ComposerSuggestionTests
     [Fact]
     public void Skills_are_found_under_the_workspace_and_user_folders()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-skills-" + Guid.NewGuid().ToString("N"));
+        var root = TestTempFiles.NewDirectory("forge-skills-");
         try
         {
             var workspace = Path.Combine(root, "ws");
@@ -126,8 +126,7 @@ public sealed class ComposerSuggestionTests
     [Fact]
     public void The_composer_picker_suggests_skills_and_files_and_inserts_the_choice()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-composer-picker-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-composer-picker-");
         try
         {
             var composer = NewComposer(root, out _, out var holder);
@@ -172,8 +171,7 @@ public sealed class ComposerSuggestionTests
         // Rewritten for multi-provider: the old single-provider build sorted the default model first even when it
         // was listed second; the new catalogue keeps the stored order (trimmed), so the fixture lists the default
         // first explicitly. Trimming (" model-c ") is still verified.
-        var root = Path.Combine(Path.GetTempPath(), "forge-composer-models-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-composer-models-");
         try
         {
             var composer = NewComposer(root, out var preferences, out var services);
@@ -278,12 +276,6 @@ public sealed class ComposerSuggestionTests
         }
 
         public void Dispose() => Http.Dispose();
-
-        private sealed class ThrowingHandler : HttpMessageHandler
-        {
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-                throw new InvalidOperationException("no network in this test");
-        }
     }
 
     private static void Write(string path, string text)

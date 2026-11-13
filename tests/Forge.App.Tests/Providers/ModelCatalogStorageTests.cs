@@ -12,19 +12,12 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class ModelCatalogStorageTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-catalog-store-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-catalog-store-");
 
-    public ModelCatalogStorageTests() => Directory.CreateDirectory(root);
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     /// <summary>A clock that does not move; the catalog's "is today's here?" test must follow it, not the wall clock.</summary>

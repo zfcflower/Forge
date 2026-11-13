@@ -87,8 +87,7 @@ public sealed class GitCliCommitCancellationTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write(FileName, "a\n");
-        repo.Commit("base");
+        repo.CommitFile(FileName, "a\n", "base");
         repo.Write(FileName, "b\n");
         var message = LongMessage("feat(core): a very long step summary", 100 * 1024);
         Assert.True(message.Length >= 100 * 1024);
@@ -106,8 +105,7 @@ public sealed class GitCliCommitCancellationTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write(FileName, "a\n");
-        repo.Commit("base");
+        repo.CommitFile(FileName, "a\n", "base");
         repo.Write(FileName, "b\n");
         const string message = "fix: it's \"quoted\" & $HOME %PATH% `ticks` 汉字 \U0001F600\n\n# not a comment\n- bullet\n  indented line\n\nlast line";
 

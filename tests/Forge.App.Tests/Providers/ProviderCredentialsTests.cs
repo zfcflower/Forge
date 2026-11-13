@@ -9,9 +9,8 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class ProviderCredentialsTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-provider-credentials-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-provider-credentials-");
 
-    public ProviderCredentialsTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void A_credentials_file_with_an_access_token_reads_as_signed_in()
@@ -69,13 +68,7 @@ public sealed class ProviderCredentialsTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private ProviderCredentials Credentials(string claudePath) =>

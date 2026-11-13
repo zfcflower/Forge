@@ -292,9 +292,7 @@ public sealed class PluginQueueBudgetTests
     private static async Task StartGatedAsync(E2eFixture fx)
     {
         fx.WritePlugin("gate", PluginQueueBudgetSources.Gated("gate"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("gate");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gate").Count == 4, "the tools of gate");
+        await fx.StartAndApproveAsync("gate", 4, "the tools of gate");
     }
 
     private static async Task<(ToolResult? Result, Exception? Fault)> EndAsync(Task<ToolResult> call, CancellationToken ct)

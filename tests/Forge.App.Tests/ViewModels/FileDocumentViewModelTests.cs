@@ -14,8 +14,7 @@ public sealed class FileDocumentViewModelTests
         await File.WriteAllBytesAsync(path, new UTF8Encoding(false).GetBytes(text));
         try
         {
-            var document = FileDocumentViewModel.Create();
-            await document.LoadAsync(path, CancellationToken.None);
+            var document = await TestDocuments.LoadAsync(path);
 
             Assert.False(document.HasError, document.Error);
             Assert.True(document.HasDocument);

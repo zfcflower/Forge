@@ -232,7 +232,7 @@ internal static class ChangeBadge
 /// and re-applied as one virtualized row list, keeping every expanded folder and the row order. The panel's own texts are
 /// resolved from <see cref="Loc"/> on every read and re-raised when the language changes.
 /// </summary>
-internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
+internal sealed class FilesPanelViewModel : NotifyingObject, IDisposable
 {
     private readonly GitCli git;
     private readonly Action<string> openFile;
@@ -355,9 +355,8 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
         get => selectedTab;
         set
         {
-            if (Set(ref selectedTab, value))
+            if (SetAndNotify(ref selectedTab, value, nameof(IsAllTab)))
             {
-                OnPropertyChanged(nameof(IsAllTab));
                 OnPropertyChanged(nameof(IsChangedTab));
                 OnPropertyChanged(nameof(ShowSharedChanges));
                 OnPropertyChanged(nameof(ShowFallbackChanges));
@@ -879,7 +878,7 @@ internal sealed class FilesPanelViewModel : ObservableObject, IDisposable
 /// and are never translated; only the tab title's leading mark and the placeholder before a file is loaded come from the
 /// string table, and both are read when the property is read.
 /// </summary>
-internal sealed partial class FileDocumentViewModel : ObservableObject
+internal sealed partial class FileDocumentViewModel : NotifyingObject
 {
     private readonly GrammarRegistry? grammars;
     private string path = string.Empty;
@@ -901,13 +900,7 @@ internal sealed partial class FileDocumentViewModel : ObservableObject
     public string Path
     {
         get => path;
-        private set
-        {
-            if (Set(ref path, value))
-            {
-                OnPropertyChanged(nameof(PathDisplay));
-            }
-        }
+        private set => SetAndNotify(ref path, value, nameof(PathDisplay));
     }
 
     public string PathDisplay => path;
@@ -1002,7 +995,7 @@ internal sealed partial class FileDiffViewModel
     }
 }
 
-internal sealed class TurnChoiceViewModel : ObservableObject
+internal sealed class TurnChoiceViewModel : NotifyingObject
 {
     private readonly LocText label;
     private bool isSelected;
@@ -1052,26 +1045,14 @@ internal sealed class TurnChoiceViewModel : ObservableObject
     public int? FileCount
     {
         get => fileCount;
-        internal set
-        {
-            if (Set(ref fileCount, value))
-            {
-                OnPropertyChanged(nameof(Subtitle));
-            }
-        }
+        internal set => SetAndNotify(ref fileCount, value, nameof(Subtitle));
     }
 
     /// <summary>The newest turn: shown as "上一轮".</summary>
     public bool IsLatest
     {
         get => isLatest;
-        internal set
-        {
-            if (Set(ref isLatest, value))
-            {
-                OnPropertyChanged(nameof(Title));
-            }
-        }
+        internal set => SetAndNotify(ref isLatest, value, nameof(Title));
     }
 
     /// <summary>True when this turn is the scope in use (the ✓ of the picker row); <see cref="IsSelected"/> only remembers the choice.</summary>
@@ -1104,7 +1085,7 @@ internal sealed class TurnChoiceViewModel : ObservableObject
 /// against HEAD including untracked files. All files are stacked into one flat row list that the view virtualizes;
 /// selecting one scrolls the view to it.
 /// </summary>
-internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
+internal sealed partial class ChangesViewModel : NotifyingObject, IDisposable
 {
     private readonly GitCli git;
     private readonly ITurnCheckpointStore checkpoints;
@@ -1187,9 +1168,8 @@ internal sealed partial class ChangesViewModel : ObservableObject, IDisposable
         get => selectedFile;
         set
         {
-            if (Set(ref selectedFile, value))
+            if (SetAndNotify(ref selectedFile, value, nameof(HasSelectedFile)))
             {
-                OnPropertyChanged(nameof(HasSelectedFile));
                 PreviousFileCommand.NotifyCanExecuteChanged();
                 NextFileCommand.NotifyCanExecuteChanged();
                 OpenInEditorCommand.NotifyCanExecuteChanged();
@@ -1750,7 +1730,7 @@ internal sealed class TodoRowViewModel : ObservableObject
 /// no actions of its own: no delete button and no chevron while it is unfinished, because an unfinished plan stays open. A
 /// finished group folds to a single row in the done section and opens again from there.
 /// </summary>
-internal sealed class TodoGroupViewModel : ObservableObject
+internal sealed class TodoGroupViewModel : NotifyingObject
 {
     private bool isExpanded;
 
@@ -1813,13 +1793,7 @@ internal sealed class TodoGroupViewModel : ObservableObject
     public bool IsExpanded
     {
         get => isExpanded;
-        set
-        {
-            if (Set(ref isExpanded, value))
-            {
-                OnPropertyChanged(nameof(ToggleName));
-            }
-        }
+        set => SetAndNotify(ref isExpanded, value, nameof(ToggleName));
     }
 
     public RelayCommand ToggleCommand { get; }

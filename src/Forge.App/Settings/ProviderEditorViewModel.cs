@@ -30,7 +30,7 @@ internal enum ProviderTestState
 /// Models, default model, thinking effort and output limit are not edited here: a provider's models come from its
 /// <c>/models</c> answer, and the default model and effort belong to the agents, not to the provider.
 /// </remarks>
-internal sealed class ProviderEditorViewModel : ObservableObject
+internal sealed class ProviderEditorViewModel : NotifyingObject
 {
     /// <summary>The thinking effort a provider's definition carries when the dialog creates it; the agents override it.</summary>
     private const ThinkingEffort DefaultThinking = ThinkingEffort.Medium;
@@ -243,13 +243,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject
     public string? Status
     {
         get => status;
-        private set
-        {
-            if (Set(ref status, value))
-            {
-                OnPropertyChanged(nameof(HasStatus));
-            }
-        }
+        private set => SetAndNotify(ref status, value, nameof(HasStatus));
     }
 
     public bool HasStatus => Status is { Length: > 0 };
@@ -258,13 +252,7 @@ internal sealed class ProviderEditorViewModel : ObservableObject
     public string? Error
     {
         get => error;
-        private set
-        {
-            if (Set(ref error, value))
-            {
-                OnPropertyChanged(nameof(HasError));
-            }
-        }
+        private set => SetAndNotify(ref error, value, nameof(HasError));
     }
 
     public bool HasError => Error is { Length: > 0 };

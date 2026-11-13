@@ -34,9 +34,7 @@ public sealed class VerifiedDependencyTests
             new Dictionary<string, byte[]> { [DependencyAssembly + ".dll"] = original });
         var dependencyPath = Path.Combine(output, DependencyAssembly + ".dll");
 
-        await fx.StartAsync();
-        await fx.ApproveAsync("delta");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("delta").Count == 1, "the delta tools");
+        await fx.StartAndApproveAsync("delta", 1, "the delta tools");
         Assert.False(File.Exists(marker));
 
         var call = fx.InvokeAsync("delta", "dep", JsonSerializer.Serialize(new { started, barrier }));
@@ -69,12 +67,8 @@ public sealed class VerifiedDependencyTests
         File.Delete(Path.Combine(output, "native.dll"));
         await fx.Client.RefreshPluginsAsync(fx.Ct);
         await fx.ApproveAsync("delta");
-        await fx.WaitUntilAsync(
-            () => fx.ToolsOf("delta").Count == PluginSources.AllTools.Length,
-            "the delta tools once the unmanaged file is gone");
-        var echo = await fx.InvokeAsync("delta", "echo", """{"text":"ok"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("echo:ok", echo.Content);
+        await fx.WaitForToolsAsync("delta", PluginSources.AllTools.Length, "the delta tools once the unmanaged file is gone");
+        await fx.AssertToolContentAsync("delta", "echo", """{"text":"ok"}""", "echo:ok");
     }
 
     /// <summary>Writes a prebuilt (source-free) plugin package: <c>bin/&lt;version&gt;/plugin.dll</c> plus its private

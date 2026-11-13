@@ -51,13 +51,7 @@ internal sealed partial class TreeNodeViewModel
     public bool IsPlainProject
     {
         get => isPlainProject;
-        set
-        {
-            if (Set(ref isPlainProject, value))
-            {
-                OnPropertyChanged(nameof(HasNewSession));
-            }
-        }
+        set => SetAndNotify(ref isPlainProject, value, nameof(HasNewSession));
     }
 
     /// <summary>Replaces the commands only the generated menu reaches; null leaves the entry without a command (disabled).</summary>

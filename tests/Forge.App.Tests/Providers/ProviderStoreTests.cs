@@ -12,9 +12,8 @@ namespace Forge.App.Tests.Providers;
 /// </summary>
 public sealed class ProviderStoreTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-provider-store-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-provider-store-");
 
-    public ProviderStoreTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void The_legacy_single_provider_section_loads_as_one_connected_provider()
@@ -294,13 +293,7 @@ public sealed class ProviderStoreTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private (ProviderStore Store, ProviderSecretStore Secrets, ProviderCredentials Credentials) CreateStack(string settingsPath)

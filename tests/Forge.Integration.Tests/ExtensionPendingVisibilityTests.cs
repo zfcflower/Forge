@@ -154,9 +154,7 @@ public sealed class ExtensionPendingVisibilityTests
                 Interlocked.Increment(ref probeCalls);
                 return Task.FromResult(new ToolResult("probe-ok"));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
+        await using var fx = E2eFixture.AllowingApprovals(probe);
         await fx.StartAsync();
 
         await fx.Client.StageExtensionAsync(

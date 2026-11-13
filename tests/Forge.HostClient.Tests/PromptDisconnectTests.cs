@@ -1,6 +1,7 @@
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
+using static Forge.HostClient.Tests.ToolFixtures;
 
 namespace Forge.HostClient.Tests;
 
@@ -17,8 +18,7 @@ public sealed class PromptDisconnectTests
     public async Task Mid_flight_transport_drop_returns_null_with_a_diagnostic()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("prompt-drop");
@@ -49,8 +49,7 @@ public sealed class PromptDisconnectTests
     public async Task Caller_cancellation_still_throws()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("prompt-cancel");
@@ -73,14 +72,4 @@ public sealed class PromptDisconnectTests
         gate.TrySetResult();
     }
 
-    private static async Task<PluginPromptReference> RegisterPromptAsync(
-        FakeHost host, ExtensionHostClient client, string pluginId, string contributorId)
-    {
-        await host.NotifyClientAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"promptContributors\":[{\"id\":\""
-            + contributorId + "\"}]}}");
-        await host.SyncAsync();
-        return client.PromptContributors.Single(p =>
-            p.PluginId == pluginId && p.ContributorId == contributorId);
-    }
 }

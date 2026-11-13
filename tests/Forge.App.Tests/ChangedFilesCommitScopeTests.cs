@@ -202,24 +202,13 @@ public sealed class ChangedFilesCommitScopeTests
 
     private static async Task<ChangesViewModel> OpenAsync(string work)
     {
-        var changes = new ChangesViewModel(new GitCli(), new EmptyCheckpoints());
+        var changes = new ChangesViewModel(new GitCli(), new EmptyCheckpointStore());
         changes.Attach(new PanelContext(SessionId, work, null));
         await changes.LoadAsync(CancellationToken.None);
         return changes;
     }
 
-    private static async Task RunAsync(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(
-            async () =>
-            {
-                await body();
-                return 0;
-            },
-            budget.Token);
-    }
+    private static Task RunAsync(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntilAsync(Func<bool> condition, string what)
     {
@@ -235,15 +224,4 @@ public sealed class ChangedFilesCommitScopeTests
         }
     }
 
-    private sealed class EmptyCheckpoints : ITurnCheckpointStore
-    {
-        public Task BeginAsync(string sessionId, int turn, string worktreePath, string treeBefore, DateTimeOffset at, CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task<bool> CompleteAsync(string sessionId, int turn, string treeAfter, DateTimeOffset at, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<IReadOnlyList<TurnCheckpoint>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TurnCheckpoint>>([]);
-    }
 }

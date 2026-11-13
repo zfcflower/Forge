@@ -236,8 +236,7 @@ public sealed class GitSyncFailureKindTests
                     case GitRemoteFailureKind.NonFastForward:
                     {
                         var other = sandbox.Clone("other");
-                        sandbox.CommitFile(other, "remote.txt", "from the other clone\n", "remote work");
-                        GitTestShell.RunChecked(other, "push", "-q", "origin", "main");
+                        sandbox.CommitAndPush(other, "remote.txt", "from the other clone\n", "remote work");
                         sandbox.CommitFile(work, "local.txt", "local work\n", "local work");
                         act = static p => p.PushCommand.Execute(null);
                         break;
@@ -246,8 +245,7 @@ public sealed class GitSyncFailureKindTests
                     case GitRemoteFailureKind.Conflict:
                     {
                         var other = sandbox.Clone("other");
-                        sandbox.CommitFile(other, "file.txt", "other version\n", "other edit");
-                        GitTestShell.RunChecked(other, "push", "-q", "origin", "main");
+                        sandbox.CommitAndPush(other, "file.txt", "other version\n", "other edit");
                         sandbox.CommitFile(work, "file.txt", "local version\n", "local edit");
                         strategy = GitPullStrategy.Rebase;
                         act = static p => p.PullCommand.Execute(null);
@@ -269,8 +267,7 @@ public sealed class GitSyncFailureKindTests
                         // The remote moves the very file the worktree has edited; that is what makes a fast-forward pull
                         // refuse with "Your local changes ... would be overwritten by merge".
                         var other = sandbox.Clone("other");
-                        sandbox.CommitFile(other, "file.txt", "remote edit\n", "remote edit");
-                        GitTestShell.RunChecked(other, "push", "-q", "origin", "main");
+                        sandbox.CommitAndPush(other, "file.txt", "remote edit\n", "remote edit");
                         File.WriteAllText(Path.Combine(work, "file.txt"), "uncommitted edit\n");
                         act = static p => p.PullCommand.Execute(null);
                         break;

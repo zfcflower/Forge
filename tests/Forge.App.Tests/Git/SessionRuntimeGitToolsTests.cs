@@ -132,8 +132,7 @@ public sealed class SessionRuntimeGitToolsTests
 
     private static string TestWorkDir()
     {
-        var path = Path.Combine(Path.GetTempPath(), "forge-git-tools-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
+        var path = TestTempFiles.NewDirectory("forge-git-tools-");
         return path;
     }
 }

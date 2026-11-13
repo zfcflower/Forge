@@ -11,9 +11,7 @@ public sealed class TamperingTests
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
         var evilMarker = Path.Combine(fx.Root, "evil-loaded.txt");
         fx.WritePlugin("gamma", EvilSource(evilMarker));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.AllTools.Length);
 
         var staleEcho = fx.ToolOf("alpha", "echo");
         var alphaDll = Assert.Single(Directory.GetFiles(
@@ -24,7 +22,7 @@ public sealed class TamperingTests
 
         File.Copy(gammaDll, alphaDll, overwrite: true);
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "the tampered alpha tools to be unregistered");
+        await fx.WaitForToolsAsync("alpha", 0, "the tampered alpha tools to be unregistered");
 
         var blocked = await fx.InvokeAsync(staleEcho, """{"text":"x"}""");
         Assert.True(blocked.IsError);
@@ -33,11 +31,9 @@ public sealed class TamperingTests
 
         var current = fx.ReadRecord("alpha")!;
         await fx.Client.ApprovePluginAsync("alpha", "1.0.0", current.SourceHash, current.DependencyHash, current.SdkVersion, fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools after re-approval");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "alpha tools after re-approval");
 
-        var evil = await fx.InvokeAsync("alpha", "echo", """{"text":"x"}""");
-        Assert.False(evil.IsError, evil.Content);
-        Assert.Equal("evil:x", evil.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"x"}""", "evil:x");
         Assert.True(File.Exists(evilMarker));
     }
 

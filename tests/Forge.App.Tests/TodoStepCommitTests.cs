@@ -546,8 +546,7 @@ public sealed class TodoStepCommitTests
 
         public static async Task<PanelRig> CreateAsync(bool withCommitter = true)
         {
-            var directory = Path.Combine(Path.GetTempPath(), "forge-todo-step-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(directory);
+            var directory = TestTempFiles.NewDirectory("forge-todo-step-");
             var session = SharedUi.Session;
             var store = new SqliteTodoStore(directory);
             var committer = new RecordingCommitter();

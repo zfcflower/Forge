@@ -337,9 +337,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"," +
         "\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n";
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-chatgpt-login-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-chatgpt-login-");
 
-    public ChatGptAuthenticationCredentialTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void The_openai_preset_offers_a_key_and_a_plan_and_the_plan_is_the_way_in_this_dialog_takes()
@@ -640,13 +639,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     /// <summary>Drives one streamed turn far enough that the request has gone out.</summary>

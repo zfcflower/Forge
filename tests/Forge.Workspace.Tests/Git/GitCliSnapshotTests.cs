@@ -30,8 +30,7 @@ public sealed class GitCliSnapshotTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "line1\nline2\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "line1\nline2\n", "base");
 
         // Park one change in the stash so `git stash list` has content to protect.
         repo.Write("a.txt", "stashed change\n");
@@ -74,8 +73,7 @@ public sealed class GitCliSnapshotTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
         repo.Write("dirty.txt", "dirty\n");
 
         var before = SnapshotTempFiles();
@@ -91,8 +89,7 @@ public sealed class GitCliSnapshotTests
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
         repo.Write("a.txt", "a\n");
-        repo.Write(".gitattributes", "*.bin filter=fail\n");
-        repo.Commit("base");
+        repo.CommitFile(".gitattributes", "*.bin filter=fail\n", "base");
         repo.RunGit("config", "--local", "filter.fail.clean", "git non-existent-command-xyz");
         repo.RunGit("config", "--local", "filter.fail.required", "true");
         repo.WriteBytes("f.bin", [1, 2, 3]);
@@ -115,8 +112,7 @@ public sealed class GitCliSnapshotTests
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
         repo.Write("a.txt", "a\n");
-        repo.Write(".gitignore", "*.ignored\n");
-        repo.Commit("base");
+        repo.CommitFile(".gitignore", "*.ignored\n", "base");
 
         var cli = Cli();
         var first = await cli.SnapshotTreeAsync(repo.Root);
@@ -140,8 +136,7 @@ public sealed class GitCliSnapshotTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
         repo.Write("dirty.txt", "dirty\n");
 
         var cli = Cli();
@@ -153,8 +148,7 @@ public sealed class GitCliSnapshotTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         var tree = await Cli().SnapshotTreeAsync(repo.Root);
         Assert.Equal(GitFixture.RunChecked(repo.Root, "rev-parse", "HEAD^{tree}").Trim(), tree);
@@ -166,8 +160,7 @@ public sealed class GitCliSnapshotTests
         if (!GitProbe.IsAvailable) return;
         using var sandbox = new TempDirectory();
         using var repo = new TestRepo(sandbox);
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         var linked = sandbox.Combine("linked");
         GitFixture.RunChecked(repo.Root, "worktree", "add", linked);
@@ -191,8 +184,7 @@ public sealed class GitCliSnapshotTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         var cli = Cli();
         var before = await cli.SnapshotTreeAsync(repo.Root);
@@ -218,8 +210,7 @@ public sealed class GitCliSnapshotTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("base");
+        repo.CommitFile("a.txt", "a\n", "base");
 
         var cli = Cli();
         var tree = await cli.SnapshotTreeAsync(repo.Root);

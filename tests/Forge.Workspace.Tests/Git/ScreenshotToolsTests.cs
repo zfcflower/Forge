@@ -80,12 +80,11 @@ public sealed class ScreenshotToolsTests
         OpenPullRequest(fixture);
         var bodyBefore = fixture.Platform.Current!.Body;
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("pr_screenshots refused", result.Content, StringComparison.Ordinal);
-        Assert.Contains(".forge/screenshots.json", result.Content, StringComparison.Ordinal);
-        Assert.Contains("never fabricate an image", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "pr_screenshots refused",
+            ".forge/screenshots.json",
+            "never fabricate an image");
         Assert.Null(fixture.OriginTip("assets/forge-feature"));
         Assert.Equal(bodyBefore, fixture.Platform.Current!.Body);
         fixture.AssertNoTrace();
@@ -104,11 +103,10 @@ public sealed class ScreenshotToolsTests
         fixture.Write(".forge/screenshots.json", "{\"commnd\": \"call .\\\\capture.cmd\", \"output\": \"screenshots\"}");
         fixture.CommitAll("a declaration with a misspelt key");
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("commnd", result.Content, StringComparison.Ordinal);
-        Assert.Contains("Fix .forge/screenshots.json", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "commnd",
+            "Fix .forge/screenshots.json");
         Assert.Null(fixture.OriginTip("assets/forge-feature"));
         fixture.AssertNoTrace();
     }
@@ -125,11 +123,10 @@ public sealed class ScreenshotToolsTests
         fixture.Platform.Current = PrLifecycleTestHelpers.Pr(state: PrState.Merged);
         fixture.WriteConfig(ScreenshotTestData.CaptureCommand, "screenshots");
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("is Merged", result.Content, StringComparison.Ordinal);
-        Assert.Contains("Nothing was changed", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "is Merged",
+            "Nothing was changed");
         Assert.Empty(fixture.Platform.Edits);
         fixture.AssertNoTrace();
     }
@@ -145,11 +142,10 @@ public sealed class ScreenshotToolsTests
         using var fixture = new ScreenshotFixture();
         fixture.WriteConfig(ScreenshotTestData.CaptureCommand, "screenshots");
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("PullRequestNotFound", result.Content, StringComparison.Ordinal);
-        Assert.Contains("pr_create", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "PullRequestNotFound",
+            "pr_create");
         fixture.AssertNoTrace();
     }
 
@@ -166,12 +162,11 @@ public sealed class ScreenshotToolsTests
         fixture.WriteConfig(ScreenshotTestData.FailOn("before", 7, "the base cannot be captured"), "screenshots");
         var bodyBefore = fixture.Platform.Current!.Body;
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("exit code 7", result.Content, StringComparison.Ordinal);
-        Assert.Contains("the base cannot be captured", result.Content, StringComparison.Ordinal);
-        Assert.Contains("nothing was pushed and the description is unchanged", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "exit code 7",
+            "the base cannot be captured",
+            "nothing was pushed and the description is unchanged");
         Assert.Null(fixture.OriginTip("assets/forge-feature"));
         Assert.Equal(bodyBefore, fixture.Platform.Current!.Body);
         fixture.AssertNoTrace();
@@ -189,10 +184,9 @@ public sealed class ScreenshotToolsTests
         OpenPullRequest(fixture);
         fixture.WriteConfig(ScreenshotTestData.Pick("exit /b 0", "true"), "screenshots");
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("wrote no PNG files", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "wrote no PNG files");
         Assert.Null(fixture.OriginTip("assets/forge-feature"));
         fixture.AssertNoTrace();
     }
@@ -319,10 +313,9 @@ public sealed class ScreenshotToolsTests
         fixture.RejectPushes();
         var bodyBefore = fixture.Platform.Current!.Body;
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("rejected by policy", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "rejected by policy");
         Assert.Equal(bodyBefore, fixture.Platform.Current!.Body);
         fixture.AssertNoTrace();
     }
@@ -340,12 +333,11 @@ public sealed class ScreenshotToolsTests
         fixture.WriteConfig(ScreenshotTestData.CaptureCommand, "screenshots");
         fixture.Platform.DropEdits = true;
 
-        var result = await PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work);
-
-        Assert.True(result.IsError);
-        Assert.Contains("the images are on the remote already", result.Content, StringComparison.Ordinal);
-        Assert.Contains("pr_edit (section Screenshots)", result.Content, StringComparison.Ordinal);
-        Assert.Contains("| Screen | Before | After |", result.Content, StringComparison.Ordinal);
+        var result = await ToolResultAssertions.RefusedAsync(
+            PrLifecycleTestHelpers.InvokeAsync(NewTools(fixture).Screenshots, "{}", fixture.Work),
+            "the images are on the remote already",
+            "pr_edit (section Screenshots)",
+            "| Screen | Before | After |");
         Assert.NotNull(fixture.OriginTip("assets/forge-feature"));
         fixture.AssertNoTrace();
     }

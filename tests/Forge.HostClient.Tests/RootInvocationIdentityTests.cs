@@ -3,6 +3,7 @@ using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
+using static Forge.HostClient.Tests.ToolFixtures;
 
 namespace Forge.HostClient.Tests;
 
@@ -16,10 +17,8 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_plugin_execute_carries_its_own_runId_as_camelCase_rootRunId()
     {
         await using var host = new FakeHost();
-        host.On("plugin.execute", (_, _) =>
-            Task.FromResult(Json.Element("""{"content":"ok","isError":false}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.execute", """{"content":"ok","isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
 
@@ -37,10 +36,8 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_code_execute_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.On("code.execute", (_, _) =>
-            Task.FromResult(Json.Element("""{"content":"ok","isError":false}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("code.execute", """{"content":"ok","isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = client.CreateRunCodeTool(new TestRegistry());
 
@@ -58,11 +55,8 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_command_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.On("plugin.command", (_, _) =>
-            Task.FromResult(Json.Element("""{"output":"hello","promptToSend":"next","isError":false}""")));
-        await using var client = ClientFactory.Create(
-            host, approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.command", """{"output":"hello","promptToSend":"next","isError":false}""");
+        await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var command = await RegisterCommandAsync(host, client, "alpha", "hi");
 
@@ -78,9 +72,8 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_prompt_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.On("plugin.prompt", (_, _) => Task.FromResult(Json.Element("""{"text":"t"}""")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer("plugin.prompt", """{"text":"t"}""");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
 
@@ -104,11 +97,7 @@ public sealed class RootInvocationIdentityTests
             return await beta.InvokeAsync(new ToolCall("nested-1", "work", "{}"), context, ct).ConfigureAwait(false);
         });
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "bridge" ? bridge : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: bridge.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var setup = await StartChainAsync(host, client, betaSource, limit.Token);
 
@@ -144,11 +133,7 @@ public sealed class RootInvocationIdentityTests
             return new ToolResult(first.Content + "+" + second.Content);
         });
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "bridge" ? bridge : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: bridge.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var nestedCalls = new ConcurrentQueue<JsonElement>();
         var bothNested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -212,8 +197,7 @@ public sealed class RootInvocationIdentityTests
             seen.Enqueue(message.Arguments!.Value.Clone());
             return Task.FromResult(Json.Element("""{"content":"ok","isError":false}"""));
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
         var directory = BoundRoots.AbsoluteDir("independent");
@@ -245,8 +229,7 @@ public sealed class RootInvocationIdentityTests
             seen.Enqueue(message.Arguments!.Value.Clone());
             return Task.FromResult(Json.Element("""{"content":"ok","isError":false}"""));
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = client.CreateRunCodeTool(new TestRegistry());
         var directory = BoundRoots.AbsoluteDir("independent-scripts");
@@ -278,11 +261,7 @@ public sealed class RootInvocationIdentityTests
             return await beta.InvokeAsync(new ToolCall("nested-1", "work", "{}"), context, ct).ConfigureAwait(false);
         });
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(
-            host,
-            resolver: name => name == "bridge" ? bridge : null,
-            approval: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, resolver: bridge.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var setup = await StartChainAsync(host, client, betaSource, limit.Token);
 
@@ -361,21 +340,10 @@ public sealed class RootInvocationIdentityTests
     private static async Task<ExtensionHostCommand> RegisterCommandAsync(
         FakeHost host, ExtensionHostClient client, string pluginId, string name)
     {
-        await host.NotifyClientAsync("contributions.register",
+        await host.NotifyAndSyncAsync("contributions.register",
             "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"commands\":["
             + "{\"name\":\"" + name + "\",\"description\":\"d\",\"argumentHint\":\"\"}]}}");
-        await host.SyncAsync();
         return (ExtensionHostCommand)client.Commands.Single(c => c.Definition.Name == name);
     }
 
-    private static async Task<PluginPromptReference> RegisterPromptAsync(
-        FakeHost host, ExtensionHostClient client, string pluginId, string contributorId)
-    {
-        await host.NotifyClientAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"promptContributors\":[{\"id\":\""
-            + contributorId + "\"}]}}");
-        await host.SyncAsync();
-        return client.PromptContributors.Single(p =>
-            p.PluginId == pluginId && p.ContributorId == contributorId);
-    }
 }

@@ -59,8 +59,7 @@ internal static class LifecycleStrings
     public static string DirectoryMissing => Loc.Instance[DirectoryMissingKey];
 
     /// <summary>The directory is there but git marks its worktree prunable (its <c>.git</c> link is broken); git's reason, if any.</summary>
-    public static string WorktreePrunable(string? reason) =>
-        Loc.Instance.Format(WorktreePrunableKey, string.IsNullOrWhiteSpace(reason) ? "-" : reason);
+    public static string WorktreePrunable(string? reason) => Loc.Instance.FormatReason(WorktreePrunableKey, reason);
 
     /// <summary>The directory is there but the repository's worktree list does not name it.</summary>
     public static string WorktreeUnregistered => Loc.Instance[WorktreeUnregisteredKey];
@@ -74,8 +73,7 @@ internal static class LifecycleStrings
 
     public static LocText TurnCheckFailed(string reason) => new(TurnCheckFailedKey, reason);
 
-    public static string PendingComposer(int count) =>
-        Loc.Instance.Format(LocText.PluralKey(PendingComposerKeyBase, count), TextFormat.Number(count));
+    public static string PendingComposer(int count) => Loc.Instance.FormatPlural(PendingComposerKeyBase, count);
 
     /// <summary>Kept by the transcript, so it re-renders on a language switch.</summary>
     public static LocText TakenOver => new(TakenOverKey);
@@ -94,11 +92,9 @@ internal static class LifecycleStrings
 
     public static string NoticeTitle => Loc.Instance[NoticeTitleKey];
 
-    public static string DedupeArchived(long count) =>
-        Loc.Instance.Format(LocText.PluralKey(DedupeArchivedKeyBase, count), TextFormat.Number(count));
+    public static string DedupeArchived(long count) => Loc.Instance.FormatPlural(DedupeArchivedKeyBase, count);
 
-    public static string HealDeleted(long count) =>
-        Loc.Instance.Format(LocText.PluralKey(HealDeletedKeyBase, count), TextFormat.Number(count));
+    public static string HealDeleted(long count) => Loc.Instance.FormatPlural(HealDeletedKeyBase, count);
 
     [ModuleInitializer]
     internal static void Initialize() => Register();

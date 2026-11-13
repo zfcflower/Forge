@@ -33,7 +33,7 @@ internal sealed record PromptScopeChoice(string Label, PromptTemplateScope Value
 /// UI thread (the awaiting continuation). It captures the workspace it was opened for, so a save always targets the file it
 /// read even if the active project changes meanwhile.
 /// </summary>
-internal sealed class PromptEditorViewModel : ObservableObject
+internal sealed class PromptEditorViewModel : NotifyingObject
 {
     private const string CommandSkeleton = "---\ndescription: \n---\n";
     private const string AgentSkeleton = "---\nname: \ndescription: \n---\n";
@@ -250,13 +250,7 @@ internal sealed class PromptEditorViewModel : ObservableObject
     public string? Status
     {
         get => status;
-        private set
-        {
-            if (Set(ref status, value))
-            {
-                OnPropertyChanged(nameof(HasStatus));
-            }
-        }
+        private set => SetAndNotify(ref status, value, nameof(HasStatus));
     }
 
     public bool HasStatus => !string.IsNullOrEmpty(status);
@@ -273,9 +267,8 @@ internal sealed class PromptEditorViewModel : ObservableObject
         get => confirmingDelete;
         private set
         {
-            if (Set(ref confirmingDelete, value))
+            if (SetAndNotify(ref confirmingDelete, value, nameof(ShowsDeleteButton)))
             {
-                OnPropertyChanged(nameof(ShowsDeleteButton));
                 ConfirmDeleteCommand.NotifyCanExecuteChanged();
             }
         }

@@ -22,7 +22,7 @@ public sealed class AgentDefaultsRowTests : IDisposable
         ThinkingEffort.XHigh, ThinkingEffort.Max,
     ];
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-agent-defaults-row-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-agent-defaults-row-");
     private readonly ProviderSecretStore secrets;
     private readonly ProviderCredentials credentials;
 
@@ -71,13 +71,7 @@ public sealed class AgentDefaultsRowTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private AgentDefaultsRowViewModel Row(

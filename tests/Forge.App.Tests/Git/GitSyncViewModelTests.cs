@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Threading;
@@ -24,18 +22,13 @@ namespace Forge.App.Tests.Git;
 [Collection("forge-app-ui")]
 public sealed class GitSyncViewModelTests
 {
-    private static readonly TimeSpan IdleBudget = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(20);
-
     // ------------------------------------------------------------ attach and cleared states
 
     [Fact]
     public async Task Attach_to_a_tracked_repo_shows_branch_upstream_aheadbehind_remotes_and_branches()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -67,10 +60,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Attach_with_an_empty_context_clears_and_disables_everything()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -83,7 +74,7 @@ public sealed class GitSyncViewModelTests
                 async () =>
                 {
                     panel.Attach(PanelContext.Empty);
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -112,13 +103,11 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_newer_attach_wins_over_an_in_flight_read()
     {
-        using var sandbox = GitSandbox.Create();
-        var repoA = sandbox.Clone("a");
-        sandbox.CommitFile(repoA, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(repoA, "push", "-q", "-u", "origin", "main");
-        GitShell.RunChecked(repoA, "checkout", "-q", "-b", "alpha");
+        using var sandbox = GitTestSandbox.Create();
+        var repoA = sandbox.CloneTracked("a");
+        GitTestShell.RunChecked(repoA, "checkout", "-q", "-b", "alpha");
         var repoB = sandbox.Clone("b");
-        GitShell.RunChecked(repoB, "checkout", "-q", "-b", "beta");
+        GitTestShell.RunChecked(repoB, "checkout", "-q", "-b", "beta");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -130,7 +119,7 @@ public sealed class GitSyncViewModelTests
                 {
                     panel.Attach(new PanelContext("s-a", repoA, null));
                     panel.Attach(new PanelContext("s-b", repoB, null));
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -142,7 +131,7 @@ public sealed class GitSyncViewModelTests
                 {
                     panel.Attach(new PanelContext("s-b", repoB, null));
                     panel.Attach(new PanelContext("s-a", repoA, null));
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -158,10 +147,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Commands_are_disabled_while_busy_and_only_one_operation_runs()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -181,7 +168,7 @@ public sealed class GitSyncViewModelTests
                         Pull = panel.PullCommand.CanExecute(null),
                         Push = panel.PushCommand.CanExecute(null),
                     };
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return new
                     {
                         Busy = busy,
@@ -216,10 +203,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Push_moves_ahead_commits_and_fetch_pull_track_the_remote()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -242,8 +227,7 @@ public sealed class GitSyncViewModelTests
 
             // A second clone moves the remote forward; fetch shows behind, pull catches up.
             var other = sandbox.Clone("other");
-            sandbox.CommitFile(other, "file.txt", "v3\n", "third");
-            GitShell.RunChecked(other, "push", "-q", "origin", "main");
+        sandbox.CommitAndPush(other, "file.txt", "v3\n", "third");
 
             await ExecuteAndWaitAsync(session, panel, panel.FetchCommand);
             Assert.Equal(
@@ -268,11 +252,9 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Push_without_an_upstream_sets_it_on_the_first_push()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
-        GitShell.RunChecked(work, "checkout", "-q", "-b", "feature");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        GitTestShell.RunChecked(work, "checkout", "-q", "-b", "feature");
         sandbox.CommitFile(work, "feature.txt", "new\n", "feature work");
 
         var session = SharedUi.Session;
@@ -303,17 +285,14 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Pull_on_a_diverged_branch_with_ff_only_reports_an_error_and_keeps_head()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var other = sandbox.Clone("other");
-        sandbox.CommitFile(other, "file.txt", "remote\n", "remote change");
-        GitShell.RunChecked(other, "push", "-q", "origin", "main");
+        sandbox.CommitAndPush(other, "file.txt", "remote\n", "remote change");
 
         sandbox.CommitFile(work, "file.txt", "local\n", "local change");
-        var headBefore = GitShell.RunChecked(work, "rev-parse", "HEAD").Trim();
+        var headBefore = GitTestShell.RunChecked(work, "rev-parse", "HEAD").Trim();
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -346,7 +325,7 @@ public sealed class GitSyncViewModelTests
             Assert.True(state.HasHint);
             Assert.False(string.IsNullOrWhiteSpace(state.HintText));
             Assert.Equal("main", state.BranchLabel);
-            Assert.Equal(headBefore, GitShell.RunChecked(work, "rev-parse", "HEAD").Trim());
+            Assert.Equal(headBefore, GitTestShell.RunChecked(work, "rev-parse", "HEAD").Trim());
         }
         finally
         {
@@ -357,14 +336,11 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Pull_conflict_with_the_rebase_strategy_lists_files_and_abort_clears_it()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var other = sandbox.Clone("other");
-        sandbox.CommitFile(other, "file.txt", "remote\n", "remote change");
-        GitShell.RunChecked(other, "push", "-q", "origin", "main");
+        sandbox.CommitAndPush(other, "file.txt", "remote\n", "remote change");
         sandbox.CommitFile(work, "file.txt", "local\n", "local change");
 
         var session = SharedUi.Session;
@@ -417,10 +393,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Fetch_failure_keeps_the_previous_state_and_shows_the_localized_hint()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -436,7 +410,7 @@ public sealed class GitSyncViewModelTests
                 },
                 CancellationToken.None);
 
-            GitShell.RunChecked(work, "remote", "set-url", "origin", Path.Combine(sandbox.Root, "gone.git"));
+            GitTestShell.RunChecked(work, "remote", "set-url", "origin", Path.Combine(sandbox.Root, "gone.git"));
             await ExecuteAndWaitAsync(session, panel, panel.FetchCommand);
 
             var after = await session.Dispatch(
@@ -467,10 +441,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Dispose_cancels_in_flight_work_and_ignores_later_calls()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -482,7 +454,7 @@ public sealed class GitSyncViewModelTests
                 {
                     panel.Attach(new PanelContext("s1", work, null));
                     panel.Dispose();
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -494,7 +466,7 @@ public sealed class GitSyncViewModelTests
                     panel.Attach(new PanelContext("s2", work, null));
                     panel.FetchCommand.Execute(null);
                     panel.RefreshCommand.Execute(null);
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -516,17 +488,15 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task NotifyTurnCompleted_refreshes_only_the_attached_session()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("work");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
         try
         {
             await AttachAndWaitAsync(session, panel, "s1", work);
-            GitShell.RunChecked(work, "checkout", "-q", "-b", "external-x");
+            GitTestShell.RunChecked(work, "checkout", "-q", "-b", "external-x");
 
             // A turn of another session does nothing: no refresh, no busy, no new branch.
             await session.Dispatch(() => { panel.NotifyTurnCompleted("other"); return 0; }, CancellationToken.None);
@@ -541,7 +511,7 @@ public sealed class GitSyncViewModelTests
                 async () =>
                 {
                     panel.NotifyTurnCompleted("s1");
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return panel.BranchLabel;
                 },
                 CancellationToken.None);
@@ -558,10 +528,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_ship_row_offers_to_open_a_pull_request_once_the_branch_is_published()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("ship-none");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("ship-none");
 
         var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Fail(
             GitRemoteFailureKind.Other, "no pull request", reason: PrFailureReason.PullRequestNotFound));
@@ -605,10 +573,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task An_open_pull_request_becomes_the_button_state_and_blocks_a_second_one()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("ship-open");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("ship-open");
 
         var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Ok(
             new PullRequestInfo(12, "https://example.test/pr/12", PrState.Open, "t", "b", "main", "main", "sha", false,
@@ -650,10 +616,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Gh_not_ready_is_its_own_state_and_never_looks_like_no_pull_request()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("ship-gh");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("ship-gh");
 
         var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Ok(
             new PullRequestInfo(1, "u", PrState.Open, "t", "b", "main", "main", "sha", false,
@@ -693,7 +657,7 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Merging_into_the_default_branch_refuses_a_dirty_root_checkout()
     {
-        using var sandbox = GitSandbox.Create();
+        using var sandbox = GitTestSandbox.Create();
         var (root, sessionDirectory) = MergeFixture(sandbox, "dirty-root");
         File.WriteAllText(Path.Combine(root, "root-dirty.txt"), "not committed");
 
@@ -705,7 +669,7 @@ public sealed class GitSyncViewModelTests
                 async () =>
                 {
                     panel.Attach(new PanelContext("s1", sessionDirectory, root));
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -728,9 +692,9 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Merging_into_the_default_branch_refuses_a_root_checkout_on_another_branch()
     {
-        using var sandbox = GitSandbox.Create();
+        using var sandbox = GitTestSandbox.Create();
         var (root, sessionDirectory) = MergeFixture(sandbox, "wrong-checkout");
-        GitShell.RunChecked(root, "checkout", "-q", "-b", "somewhere-else");
+        GitTestShell.RunChecked(root, "checkout", "-q", "-b", "somewhere-else");
 
         await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
         var panel = NewPanel(confirm: (_, _) => Task.FromResult(true));
@@ -740,7 +704,7 @@ public sealed class GitSyncViewModelTests
                 async () =>
                 {
                     panel.Attach(new PanelContext("s1", sessionDirectory, root));
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -763,10 +727,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_pull_request_dialog_opens_with_the_description_the_plan_can_already_write()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("pr-prefill");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("pr-prefill");
 
         PullRequestDraft? seen = null;
         await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
@@ -810,7 +772,7 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_remote_readout_tracks_published_pending_and_synced()
     {
-        using var sandbox = GitSandbox.Create();
+        using var sandbox = GitTestSandbox.Create();
         var work = sandbox.Clone("readout");
         sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
 
@@ -834,7 +796,7 @@ public sealed class GitSyncViewModelTests
                 async () =>
                 {
                     panel.NotifyTurnCompleted("s1");
-                    await WaitIdleOnUiAsync(panel);
+                    await GitPanelTesting.WaitIdleAsync(panel);
                     return 0;
                 },
                 CancellationToken.None);
@@ -851,7 +813,7 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Pushing_to_the_shared_branch_asks_first_and_declining_pushes_nothing()
     {
-        using var sandbox = GitSandbox.Create();
+        using var sandbox = GitTestSandbox.Create();
         var work = sandbox.Clone("shared-push");
         sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
 
@@ -886,10 +848,10 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Pushing_a_feature_branch_does_not_ask()
     {
-        using var sandbox = GitSandbox.Create();
+        using var sandbox = GitTestSandbox.Create();
         var work = sandbox.Clone("feature-push");
         sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "checkout", "-q", "-b", "feature-x");
+        GitTestShell.RunChecked(work, "checkout", "-q", "-b", "feature-x");
 
         var asked = 0;
         await using var ui = HeadlessUnitTestSession.StartNew(typeof(App));
@@ -918,10 +880,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_merge_pull_request_row_follows_the_platform_merge_state()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("merge-state");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("merge-state");
 
         var platform = new StubPullRequestPlatform(PrResult<PullRequestInfo>.Ok(
             new PullRequestInfo(7, "u", PrState.Open, "t", "b", "main", "main", "sha", false,
@@ -951,10 +911,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Refresh_requests_raised_during_a_read_collapse_into_one_more_read()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("row-queue");
-        sandbox.CommitFile(work, "file.txt", "v1" + (char)10, "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneWithPushedCommit("row-queue", "file.txt", "v1" + (char)10, "initial");
         var session = SharedUi.Session;
         var panel = NewPanel();
         try
@@ -979,7 +937,7 @@ public sealed class GitSyncViewModelTests
                         // Two turn completions while the first read is in flight: one slot, one extra read.
                         panel.NotifyTurnCompleted("s1");
                         panel.NotifyTurnCompleted("s1");
-                        await WaitIdleOnUiAsync(panel);
+                        await GitPanelTesting.WaitIdleAsync(panel);
                         return applied;
                     }
                     finally
@@ -1000,13 +958,10 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_files_panel_row_puts_the_branch_and_each_count_on_its_own_verb()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("row-view");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("row-view");
         var other = sandbox.Clone("row-view-other");
-        sandbox.CommitFile(other, "remote.txt", "remote work\n", "remote work");
-        GitShell.RunChecked(other, "push", "-q", "origin", "main");
+        sandbox.CommitAndPush(other, "remote.txt", "remote work\n", "remote work");
 
         var session = SharedUi.Session;
         var git = NewPanel();
@@ -1026,7 +981,7 @@ public sealed class GitSyncViewModelTests
                     var context = new PanelContext("s1", work, null);
                     git.Attach(context);
                     files.Attach(context);
-                    await WaitIdleOnUiAsync(git);
+                    await GitPanelTesting.WaitIdleAsync(git);
                     return 0;
                 },
                 CancellationToken.None);
@@ -1042,7 +997,7 @@ public sealed class GitSyncViewModelTests
                         Content = new FilesToolView { DataContext = files },
                     };
                     window.Show();
-                    Settle(window);
+                    SharedUi.Settle(window);
                     try
                     {
                         return new
@@ -1082,10 +1037,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task A_failed_re_read_outranks_the_stale_result_of_the_last_write()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("row-stale");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("row-stale");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -1122,10 +1075,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_row_enables_every_verb_even_when_both_numbers_are_zero()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("row-sync");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("row-sync");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -1160,14 +1111,12 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task Fetching_turns_the_behind_count_into_the_pull_button_number()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("row-counts");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("row-counts");
         var other = sandbox.Clone("row-counts-other");
         sandbox.CommitFile(other, "remote-a.txt", "a\n", "remote a");
         sandbox.CommitFile(other, "remote-b.txt", "b\n", "remote b");
-        GitShell.RunChecked(other, "push", "-q", "origin", "main");
+        GitTestShell.RunChecked(other, "push", "-q", "origin", "main");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -1195,10 +1144,8 @@ public sealed class GitSyncViewModelTests
     [Fact]
     public async Task The_branch_tooltip_names_the_push_target_and_the_upstream_side_by_side()
     {
-        using var sandbox = GitSandbox.Create();
-        var work = sandbox.Clone("row-tooltip");
-        sandbox.CommitFile(work, "file.txt", "v1\n", "initial");
-        GitShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("row-tooltip");
 
         var session = SharedUi.Session;
         var panel = NewPanel();
@@ -1250,7 +1197,7 @@ public sealed class GitSyncViewModelTests
             async () =>
             {
                 panel.Attach(new PanelContext(sessionId, directory, null));
-                await WaitIdleOnUiAsync(panel);
+                await GitPanelTesting.WaitIdleAsync(panel);
                 return 0;
             },
             CancellationToken.None);
@@ -1261,28 +1208,10 @@ public sealed class GitSyncViewModelTests
             async () =>
             {
                 command.Execute(null);
-                await WaitIdleOnUiAsync(panel);
+                await GitPanelTesting.WaitIdleAsync(panel);
                 return 0;
             },
             CancellationToken.None);
-
-    /// <summary>
-    /// Polls <c>IsBusy == false</c> with a bounded budget. Must run on the UI thread: awaiting
-    /// <c>Task.Delay</c> there yields the dispatcher, which is what lets the panel's continuations run.
-    /// </summary>
-    private static async Task WaitIdleOnUiAsync(GitSyncViewModel panel)
-    {
-        var deadline = DateTime.UtcNow + IdleBudget;
-        while (panel.IsBusy)
-        {
-            if (DateTime.UtcNow >= deadline)
-            {
-                Assert.Fail("the git panel stayed busy past the 30 s budget");
-            }
-
-            await Task.Delay(PollInterval);
-        }
-    }
 
     /// <summary>
     /// The visible text inside one of the row's verb buttons: the count that rides on pull/push. A hidden count is not
@@ -1296,16 +1225,6 @@ public sealed class GitSyncViewModelTests
                 .Select(text => text.Text))
             : string.Empty;
 
-    private static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
 
     private static T? ControlOf<T>(Window window, string automationId)
         where T : Control =>
@@ -1317,124 +1236,20 @@ public sealed class GitSyncViewModelTests
     private static string? TextOf(Window window, string automationId) =>
         ControlOf<TextBlock>(window, automationId)?.Text;
 
-    private static string NewTempDir()
-    {
-        var path = Path.Combine(Path.GetTempPath(), "forge-git-panel-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
-    }
-
-    private static void DeleteTree(string path)
-    {
-        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    /// <summary>Isolated git runner: per-process empty global/system stubs so the developer's config never leaks in.</summary>
-    private static class GitShell
-    {
-        private static readonly Lazy<(string Global, string System)> Stubs = new(() =>
-        {
-            var dir = Path.Combine(Path.GetTempPath(), "forge-git-panel-tests", Guid.NewGuid().ToString("n"));
-            Directory.CreateDirectory(dir);
-            var global = Path.Combine(dir, "global.config");
-            var system = Path.Combine(dir, "system.config");
-            File.WriteAllText(global, string.Empty, new UTF8Encoding(false));
-            File.WriteAllText(system, string.Empty, new UTF8Encoding(false));
-            return (global, system);
-        }, LazyThreadSafetyMode.ExecutionAndPublication);
-
-        public static (int ExitCode, string Output, string Error) Run(string directory, params string[] arguments)
-        {
-            var startInfo = new ProcessStartInfo("git")
-            {
-                WorkingDirectory = directory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-            foreach (var argument in new[]
-            {
-                "-c", "user.name=Forge Test",
-                "-c", "user.email=forge@example.com",
-                "-c", "core.autocrlf=false",
-                "-c", "core.safecrlf=false",
-                "-c", "init.defaultBranch=main",
-                "-c", "commit.gpgsign=false",
-            })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            foreach (var argument in arguments)
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            startInfo.Environment["LC_ALL"] = "C";
-            startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
-            startInfo.Environment["GCM_INTERACTIVE"] = "never";
-            startInfo.Environment["GIT_PAGER"] = "cat";
-            startInfo.Environment["GIT_CONFIG_GLOBAL"] = Stubs.Value.Global;
-            startInfo.Environment["GIT_CONFIG_SYSTEM"] = Stubs.Value.System;
-            using var process = Process.Start(startInfo)!;
-            var stdout = process.StandardOutput.ReadToEndAsync();
-            var stderr = process.StandardError.ReadToEndAsync();
-            process.WaitForExit();
-            return (process.ExitCode, stdout.Result, stderr.Result);
-        }
-
-        public static string RunChecked(string directory, params string[] arguments)
-        {
-            var (exitCode, output, error) = Run(directory, arguments);
-            if (exitCode != 0)
-            {
-                throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed ({exitCode}): {error}");
-            }
-
-            return output;
-        }
-
-        public static IReadOnlyList<string> BranchList(string repository) =>
-            RunChecked(repository, "branch", "--list", "--format=%(refname:short)")
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(static line => line.Trim())
-                .ToList();
-    }
-
     /// <summary>A bare <c>origin.git</c> plus clones with pinned local identity.</summary>
     /// <summary>
     /// The topology the local merge assumes: a root checkout on <c>main</c> and a session directory that is a linked
     /// worktree of it (refs shared, like a Forge session), with one commit on the session branch.
     /// </summary>
-    private static (string Root, string Session) MergeFixture(GitSandbox sandbox, string name)
+    private static (string Root, string Session) MergeFixture(GitTestSandbox sandbox, string name)
     {
         var seed = sandbox.Clone(name + "-seed");
         sandbox.CommitFile(seed, "readme.txt", "seed\n", "seed");
-        GitShell.RunChecked(seed, "push", "-q", "-u", "origin", "main");
+        GitTestShell.RunChecked(seed, "push", "-q", "-u", "origin", "main");
 
         var root = sandbox.Clone(name + "-root");
         var session = Path.Combine(sandbox.Root, name + "-session");
-        GitShell.RunChecked(root, "worktree", "add", "-q", "-b", "session-x", session);
+        GitTestShell.RunChecked(root, "worktree", "add", "-q", "-b", "session-x", session);
         sandbox.CommitFile(session, "feature.txt", "f\n", "feature");
         return (root, session);
     }
@@ -1483,47 +1298,4 @@ public sealed class GitSyncViewModelTests
             throw new NotSupportedException();
     }
 
-    private sealed class GitSandbox : IDisposable
-    {
-        private GitSandbox(string root, string origin)
-        {
-            Root = root;
-            Origin = origin;
-        }
-
-        public string Root { get; }
-
-        public string Origin { get; }
-
-        public static GitSandbox Create()
-        {
-            var root = NewTempDir();
-            var origin = Path.Combine(root, "origin.git");
-            GitShell.RunChecked(root, "init", "--bare", "-q", "-b", "main", origin);
-            return new GitSandbox(root, origin);
-        }
-
-        public string Clone(string name)
-        {
-            var path = Path.Combine(Root, name);
-            GitShell.RunChecked(Root, "clone", "-q", Origin, path);
-            GitShell.RunChecked(path, "config", "--local", "user.name", "Forge Test");
-            GitShell.RunChecked(path, "config", "--local", "user.email", "forge@example.com");
-            GitShell.RunChecked(path, "config", "--local", "core.autocrlf", "false");
-            GitShell.RunChecked(path, "config", "--local", "commit.gpgsign", "false");
-            return path;
-        }
-
-        public string CommitFile(string repository, string relativePath, string content, string message)
-        {
-            var full = Path.Combine(repository, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllText(full, content, new UTF8Encoding(false));
-            GitShell.RunChecked(repository, "add", "-A");
-            GitShell.RunChecked(repository, "commit", "-q", "-m", message);
-            return GitShell.RunChecked(repository, "rev-parse", "HEAD").Trim();
-        }
-
-        public void Dispose() => DeleteTree(Root);
-    }
 }

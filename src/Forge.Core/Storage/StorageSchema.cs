@@ -336,10 +336,10 @@ internal static class StorageSchema
         foreach (var (id, createdAt) in rows)
         {
             var at = StorageDb.ParseCanonicalTimestamp(createdAt, "created_at", databasePath, id);
-            await using var update = connection.CreateCommand();
-            update.Transaction = transaction;
-            update.CommandText =
-                "UPDATE sessions SET status = $status, last_active_at = $at, last_active_ticks = $ticks WHERE id = $id";
+            await using var update = StorageDb.Command(
+                connection,
+                transaction,
+                "UPDATE sessions SET status = $status, last_active_at = $at, last_active_ticks = $ticks WHERE id = $id");
             update.Parameters.AddWithValue("$status", StatusActive);
             update.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(at));
             update.Parameters.AddWithValue("$ticks", StorageDb.TimestampTicks(at));
@@ -428,9 +428,7 @@ internal static class StorageSchema
 
         foreach (var (id, key) in rows)
         {
-            await using var update = connection.CreateCommand();
-            update.Transaction = transaction;
-            update.CommandText = "UPDATE sessions SET occupancy_key = $key WHERE id = $id";
+            await using var update = StorageDb.Command(connection, transaction, "UPDATE sessions SET occupancy_key = $key WHERE id = $id");
             update.Parameters.AddWithValue("$key", key);
             update.Parameters.AddWithValue("$id", id);
             await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -468,9 +466,7 @@ internal static class StorageSchema
         archived.Sort(StringComparer.Ordinal);
         foreach (var id in archived)
         {
-            await using var update = connection.CreateCommand();
-            update.Transaction = transaction;
-            update.CommandText = "UPDATE sessions SET status = 'Archived' WHERE id = $id";
+            await using var update = StorageDb.Command(connection, transaction, "UPDATE sessions SET status = 'Archived' WHERE id = $id");
             update.Parameters.AddWithValue("$id", id);
             await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
@@ -612,9 +608,10 @@ internal static class StorageSchema
         IReadOnlyList<string> sessionIds,
         CancellationToken ct)
     {
-        await using var insert = connection.CreateCommand();
-        insert.Transaction = transaction;
-        insert.CommandText = "INSERT INTO storage_notices (kind, payload_json, created_at) VALUES ($kind, $payload, $at)";
+        await using var insert = StorageDb.Command(
+            connection,
+            transaction,
+            "INSERT INTO storage_notices (kind, payload_json, created_at) VALUES ($kind, $payload, $at)");
         insert.Parameters.AddWithValue("$kind", kind);
         insert.Parameters.AddWithValue("$payload", NoticePayload(sessionIds));
         insert.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(DateTimeOffset.UtcNow));
@@ -782,9 +779,7 @@ internal static class StorageSchema
 
         foreach (var (table, columns) in tables)
         {
-            await using var info = connection.CreateCommand();
-            info.Transaction = transaction;
-            info.CommandText = "SELECT name FROM pragma_table_info($table)";
+            await using var info = StorageDb.Command(connection, transaction, "SELECT name FROM pragma_table_info($table)");
             info.Parameters.AddWithValue("$table", table);
             await using var reader = await info.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -912,9 +907,8 @@ internal static class StorageSchema
         SqliteTransaction? transaction,
         CancellationToken ct = default)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = $name";
+        await using var command = StorageDb.Command(
+            connection, transaction, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = $name");
         command.Parameters.AddWithValue("$name", name);
         var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return (value is long count ? count : Convert.ToInt64(value, CultureInfo.InvariantCulture)) > 0;

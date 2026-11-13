@@ -305,9 +305,8 @@ public sealed class ChangedFilesScopeTests
                 shell.Children.Add(filesView);
                 Grid.SetColumn(changesView, 1);
                 shell.Children.Add(changesView);
-                var window = new Window { Width = 940, Height = 650, Content = shell };
-                window.Show();
-                Settle(window);
+                var window = SharedUi.Show(shell, 940, 650);
+                SharedUi.Settle(window);
 
                 var scopePicker = filesView.FindControl<Button>("ScopePicker");
                 var branchPicker = filesView.FindControl<Button>("CompareBranchPicker");
@@ -320,7 +319,7 @@ public sealed class ChangedFilesScopeTests
 
                 var scopeFlyout = Assert.IsType<Flyout>(scopePicker.Flyout);
                 scopeFlyout.ShowAt(scopePicker);
-                Settle(window);
+                SharedUi.Settle(window);
                 var scopeMenu = Assert.IsType<Border>(scopeFlyout.Content);
                 var scopeScroll = Assert.IsType<ScrollViewer>(scopeMenu.Child);
                 var scopeStack = Assert.IsType<StackPanel>(scopeScroll.Content);
@@ -335,7 +334,7 @@ public sealed class ChangedFilesScopeTests
 
                 var branchFlyout = Assert.IsType<Flyout>(branchPicker.Flyout);
                 branchFlyout.ShowAt(branchPicker);
-                Settle(window);
+                SharedUi.Settle(window);
                 // The compare-base picker and the new-branch dialog share one menu card: the flyout hosts a
                 // BranchPickerView bound to the picker's view model, with the menu Border/StackPanel inside it.
                 var branchView = Assert.IsType<BranchPickerView>(branchFlyout.Content);
@@ -366,18 +365,18 @@ public sealed class ChangedFilesScopeTests
                 Assert.NotEqual(remoteChoice.RefName, changes.SelectedBranch?.RefName);
                 // A real click: Click (which closes the flyout) is raised before the command runs, so the pick must survive it.
                 UserClick(remoteButton);
-                Settle(window);
+                SharedUi.Settle(window);
                 Assert.False(branchFlyout.IsOpen);
                 Assert.Equal(remoteChoice.RefName, changes.SelectedBranch?.RefName);
 
                 scopeFlyout.ShowAt(scopePicker);
-                Settle(window);
+                SharedUi.Settle(window);
                 var allButton = scopeStack.Children.OfType<Button>().First();
                 Assert.False(changes.IsAllChanges);
                 UserClick(allButton);
-                Settle(window);
+                SharedUi.Settle(window);
                 await changes.LoadAsync(CancellationToken.None);
-                Settle(window);
+                SharedUi.Settle(window);
                 Assert.True(changes.IsAllChanges);
                 Assert.False(scopeFlyout.IsOpen);
 
@@ -388,7 +387,7 @@ public sealed class ChangedFilesScopeTests
                 Assert.True(nodes.Count(static node => !node.IsDirectory) >= 2);
                 var firstFile = nodes.First(static node => !node.IsDirectory);
                 firstFile.ToggleCommand.Execute(null);
-                Settle(window);
+                SharedUi.Settle(window);
                 var selectedPath = firstFile.File!.Path;
                 Assert.Contains(selectedPath, requestedChanges);
                 await changes.ShowFileAsync(selectedPath, CancellationToken.None);
@@ -418,7 +417,7 @@ public sealed class ChangedFilesScopeTests
 
                 // Open-in-editor and copy-path moved into each file header's menu; copying still lands in the clipboard.
                 changes.SelectedFile!.CopyPathCommand.Execute(null);
-                Settle(window);
+                SharedUi.Settle(window);
                 if (window.Clipboard is { } clipboard)
                 {
                     Assert.Equal(selectedPath, await clipboard.TryGetTextAsync());
@@ -528,24 +527,8 @@ public sealed class ChangedFilesScopeTests
         Assert.IsAssignableFrom<Avalonia.Automation.Provider.IInvokeProvider>(
             Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(button)).Invoke();
 
-    private static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            window.UpdateLayout();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
-    }
-
-    private static void Write(string root, string relativePath, string text)
-    {
-        var fullPath = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        File.WriteAllText(fullPath, text);
-    }
+    private static void Write(string root, string relativePath, string text) =>
+        TestTempFiles.WriteFile(root, relativePath, text);
 
     private sealed record TestWorkspace(
         GitTestSandbox Sandbox,

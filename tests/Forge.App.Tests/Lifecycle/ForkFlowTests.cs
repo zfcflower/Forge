@@ -20,7 +20,7 @@ public sealed class ForkFlowTests : IAsyncLifetime
     private const string Head = "0123456789abcdef0123456789abcdef01234567";
     private const string Committed = "89abcdef0123456789abcdef0123456789abcdef";
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-fork-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-fork-");
     private SqliteSessionStore store = null!;
 
     private string Repository => Path.Combine(root, "repo");
@@ -40,13 +40,7 @@ public sealed class ForkFlowTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await store.DisposeAsync();
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     [Fact]

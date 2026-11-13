@@ -41,8 +41,8 @@ public sealed class SqliteUiStateStore : IUiStateStore, IAsyncDisposable, IDispo
         return _writer.ReadAsync(
             async connection =>
             {
-                await using var command = connection.CreateCommand();
-                command.CommandText = "SELECT key, version, json, updated_at FROM ui_state WHERE key = $key";
+                await using var command = StorageDb.Command(
+                    connection, "SELECT key, version, json, updated_at FROM ui_state WHERE key = $key");
                 command.Parameters.AddWithValue("$key", key);
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadEntry(reader) : null;
@@ -81,9 +81,7 @@ public sealed class SqliteUiStateStore : IUiStateStore, IAsyncDisposable, IDispo
         return _writer.WriteAsync(
             async (connection, transaction) =>
             {
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText = "DELETE FROM ui_state WHERE key = $key";
+                await using var command = StorageDb.Command(connection, transaction, "DELETE FROM ui_state WHERE key = $key");
                 command.Parameters.AddWithValue("$key", key);
                 return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
             },

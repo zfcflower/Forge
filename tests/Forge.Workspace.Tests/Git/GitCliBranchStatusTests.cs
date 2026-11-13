@@ -6,14 +6,6 @@ public sealed class GitCliBranchStatusTests
 {
     private static GitCli Cli() => new();
 
-    private static string SeedTracked(RemoteSandbox sandbox, string name = "alice")
-    {
-        var repo = sandbox.Clone(name);
-        sandbox.CommitFile(repo, "base.txt", "base\n", "seed");
-        IsolatedGit.RunChecked(repo, "push", "-q", "-u", "origin", "main");
-        return repo;
-    }
-
     [Fact]
     public async Task Clean_tracking_branch_reports_zero_ahead_behind()
     {
@@ -23,7 +15,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var head = IsolatedGit.Head(repo);
 
         var status = await Cli().GetBranchStatusAsync(repo);
@@ -46,7 +38,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var head = sandbox.CommitFile(repo, "local.txt", "local\n", "local work");
 
         var status = await Cli().GetBranchStatusAsync(repo);
@@ -67,10 +59,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         IsolatedGit.RunChecked(alice, "fetch", "-q", "origin");
 
         var status = await Cli().GetBranchStatusAsync(alice);
@@ -89,10 +78,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var alice = SeedTracked(sandbox, "alice");
-        var bob = sandbox.Clone("bob");
-        sandbox.CommitFile(bob, "remote.txt", "remote\n", "remote work");
-        IsolatedGit.RunChecked(bob, "push", "-q", "origin", "main");
+        var (alice, _, _) = sandbox.SeedRemoteAhead();
         sandbox.CommitFile(alice, "local.txt", "local\n", "local work");
         IsolatedGit.RunChecked(alice, "fetch", "-q", "origin");
 
@@ -112,7 +98,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "feature-x");
         var head = sandbox.CommitFile(repo, "x.txt", "x\n", "feature work");
 
@@ -136,7 +122,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         IsolatedGit.RunChecked(repo, "checkout", "-q", "-b", "doomed");
         sandbox.CommitFile(repo, "doomed.txt", "x\n", "doomed work");
         IsolatedGit.RunChecked(repo, "push", "-q", "-u", "origin", "doomed");
@@ -161,7 +147,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var head = IsolatedGit.Head(repo);
         IsolatedGit.RunChecked(repo, "checkout", "-q", "--detach", "HEAD");
 
@@ -206,7 +192,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
         var mirror = Path.Combine(sandbox.Root, "mirror.git");
         IsolatedGit.RunChecked(sandbox.Root, "init", "--bare", "-q", "-b", "main", mirror);
         IsolatedGit.RunChecked(repo, "remote", "add", "backup", mirror);
@@ -242,7 +228,7 @@ public sealed class GitCliBranchStatusTests
         }
 
         using var sandbox = new RemoteSandbox();
-        var repo = SeedTracked(sandbox);
+        var repo = sandbox.SeedTracked();
 
         Assert.Equal(expected, await Cli().IsValidBranchNameAsync(repo, name));
     }

@@ -13,7 +13,7 @@ namespace Forge.App.Settings;
 /// and written back to <c>settings.json</c>'s <c>modelMeta</c> override. Empty means unknown — it is stored as an absent
 /// field, never as zero, because a zero window or price would put a fake "% used" or "$0.00" on every session.
 /// </summary>
-internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
+internal sealed class ModelMetadataViewModel : NotifyingObject, IDisposable
 {
     private readonly ProviderServices services;
     private readonly string providerId;
@@ -84,13 +84,7 @@ internal sealed class ModelMetadataViewModel : ObservableObject, IDisposable
     public string? Status
     {
         get => status;
-        private set
-        {
-            if (Set(ref status, value))
-            {
-                OnPropertyChanged(nameof(HasStatus));
-            }
-        }
+        private set => SetAndNotify(ref status, value, nameof(HasStatus));
     }
 
     public bool HasStatus => Status is { Length: > 0 };

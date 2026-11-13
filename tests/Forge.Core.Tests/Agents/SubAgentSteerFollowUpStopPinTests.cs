@@ -57,6 +57,50 @@ public sealed class SubAgentSteerFollowUpStopPinTests
         }
     }
 
+    /// <summary>Opens a root session under the temp workspace and starts its <c>go</c> turn in the background.</summary>
+    private static (Task<List<AgentEvent>> Run, AgentInstance Root) StartRun(AgentHost host, string sessionPrefix)
+    {
+        var root = host.CreateRoot(sessionPrefix + "-" + Guid.NewGuid().ToString("n"), Workspace);
+        return (Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go"))), root);
+    }
+
+    /// <summary>Waits for <paramref name="entered"/>, then until the scheduler has registered
+    /// <paramref name="childCount"/> live children, and returns their ids.</summary>
+    private static async Task<IReadOnlyList<string>> AwaitChildrenAsync(AgentHost host, Task entered, int childCount = 1)
+    {
+        await entered.WaitAsync(TimeSpan.FromSeconds(10));
+        await SpinUntilAsync(() => host.SubAgents.Instances.Count == childCount, TimeSpan.FromSeconds(10));
+        return [.. host.SubAgents.Instances.Select(instance => instance.Id)];
+    }
+
+    /// <summary>Parent spawns one Scout child on <c>job</c>; that child blocks in its first turn until
+    /// <paramref name="release"/> completes, then answers an instruction containing
+    /// <paramref name="marker"/> with <paramref name="reply"/>.</summary>
+    private static FakeProvider HoldingChildProvider(
+        TaskCompletionSource entered,
+        TaskCompletionSource release,
+        string marker,
+        string reply) =>
+        new(async (request, index, ct) =>
+        {
+            var last = Turn.LastUserText(request);
+            if (last == "job")
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(ct);
+                return Turn.Say("part1");
+            }
+
+            if (last.Contains(marker, StringComparison.Ordinal))
+            {
+                return Turn.Say(reply);
+            }
+
+            return request.Messages.Count == 1 && last == "go"
+                ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "job")))
+                : Turn.Say("parent done");
+        });
+
     // ---- Steer ----
 
     [Fact]
@@ -100,12 +144,8 @@ public sealed class SubAgentSteerFollowUpStopPinTests
         });
         var policy = new DefaultApprovalPolicy { TrustedDirectories = [Workspace] };
         var host = AgentTestHost.Create(provider, tools, options: Options(), agents: [OpenScout], policy: policy);
-        var root = host.CreateRoot("session-steer-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await w1Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, root) = StartRun(host, "session-steer");
+        var childId = (await AwaitChildrenAsync(host, w1Entered.Task)).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Steer(childId, "redirect now"));
         w1Release.TrySetResult();
@@ -166,12 +206,8 @@ public sealed class SubAgentSteerFollowUpStopPinTests
         });
         var policy = new DefaultApprovalPolicy { TrustedDirectories = [Workspace] };
         var host = AgentTestHost.Create(provider, tools, options: Options(), agents: [OpenScout], policy: policy);
-        var root = host.CreateRoot("session-steer2-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await w1Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, _) = StartRun(host, "session-steer2");
+        var childId = (await AwaitChildrenAsync(host, w1Entered.Task)).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Steer(childId, "first instruction"));
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Steer(childId, "second instruction"));
@@ -194,32 +230,10 @@ public sealed class SubAgentSteerFollowUpStopPinTests
     {
         var turnEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var turnRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var provider = new FakeProvider(async (request, index, ct) =>
-        {
-            var last = Turn.LastUserText(request);
-            if (last == "job")
-            {
-                turnEntered.TrySetResult();
-                await turnRelease.Task.WaitAsync(ct);
-                return Turn.Say("part1");
-            }
-
-            if (last.Contains("late steer", StringComparison.Ordinal))
-            {
-                return Turn.Say("steered done");
-            }
-
-            return request.Messages.Count == 1 && last == "go"
-                ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "job")))
-                : Turn.Say("parent done");
-        });
+        var provider = HoldingChildProvider(turnEntered, turnRelease, "late steer", "steered done");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-steer3-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await turnEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, _) = StartRun(host, "session-steer3");
+        var childId = (await AwaitChildrenAsync(host, turnEntered.Task)).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Steer(childId, "late steer"));
         turnRelease.TrySetResult();
@@ -276,12 +290,8 @@ public sealed class SubAgentSteerFollowUpStopPinTests
         });
         var policy = new DefaultApprovalPolicy { TrustedDirectories = [Workspace] };
         var host = AgentTestHost.Create(provider, tools, options: Options(), agents: [OpenScout], policy: policy);
-        var root = host.CreateRoot("session-steer4-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await Task.WhenAll(r1Entered.Task, r2Entered.Task).WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, _) = StartRun(host, "session-steer4");
+        var childId = (await AwaitChildrenAsync(host, Task.WhenAll(r1Entered.Task, r2Entered.Task))).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Steer(childId, "redirect after batch"));
         release.TrySetResult();
@@ -304,32 +314,10 @@ public sealed class SubAgentSteerFollowUpStopPinTests
     {
         var turnEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var turnRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var provider = new FakeProvider(async (request, index, ct) =>
-        {
-            var last = Turn.LastUserText(request);
-            if (last == "job")
-            {
-                turnEntered.TrySetResult();
-                await turnRelease.Task.WaitAsync(ct);
-                return Turn.Say("part1");
-            }
-
-            if (last.Contains("more work", StringComparison.Ordinal))
-            {
-                return Turn.Say("part2");
-            }
-
-            return request.Messages.Count == 1 && last == "go"
-                ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "job")))
-                : Turn.Say("parent done");
-        });
+        var provider = HoldingChildProvider(turnEntered, turnRelease, "more work", "part2");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-follow-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await turnEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, _) = StartRun(host, "session-follow");
+        var childId = (await AwaitChildrenAsync(host, turnEntered.Task)).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.FollowUp(childId, "more work"));
         turnRelease.TrySetResult();
@@ -352,32 +340,10 @@ public sealed class SubAgentSteerFollowUpStopPinTests
     {
         var turnEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var turnRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var provider = new FakeProvider(async (request, index, ct) =>
-        {
-            var last = Turn.LastUserText(request);
-            if (last == "job")
-            {
-                turnEntered.TrySetResult();
-                await turnRelease.Task.WaitAsync(ct);
-                return Turn.Say("part1");
-            }
-
-            if (last.Contains("extra", StringComparison.Ordinal))
-            {
-                return Turn.Say("final");
-            }
-
-            return request.Messages.Count == 1 && last == "go"
-                ? Turn.Call(("call-1", "spawn_agent", Spawn("Scout", "job")))
-                : Turn.Say("parent done");
-        });
+        var provider = HoldingChildProvider(turnEntered, turnRelease, "extra", "final");
         var host = AgentTestHost.Create(provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout]);
-        var root = host.CreateRoot("session-follow2-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await turnEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, _) = StartRun(host, "session-follow2");
+        var childId = (await AwaitChildrenAsync(host, turnEntered.Task)).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.FollowUp(childId, "extra one"));
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.FollowUp(childId, "extra two"));
@@ -437,11 +403,8 @@ public sealed class SubAgentSteerFollowUpStopPinTests
         });
         var policy = new DefaultApprovalPolicy { TrustedDirectories = [Workspace] };
         var host = AgentTestHost.Create(provider, tools, options: Options(), agents: [OpenScout], policy: policy);
-        var root = host.CreateRoot("session-stop-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await slowEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 2, TimeSpan.FromSeconds(10));
+        var (runTask, root) = StartRun(host, "session-stop");
+        await AwaitChildrenAsync(host, slowEntered.Task, childCount: 2);
         var slowId = host.SubAgents.Instances.Single(i => i.History.Any(m => Turn.Text(m).Contains("partial-A", StringComparison.Ordinal))).Id;
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Stop(slowId, "enough"));
@@ -500,12 +463,8 @@ public sealed class SubAgentSteerFollowUpStopPinTests
                 : Turn.Say("parent done");
         });
         var host = AgentTestHost.Create(provider, tools, options: Options(), agents: [OpenScout], policy: policy, handler: handler);
-        var root = host.CreateRoot("session-stop-approval-" + Guid.NewGuid().ToString("n"), Workspace);
-
-        var runTask = Task.Run(() => AgentTestHost.CollectAsync(host.RunAsync(root, "go")));
-        await approvalEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await SpinUntilAsync(() => host.SubAgents.Instances.Count == 1, TimeSpan.FromSeconds(10));
-        var childId = host.SubAgents.Instances.Single().Id;
+        var (runTask, _) = StartRun(host, "session-stop-approval");
+        var childId = (await AwaitChildrenAsync(host, approvalEntered.Task)).Single();
 
         Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Stop(childId, "halt"));
         var events = await runTask.WaitAsync(TimeSpan.FromSeconds(15));

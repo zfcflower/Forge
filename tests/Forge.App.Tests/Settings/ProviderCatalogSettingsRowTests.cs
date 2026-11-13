@@ -19,7 +19,7 @@ public sealed class ProviderCatalogSettingsRowTests : IDisposable
     {"anthropic":{"id":"anthropic","models":{"claude-sonnet-4-5":{"limit":{"context":200000,"output":64000},"modalities":{"input":["text","image"]},"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high"]}]}}}}
     """;
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-catalog-row-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-catalog-row-");
     private readonly HttpClient http;
     private readonly ProviderServices providers;
     private readonly ModelCatalogRefreshService refresh;
@@ -46,13 +46,7 @@ public sealed class ProviderCatalogSettingsRowTests : IDisposable
     {
         page.Dispose();
         http.Dispose();
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     [Fact]

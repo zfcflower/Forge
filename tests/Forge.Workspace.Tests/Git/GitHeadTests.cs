@@ -14,8 +14,7 @@ public sealed class GitHeadTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("first");
+        repo.CommitFile("a.txt", "a\n", "first");
 
         var actual = await new GitCli().GetHeadAsync(repo.Root);
 
@@ -40,8 +39,7 @@ public sealed class GitHeadTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("first");
+        repo.CommitFile("a.txt", "a\n", "first");
         repo.RunGit("checkout", "--detach");
 
         var actual = await new GitCli().GetHeadAsync(repo.Root);
@@ -67,8 +65,7 @@ public sealed class GitHeadTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("first");
+        repo.CommitFile("a.txt", "a\n", "first");
         var subdirectory = repo.FullPath("sub/dir");
         Directory.CreateDirectory(subdirectory);
 
@@ -100,8 +97,7 @@ public sealed class GitHeadTests
     {
         if (!GitProbe.IsAvailable) return;
         using var repo = new TestRepo();
-        repo.Write("a.txt", "a\n");
-        repo.Commit("first");
+        repo.CommitFile("a.txt", "a\n", "first");
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
 

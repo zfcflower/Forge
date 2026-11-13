@@ -10,8 +10,7 @@ public sealed class WorktreeManagerPinTests
     {
         var sandbox = new TempDirectory();
         var repo = new TestRepo(sandbox);
-        repo.Write("README.md", "# repo\n");
-        repo.Commit("initial");
+        repo.CommitFile("README.md", "# repo\n", "initial");
         return (sandbox, repo);
     }
 

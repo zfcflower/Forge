@@ -9,8 +9,7 @@ public class AnthropicRegressionTests
     [Fact]
     public async Task System_messages_are_folded_into_the_top_level_system_once_and_never_sent_as_messages()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         var request = TestData.Request(
             messages:
@@ -45,8 +44,7 @@ public class AnthropicRegressionTests
     [Fact]
     public async Task Tool_results_lead_the_user_turn_and_cache_control_lands_on_its_last_block()
     {
-        var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("message_stop", """{"type":"message_stop"}"""));
-        var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
+        var (provider, handler) = TestData.AnthropicProvider();
 
         var request = TestData.Request(
             messages:
@@ -124,9 +122,7 @@ public class AnthropicRegressionTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.Sse("[]"));
         var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        var exception = await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
         Assert.Contains("malformed", exception.Message, StringComparison.Ordinal);
     }
 
@@ -136,9 +132,7 @@ public class AnthropicRegressionTests
         var handler = new FakeHttpMessageHandler().EnqueueSse(TestData.WithEvent("content_block_delta", "{\"type\":"));
         var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
     }
 
     [Fact]
@@ -149,8 +143,6 @@ public class AnthropicRegressionTests
             TestData.WithEvent("message_stop", """{"type":"message_stop"}""")));
         var provider = new AnthropicProvider(TestData.AnthropicConfig(), handler.CreateClient());
 
-        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
-
-        Assert.False(exception.Retryable);
+        await ProviderAssertions.AssertRejectedAsNonRetryableAsync(provider);
     }
 }

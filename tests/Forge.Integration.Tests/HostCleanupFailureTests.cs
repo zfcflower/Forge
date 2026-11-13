@@ -80,8 +80,8 @@ public sealed class HostCleanupFailureTests
         finally
         {
             ReleaseFake(fakeDirectory);
-            TryDeleteDirectory(root);
-            TryDeleteDirectory(fakeDirectory);
+            RawHost.TryDeleteDirectory(root);
+            RawHost.TryDeleteDirectory(fakeDirectory);
         }
     }
 
@@ -150,17 +150,6 @@ public sealed class HostCleanupFailureTests
         try
         {
             File.WriteAllText(Path.Combine(fakeDirectory, "release.txt"), "release");
-        }
-        catch (IOException)
-        {
-        }
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            Directory.Delete(path, recursive: true);
         }
         catch (IOException)
         {

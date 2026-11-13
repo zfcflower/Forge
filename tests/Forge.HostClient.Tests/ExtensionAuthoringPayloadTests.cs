@@ -1,6 +1,7 @@
 using System.IO;
 using Forge.Ipc;
 using Xunit;
+using static Forge.HostClient.Tests.AuthoringPayloads;
 using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
@@ -13,26 +14,12 @@ namespace Forge.HostClient.Tests;
 /// <see cref="ArgumentException"/>/<see cref="ArgumentNullException"/> before anything reaches the wire.</summary>
 public sealed class ExtensionAuthoringPayloadTests
 {
-    private const string ValidStagedJson =
-        "{\"pluginId\":\"demo\",\"version\":\"1.0.0\",\"kind\":\"plugin\"," +
-        "\"files\":[{\"path\":\"Plugin.cs\",\"text\":\"// code\"}]," +
-        "\"permissions\":[{\"kind\":0}]," +
-        "\"dependencies\":[{\"name\":\"Dep\",\"version\":\"1.0.0\"}]," +
-        "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-1\"," +
-        "\"diagnostics\":[]}";
-
-    private const string ValidCommitJson =
-        "{\"status\":{\"pluginId\":\"demo\",\"version\":\"1.0.0\",\"status\":\"approved\"," +
-        "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-1\"," +
-        "\"permissions\":[],\"error\":null},\"toolNames\":[\"demo-tool\"]}";
-
     [Fact]
     public async Task Stage_sends_camelCase_files_dictionary_permissions_enum_dependencies_and_tool()
     {
         await using var host = new FakeHost();
-        host.On(Sdk.ExtensionProtocol.ExtensionsStage, (_, _) => Task.FromResult(Json.Element(ValidStagedJson)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsStage, ValidStagedJson);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(ValidStageRequest(), limit.Token);
@@ -73,10 +60,9 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_sends_workflow_kind_verbatim()
     {
         await using var host = new FakeHost();
-        host.On(Sdk.ExtensionProtocol.ExtensionsStage, (_, _) => Task.FromResult(Json.Element(
-            ValidStagedJson.Replace("\"kind\":\"plugin\"", "\"kind\":\"workflow\""))));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsStage,
+            ValidStagedJson.Replace("\"kind\":\"plugin\"", "\"kind\":\"workflow\""));
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(
@@ -91,9 +77,8 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Commit_sends_hashes_and_decodes_status_with_tool_names()
     {
         await using var host = new FakeHost();
-        host.On(Sdk.ExtensionProtocol.ExtensionsCommit, (_, _) => Task.FromResult(Json.Element(ValidCommitJson)));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsCommit, ValidCommitJson);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var result = await client.CommitExtensionAsync(
@@ -116,9 +101,8 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Discard_sends_only_the_plugin_id()
     {
         await using var host = new FakeHost();
-        host.On(Sdk.ExtensionProtocol.ExtensionsDiscard, (_, _) => Task.FromResult(Json.Element("{}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsDiscard, "{}");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await client.DiscardExtensionAsync("demo", limit.Token);
@@ -136,9 +120,8 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Plugin_version_calls_send_plugin_id_and_version(string operation)
     {
         await using var host = new FakeHost();
-        host.On(operation, (_, _) => Task.FromResult(Json.Element("{}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        host.Answer(operation, "{}");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var call = operation switch
@@ -160,11 +143,10 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Pending_sends_an_empty_object_and_decodes_both_rows()
     {
         await using var host = new FakeHost();
-        host.On(Sdk.ExtensionProtocol.ExtensionsPending, (_, _) => Task.FromResult(Json.Element(
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsPending,
             "{\"items\":[" + ValidStagedJson + "," +
-            ValidStagedJson.Replace("\"pluginId\":\"demo\"", "\"pluginId\":\"second\"") + "]}")));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+            ValidStagedJson.Replace("\"pluginId\":\"demo\"", "\"pluginId\":\"second\"") + "]}");
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var pending = await client.GetPendingExtensionsAsync(limit.Token);
@@ -180,8 +162,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_a_null_request_without_ipc()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentNullException>(
@@ -197,8 +178,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_a_blank_plugin_id_without_ipc(string? pluginId)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
@@ -214,8 +194,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_a_blank_version_without_ipc(string? version)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
@@ -233,8 +212,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_an_unknown_kind_without_ipc(string? kind)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<ArgumentException>(
@@ -248,8 +226,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_null_collections_without_ipc()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentNullException>(
@@ -268,8 +245,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_a_blank_file_key_without_ipc(string key)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -284,8 +260,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_rejects_null_entries_without_ipc()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -308,8 +283,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Commit_rejects_a_null_request_without_ipc()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAsync<ArgumentNullException>(
@@ -326,8 +300,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Commit_rejects_blank_identity_and_hashes_without_ipc(string field)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         foreach (var blank in new string?[] { null, "", "   " })
@@ -353,8 +326,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Discard_rejects_a_blank_plugin_id_without_ipc(string? pluginId)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
@@ -378,8 +350,7 @@ public sealed class ExtensionAuthoringPayloadTests
         string operation, string? pluginId, string? version)
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var call = operation switch

@@ -59,7 +59,7 @@ internal sealed record ToolGroupViewModel(string Title, IReadOnlyList<ToolRowVie
 /// plugin or server is where they are switched. Switches write <see cref="AppPreferences.ToolsDisabled"/>; every session
 /// applies it before its next turn.
 /// </summary>
-internal sealed class ToolsSettingsSectionViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
+internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
     private static readonly string[] BuiltInOrder =
     [
@@ -101,13 +101,7 @@ internal sealed class ToolsSettingsSectionViewModel : ObservableObject, IDisposa
     public string InventoryText
     {
         get => inventoryText;
-        private set
-        {
-            if (Set(ref inventoryText, value))
-            {
-                OnPropertyChanged(nameof(HasInventory));
-            }
-        }
+        private set => SetAndNotify(ref inventoryText, value, nameof(HasInventory));
     }
 
     public bool HasInventory => inventoryText.Length > 0;

@@ -84,8 +84,7 @@ public sealed class TreeRowActivationTests
             addProject: _ => Task.CompletedTask);
         tree.Rows.ReplaceAll([parent, child]);
         var view = new ProjectView { DataContext = tree };
-        var window = new Window { Width = 400, Height = 300, Content = view };
-        window.Show();
+        var window = SharedUi.Show(view, 400, 300);
         Dispatcher.UIThread.RunJobs();
 
         var title = window.GetVisualDescendants().OfType<TextBlock>()
@@ -117,8 +116,7 @@ public sealed class TreeRowActivationTests
             addProject: _ => Task.CompletedTask);
         tree.Rows.ReplaceAll([node]);
         var view = new ProjectView { DataContext = tree };
-        var window = new Window { Width = 260, Height = 220, Content = view };
-        window.Show();
+        var window = SharedUi.Show(view, 260, 220);
         Dispatcher.UIThread.RunJobs();
 
         var title = window.GetVisualDescendants().OfType<TextBlock>()

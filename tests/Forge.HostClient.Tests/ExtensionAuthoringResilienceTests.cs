@@ -2,6 +2,7 @@ using System.IO;
 using System.Reflection;
 using Forge.Ipc;
 using Xunit;
+using static Forge.HostClient.Tests.AuthoringPayloads;
 using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
@@ -12,19 +13,6 @@ namespace Forge.HostClient.Tests;
 /// caller cancellation, refusal before <c>StartAsync</c>, and a mid-call disconnect.</summary>
 public sealed class ExtensionAuthoringResilienceTests
 {
-    private const string ValidStagedJson =
-        "{\"pluginId\":\"demo\",\"version\":\"1.0.0\",\"kind\":\"plugin\"," +
-        "\"files\":[{\"path\":\"Plugin.cs\",\"text\":\"// code\"}]," +
-        "\"permissions\":[{\"kind\":0}]," +
-        "\"dependencies\":[{\"name\":\"Dep\",\"version\":\"1.0.0\"}]," +
-        "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-1\"," +
-        "\"diagnostics\":[]}";
-
-    private const string ValidCommitJson =
-        "{\"status\":{\"pluginId\":\"demo\",\"version\":\"1.0.0\",\"status\":\"approved\"," +
-        "\"sourceHash\":\"s\",\"dependencyHash\":\"d\",\"sdkVersion\":\"sdk-1\"," +
-        "\"permissions\":[],\"error\":null},\"toolNames\":[\"demo-tool\"]}";
-
     [Fact]
     public async Task Compile_budget_defaults_to_the_five_minute_floor()
     {
@@ -80,8 +68,7 @@ public sealed class ExtensionAuthoringResilienceTests
             await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
             return Json.Element(ValidStagedJson);
         });
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(
@@ -102,8 +89,7 @@ public sealed class ExtensionAuthoringResilienceTests
             await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
             return Json.Element(ValidCommitJson);
         });
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
 
         var result = await client.CommitExtensionAsync(
@@ -129,8 +115,7 @@ public sealed class ExtensionAuthoringResilienceTests
 
             return Task.FromResult(Json.Element("{\"items\":[]}"));
         });
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcTimeoutException>(
@@ -159,8 +144,7 @@ public sealed class ExtensionAuthoringResilienceTests
             await Task.Delay(TimeSpan.FromMilliseconds(800), ct).ConfigureAwait(false);
             return Json.Element(ValidStagedJson);
         });
-        await using var client = ClientFactory.Create(host, options: options);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(
@@ -180,8 +164,7 @@ public sealed class ExtensionAuthoringResilienceTests
     {
         await using var host = new FakeHost();
         host.On(Sdk.ExtensionProtocol.ExtensionsStage, (_, _) => throw new FakeHostError(code, "host refused: " + code));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
@@ -201,8 +184,7 @@ public sealed class ExtensionAuthoringResilienceTests
         host.On(
             Sdk.ExtensionProtocol.ExtensionsCommit,
             (_, _) => throw new FakeHostError("approval_mismatch", "the staged bytes changed since approval"));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
@@ -221,8 +203,7 @@ public sealed class ExtensionAuthoringResilienceTests
         host.On(
             Sdk.ExtensionProtocol.ExtensionsPending,
             (_, _) => throw new FakeHostError("unknown_plugin", "no such staged extension"));
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
@@ -239,8 +220,7 @@ public sealed class ExtensionAuthoringResilienceTests
         await using var host = new FakeHost();
         host.On(Sdk.ExtensionProtocol.ExtensionsStage, FakeHost.NeverAnswer);
         host.On(Sdk.ExtensionProtocol.ExtensionsPending, FakeHost.NeverAnswer);
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
 
@@ -289,8 +269,7 @@ public sealed class ExtensionAuthoringResilienceTests
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
             return Json.Element("{\"items\":[]}");
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var pending = client.GetPendingExtensionsAsync(limit.Token);
@@ -312,8 +291,7 @@ public sealed class ExtensionAuthoringResilienceTests
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
             return Json.Element(ValidStagedJson);
         });
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var staging = client.StageExtensionAsync(

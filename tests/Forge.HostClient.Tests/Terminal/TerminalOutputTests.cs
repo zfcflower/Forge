@@ -12,12 +12,10 @@ public sealed class TerminalOutputTests
     public async Task Output_is_not_acknowledged_before_the_consumer_reads_it()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         const string terminalId = "t-ack-quiet";
-        TerminalFixtures.AnswerStart(host, terminalId);
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
         var chunk = new byte[16 * 1024];
         new Random(7).NextBytes(chunk);
@@ -38,12 +36,10 @@ public sealed class TerminalOutputTests
         // 实现规则：累计未确认 ≥64 KiB 或队列读空时发一次 ack。5×16 KiB 应收敛为
         // 65536（第 4 块读完触发）+ 16384（读空触发），累计恰好等于解码总字节。
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         const string terminalId = "t-ack";
-        TerminalFixtures.AnswerStart(host, terminalId);
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
         var expected = new List<byte>();
         var random = new Random(11);
@@ -87,12 +83,10 @@ public sealed class TerminalOutputTests
     public async Task Skipped_sequence_faults_output_and_exited_with_a_protocol_error()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         const string terminalId = "t-gap";
-        TerminalFixtures.AnswerStart(host, terminalId);
-        var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
         await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "first"));
         await host.SyncAsync();
@@ -123,8 +117,7 @@ public sealed class TerminalOutputTests
         // 早到输出是显式设计：start 应答在途时先到的 output/exit 缓存在客户端，
         // 注册时按 seq 重放，首批字节不丢失、exit 正常收口。
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         const string terminalId = "t-early";
         var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On(
@@ -159,8 +152,7 @@ public sealed class TerminalOutputTests
     public async Task Early_exit_without_output_still_reports_the_exit_code()
     {
         await using var host = new FakeHost();
-        await using var client = ClientFactory.Create(host);
-        await client.StartConnectedAsync(host);
+        await using var client = await ClientFactory.StartAsync(host);
         const string terminalId = "t-early-exit";
         var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On(

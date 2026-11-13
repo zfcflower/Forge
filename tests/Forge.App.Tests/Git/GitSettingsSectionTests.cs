@@ -103,7 +103,7 @@ public sealed class GitSettingsSectionTests
         var section = await session.Dispatch(
             async () =>
             {
-                await using var harness = AppHarness.Open();
+                await using var harness = await GitAppHarness.Open();
                 var found = harness.Composition.Settings.Items.SingleOrDefault(
                     static item => string.Equals(item.Id, SettingsSectionIds.Git, StringComparison.Ordinal));
                 return found is null
@@ -137,7 +137,7 @@ public sealed class GitSettingsSectionTests
             var rendered = await session.Dispatch(
                 async () =>
                 {
-                    await using var harness = AppHarness.Open();
+                    await using var harness = await GitAppHarness.Open();
                     var shell = new SettingsShell(harness.Composition);
                     try
                     {
@@ -172,83 +172,6 @@ public sealed class GitSettingsSectionTests
         }
     }
 
-    // ------------------------------------------------------------ harness
-
-    /// <summary>One throw-away data root with a real composition root; nothing touches the user's database.</summary>
-    private sealed class AppHarness : IAsyncDisposable
-    {
-        private readonly string root;
-        private readonly (string? Data, string? General, string? Workspace) saved;
-
-        private AppHarness(string root, (string? Data, string? General, string? Workspace) saved, AppComposition composition)
-        {
-            this.root = root;
-            this.saved = saved;
-            Composition = composition;
-        }
-
-        public AppComposition Composition { get; }
-
-        public static AppHarness Open()
-        {
-            var root = Path.Combine(Path.GetTempPath(), "forge-git-settings-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path.Combine(root, "workspace"));
-            var saved = (
-                Data: Environment.GetEnvironmentVariable(AppPaths.DataVariable),
-                General: Environment.GetEnvironmentVariable(AppPaths.GeneralVariable),
-                Workspace: Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable));
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, Path.Combine(root, "data"));
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, Path.Combine(root, "general"));
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Path.Combine(root, "workspace"));
-            try
-            {
-                return new AppHarness(root, saved, AppComposition.Create());
-            }
-            catch (Exception)
-            {
-                Restore(saved);
-                DeleteTree(root);
-                throw;
-            }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await Composition.DisposeAsync();
-            Restore(saved);
-            DeleteTree(root);
-        }
-
-        private static void Restore((string? Data, string? General, string? Workspace) saved)
-        {
-            Environment.SetEnvironmentVariable(AppPaths.DataVariable, saved.Data);
-            Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, saved.General);
-            Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, saved.Workspace);
-        }
-
-        private static void DeleteTree(string path)
-        {
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                }
-            }
-
-            try
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-    }
-
     /// <summary>
     /// The settings window the shell opens, read on the UI thread. Since the settings page moved out of the main window
     /// this harness shows the real window through the shell's own command, so the registration, the grouped nav and the
@@ -265,7 +188,7 @@ public sealed class GitSettingsSectionTests
             viewModel = new MainWindowViewModel(composition);
             main = new MainWindow { DataContext = viewModel };
             main.Show();
-            Settle(main);
+            SharedUi.Settle(main);
             viewModel.ToggleSettingsCommand.Execute(null);
             Window = Assert.IsType<SettingsWindow>(viewModel.SettingsWindow);
         }
@@ -278,7 +201,7 @@ public sealed class GitSettingsSectionTests
         {
             for (var attempt = 0; attempt < 200; attempt++)
             {
-                Settle(Window);
+                SharedUi.Settle(Window);
                 if (RenderedSectionIds().Count == viewModel.Settings.Sections.Items.Count
                     && HeadingsSettled())
                 {
@@ -289,7 +212,7 @@ public sealed class GitSettingsSectionTests
             // The git section body only renders once selected; this test reads it, so select it before reading.
             viewModel.Settings.SelectedSection = viewModel.Settings.Sections.Items.Single(
                 static item => string.Equals(item.Id, SettingsSectionIds.Git, StringComparison.Ordinal));
-            Settle(Window);
+            SharedUi.Settle(Window);
         }
 
         /// <summary>All three nav rows are laid out at distinct heights, so order assertions are stable.</summary>
@@ -341,16 +264,6 @@ public sealed class GitSettingsSectionTests
             viewModel.Dispose();
         }
 
-        public static void Settle(Window window)
-        {
-            for (var pass = 0; pass < 2; pass++)
-            {
-                Dispatcher.UIThread.RunJobs();
-                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-            }
-
-            Dispatcher.UIThread.RunJobs();
-        }
 
         /// <summary>
         /// One nav row. The grouped column draws every section as a button (a heading that cannot be selected was the

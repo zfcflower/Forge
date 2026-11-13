@@ -218,16 +218,28 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
         RebuildInstalled();
         RebuildPending();
         RebuildRules();
-        OnPropertyChanged(nameof(UnavailableText));
-        OnPropertyChanged(nameof(HasUnavailableText));
-        OnPropertyChanged(nameof(ShowExtensions));
-        OnPropertyChanged(nameof(ShowInstalledEmpty));
-        OnPropertyChanged(nameof(ShowPendingEmpty));
+        NotifyComputedState();
+    }
+
+    /// <summary>Raises every binding derived from the snapshot, the rules and the last action, in that order.</summary>
+    private void NotifyComputedState()
+    {
+        NotifyAvailability();
         OnPropertyChanged(nameof(ShowRulesEmpty));
         OnPropertyChanged(nameof(RulesProblemText));
         OnPropertyChanged(nameof(HasRulesProblem));
         OnPropertyChanged(nameof(ActionProblem));
         OnPropertyChanged(nameof(HasActionProblem));
+    }
+
+    /// <summary>Raises the bindings that decide whether the extension blocks are shown at all.</summary>
+    private void NotifyAvailability()
+    {
+        OnPropertyChanged(nameof(UnavailableText));
+        OnPropertyChanged(nameof(HasUnavailableText));
+        OnPropertyChanged(nameof(ShowExtensions));
+        OnPropertyChanged(nameof(ShowInstalledEmpty));
+        OnPropertyChanged(nameof(ShowPendingEmpty));
     }
 
     private void RebuildInstalled()
@@ -399,11 +411,7 @@ internal sealed class ExtensionsSettingsSectionViewModel : ObservableObject, IDi
                     return;
                 }
 
-                OnPropertyChanged(nameof(UnavailableText));
-                OnPropertyChanged(nameof(HasUnavailableText));
-                OnPropertyChanged(nameof(ShowExtensions));
-                OnPropertyChanged(nameof(ShowInstalledEmpty));
-                OnPropertyChanged(nameof(ShowPendingEmpty));
+                NotifyAvailability();
                 if (host.Status == HostStatus.Running)
                 {
                     _ = RefreshAsync(CancellationToken.None);
@@ -447,7 +455,7 @@ internal enum InstalledExtensionAction
 }
 
 /// <summary>One installed extension version: state, its tool names, and the enable/disable/delete actions.</summary>
-internal sealed class InstalledExtensionViewModel : ObservableObject
+internal sealed class InstalledExtensionViewModel : NotifyingObject
 {
     private readonly ExtensionRow row;
     private readonly Func<InstalledExtensionViewModel, InstalledExtensionAction, Task> action;
@@ -497,9 +505,8 @@ internal sealed class InstalledExtensionViewModel : ObservableObject
         get => isConfirmingDelete;
         private set
         {
-            if (Set(ref isConfirmingDelete, value))
+            if (SetAndNotify(ref isConfirmingDelete, value, nameof(ShowDelete)))
             {
-                OnPropertyChanged(nameof(ShowDelete));
                 OnPropertyChanged(nameof(ShowConfirmDelete));
             }
         }

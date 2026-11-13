@@ -156,16 +156,10 @@ public sealed class FileIndexTests : IDisposable
 
     private string NewRoot()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-fileindex-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-fileindex-");
         roots.Add(root);
         return root;
     }
 
-    private static void Write(string root, string relativePath)
-    {
-        var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, "x");
-    }
+    private static void Write(string root, string relativePath) => TestTempFiles.WriteFile(root, relativePath, "x");
 }

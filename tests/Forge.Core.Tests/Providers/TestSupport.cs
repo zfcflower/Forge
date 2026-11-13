@@ -93,6 +93,22 @@ internal static class TestData
 
     public static string WithEvent(string name, string payload) => $"event: {name}\ndata: {payload}\n\n";
 
+    /// <summary>An OpenAI-compatible provider over a fake handler primed with one SSE stream built from
+    /// <paramref name="payloads"/>, together with that handler.</summary>
+    public static (OpenAiCompatibleProvider Provider, FakeHttpMessageHandler Handler) OpenAiProvider(params string[] payloads)
+    {
+        var handler = new FakeHttpMessageHandler().EnqueueSse(Sse(payloads));
+        return (new OpenAiCompatibleProvider(OpenAiConfig(), handler.CreateClient()), handler);
+    }
+
+    /// <summary>An Anthropic provider over a fake handler primed with a stream carrying only the terminating
+    /// <c>message_stop</c> event, together with that handler.</summary>
+    public static (AnthropicProvider Provider, FakeHttpMessageHandler Handler) AnthropicProvider()
+    {
+        var handler = new FakeHttpMessageHandler().EnqueueSse(WithEvent("message_stop", """{"type":"message_stop"}"""));
+        return (new AnthropicProvider(AnthropicConfig(), handler.CreateClient()), handler);
+    }
+
     public static ProviderConfig OpenAiConfig(string baseUrl = "https://api.example.test/v1") =>
         new("openai", ProviderFactory.OpenAiCompatibleKind, baseUrl, "sk-test");
 

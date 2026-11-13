@@ -19,11 +19,7 @@ public sealed class NonUiContributionTests
     public async Task Status_reports_draft_hashes_before_approval_without_running_register()
     {
         await using var fx = new E2eFixture();
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
+        var marker = fx.WriteContributedPlugin("gamma");
         await fx.StartAsync();
 
         var status = await fx.WaitForStatusAsync("gamma", "a status row for gamma");
@@ -47,18 +43,13 @@ public sealed class NonUiContributionTests
     public async Task Approve_via_status_publishes_tools_and_all_contributions()
     {
         await using var fx = new E2eFixture();
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
+        var marker = fx.WriteContributedPlugin("gamma");
 
         var contributionsChanged = 0;
         fx.Client.ContributionsChanged += () => Interlocked.Increment(ref contributionsChanged);
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
 
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma");
+        await fx.WaitForToolsAsync("gamma", 1, "the tool of gamma");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 1, "the command of gamma");
         Assert.True(File.Exists(marker), "approval must run registration exactly once it is granted.");
 
@@ -85,11 +76,7 @@ public sealed class NonUiContributionTests
     public async Task Unapproved_plugin_exposes_no_contributions_and_prompt_returns_null()
     {
         await using var fx = new E2eFixture();
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
+        var marker = fx.WriteContributedPlugin("gamma");
         await fx.StartAsync();
         await fx.WaitForStatusAsync("gamma", "a status row for gamma");
 
@@ -123,13 +110,8 @@ public sealed class NonUiContributionTests
                 approvals.Enqueue(request);
                 return ValueTask.FromResult(ApprovalDecision.Allow);
             });
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
+        fx.WriteContributedPlugin("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 1, "the command of gamma");
 
         var command = Assert.Single(fx.Client.Commands);
@@ -159,16 +141,9 @@ public sealed class NonUiContributionTests
                 probeContexts.Enqueue(context);
                 return ValueTask.FromResult(new ToolResult("saw:" + context.SessionId + "|" + context.WorkingDirectory));
             });
-        await using var fx = new E2eFixture(
-            toolResolver: name => name == probe.Definition.Name ? probe : null,
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
+        await using var fx = E2eFixture.AllowingApprovals(probe);
+        fx.WriteContributedPlugin("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
         await fx.WaitUntilAsync(() => fx.Client.PromptContributors.Count == 1, "the prompt contributor of gamma");
 
         var text = await fx.Client.GetPluginPromptAsync(
@@ -187,18 +162,11 @@ public sealed class NonUiContributionTests
     public async Task Panel_declaration_accepted_without_ui_renderer()
     {
         await using var fx = new E2eFixture();
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma");
+        fx.WriteContributedPlugin("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
+        await fx.WaitForToolsAsync("gamma", 1, "the tool of gamma");
 
-        var echo = await fx.InvokeAsync("gamma", "cecho", """{"text":"panel-ok"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("c:panel-ok", echo.Content);
+        await fx.AssertToolContentAsync("gamma", "cecho", """{"text":"panel-ok"}""", "c:panel-ok");
         Assert.Contains(
             fx.Client.Diagnostics,
             diagnostic => diagnostic.Contains("panel", StringComparison.OrdinalIgnoreCase));
@@ -208,18 +176,11 @@ public sealed class NonUiContributionTests
     public async Task Permission_subset_of_manifest_loads()
     {
         await using var fx = new E2eFixture();
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma");
+        fx.WriteContributedPlugin("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
+        await fx.WaitForToolsAsync("gamma", 1, "the tool of gamma");
 
-        var echo = await fx.InvokeAsync("gamma", "cecho", """{"text":"subset"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("c:subset", echo.Content);
+        await fx.AssertToolContentAsync("gamma", "cecho", """{"text":"subset"}""", "c:subset");
     }
 
     [Fact]
@@ -232,17 +193,12 @@ public sealed class NonUiContributionTests
             PluginSources.ManifestWithPermissions("greedy", "1.0.0"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("greedy", "a status row for greedy");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("greedy");
         Assert.Empty(fx.ToolsOf("greedy"));
 
-        await fx.Client.ApprovePluginAsync(
-            "greedy", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("greedy");
         Assert.Empty(fx.ToolsOf("greedy"));
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "greedy");
+        var after = await fx.StatusOfAsync("greedy");
         Assert.False(string.IsNullOrWhiteSpace(after.Error));
     }
 
@@ -250,17 +206,15 @@ public sealed class NonUiContributionTests
     public async Task Manifest_permission_change_invalidates_old_approval()
     {
         await using var fx = new E2eFixture();
-        var marker = Path.Combine(fx.Root, "registered.txt");
+        var marker = fx.WriteContributedPlugin("gamma");
         var source = PluginSources.Contributed("gamma", marker);
-        fx.WritePluginWithManifest("gamma", source, PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
+        await fx.WaitForToolsAsync("gamma", 1, "the tool of gamma");
 
         var staleTool = fx.ToolOf("gamma", "cecho");
         var before = await fx.InvokeAsync(staleTool, """{"text":"before"}""");
         Assert.False(before.IsError, before.Content);
-        var oldStatus = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "gamma");
+        var oldStatus = await fx.StatusOfAsync("gamma");
 
         fx.WritePluginWithManifest(
             "gamma", source, PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile", "Network"));
@@ -278,11 +232,8 @@ public sealed class NonUiContributionTests
             fx.Client.ApprovePluginAsync("gamma", "1.0.0", oldStatus.SourceHash, oldStatus.DependencyHash, oldStatus.SdkVersion, fx.Ct));
         Assert.Equal("approval_mismatch", mismatch.Code);
 
-        await fx.ApproveViaStatusAsync("gamma");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 1, "the tool of gamma after re-approval");
-        var after = await fx.InvokeAsync("gamma", "cecho", """{"text":"after"}""");
-        Assert.False(after.IsError, after.Content);
-        Assert.Equal("c:after", after.Content);
+        await fx.ApproveViaStatusAndWaitForToolsAsync("gamma", 1, "the tool of gamma after re-approval");
+        await fx.AssertToolContentAsync("gamma", "cecho", """{"text":"after"}""", "c:after");
     }
 
     [Fact]
@@ -312,18 +263,13 @@ public sealed class NonUiContributionTests
         fx.WritePlugin("shady", PluginSources.BadRuntimePermission("shady"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("shady", "a status row for shady");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("shady");
         Assert.Empty(fx.ToolsOf("shady"));
 
-        await fx.Client.ApprovePluginAsync(
-            "shady", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("shady");
         Assert.Empty(fx.ToolsOf("shady"));
         Assert.Empty(fx.Client.Commands);
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "shady");
+        var after = await fx.StatusOfAsync("shady");
         Assert.Contains("undefined permission", after.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -334,18 +280,13 @@ public sealed class NonUiContributionTests
         fx.WritePlugin("dreamer", PluginSources.BadThinking("dreamer"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("dreamer", "a status row for dreamer");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("dreamer");
         Assert.Empty(fx.ToolsOf("dreamer"));
 
-        await fx.Client.ApprovePluginAsync(
-            "dreamer", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("dreamer");
         Assert.Empty(fx.ToolsOf("dreamer"));
         Assert.Empty(fx.Client.Agents);
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "dreamer");
+        var after = await fx.StatusOfAsync("dreamer");
         Assert.Contains("undefined thinking", after.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -356,18 +297,13 @@ public sealed class NonUiContributionTests
         fx.WritePlugin("dud", PluginSources.PlainCommand("dud"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("dud", "a status row for dud");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("dud");
         Assert.Empty(fx.Client.Commands);
 
-        await fx.Client.ApprovePluginAsync(
-            "dud", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("dud");
         Assert.Empty(fx.Client.Commands);
         Assert.Empty(fx.Client.Tools);
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "dud");
+        var after = await fx.StatusOfAsync("dud");
         Assert.Contains("without an executable body", after.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -378,18 +314,13 @@ public sealed class NonUiContributionTests
         fx.WritePlugin("hollow", PluginSources.EmptyBodyWorkflow("hollow"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("hollow", "a status row for hollow");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("hollow");
         Assert.Empty(fx.ToolsOf("hollow"));
 
-        await fx.Client.ApprovePluginAsync(
-            "hollow", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("hollow");
         Assert.Empty(fx.ToolsOf("hollow"));
         Assert.Empty(fx.Client.Workflows);
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "hollow");
+        var after = await fx.StatusOfAsync("hollow");
         Assert.Contains("has no body", after.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -400,17 +331,12 @@ public sealed class NonUiContributionTests
         fx.WritePlugin("billboard", PluginSources.BadPanelKind("billboard"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("billboard", "a status row for billboard");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("billboard");
         Assert.Empty(fx.ToolsOf("billboard"));
 
-        await fx.Client.ApprovePluginAsync(
-            "billboard", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("billboard");
         Assert.Empty(fx.ToolsOf("billboard"));
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "billboard");
+        var after = await fx.StatusOfAsync("billboard");
         Assert.Contains("hologram", after.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -421,19 +347,14 @@ public sealed class NonUiContributionTests
         fx.WritePlugin("regboom", ThrowingSource("regboom"));
         await fx.StartAsync();
 
-        var status = await fx.WaitForStatusAsync("regboom", "a status row for regboom");
-        Assert.NotNull(status);
-        Assert.Equal("draft", status!.Status);
-        Assert.Null(status.Error);
+        await fx.WaitForCleanDraftAsync("regboom");
         Assert.Empty(fx.ToolsOf("regboom"));
         Assert.Empty(fx.Client.Commands);
 
-        await fx.Client.ApprovePluginAsync(
-            "regboom", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion, fx.Ct);
-        await fx.Client.RefreshPluginsAsync(fx.Ct);
+        await fx.ApproveViaStatusAndRefreshAsync("regboom");
         Assert.Empty(fx.ToolsOf("regboom"));
         Assert.Empty(fx.Client.Commands);
-        var after = (await fx.Client.GetPluginStatusesAsync(fx.Ct)).Single(s => s.PluginId == "regboom");
+        var after = await fx.StatusOfAsync("regboom");
         Assert.Contains("reg-boom", after.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -476,12 +397,9 @@ public sealed class NonUiContributionTests
             fx.Client.ApprovePluginAsync("legacy", "1.0.0", new string('a', 64), new string('b', 64), "x", fx.Ct));
         Assert.Equal("unknown_plugin", refused.Code);
 
-        await fx.ApproveViaStatusAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.ApproveViaStatusAndWaitForToolsAsync("alpha", PluginSources.AllTools.Length, "alpha tools");
         Assert.All(fx.Client.Tools, tool => Assert.Equal("alpha", ((ExtensionHostTool)tool).PluginId));
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"healthy"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:healthy", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"healthy"}""", "a:healthy");
     }
 
     [Fact]
@@ -507,15 +425,9 @@ public sealed class NonUiContributionTests
     [Fact]
     public async Task Revoke_removes_tools_and_contributions_and_stale_proxies_fail()
     {
-        await using var fx = new E2eFixture(
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        var marker = Path.Combine(fx.Root, "registered.txt");
-        fx.WritePluginWithManifest(
-            "gamma",
-            PluginSources.Contributed("gamma", marker),
-            PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
+        await using var fx = E2eFixture.AllowingApprovals();
+        fx.WriteContributedPlugin("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 1, "the command of gamma");
 
         var staleTool = fx.ToolOf("gamma", "cecho");
@@ -525,7 +437,7 @@ public sealed class NonUiContributionTests
         Assert.Single(fx.Client.Agents);
 
         await fx.Client.RevokePluginAsync("gamma", "1.0.0", fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 0, "gamma tools after revoke");
+        await fx.WaitForToolsAsync("gamma", 0, "gamma tools after revoke");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 0, "gamma commands after revoke");
         Assert.Empty(fx.Client.Tools);
         Assert.Empty(fx.Client.Workflows);
@@ -557,18 +469,15 @@ public sealed class NonUiContributionTests
     [Fact]
     public async Task Source_change_and_refresh_removes_snapshots_until_reapproved()
     {
-        await using var fx = new E2eFixture(
-            approvalPath: (_, _) => ValueTask.FromResult(ApprovalDecision.Allow));
-        var marker = Path.Combine(fx.Root, "registered.txt");
+        await using var fx = E2eFixture.AllowingApprovals();
+        var marker = fx.WriteContributedPlugin("gamma");
         var source = PluginSources.Contributed("gamma", marker);
-        fx.WritePluginWithManifest("gamma", source, PluginSources.ManifestWithPermissions("gamma", "1.0.0", "ReadFile"));
-        await fx.StartAsync();
-        await fx.ApproveViaStatusAsync("gamma");
+        await fx.StartAndApproveViaStatusAsync("gamma");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 1, "the command of gamma");
 
         fx.EditSource("gamma", source + "\n// touched\n");
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("gamma").Count == 0, "gamma tools after the source change");
+        await fx.WaitForToolsAsync("gamma", 0, "gamma tools after the source change");
         await fx.WaitUntilAsync(() => fx.Client.Commands.Count == 0, "gamma commands after the source change");
         Assert.Empty(fx.Client.Workflows);
         Assert.Empty(fx.Client.Agents);
@@ -583,9 +492,7 @@ public sealed class NonUiContributionTests
         Assert.Single(fx.Client.Workflows);
         Assert.Single(fx.Client.Agents);
         Assert.Single(fx.Client.PromptContributors);
-        var echo = await fx.InvokeAsync("gamma", "cecho", """{"text":"back"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("c:back", echo.Content);
+        await fx.AssertToolContentAsync("gamma", "cecho", """{"text":"back"}""", "c:back");
     }
 
     private static string ThrowingSource(string id) =>

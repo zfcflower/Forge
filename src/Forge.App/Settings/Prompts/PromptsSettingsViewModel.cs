@@ -22,7 +22,7 @@ internal enum PromptFilter
 /// and the continuation lands back on the UI thread, where the collections are touched. A late result of a superseded
 /// reload or selection is dropped by version counters.
 /// </summary>
-internal sealed class PromptsSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
+internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
     private readonly Func<string?> workspace;
     private readonly List<PromptRowViewModel> allRows = [];
@@ -67,9 +67,8 @@ internal sealed class PromptsSettingsViewModel : ObservableObject, IDisposable, 
         get => editor;
         private set
         {
-            if (Set(ref editor, value))
+            if (SetAndNotify(ref editor, value, nameof(HasEditor)))
             {
-                OnPropertyChanged(nameof(HasEditor));
                 OnPropertyChanged(nameof(ShowsSelectHint));
             }
         }
@@ -82,13 +81,7 @@ internal sealed class PromptsSettingsViewModel : ObservableObject, IDisposable, 
     public string? ListProblem
     {
         get => listProblem;
-        private set
-        {
-            if (Set(ref listProblem, value))
-            {
-                OnPropertyChanged(nameof(HasListProblem));
-            }
-        }
+        private set => SetAndNotify(ref listProblem, value, nameof(HasListProblem));
     }
 
     public bool HasListProblem => !string.IsNullOrEmpty(listProblem);
@@ -98,9 +91,8 @@ internal sealed class PromptsSettingsViewModel : ObservableObject, IDisposable, 
         get => filter;
         set
         {
-            if (Set(ref filter, value))
+            if (SetAndNotify(ref filter, value, nameof(IsFilterAll)))
             {
-                OnPropertyChanged(nameof(IsFilterAll));
                 OnPropertyChanged(nameof(IsFilterBuiltIn));
                 OnPropertyChanged(nameof(IsFilterCustom));
                 Rebuild();

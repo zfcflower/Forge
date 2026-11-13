@@ -55,8 +55,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task Folding_produces_a_margin_and_the_commands_collapse_and_expand() => Ui(async () =>
     {
         var path = Write("blocks.cs", "class A\n{\n    void M()\n    {\n        var x = 1;\n    }\n}\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         var folding = host.View.Folding;
@@ -82,8 +81,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task Turning_automatic_folding_off_removes_the_margin_and_turning_it_on_restores_it() => Ui(async () =>
     {
         var path = Write("toggle.cs", "class A\n{\n}\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
         await WaitUntil(() => host.View.Folding!.HasFoldings);
         Assert.Contains(host.Editor.TextArea.LeftMargins, margin => margin is FoldingMargin);
@@ -109,8 +107,7 @@ public sealed class EditorFeatureTests : IDisposable
         }
 
         var path = Write("huge.txt", lines.ToString());
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         await WaitUntil(() => model.HasFoldingNotice);
@@ -122,8 +119,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task Whitespace_tab_and_end_of_line_glyphs_are_drawn_when_their_options_are_on() => Ui(async () =>
     {
         var path = Write("glyphs.txt", "a b\tc\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
         var options = host.Editor.Options;
 
@@ -157,8 +153,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task Line_numbers_scroll_below_current_line_and_rulers_follow_the_options() => Ui(async () =>
     {
         var path = Write("options.txt", "alpha\nbeta\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
         var options = host.Editor.Options;
 
@@ -191,8 +186,7 @@ public sealed class EditorFeatureTests : IDisposable
         var text = Write("indent.txt", "alpha\n");
         foreach (var (path, expected) in new[] { (csharp, true), (text, false) })
         {
-            var model = FileDocumentViewModel.Create();
-            await model.LoadAsync(path, CancellationToken.None);
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model);
             Assert.Equal(expected, host.Editor.TextArea.IndentationStrategy is CSharpIndentationStrategy);
             Assert.True(EditorSettings.Current.TabsToSpaces);
@@ -205,8 +199,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task A_clicked_hyperlink_is_routed_through_the_launcher_and_a_failure_is_reported() => Ui(async () =>
     {
         var path = Write("links.txt", "see https://example.com/docs for details\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
         Assert.False(model.HasEditorActionNotice);
 
@@ -223,8 +216,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task The_hyperlink_option_can_turn_links_off() => Ui(async () =>
     {
         var path = Write("nolinks.txt", "see https://example.com for details\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         EditorSettings.Current.Hyperlinks = false;
@@ -239,8 +231,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task The_selection_tints_rather_than_covers_the_text() => Ui(async () =>
     {
         var path = Write("selection.cs", "public abstract class AdminController" + ((char)10) + "{" + ((char)10) + "}" + ((char)10));
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         var area = host.Editor.TextArea;
@@ -262,8 +253,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task The_inline_adornment_marks_only_the_lines_with_diagnostics() => Ui(async () =>
     {
         var path = Write("diag.cs", "var a = 1;\nvar b = 2;\nvar c = 3;\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
         var adornments = host.View.Diagnostics;
         Assert.NotNull(adornments);
@@ -289,8 +279,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task Ctrl_f_opens_the_library_search_panel_and_finds_the_next_match() => Ui(async () =>
     {
         var path = Write("search.txt", "alpha\nbeta\ngamma\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         host.Editor.TextArea.Focus();
@@ -317,8 +306,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task The_transform_commands_change_the_selection_and_the_line_commands_delete_a_line() => Ui(async () =>
     {
         var path = Write("transform.txt", "alpha\nbeta\ngamma\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         host.Editor.Select(0, 5);
@@ -345,8 +333,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task The_context_menu_offers_every_display_toggle_and_its_checkboxes_drive_the_options() => Ui(async () =>
     {
         var path = Write("menu.txt", "alpha beta\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         var menu = host.Editor.ContextMenu;
@@ -401,8 +388,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task The_toolbar_ellipsis_opens_its_own_menu_without_touching_the_editor_one() => Ui(async () =>
     {
         var path = Write("toolbar.txt", "alpha\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         var button = host.View.GetVisualDescendants().OfType<Control>()
@@ -428,8 +414,7 @@ public sealed class EditorFeatureTests : IDisposable
     public Task Settings_changes_reach_an_already_open_editor() => Ui(async () =>
     {
         var path = Write("live.txt", "alpha\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         Assert.False(host.Editor.Options.ShowBoxForControlCharacters);
@@ -453,8 +438,7 @@ public sealed class EditorFeatureTests : IDisposable
     {
         EditorSettings.Current.WordWrap = true;
         var path = Write("wrap.txt", "alpha\n");
-        var model = FileDocumentViewModel.Create();
-        await model.LoadAsync(path, CancellationToken.None);
+        var model = await TestDocuments.LoadAsync(path);
         var host = Show(model);
 
         Assert.True(model.WrapLines);
@@ -508,22 +492,9 @@ public sealed class EditorFeatureTests : IDisposable
         return null;
     }
 
-    private sealed record EditorHost(Window Window, TextEditor Editor, FileDocumentView View);
+    private static EditorHost Show(FileDocumentViewModel model) => EditorUi.Show(model);
 
-    private static EditorHost Show(FileDocumentViewModel model)
-    {
-        var view = new FileDocumentView { DataContext = model };
-        var window = new Window { Width = 900, Height = 600, Content = view };
-        window.Show();
-        WorkbenchUi.Settle(window);
-        return new EditorHost(window, view.GetVisualDescendants().OfType<TextEditor>().Single(), view);
-    }
-
-    private static async Task Ui(Func<Task> body)
-    {
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await SharedUi.Session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static async Task WaitUntil(Func<bool> condition)
     {
@@ -537,8 +508,7 @@ public sealed class EditorFeatureTests : IDisposable
 
     private string Write(string name, string content)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-editor-features-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var root = TestTempFiles.NewDirectory("forge-editor-features-");
         roots.Add(root);
         var path = Path.Combine(root, name);
         File.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(content));

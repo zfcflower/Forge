@@ -115,8 +115,8 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
 
         await EnsureInitializedAsync().ConfigureAwait(false);
         await using var connection = await StorageDb.OpenAsync(_connectionString, ct).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, session_id, name, size_bytes, at FROM artifacts WHERE id = $id";
+        await using var command = StorageDb.Command(
+            connection, "SELECT id, session_id, name, size_bytes, at FROM artifacts WHERE id = $id");
         command.Parameters.AddWithValue("$id", artifactId);
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -244,8 +244,7 @@ public sealed class FileArtifactStore : IArtifactStore, IAsyncDisposable, IDispo
             }
         }
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM artifacts WHERE session_id = $session";
+        await using var command = StorageDb.Command(connection, "DELETE FROM artifacts WHERE session_id = $session");
         command.Parameters.AddWithValue("$session", sessionId);
         return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }

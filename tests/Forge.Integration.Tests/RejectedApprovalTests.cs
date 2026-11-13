@@ -11,9 +11,7 @@ public sealed class RejectedApprovalTests
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "old"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartAndApproveAsync("alpha", PluginSources.AllTools.Length);
         var original = fx.ReadRecord("alpha")!;
 
         fx.EditSource("alpha", PluginSources.Standard("alpha", echoPrefix: "new"));
@@ -37,10 +35,7 @@ public sealed class RejectedApprovalTests
     public async Task Rejected_approval_with_hashes_outside_the_record_leaves_a_valid_approval_untouched()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
         var approved = fx.ReadRecord("alpha")!;
         Assert.Equal("Approved", approved.Status);
 
@@ -53,8 +48,6 @@ public sealed class RejectedApprovalTests
         Assert.Equal("Approved", after.Status);
         Assert.Equal(PluginSources.AllTools.Length, fx.ToolsOf("alpha").Count);
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"still"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:still", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"still"}""", "a:still");
     }
 }

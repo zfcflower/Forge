@@ -353,9 +353,8 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
         {"access_token":"kimi-access-token","refresh_token":"kimi-refresh-token","expires_in":3600}
         """;
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-kimi-login-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-kimi-login-");
 
-    public KimiAuthenticationCredentialTests() => Directory.CreateDirectory(root);
 
     [Fact]
     public void The_kimi_preset_offers_a_key_and_a_sign_in_and_defaults_to_the_sign_in()
@@ -573,13 +572,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     private ProviderServices Services(HttpMessageHandler handler) =>

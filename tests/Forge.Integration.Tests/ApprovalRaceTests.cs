@@ -11,10 +11,7 @@ public sealed class ApprovalRaceTests
     {
         await using var fx = new E2eFixture();
         var marker = Path.Combine(fx.Root, "race-started.txt");
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var workerPid = await fx.WorkerPidAsync("alpha");
         var staleEcho = fx.ToolOf("alpha", "echo");
@@ -32,7 +29,7 @@ public sealed class ApprovalRaceTests
         Assert.Contains("alpha", outcome.Content, StringComparison.Ordinal);
         Assert.Contains("sleep", outcome.Content, StringComparison.Ordinal);
 
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "alpha tools to be unregistered");
+        await fx.WaitForToolsAsync("alpha", 0, "alpha tools to be unregistered");
         Assert.Empty(fx.Client.Tools);
         Assert.Equal("Draft", fx.ReadRecord("alpha")!.Status);
         await fx.WaitForExitAsync(workerPid, "the revoked worker");

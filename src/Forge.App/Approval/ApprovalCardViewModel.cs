@@ -52,7 +52,7 @@ internal readonly record struct ApprovalCardOutcome(ApprovalCardDecision Decisio
 /// which complete the card from a background thread; those set <see cref="IsDecided"/> without a notification, because a
 /// bound-property change from a background thread is not allowed.</para>
 /// </summary>
-internal abstract class ApprovalCardViewModel : ObservableObject, IDisposable
+internal abstract class ApprovalCardViewModel : NotifyingObject, IDisposable
 {
     private readonly TaskCompletionSource<ApprovalCardOutcome> completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -20,8 +20,7 @@ namespace Forge.App.Tests.Editor;
 [Collection("forge-app-ui")]
 public sealed class EditorLspWindowTests : IDisposable
 {
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-lsp-window-" + Guid.NewGuid().ToString("N"));
-    public EditorLspWindowTests() => Directory.CreateDirectory(root);
+    private readonly string root = TestTempFiles.NewDirectory("forge-lsp-window-");
     public void Dispose() => Directory.Delete(root, recursive: true);
 
     [Fact]
@@ -276,11 +275,7 @@ public sealed class EditorLspWindowTests : IDisposable
         return (presenter?.Background as Avalonia.Media.ISolidColorBrush)?.Color;
     }
 
-    private static async Task Ui(Func<Task> body)
-    {
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await SharedUi.Session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private sealed class Rig : IAsyncDisposable
     {

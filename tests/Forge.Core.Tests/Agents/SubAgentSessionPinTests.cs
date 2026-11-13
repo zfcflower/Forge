@@ -249,9 +249,7 @@ public sealed class SubAgentSessionPinTests
             provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout], store: store);
         var root = host.CreateRoot(parentSeed.Id, Workspace);
 
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "go")).WaitAsync(TimeSpan.FromSeconds(15));
-
-        Assert.Empty(events.OfType<AgentFailed>());
+        var events = await host.RunToCompletionAsync(root);
         var created = Assert.Single(store.CreatedRequests);
         Assert.Equal(parentSeed.Id, created.ParentSessionId);
         Assert.Equal("Scout", created.AgentKind);
@@ -271,9 +269,7 @@ public sealed class SubAgentSessionPinTests
             provider, [FakeTool.Echo("read")], options: Options(), agents: [Scout], store: store);
         var root = host.CreateRoot("sess-touch-" + Guid.NewGuid().ToString("n"), Workspace);
 
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "hello")).WaitAsync(TimeSpan.FromSeconds(15));
-
-        Assert.Empty(events.OfType<AgentFailed>());
+        var events = await host.RunToCompletionAsync(root, "hello");
         Assert.Contains(events.OfType<AgentTurnCompleted>(), t => t.AgentId == "root");
         Assert.True(store.TouchCalls > 0);
     }
@@ -298,8 +294,7 @@ public sealed class SubAgentSessionPinTests
         Assert.Equal("first question", Turn.Text(resumed.History[0]));
         Assert.Equal("first answer", Turn.Text(resumed.History[1]));
 
-        var events = await AgentTestHost.CollectAsync(host.RunAsync(resumed, "second question")).WaitAsync(TimeSpan.FromSeconds(15));
-        Assert.Empty(events.OfType<AgentFailed>());
+        var events = await host.RunToCompletionAsync(resumed, "second question");
         Assert.True(resumed.History.Count > 3);
         Assert.Contains(resumed.History, m => Turn.Text(m).Contains("first question", StringComparison.Ordinal));
     }

@@ -49,10 +49,7 @@ public sealed class ConcurrencyAndIsolationTests
     public async Task Parallel_calls_to_one_plugin_each_return_their_own_result()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var sleeps = Enumerable.Range(0, 3).Select(index =>
             fx.InvokeAsync("alpha", "sleep", $$"""{"ms":300,"text":"{{index}}"}"""))
@@ -85,15 +82,13 @@ public sealed class ConcurrencyAndIsolationTests
         Assert.Empty(fx.ToolsOf("broken"));
 
         await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "alpha tools");
 
         Assert.Empty(fx.ToolsOf("broken"));
         Assert.Equal(PluginSources.AllTools.Length, fx.Client.Tools.Count);
         Assert.All(fx.Client.Tools, tool => Assert.Equal("alpha", ((ExtensionHostTool)tool).PluginId));
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"healthy"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:healthy", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"healthy"}""", "a:healthy");
     }
 
     [Fact]
@@ -101,10 +96,7 @@ public sealed class ConcurrencyAndIsolationTests
     {
         await using var fx = new E2eFixture();
         fx.WritePlugin("broken", PluginSources.Broken("broken"));
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
         Assert.Null(fx.ReadRecord("broken"));
     }
 }

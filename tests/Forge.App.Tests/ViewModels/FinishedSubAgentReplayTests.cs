@@ -20,8 +20,6 @@ namespace Forge.App.Tests.ViewModels;
 [Collection("forge-app-ui")]
 public sealed class FinishedSubAgentReplayTests
 {
-    private const int PumpIterations = 400;
-    private const int PumpDelayMilliseconds = 5;
     private const string ParentSessionId = "main-session";
     private const string ChildSessionId = "child-session";
     private const string ChildTask = "review the diff";
@@ -101,12 +99,12 @@ public sealed class FinishedSubAgentReplayTests
                             HostClient: null,
                             store,
                             catalog,
-                            new EmptyTodoStore(),
+                            new EmptyTodoStore("t1", DateTimeOffset.UnixEpoch),
                             new ModelSettings("model")),
                         Info(ParentSessionId, null, null)),
                     checkpoints: null,
                     store,
-                    UnconfiguredProviders());
+                    TestProviderServices.UnconfiguredProbe());
 
                 await workspace.LoadHistoryAsync(CancellationToken.None);
                 var agent = Assert.Single(workspace.Finished);
@@ -150,44 +148,7 @@ public sealed class FinishedSubAgentReplayTests
         };
 
     /// <summary>An empty catalogue for tests that never touch providers; self-cleaning because the catalogue is in memory after load.</summary>
-    private static ProviderServices UnconfiguredProviders()
-    {
-        var probe = Path.Combine(Path.GetTempPath(), "forge-unconfigured-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(probe);
-        try
-        {
-            var settingsPath = Path.Combine(probe, "settings.json");
-            File.WriteAllText(settingsPath, """{"provider":{"kind":"","baseUrl":""}}""");
-            var dataDir = Path.Combine(probe, "data");
-            Directory.CreateDirectory(dataDir);
-            return new ProviderServices(settingsPath, dataDir, new HttpClient(new ThrowingHandler()));
-        }
-        finally
-        {
-            Directory.Delete(probe, recursive: true);
-        }
-    }
-
-    private sealed class ThrowingHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("no network in this test");
-    }
-
-    private static async Task<bool> PumpUntilAsync(Func<bool> condition)
-    {
-        for (var i = 0; i < PumpIterations; i++)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            await Task.Delay(PumpDelayMilliseconds);
-        }
-
-        return condition();
-    }
+    private static Task<bool> PumpUntilAsync(Func<bool> condition) => TestPump.UntilAsync(condition);
 
     /// <summary>Only the child session's message log matters; anything else the workspace reads is empty.</summary>
     private sealed class ChildStore(IReadOnlyList<StoredMessage> childMessages) : ISessionStore
@@ -254,25 +215,4 @@ public sealed class FinishedSubAgentReplayTests
         public Task TouchAsync(string sessionId, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class EmptyTodoStore : ITodoStore
-    {
-        public event Action<string>? Changed
-        {
-            add { }
-            remove { }
-        }
-
-        public Task<IReadOnlyList<TodoItem>> ListAsync(string sessionId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TodoItem>>([]);
-
-        public Task<TodoItem> AddAsync(string sessionId, string title, string? note, string? afterId, CancellationToken ct) =>
-            Task.FromResult(new TodoItem("t1", sessionId, title, TodoStatus.Pending, note, 0, DateTimeOffset.UnixEpoch));
-
-        public Task<TodoItem?> UpdateAsync(string id, string? title, TodoStatus? status, string? note, CancellationToken ct) =>
-            Task.FromResult<TodoItem?>(null);
-
-        public Task<bool> RemoveAsync(string id, CancellationToken ct) => Task.FromResult(false);
-
-        public Task<bool> MoveAsync(string id, int order, CancellationToken ct) => Task.FromResult(false);
-    }
 }

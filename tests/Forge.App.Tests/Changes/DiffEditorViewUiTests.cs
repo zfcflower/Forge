@@ -535,12 +535,7 @@ public sealed class DiffEditorViewUiTests
         Assert.True(s.View.ReviewController.CanCommentOn(8, 8));
     });
 
-    private static async Task Ui(Func<Task> body)
-    {
-        var session = SharedUi.Session;
-        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await session.Dispatch(async () => { await body(); return 0; }, budget.Token);
-    }
+    private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
     private static Task Ui(Action body) => Ui(() =>
     {

@@ -19,16 +19,10 @@ public sealed class HostToolCallTests
                 requests.Enqueue(request);
                 return ValueTask.FromResult(ApprovalDecision.Allow);
             });
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
-        var result = await fx.InvokeAsync(
-            "alpha", "callHost", """{"target":"host-echo","args":{"text":"from-plugin"}}""");
-
-        Assert.False(result.IsError, result.Content);
-        Assert.Equal("host-echo:from-plugin", result.Content);
+        await fx.AssertToolContentAsync(
+            "alpha", "callHost", """{"target":"host-echo","args":{"text":"from-plugin"}}""", "host-echo:from-plugin");
         Assert.Equal(1, hostTool.Invocations);
 
         var request = Assert.Single(requests);
@@ -50,10 +44,7 @@ public sealed class HostToolCallTests
                 requests.Enqueue(request);
                 return ValueTask.FromResult(ApprovalDecision.Deny);
             });
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var result = await fx.InvokeAsync(
             "alpha", "callHost", """{"target":"host-echo","args":{"text":"nope"}}""");
@@ -78,10 +69,7 @@ public sealed class HostToolCallTests
                 requests.Enqueue(request);
                 return ValueTask.FromResult(ApprovalDecision.Allow);
             });
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var result = await fx.InvokeAsync(
             "alpha", "callHost", """{"target":"no-such-tool","args":{}}""");
@@ -96,10 +84,7 @@ public sealed class HostToolCallTests
     {
         var hostTool = new RecordingHostTool();
         await using var fx = new E2eFixture(toolResolver: name => name == hostTool.Definition.Name ? hostTool : null);
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var result = await fx.InvokeAsync(
             "alpha", "callHost", """{"target":"host-echo","args":{"text":"x"}}""");

@@ -43,7 +43,7 @@ public sealed class ModelCatalogRefreshTests : IDisposable
     }
     """;
 
-    private readonly string root = Path.Combine(Path.GetTempPath(), "forge-catalog-refresh-" + Guid.NewGuid().ToString("N"));
+    private readonly string root = TestTempFiles.NewDirectory("forge-catalog-refresh-");
     private readonly HttpClient http;
     private readonly ProviderServices providers;
     private readonly ModelCatalogRefreshService service;
@@ -66,13 +66,7 @@ public sealed class ModelCatalogRefreshTests : IDisposable
     {
         Environment.SetEnvironmentVariable("FORGE_TEST_CATALOG_KEY", null);
         http.Dispose();
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
+        TestTempFiles.DeleteQuietly(root);
     }
 
     [Fact]

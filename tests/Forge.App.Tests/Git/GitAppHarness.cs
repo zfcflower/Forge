@@ -13,9 +13,9 @@ namespace Forge.App.Tests.Git;
 internal sealed class GitAppHarness : IAsyncDisposable
 {
     private readonly string root;
-    private readonly (string? Data, string? General, string? Workspace) saved;
+    private readonly EnvironmentSnapshot saved;
 
-    private GitAppHarness(string root, (string? Data, string? General, string? Workspace) saved)
+    private GitAppHarness(string root, EnvironmentSnapshot saved)
     {
         this.root = root;
         this.saved = saved;
@@ -25,24 +25,27 @@ internal sealed class GitAppHarness : IAsyncDisposable
 
     public MainWindowViewModel ViewModel { get; private set; } = null!;
 
+    /// <summary>The temp data root, the three data-root variables redirected at it and a real composition root - no session.</summary>
+    public static async Task<GitAppHarness> Open()
+    {
+        var harness = Begin();
+        try
+        {
+            harness.Composition = AppComposition.Create();
+        }
+        catch (Exception)
+        {
+            await harness.DisposeAsync();
+            throw;
+        }
+
+        return harness;
+    }
+
     /// <summary>Seeds one session in <paramref name="sessionWorkDir"/> and restores it as the active session.</summary>
     public static async Task<GitAppHarness> OpenWithSession(string sessionWorkDir)
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-git-harness-" + Guid.NewGuid().ToString("N"));
-        foreach (var directory in new[] { "data", "workspace", "general" })
-        {
-            Directory.CreateDirectory(Path.Combine(root, directory));
-        }
-
-        var saved = (
-            Data: Environment.GetEnvironmentVariable(AppPaths.DataVariable),
-            General: Environment.GetEnvironmentVariable(AppPaths.GeneralVariable),
-            Workspace: Environment.GetEnvironmentVariable(AppPaths.WorkspaceVariable));
-        Environment.SetEnvironmentVariable(AppPaths.DataVariable, Path.Combine(root, "data"));
-        Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, Path.Combine(root, "general"));
-        Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, Path.Combine(root, "workspace"));
-
-        var harness = new GitAppHarness(root, saved);
+        var harness = Begin();
         try
         {
             harness.Composition = AppComposition.Create();
@@ -64,6 +67,13 @@ internal sealed class GitAppHarness : IAsyncDisposable
         }
     }
 
+    /// <summary>One fresh data root with the three data-root variables pointed at it and the previous values captured.</summary>
+    private static GitAppHarness Begin()
+    {
+        var (root, previous) = TempDataRoot.Redirect("forge-git-harness-");
+        return new GitAppHarness(root, previous);
+    }
+
     public void Detach(MainWindowViewModel viewModel)
     {
         viewModel.Files.Attach(PanelContext.Empty);
@@ -83,9 +93,7 @@ internal sealed class GitAppHarness : IAsyncDisposable
             await Composition.DisposeAsync();
         }
 
-        Environment.SetEnvironmentVariable(AppPaths.DataVariable, saved.Data);
-        Environment.SetEnvironmentVariable(AppPaths.GeneralVariable, saved.General);
-        Environment.SetEnvironmentVariable(AppPaths.WorkspaceVariable, saved.Workspace);
+        saved.Restore();
         GitTestFiles.DeleteTree(root);
     }
 }

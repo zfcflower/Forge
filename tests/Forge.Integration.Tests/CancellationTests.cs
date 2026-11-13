@@ -12,10 +12,7 @@ public sealed class CancellationTests
     {
         await using var fx = new E2eFixture();
         var marker = Path.Combine(fx.Root, "cancel-started.txt");
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "a"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "a", PluginSources.AllTools.Length);
 
         var pidBefore = await fx.WorkerPidAsync("alpha");
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(fx.Ct);
@@ -36,9 +33,7 @@ public sealed class CancellationTests
         Assert.True(callerUnblocked < TimeSpan.FromSeconds(15), $"the cancelled caller waited {callerUnblocked}");
         Assert.True(workerKilled < TimeSpan.FromSeconds(20), $"the worker lived {workerKilled} after the cancel");
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"next"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:next", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"next"}""", "a:next");
         Assert.NotEqual(pidBefore, await fx.WorkerPidAsync("alpha"));
     }
 }

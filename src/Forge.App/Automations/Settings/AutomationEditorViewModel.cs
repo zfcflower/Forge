@@ -9,7 +9,7 @@ namespace Forge.App.Automations.Settings;
 /// The new/edit dialog of a user automation. Validation errors block <see cref="SaveAsync"/>; the next-fire preview is
 /// recomputed whenever a trigger field changes. Saving writes through <see cref="IAutomationEngine.UpdateConfigAsync"/>.
 /// </summary>
-internal sealed class AutomationEditorViewModel : ObservableObject
+internal sealed class AutomationEditorViewModel : NotifyingObject
 {
     private const int PreviewCount = 5;
 
@@ -142,9 +142,7 @@ internal sealed class AutomationEditorViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowsPlacement));
                 OnPropertyChanged(nameof(PromptLabel));
-                OnPropertyChanged(nameof(ShowsScratchOptions));
-                OnPropertyChanged(nameof(ShowsProject));
-                OnPropertyChanged(nameof(ShowsSession));
+                NotifyPlacementBlocks();
             }
         }
     }
@@ -163,11 +161,17 @@ internal sealed class AutomationEditorViewModel : ObservableObject
         {
             if (Set(ref placementIndex, Math.Clamp(value, 0, 2)))
             {
-                OnPropertyChanged(nameof(ShowsScratchOptions));
-                OnPropertyChanged(nameof(ShowsProject));
-                OnPropertyChanged(nameof(ShowsSession));
+                NotifyPlacementBlocks();
             }
         }
+    }
+
+    /// <summary>Raises the bindings that pick which placement block (scratch, project, session) the editor shows.</summary>
+    private void NotifyPlacementBlocks()
+    {
+        OnPropertyChanged(nameof(ShowsScratchOptions));
+        OnPropertyChanged(nameof(ShowsProject));
+        OnPropertyChanged(nameof(ShowsSession));
     }
 
     public bool ReadOnlyTools
@@ -222,13 +226,7 @@ internal sealed class AutomationEditorViewModel : ObservableObject
     public string? PreviewError
     {
         get => previewError;
-        private set
-        {
-            if (Set(ref previewError, value))
-            {
-                OnPropertyChanged(nameof(HasPreviewError));
-            }
-        }
+        private set => SetAndNotify(ref previewError, value, nameof(HasPreviewError));
     }
 
     public bool HasPreviewError => PreviewError is { Length: > 0 };
@@ -238,13 +236,7 @@ internal sealed class AutomationEditorViewModel : ObservableObject
     public string? Error
     {
         get => error;
-        private set
-        {
-            if (Set(ref error, value))
-            {
-                OnPropertyChanged(nameof(HasError));
-            }
-        }
+        private set => SetAndNotify(ref error, value, nameof(HasError));
     }
 
     public bool HasError => Error is { Length: > 0 };

@@ -12,40 +12,10 @@ namespace Forge.App.Tests.Git;
 /// <summary>Temp-directory helpers shared by the git panel suites in this folder.</summary>
 internal static class GitTestFiles
 {
-    public static string NewTempDir(string prefix)
-    {
-        var path = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(path);
-        return path;
-    }
+    public static string NewTempDir(string prefix) => TestTempFiles.NewDirectory(prefix);
 
     /// <summary>Best-effort recursive delete (git object files are read-only on Windows).</summary>
-    public static void DeleteTree(string path)
-    {
-        if (!Directory.Exists(path))
-        {
-            return;
-        }
-
-        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-        {
-            try
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
+    public static void DeleteTree(string path) => TestTempFiles.DeleteTree(path);
 }
 
 /// <summary>Isolated git runner: per-process empty global/system stubs so the developer's config never leaks in.</summary>
@@ -162,12 +132,22 @@ internal sealed class GitTestSandbox : IDisposable
     }
 
     /// <summary>A clone of <c>main</c> with one pushed commit, upstream set - the usual starting point.</summary>
-    public string CloneTracked(string name)
+    public string CloneTracked(string name) => CloneWithPushedCommit(name, "file.txt", "v1\n", "initial");
+
+    /// <summary>A clone with one commit of <paramref name="relativePath"/>, pushed to <c>main</c> with the upstream set.</summary>
+    public string CloneWithPushedCommit(string name, string relativePath, string content, string message)
     {
         var work = Clone(name);
-        CommitFile(work, "file.txt", "v1\n", "initial");
+        CommitFile(work, relativePath, content, message);
         GitTestShell.RunChecked(work, "push", "-q", "-u", "origin", "main");
         return work;
+    }
+
+    /// <summary>Commits one file in <paramref name="repository"/> and pushes the checked-out branch to <c>main</c>.</summary>
+    public void CommitAndPush(string repository, string relativePath, string content, string message)
+    {
+        CommitFile(repository, relativePath, content, message);
+        GitTestShell.RunChecked(repository, "push", "-q", "origin", "main");
     }
 
     /// <summary>

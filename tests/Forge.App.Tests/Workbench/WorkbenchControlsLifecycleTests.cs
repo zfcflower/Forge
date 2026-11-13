@@ -73,7 +73,7 @@ public sealed class WorkbenchControlsLifecycleTests
 
             var newLayout = WorkbenchLifecycle.NewLayout();
             scene.Host.Layout = newLayout;
-            WorkbenchLifecycle.Settle(scene.Window);
+            SharedUi.Settle(scene.Window);
 
             var oldClosed = oldWindow is null || !scene.Window.OwnedWindows.Contains(oldWindow);
             var oldNotVisible = oldWindow is null || !oldWindow.IsVisible;
@@ -82,12 +82,12 @@ public sealed class WorkbenchControlsLifecycleTests
             oldTab.Title = "renamed";
             oldLayout.IsBottomMinimized = true;
             oldLayout.Project.Width = 999;
-            WorkbenchLifecycle.Settle(scene.Window);
+            SharedUi.Settle(scene.Window);
             var noReaction = scene.Window.OwnedWindows.Count == 0;
 
             // The host is subscribed to the new model: its floating items still open windows.
             newLayout.FloatFilesPanel();
-            WorkbenchLifecycle.Settle(scene.Window);
+            SharedUi.Settle(scene.Window);
             var newWindowOpened = WorkbenchLifecycle.FloatingWindow(scene.Window, WorkbenchIds.FilesPanel) is not null;
 
             return (oldWindowOpened, oldClosed, oldNotVisible, noReaction, newWindowOpened);
@@ -142,13 +142,13 @@ public sealed class WorkbenchControlsLifecycleTests
 
             floating.WindowState = WindowState.Minimized;
             floating.Position = new PixelPoint(700, 700);
-            WorkbenchLifecycle.Settle(scene.Window);
+            SharedUi.Settle(scene.Window);
             var during = item.Geometry;
 
             floating.WindowState = WindowState.Normal;
             floating.Width = 400;
             floating.Height = 300;
-            WorkbenchLifecycle.Settle(scene.Window);
+            SharedUi.Settle(scene.Window);
             var afterResize = item.Geometry;
 
             return (before, during, afterResize);
@@ -172,21 +172,9 @@ internal static class WorkbenchLifecycle
     public static LifecycleScene Open(WorkbenchLayout layout)
     {
         var host = new WorkbenchHost { Layout = layout };
-        var window = new Window { Width = WindowWidth, Height = WindowHeight, Content = host };
-        window.Show();
-        Settle(window);
+        var window = SharedUi.Show(host, WindowWidth, WindowHeight);
+        SharedUi.Settle(window);
         return new LifecycleScene(window, host, layout);
-    }
-
-    public static void Settle(Window window)
-    {
-        for (var pass = 0; pass < 2; pass++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
-        }
-
-        Dispatcher.UIThread.RunJobs();
     }
 
     public static T Find<T>(Visual root, string automationId) where T : Visual =>

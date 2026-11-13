@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Approval;
@@ -30,7 +29,7 @@ public sealed class ApprovalLifecycleTests
 
         await fx.ApproveAsync("alpha");
 
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "six tools of alpha");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "six tools of alpha");
         Assert.True(Volatile.Read(ref changes) >= 1);
         Assert.Equal(PluginSources.AllTools.OrderBy(name => name, StringComparer.Ordinal),
             fx.Client.Tools.Select(tool => tool.Definition.Name).OrderBy(name => name, StringComparer.Ordinal));
@@ -40,29 +39,22 @@ public sealed class ApprovalLifecycleTests
         Assert.NotNull(approved);
         Assert.Equal("Approved", approved.Status);
 
-        var echo = await fx.InvokeAsync("alpha", "echo", """{"text":"hello"}""");
-        Assert.False(echo.IsError, echo.Content);
-        Assert.Equal("a:hello", echo.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"hello"}""", "a:hello");
     }
 
     [Fact]
     public async Task Unapproved_plugin_rejects_plugin_execute_over_the_protocol()
     {
-        var root = Path.Combine(Path.GetTempPath(), "forge-e2e-raw-" + Guid.NewGuid().ToString("N")[..10]);
-        var plugins = Path.Combine(root, "plugins");
-        var data = Path.Combine(root, "data");
-        var pipe = "forge-e2e-raw-" + Guid.NewGuid().ToString("N")[..20];
-        Directory.CreateDirectory(plugins);
-        Directory.CreateDirectory(data);
-        var plugin = Path.Combine(plugins, "alpha");
+        var layout = RawHostLayout.Create();
+        var plugin = Path.Combine(layout.Plugins, "alpha");
         Directory.CreateDirectory(plugin);
         File.WriteAllText(Path.Combine(plugin, "manifest.json"), """{"id":"alpha","version":"1.0.0","source":"Plugin.cs"}""");
         File.WriteAllText(Path.Combine(plugin, "Plugin.cs"), PluginSources.Standard("alpha", echoPrefix: "a"));
 
         using var budget = new CancellationTokenSource(TestBudgets.Safety(TimeSpan.FromSeconds(120), TimeSpan.FromMinutes(10)));
         var ct = budget.Token;
-        using var hostProcess = StartRawHost(pipe, plugins, data);
-        await using var transport = await ConnectRawAsync(pipe, ct);
+        await using var host = RawHost.Start(layout);
+        await using var transport = await RawHost.ConnectTransportAsync(layout.Pipe, ct);
         await using var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
         var registrations = new List<IpcMessage>();
         var registered = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -77,7 +69,7 @@ public sealed class ApprovalLifecycleTests
         await peer.StartAsync(ct);
         try
         {
-            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, Empty(), ct);
+            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), ct);
 
             var executeArgs = JsonSerializer.SerializeToElement(new
             {
@@ -85,7 +77,7 @@ public sealed class ApprovalLifecycleTests
                 tool = "echo",
                 args = new { text = "hi" },
                 sessionId = "raw",
-                workingDir = root,
+                workingDir = layout.Root,
                 depth = 0,
             });
             var rejected = await Assert.ThrowsAsync<IpcRemoteException>(
@@ -94,7 +86,7 @@ public sealed class ApprovalLifecycleTests
 
             Assert.Empty(registrations);
 
-            var record = ApprovalDatabase.ReadRecord(data, "alpha", "1.0.0")
+            var record = ApprovalDatabase.ReadRecord(layout.Data, "alpha", "1.0.0")
                 ?? throw new InvalidOperationException("the host persisted no approval record for alpha 1.0.0");
             var approveArgs = JsonSerializer.SerializeToElement(new
             {
@@ -121,9 +113,7 @@ public sealed class ApprovalLifecycleTests
         finally
         {
             await peer.StopAsync(CancellationToken.None);
-            KillQuietly(hostProcess);
-            await hostProcess.WaitForExitAsync(CancellationToken.None);
-            TryDeleteDirectory(root);
+            await host.StopAsync();
         }
     }
 
@@ -131,10 +121,7 @@ public sealed class ApprovalLifecycleTests
     public async Task Source_edit_blocks_execution_until_reapproved_and_revoke_blocks_again()
     {
         await using var fx = new E2eFixture();
-        fx.WritePlugin("alpha", PluginSources.Standard("alpha", echoPrefix: "old"));
-        await fx.StartAsync();
-        await fx.ApproveAsync("alpha");
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools");
+        await fx.StartWithApprovedPluginAsync("alpha", "old", PluginSources.AllTools.Length);
 
         var oldEcho = fx.ToolOf("alpha", "echo");
         var before = await fx.InvokeAsync(oldEcho, """{"text":"x"}""");
@@ -149,7 +136,7 @@ public sealed class ApprovalLifecycleTests
         Assert.Contains("changed on disk", blockedBeforeRefresh.Content, StringComparison.Ordinal);
 
         await fx.Client.RefreshPluginsAsync(fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "alpha tools to be unregistered");
+        await fx.WaitForToolsAsync("alpha", 0, "alpha tools to be unregistered");
         Assert.Empty(fx.Client.Tools);
 
         var changed = fx.ReadRecord("alpha")!;
@@ -167,72 +154,17 @@ public sealed class ApprovalLifecycleTests
         Assert.Empty(fx.Client.Tools);
 
         await fx.Client.ApprovePluginAsync("alpha", "1.0.0", changed.SourceHash, changed.DependencyHash, changed.SdkVersion, fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == PluginSources.AllTools.Length, "alpha tools after re-approval");
+        await fx.WaitForToolsAsync("alpha", PluginSources.AllTools.Length, "alpha tools after re-approval");
 
-        var reapproved = await fx.InvokeAsync("alpha", "echo", """{"text":"x"}""");
-        Assert.False(reapproved.IsError, reapproved.Content);
-        Assert.Equal("new:x", reapproved.Content);
+        await fx.AssertToolContentAsync("alpha", "echo", """{"text":"x"}""", "new:x");
 
         var reapprovedEcho = fx.ToolOf("alpha", "echo");
         await fx.Client.RevokePluginAsync("alpha", "1.0.0", fx.Ct);
-        await fx.WaitUntilAsync(() => fx.ToolsOf("alpha").Count == 0, "alpha tools to be unregistered after revoke");
+        await fx.WaitForToolsAsync("alpha", 0, "alpha tools to be unregistered after revoke");
         Assert.Equal("Draft", fx.ReadRecord("alpha")!.Status);
 
         var revoked = await fx.InvokeAsync(reapprovedEcho, """{"text":"x"}""");
         Assert.True(revoked.IsError);
         Assert.Contains("must not run", revoked.Content, StringComparison.Ordinal);
-    }
-
-    private static JsonElement Empty() => JsonDocument.Parse("{}").RootElement.Clone();
-
-    private static Process StartRawHost(string pipe, string plugins, string data)
-    {
-        var info = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "dotnet",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        info.ArgumentList.Add(E2eFixture.HostAssemblyPath);
-        info.ArgumentList.Add("--pipe");
-        info.ArgumentList.Add(pipe);
-        info.ArgumentList.Add("--plugins");
-        info.ArgumentList.Add(plugins);
-        info.ArgumentList.Add("--data");
-        info.ArgumentList.Add(data);
-        var process = Process.Start(info) ?? throw new InvalidOperationException("The raw host did not start.");
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return process;
-    }
-
-    private static Task<NamedPipeClientTransport> ConnectRawAsync(string pipe, CancellationToken ct) =>
-        PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
-
-    private static void KillQuietly(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
     }
 }
