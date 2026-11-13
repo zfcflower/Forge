@@ -66,8 +66,8 @@ public sealed record NetworkHandlerOptions
 /// <summary>
 /// The one place outbound HTTP connections are made: providers, model listing and the models.dev catalog, web tools, MCP
 /// over HTTP, automations. A handler reads the current <see cref="Settings"/> on every new connection (resolver and
-/// proxy), so a settings change applies to the next connection without rebuilding clients; pooled connections finish
-/// their life on the old route (<see cref="NetworkHandlerOptions.PooledConnectionLifetime"/> bounds that).
+/// proxy), so a settings change applies without rebuilding clients: a change that alters the route swaps the handler's
+/// inner connection pool, new requests open fresh connections at once, and requests already in flight finish on the old one.
 /// </summary>
 public interface INetworkStack
 {

@@ -20,12 +20,12 @@ public sealed class AskUserTool : ITool
     public const int MaxHeaderLength = 12;
 
     private const string SchemaJson =
-        """{"type":"object","properties":{"questions":{"type":"array","minItems":1,"maxItems":4,"description":"One to four questions asked together.","items":{"type":"object","properties":{"id":{"type":"string","description":"Optional stable id, unique within the call; q1..qN are generated when absent."},"header":{"type":"string","maxLength":12,"description":"Very short label shown as a chip (at most 12 characters)."},"question":{"type":"string","description":"The full question, ending with a question mark."},"options":{"type":"array","minItems":2,"maxItems":6,"description":"The choices; put the one you recommend first.","items":{"type":"object","properties":{"label":{"type":"string","description":"Short choice text, unique within the question."},"description":{"type":"string","description":"What picking it means or implies."}},"required":["label"],"additionalProperties":false}},"multiSelect":{"type":"boolean","description":"Allow picking several options. Default false."},"allowFreeText":{"type":"boolean","description":"Offer an 'other' text box next to the options. Default true."}},"required":["header","question","options"],"additionalProperties":false}}},"required":["questions"],"additionalProperties":false}""";
+        """{"type":"object","properties":{"questions":{"type":"array","minItems":1,"maxItems":4,"description":"One to four questions asked together.","items":{"type":"object","properties":{"id":{"type":"string","description":"Optional stable id, unique within the call; q1..qN are generated when absent."},"header":{"type":"string","maxLength":12,"description":"Very short label shown as a chip (at most 12 characters)."},"question":{"type":"string","description":"The full question, ending with a question mark."},"options":{"type":"array","minItems":2,"maxItems":6,"description":"The choices; put the one you recommend first.","items":{"type":"object","properties":{"label":{"type":"string","description":"Short choice text, unique within the question."},"description":{"type":"string","description":"What picking it means or implies."}},"required":["label"],"additionalProperties":false}},"multiSelect":{"type":"boolean","description":"Allow picking several options. Default false."},"allowFreeText":{"type":"boolean","description":"Offer an 'other' text box next to the options. Default true."},"minSelect":{"type":"integer","minimum":1,"description":"Only with multiSelect: the fewest picks required (free text counts as one pick). Default 1."},"maxSelect":{"type":"integer","minimum":1,"description":"Only with multiSelect: the most picks allowed (free text counts as one pick). Default: no limit."}},"required":["header","question","options"],"additionalProperties":false}}},"required":["questions"],"additionalProperties":false}""";
 
     private const string Description =
         "Ask the user one to four multiple-choice questions and wait for the answers. Use it only for genuine decisions that only the user can make and that you cannot settle by reading the code or the project: a preference between valid designs, a missing requirement, a choice with different costs for them. "
         + "Do not use it to confirm obvious next steps, to ask permission for work you were already asked to do, or for anything you can decide or look up yourself; prefer a sensible default and say so. "
-        + "Batch related questions into one call instead of asking one by one. Give each question a short header (at most 12 characters) and two to six distinct options with a one-line description each; list your recommended option first. Set multiSelect when several options may apply; the user can also type a free-text answer unless allowFreeText is false. "
+        + "Batch related questions into one call instead of asking one by one. Give each question a short header (at most 12 characters) and two to six distinct options with a one-line description each; list your recommended option first. Set multiSelect when several options may apply; the user can also type a free-text answer unless allowFreeText is false. With multiSelect you may bound the picks with minSelect/maxSelect (free text counts as one pick); they are an error on a single-select question. The user may skip individual questions; a skipped one is reported as (skipped). "
         + "The result lists each question's chosen labels and any free text. If the user dismisses the questions, continue on your best judgment or ask in plain text.";
 
     private readonly IUserQuestionHandler handler;
@@ -195,13 +195,66 @@ public sealed class AskUserTool : ITool
             options.Add(new UserQuestionOption(label, string.IsNullOrEmpty(description) ? null : description));
         }
 
-        question = new UserQuestion(
-            id,
-            header,
-            prompt,
-            options,
-            OptionalBool(item, "multiSelect", false),
-            OptionalBool(item, "allowFreeText", true));
+        var multiSelect = OptionalBool(item, "multiSelect", false);
+        var allowFreeText = OptionalBool(item, "allowFreeText", true);
+        var problem = OptionalInt(item, "minSelect", at, out var minSelect);
+        if (problem is not null)
+        {
+            return problem;
+        }
+
+        problem = OptionalInt(item, "maxSelect", at, out var maxSelect);
+        if (problem is not null)
+        {
+            return problem;
+        }
+
+        if ((minSelect is not null || maxSelect is not null) && !multiSelect)
+        {
+            return at + "'minSelect'/'maxSelect' require 'multiSelect': true.";
+        }
+
+        // Free text counts as one pick, so it raises the number of picks a user can make by one.
+        var pickable = optionCount + (allowFreeText ? 1 : 0);
+        if (minSelect is { } lo && lo > pickable)
+        {
+            return at + $"'minSelect' ({lo}) exceeds the {pickable} possible picks (options plus free text).";
+        }
+
+        if (maxSelect is { } hi && hi > pickable)
+        {
+            return at + $"'maxSelect' ({hi}) exceeds the {pickable} possible picks (options plus free text).";
+        }
+
+        if (minSelect is { } min && maxSelect is { } max && min > max)
+        {
+            return at + $"'minSelect' ({min}) must not exceed 'maxSelect' ({max}).";
+        }
+
+        question = new UserQuestion(id, header, prompt, options, multiSelect, allowFreeText, minSelect, maxSelect);
+        return null;
+    }
+
+    /// <summary>Reads an optional integer >= 1; absent or null leaves it null; anything else is an error text.</summary>
+    private static string? OptionalInt(JsonElement item, string name, string at, out int? value)
+    {
+        value = null;
+        if (!item.TryGetProperty(name, out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt32(out var number))
+        {
+            return at + $"'{name}' must be an integer.";
+        }
+
+        if (number < 1)
+        {
+            return at + $"'{name}' must be at least 1, got {number}.";
+        }
+
+        value = number;
         return null;
     }
 
@@ -240,6 +293,12 @@ public sealed class AskUserTool : ITool
             }
 
             builder.Append(question.Header).Append(": ");
+            if (answer is { Skipped: true })
+            {
+                builder.Append("(skipped)");
+                continue;
+            }
+
             var wrote = false;
             if (answer is not null && answer.Selected.Count > 0)
             {

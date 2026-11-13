@@ -34,6 +34,8 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
     private string proxyError = string.Empty;
     private string bypassError = string.Empty;
     private string statusText = string.Empty;
+    private bool showsSocks4Hint;
+    private bool showsDohNameHint;
     private bool disposed;
 
     /// <param name="probe">Resolves a host with candidate settings without applying them.</param>
@@ -186,6 +188,26 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
     }
 
     public bool HasBypassError => bypassError.Length > 0;
+
+    /// <summary>
+    /// A valid manual <c>socks4://</c> proxy is entered: SOCKS4 carries only an IPv4 address, so the target name is resolved
+    /// locally with the system DNS (not the DNS chosen above); socks4a/socks5 hand the name to the proxy.
+    /// </summary>
+    public bool ShowsSocks4Hint
+    {
+        get => showsSocks4Hint;
+        private set => Set(ref showsSocks4Hint, value);
+    }
+
+    /// <summary>
+    /// A valid DoH URL whose host is a name rather than an IP literal is entered: that name is resolved by the system DNS
+    /// before any DoH query, so an IP literal avoids depending on it.
+    /// </summary>
+    public bool ShowsDohNameHint
+    {
+        get => showsDohNameHint;
+        private set => Set(ref showsDohNameHint, value);
+    }
 
     /// <summary>Whether the entered values are valid for the selected modes (Apply and Test need it).</summary>
     public bool IsValid => !HasServersError && !HasDohError && !HasProxyError && !HasBypassError;
@@ -352,6 +374,15 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
             : null;
         BypassError = badPattern is null ? string.Empty : loc.Format(NetworkStrings.ErrorBypass, badPattern);
         OnPropertyChanged(nameof(IsValid));
+
+        ShowsSocks4Hint = proxy == ProxyMode.Manual
+            && NetworkSettingsRules.TryParseProxyUrl(Blank(proxyUrl), out var parsedProxy, out _)
+            && string.Equals(parsedProxy.Scheme, "socks4", StringComparison.Ordinal);
+        ShowsDohNameHint = dns == DnsMode.DnsOverHttps
+            && Blank(dohUrl) is { } doh
+            && NetworkSettingsRules.IsValidDohUrl(doh)
+            && Uri.TryCreate(doh, UriKind.Absolute, out var dohUri)
+            && dohUri.HostNameType == UriHostNameType.Dns;
     }
 
     private static string? Blank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();

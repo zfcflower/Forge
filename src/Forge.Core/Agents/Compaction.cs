@@ -55,6 +55,8 @@ public sealed class NoopCompactor : IContextCompactor
 /// previous summary updated with the newly cut messages, plus the files read and modified so far. The context becomes
 /// [inherited prefix] + [that summary] + [raw tail]. A cut inside one long interaction summarizes the turn's prefix
 /// separately and appends it as turn context. Records are only ever appended; summarized originals stay in the store.
+/// A range too large for one summarizer request is summarized in consecutive batches, each later batch updating the
+/// running summary, so no message is dropped for length.
 /// </summary>
 public sealed class SummaryCompactor : IContextCompactor
 {
@@ -129,8 +131,44 @@ public sealed class SummaryCompactor : IContextCompactor
         Be concise.
         """;
 
+    /// <summary>
+    /// Instruction for a further batch of a turn prefix too large for one request: the running prefix summary is given in
+    /// <c>&lt;previous-summary&gt;</c>.
+    /// </summary>
+    public const string TurnPrefixUpdateInstruction =
+        """
+        The messages above CONTINUE the prefix of a single turn that is too large to keep whole; the summary of the earlier part of that prefix is given in <previous-summary>, and the turn's later part stays in the context verbatim.
+        For this request do not use the checkpoint format. Update that summary with the new messages and write it completely, in exactly this format:
+
+        ## Original Request
+        [What the user asked for in this turn]
+
+        ## Progress So Far
+        - [Work done and results obtained in the prefix]
+
+        ## Context Needed to Continue
+        - [Facts, file paths, function names and error messages the kept part relies on]
+
+        Be concise.
+        """;
+
+    /// <summary>
+    /// Added to <see cref="UpdateInstruction"/> when the previous summary still carries a split-turn block, so repeated
+    /// split-turn compactions do not stack such blocks.
+    /// </summary>
+    public const string FoldTurnContextInstruction =
+        """
+        The previous summary contains a "**Turn Context (split turn):**" section left by an earlier compaction. Fold its content into the regular sections (Progress, Key Decisions, Next Steps, Critical Context) and do not reproduce that heading or the "---" separator before it.
+        """;
+
     /// <summary>Separator between the history summary and the summary of a split turn's prefix.</summary>
     public const string SplitTurnHeading = "**Turn Context (split turn):**";
+
+    /// <summary>What a split-turn heading the summarizer failed to fold becomes, so a summary carries at most one such block.</summary>
+    public const string FoldedTurnHeading = "**Earlier turn context:**";
+
+    /// <summary>Placeholder conversation of a request that only folds an old split-turn block (no new history messages).</summary>
+    public const string NoNewMessages = "(no new messages)";
 
     public const string ReadFilesTag = "read-files";
     public const string ModifiedFilesTag = "modified-files";
@@ -143,8 +181,24 @@ public sealed class SummaryCompactor : IContextCompactor
     public const int MaxToolResultChars = 2_000;
     public const int MaxToolArgumentChars = 500;
 
-    private const int MaxMessageChars = 8_000;
-    private const int MaxConversationChars = 400_000;
+    /// <summary>Largest conversation text of one summarizer request; also the figure used when the window is unknown.</summary>
+    public const int MaxRequestConversationChars = 400_000;
+
+    /// <summary>Smallest conversation text of one request, so a batch always makes progress even with a huge previous summary.</summary>
+    public const int MinRequestConversationChars = 4_000;
+
+    /// <summary>
+    /// Share of the summarizer's input room (window minus its output limit) the request text may fill: the four
+    /// characters per token estimate is rough (code and CJK text have more tokens per character).
+    /// </summary>
+    public const double RequestWindowShare = 0.6;
+
+    private const int CharsPerToken = 4;
+
+    /// <summary>Fixed text around the conversation of one request (tags, separators) beyond the instruction itself.</summary>
+    private const int PromptFrameChars = 128;
+
+    private const string ChunkSeparator = "\n\n";
 
     /// <summary>Built-in file tools by name: whether a call reads or modifies the file, and the argument holding its path.</summary>
     private static readonly FrozenDictionary<string, (bool Modifies, string PathArgument)> FileTools =
@@ -159,12 +213,15 @@ public sealed class SummaryCompactor : IContextCompactor
     private readonly Func<ModelSettings, IChatProvider> providers;
     private readonly ITokenCounter tokens;
     private readonly string summarizerPrompt;
+    private readonly CompactionPolicy? policy;
 
+    /// <param name="policy">Supplies each model's window, which bounds one summarizer request; null treats every window as unknown.</param>
     public SummaryCompactor(
         ISessionStore store,
         Func<ModelSettings, IChatProvider> providers,
         ITokenCounter tokens,
-        string? summarizerPrompt = null)
+        string? summarizerPrompt = null,
+        CompactionPolicy? policy = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(providers);
@@ -173,6 +230,7 @@ public sealed class SummaryCompactor : IContextCompactor
         this.providers = providers;
         this.tokens = tokens;
         this.summarizerPrompt = string.IsNullOrWhiteSpace(summarizerPrompt) ? SummarizerPrompt : summarizerPrompt;
+        this.policy = policy;
     }
 
     public async Task<CompactionResult?> CompactAsync(AgentInstance instance, CompactionRequest request, CancellationToken ct)
@@ -214,23 +272,25 @@ public sealed class SummaryCompactor : IContextCompactor
         var focus = string.IsNullOrWhiteSpace(request.CustomInstructions)
             ? string.Empty
             : string.Concat("\n\nAdditional focus: ", request.CustomInstructions.Trim());
-        var history = cut.HistoryEnd > 0
-            ? SummarizeAsync(
-                instance,
-                UserPrompt(raw, 0, cut.HistoryEnd, previous.Text, previous.Text.Length > 0 ? UpdateInstruction : InitialInstruction, focus),
-                SummaryMaxOutputTokens,
-                ct)
+        // The history and the split turn's prefix are independent chains of requests; a chain that fails cancels the other,
+        // so a failed compaction stops spending requests and persists nothing. A previous summary that still carries a
+        // split-turn block is rewritten even without new history when a new block is about to be added, so the stored
+        // summary never stacks two of them.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var foldOnly = cut.HistoryEnd == 0 && cut.IsSplitTurn && HasTurnContext(previous.Text);
+        var history = cut.HistoryEnd > 0 || foldOnly
+            ? SummarizeRangeAsync(instance, raw, 0, cut.HistoryEnd, previous.Text, turnPrefix: false, focus, linked)
             : Task.FromResult(previous.Text);
         var prefix = cut.IsSplitTurn
-            ? SummarizeAsync(
-                instance,
-                UserPrompt(raw, cut.TurnStart, cut.KeepFrom, string.Empty, TurnPrefixInstruction, focus),
-                TurnPrefixMaxOutputTokens,
-                ct)
+            ? SummarizeRangeAsync(instance, raw, cut.TurnStart, cut.KeepFrom, string.Empty, turnPrefix: true, focus, linked)
             : Task.FromResult(string.Empty);
         await Task.WhenAll(history, prefix).ConfigureAwait(false);
 
-        var text = Compose(await history.ConfigureAwait(false), await prefix.ConfigureAwait(false), read, modified);
+        var text = Compose(
+            FoldStaleTurnContext(await history.ConfigureAwait(false)),
+            await prefix.ConfigureAwait(false),
+            read,
+            modified);
         var fromSeq = view.SessionSummary?.FromSeq
                       ?? (view.StageSummaries.Count > 0 ? Math.Min(view.StageSummaries[0].FromSeq, raw[0].Seq) : raw[0].Seq);
         await store.PutSummaryAsync(
@@ -465,16 +525,209 @@ public sealed class SummaryCompactor : IContextCompactor
 
     // ------------------------------------------------------------------ summarizer request
 
+    private static bool HasTurnContext(string text) => text.Contains(SplitTurnHeading, StringComparison.Ordinal);
+
     /// <summary>
-    /// <c>&lt;conversation&gt;</c> (raw[from, to) serialized), the optional <c>&lt;previous-summary&gt;</c>, then the
-    /// instruction and the user's focus.
+    /// Demotes split-turn blocks the summarizer kept in an updated history summary (and the separator before them) to
+    /// <see cref="FoldedTurnHeading"/>, so the stored summary carries at most the one block of the current split.
     /// </summary>
-    internal static string UserPrompt(IReadOnlyList<StoredMessage> raw, int from, int to, string previous, string instruction, string focus)
+    internal static string FoldStaleTurnContext(string history)
     {
-        var builder = new StringBuilder(8192);
-        builder.Append("<conversation>\n");
-        SerializeConversation(builder, raw, from, to);
-        builder.Append("\n</conversation>\n\n");
+        if (!HasTurnContext(history))
+        {
+            return history;
+        }
+
+        return history
+            .Replace(string.Concat("\n\n---\n\n", SplitTurnHeading), string.Concat("\n\n", FoldedTurnHeading), StringComparison.Ordinal)
+            .Replace(SplitTurnHeading, FoldedTurnHeading, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Summarizes <c>raw[from, to)</c> in as many requests as the per-request budget needs: the first batch with the
+    /// initial instruction (the update instruction when <paramref name="previous"/> is not empty), every later batch with
+    /// the update instruction and the running summary as <c>&lt;previous-summary&gt;</c>. A tool call and its results are
+    /// never put in different batches. An empty range sends one request with <see cref="NoNewMessages"/> (it only rewrites
+    /// <paramref name="previous"/>). A failed request cancels <paramref name="linked"/>, which stops the sibling chain.
+    /// </summary>
+    private async Task<string> SummarizeRangeAsync(
+        AgentInstance instance,
+        IReadOnlyList<StoredMessage> raw,
+        int from,
+        int to,
+        string previous,
+        bool turnPrefix,
+        string focus,
+        CancellationTokenSource linked)
+    {
+        var ct = linked.Token;
+        try
+        {
+            var model = instance.Definition.Model;
+            var units = SerializeUnits(raw, from, to);
+            var maxOutput = OutputLimit(model, turnPrefix ? TurnPrefixMaxOutputTokens : SummaryMaxOutputTokens);
+            var running = previous;
+            var next = 0;
+            do
+            {
+                ct.ThrowIfCancellationRequested();
+                var instruction = Instruction(turnPrefix, running);
+                var budget = RequestBudget(model, maxOutput, running.Length + instruction.Length + focus.Length);
+                (var conversation, next) = NextBatch(units, next, budget);
+                running = await SummarizeAsync(instance, ChunkPrompt(conversation, running, instruction, focus), maxOutput, ct)
+                    .ConfigureAwait(false);
+            }
+            while (next < units.Count);
+
+            return running;
+        }
+        catch (CompactionFailedException)
+        {
+            await linked.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static string Instruction(bool turnPrefix, string running)
+    {
+        if (turnPrefix)
+        {
+            return running.Length == 0 ? TurnPrefixInstruction : TurnPrefixUpdateInstruction;
+        }
+
+        if (running.Length == 0)
+        {
+            return InitialInstruction;
+        }
+
+        return HasTurnContext(running) ? string.Concat(UpdateInstruction, "\n", FoldTurnContextInstruction) : UpdateInstruction;
+    }
+
+    private static int OutputLimit(ModelSettings model, int maxOutputTokens) =>
+        model.MaxOutputTokens is { } own && own > 0 ? Math.Min(own, maxOutputTokens) : maxOutputTokens;
+
+    /// <summary>
+    /// Characters of conversation one request may carry: <see cref="RequestWindowShare"/> of what the model's window leaves
+    /// after the request's output limit, at four characters per token, less the system prompt and
+    /// <paramref name="fixedChars"/> (previous summary, instruction, focus); between <see cref="MinRequestConversationChars"/>
+    /// and <see cref="MaxRequestConversationChars"/>, the latter when the window is unknown.
+    /// </summary>
+    internal int RequestBudget(ModelSettings model, int maxOutputTokens, int fixedChars)
+    {
+        if (policy?.BudgetFor(model) is not { } budget)
+        {
+            return MaxRequestConversationChars;
+        }
+
+        var reserve = Math.Min(maxOutputTokens, budget.Window / 2);
+        var room = (long)((budget.Window - reserve) * RequestWindowShare) * CharsPerToken;
+        var chars = room - summarizerPrompt.Length - fixedChars - PromptFrameChars;
+        return (int)Math.Clamp(chars, MinRequestConversationChars, MaxRequestConversationChars);
+    }
+
+    /// <summary>
+    /// Serialized units of <c>raw[from, to)</c>: each user or assistant message together with the tool results that follow
+    /// it (so a batch boundary never separates a call from its result); units that serialize to nothing are left out.
+    /// </summary>
+    internal static List<string> SerializeUnits(IReadOnlyList<StoredMessage> raw, int from, int to)
+    {
+        var units = new List<string>();
+        var builder = new StringBuilder(4096);
+        var start = from;
+        for (var index = from + 1; index <= to; index++)
+        {
+            if (index < to && raw[index].Message.Role == MessageRole.Tool)
+            {
+                continue;
+            }
+
+            builder.Clear();
+            SerializeConversation(builder, raw, start, index);
+            if (builder.Length > 0)
+            {
+                units.Add(builder.ToString());
+            }
+
+            start = index;
+        }
+
+        return units;
+    }
+
+    /// <summary>
+    /// The conversation text of the next request: whole units from <paramref name="start"/> while they fit
+    /// <paramref name="budget"/>, at least one; a single unit larger than the budget is cut in the middle with a marker.
+    /// </summary>
+    internal static (string Text, int Next) NextBatch(IReadOnlyList<string> units, int start, int budget)
+    {
+        if (start >= units.Count)
+        {
+            return (NoNewMessages, units.Count);
+        }
+
+        var first = units[start];
+        if (first.Length > budget)
+        {
+            return (TruncateMiddle(first, budget), start + 1);
+        }
+
+        var next = start + 1;
+        var length = first.Length;
+        while (next < units.Count && length + ChunkSeparator.Length + units[next].Length <= budget)
+        {
+            length += ChunkSeparator.Length + units[next].Length;
+            next++;
+        }
+
+        if (next == start + 1)
+        {
+            return (first, next);
+        }
+
+        var builder = new StringBuilder(length);
+        builder.Append(first);
+        for (var index = start + 1; index < next; index++)
+        {
+            builder.Append(ChunkSeparator).Append(units[index]);
+        }
+
+        return (builder.ToString(), next);
+    }
+
+    /// <summary>Keeps the head and the tail of <paramref name="text"/> within about <paramref name="limit"/> characters, with a marker for the cut middle.</summary>
+    internal static string TruncateMiddle(string text, int limit)
+    {
+        if (text.Length <= limit)
+        {
+            return text;
+        }
+
+        const int MarkerRoom = 48;
+        var keep = Math.Max(2, limit - MarkerRoom);
+        var head = keep / 2;
+        var tail = keep - head;
+        if (char.IsHighSurrogate(text[head - 1]))
+        {
+            head--;
+        }
+
+        if (char.IsLowSurrogate(text[text.Length - tail]))
+        {
+            tail--;
+        }
+
+        var marker = string.Concat("\n[… ", (text.Length - head - tail).ToString(CultureInfo.InvariantCulture), " chars omitted …]\n");
+        return string.Concat(text.AsSpan(0, head), marker, text.AsSpan(text.Length - tail));
+    }
+
+    /// <summary>
+    /// <c>&lt;conversation&gt;</c> (the batch), the optional <c>&lt;previous-summary&gt;</c>, then the instruction and the
+    /// user's focus.
+    /// </summary>
+    internal static string ChunkPrompt(string conversation, string previous, string instruction, string focus)
+    {
+        var builder = new StringBuilder(conversation.Length + previous.Length + instruction.Length + focus.Length + PromptFrameChars);
+        builder.Append("<conversation>\n").Append(conversation).Append("\n</conversation>\n\n");
         if (previous.Length > 0)
         {
             builder.Append("<previous-summary>\n").Append(previous).Append("\n</previous-summary>\n\n");
@@ -487,28 +740,22 @@ public sealed class SummaryCompactor : IContextCompactor
     /// <summary>
     /// <c>[User]: …</c>, <c>[Assistant]: …</c>, <c>[Assistant tool calls]: name(arg=value, …)</c> and <c>[Tool result]: …</c>
     /// lines; reasoning is left out, tool results are cut at <see cref="MaxToolResultChars"/>, images and files appear as
-    /// placeholders.
+    /// placeholders. User and assistant text is written whole; only a unit larger than a whole request is cut (see
+    /// <see cref="NextBatch"/>).
     /// </summary>
     internal static void SerializeConversation(StringBuilder builder, IReadOnlyList<StoredMessage> raw, int from, int to)
     {
-        var start = builder.Length;
         for (var index = from; index < to; index++)
         {
-            if (builder.Length - start >= MaxConversationChars)
-            {
-                builder.Append("\n\n[remaining messages omitted for length]");
-                return;
-            }
-
             var message = raw[index].Message;
             switch (message.Role)
             {
                 case MessageRole.User:
                 case MessageRole.System:
-                    AppendLine(builder, "[User]: ", Truncate(Prose(message), MaxMessageChars));
+                    AppendLine(builder, "[User]: ", Prose(message));
                     break;
                 case MessageRole.Assistant:
-                    AppendLine(builder, "[Assistant]: ", Truncate(Prose(message), MaxMessageChars));
+                    AppendLine(builder, "[Assistant]: ", Prose(message));
                     AppendLine(builder, "[Assistant tool calls]: ", ToolCalls(message));
                     break;
                 case MessageRole.Tool:
@@ -663,7 +910,7 @@ public sealed class SummaryCompactor : IContextCompactor
         var settings = model with
         {
             Thinking = ThinkingEffort.Off,
-            MaxOutputTokens = model.MaxOutputTokens is { } own && own > 0 ? Math.Min(own, maxOutputTokens) : maxOutputTokens,
+            MaxOutputTokens = OutputLimit(model, maxOutputTokens),
         };
         var request = new ChatRequest(summarizerPrompt, [], [ChatMessage.User(userPrompt)], settings) { SessionId = instance.SessionId };
         var builder = new StringBuilder(2048);

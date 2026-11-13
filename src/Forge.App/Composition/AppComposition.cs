@@ -400,11 +400,12 @@ internal sealed class AppComposition : IAsyncDisposable
         // 4. MCP.
         McpServices? mcp = null;
         var mcpProblem = default(LocText);
+        HttpClient? mcpHttp = null;
         try
         {
             // The MCP client mirrors the transport's own defaults (no cookies, 30 s connect, 5 min pooled lifetime, no
             // decompression, no whole-response timeout) but resolves and proxies through the network stack.
-            var mcpHttp = new HttpClient(network.CreateHandler(new NetworkHandlerOptions
+            mcpHttp = new HttpClient(network.CreateHandler(new NetworkHandlerOptions
             {
                 ConnectTimeout = TimeSpan.FromSeconds(30),
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
@@ -413,10 +414,16 @@ internal sealed class AppComposition : IAsyncDisposable
                 Timeout = Timeout.InfiniteTimeSpan,
             };
             mcp = McpServices.Create(paths, notifications, mcpHttp);
+            mcpHttp = null; // owned (and disposed) by the MCP services from here on
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
             mcpProblem = ShellStrings.McpServiceProblem(exception.Message);
+        }
+        finally
+        {
+            // Create failed (with any exception): nobody owns the client, so its handler and pooled sockets go here.
+            mcpHttp?.Dispose();
         }
 
         // 5. Editor.
@@ -433,7 +440,18 @@ internal sealed class AppComposition : IAsyncDisposable
 
         // 6. Providers: the stored definitions, the encrypted secret store behind them and the credential resolvers.
         var httpClient = ProviderHttpClient.Create(network);
-        var providers = new ProviderServices(paths.SettingsPath, paths.UserDataDirectory, httpClient);
+        ProviderServices providers;
+        try
+        {
+            providers = new ProviderServices(paths.SettingsPath, paths.UserDataDirectory, httpClient);
+        }
+        catch
+        {
+            // The composition owns this client only once it is built; a failure here must not leave it behind.
+            httpClient.Dispose();
+            throw;
+        }
+
         // The catalog refresh is one service with three callers (the daily automation, the startup check, the settings
         // button); it needs the provider list it also refreshes, so it is built here rather than inside automations.
         var modelCatalogRefresh = new ModelCatalogRefreshService(providers, httpClient);
@@ -530,7 +548,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // (catalog snapshot → provider report → default context window → per-model override).
         runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
         runtimeServices.MaxOutputTokens = model => providers.ModelCatalog.View.Find(null, model.Model)?.MaxOutputTokens;
-        runtimeServices.Compaction = () => compactionSettings.Current;
+        // Read before every turn and re-applied to every live session on each save, so a change reaches a running turn at
+        // its next model request.
+        runtimeServices.CompactionChanges = compactionSettings;
         // The workspace file and shell tools. Built once and shared: they take the session's worktree from each call. The
         // options are read through a factory, so a preference change (ripgrep path, shell, bash timeout) applies to the
         // next call without rebuilding the tool surface.

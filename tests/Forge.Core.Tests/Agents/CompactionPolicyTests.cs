@@ -316,8 +316,9 @@ public class CompactionPolicyTests
         var provider = new FakeProvider((request, _) =>
             request.SystemPrompt == SummaryCompactor.SummarizerPrompt ? Turn.Say("S") : Turn.Say(new string('a', 1_200), TokenUsage.Empty));
         var compactor = new RecordingCompactor(new SummaryCompactor(store, _ => provider, new ApproximateTokenCounter()));
-        var host = AgentTestHost.Create(provider, options: Options(_ => SmallWindow), store: store, compactor: compactor);
-        var root = host.CreateRoot(session.Id, directory.Path);
+        // The built-in tool definitions alone would fill most of U = 1000 in the estimate: the root gets no tools.
+        var host = AgentTestHost.Create(provider, options: Options(_ => SmallWindow) with { MaxSubAgentDepth = 0 }, store: store, compactor: compactor);
+        var root = host.CreateRoot(session.Id, directory.Path, AgentTestHost.Definition("Root", tools: []));
 
         var stalled = 0;
         var compacted = 0;

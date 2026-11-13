@@ -46,6 +46,7 @@ public sealed class RootInterjectionTests
         var interjected = Assert.Single(events.OfType<AgentInterjected>());
         Assert.Equal("root", interjected.AgentId);
         Assert.Equal("also check the tests", interjected.Text);
+        Assert.Empty(interjected.Attachments);
         Assert.Equal(1, Volatile.Read(ref secondRan));
         Assert.False(root.HasInterjections);
 
@@ -141,6 +142,12 @@ public sealed class RootInterjectionTests
         Assert.Empty(events.OfType<AgentFailed>());
         // The notice text is the typed text only; an attachment-only interjection has none.
         Assert.Equal(["look at this", string.Empty], events.OfType<AgentInterjected>().Select(static e => e.Text));
+
+        // The attachments ride along as the very block instances the caller handed in, so the UI can match its chip and
+        // describe an attachment-only interjection.
+        var notices = events.OfType<AgentInterjected>().ToList();
+        Assert.Same(image, Assert.Single(notices[0].Attachments));
+        Assert.Same(pdf, Assert.Single(notices[1].Attachments));
 
         var second = provider.Requests[1];
         Assert.Equal(MessageRole.Tool, second.Messages[^2].Role);

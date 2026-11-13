@@ -124,11 +124,12 @@ internal sealed class WebSettingsStore
 }
 
 /// <summary>
-/// The shell's web tools: <c>web_fetch</c> and <c>web_search</c>, both always registered so the tool surface (and the
-/// prompt cache) stays stable. Keys live in the encrypted <see cref="ProviderSecretStore"/> under fixed references, never
-/// in settings.json. Settings apply live: <c>web_search</c> builds its backend from the current settings and key on every
-/// call (and reports "not configured" when there is none), and <c>web_fetch</c> reads the private-network switch on every
-/// fetch. With a <see cref="NetworkStack"/> both clients go through it, and the fetch client refuses private addresses at
+/// The shell's web tools: <c>web_fetch</c>, always registered, and <c>web_search</c>, registered only while a usable
+/// backend exists (<see cref="SearchAvailable"/>); each session re-checks that before every turn and republishes its tool
+/// set only when the answer moved, so the prompt cache survives unrelated settings edits. Keys live in the encrypted
+/// <see cref="ProviderSecretStore"/> under fixed references, never in settings.json. Settings apply live: <c>web_search</c>
+/// builds its backend from the current settings and key on every call (and reports "not configured" when there is none,
+/// the safety net for a key removed mid-turn), and <c>web_fetch</c> reads the private-network switch on every fetch. With a <see cref="NetworkStack"/> both clients go through it, and the fetch client refuses private addresses at
 /// connect time (after resolution, so DNS rebinding cannot slip past a resolve-only check) unless the switch allows them.
 /// </summary>
 internal sealed class WebServices : IDisposable
@@ -140,6 +141,8 @@ internal sealed class WebServices : IDisposable
     private readonly HttpClient searchHttp;
     private readonly NetworkStack? network;
     private readonly bool ownsClients;
+    private readonly ITool[] fetchOnly;
+    private readonly ITool[] withSearch;
 
     /// <summary>One client for both tools (tests); a client passed in stays the caller's.</summary>
     public WebServices(WebSettingsStore store, ProviderSecretStore secrets, HttpClient? http = null)
@@ -151,6 +154,7 @@ internal sealed class WebServices : IDisposable
         ownsClients = http is null;
         this.http = http ?? CreateHttpClient();
         searchHttp = this.http;
+        (fetchOnly, withSearch) = BuildTools();
     }
 
     /// <summary>
@@ -176,10 +180,21 @@ internal sealed class WebServices : IDisposable
         {
             Timeout = Timeout.InfiniteTimeSpan,
         };
-        searchHttp = new HttpClient(network.CreateHandler(new NetworkHandlerOptions { AutomaticDecompression = DecompressionMethods.All }))
+        try
         {
-            Timeout = Timeout.InfiniteTimeSpan,
-        };
+            searchHttp = new HttpClient(network.CreateHandler(new NetworkHandlerOptions { AutomaticDecompression = DecompressionMethods.All }))
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+        }
+        catch
+        {
+            // The fetch client is already built; a failing second handler must not leak it.
+            http.Dispose();
+            throw;
+        }
+
+        (fetchOnly, withSearch) = BuildTools();
     }
 
     public WebSettingsStore Store { get; }
@@ -208,16 +223,38 @@ internal sealed class WebServices : IDisposable
         {
             WebSettings.Brave when key is not null => new BraveSearchBackend(searchHttp, key),
             WebSettings.Tavily when key is not null => new TavilySearchBackend(searchHttp, key),
-            WebSettings.Searxng when Uri.TryCreate(settings.SearxngUrl, UriKind.Absolute, out var uri)
-                && uri.Scheme is "http" or "https" => new SearxngSearchBackend(searchHttp, settings.SearxngUrl),
+            WebSettings.Searxng when IsSearxngUrl(settings.SearxngUrl) => new SearxngSearchBackend(searchHttp, settings.SearxngUrl),
             _ => null,
         };
     }
 
     /// <summary>
-    /// The tools to register: <c>web_fetch</c> and <c>web_search</c>, always both; the search backend is chosen per call.
+    /// Whether the current settings give a usable search backend – exactly when <see cref="CreateBackend"/> would return
+    /// one – without building it. Cheap (two short locks, no allocation), so a session checks it before every turn.
     /// </summary>
-    public IReadOnlyList<ITool> CreateTools()
+    public bool SearchAvailable()
+    {
+        var settings = Store.Current;
+        return settings.SearchBackend switch
+        {
+            WebSettings.Brave or WebSettings.Tavily => Secrets.Get(KeyReference(settings.SearchBackend)) is not null,
+            WebSettings.Searxng => IsSearxngUrl(settings.SearxngUrl),
+            _ => false,
+        };
+    }
+
+    private static bool IsSearxngUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+
+    /// <summary>
+    /// The tools to register right now: <c>web_fetch</c> always, <c>web_search</c> only while <see cref="SearchAvailable"/>.
+    /// The instances are built once and shared by every session (both read the settings live), so repeated calls neither
+    /// allocate nor change identity. <c>web_search</c> still reads the backend per call: a key removed between the check
+    /// and the call reports "not configured" instead of searching.
+    /// </summary>
+    public IReadOnlyList<ITool> CreateTools() => SearchAvailable() ? withSearch : fetchOnly;
+
+    private (ITool[] FetchOnly, ITool[] WithSearch) BuildTools()
     {
         var stack = network;
         var fetchOptions = new WebFetchOptions
@@ -226,11 +263,9 @@ internal sealed class WebServices : IDisposable
             ConnectsDirectly = stack is null ? null : stack.ConnectsDirectly,
         };
         Func<string, CancellationToken, Task<IPAddress[]>>? resolve = stack is null ? null : (host, ct) => stack.ResolveAsync(host, ct).AsTask();
-        return
-        [
-            new WebFetchTool(http, resolve, fetchOptions),
-            new WebSearchTool(() => CreateBackend(Store.Current)),
-        ];
+        var fetch = new WebFetchTool(http, resolve, fetchOptions);
+        var search = new WebSearchTool(() => CreateBackend(Store.Current));
+        return ([fetch], [fetch, search]);
     }
 
     public void Dispose()

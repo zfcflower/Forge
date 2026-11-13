@@ -91,18 +91,62 @@ public sealed class WebToolsTests : IDisposable
         Assert.Equal("brave", services.CreateBackend(services.Store.Current)!.Id);
     }
 
-    [Fact]
-    public void Both_web_tools_are_always_registered_whatever_the_configuration()
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("brave", "")]
+    [InlineData("tavily", "")]
+    [InlineData("searxng", "")]
+    [InlineData("searxng", "not a url")]
+    [InlineData("searxng", "ftp://searx.local")]
+    public void Without_a_usable_backend_only_web_fetch_is_offered(string? backend, string url)
     {
         var services = NewServices();
+        services.Store.Save(new WebSettings(backend, url, false));
+
+        Assert.False(services.SearchAvailable());
+        Assert.Null(services.CreateBackend(services.Store.Current));
+        Assert.Equal([WebFetchTool.Name], services.CreateTools().Select(t => t.Definition.Name));
+    }
+
+    [Theory]
+    [InlineData("brave", "", WebServices.BraveKeyReference)]
+    [InlineData("tavily", "", WebServices.TavilyKeyReference)]
+    [InlineData("searxng", "http://searx.local", null)]
+    [InlineData("searxng", "https://searx.local/", null)]
+    public void A_usable_backend_adds_web_search_and_agrees_with_create_backend(string backend, string url, string? keyReference)
+    {
+        var services = NewServices();
+        services.Store.Save(new WebSettings(backend, url, false));
+        if (keyReference is not null)
+        {
+            Assert.False(services.SearchAvailable());
+            services.Secrets.Set(keyReference, "k");
+        }
+
+        Assert.True(services.SearchAvailable());
+        Assert.NotNull(services.CreateBackend(services.Store.Current));
         Assert.Equal([WebFetchTool.Name, WebSearchTool.Name], services.CreateTools().Select(t => t.Definition.Name));
 
-        // A backend that needs a key but has none, or a SearXNG without a valid URL, keeps the same tool surface.
-        services.Store.Save(new WebSettings("tavily", "", false));
-        Assert.Equal([WebFetchTool.Name, WebSearchTool.Name], services.CreateTools().Select(t => t.Definition.Name));
+        // Removing the key takes web_search away again.
+        if (keyReference is not null)
+        {
+            services.Secrets.Remove(keyReference);
+            Assert.False(services.SearchAvailable());
+            Assert.Equal([WebFetchTool.Name], services.CreateTools().Select(t => t.Definition.Name));
+        }
+    }
 
-        services.Store.Save(new WebSettings("searxng", "not a url", false));
-        Assert.Equal([WebFetchTool.Name, WebSearchTool.Name], services.CreateTools().Select(t => t.Definition.Name));
+    [Fact]
+    public void The_tool_instances_are_shared_and_stable_across_calls()
+    {
+        var services = NewServices();
+        var fetchOnly = services.CreateTools();
+        Assert.Same(fetchOnly, services.CreateTools());
+
+        services.Store.Save(new WebSettings("searxng", "http://searx.local", false));
+        var withSearch = services.CreateTools();
+        Assert.Same(withSearch, services.CreateTools());
+        Assert.Same(fetchOnly[0], withSearch[0]);
     }
 
     [Theory]
@@ -110,14 +154,16 @@ public sealed class WebToolsTests : IDisposable
     [InlineData("tavily", "")]
     [InlineData("searxng", "not a url")]
     [InlineData(null, "")]
-    public async Task Unconfigured_web_search_reports_it_instead_of_searching(string? backend, string url)
+    public async Task Web_search_obtained_while_configured_reports_a_later_unconfiguration_instead_of_searching(string? backend, string url)
     {
         var handler = new RecordingHandler();
         using var http = new HttpClient(handler);
         var services = new WebServices(new WebSettingsStore(SettingsPath), new ProviderSecretStore(dir), http);
-        services.Store.Save(new WebSettings(backend, url, false));
+        services.Store.Save(new WebSettings("searxng", "http://searx.local", false));
         var search = services.CreateTools().Single(t => t.Definition.Name == WebSearchTool.Name);
 
+        // The safety net: the settings change between publishing the tool and the call.
+        services.Store.Save(new WebSettings(backend, url, false));
         var result = await search.InvokeAsync(new ToolCall("1", WebSearchTool.Name, "{\"query\":\"forge\"}"), new ToolContext("s", dir), default);
 
         Assert.True(result.IsError);
@@ -131,13 +177,11 @@ public sealed class WebToolsTests : IDisposable
         var handler = new RecordingHandler();
         using var http = new HttpClient(handler);
         var services = new WebServices(new WebSettingsStore(SettingsPath), new ProviderSecretStore(dir), http);
+        services.Store.Save(new WebSettings("searxng", "http://first.local", false));
         var search = services.CreateTools().Single(t => t.Definition.Name == WebSearchTool.Name);
         var call = new ToolCall("1", WebSearchTool.Name, "{\"query\":\"forge\"}");
         var context = new ToolContext("s", dir);
 
-        Assert.True((await search.InvokeAsync(call, context, default)).IsError);
-
-        services.Store.Save(new WebSettings("searxng", "http://first.local", false));
         var first = await search.InvokeAsync(call, context, default);
         Assert.False(first.IsError, first.Content);
         Assert.Equal("first.local", handler.Requests[^1].Host);

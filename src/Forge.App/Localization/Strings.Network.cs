@@ -20,6 +20,8 @@ internal static class NetworkStrings
     public const string ProxyManual = "network.proxy.manual";
     public const string ProxyUrlLabel = "network.proxy.url";
     public const string ProxyUrlHint = "network.proxy.url.hint";
+    public const string ProxySocks4Hint = "network.proxy.socks4.hint";
+    public const string DnsDohNameHint = "network.dns.doh.nameHint";
     public const string ProxyBypassLabel = "network.proxy.bypass";
     public const string ErrorServer = "network.error.server";
     public const string ErrorServersEmpty = "network.error.serversEmpty";
@@ -60,8 +62,16 @@ internal static class NetworkStrings
         Loc.Register(DnsDohLabel, "DoH 地址", "DoH URL");
         Loc.Register(
             DnsDohHint,
-            "例如 https://1.1.1.1/dns-query。DoH 服务器自身的主机名用系统解析器解析。",
-            "For example https://1.1.1.1/dns-query. The DoH server's own host name is resolved by the system resolver.");
+            "例如 https://1.1.1.1/dns-query。",
+            "For example https://1.1.1.1/dns-query.");
+        Loc.Register(
+            DnsDohNameHint,
+            "这个 DoH 地址用的是主机名:它本身要先由系统 DNS 解析,系统 DNS 不可用或被污染时 DoH 也无法使用。改用 IP 地址(如 https://1.1.1.1/dns-query)可避免这一步。",
+            "This DoH URL uses a host name: that name is resolved by the system DNS first, so DoH fails when the system DNS is unavailable or tampered with. An IP address (e.g. https://1.1.1.1/dns-query) avoids that step.");
+        Loc.Register(
+            ProxySocks4Hint,
+            "SOCKS4 只能传 IPv4 地址,目标主机名会在本机用系统 DNS 解析(不走上面设置的 DNS)。要让代理负责解析,请改用 socks4a:// 或 socks5://。",
+            "SOCKS4 only carries IPv4 addresses, so target host names are resolved locally with the system DNS (not the DNS set above). Use socks4a:// or socks5:// to let the proxy resolve them.");
         Loc.Register(ProxyHeading, "代理", "Proxy");
         Loc.Register(ProxySystem, "系统代理", "System proxy");
         Loc.Register(ProxyNone, "不使用代理", "No proxy");

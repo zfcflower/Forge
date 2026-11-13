@@ -23,6 +23,11 @@ internal sealed class QuestionOptionViewModel : ObservableObject
 
     public bool HasDescription => Description.Length > 0;
 
+    /// <summary>False when the question is skipped, or (multi-select) the max is reached and this option is not picked.</summary>
+    public bool IsEnabled => !owner.IsSkipped && (!owner.MultiSelect || isSelected || !owner.IsAtMax);
+
+    internal void RefreshEnabled() => OnPropertyChanged(nameof(IsEnabled));
+
     public bool IsMulti => owner.MultiSelect;
 
     public bool IsSingle => !owner.MultiSelect;
@@ -32,8 +37,16 @@ internal sealed class QuestionOptionViewModel : ObservableObject
         get => isSelected;
         set
         {
+            if (value && !isSelected && owner.MultiSelect && owner.IsAtMax)
+            {
+                // The max is reached: a further pick is refused (the check box snaps back).
+                OnPropertyChanged();
+                return;
+            }
+
             if (Set(ref isSelected, value))
             {
+                OnPropertyChanged(nameof(IsEnabled));
                 owner.OnOptionChanged(this);
             }
         }
@@ -46,6 +59,7 @@ internal sealed class QuestionItemViewModel : ObservableObject
     private readonly Action changed;
     private string freeText = string.Empty;
     private bool updating;
+    private bool skipped;
 
     public QuestionItemViewModel(UserQuestion question, Action changed)
     {
@@ -55,6 +69,18 @@ internal sealed class QuestionItemViewModel : ObservableObject
         Prompt = question.Prompt;
         MultiSelect = question.MultiSelect;
         AllowFreeText = question.AllowFreeText;
+        var capacity = question.Options.Count + (question.AllowFreeText ? 1 : 0);
+        if (question.MultiSelect)
+        {
+            MinSelect = Math.Clamp(question.MinSelect ?? 1, 1, capacity);
+            MaxSelect = Math.Clamp(question.MaxSelect ?? capacity, MinSelect, capacity);
+        }
+        else
+        {
+            MinSelect = 1;
+            MaxSelect = 1;
+        }
+
         Options = [.. question.Options.Select(option => new QuestionOptionViewModel(this, option))];
     }
 
@@ -72,6 +98,58 @@ internal sealed class QuestionItemViewModel : ObservableObject
 
     public IReadOnlyList<QuestionOptionViewModel> Options { get; }
 
+    /// <summary>Fewest picks that answer a multi-select question (free text counts as one); 1 for single-select.</summary>
+    public int MinSelect { get; }
+
+    /// <summary>Most picks allowed for a multi-select question (free text counts as one); 1 for single-select.</summary>
+    public int MaxSelect { get; }
+
+    /// <summary>Picked options plus one when free text is typed.</summary>
+    public int PickCount => Options.Count(option => option.IsSelected) + (HasFreeText ? 1 : 0);
+
+    private bool HasFreeText => AllowFreeText && !string.IsNullOrWhiteSpace(freeText);
+
+    /// <summary>Multi-select only: no further option may be picked.</summary>
+    public bool IsAtMax => MultiSelect && PickCount >= MaxSelect;
+
+    /// <summary>Localized selection-bound hint; empty for single-select.</summary>
+    public string BoundsHint => !MultiSelect ? string.Empty : QuestionsStrings.BoundsHint(MinSelect, MaxSelect, Options.Count + (AllowFreeText ? 1 : 0));
+
+    public bool IsEditable => !skipped;
+
+    /// <summary>The free-text box is off while skipped, or when a multi-select question is full and the box is empty.</summary>
+    public bool IsFreeTextEnabled => !skipped && (!MultiSelect || HasFreeText || PickCount < MaxSelect);
+
+    /// <summary>The user chose not to answer this question; it counts as resolved but not as answered.</summary>
+    public bool IsSkipped
+    {
+        get => skipped;
+        set
+        {
+            if (Set(ref skipped, value))
+            {
+                OnPropertyChanged(nameof(IsEditable));
+                OnPropertyChanged(nameof(IsFreeTextEnabled));
+                OnPropertyChanged(nameof(IsAnswered));
+                RefreshOptions();
+                changed();
+            }
+        }
+    }
+
+    /// <summary>The question is skipped, or its pick count is within bounds.</summary>
+    public bool IsResolved => skipped || IsAnswered;
+
+    internal void RefreshLanguage() => OnPropertyChanged(nameof(BoundsHint));
+
+    private void RefreshOptions()
+    {
+        foreach (var option in Options)
+        {
+            option.RefreshEnabled();
+        }
+    }
+
     public string FreeText
     {
         get => freeText;
@@ -79,15 +157,14 @@ internal sealed class QuestionItemViewModel : ObservableObject
         {
             if (Set(ref freeText, value ?? string.Empty))
             {
-                OnPropertyChanged(nameof(IsAnswered));
+                RefreshState();
                 changed();
             }
         }
     }
 
-    /// <summary>An option is picked, or (when allowed) some free text is typed.</summary>
-    public bool IsAnswered =>
-        Options.Any(option => option.IsSelected) || (AllowFreeText && !string.IsNullOrWhiteSpace(freeText));
+    /// <summary>Not skipped and the pick count (options plus non-blank free text) is within [min, max].</summary>
+    public bool IsAnswered => !skipped && (MultiSelect ? PickCount >= MinSelect && PickCount <= MaxSelect : PickCount >= 1);
 
     internal void OnOptionChanged(QuestionOptionViewModel changedOption)
     {
@@ -116,12 +193,27 @@ internal sealed class QuestionItemViewModel : ObservableObject
             }
         }
 
-        OnPropertyChanged(nameof(IsAnswered));
+        RefreshState();
         changed();
+    }
+
+    private void RefreshState()
+    {
+        OnPropertyChanged(nameof(IsAnswered));
+        OnPropertyChanged(nameof(IsResolved));
+        OnPropertyChanged(nameof(PickCount));
+        OnPropertyChanged(nameof(IsAtMax));
+        OnPropertyChanged(nameof(IsFreeTextEnabled));
+        RefreshOptions();
     }
 
     internal UserQuestionAnswer ToAnswer()
     {
+        if (skipped)
+        {
+            return new UserQuestionAnswer(Id, [], null, Skipped: true);
+        }
+
         var selected = Options.Where(option => option.IsSelected).Select(option => option.Label).ToArray();
         var text = AllowFreeText && !string.IsNullOrWhiteSpace(freeText) ? freeText.Trim() : null;
         return new UserQuestionAnswer(Id, selected, text);
@@ -161,8 +253,34 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
 
     public string Title => QuestionsStrings.CardTitle;
 
-    /// <summary>Every question has an answer and the card is still open.</summary>
-    public bool CanSubmit => !IsDecided && Questions.All(question => question.IsAnswered);
+    private int waitingCount;
+
+    /// <summary>Every question is answered or skipped, at least one is answered, and the card is still open.</summary>
+    public bool CanSubmit => !IsDecided && Questions.All(question => question.IsResolved) && Questions.Any(question => question.IsAnswered);
+
+    /// <summary>True when every question is skipped: nothing to submit, the user should dismiss instead.</summary>
+    public bool AllSkipped => Questions.All(question => question.IsSkipped);
+
+    /// <summary>Shown when the submit is disabled because everything was skipped.</summary>
+    public string AllSkippedHint => AllSkipped ? QuestionsStrings.AllSkippedHint : string.Empty;
+
+    /// <summary>Other question cards of the same session waiting behind this one; set by the queue on the UI thread.</summary>
+    public int WaitingCount
+    {
+        get => waitingCount;
+        internal set
+        {
+            if (Set(ref waitingCount, value))
+            {
+                OnPropertyChanged(nameof(HasWaiting));
+                OnPropertyChanged(nameof(WaitingText));
+            }
+        }
+    }
+
+    public bool HasWaiting => waitingCount > 0;
+
+    public string WaitingText => waitingCount > 0 ? QuestionsStrings.Waiting(waitingCount) : string.Empty;
 
     /// <summary>The answers once the user submitted; null before.</summary>
     public UserQuestionResponse? Response => response;
@@ -186,11 +304,23 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
 
     private void Dismiss() => TryComplete(ApprovalCardOutcome.Deny);
 
-    private void OnAnswerChanged() => SubmitCommand.NotifyCanExecuteChanged();
+    private void OnAnswerChanged()
+    {
+        SubmitCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSubmit));
+        OnPropertyChanged(nameof(AllSkipped));
+        OnPropertyChanged(nameof(AllSkippedHint));
+    }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         OnPropertyChanged(nameof(AskedByText));
         OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(WaitingText));
+        OnPropertyChanged(nameof(AllSkippedHint));
+        foreach (var question in Questions)
+        {
+            question.RefreshLanguage();
+        }
     }
 }

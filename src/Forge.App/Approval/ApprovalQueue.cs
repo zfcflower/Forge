@@ -13,6 +13,10 @@ internal sealed class ApprovalQueue
 {
     private readonly RangeObservableCollection<ApprovalCardViewModel> items = [];
 
+    // Question cards are shown one at a time per session; the others wait here (FIFO, UI thread only) and never reach Items
+    // until promoted. Approval cards are independent of questions and are never held back.
+    private readonly List<UserQuestionCardViewModel> waitingQuestions = [];
+
     public ApprovalQueue(IApprovalDispatcher? dispatcher = null) => Dispatcher = dispatcher ?? UiThreadDispatcher.Instance;
 
     /// <summary>Raised on the UI thread right after a card was added; the overlay expands itself on it.</summary>
@@ -42,7 +46,27 @@ internal sealed class ApprovalQueue
                         return false;
                     }
 
+                    if (card is UserQuestionCardViewModel question)
+                    {
+                        if (waitingQuestions.Exists(other => string.Equals(other.Id, card.Id, StringComparison.Ordinal)))
+                        {
+                            return false;
+                        }
+
+                        if (HasShownQuestion(question.SessionId))
+                        {
+                            waitingQuestions.Add(question);
+                            RefreshWaiting(question.SessionId);
+                            return true;
+                        }
+                    }
+
                     items.Add(card);
+                    if (card is UserQuestionCardViewModel shown)
+                    {
+                        RefreshWaiting(shown.SessionId);
+                    }
+
                     RaiseCardAdded(card);
                     RaiseChanged();
                     return true;
@@ -61,6 +85,15 @@ internal sealed class ApprovalQueue
         return Dispatcher.InvokeAsync(
             () =>
             {
+                if (card is UserQuestionCardViewModel waiting && waitingQuestions.Remove(waiting))
+                {
+                    // Never shown: complete it right away, without touching what is on screen.
+                    waiting.TryComplete(outcome ?? waiting.WithdrawnOutcome);
+                    waiting.Dispose();
+                    RefreshWaiting(waiting.SessionId);
+                    return;
+                }
+
                 var index = IndexOf(card.Id);
                 if (index < 0 || !ReferenceEquals(items[index], card))
                 {
@@ -71,6 +104,11 @@ internal sealed class ApprovalQueue
                 items.RemoveAt(index);
                 card.TryComplete(outcome ?? card.WithdrawnOutcome);
                 card.Dispose();
+                if (card is UserQuestionCardViewModel gone)
+                {
+                    PromoteNextQuestion(gone.SessionId);
+                }
+
                 RaiseChanged();
             });
     }
@@ -83,6 +121,19 @@ internal sealed class ApprovalQueue
             () =>
             {
                 var removed = 0;
+                for (var index = waitingQuestions.Count - 1; index >= 0; index--)
+                {
+                    if (!string.Equals(waitingQuestions[index].SessionId, sessionId, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var queued = waitingQuestions[index];
+                    waitingQuestions.RemoveAt(index);
+                    queued.TryComplete(queued.WithdrawnOutcome);
+                    queued.Dispose();
+                }
+
                 for (var index = items.Count - 1; index >= 0; index--)
                 {
                     if (!string.Equals(items[index].SessionId, sessionId, StringComparison.Ordinal))
@@ -111,6 +162,14 @@ internal sealed class ApprovalQueue
         Dispatcher.InvokeAsync(
             () =>
             {
+                var held = waitingQuestions.ToArray();
+                waitingQuestions.Clear();
+                foreach (var card in held)
+                {
+                    card.TryComplete(card.WithdrawnOutcome);
+                    card.Dispose();
+                }
+
                 if (items.Count == 0)
                 {
                     return;
@@ -142,6 +201,61 @@ internal sealed class ApprovalQueue
                 var index = IndexOf(id);
                 return index < 0 ? null : items[index];
             });
+
+    private bool HasShownQuestion(string sessionId)
+    {
+        foreach (var item in items)
+        {
+            if (item is UserQuestionCardViewModel question && string.Equals(question.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Shows the session's oldest waiting question once its previous card left the list.</summary>
+    private void PromoteNextQuestion(string sessionId)
+    {
+        for (var index = 0; index < waitingQuestions.Count; index++)
+        {
+            var next = waitingQuestions[index];
+            if (!string.Equals(next.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            waitingQuestions.RemoveAt(index);
+            items.Add(next);
+            RefreshWaiting(sessionId);
+            RaiseCardAdded(next);
+            return;
+        }
+
+        RefreshWaiting(sessionId);
+    }
+
+    /// <summary>Tells the shown question card of a session how many more wait behind it.</summary>
+    private void RefreshWaiting(string sessionId)
+    {
+        var count = 0;
+        foreach (var waiting in waitingQuestions)
+        {
+            if (string.Equals(waiting.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        foreach (var item in items)
+        {
+            if (item is UserQuestionCardViewModel question && string.Equals(question.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                question.WaitingCount = count;
+            }
+        }
+    }
 
     private int IndexOf(string id)
     {

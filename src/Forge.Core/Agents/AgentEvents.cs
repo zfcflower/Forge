@@ -9,8 +9,14 @@ public interface IAgentEventSink
     void Emit(AgentEvent value);
 }
 
-/// <summary>A user interjection (see <see cref="AgentInstance.Interject"/>) was handed to the agent as a user message.</summary>
-public sealed record AgentInterjected(string AgentId, string Text, DateTimeOffset At) : AgentEvent(AgentId);
+/// <summary>
+/// A user interjection (see <see cref="AgentInstance.Interject(IReadOnlyList{ContentBlock})"/>) was handed to the agent as a
+/// user message. <see cref="Text"/> is the typed part only (empty for an attachment-only interjection);
+/// <see cref="Attachments"/> are the interjection's attachments, the same block instances the caller passed in, so the UI
+/// can tell two attachment-only interjections apart by reference.
+/// </summary>
+public sealed record AgentInterjected(string AgentId, string Text, DateTimeOffset At, IReadOnlyList<ContentBlock> Attachments)
+    : AgentEvent(AgentId);
 
 internal sealed class ChannelEventSink(ChannelWriter<AgentEvent> writer) : IAgentEventSink
 {

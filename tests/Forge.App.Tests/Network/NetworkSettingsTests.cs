@@ -451,4 +451,86 @@ public sealed class NetworkSettingsSectionViewModelTests : IDisposable
             Assert.Contains("pac", vm.LoadProblemText);
         }
     }
+
+    [Fact]
+    public void Socks4_hint_follows_the_scheme_of_a_valid_manual_proxy()
+    {
+        var (vm, _, stack) = Create();
+        using (vm)
+        using (stack)
+        {
+            var changed = new List<string?>();
+            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+            // Not in manual mode: a socks4 URL typed in the hidden field gives no hint.
+            vm.ProxyUrl = "socks4://127.0.0.1:1080";
+            Assert.False(vm.ShowsSocks4Hint);
+
+            vm.IsProxyManual = true;
+            Assert.True(vm.ShowsSocks4Hint);
+            Assert.Contains(nameof(vm.ShowsSocks4Hint), changed);
+
+            vm.ProxyUrl = "SOCKS4://proxy.local";
+            Assert.True(vm.ShowsSocks4Hint);
+
+            foreach (var other in new[] { "socks4a://127.0.0.1:1080", "socks5://127.0.0.1:1080", "http://p:8080", "socks4://", "socks4", "" })
+            {
+                vm.ProxyUrl = other;
+                Assert.False(vm.ShowsSocks4Hint, other);
+            }
+
+            vm.ProxyUrl = "socks4://127.0.0.1:1080";
+            Assert.True(vm.ShowsSocks4Hint);
+            vm.IsProxyNone = true;
+            Assert.False(vm.ShowsSocks4Hint);
+        }
+    }
+
+    [Fact]
+    public void Doh_hint_appears_only_for_a_valid_url_whose_host_is_a_name()
+    {
+        var (vm, _, stack) = Create();
+        using (vm)
+        using (stack)
+        {
+            vm.DohUrl = "https://dns.google/dns-query";
+            Assert.False(vm.ShowsDohNameHint);
+
+            vm.IsDnsDoh = true;
+            Assert.True(vm.ShowsDohNameHint);
+
+            foreach (var literal in new[] { "https://1.1.1.1/dns-query", "https://[2606:4700:4700::1111]/dns-query" })
+            {
+                vm.DohUrl = literal;
+                Assert.False(vm.ShowsDohNameHint, literal);
+            }
+
+            // Invalid URLs show their error instead of the hint.
+            foreach (var invalid in new[] { "http://dns.google/dns-query", "dns.google", "" })
+            {
+                vm.DohUrl = invalid;
+                Assert.False(vm.ShowsDohNameHint, invalid);
+                Assert.True(vm.HasDohError, invalid);
+            }
+
+            vm.DohUrl = "https://cloudflare-dns.com/dns-query";
+            Assert.True(vm.ShowsDohNameHint);
+            vm.IsDnsServers = true;
+            Assert.False(vm.ShowsDohNameHint);
+        }
+    }
+
+    [Fact]
+    public void Hints_are_computed_for_stored_settings_on_load()
+    {
+        new NetworkSettingsStore(SettingsPath).Save(
+            new NetworkSettings(DnsMode.DnsOverHttps, [], "https://dns.google/dns-query", ProxyMode.Manual, "socks4://10.0.0.1:1080", []));
+        var (vm, _, stack) = Create();
+        using (vm)
+        using (stack)
+        {
+            Assert.True(vm.ShowsDohNameHint);
+            Assert.True(vm.ShowsSocks4Hint);
+        }
+    }
 }

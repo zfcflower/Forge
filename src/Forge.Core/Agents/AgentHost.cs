@@ -142,7 +142,8 @@ public sealed class AgentHost
                                 summaryStore,
                                 options.Providers,
                                 options.TokenCounter,
-                                summarizerPrompt: options.Templates?.FindSlot(Prompts.Templates.PromptSlotIds.CompactionSummarizer))
+                                summarizerPrompt: options.Templates?.FindSlot(Prompts.Templates.PromptSlotIds.CompactionSummarizer),
+                                policy: options.Options.Compaction)
                             : NoopCompactor.Instance);
 
         toolSurface = new ToolSurface(builtIns);
@@ -169,7 +170,26 @@ public sealed class AgentHost
         scheduler.Runner = loop.RunAsync;
     }
 
+    /// <summary>
+    /// The options the host was built with. <see cref="AgentOptions.Compaction"/> there is the initial policy; the one in
+    /// force is <see cref="CompactionPolicy"/>.
+    /// </summary>
     public AgentOptions Options => options;
+
+    /// <summary>The compaction policy in force for the root and every sub-agent of this host.</summary>
+    public CompactionPolicy CompactionPolicy => loop.CurrentCompaction;
+
+    /// <summary>
+    /// Replaces the compaction policy (switch, trigger and target ratios, and the window/max-output resolvers). Validated
+    /// first: an invalid policy throws and the current one stays. Thread-safe; running loops read it before their next model
+    /// request. It changes no request and resets no state (hysteresis, last prompt size), so the prompt cache is untouched.
+    /// </summary>
+    public void SetCompactionPolicy(CompactionPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        policy.Validate();
+        loop.CurrentCompaction = policy;
+    }
 
     public AgentCatalog Catalog => catalog;
 

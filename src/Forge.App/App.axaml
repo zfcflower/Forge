@@ -397,6 +397,10 @@
                      Text="{Binding [network.dns.doh.hint], Source={x:Static loc:Loc.Instance}}" />
           <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
                      IsVisible="{Binding HasDohError}" Text="{Binding DohError}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                     IsVisible="{Binding ShowsDohNameHint}"
+                     Text="{Binding [network.dns.doh.nameHint], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="network-doh-name-hint" />
         </StackPanel>
         <TextBlock Classes="label" Margin="0,6,0,0" Text="{Binding [network.proxy], Source={x:Static loc:Loc.Instance}}" />
         <StackPanel Orientation="Horizontal" Spacing="16">
@@ -418,6 +422,10 @@
                      Text="{Binding [network.proxy.url.hint], Source={x:Static loc:Loc.Instance}}" />
           <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
                      IsVisible="{Binding HasProxyError}" Text="{Binding ProxyError}" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                     IsVisible="{Binding ShowsSocks4Hint}"
+                     Text="{Binding [network.proxy.socks4.hint], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="network-proxy-socks4-hint" />
           <TextBlock Classes="caption" TextWrapping="Wrap"
                      Text="{Binding [network.proxy.bypass], Source={x:Static loc:Loc.Instance}}" />
           <TextBox Text="{Binding BypassText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="56"

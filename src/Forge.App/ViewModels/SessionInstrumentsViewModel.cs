@@ -28,6 +28,18 @@ internal sealed record ContextSegment(bool IsFilled)
     public bool IsEmpty => !IsFilled;
 }
 
+/// <summary>How close the root context is to the automatic-compaction trigger line; the gauge is coloured by it.</summary>
+internal enum ContextLevel
+{
+    Normal,
+
+    /// <summary>Within 10 percentage points of U below the trigger line.</summary>
+    Warning,
+
+    /// <summary>At or past the trigger line.</summary>
+    Over,
+}
+
 /// <summary>
 /// One session's readout: the composer strip above the input.
 /// <para>Left of the strip it answers "what is this session doing" (branch, ahead/behind, CI, the four counters and the
@@ -48,7 +60,10 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private IReadOnlyList<SlashEntry> skills = [];
     private IReadOnlyList<string> tools = [];
     private TokenUsage usage = TokenUsage.Empty;
-    private int lastPromptTokens;
+    private int? contextTokens;
+    private int? usableTokens;
+    private int? triggerTokens;
+    private ContextLevel contextLevel;
     private int approvalRecords;
     private (int Ready, int Configured) mcp;
     private string aheadBehind = string.Empty;
@@ -201,23 +216,35 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     public bool HasUsage => usage.InputTokens > 0 || usage.OutputTokens > 0;
 
-    /// <summary>True when the model's context window is known <em>and</em> a turn reported a prompt size.</summary>
-    public bool HasContextWindow => Metadata.ContextWindow is > 0 && lastPromptTokens > 0;
+    /// <summary>True once the root agent reported its context size (<see cref="NoteContext"/>) since the strip was created.</summary>
+    public bool HasContextMeasure => contextTokens is not null;
 
-    /// <summary>The context window's fill, 0-100; 0 when the window or the prompt size is unknown.</summary>
-    public double ContextPercent => SessionUsageMath.ContextRatio(lastPromptTokens, Metadata.ContextWindow) is { } ratio
-        ? Math.Round(ratio * 100, 0)
-        : 0;
+    /// <summary>True when the context size <em>and</em> the model's usable budget U are both known: the gauge then shows a percentage.</summary>
+    public bool HasContextWindow => contextTokens is not null && usableTokens is > 0;
+
+    /// <summary>C / U in percent (0-100, rounded); 0 while either is unknown.</summary>
+    public double ContextPercent => ContextRatio is { } ratio ? Math.Round(ratio * 100, 0) : 0;
+
+    /// <summary>Normal, warning (within 10 percentage points of the trigger line) or over (at or past it).</summary>
+    public ContextLevel ContextLevel => contextLevel;
+
+    public bool IsContextWarning => contextLevel == ContextLevel.Warning;
+
+    public bool IsContextOver => contextLevel == ContextLevel.Over;
 
     /// <summary>
     /// The fixed-width gauge next to the readout: five identical slanted segments, the filled ones counting up to the rounded
-    /// fraction. Fixed because it is the strip's stable anchor — the numbers beside it change, the gauge does not resize.
+    /// fraction C / U. Fixed because it is the strip's stable anchor — the numbers beside it change, the gauge does not resize.
     /// </summary>
     public IReadOnlyList<ContextSegment> ContextSegments { get; private set; } = BuildSegments(0);
 
     /// <summary>"RC 98.5": the cache-read hit rate of the session, one decimal, 0.0 before any usage.</summary>
     public string CacheReadText => InstrumentsStrings.CacheRead(
         (SessionUsageMath.CacheHitRatio(usage) * 100).ToString("0.0", CultureInfo.InvariantCulture));
+
+    private double? ContextRatio => contextTokens is { } used && usableTokens is > 0
+        ? Math.Clamp((double)used / usableTokens.Value, 0, 1)
+        : null;
 
     private static ContextSegment[] BuildSegments(double ratio)
     {
@@ -232,19 +259,47 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// "9% / 1.0M" next to the bar. It always says something: with no usage yet, or no window for the model, the bar reads
-    /// 0% rather than disappearing, so the right end of the strip keeps its shape.
+    /// "62k/170k · 36%" next to the gauge: the current context C over the model's usable input budget U (the window minus
+    /// the output reserve, the same budget the trigger line is a share of). With an unknown window it is the token count
+    /// alone; before the first request reported a size it reads "0%", so the right end of the strip keeps its shape.
     /// </summary>
     public string ContextLabel
     {
         get
         {
-            var window = Metadata.ContextWindow;
-            var percent = (Math.Round((SessionUsageMath.ContextRatio(lastPromptTokens, window) ?? 0) * 100, 0))
-                .ToString("0", CultureInfo.InvariantCulture) + "%";
-            return window is > 0 ? InstrumentsStrings.UsageContext(percent, Scale(window.Value)) : percent;
+            if (contextTokens is not { } used)
+            {
+                return InstrumentsStrings.ContextPercent("0");
+            }
+
+            return usableTokens is > 0
+                ? InstrumentsStrings.UsageContext(Scale(used), Scale(usableTokens.Value), PercentText())
+                : InstrumentsStrings.ContextTokens(Scale(used));
         }
     }
+
+    /// <summary>The gauge's own hover line: the numbers behind it, the trigger line, and that a click compacts now.</summary>
+    public string ContextTooltip
+    {
+        get
+        {
+            if (contextTokens is not { } used)
+            {
+                return InstrumentsStrings.ContextTooltipPending;
+            }
+
+            if (usableTokens is not > 0)
+            {
+                return InstrumentsStrings.ContextTooltipUnknown(Scale(used));
+            }
+
+            var trigger = triggerTokens ?? usableTokens.Value;
+            var triggerPercent = Math.Round((double)trigger / usableTokens.Value * 100, 0).ToString("0", CultureInfo.InvariantCulture);
+            return InstrumentsStrings.ContextTooltip(Scale(used), Scale(usableTokens.Value), PercentText(), Scale(trigger), triggerPercent);
+        }
+    }
+
+    private string PercentText() => ContextPercent.ToString("0", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The hover line: every number the strip's readout is made of, always all of them and always in the same order, so the
@@ -274,45 +329,90 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     /// <summary>
     /// One turn's delta, from the same <see cref="AgentTurnCompleted"/> arithmetic the turn card uses. Only the root agent
-    /// counts: the context bar follows the conversation's own prompt, and the cost is priced with the model the composer's
-    /// picker shows. A sub-agent's spend stays on its tab.
+    /// counts: the cost is priced with the model the composer's picker shows, and a sub-agent's spend stays on its tab. The
+    /// gauge does not move here: a turn's summed input is not a prompt size, <see cref="NoteContext"/> reports that.
     /// </summary>
     public void AddTurn(string agentId, TokenUsage delta)
     {
-        if (!string.Equals(agentId, "root", StringComparison.Ordinal))
+        if (!IsRoot(agentId))
         {
             return;
         }
 
         usage += delta;
-        lastPromptTokens = Math.Max(0, delta.InputTokens);
-        ContextSegments = BuildSegments(SessionUsageMath.ContextRatio(lastPromptTokens, Metadata.ContextWindow) ?? 0);
         OnPropertyChanged(nameof(HasUsage));
-        OnPropertyChanged(nameof(HasContextWindow));
-        OnPropertyChanged(nameof(ContextPercent));
-        OnPropertyChanged(nameof(ContextSegments));
         OnPropertyChanged(nameof(CacheReadText));
-        OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(UsageTooltip));
     }
 
     /// <summary>
-    /// A manual compaction shrank the root context: the bar shows the compactor's estimate of what is left until the next
-    /// turn reports a real prompt size again. Spend is untouched.
+    /// The root agent's context after a model request or a compaction (Core's <c>AgentContextMeasured</c>): C, the usable
+    /// budget U of its model and the trigger line, the last two null when the window is unknown. A sub-agent's report is
+    /// ignored — it has its own model and its own window.
     /// </summary>
-    public void NoteCompacted(int contextTokens)
+    public void NoteContext(string agentId, int contextTokens, int? usableTokens, int? triggerTokens)
     {
-        lastPromptTokens = Math.Max(0, contextTokens);
-        ContextSegments = BuildSegments(SessionUsageMath.ContextRatio(lastPromptTokens, Metadata.ContextWindow) ?? 0);
-        OnPropertyChanged(nameof(HasContextWindow));
-        OnPropertyChanged(nameof(ContextPercent));
-        OnPropertyChanged(nameof(ContextSegments));
-        OnPropertyChanged(nameof(ContextLabel));
+        if (!IsRoot(agentId))
+        {
+            return;
+        }
+
+        this.usableTokens = usableTokens is > 0 ? usableTokens : null;
+        this.triggerTokens = this.usableTokens is null ? null : triggerTokens;
+        SetContext(contextTokens);
     }
 
     /// <summary>
+    /// A manual compaction shrank the root context and reported no measurement of its own: the gauge shows the compactor's
+    /// figure against the budget it last knew, until the next request reports a real size.
+    /// </summary>
+    public void NoteCompacted(int contextTokens) => SetContext(contextTokens);
+
+    private void SetContext(int value)
+    {
+        contextTokens = Math.Max(0, value);
+        contextLevel = LevelOf(contextTokens.Value, usableTokens, triggerTokens);
+        ContextSegments = BuildSegments(ContextRatio ?? 0);
+        OnPropertyChanged(nameof(HasContextMeasure));
+        OnPropertyChanged(nameof(HasContextWindow));
+        OnPropertyChanged(nameof(ContextPercent));
+        OnPropertyChanged(nameof(ContextLevel));
+        OnPropertyChanged(nameof(IsContextWarning));
+        OnPropertyChanged(nameof(IsContextOver));
+        OnPropertyChanged(nameof(ContextSegments));
+        OnPropertyChanged(nameof(ContextLabel));
+        OnPropertyChanged(nameof(ContextTooltip));
+    }
+
+    /// <summary>
+    /// Over at or past the trigger line; warning from 10 percentage points of U below it; normal otherwise, and always normal
+    /// when the budget or the line is unknown (nothing to measure against).
+    /// </summary>
+    internal static ContextLevel LevelOf(int contextTokens, int? usableTokens, int? triggerTokens)
+    {
+        if (usableTokens is not > 0 || triggerTokens is not > 0)
+        {
+            return ContextLevel.Normal;
+        }
+
+        if (contextTokens >= triggerTokens.Value)
+        {
+            return ContextLevel.Over;
+        }
+
+        return (long)contextTokens * 100 >= (long)triggerTokens.Value * 100 - (long)usableTokens.Value * WarningMarginPercent
+            ? ContextLevel.Warning
+            : ContextLevel.Normal;
+    }
+
+    /// <summary>How far below the trigger line, in percentage points of U, the gauge starts to warn.</summary>
+    internal const int WarningMarginPercent = 10;
+
+    private static bool IsRoot(string agentId) => string.Equals(agentId, "root", StringComparison.Ordinal);
+
+    /// <summary>
     /// The usage a reopened session already spent, summed from its stored messages. The prompt size of its last request is
-    /// not recoverable from that sum, so the context bar stays empty until the next turn reports one.
+    /// not recoverable from that sum, so the context bar stays empty until the next request reports one.
     /// </summary>
     public void SeedHistory(TokenUsage total)
     {
@@ -584,6 +684,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
         RaiseCounters();
         OnPropertyChanged(nameof(ContextLabel));
+        OnPropertyChanged(nameof(ContextTooltip));
         OnPropertyChanged(nameof(UsageTooltip));
         OnPropertyChanged(nameof(WorkspaceTooltip));
         OnPropertyChanged(nameof(ApprovalsLabel));
