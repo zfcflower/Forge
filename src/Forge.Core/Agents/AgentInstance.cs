@@ -181,6 +181,12 @@ internal sealed class CompactionState
     /// <summary>True once automatic compaction gave up, until a manual compaction or another model.</summary>
     public bool Stalled { get; set; }
 
+    /// <summary>Published tool-set version <see cref="ToolTokens"/> was counted for; -1 before the first count.</summary>
+    public int ToolTokensVersion { get; set; } = -1;
+
+    /// <summary>Estimated tokens of the tool definitions this instance is offered at <see cref="ToolTokensVersion"/>.</summary>
+    public int ToolTokens { get; set; }
+
     public void ResetHysteresis()
     {
         FruitlessBaseline = null;

@@ -100,6 +100,34 @@
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
 
+    <!-- The context gauge: accent while there is room, the warning colour within 10 points of the trigger line, the danger
+         colour at or past it. The segments and the label take the colour; the brushes live here and not in the template so
+         the state classes can replace them. -->
+    <Style Selector="Button.context-gauge Polygon.gauge-fill">
+      <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge Polygon.gauge-outline">
+      <Setter Property="Stroke" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge.warning Polygon.gauge-fill">
+      <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge.warning Polygon.gauge-outline">
+      <Setter Property="Stroke" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge.warning TextBlock.gauge-label">
+      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge.over Polygon.gauge-fill">
+      <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge.over Polygon.gauge-outline">
+      <Setter Property="Stroke" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Button.context-gauge.over TextBlock.gauge-label">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+
     <Style Selector="Button.instrument-project">
       <Setter Property="Height" Value="24" />
       <Setter Property="MinHeight" Value="24" />
@@ -537,8 +565,11 @@
                 </Button>
               </StackPanel>
 
-              <!-- Right half: the token reading — the cache-read hit rate, the five-segment gauge and "<percent>/<window>".
-                   Hovering it gives the full breakdown (input/output, window, used, cache hit ratio and the cost estimate). -->
+              <!-- Right half: the token reading — the cache-read hit rate, then the gauge button: five segments and
+                   "<used>/<usable> · <percent>" for the root context against its model's usable budget (tokens only when the
+                   window is unknown). Hovering the strip gives the spend breakdown; hovering the gauge gives the context
+                   numbers and the trigger line. The gauge turns to the warning colour within 10 points of the trigger line
+                   and to the danger colour at it, and a click runs the same manual compaction as /compact. -->
               <StackPanel Grid.Column="2"
                           Orientation="Horizontal"
                           Spacing="8"
@@ -548,33 +579,46 @@
                 <TextBlock Classes="instrument-meta"
                            VerticalAlignment="Center"
                            Text="{Binding Instruments.CacheReadText}" />
-                <ItemsControl ItemsSource="{Binding Instruments.ContextSegments}"
-                              VerticalAlignment="Center"
-                              AutomationProperties.AutomationId="strip-context-gauge">
-                  <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                      <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" />
-                    </ItemsPanelTemplate>
-                  </ItemsControl.ItemsPanel>
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:ContextSegment">
-                      <!-- One slanted quadrilateral, same size for every segment; filled ones are solid, the rest outline only. -->
-                      <Panel Width="13" Height="8" VerticalAlignment="Center">
-                        <Polygon Points="0,8 3,0 13,0 10,8"
-                                 Fill="{DynamicResource AccentBrush}"
-                                 IsVisible="{Binding IsFilled}" />
-                        <Polygon Points="0,8 3,0 13,0 10,8"
-                                 Stroke="{DynamicResource AccentBrush}"
-                                 StrokeThickness="1"
-                                 Fill="Transparent"
-                                 IsVisible="{Binding IsEmpty}" />
-                      </Panel>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Classes="instrument-meta"
-                           VerticalAlignment="Center"
-                           Text="{Binding Instruments.ContextLabel}" />
+                <Button Classes="instrument-chip context-gauge"
+                        Classes.warning="{Binding Instruments.IsContextWarning}"
+                        Classes.over="{Binding Instruments.IsContextOver}"
+                        Padding="4,0"
+                        Command="{Binding CompactCommand}"
+                        ToolTip.Tip="{Binding Instruments.ContextTooltip}"
+                        AutomationProperties.AutomationId="strip-context-compact"
+                        AutomationProperties.Name="{Binding [session.strip.context.compact], Source={x:Static loc:Loc.Instance}}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ItemsControl ItemsSource="{Binding Instruments.ContextSegments}"
+                                  VerticalAlignment="Center"
+                                  AutomationProperties.AutomationId="strip-context-gauge">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ContextSegment">
+                          <!-- One slanted quadrilateral, same size for every segment; filled ones are solid, the rest outline
+                               only. The brush comes from the gauge's state styles above. -->
+                          <Panel Width="13" Height="8" VerticalAlignment="Center">
+                            <Polygon Classes="gauge-fill"
+                                     Points="0,8 3,0 13,0 10,8"
+                                     IsVisible="{Binding IsFilled}" />
+                            <Polygon Classes="gauge-outline"
+                                     Points="0,8 3,0 13,0 10,8"
+                                     StrokeThickness="1"
+                                     Fill="Transparent"
+                                     IsVisible="{Binding IsEmpty}" />
+                          </Panel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="instrument-meta gauge-label"
+                               VerticalAlignment="Center"
+                               Text="{Binding Instruments.ContextLabel}"
+                               AutomationProperties.AutomationId="strip-context-label" />
+                  </StackPanel>
+                </Button>
               </StackPanel>
             </Grid>
           </Border>

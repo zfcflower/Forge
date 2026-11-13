@@ -108,3 +108,12 @@ public readonly record struct CompactionBudget(int Window, int Reserve, int Usab
 /// example because an inherited prefix alone exceeds it). It stays off until a manual compaction or another model.
 /// </summary>
 public sealed record AgentCompactionStalled(string AgentId, int ContextTokens, int TriggerTokens) : AgentEvent(AgentId);
+
+/// <summary>
+/// The context size C of an instance as automatic compaction sees it (the last real prompt size plus an estimate of what was
+/// appended since), reported after every model request and after every compaction. <see cref="UsableTokens"/> is the
+/// usable input budget U of the instance's model and <see cref="TriggerTokens"/> the trigger line under the policy in
+/// force; both are null when the model's window is unknown.
+/// </summary>
+public sealed record AgentContextMeasured(string AgentId, int ContextTokens, int? UsableTokens, int? TriggerTokens)
+    : AgentEvent(AgentId);

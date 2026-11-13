@@ -72,8 +72,10 @@ internal sealed record AgentRuntimeServices(
     // --- web tools (web_fetch / web_search) ---
     /// <summary>
     /// Produces the web tools when a session assembles its tool surface: <c>web_fetch</c> always, <c>web_search</c> only
-    /// while a backend is configured with its key or URL. Null in a unit test: no web tools. Both always ask for approval
-    /// (see <c>CreatePolicy</c>): network egress can carry data out.
+    /// while a backend is configured with its key or URL. Called again at the start of every turn: when the names it
+    /// returns differ from what the session's host holds, the external set is republished (otherwise nothing changes,
+    /// so the prompt cache stays). Should be cheap and return shared instances. Null in a unit test: no web tools. Both
+    /// always ask for approval (see <c>CreatePolicy</c>): network egress can carry data out.
     /// </summary>
     public Func<IReadOnlyList<ITool>>? WebTools { get; set; }
     // --- end web tools ---
@@ -100,8 +102,22 @@ internal sealed record AgentRuntimeServices(
     /// <summary>Largest output of a model when its settings do not pin one; null = unknown (the reserve is then 20% of the window).</summary>
     public Func<ModelSettings, int?>? MaxOutputTokens { get; set; }
 
-    /// <summary>The <c>compaction</c> settings, read when a session's host is built; null = the defaults.</summary>
+    /// <summary>
+    /// The <c>compaction</c> settings, read when a session's host is built, again before every turn and whenever
+    /// <see cref="CompactionChanges"/> reports a save; null = the defaults (or the store's current value when only the store
+    /// is set).
+    /// </summary>
     public Func<CompactionSettings>? Compaction { get; set; }
+
+    /// <summary>
+    /// The settings store whose <see cref="CompactionSettingsStore.Changed"/> makes every live session re-apply the settings
+    /// to its host at once, so a running turn uses them from its next model request. Null in a unit test that does not care.
+    /// </summary>
+    public CompactionSettingsStore? CompactionChanges { get; set; }
+
+    /// <summary>The settings in force: <see cref="Compaction"/>, else the store's current value, else the defaults.</summary>
+    internal CompactionSettings CurrentCompaction() =>
+        Compaction?.Invoke() ?? CompactionChanges?.Current ?? CompactionSettings.Default;
     // --- end compaction ---
 
     public static string? UserDirectory()
@@ -131,6 +147,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private SessionQuestionHandler? questionHandler;
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
+    private CompactionSettings? appliedCompaction;
     private bool disposed;
 
     // Sub-agent sessions aliased to this runtime in the router, by child agent id. Guarded by gate.
@@ -140,6 +157,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     {
         this.services = services;
         Session = session;
+        if (services.CompactionChanges is { } changes)
+        {
+            changes.Changed += OnCompactionChanged;
+        }
     }
 
     public SessionInfo Session { get; }
@@ -464,6 +485,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             if (host is not null && root is not null && !rootStale)
             {
                 ApplyDisabledTools(host);
+                RefreshWebTools(host);
+                ApplyCompaction(host);
                 return (host, root);
             }
 
@@ -479,6 +502,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             host ??= built;
             root = agent;
             ApplyDisabledTools(host);
+            RefreshWebTools(host);
+            ApplyCompaction(host);
             rootStale = !SameDefinition(rootDefinition, definition);
 
             // Subscribed here rather than in Build: a registration that arrives before the host field is set would otherwise
@@ -502,6 +527,115 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    /// <summary>
+    /// Brings the web tools <paramref name="target"/> holds in line with the web settings: when the names the factory
+    /// offers now differ from the held ones (<c>web_search</c> appearing because a backend became usable, or vanishing
+    /// because it no longer is), the external set is collected afresh and published. Otherwise nothing is published, so
+    /// the tool set version (and the prompt cache) survives an unrelated settings edit. Runs at the start of every turn
+    /// with the gate held; a turn already running keeps its set until it ends, and <c>web_search</c>'s per-call backend
+    /// read answers "not configured" if the backend went away meanwhile. A failure is traced and the next turn retries.
+    /// </summary>
+    private void RefreshWebTools(AgentHost target)
+    {
+        if (services.WebTools is not { } webTools)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!SameWebTools(webTools(), target.AllTools.External))
+            {
+                target.ReplaceExternalTools(CollectExternalTools());
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Trace.WriteLine("[session] the web tools could not be refreshed: " + exception.Message);
+        }
+    }
+
+    private static bool IsWebTool(string name) =>
+        name is Forge.Core.Tools.Web.WebFetchTool.Name or Forge.Core.Tools.Web.WebSearchTool.Name;
+
+    /// <summary>Whether <paramref name="held"/> carries exactly the web tool names of <paramref name="wanted"/>; no allocation.</summary>
+    private static bool SameWebTools(IReadOnlyList<ITool> wanted, IReadOnlyList<ITool> held)
+    {
+        var heldWeb = 0;
+        foreach (var tool in held)
+        {
+            if (IsWebTool(tool.Definition.Name))
+            {
+                heldWeb++;
+            }
+        }
+
+        if (heldWeb != wanted.Count)
+        {
+            return false;
+        }
+
+        foreach (var tool in wanted)
+        {
+            var found = false;
+            foreach (var candidate in held)
+            {
+                if (string.Equals(candidate.Definition.Name, tool.Definition.Name, StringComparison.Ordinal))
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Hands the current <c>compaction</c> settings to the host when they differ from what it last got; the window and
+    /// max-output resolvers stay the catalog's. Caller holds <see cref="gate"/>.
+    /// </summary>
+    private void ApplyCompaction(AgentHost target)
+    {
+        var settings = services.CurrentCompaction();
+        if (settings == appliedCompaction)
+        {
+            return;
+        }
+
+        target.SetCompactionPolicy(settings.ToPolicy(services.ContextWindow, services.MaxOutputTokens));
+        appliedCompaction = settings;
+    }
+
+    /// <summary>A settings save reaches a built host at once, so even a running turn uses it from its next request.</summary>
+    private void OnCompactionChanged(object? sender, EventArgs e)
+    {
+        lock (gate)
+        {
+            if (!disposed && host is { } current)
+            {
+                ApplyCompaction(current);
+            }
+        }
+    }
+
+    /// <summary>The policy the session's host is using now; null before the host is built. For tests and diagnostics.</summary>
+    internal CompactionPolicy? CompactionPolicy
+    {
+        get
+        {
+            lock (gate)
+            {
+                return host?.CompactionPolicy;
+            }
+        }
+    }
+
     private AgentHost Build()
     {
         var handler = services.Approvals?.CreateHandler(Session);
@@ -516,6 +650,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         var templates = services.PromptTemplates?.Resolve(Session.WorkspacePath)
             ?? PromptTemplateSet.BuiltIn(Prompts.AppPromptTexts.Registry);
         var layers = LayerSources.Resolve(templates.Slot(PromptSlotIds.System), AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
+        var compaction = services.CurrentCompaction();
         var built = new AgentHost(
             new AgentHostOptions
             {
@@ -536,11 +671,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 {
                     DefaultModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model,
                     MessageCacheTtl = services.MessageCacheTtl,
-                    // compaction (feature B): thresholds relative to each model's effective window.
-                    Compaction = (services.Compaction?.Invoke() ?? CompactionSettings.Default)
-                        .ToPolicy(services.ContextWindow, services.MaxOutputTokens),
+                    // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
+                    // this host through ApplyCompaction.
+                    Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens),
                 },
             });
+        appliedCompaction = compaction;
 
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
         builtHost = built;
@@ -637,7 +773,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         // host actually holds instead of calling the factory again.
         foreach (var tool in external)
         {
-            if (tool.Definition.Name is Forge.Core.Tools.Web.WebFetchTool.Name or Forge.Core.Tools.Web.WebSearchTool.Name)
+            if (IsWebTool(tool.Definition.Name))
             {
                 descriptors.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.Web));
             }
@@ -787,6 +923,21 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <summary>The tool surface one session runs with (see <see cref="CollectExternalTools"/>); tests read it directly.</summary>
     internal IReadOnlyList<ITool> BuildTools() => CollectExternalTools();
 
+    /// <summary>
+    /// The host's currently published tool registry: a new instance exactly when a new tool set was published, so tests
+    /// compare it across turns to prove that the prompt cache was (or was not) invalidated. Null before the first turn.
+    /// </summary>
+    internal ToolRegistry? PublishedTools
+    {
+        get
+        {
+            lock (gate)
+            {
+                return disposed ? null : builtHost?.Tools;
+            }
+        }
+    }
+
     public void Dispose()
     {
         SessionApprovalHandler? handler;
@@ -807,6 +958,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             questionHandler = null;
             client = listenedClient;
             listenedClient = null;
+        }
+
+        if (services.CompactionChanges is { } changes)
+        {
+            changes.Changed -= OnCompactionChanged;
         }
 
         services.ToolRouter?.Unregister(SessionId, this);

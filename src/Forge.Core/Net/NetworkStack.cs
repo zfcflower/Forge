@@ -61,6 +61,7 @@ public sealed class NetworkStack : INetworkStack, IDisposable
     private readonly Lazy<HttpClient> dohClient;
     private State state;
     private int disposed;
+    private int routeVersion;
 
     /// <param name="settings">The initial settings; null is <see cref="NetworkSettings.Default"/>.</param>
     /// <param name="resolverFactory">Replaces the built-in resolver choice (tests).</param>
@@ -84,14 +85,27 @@ public sealed class NetworkStack : INetworkStack, IDisposable
     public void Apply(NetworkSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        Volatile.Write(ref state, Build(settings));
+        var next = Build(settings);
+        var previous = Interlocked.Exchange(ref state, next);
+        if (!SameSettings(previous.Settings, settings))
+        {
+            Interlocked.Increment(ref routeVersion);
+        }
+
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>Bumped by <see cref="Apply"/> only when the settings actually differ; wrappers swap their inner handler on a new value.</summary>
+    internal int RouteVersion => Volatile.Read(ref routeVersion);
 
     public HttpMessageHandler CreateHandler(NetworkHandlerOptions? options = null)
     {
         var chosen = options ?? new NetworkHandlerOptions();
-        return new SocketsHttpHandler
+        return new SwappableNetworkHandler(this, () => CreateInner(chosen));
+    }
+
+    private SocketsHttpHandler CreateInner(NetworkHandlerOptions chosen) =>
+        new()
         {
             AllowAutoRedirect = chosen.AllowAutoRedirect,
             AutomaticDecompression = chosen.AutomaticDecompression,
@@ -102,7 +116,14 @@ public sealed class NetworkStack : INetworkStack, IDisposable
             Proxy = proxy,
             ConnectCallback = (context, ct) => ConnectAsync(context, chosen, ct),
         };
-    }
+
+    private static bool SameSettings(NetworkSettings a, NetworkSettings b) =>
+        a.Dns == b.Dns
+        && a.Proxy == b.Proxy
+        && string.Equals(a.DohUrl, b.DohUrl, StringComparison.Ordinal)
+        && string.Equals(a.ProxyUrl, b.ProxyUrl, StringComparison.Ordinal)
+        && a.DnsServers.SequenceEqual(b.DnsServers)
+        && a.ProxyBypass.SequenceEqual(b.ProxyBypass);
 
     public ValueTask<IPAddress[]> ResolveAsync(string host, CancellationToken ct)
     {

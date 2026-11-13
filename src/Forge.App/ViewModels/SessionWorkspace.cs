@@ -106,6 +106,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
     private bool isReadOnlyView;
     private bool isHandingOver;
     private AsyncRelayCommand? continueCommand;
+    private AsyncRelayCommand? compactCommand;
     private AsyncRelayCommand? restoreCommand;
     private string? continueBlockedReason;
 
@@ -212,6 +213,12 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 
     /// <summary>While a turn runs: stop it and send the draft right after.</summary>
     public RelayCommand RedirectCommand { get; }
+
+    /// <summary>
+    /// The context gauge's click: the same manual compaction as <c>/compact</c>, offered only while
+    /// <see cref="CanCompactNow"/> holds (re-evaluated with every send-state change).
+    /// </summary>
+    public AsyncRelayCommand CompactCommand => compactCommand ??= new AsyncRelayCommand(_ => CompactNowAsync(), () => CanCompactNow);
 
     /// <summary>Messages waiting for the running turn: interjections not yet delivered, then the queue in sending order.</summary>
     public ReadOnlyObservableCollection<QueuedMessageViewModel> Queued { get; }
@@ -866,6 +873,10 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         QueueCommand.NotifyCanExecuteChanged();
         InterjectCommand.NotifyCanExecuteChanged();
         RedirectCommand.NotifyCanExecuteChanged();
+
+        // Every input of CanCompactNow (running, gating, handing over, compacting, read-only) changes through here.
+        OnPropertyChanged(nameof(CanCompactNow));
+        compactCommand?.NotifyCanExecuteChanged();
     }
 
     private async Task SendAsync(CancellationToken ignored)
@@ -960,10 +971,20 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 
         compacting = true;
         RefreshCanSend();
-        OnPropertyChanged(nameof(CanCompactNow));
+        AgentContextMeasured? measured = null;
         try
         {
-            var result = await live.CompactNowAsync(static _ => { }, focus, CancellationToken.None).ConfigureAwait(true);
+            // The measurement arrives on a worker thread; it is only read after the await, back on the UI thread.
+            var result = await live.CompactNowAsync(
+                value =>
+                {
+                    if (value is AgentContextMeasured context && string.Equals(context.AgentId, "root", StringComparison.Ordinal))
+                    {
+                        Volatile.Write(ref measured, context);
+                    }
+                },
+                focus,
+                CancellationToken.None).ConfigureAwait(true);
             if (result is null)
             {
                 Transcript.AddNotice(CompactionStrings.Nothing());
@@ -971,7 +992,14 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
             else
             {
                 Transcript.AddNotice(SessionStrings.Compacted(result.TokensBefore, result.TokensAfter));
-                Instruments.NoteCompacted(result.TokensAfter);
+                if (Volatile.Read(ref measured) is { } context)
+                {
+                    Instruments.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
+                }
+                else
+                {
+                    Instruments.NoteCompacted(result.TokensAfter);
+                }
             }
         }
         catch (InvalidOperationException)
@@ -986,7 +1014,6 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         {
             compacting = false;
             RefreshCanSend();
-            OnPropertyChanged(nameof(CanCompactNow));
             ScheduleNext();
         }
     }
@@ -1646,6 +1673,9 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
             case AgentCompacted compacted:
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));
                 break;
+            case AgentContextMeasured context:
+                Instruments.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
+                break;
             case AgentCompactionStalled stalled:
                 Card(stalled.AgentId)?.AddNotice(CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens), isError: true);
                 break;
@@ -1668,15 +1698,62 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 
     private void OnInterjected(AgentInterjected interjected)
     {
-        var chip = queued.FirstOrDefault(message =>
-            message.IsInterjection && string.Equals(message.Text, interjected.Text, StringComparison.Ordinal));
-        if (chip is not null)
+        var attachments = interjected.Attachments ?? [];
+        if (FindInterjectionChip(queued, interjected.Text, attachments) is { } chip)
         {
             queued.Remove(chip);
             OnQueueChanged();
         }
 
-        Card(interjected.AgentId)?.AddNotice(SessionStrings.ComposerInterjectedNotice(interjected.Text));
+        Card(interjected.AgentId)?.AddNotice(SessionStrings.ComposerInterjectedNotice(interjected.Text, attachments));
+    }
+
+    /// <summary>
+    /// The pending interjection chip a delivered interjection belongs to: the first one with the same typed text (blank
+    /// reads as none) and the very same attachment blocks — the loop reports the instances the chip handed over, so two
+    /// attachment-only interjections are told apart. When no chip holds those instances (a chip carried over from another
+    /// view), the first with the same text and attachment count is taken.
+    /// </summary>
+    internal static QueuedMessageViewModel? FindInterjectionChip(
+        IEnumerable<QueuedMessageViewModel> chips,
+        string text,
+        IReadOnlyList<ContentBlock> attachments)
+    {
+        QueuedMessageViewModel? fallback = null;
+        foreach (var chip in chips)
+        {
+            if (!chip.IsInterjection || !SameTypedText(chip.Text, text) || chip.Attachments.Count != attachments.Count)
+            {
+                continue;
+            }
+
+            if (SameBlocks(chip.Attachments, attachments))
+            {
+                return chip;
+            }
+
+            fallback ??= chip;
+        }
+
+        return fallback;
+    }
+
+    private static bool SameTypedText(string chipText, string deliveredText) =>
+        string.IsNullOrWhiteSpace(chipText)
+            ? string.IsNullOrWhiteSpace(deliveredText)
+            : string.Equals(chipText, deliveredText, StringComparison.Ordinal);
+
+    private static bool SameBlocks(IReadOnlyList<ContentBlock> left, IReadOnlyList<ContentBlock> right)
+    {
+        for (var index = 0; index < left.Count; index++)
+        {
+            if (!ReferenceEquals(left[index], right[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

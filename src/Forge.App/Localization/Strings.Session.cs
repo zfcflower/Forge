@@ -65,6 +65,10 @@ internal static class SessionStrings
     public const string ComposerRemoveQueuedKey = "session.composer.removeQueued";
     public const string ComposerQueuePausedKey = "session.composer.queuePaused";
     public const string ComposerInterjectedNoticeKey = "session.composer.interjectedNotice";
+    public const string ComposerInterjectedAttachmentsBase = "session.composer.interjectedAttachments";
+    public const string ComposerInterjectedTextAttachmentsBase = "session.composer.interjectedTextAttachments";
+    public const string ComposerAttachmentImageKey = "session.composer.attachmentImage";
+    public const string ComposerAttachmentSeparatorKey = "session.composer.attachmentSeparator";
     public const string ComposerSkillKey = "session.composer.skill";
     public const string ComposerCommandKey = "session.composer.command";
     public const string ComposerNoMatchesKey = "session.composer.noMatches";
@@ -185,6 +189,48 @@ internal static class SessionStrings
     }];
 
     public static LocText ComposerInterjectedNotice(string text) => new(ComposerInterjectedNoticeKey, text);
+
+    /// <summary>
+    /// The notice of a delivered interjection. Text only: "插话：<text>". Attachments only: "插话：2 个附件（a.png、report.pdf）",
+    /// an image without a name reading as "图片". Text and attachments: the text plus the attachment count. The names are
+    /// resolved when the notice renders, so the placeholder follows a language switch.
+    /// </summary>
+    public static LocText ComposerInterjectedNotice(string text, IReadOnlyList<ContentBlock> attachments)
+    {
+        ArgumentNullException.ThrowIfNull(attachments);
+        if (attachments.Count == 0)
+        {
+            return ComposerInterjectedNotice(text);
+        }
+
+        var count = TextFormat.Number(attachments.Count);
+        return string.IsNullOrWhiteSpace(text)
+            ? LocText.Plural(ComposerInterjectedAttachmentsBase, attachments.Count, count, new AttachmentNames(attachments))
+            : LocText.Plural(ComposerInterjectedTextAttachmentsBase, attachments.Count, text, count);
+    }
+
+    /// <summary>
+    /// The display names of an interjection's attachments, joined in the language of the moment: a file's own name (its
+    /// media type when it has none), an inlined text file's name, and the image placeholder for an image.
+    /// </summary>
+    private sealed class AttachmentNames(IReadOnlyList<ContentBlock> attachments)
+    {
+        public override string ToString()
+        {
+            var names = new string[attachments.Count];
+            for (var index = 0; index < names.Length; index++)
+            {
+                names[index] = attachments[index] switch
+                {
+                    FileBlock file => string.IsNullOrWhiteSpace(file.Name) ? file.MediaType : file.Name,
+                    TextBlock block when Forge.Core.Storage.TextAttachment.TryParse(block.Text, out var name, out _) => name,
+                    _ => Loc.Instance[ComposerAttachmentImageKey],
+                };
+            }
+
+            return string.Join(Loc.Instance[ComposerAttachmentSeparatorKey], names);
+        }
+    }
     // ---------------------------------------------------------------- turn card
     /// <summary>
     /// <c>第 3 轮 · 12:30:45 · 4.2 秒 · 输入 900 · 输出 80</c> / <c>Turn 3 · 12:30:45 · 4.2s · in 900 · out 80</c>; a side
@@ -383,6 +429,12 @@ internal static class SessionStrings
         Loc.Register(ComposerRemoveQueuedKey, "移除", "Remove");
         Loc.Register(ComposerQueuePausedKey, "队列已暂停：发送或按 Ctrl+Enter 继续", "Queue paused: send or press Ctrl+Enter to resume");
         Loc.Register(ComposerInterjectedNoticeKey, "插话：{0}", "Interjected: {0}");
+        Loc.Register(ComposerInterjectedAttachmentsBase + ".one", "插话：{0} 个附件（{1}）", "Interjected: {0} attachment ({1})");
+        Loc.Register(ComposerInterjectedAttachmentsBase + ".other", "插话：{0} 个附件（{1}）", "Interjected: {0} attachments ({1})");
+        Loc.Register(ComposerInterjectedTextAttachmentsBase + ".one", "插话：{0}（另附 {1} 个附件）", "Interjected: {0} (+{1} attachment)");
+        Loc.Register(ComposerInterjectedTextAttachmentsBase + ".other", "插话：{0}（另附 {1} 个附件）", "Interjected: {0} (+{1} attachments)");
+        Loc.Register(ComposerAttachmentImageKey, "图片", "image");
+        Loc.Register(ComposerAttachmentSeparatorKey, "、", ", ");
         Loc.Register(ComposerSkillKey, "技能", "Skill");
         Loc.Register(ComposerCommandKey, "命令", "Command");
         Loc.Register(ComposerNoMatchesKey, "没有匹配项", "No matches");        Loc.Register(StoppedKey, "已停止", "Stopped");

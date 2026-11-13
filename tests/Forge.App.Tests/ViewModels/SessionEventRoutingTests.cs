@@ -5,6 +5,7 @@ using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Providers;
 using Forge.App.ViewModels;
+using Forge.Core.Agents;
 using Xunit;
 
 namespace Forge.App.Tests.ViewModels;
@@ -179,6 +180,120 @@ public sealed class SessionEventRoutingTests
         Assert.False(reading.label.Any(char.IsAsciiDigit), "the chip label still spells out a count: " + reading.label);
         Assert.Contains("1", reading.name);
     }
+
+    // ---------------------------------------------------------------- the context gauge and interjection notices
+
+    /// <summary>
+    /// The gauge follows Core's context reports through the same sink every runtime event takes: after a model request,
+    /// after an automatic compaction, and never for a sub-agent.
+    /// </summary>
+    [Fact]
+    public async Task The_context_gauge_follows_the_root_agents_reports_and_an_automatic_compaction()
+    {
+        using var language = new Forge.App.Tests.Localization.LanguageScope(Forge.App.Preferences.UiLanguage.Chinese);
+        var session = SharedUi.Session;
+        var readings = await session.Dispatch(
+            async () =>
+            {
+                using var workspace = CreateWorkspace();
+                var labels = new List<string> { workspace.Instruments.ContextLabel };
+
+                await Task.Run(() => Emit(workspace, new AgentContextMeasured("root", 68_000, 170_000, 136_000)));
+                Assert.True(
+                    await PumpUntilAsync(() => workspace.Instruments.HasContextMeasure),
+                    "the request's context report never reached the gauge");
+                labels.Add(workspace.Instruments.ContextLabel);
+
+                Emit(workspace, new AgentContextMeasured("root", 140_000, 170_000, 136_000));
+                Assert.True(await PumpUntilAsync(() => workspace.Instruments.IsContextOver), "the gauge never turned over");
+                labels.Add(workspace.Instruments.ContextLabel);
+
+                // A sub-agent's report is ignored; an automatic compaction's notice and report move the gauge back.
+                Emit(workspace, new AgentContextMeasured(ChildAgentId, 10, 170_000, 136_000));
+                Emit(workspace, new AgentCompacted("root", 140_000, 30_000));
+                Emit(workspace, new AgentContextMeasured("root", 34_000, 170_000, 136_000));
+                Assert.True(
+                    await PumpUntilAsync(() => workspace.Instruments.ContextLabel.StartsWith("34k", StringComparison.Ordinal)),
+                    "the compaction's report never reached the gauge");
+                labels.Add(workspace.Instruments.ContextLabel);
+                labels.Add(workspace.Instruments.IsContextOver || workspace.Instruments.IsContextWarning ? "hot" : "normal");
+                return labels;
+            },
+            CancellationToken.None);
+
+        Assert.Equal(["0%", "68k/170k · 40%", "140k/170k · 82%", "34k/170k · 20%", "normal"], readings);
+    }
+
+    [Fact]
+    public async Task An_attachment_only_interjection_leaves_a_notice_that_names_its_attachments()
+    {
+        using var language = new Forge.App.Tests.Localization.LanguageScope(Forge.App.Preferences.UiLanguage.Chinese);
+        var session = SharedUi.Session;
+        var image = new ImageBlock("image/png", "AAAA");
+        var pdf = new FileBlock("application/pdf", "JVBERi0=", "report.pdf");
+        var notices = await session.Dispatch(
+            async () =>
+            {
+                using var workspace = CreateWorkspace();
+                await Task.Run(() => Emit(workspace, new AgentInterjected("root", string.Empty, At, [image, pdf])));
+                Emit(workspace, new AgentInterjected("root", "看这张图", At, [image]));
+                Emit(workspace, new AgentInterjected("root", "plain", At, []));
+                Assert.True(
+                    await PumpUntilAsync(() => CardNotices(workspace).Count == 3),
+                    "the interjection notices never reached the turn card");
+                return CardNotices(workspace);
+            },
+            CancellationToken.None);
+
+        Assert.Equal(["插话：2 个附件（图片、report.pdf）", "插话：看这张图（另附 1 个附件）", "插话：plain"], notices);
+    }
+
+    /// <summary>
+    /// The gauge's click is the same manual compaction as <c>/compact</c>, offered only when <c>CanCompactNow</c> holds: never
+    /// on a read-only view, and not again while one runs.
+    /// </summary>
+    [Fact]
+    public async Task The_gauge_command_compacts_only_when_compaction_is_allowed()
+    {
+        using var language = new Forge.App.Tests.Localization.LanguageScope(Forge.App.Preferences.UiLanguage.Chinese);
+        var session = SharedUi.Session;
+        var state = await session.Dispatch(
+            async () =>
+            {
+                var info = new SessionInfo(SessionId, Path.GetTempPath(), "read only", At);
+                using var readOnly = new SessionWorkspaceViewModel(info, runtime: null, checkpoints: null, new EmptySessionStore(At), TestProviderServices.UnconfiguredProbe());
+                var readOnlyCan = readOnly.CompactCommand.CanExecute(null);
+
+                using var workspace = CreateWorkspace();
+                var idleCan = (workspace.CanCompactNow, workspace.CompactCommand.CanExecute(null));
+                var changes = 0;
+                workspace.CompactCommand.CanExecuteChanged += (_, _) => changes++;
+
+                // Clicking runs the manual compaction; while it runs the gauge (and /compact) are not offered again.
+                workspace.CompactCommand.Execute(null);
+                var during = (workspace.CanCompactNow, workspace.CompactCommand.CanExecute(null));
+                var finished = await PumpUntilAsync(() => workspace.CanCompactNow);
+                var notes = Texts(workspace.Transcript);
+                return (readOnlyCan, idleCan, during, finished, changes, notes, after: workspace.CompactCommand.CanExecute(null));
+            },
+            CancellationToken.None);
+
+        Assert.False(state.readOnlyCan);
+        Assert.Equal((true, true), state.idleCan);
+        Assert.Equal((false, false), state.during);
+        Assert.True(state.finished, "the compaction never finished");
+        Assert.True(state.after);
+        Assert.True(state.changes >= 2, "the command never told the gauge to re-read whether it can run");
+        // An empty session has nothing to compact; the click still reports its outcome like /compact does.
+        Assert.Contains("没有可压缩的内容", state.notes);
+    }
+
+    private static List<string> CardNotices(SessionWorkspaceViewModel workspace) =>
+        workspace.Transcript.Items
+            .OfType<TurnCardViewModel>()
+            .SelectMany(static card => card.Blocks.OfType<TurnNoticeViewModel>())
+            .Select(static notice => notice.Text)
+            .ToList();
 
     private static void Emit(SessionWorkspaceViewModel workspace, AgentEvent value) => Sink.Invoke(workspace, [value]);
 

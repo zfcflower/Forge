@@ -31,6 +31,12 @@ internal static class InstrumentsStrings
     public const string UsageCacheWriteKey = "session.strip.usage.cacheWrite";
     public const string UsageCacheKey = "session.strip.usage.cache";
     public const string UsageContextKey = "session.strip.usage.context";
+    public const string ContextPercentKey = "session.strip.context.percent";
+    public const string ContextTokensKey = "session.strip.context.tokens";
+    public const string ContextTooltipKey = "session.strip.context.tooltip";
+    public const string ContextTooltipUnknownKey = "session.strip.context.tooltip.unknown";
+    public const string ContextTooltipPendingKey = "session.strip.context.tooltip.pending";
+    public const string ContextCompactNameKey = "session.strip.context.compact";
     public const string CacheReadKey = "session.strip.cacheRead";
     public const string UsageNoneKey = "session.strip.usage.none";
 
@@ -120,10 +126,27 @@ internal static class InstrumentsStrings
 
     public static string UsageCache(string ratio) => Loc.Instance.Format(UsageCacheKey, ratio);
 
-    public static string UsageContext(string percent, string window) =>
-        Loc.Instance.Format(UsageContextKey, percent, window);
 
     public static string UsageNone => Loc.Instance[UsageNoneKey];
+    /// <summary>"62k/170k · 36%": the context over the usable budget, then the percentage.</summary>
+    public static string UsageContext(string used, string usable, string percent) =>
+        Loc.Instance.Format(UsageContextKey, used, usable, percent);
+
+    /// <summary>"0%": the gauge's label before the first request reported a context size.</summary>
+    public static string ContextPercent(string percent) => Loc.Instance.Format(ContextPercentKey, percent);
+
+    /// <summary>"62k": the context size alone, when the model's window is unknown.</summary>
+    public static string ContextTokens(string used) => Loc.Instance.Format(ContextTokensKey, used);
+
+    public static string ContextTooltip(string used, string usable, string percent, string trigger, string triggerPercent) =>
+        Loc.Instance.Format(ContextTooltipKey, used, usable, percent, trigger, triggerPercent);
+
+    public static string ContextTooltipUnknown(string used) => Loc.Instance.Format(ContextTooltipUnknownKey, used);
+
+    public static string ContextTooltipPending => Loc.Instance[ContextTooltipPendingKey];
+
+    /// <summary>The gauge button's accessible name: what clicking it does.</summary>
+    public static string ContextCompactName => Loc.Instance[ContextCompactNameKey];
 
     /// <summary>"RC 98.5" — the cache-read hit rate in the strip, one decimal; the gauge beside it carries the percentage.</summary>
     public static string CacheRead(string ratio) => Loc.Instance.Format(CacheReadKey, ratio);
@@ -240,7 +263,22 @@ internal static class InstrumentsStrings
         Loc.Register(UsageCacheReadKey, "R {0}", "R {0}");
         Loc.Register(UsageCacheWriteKey, "W {0}", "W {0}");
         Loc.Register(UsageCacheKey, "RC {0}", "RC {0}");
-        Loc.Register(UsageContextKey, "{0}/{1}", "{0}/{1}");
+        Loc.Register(UsageContextKey, "{0}/{1} · {2}%", "{0}/{1} · {2}%");
+        Loc.Register(ContextPercentKey, "{0}%", "{0}%");
+        Loc.Register(ContextTokensKey, "{0}", "{0}");
+        Loc.Register(
+            ContextTooltipKey,
+            "上下文 {0} / 可用 {1}（{2}%），到 {3}（{4}%）自动压缩。点击立即压缩",
+            "Context {0} of {1} usable ({2}%); compacts automatically at {3} ({4}%). Click to compact now");
+        Loc.Register(
+            ContextTooltipUnknownKey,
+            "上下文 {0}；模型窗口未知，不显示百分比。点击立即压缩",
+            "Context {0}; the model's window is unknown, so there is no percentage. Click to compact now");
+        Loc.Register(
+            ContextTooltipPendingKey,
+            "上下文用量在下一次模型请求后显示。点击立即压缩",
+            "Context usage appears after the next model request. Click to compact now");
+        Loc.Register(ContextCompactNameKey, "压缩上下文", "Compact context");
         Loc.Register(CacheReadKey, "RC {0}%", "RC {0}%");
         Loc.Register(UsageNoneKey, "暂无用量", "No usage yet");
 

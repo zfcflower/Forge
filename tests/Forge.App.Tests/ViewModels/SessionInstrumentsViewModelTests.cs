@@ -10,7 +10,7 @@ namespace Forge.App.Tests.ViewModels;
 
 /// <summary>
 /// Pins the composer strip's data (task spec "Forge.App", 计数语义 table): every counter is "this session's number over
-/// the app-wide one", the context bar only appears when the window <em>and</em> the last prompt size are both known, and a
+/// the app-wide one", the context gauge shows a percentage only when the root agent reported its context size <em>and</em> the usable budget is known, and a
 /// source that knows nothing leaves the readout blank instead of inventing a percentage or a price.
 /// <para>The model metadata and the two background reads (skills, approval records) are faked through
 /// <see cref="ISessionInstrumentSources"/>; the real chain is pinned in <c>ProviderMetadataTests</c> and the arithmetic
@@ -273,10 +273,10 @@ public sealed class SessionInstrumentsViewModelTests
         Assert.Equal("1/2", counts.After);
     }
 
-    // ---------------------------------------------------------------- usage and the context bar
+    // ---------------------------------------------------------------- usage and the context gauge
 
     [Fact]
-    public async Task The_context_bar_follows_the_root_agent_and_ignores_a_child_agents_usage()
+    public async Task The_gauge_follows_the_root_agents_context_reports_and_ignores_turn_sums_and_child_agents()
     {
         using var language = new LanguageScope(UiLanguage.Chinese);
         var session = SharedUi.Session;
@@ -286,64 +286,136 @@ public sealed class SessionInstrumentsViewModelTests
             () =>
             {
                 using var instruments = Create(sources);
-                var beforeTurn = (instruments.HasContextWindow, instruments.ContextLabel);
+                var before = (instruments.HasContextMeasure, instruments.ContextLabel, instruments.ContextTooltip);
 
-                // A child agent's spend stays on its tab: it neither fills the bar nor counts as session usage.
-                instruments.AddTurn("child-1", new TokenUsage(90_000, 500));
-                var afterChild = (
-                    instruments.HasUsage,
+                // A turn's summed input is a cost figure, not a prompt size: the gauge stays where it was.
+                instruments.AddTurn("root", new TokenUsage(90_000, 400));
+                var afterTurn = (instruments.HasUsage, instruments.HasContextMeasure, instruments.ContextLabel);
+
+                // A sub-agent has its own model and window; its report never reaches the session's gauge.
+                instruments.NoteContext("child-1", 160_000, 170_000, 136_000);
+                var afterChild = (instruments.HasContextMeasure, instruments.ContextLabel);
+
+                var raised = Watch(instruments);
+                instruments.NoteContext("root", 68_000, 170_000, 136_000);
+                var measured = (
+                    instruments.HasContextMeasure,
                     instruments.HasContextWindow,
                     instruments.ContextLabel,
                     instruments.ContextPercent,
-                    instruments.UsageTooltip);
-
-                instruments.AddTurn("root", new TokenUsage(18_000, 400));
-                var afterRoot = (
-                    instruments.HasUsage,
-                    instruments.HasContextWindow,
-                    instruments.ContextLabel,
-                    instruments.ContextPercent,
+                    instruments.ContextLevel,
+                    instruments.ContextTooltip,
                     Segments: instruments.ContextSegments.Count,
                     Filled: instruments.ContextSegments.Count(static segment => segment.IsFilled));
+                var names = string.Join(",", raised);
 
-                // The gauge follows the conversation's own prompt, so a later, larger root turn moves it.
-                instruments.AddTurn("root", new TokenUsage(50_000, 100));
-                var afterSecondTurn = (
-                    instruments.ContextLabel,
-                    instruments.ContextPercent,
-                    Segments: instruments.ContextSegments.Count,
-                    Filled: instruments.ContextSegments.Count(static segment => segment.IsFilled));
-
-                return (BeforeTurn: beforeTurn, AfterChild: afterChild, AfterRoot: afterRoot, AfterSecondTurn: afterSecondTurn);
+                return (Before: before, AfterTurn: afterTurn, AfterChild: afterChild, Measured: measured, Names: names);
             },
             new CancellationTokenSource(StepBudget).Token);
 
-        Assert.False(state.BeforeTurn.HasContextWindow);
-        Assert.Equal("0%/200k", state.BeforeTurn.ContextLabel);
+        Assert.False(state.Before.HasContextMeasure);
+        Assert.Equal("0%", state.Before.ContextLabel);
+        Assert.Equal("上下文用量在下一次模型请求后显示。点击立即压缩", state.Before.ContextTooltip);
 
-        Assert.False(state.AfterChild.HasUsage);
-        Assert.False(state.AfterChild.HasContextWindow);
-        Assert.Equal("0%/200k", state.AfterChild.ContextLabel);
-        Assert.Equal(0d, state.AfterChild.ContextPercent);
-        Assert.StartsWith("↑0 ↓0 · R 0 · W 0 · RC 0.0% · $", state.AfterChild.UsageTooltip, StringComparison.Ordinal);
+        Assert.True(state.AfterTurn.HasUsage);
+        Assert.False(state.AfterTurn.HasContextMeasure);
+        Assert.Equal("0%", state.AfterTurn.ContextLabel);
 
-        Assert.True(state.AfterRoot.HasUsage);
-        Assert.True(state.AfterRoot.HasContextWindow);
-        Assert.Equal(9d, state.AfterRoot.ContextPercent);
-        Assert.Equal("9%/200k", state.AfterRoot.ContextLabel);
+        Assert.False(state.AfterChild.HasContextMeasure);
+        Assert.Equal("0%", state.AfterChild.ContextLabel);
 
-        // The gauge is always five segments of one size; the filled ones round to the fraction (9% → 0, 25% → 1 of 5).
-        Assert.Equal(5, state.AfterRoot.Segments);
-        Assert.Equal(0, state.AfterRoot.Filled);
+        // C over U (the window minus the output reserve), not over the raw window.
+        Assert.True(state.Measured.HasContextMeasure);
+        Assert.True(state.Measured.HasContextWindow);
+        Assert.Equal("68k/170k · 40%", state.Measured.ContextLabel);
+        Assert.Equal(40d, state.Measured.ContextPercent);
+        Assert.Equal(ContextLevel.Normal, state.Measured.ContextLevel);
+        Assert.Equal("上下文 68k / 可用 170k（40%），到 136k（80%）自动压缩。点击立即压缩", state.Measured.ContextTooltip);
+        Assert.Equal(5, state.Measured.Segments);
+        Assert.Equal(2, state.Measured.Filled);
 
-        Assert.Equal("25%/200k", state.AfterSecondTurn.ContextLabel);
-        Assert.Equal(25d, state.AfterSecondTurn.ContextPercent);
-        Assert.Equal(5, state.AfterSecondTurn.Segments);
-        Assert.Equal(1, state.AfterSecondTurn.Filled);
+        foreach (var name in new[]
+                 {
+                     nameof(SessionInstrumentsViewModel.ContextLabel),
+                     nameof(SessionInstrumentsViewModel.ContextPercent),
+                     nameof(SessionInstrumentsViewModel.ContextSegments),
+                     nameof(SessionInstrumentsViewModel.ContextTooltip),
+                     nameof(SessionInstrumentsViewModel.IsContextWarning),
+                     nameof(SessionInstrumentsViewModel.IsContextOver),
+                 })
+        {
+            Assert.Contains(name, state.Names);
+        }
     }
 
     [Fact]
-    public async Task Without_a_window_the_bar_and_the_context_label_stay_empty_while_the_tokens_show()
+    public async Task The_gauge_warns_ten_points_below_the_trigger_line_and_turns_over_at_it()
+    {
+        using var language = new LanguageScope(UiLanguage.Chinese);
+        var session = SharedUi.Session;
+        var sources = new FakeSources { Metadata = static _ => new ModelMetadata(200_000, null) };
+
+        var state = await session.Dispatch(
+            () =>
+            {
+                using var instruments = Create(sources);
+                (ContextLevel Level, bool Warning, bool Over, string Label) Read() => (
+                    instruments.ContextLevel,
+                    instruments.IsContextWarning,
+                    instruments.IsContextOver,
+                    instruments.ContextLabel);
+
+                // U 170k, trigger 80% = 136k: the warning starts at 70% = 119k.
+                instruments.NoteContext("root", 118_999, 170_000, 136_000);
+                var below = Read();
+                instruments.NoteContext("root", 119_000, 170_000, 136_000);
+                var warning = Read();
+                instruments.NoteContext("root", 136_000, 170_000, 136_000);
+                var over = Read();
+                instruments.NoteContext("root", 200_000, 170_000, 136_000);
+                var past = (Read(), instruments.ContextPercent, Filled: instruments.ContextSegments.Count(static s => s.IsFilled));
+
+                // A compaction that reports no measurement keeps the last known budget and drops back to normal.
+                instruments.NoteCompacted(17_000);
+                var compacted = (Read(), instruments.HasContextWindow);
+                return (Below: below, Warning: warning, Over: over, Past: past, Compacted: compacted);
+            },
+            new CancellationTokenSource(StepBudget).Token);
+
+        Assert.Equal((ContextLevel.Normal, false, false), (state.Below.Level, state.Below.Warning, state.Below.Over));
+        Assert.Equal((ContextLevel.Warning, true, false), (state.Warning.Level, state.Warning.Warning, state.Warning.Over));
+        Assert.Equal("119k/170k · 70%", state.Warning.Label);
+        Assert.Equal((ContextLevel.Over, false, true), (state.Over.Level, state.Over.Warning, state.Over.Over));
+
+        // Past the usable budget the percentage reads the clamped 100 and every segment fills.
+        Assert.Equal(ContextLevel.Over, state.Past.Item1.Level);
+        Assert.Equal(100d, state.Past.ContextPercent);
+        Assert.Equal(5, state.Past.Filled);
+
+        Assert.Equal(ContextLevel.Normal, state.Compacted.Item1.Level);
+        Assert.Equal("17k/170k · 10%", state.Compacted.Item1.Label);
+        Assert.True(state.Compacted.HasContextWindow);
+    }
+
+    [Theory]
+    [InlineData(0, 170_000, 136_000, nameof(ContextLevel.Normal))]
+    [InlineData(118_999, 170_000, 136_000, nameof(ContextLevel.Normal))]
+    [InlineData(119_000, 170_000, 136_000, nameof(ContextLevel.Warning))]
+    [InlineData(135_999, 170_000, 136_000, nameof(ContextLevel.Warning))]
+    [InlineData(136_000, 170_000, 136_000, nameof(ContextLevel.Over))]
+    // A trigger line under ten points: the warning starts at zero.
+    [InlineData(0, 100_000, 5_000, nameof(ContextLevel.Warning))]
+    // Unknown budget or line: nothing to measure against.
+    [InlineData(500_000, null, 136_000, nameof(ContextLevel.Normal))]
+    [InlineData(500_000, 170_000, null, nameof(ContextLevel.Normal))]
+    [InlineData(500_000, 0, 0, nameof(ContextLevel.Normal))]
+    // Large values do not overflow the percentage arithmetic.
+    [InlineData(int.MaxValue - 1, int.MaxValue, int.MaxValue, nameof(ContextLevel.Warning))]
+    public void LevelOf_places_the_thresholds(int context, int? usable, int? trigger, string expected) =>
+        Assert.Equal(expected, SessionInstrumentsViewModel.LevelOf(context, usable, trigger).ToString());
+
+    [Fact]
+    public async Task With_an_unknown_window_the_gauge_shows_tokens_only_and_never_warns()
     {
         using var language = new LanguageScope(UiLanguage.Chinese);
         var session = SharedUi.Session;
@@ -354,22 +426,80 @@ public sealed class SessionInstrumentsViewModelTests
             {
                 using var instruments = Create(sources);
                 instruments.AddTurn("root", new TokenUsage(18_000, 400, CacheReadTokens: 9_000));
-                return (
+
+                // Core reports no budget for an unknown window; a non-positive budget is treated the same way.
+                instruments.NoteContext("root", 18_000, null, null);
+                var unknown = (
                     instruments.HasUsage,
+                    instruments.HasContextMeasure,
                     instruments.HasContextWindow,
                     instruments.ContextLabel,
                     instruments.ContextPercent,
+                    instruments.ContextLevel,
+                    instruments.ContextTooltip,
+                    Filled: instruments.ContextSegments.Count(static segment => segment.IsFilled),
                     instruments.UsageTooltip);
+
+                instruments.NoteContext("root", 900_000, 0, 500);
+                var zero = (instruments.HasContextWindow, instruments.ContextLabel, instruments.ContextLevel);
+                return (Unknown: unknown, Zero: zero);
             },
             new CancellationTokenSource(StepBudget).Token);
 
-        Assert.True(state.HasUsage);
-        Assert.False(state.HasContextWindow);
-        Assert.Equal("0%", state.ContextLabel);
-        Assert.Equal(0d, state.ContextPercent);
+        Assert.True(state.Unknown.HasUsage);
+        Assert.True(state.Unknown.HasContextMeasure);
+        Assert.False(state.Unknown.HasContextWindow);
+        Assert.Equal("18k", state.Unknown.ContextLabel);
+        Assert.Equal(0d, state.Unknown.ContextPercent);
+        Assert.Equal(ContextLevel.Normal, state.Unknown.ContextLevel);
+        Assert.Equal(0, state.Unknown.Filled);
+        Assert.Equal("上下文 18k；模型窗口未知，不显示百分比。点击立即压缩", state.Unknown.ContextTooltip);
         // Tokens and the cache ratio are still real numbers; the window, the percentage and the cost are not invented.
-        Assert.Equal("↑18k ↓400 · R 9k · W 0 · RC 50.0% · $0.0000 · C 0", state.UsageTooltip);
+        Assert.Equal("↑18k ↓400 · R 9k · W 0 · RC 50.0% · $0.0000 · C 0", state.Unknown.UsageTooltip);
+
+        Assert.False(state.Zero.HasContextWindow);
+        Assert.Equal("900k", state.Zero.ContextLabel);
+        Assert.Equal(ContextLevel.Normal, state.Zero.ContextLevel);
     }
+
+    [Fact]
+    public async Task The_gauge_text_follows_a_language_switch()
+    {
+        var session = SharedUi.Session;
+        var previous = Loc.Instance.Language;
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        try
+        {
+            var state = await session.Dispatch(
+                () =>
+                {
+                    Loc.Instance.Language = UiLanguage.Chinese;
+                    var sources = new FakeSources { Metadata = static _ => new ModelMetadata(200_000, null) };
+                    using var instruments = Create(sources);
+                    instruments.NoteContext("root", 68_000, 170_000, 136_000);
+                    var raised = Watch(instruments);
+                    Loc.Instance.Language = UiLanguage.English;
+                    return (Tooltip: instruments.ContextTooltip, Name: InstrumentsStrings.ContextCompactName, Names: string.Join(",", raised));
+                },
+                token);
+
+            Assert.Equal("Context 68k of 170k usable (40%); compacts automatically at 136k (80%). Click to compact now", state.Tooltip);
+            Assert.Equal("Compact context", state.Name);
+            Assert.Contains(nameof(SessionInstrumentsViewModel.ContextTooltip), state.Names);
+        }
+        finally
+        {
+            await session.Dispatch(
+                () =>
+                {
+                    Loc.Instance.Language = previous;
+                    return 0;
+                },
+                token);
+        }
+    }
+
 
     [Fact]
     public async Task The_usage_tooltip_names_every_known_part_and_the_unknown_price_stays_out()
@@ -429,7 +559,7 @@ public sealed class SessionInstrumentsViewModelTests
         // The prompt size of the session's last request is not recoverable from the stored sum.
         Assert.False(state.HasContextWindow);
         Assert.Equal(0d, state.ContextPercent);
-        Assert.Equal("0%/200k", state.ContextLabel);
+        Assert.Equal("0%", state.ContextLabel);
         Assert.Equal("↑5k ↓700 · R 2.5k · W 0 · RC 50.0% · $0.0000 · C 200k", state.Tooltip);
     }
 

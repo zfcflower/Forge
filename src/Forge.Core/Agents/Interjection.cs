@@ -15,6 +15,7 @@ public sealed class Interjection
     {
         Content = content;
         Text = TypedText(content);
+        Attachments = AttachmentsOf(content);
     }
 
     /// <summary>The blocks of the message: <see cref="TextBlock"/>, <see cref="ImageBlock"/> and <see cref="FileBlock"/> only.</summary>
@@ -23,19 +24,39 @@ public sealed class Interjection
     /// <summary>The typed text (text blocks that are not attached files, joined by a blank line); empty for attachments only.</summary>
     public string Text { get; }
 
-    /// <summary>The attachments (images, files, inlined text files) in their order; empty for a text-only message.</summary>
-    public IEnumerable<ContentBlock> Attachments
+    /// <summary>
+    /// The attachments (images, files, inlined text files) in their order, the same block instances as in
+    /// <see cref="Content"/>; empty for a text-only message. <see cref="AgentInterjected"/> reports this list.
+    /// </summary>
+    public IReadOnlyList<ContentBlock> Attachments { get; }
+
+    private static ContentBlock[] AttachmentsOf(IReadOnlyList<ContentBlock> content)
     {
-        get
+        var count = 0;
+        foreach (var block in content)
         {
-            foreach (var block in Content)
+            if (IsAttachment(block))
             {
-                if (IsAttachment(block))
-                {
-                    yield return block;
-                }
+                count++;
             }
         }
+
+        if (count == 0)
+        {
+            return [];
+        }
+
+        var attachments = new ContentBlock[count];
+        var index = 0;
+        foreach (var block in content)
+        {
+            if (IsAttachment(block))
+            {
+                attachments[index++] = block;
+            }
+        }
+
+        return attachments;
     }
 
     internal static Interjection Create(IReadOnlyList<ContentBlock> content)

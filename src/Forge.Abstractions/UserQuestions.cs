@@ -7,6 +7,9 @@ public sealed record UserQuestionOption(string Label, string? Description = null
 /// One question the agent puts to the user. <paramref name="Id"/> is unique within its request and comes back in the answer;
 /// <paramref name="Header"/> is a short chip label (at most 12 characters), <paramref name="Prompt"/> the full question.
 /// Two to six <paramref name="Options"/>; <paramref name="AllowFreeText"/> adds an "other" text box.
+/// For a <paramref name="MultiSelect"/> question <paramref name="MinSelect"/>/<paramref name="MaxSelect"/> bound how many
+/// options may be picked (null: at least one, at most all); free text counts as one pick. A single-select question ignores
+/// both. Every question may be skipped by the user (see <see cref="UserQuestionAnswer.Skipped"/>).
 /// </summary>
 public sealed record UserQuestion(
     string Id,
@@ -14,7 +17,9 @@ public sealed record UserQuestion(
     string Prompt,
     IReadOnlyList<UserQuestionOption> Options,
     bool MultiSelect = false,
-    bool AllowFreeText = true);
+    bool AllowFreeText = true,
+    int? MinSelect = null,
+    int? MaxSelect = null);
 
 /// <summary>
 /// A batch of one to four questions from one agent. <paramref name="AgentName"/> is shown on the card so the user knows
@@ -26,8 +31,11 @@ public sealed record UserQuestionRequest(
     string? AgentName,
     IReadOnlyList<UserQuestion> Questions);
 
-/// <summary>The answer to one question: the labels picked (in option order) and the free text, if any.</summary>
-public sealed record UserQuestionAnswer(string QuestionId, IReadOnlyList<string> Selected, string? FreeText = null);
+/// <summary>
+/// The answer to one question: the labels picked (in option order) and the free text, if any. <paramref name="Skipped"/>
+/// means the user chose not to answer this question while answering others; Selected is then empty and FreeText null.
+/// </summary>
+public sealed record UserQuestionAnswer(string QuestionId, IReadOnlyList<string> Selected, string? FreeText = null, bool Skipped = false);
 
 public enum UserQuestionOutcome
 {

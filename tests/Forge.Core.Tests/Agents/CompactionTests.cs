@@ -103,8 +103,9 @@ public class CompactionTests
         var answer = new string('d', 800);
         var provider = new FakeProvider((request, index) =>
             request.SystemPrompt == SummaryCompactor.SummarizerPrompt ? Turn.Say(SummaryText) : Turn.Say(answer, TokenUsage.Empty));
-        var host = AgentTestHost.Create(provider, options: CompactionWindows.Legacy(100, targetRatio: 0.05), store: store);
-        var root = host.CreateRoot(session.Id, directory.Path);
+        // A 100-token budget is smaller than the built-in tool definitions the estimate now counts: the root gets no tools.
+        var host = AgentTestHost.Create(provider, options: CompactionWindows.Legacy(100, targetRatio: 0.05) with { MaxSubAgentDepth = 0 }, store: store);
+        var root = host.CreateRoot(session.Id, directory.Path, AgentTestHost.Definition("Root", tools: []));
 
         for (var turn = 1; turn <= 6; turn++)
         {

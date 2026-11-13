@@ -67,6 +67,18 @@ public sealed class AgentLoop(AgentLoopServices services)
 
     private readonly SemaphoreSlim approvalGate = new(1, 1);
     private readonly AgentSlotPool slots = new(services.Options.MaxParallelSubAgents);
+    private CompactionPolicy compactionPolicy = services.Options.Compaction;
+
+    /// <summary>
+    /// The compaction policy in force. It starts as <see cref="AgentOptions.Compaction"/> and is replaced through
+    /// <see cref="AgentHost.SetCompactionPolicy"/>; every decision reads it once, before the request it is about, so a change
+    /// reaches a running loop at its next model request. It never touches the request itself, so the prompt cache holds.
+    /// </summary>
+    internal CompactionPolicy CurrentCompaction
+    {
+        get => Volatile.Read(ref compactionPolicy);
+        set => Volatile.Write(ref compactionPolicy, value);
+    }
 
     public async Task<AgentRunResult> RunAsync(
         AgentInstance instance,
@@ -100,7 +112,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         for (var turn = 0; turn < services.Options.MaxTurns; turn++)
         {
             ct.ThrowIfCancellationRequested();
-            await CompactIfNeededAsync(instance, sink, ct).ConfigureAwait(false);
+            await CompactIfNeededAsync(instance, tools, sink, ct).ConfigureAwait(false);
 
             ChatMessage? assistant = null;
             var usage = TokenUsage.Empty;
@@ -147,7 +159,7 @@ public sealed class AgentLoop(AgentLoopServices services)
                     // Overflow fallback: the window was misjudged (or unknown). Compact once and resend the same turn once;
                     // when nothing could be compacted, or the resend overflows again, the provider error stands.
                     overflowRetried = true;
-                    if (!await CompactAfterOverflowAsync(instance, sink, ct).ConfigureAwait(false))
+                    if (!await CompactAfterOverflowAsync(instance, tools, sink, ct).ConfigureAwait(false))
                     {
                         throw;
                     }
@@ -168,6 +180,7 @@ public sealed class AgentLoop(AgentLoopServices services)
             ReportFirstRequest(instance, provider, usage);
             instance.CommitText(Text(assistant));
             await PersistAsync(instance, assistant, usage, ct).ConfigureAwait(false);
+            ReportContext(instance, sink, ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter)));
             await TouchAsync(instance, ct).ConfigureAwait(false);
 
             var calls = ToolCalls(assistant);
@@ -273,7 +286,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         var at = DateTimeOffset.UtcNow;
         foreach (var interjection in taken)
         {
-            sink.Emit(new AgentInterjected(instance.Id, interjection.Text, at));
+            sink.Emit(new AgentInterjected(instance.Id, interjection.Text, at, interjection.Attachments));
         }
 
         await PersistAsync(instance, Interjection.Merge(taken), null, CancellationToken.None).ConfigureAwait(false);
@@ -466,9 +479,9 @@ public sealed class AgentLoop(AgentLoopServices services)
     /// prefix that alone exceeds it) is fruitless: the next attempt waits until the instance's own content grew by
     /// 0.1·U, and after two consecutive fruitless attempts automatic compaction stops until a manual one or another model.
     /// </summary>
-    private async Task CompactIfNeededAsync(AgentInstance instance, IAgentEventSink sink, CancellationToken ct)
+    private async Task CompactIfNeededAsync(AgentInstance instance, ToolSelection tools, IAgentEventSink sink, CancellationToken ct)
     {
-        var policy = services.Options.Compaction;
+        var policy = CurrentCompaction;
         if (!policy.Enabled || services.Compactor is NoopCompactor)
         {
             return;
@@ -481,7 +494,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var trigger = budget.TriggerTokens(policy.TriggerRatio);
-        var current = ContextTokens(instance);
+        var current = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
         if (current < trigger)
         {
             return;
@@ -501,7 +514,8 @@ public sealed class AgentLoop(AgentLoopServices services)
         if (result is not null)
         {
             sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
-            after = ContextTokens(instance);
+            after = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
+            sink.Emit(new AgentContextMeasured(instance.Id, after, budget.Usable, trigger));
             if (after < trigger)
             {
                 state.ResetHysteresis();
@@ -519,16 +533,16 @@ public sealed class AgentLoop(AgentLoopServices services)
     }
 
     /// <summary>Forced compaction after the provider rejected the request as too long; false when nothing changed.</summary>
-    private async Task<bool> CompactAfterOverflowAsync(AgentInstance instance, IAgentEventSink sink, CancellationToken ct)
+    private async Task<bool> CompactAfterOverflowAsync(AgentInstance instance, ToolSelection tools, IAgentEventSink sink, CancellationToken ct)
     {
-        var policy = services.Options.Compaction;
+        var policy = CurrentCompaction;
         if (!policy.Enabled || services.Compactor is NoopCompactor)
         {
             return false;
         }
 
         SyncModel(instance);
-        var current = ContextTokens(instance);
+        var current = ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter));
         var target = Math.Max(1, (int)(current * policy.TargetRatio));
         var keepRecent = CompactionPolicy.MaxKeepRecentTokens;
         if (policy.BudgetFor(instance.Definition.Model) is { } budget)
@@ -547,6 +561,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
+        ReportContext(instance, sink, ContextTokens(instance, tools.DefinitionTokens(instance.Compaction, services.TokenCounter)));
         return true;
     }
 
@@ -585,25 +600,44 @@ public sealed class AgentLoop(AgentLoopServices services)
             return null;
         }
 
-        var keepRecent = services.Options.Compaction.BudgetFor(instance.Definition.Model)?.KeepRecentTokens
+        var keepRecent = CurrentCompaction.BudgetFor(instance.Definition.Model)?.KeepRecentTokens
                          ?? CompactionPolicy.MaxKeepRecentTokens;
         var result = await services.Compactor.CompactAsync(
             instance,
             new CompactionRequest(1, keepRecent, CompactionReason.Manual, string.IsNullOrWhiteSpace(instructions) ? null : instructions.Trim()),
             ct).ConfigureAwait(false);
-        if (result is not null)
+        if (result is not null && sink is not null)
         {
-            sink?.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
+            sink.Emit(new AgentCompacted(instance.Id, result.TokensBefore, result.TokensAfter));
+            // Outside a turn there is no tool selection: the count the last run cached stands in (0 before any run).
+            ReportContext(instance, sink, ContextTokens(instance, instance.Compaction.ToolTokens));
         }
 
         return result;
     }
 
     /// <summary>
-    /// Current context size C: the last real prompt size of this instance on this model plus an estimate of what was
-    /// appended since that request; the full estimate (messages and stable prefix) when no real usage applies.
+    /// Reports C (<see cref="ContextTokens"/>) against the instance's usable budget U and trigger line under the policy in
+    /// force: after every model request and after every compaction, so a context gauge follows the real prompt size. The
+    /// budget is null when the model's window is unknown.
     /// </summary>
-    internal int ContextTokens(AgentInstance instance)
+    private void ReportContext(AgentInstance instance, IAgentEventSink sink, int contextTokens)
+    {
+        var policy = CurrentCompaction;
+        var budget = policy.BudgetFor(instance.Definition.Model);
+        sink.Emit(new AgentContextMeasured(
+            instance.Id,
+            contextTokens,
+            budget?.Usable,
+            budget?.TriggerTokens(policy.TriggerRatio)));
+    }
+
+    /// <summary>
+    /// Current context size C: the last real prompt size of this instance on this model plus an estimate of what was
+    /// appended since that request; the full estimate (messages, stable prefix and the <paramref name="toolTokens"/> of the
+    /// tool definitions the request carries) when no real usage applies. Real usage already includes the definitions.
+    /// </summary>
+    internal int ContextTokens(AgentInstance instance, int toolTokens)
     {
         var state = instance.Compaction;
         var messages = instance.Messages;
@@ -617,7 +651,25 @@ public sealed class AgentLoop(AgentLoopServices services)
 
         return (int)Math.Min(
             int.MaxValue,
-            (long)Estimate(messages, 0, ownOnly: false) + services.TokenCounter.Count(instance.Prompt.StablePrefix));
+            (long)Estimate(messages, 0, ownOnly: false) + services.TokenCounter.Count(instance.Prompt.StablePrefix) + Math.Max(0, toolTokens));
+    }
+
+    /// <summary>Per-definition overhead of the wire wrapper (type, name and parameter keys) beyond the counted text.</summary>
+    internal const int ToolDefinitionOverheadTokens = 8;
+
+    /// <summary>Estimated tokens of <paramref name="definitions"/>: name, description and schema text plus a small wrapper each.</summary>
+    internal static int DefinitionTokens(IReadOnlyList<ToolDefinition> definitions, ITokenCounter counter)
+    {
+        long total = 0;
+        foreach (var definition in definitions)
+        {
+            total += (long)counter.Count(definition.Name)
+                     + counter.Count(definition.Description)
+                     + counter.Count(definition.InputSchemaJson)
+                     + ToolDefinitionOverheadTokens;
+        }
+
+        return (int)Math.Min(int.MaxValue, total);
     }
 
     private int OwnTokens(AgentInstance instance) => Estimate(instance.Messages, 0, ownOnly: true);
@@ -913,18 +965,36 @@ public sealed class AgentLoop(AgentLoopServices services)
         private Selected? selected;
 
         /// <summary>The registry to use right now: the cached one unless the host published a new tool set.</summary>
-        public ToolRegistry Current()
+        public ToolRegistry Current() => CurrentSelection().Registry;
+
+        /// <summary>
+        /// Estimated tokens of the current registry's definitions, counted once per published version and instance (the
+        /// instance's tool selection is fixed, and only the run holding the instance touches <paramref name="state"/>).
+        /// </summary>
+        public int DefinitionTokens(CompactionState state, ITokenCounter counter)
+        {
+            var current = CurrentSelection();
+            if (state.ToolTokensVersion != current.Version)
+            {
+                state.ToolTokens = AgentLoop.DefinitionTokens(current.Registry.Definitions, counter);
+                state.ToolTokensVersion = current.Version;
+            }
+
+            return state.ToolTokens;
+        }
+
+        private Selected CurrentSelection()
         {
             var published = surface.Current;
             var cached = Volatile.Read(ref selected);
             if (cached is not null && cached.Version == published.Version)
             {
-                return cached.Registry;
+                return cached;
             }
 
-            var registry = published.Tools.Select(toolNames, canSpawn, subAgentTools, isRoot);
-            Volatile.Write(ref selected, new Selected(published.Version, registry));
-            return registry;
+            var fresh = new Selected(published.Version, published.Tools.Select(toolNames, canSpawn, subAgentTools, isRoot));
+            Volatile.Write(ref selected, fresh);
+            return fresh;
         }
 
         private sealed record Selected(int Version, ToolRegistry Registry);
