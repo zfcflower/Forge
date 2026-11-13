@@ -82,7 +82,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 **图片输入。** `ImageBlock(MediaType, Data)` 是用户消息的内容块(base64),`AgentHost.RunAsync(instance, ChatMessage, ct)` 接收带图片的用户消息。三个适配器按各自协议编码(Anthropic `image` source、OpenAI 兼容 `image_url` data URL、Responses `input_image`);`MessageJson` 原样持久化。`TokenCounter` 每张图按固定 1600 token 估算。压缩器给摘要模型的永远只是占位文本 `[image: <type>, <n> KB]`(文件为 `[file: <name>, <type>, <n> KB]`),原图与文件内容不进摘要请求。
 
-**工具结果的图片。** `ToolResult`/`ToolResultBlock` 是块列表,不只是字符串:`Blocks` 是工具交回的有序块,`Text` 是它自己的文本(只含 `TextBlock`,逐行),`Content` 是整份结果的文本视图(非文本块各占一行占位,如 `[image: image/png]`),`Images` 是在场图片。两个文本读法在构造时算一次并缓存在记录里:`Content` 给不认识图片的读者(存储、搜索、只用文本的适配器、界面),`Text` 给**自己把图片送上线路**的适配器——后者若还用 `Content` 就把同一张图说了两遍。块列表在构造时拷贝,`Equals` 按块逐项比较(数组本身是引用相等)。只有一层嵌套:工具结果里能放 `TextBlock`/`ImageBlock`/`FileBlock`/`ArtifactRefBlock`,不嵌套工具结果。
+**工具结果的图片。** `ToolResult`/`ToolResultBlock` 是块列表,不只是字符串(契约的一半由 W0 定:`Blocks` 只允许 `TextBlock`/`ImageBlock` 并在 `init` 与 `with` 时校验,`Content` 是整份结果的文本视图、非文本块各占一行占位如 `[image: image/png, 12 KB]`,`Equals`/`GetHashCode` 手写为逐块比较)。本波在它上面补了两件:`Text` 是工具自己的话(只含 `TextBlock`,逐行,没有占位)给**自己把图片送上线路**的适配器——后者若还用 `Content` 就把同一张图说了两遍;`HasImages` 判断结果里有没有图而不建列表。只有一层嵌套:工具结果里放 `TextBlock`/`ImageBlock`,不嵌套工具结果。
 
 三个适配器各自的形状,以及谁来决定发不发:`ChatRequest.IncludeToolImages`(默认 true)由 `AgentLoop.BuildRequest` 每请求算一次——`AgentOptions.SendToolImagesToModel`(一个 `Func<bool>`,每次请求现问,所以设置开关下一次回合就生效,不必重建宿主)与 `AgentOptions.ModelInputs`(目录里该模型的输入种类;未知视为可收图,与输入框对用户附件的规则一致)。为 false 时**所有适配器都只写 `Content`**,图片仍在存下的消息里,界面照常显示,改回开关只影响下一次请求。
 

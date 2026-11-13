@@ -31,7 +31,7 @@
 
 ### 3. 设置(第六·二节登记项 → 界面)
 
-`AppPreferences` 一次加齐五项并进 `PreferencesSection` 映射与夹取:`toolImageThumbnailEdge`(64–512,默认 256)、`sendToolImagesToModel`(默认开)、`filePreviewRows`(50–10000,默认 1000)、`notebookOutputChars`(1000–200000,默认 20480)、`previewImageBytes`(1 MiB–512 MiB,默认 20 MiB)。新分区 `chat`(order 250,`IconChat`)与 `files`(order 380,`IconEye`),视图模型直接写偏好、下一次动作即生效,组合根 `FilePreviewSettings.Current` 与 `ToolImageSettings.ThumbnailEdge` 把偏好透给查看器与工具行。
+五项配置来自 **W0b 已注册的登记表**(本波只读、不再自己加字段):`ChatToolImageThumbnailPixels`(64–1024,默认 256)、`ChatToolImagesToModel`(默认开)、`FilesCsvMaxRows`(100–100000,默认 1000)、`FilesNotebookOutputKilobytes`(1–1024,默认 20)、`FilesImagePreviewMaxMegabytes`(1–256,默认 20);分区 id/order 也用 W0b 分配好的 `SettingsSectionIds.Chat`(order 320,`IconChat`)与 `.Files`(order 360,`IconEye`)。视图模型直接写偏好、下一次动作即生效,组合根 `FilePreviewSettings.Current` 与 `ToolImageSettings.ThumbnailEdge` 把偏好透给查看器与工具行(笔记本以 KB 登记、预览按字符截断,图片上限以 MB 登记、预览按字节比较,单位换算只在 `FilePreviewSettings` 一处)。
 
 ## 二、被否的备选
 
@@ -73,7 +73,7 @@ dotnet test tests/Forge.App.Tests --filter SettingsPanelTests → 5 通过 / 0 �
 
 ## 五、与计划的偏差
 
-1. **W0 的公共前置不在树上**:`ToolResult` 块契约、`FileDocumentViewModel` 拆分、`Loc` 表登记、`Preferences` 预加字段这几件本应 W0 完成的事,本波在自己分支上补做(否则 W4 无法开工)。因此本波也动了 `App.axaml` 与 `AppComposition.cs`(W0 原计划冻结这两个文件);W1–W3 若也动到同处,合并时按各自的追加块处理。
+1. **W0 落地晚于本波开工**:开工时 `main` 上还没有 W0,所以本波先在自己分支上补做了块契约、`FileDocumentViewModel` 拆分、偏好与分区 id(否则 W4 无法开工);随后 W0a/W0b 合入 `main`,本波把 `main` 合进分支并以 **W0 的形状为准**:契约用 `ToolResultBlocks`/`ContentPlaceholders`(本波自己的 `ToolPayload` 已删除),拆分用 W0 的 `FileDocumentViewModel.cs`/`Transcript.Tools.cs`,偏好与 section id 用 W0b 的登记表,工具行改为实现 W0 留好的 `CaptureImages` 钩子。合并后 `git diff main..HEAD` **不再删除任何 W0 文件**(已核对 `--diff-filter=D` 为空)。本波在 W0 之上只多两件契约读法:`Text`(工具自己的话,不发占位)与 `HasImages`。
 2. **`Text` 与 `Content` 两个读法**是对计划「`ToolResult` 保留 `string Content`」的细化:计划只说保留便捷构造;实测发现只有 `Content`(带占位)时,能内联图片的适配器会让模型把同一张图看两遍,故补 `Text`。
 3. **缩略图长边偏好**用「不要超界」语义:只在解码时约束,不重编码存下的字节(重编码会毁掉原图质量与动画 GIF)。
 4. **HTML 占位多一个「查看源码」**:计划只写占位 + OS 打开,但那样会丢掉原本能读 `.html` 源码的能力,等于回退;加一个按钮即不动「不引渲染器」的决定。
