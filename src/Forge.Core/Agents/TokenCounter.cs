@@ -33,7 +33,7 @@ public sealed class ApproximateTokenCounter : ITokenCounter
     public static long FileTokens(FileBlock file)
     {
         ArgumentNullException.ThrowIfNull(file);
-        var kilobytes = Math.Max(1, (Storage.MessageJson.DecodedLength(file.Data) + 1023) / 1024);
+        var kilobytes = Math.Max(1, (ContentPlaceholders.DecodedLength(file.Data) + 1023) / 1024);
         return kilobytes * FileTokensPerKilobyte;
     }
 
@@ -50,7 +50,7 @@ public sealed class ApproximateTokenCounter : ITokenCounter
                     TextBlock text => text.Text.Length,
                     ThinkingBlock thinking => thinking.Text.Length,
                     ToolCallBlock call => call.Name.Length + call.ArgumentsJson.Length,
-                    ToolResultBlock result => result.Content.Length,
+                    ToolResultBlock result => ToolResultChars(result),
                     ArtifactRefBlock artifact => artifact.Description.Length + 32,
                     ImageBlock => (long)ImageTokens * CharsPerToken,
                     FileBlock file => FileTokens(file) * CharsPerToken,
@@ -60,6 +60,28 @@ public sealed class ApproximateTokenCounter : ITokenCounter
         }
 
         return Saturate(chars / CharsPerToken + (long)messages.Count * MessageOverhead);
+    }
+
+    /// <summary>A tool result's text plus, for each image in it, the same flat cost an attached image has.</summary>
+    private static long ToolResultChars(ToolResultBlock result)
+    {
+        if (result.Blocks is [TextBlock only])
+        {
+            return only.Text.Length;
+        }
+
+        long chars = 0;
+        foreach (var block in result.Blocks)
+        {
+            chars += block switch
+            {
+                TextBlock text => text.Text.Length,
+                ImageBlock => (long)ImageTokens * CharsPerToken,
+                _ => 0,
+            };
+        }
+
+        return chars;
     }
 
     public int Count(string text)
