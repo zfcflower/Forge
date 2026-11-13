@@ -97,26 +97,37 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         await using var shell = await OpensAsync(session);
         var token = new CancellationTokenSource(StepBudget).Token;
 
-        async Task<string[]> TextsOf(string id)
+        // A section body is built by its data template, which needs a layout pass; a loaded machine needs more than one, so
+        // each wait pumps until the section's own hint line appears instead of assuming one tick is enough.
+        async Task<string[]> TextsOf(string id, string expected)
         {
-            await session.Dispatch(
-                () =>
+            var texts = Array.Empty<string>();
+            for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
+            {
+                texts = await session.Dispatch(
+                    () =>
+                    {
+                        shell.ViewModel.Settings.SelectedSection =
+                            shell.ViewModel.Settings.Sections.Items.First(section => section.Id == id);
+                        SharedUi.Settle(shell.Window);
+                        return PanelShell.SelectedTexts(shell.Window).ToArray();
+                    },
+                    token);
+                if (texts.Contains(expected, StringComparer.Ordinal))
                 {
-                    shell.ViewModel.Settings.SelectedSection =
-                        shell.ViewModel.Settings.Sections.Items.First(section => section.Id == id);
-                    SharedUi.Settle(shell.Window);
-                    return 0;
-                },
-                token);
-            return [.. await session.Dispatch(() => PanelShell.SelectedTexts(shell.Window), token)];
+                    break;
+                }
+            }
+
+            return texts;
         }
 
         // A section whose data template is missing draws nothing at all, so the hint line proves the template resolved.
-        var chat = await TextsOf(SettingsSectionIds.Chat);
+        var chat = await TextsOf(SettingsSectionIds.Chat, Loc.Instance[ChatStrings.SettingsHint]);
         Assert.Contains(Loc.Instance[ChatStrings.SettingsHint], chat);
         Assert.Contains(Loc.Instance[ChatStrings.SettingsSendToolImages], chat);
 
-        var files = await TextsOf(SettingsSectionIds.Files);
+        var files = await TextsOf(SettingsSectionIds.Files, Loc.Instance[PreviewStrings.SettingsHintKey]);
         Assert.Contains(Loc.Instance[PreviewStrings.SettingsHintKey], files);
         Assert.Contains(Loc.Instance[PreviewStrings.SettingsRowsKey], files);
     }
