@@ -16,6 +16,7 @@ namespace Forge.App.Settings;
 internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
     private readonly ProviderServices services;
+    private readonly AppPreferences? preferences;
     private readonly AgentDefaultsStore agentDefaults;
     private readonly ModelCatalogRefreshService? modelCatalogRefresh;
     private readonly Action<Action> post;
@@ -36,10 +37,12 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         ModelCatalogRefreshService? modelCatalogRefresh = null,
         Action<Action>? post = null,
         Forge.App.Prompts.PromptTemplateService? promptTemplates = null,
-        CompactionSettingsStore? compaction = null)
+        CompactionSettingsStore? compaction = null,
+        AppPreferences? preferences = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
+        this.preferences = preferences;
         Compaction = new CompactionSettingsViewModel(compaction ?? new CompactionSettingsStore(services.Store.SettingsPath));
         Usage = new UsageLogSettingsViewModel(services.UsageLog, () => services.UsageRecorder.Directory);
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
@@ -509,7 +512,8 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
                 agentDefaults.Get(agentId),
                 catalog,
                 notSet,
-                changed: OnAgentChanged));
+                changed: OnAgentChanged,
+                preferences: preferences));
         }
 
         // User agents follow the built-ins. Their label is the agent's own name: it is the user's content, not localized.
@@ -521,7 +525,8 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
                 agentDefaults.Get(agentId),
                 catalog,
                 notSet,
-                changed: OnAgentChanged));
+                changed: OnAgentChanged,
+                preferences: preferences));
         }
     }
 

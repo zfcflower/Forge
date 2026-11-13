@@ -940,7 +940,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Sessions,
             composition.Providers,
             OnSubAgentToolRequested,
-            instrumentSources: instruments)
+            instrumentSources: instruments,
+            preferences: composition.Preferences)
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)

@@ -11,6 +11,7 @@ using Forge.App.Automations;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Preferences;
 using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.Core.Agents;
@@ -119,6 +120,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 
     /// <param name="runtime">The live runtime, or <see langword="null"/> for a read-only view of a session that is not
     /// <see cref="SessionStatus.Active"/>: the transcript is replayed from the store and nothing can be sent.</param>
+    /// <param name="preferences">The live preferences the composer filters hidden models with; <see langword="null"/> (a
+    /// test, a standalone view) lists every model.</param>
     public SessionWorkspaceViewModel(
         SessionInfo session,
         SessionRuntime? runtime,
@@ -130,7 +133,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         Func<CancellationToken, Task<IReadOnlyList<string>>>? fileSource = null,
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
         ISessionInstrumentSources? instrumentSources = null,
-        INotifications? notifications = null)
+        INotifications? notifications = null,
+        AppPreferences? preferences = null)
     {
         Info = session;
         this.runtime = runtime;
@@ -158,7 +162,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
             fileSource,
             skillSource,
             notifications: notifications,
-            notificationScope: session.Id);
+            notificationScope: session.Id,
+            appPreferences: preferences);
         Composer.AttachmentsChanged += RefreshCanSend;
         ToggleSubAgentsCommand = new RelayCommand(() => SubAgentsCollapsed = !SubAgentsCollapsed);
         Instruments = new SessionInstrumentsViewModel(
@@ -1956,6 +1961,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         Instruments.Dispose();
+        Composer.Dispose();
         foreach (var message in queued.ToArray())
         {
             NotifyWithdrawn(message);
