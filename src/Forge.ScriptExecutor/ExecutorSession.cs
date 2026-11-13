@@ -1,6 +1,7 @@
-using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.Scripting;
 using Forge.ScriptRuntime;
@@ -62,18 +63,18 @@ internal sealed class ExecutorSession
             return;
         }
 
-        ScriptArtifactLoadRequest? request;
+        ScriptArtifactLoadRequest request;
         try
         {
-            request = message.Arguments?.Deserialize(ScriptExecutorJsonContext.Default.ScriptArtifactLoadRequest);
+            request = message.Read<ScriptArtifactLoadRequest>();
         }
-        catch (JsonException ex)
+        catch (IpcProtocolException ex)
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", ex.Message).ConfigureAwait(false);
             return;
         }
 
-        if (request is null)
+        if (request.Descriptor is null)
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", "executor.load requires an artifact and its descriptor.").ConfigureAwait(false);
             return;
@@ -82,10 +83,16 @@ internal sealed class ExecutorSession
         ScriptEntryPoint loaded;
         try
         {
-            // The bound is checked on the encoded length first, so a hostile length cannot make this process allocate;
-            // the decoded bytes are then validated before anything is loaded.
-            var image = ScriptArtifact.Decode(request.AssemblyBase64);
-            ScriptArtifact.Validate(request.Descriptor, image);
+            // The frame is already bounded by IpcProtocol.MaxFrameBytes; the image length, hash and descriptor are validated
+            // before anything is loaded.
+            var image = request.Assembly;
+            if (image.IsEmpty)
+            {
+                throw new ScriptArtifactException("The executor.load request carries no image.");
+            }
+
+            ScriptArtifact.EnsureImageWithinBounds(image.Length);
+            ScriptArtifact.Validate(request.Descriptor, image.Span);
             loaded = LoadEntryPoint(image, request.Descriptor);
         }
         catch (ScriptArtifactException ex)
@@ -111,7 +118,7 @@ internal sealed class ExecutorSession
         }
 
         entryPoint = loaded;
-        await peer.RespondAsync(message.Id, EmptyResult(), CancellationToken.None).ConfigureAwait(false);
+        await peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task HandleRunAsync(IpcMessage message, CancellationToken ct)
@@ -131,18 +138,18 @@ internal sealed class ExecutorSession
             return;
         }
 
-        ScriptRunRequest? request;
+        ScriptRunRequest request;
         try
         {
-            request = message.Arguments?.Deserialize(ScriptExecutorJsonContext.Default.ScriptRunRequest);
+            request = message.Read<ScriptRunRequest>();
         }
-        catch (JsonException ex)
+        catch (IpcProtocolException ex)
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", ex.Message).ConfigureAwait(false);
             return;
         }
 
-        if (request is null || request.Context is null)
+        if (request.Context is null)
         {
             await RespondErrorAsync(
                 message.Id,
@@ -190,21 +197,21 @@ internal sealed class ExecutorSession
         }
 
         await peer
-            .RespondAsync(message.Id, HostJson(result), CancellationToken.None)
+            .RespondAsync(message.Id, result, CancellationToken.None)
             .ConfigureAwait(false);
     }
 
     private async Task HandleStopAsync(IpcMessage message)
     {
-        await peer.RespondAsync(message.Id, EmptyResult(), CancellationToken.None).ConfigureAwait(false);
+        await peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None).ConfigureAwait(false);
         RequestStop();
     }
 
-    private static ScriptEntryPoint LoadEntryPoint(byte[] image, ScriptArtifactDescriptor descriptor)
+    private static ScriptEntryPoint LoadEntryPoint(ReadOnlyMemory<byte> image, ScriptArtifactDescriptor descriptor)
     {
         // LoadFromStream only: no Assembly.Load, no temporary file and no probing of the file system.
         var context = new System.Runtime.Loader.AssemblyLoadContext("forge-script-executor", isCollectible: false);
-        var assembly = context.LoadFromStream(new MemoryStream(image, writable: false));
+        var assembly = context.LoadFromStream(AsStream(image));
         var type = assembly.GetType(descriptor.EntryPointType, throwOnError: false) ??
             throw new ScriptArtifactException(
                 $"The script image does not contain the entry point type '{descriptor.EntryPointType}'.");
@@ -216,15 +223,16 @@ internal sealed class ExecutorSession
         return method.CreateDelegate<ScriptEntryPoint>();
     }
 
+    /// <summary>A read-only stream over the received bytes without copying them when they sit in an array.</summary>
+    private static MemoryStream AsStream(ReadOnlyMemory<byte> image) =>
+        MemoryMarshal.TryGetArray(image, out var segment) && segment.Array is { } array
+            ? new MemoryStream(array, segment.Offset, segment.Count, writable: false)
+            : new MemoryStream(image.ToArray(), writable: false);
+
     private void RequestStop() => stopRequested.TrySetResult();
 
     private Task RespondErrorAsync(long requestId, string code, string message) =>
         peer.RespondErrorAsync(requestId, new IpcError(code, message), CancellationToken.None);
-
-    private static JsonElement EmptyResult() => JsonDocument.Parse("{}").RootElement.Clone();
-
-    private static JsonElement HostJson(CodeExecutionResult result) =>
-        JsonSerializer.SerializeToElement(result, ScriptExecutorJsonContext.Default.CodeExecutionResult);
 
     private static bool IsCleanClose(TaskCompletionSource<Exception?> source) =>
         !source.Task.IsCompletedSuccessfully ||
@@ -234,7 +242,7 @@ internal sealed class ExecutorSession
 
 /// <summary>
 /// Relays <see cref="IHostFacade.CallToolAsync"/> to the host as a <c>host.tool_call</c> request
-/// <c>{runId, name, args}</c>. One instance belongs to exactly one run: the run id is the one the host bound, so the host
+/// (<see cref="HostToolCallRequest"/> → <see cref="ToolResult"/>). One instance belongs to exactly one run: the run id is the one the host bound, so the host
 /// validates the callback against its active-run table and stamps the identity itself. This process performs no
 /// permission check and never reports a session, working directory or depth.
 /// </summary>
@@ -242,51 +250,6 @@ internal sealed class ExecutorHostFacade(IIpcPeer peer, string runId) : IHostFac
 {
     public string RunId { get; } = runId;
 
-    public async Task<HostToolResult> CallToolAsync(string name, JsonElement arguments, CancellationToken ct)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-
-        var request = JsonSerializer.SerializeToElement(
-            new BoundToolCallRequest(
-                RunId,
-                name,
-                arguments.ValueKind == JsonValueKind.Undefined ? EmptyObject() : arguments),
-            ScriptExecutorJsonContext.Default.BoundToolCallRequest);
-
-        try
-        {
-            var response = await peer
-                .SendRequestAsync(ScriptExecutorProtocol.HostToolCall, request, ct)
-                .ConfigureAwait(false);
-            if (response.Result is not { } payload)
-            {
-                return new HostToolResult($"host tool '{name}' returned no result", IsError: true);
-            }
-
-            var result = payload.Deserialize(ScriptExecutorJsonContext.Default.ToolResultPayload);
-            return result is null
-                ? new HostToolResult($"host tool '{name}' returned no result", IsError: true)
-                : new HostToolResult(result.Content ?? string.Empty, result.IsError);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (IpcRemoteException ex)
-        {
-            return new HostToolResult(
-                string.Create(CultureInfo.InvariantCulture, $"{ex.Code}: {ex.Message}"),
-                IsError: true);
-        }
-        catch (Exception ex) when (ex is IpcConnectionClosedException or IpcTimeoutException or IpcProtocolException or IOException)
-        {
-            return new HostToolResult($"the host did not answer '{name}': {ex.Message}", IsError: true);
-        }
-        catch (JsonException ex)
-        {
-            return new HostToolResult($"the host answered '{name}' with an invalid result: {ex.Message}", IsError: true);
-        }
-    }
-
-    private static JsonElement EmptyObject() => JsonDocument.Parse("{}").RootElement.Clone();
+    public Task<HostToolResult> CallToolAsync(string name, JsonElement arguments, CancellationToken ct) =>
+        HostToolCalls.CallAsync(peer, RunId, name, arguments, labelDenied: false, ct);
 }

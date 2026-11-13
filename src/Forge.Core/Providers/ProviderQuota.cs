@@ -48,6 +48,19 @@ public static partial class ProviderQuota
         var message = exception.Message ?? string.Empty;
         var hasRetryAfter = ProviderErrors.TryGetRetryAfter(exception, out var retryAfter) && retryAfter > TimeSpan.Zero;
 
+        // The response's own reading outranks every inference from status and wording: the server states which window is in
+        // the way and when it resets. It is also the only evidence on a 429 that carries neither a Retry-After nor one of
+        // the marker phrases — the shape Anthropic actually sends for a spent window.
+        if (exception.RateLimit is { IsRejected: true } reading)
+        {
+            var windowReset = reading.ResetAt;
+            return new ProviderQuotaExhausted(
+                model.ProviderId,
+                model.Model,
+                windowReset > now ? windowReset : null,
+                Trim(message));
+        }
+
         var quota = status switch
         {
             402 => true,

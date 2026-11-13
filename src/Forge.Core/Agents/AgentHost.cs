@@ -367,6 +367,13 @@ public sealed class AgentHost
                 }
                 catch (Exception exception)
                 {
+                    // A rejected request still carries the account's windows; report them before the failure so the shell
+                    // shows what is actually exhausted instead of only that something failed.
+                    if (exception is ProviderException { RateLimit: { } rateLimit })
+                    {
+                        sink.Emit(new AgentRateLimitUpdated(root.Id, rateLimit));
+                    }
+
                     if (exception is ProviderException provider
                         && ProviderQuota.Classify(provider, root.Definition.Model, DateTimeOffset.UtcNow) is { } quota)
                     {

@@ -1,3 +1,5 @@
+using ZLinq;
+
 namespace Forge.App.Services;
 
 /// <summary>What kind of picker a composer token opens.</summary>
@@ -67,7 +69,9 @@ internal static class ComposerSuggestions
     {
         ArgumentNullException.ThrowIfNull(entries);
         query ??= string.Empty;
+        // Runs on every keystroke after the slash: ZLinq keeps the pipeline and its sort buffers pooled.
         return entries
+            .AsValueEnumerable()
             .Select(entry => (Entry: entry, Rank: SlashRank(entry, query)))
             .Where(pair => pair.Rank >= 0)
             .OrderBy(pair => pair.Rank)
@@ -85,7 +89,9 @@ internal static class ComposerSuggestions
     {
         ArgumentNullException.ThrowIfNull(files);
         query = (query ?? string.Empty).Replace('\\', '/');
+        // Runs on every keystroke over every workspace file: ZLinq keeps the pipeline and its sort buffers pooled.
         return files
+            .AsValueEnumerable()
             .Select(path => (Path: path, Rank: FileRank(path, query)))
             .Where(pair => pair.Rank >= 0)
             .OrderBy(pair => pair.Rank)
@@ -142,7 +148,7 @@ internal static class ComposerSuggestions
         }
 
         var slash = path.LastIndexOf('/');
-        var name = slash < 0 ? path : path[(slash + 1)..];
+        var name = path.AsSpan(slash + 1);
         if (name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
         {
             return 0;

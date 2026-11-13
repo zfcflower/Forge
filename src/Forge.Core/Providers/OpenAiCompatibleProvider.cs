@@ -12,6 +12,11 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     private const string StopReasonProperty = "finish_reason";
 
     private readonly bool sendPromptCacheKey;
+    private readonly bool sendPromptCacheRetention;
+    private readonly bool sendConversationCacheHeader;
+    private readonly bool sendInteractionId;
+    private bool downgraded;
+    private string? notice;
 
     /// <summary>
     /// The attachment kinds Chat Completions has a content part for: images (<c>image_url</c>), PDF (<c>file</c>) and audio
@@ -28,9 +33,80 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     };
 
     public OpenAiCompatibleProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null, ProviderOptions? options = null)
-        : base(config, http, idleTimeout)
+        : base(config, http, idleTimeout, options)
     {
-        sendPromptCacheKey = (options ?? ProviderOptions.Default).SendPromptCacheKey && !IsDeepSeek(config.BaseUrl);
+        var knobs = options ?? ProviderOptions.Default;
+        // DeepSeek caches by prefix on its own and refuses unknown fields, so nothing cache-shaped is sent to it whatever the options say.
+        var tunable = !IsDeepSeek(config.BaseUrl);
+        sendPromptCacheKey = knobs.SendPromptCacheKey && tunable;
+        sendPromptCacheRetention = knobs.SendPromptCacheRetention && tunable;
+        sendConversationCacheHeader = knobs.SendConversationCacheHeader && tunable;
+        sendInteractionId = knobs.SendInteractionId && tunable;
+        downgraded = ProviderDegradations.Contains(DegradationKey);
+    }
+
+    /// <summary>Identity under which "this endpoint refused the cache fields" is remembered for the rest of the process.</summary>
+    private string DegradationKey => Id + "|chat|" + Config.BaseUrl;
+
+    /// <summary>
+    /// A 400 naming one of the cache fields means this model does not know it: the answer is to send less, not to fail the turn.
+    /// </summary>
+    protected override bool CanDegrade(ProviderException failure) =>
+        !downgraded
+        && failure.StatusCode == 400
+        && (failure.Message.Contains("prompt_cache_key", StringComparison.OrdinalIgnoreCase)
+            || failure.Message.Contains("prompt_cache_retention", StringComparison.OrdinalIgnoreCase));
+
+    protected override void Degrade()
+    {
+        downgraded = true;
+        ProviderDegradations.Add(DegradationKey);
+    }
+
+    protected override string? DegradationNotice => notice ??=
+        "This model or gateway refused the prompt-cache fields, so the request was resent without them. The answer is unaffected; "
+        + "caching is then whatever the provider does on its own.";
+
+    /// <summary>
+    /// The retention this request asks for, or null when it should not be sent: <c>in_memory</c> is the short lifetime (the default
+    /// anyway), <c>24h</c> the long one, which is how a five-to-sixty-minute pause is bridged on this vendor.
+    /// </summary>
+    private string? CacheRetention(ChatRequest request)
+    {
+        if (!sendPromptCacheRetention || downgraded)
+        {
+            return null;
+        }
+
+        return string.Equals(request.Cache?.Ttl, "5m", StringComparison.OrdinalIgnoreCase) ? "in_memory" : "24h";
+    }
+
+    protected override void ApplyRequestHeaders(HttpRequestMessage request, ChatRequest chatRequest)
+    {
+        if (downgraded)
+        {
+            return;
+        }
+
+        // Both headers are per-conversation cache keys, not credentials: the routing key (the lineage root) is exactly what they want,
+        // so a handover or fork keeps hitting the same entries. Not a claim of identity, so they apply whatever the credential.
+        var conversation = string.IsNullOrEmpty(chatRequest.CacheRoutingKey) ? chatRequest.SessionId : chatRequest.CacheRoutingKey;
+        if (string.IsNullOrEmpty(conversation))
+        {
+            return;
+        }
+
+        // xAI: raises the automatic cache's hit rate.
+        if (sendConversationCacheHeader)
+        {
+            request.Headers.TryAddWithoutValidation("x-grok-conv-id", conversation);
+        }
+
+        // GitHub Copilot: the header its API keys the prompt cache on.
+        if (sendInteractionId)
+        {
+            request.Headers.TryAddWithoutValidation("X-Interaction-Id", conversation);
+        }
     }
 
     /// <summary>
@@ -77,9 +153,14 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         writer.WriteBoolean("include_usage", true);
         writer.WriteEndObject();
 
-        if (sendPromptCacheKey && !string.IsNullOrEmpty(request.CacheRoutingKey))
+        if (sendPromptCacheKey && !downgraded && !string.IsNullOrEmpty(request.CacheRoutingKey))
         {
             writer.WriteString("prompt_cache_key", request.CacheRoutingKey);
+        }
+
+        if (CacheRetention(request) is { } retention)
+        {
+            writer.WriteString("prompt_cache_retention", retention);
         }
 
         writer.WriteStartArray("messages");

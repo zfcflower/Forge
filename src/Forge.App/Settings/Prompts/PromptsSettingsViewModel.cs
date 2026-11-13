@@ -5,6 +5,8 @@ using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Prompts;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Settings.Prompts;
 
@@ -150,7 +152,7 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
-            Trace.WriteLine("[prompts] list failed: " + exception.Message);
+            AppLogs.Prompts.ZLogWarning($"list failed: {exception.Message}");
             found = [];
             problem = Loc.Instance.Format(PromptsStrings.MsgFailedKey, exception.Message);
         }

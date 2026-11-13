@@ -1,14 +1,17 @@
 using System.Text.Json;
+using MessagePack;
 
 namespace Forge.Plugin.Sdk;
 
 public enum ToolSideEffect { ReadOnly, Write, Execute }
 
 /// <summary>Static metadata for a plugin tool. The input schema is passed through to the provider verbatim.</summary>
-public sealed record ToolDeclaration(string Name, string Description, string InputSchemaJson, ToolSideEffect SideEffect);
+[MessagePackObject]
+public sealed partial record ToolDeclaration([property: Key(0)] string Name, [property: Key(1)] string Description, [property: Key(2)] string InputSchemaJson, [property: Key(3)] ToolSideEffect SideEffect);
 
 /// <summary>Result of a tool execution.</summary>
-public sealed record ToolResult(string Content, bool IsError = false);
+[MessagePackObject]
+public sealed partial record ToolResult([property: Key(0)] string Content, [property: Key(1)] bool IsError = false);
 
 /// <summary>Execution context handed to a plugin tool; <see cref="Host"/> is the only way to reach
 /// main-program tools (routed over IPC, never in-process).</summary>
@@ -37,6 +40,7 @@ public interface IHostFacade
 }
 
 /// <summary>A capability the plugin asks the user to grant; shown at approval time.</summary>
-public sealed record Permission(PermissionKind Kind, string? Scope = null);
+[MessagePackObject]
+public sealed partial record Permission([property: Key(0)] PermissionKind Kind, [property: Key(1)] string? Scope = null);
 
 public enum PermissionKind { ReadFile, WriteFile, ExecuteCommand, Network, Database }

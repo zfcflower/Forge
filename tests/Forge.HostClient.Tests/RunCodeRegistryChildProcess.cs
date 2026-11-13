@@ -84,9 +84,7 @@ internal static class RunCodeRegistryChildProcess
     }
 
     internal static List<string> ToolNamesOf(IpcMessage request) =>
-        request.Arguments!.Value.GetProperty("tools").EnumerateArray()
-            .Select(element => element.GetProperty("name").GetString()!)
-            .ToList();
+        request.Read<Forge.Plugin.Sdk.CodeExecutionRequest>().Tools.Select(tool => tool.Name).ToList();
 
     /// <summary>A mutable registry that keeps every insertion (unlike the name-keyed test double), so two
     /// <c>run_code</c> proxies can share one live surface the way a real program registry would.</summary>

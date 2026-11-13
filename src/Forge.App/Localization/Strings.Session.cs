@@ -84,6 +84,9 @@ internal static class SessionStrings
     public const string TurnFailedKey = "turn.failed";
     public const string DeniedKey = "turn.denied";
     public const string CompactedKey = "turn.compacted";
+    public const string ProviderNoticeTitleKey = "turn.providerNotice.title";
+    public const string CacheRewriteTitleKey = "turn.cacheRewrite.title";
+    public const string CacheRewriteBodyKey = "turn.cacheRewrite.body";
     public const string CheckpointFailedKey = "turn.checkpointFailed";
     public const string SteeredNoticeKey = "turn.steeredNotice";
     public const string FollowUpNoticeKey = "turn.followUpNotice";
@@ -281,6 +284,14 @@ internal static class SessionStrings
     /// <summary>The notice shown after the context was compacted.</summary>
     public static LocText Compacted(int before, int after) => new(CompactedKey, TextFormat.Number(before), TextFormat.Number(after));
 
+    /// <summary>Toast title for a note the provider attached to an answer (a reduced request shape, for one).</summary>
+    public static LocText ProviderNoticeTitle => new(ProviderNoticeTitleKey);
+
+    /// <summary>Toast title for "the same prefix was written from scratch three times".</summary>
+    public static LocText CacheRewriteTitle => new(CacheRewriteTitleKey);
+
+    public static LocText CacheRewriteBody(long tokens) => new(CacheRewriteBodyKey, TextFormat.Number(tokens));
+
     /// <summary>The notice shown when the turn checkpoint could not be written.</summary>
     public static LocText CheckpointFailed(string message) => new(CheckpointFailedKey, message);
 
@@ -453,6 +464,12 @@ internal static class SessionStrings
         Loc.Register(TurnFailedKey, "本轮无法运行：{0}", "This turn could not run: {0}");
         Loc.Register(DeniedKey, "已拒绝：{0}（尚未配置审批对话框）", "Denied: {0} (no approval dialog yet)");
         Loc.Register(CompactedKey, "已压缩上下文：{0} → {1} tokens", "Context compacted: {0} → {1} tokens");
+        Loc.Register(ProviderNoticeTitleKey, "本轮请求的形状被降级", "This turn ran with a reduced request");
+        Loc.Register(CacheRewriteTitleKey, "提示词缓存被反复整段重写", "The prompt cache was rewritten from scratch repeatedly");
+        Loc.Register(
+            CacheRewriteBodyKey,
+            "一小时内已有 3 次整段重写，共写入 {0} 个 token（按缓存写入价计费）。通常是工具集、模型或系统提示在这一小时内变过，而不是缓存寿命太短",
+            "Three full rewrites in one hour, {0} tokens written in total at the cache-write price. Usually the tool set, the model or the system prompt changed within the hour rather than the cache lifetime being too short");
         Loc.Register(CheckpointFailedKey, "轮次检查点失败：{0}", "Turn checkpoint failed: {0}");
         Loc.Register(SteeredNoticeKey, "已转向：{0}", "Steered: {0}");
         Loc.Register(FollowUpNoticeKey, "后续指令：{0}", "Follow-up: {0}");

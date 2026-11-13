@@ -1,9 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
+using TerminalStartRequest = Forge.Abstractions.TerminalStartRequest;
 
 namespace Forge.HostClient.Tests;
 
@@ -24,6 +28,49 @@ internal static class Json
     {
         using var document = JsonDocument.Parse(text);
         return document.RootElement.Clone();
+    }
+}
+
+/// <summary>Typed wire payloads and raw MessagePack bytes for the host side of the tests.</summary>
+internal static class HostWire
+{
+    /// <summary>The MessagePack nil value: a payload that is present but decodes to null.</summary>
+    public static RawPayload Nil { get; } = new(new byte[] { 0xc0 });
+
+    /// <summary>The MessagePack encoding of <paramref name="value"/>, for a raw frame (typically a payload of the wrong
+    /// type for the operation it is sent under).</summary>
+    public static RawPayload Payload<T>(T value) => new(IpcSerializer.Serialize(value));
+
+    /// <summary>The UTF-8 bytes of a JSON text, as tool arguments travel on the wire.</summary>
+    public static ReadOnlyMemory<byte> Utf8(string json) => Encoding.UTF8.GetBytes(json);
+
+    /// <summary>The text of wire tool arguments; the empty payload stays empty.</summary>
+    public static string Text(ReadOnlyMemory<byte> utf8) => Encoding.UTF8.GetString(utf8.Span);
+
+    public static Sdk.ToolDeclaration Tool(
+        string name,
+        Sdk.ToolSideEffect sideEffect = Sdk.ToolSideEffect.ReadOnly,
+        string description = "d",
+        string inputSchemaJson = "{}") =>
+        new(name, description, inputSchemaJson, sideEffect);
+
+    public static ToolsRegisterNotification Tools(string pluginId, params Sdk.ToolDeclaration[] tools) =>
+        new(pluginId, tools);
+
+    public static Sdk.ExtensionIdRequest Plugin(string pluginId) => new(pluginId);
+
+    public static Sdk.PluginContributionsNotification Contributions(string pluginId, Sdk.PluginContributionSet set) =>
+        new(pluginId, set);
+
+    /// <summary>A run-bound <c>host.tool_call</c> as the host relays it.</summary>
+    public static HostToolCallForward Forward(string runId, string pluginId, string name, string argsJson) =>
+        new(runId, pluginId, name, Utf8(argsJson));
+
+    /// <summary>The <see cref="Sdk.ToolResult"/> of a successful response.</summary>
+    public static (string Content, bool IsError) ToolOutput(IpcMessage response)
+    {
+        var result = response.Read<Sdk.ToolResult>();
+        return (result.Content, result.IsError);
     }
 }
 
@@ -238,9 +285,11 @@ internal static class ToolFixtures
     public static async Task<PluginPromptReference> RegisterPromptAsync(
         FakeHost host, ExtensionHostClient client, string pluginId, string contributorId)
     {
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"promptContributors\":[{\"id\":\""
-            + contributorId + "\"}]}}");
+        await host.NotifyAndSyncAsync(
+            Sdk.ExtensionProtocol.ContributionsRegister,
+            HostWire.Contributions(
+                pluginId,
+                new Sdk.PluginContributionSet { PromptContributors = [new Sdk.PromptContributorDeclaration(contributorId)] }));
         return client.PromptContributors.Single(p =>
             p.PluginId == pluginId && p.ContributorId == contributorId);
     }
@@ -248,8 +297,8 @@ internal static class ToolFixtures
     /// <summary>Registers plugin "alpha" with one read-only tool "echo" and waits until the client has processed it.</summary>
     public static async Task<ExtensionHostTool> RegisterEchoAsync(ExtensionHostClient client, FakeHost host)
     {
-        await host.NotifyAndSyncAsync("tools.register",
-            """{"pluginId":"alpha","tools":[{"name":"echo","description":"Echoes","inputSchemaJson":"{}","sideEffect":0}]}""");
+        await host.NotifyAndSyncAsync(
+            Sdk.ExtensionProtocol.ToolsRegister, HostWire.Tools("alpha", HostWire.Tool("echo", description: "Echoes")));
         return Assert.IsType<ExtensionHostTool>(Assert.Single(client.Tools));
     }
 }
@@ -327,7 +376,7 @@ internal static class SleeperHost
     }
 }
 
-/// <summary>Wire helpers for the <c>terminal.*</c> family: request construction, host-side frame JSON and
+/// <summary>Wire helpers for the <c>terminal.*</c> family: request construction, host-side payloads and
 /// channel draining. All waits are TCS/poll bounded by <see cref="TestLimit"/>; no sleeps.</summary>
 internal static class TerminalFixtures
 {
@@ -348,23 +397,21 @@ internal static class TerminalFixtures
             environment);
 
     /// <summary>Answers <c>terminal.start</c> with a fixed id; returns the id for the test to address.</summary>
-    public static string AnswerStart(FakeHost host, string terminalId, long processId = 4242, string? shell = "sh")
+    public static string AnswerStart(FakeHost host, string terminalId, int processId = 4242, string shell = "sh")
     {
-        host.On(TerminalOps.Start, (_, _) => Task.FromResult(Json.Element(StartResultJson(terminalId, processId, shell))));
+        host.On(TerminalOperations.Start, (_, _) => Task.FromResult(StartResult(terminalId, processId, shell)));
         return terminalId;
     }
 
-    public static string StartResultJson(string terminalId, long processId = 4242, string? shell = "sh") =>
-        "{\"terminalId\":\"" + terminalId + "\",\"processId\":" + processId + ",\"shell\":\"" + shell + "\"}";
+    public static TerminalStartResponse StartResult(string terminalId, int processId = 4242, string shell = "sh") =>
+        new(terminalId, processId, shell);
 
-    public static string OutputJson(string terminalId, long seq, byte[] data) =>
-        "{\"terminalId\":\"" + terminalId + "\",\"seq\":" + seq + ",\"data\":\"" + Convert.ToBase64String(data) + "\"}";
+    public static TerminalData Output(string terminalId, long seq, byte[] data) => new(terminalId, seq, data);
 
-    public static string OutputJson(string terminalId, long seq, string text) =>
-        OutputJson(terminalId, seq, System.Text.Encoding.UTF8.GetBytes(text));
+    public static TerminalData Output(string terminalId, long seq, string text) =>
+        Output(terminalId, seq, Encoding.UTF8.GetBytes(text));
 
-    public static string ExitJson(string terminalId, int exitCode) =>
-        "{\"terminalId\":\"" + terminalId + "\",\"exitCode\":" + exitCode + "}";
+    public static TerminalExit Exit(string terminalId, int exitCode) => new(terminalId, exitCode);
 
     /// <summary>Answers <c>terminal.start</c> with <paramref name="terminalId"/> and starts one terminal against
     /// the connected client.</summary>
@@ -376,9 +423,8 @@ internal static class TerminalFixtures
         return await client.StartAsync(request ?? Request(), ct).ConfigureAwait(false);
     }
 
-    /// <summary>Decodes the base64 <c>data</c> of a captured <c>terminal.input</c>/<c>terminal.output</c> frame.</summary>
-    public static byte[] DecodeData(IpcMessage message) =>
-        Convert.FromBase64String(message.Arguments!.Value.GetProperty("data").GetString()!);
+    /// <summary>The <c>data</c> bytes of a captured <c>terminal.input</c>/<c>terminal.output</c> frame.</summary>
+    public static byte[] DecodeData(IpcMessage message) => message.Read<TerminalData>().Data.ToArray();
 
     /// <summary>Reads <see cref="ITerminalSession.Output"/> to normal completion and returns every byte.
     /// Faults with the session's own error when the stream ends abnormally.</summary>
@@ -405,7 +451,7 @@ internal static class TerminalFixtures
         long total = 0;
         foreach (var ack in acks)
         {
-            total += ack.Arguments!.Value.GetProperty("bytes").GetInt64();
+            total += ack.Read<TerminalAck>().Bytes;
         }
 
         return total;

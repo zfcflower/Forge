@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Forge.Ipc;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -25,11 +24,9 @@ public sealed partial class ExtensionHostClient
     {
         ValidateStageRequest(request);
         var active = RequireRunning();
-        var payload = JsonSerializer.SerializeToElement(
-            request, Sdk.ExtensionAuthoringJsonContext.Default.ExtensionStageRequest);
-        var response = await SendAuthoringAsync(active, Sdk.ExtensionProtocol.ExtensionsStage, payload, CompileBudget, ct)
+        var response = await SendAuthoringAsync(active, Sdk.ExtensionProtocol.ExtensionsStage, request, CompileBudget, ct)
             .ConfigureAwait(false);
-        if (!TryReadStagedExtension(response.Result, "The staged extension", out var staged, out var problem))
+        if (!TryReadStagedAnswer(response, out var staged, out var problem))
         {
             throw UnusableAnswer(Sdk.ExtensionProtocol.ExtensionsStage, problem);
         }
@@ -43,9 +40,9 @@ public sealed partial class ExtensionHostClient
     {
         var active = RequireRunning();
         var response = await SendAuthoringAsync(
-                active, Sdk.ExtensionProtocol.ExtensionsPending, IpcJsonTypes.EmptyObject, RequestBudget, ct)
+                active, Sdk.ExtensionProtocol.ExtensionsPending, IpcEmpty.Instance, RequestBudget, ct)
             .ConfigureAwait(false);
-        if (!TryReadPendingExtensions(response.Result, out var pending, out var problem))
+        if (!TryReadPendingExtensions(response, out var pending, out var problem))
         {
             throw UnusableAnswer(Sdk.ExtensionProtocol.ExtensionsPending, problem);
         }
@@ -60,11 +57,9 @@ public sealed partial class ExtensionHostClient
     {
         ValidateCommitRequest(request);
         var active = RequireRunning();
-        var payload = JsonSerializer.SerializeToElement(
-            request, Sdk.ExtensionAuthoringJsonContext.Default.ExtensionCommitRequest);
-        var response = await SendAuthoringAsync(active, Sdk.ExtensionProtocol.ExtensionsCommit, payload, CompileBudget, ct)
+        var response = await SendAuthoringAsync(active, Sdk.ExtensionProtocol.ExtensionsCommit, request, CompileBudget, ct)
             .ConfigureAwait(false);
-        if (!TryReadCommitResult(response.Result, out var result, out var problem))
+        if (!TryReadCommitResult(response, out var result, out var problem))
         {
             throw UnusableAnswer(Sdk.ExtensionProtocol.ExtensionsCommit, problem);
         }
@@ -77,9 +72,8 @@ public sealed partial class ExtensionHostClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         var active = RequireRunning();
-        var payload = JsonSerializer.SerializeToElement(
-            new Sdk.ExtensionIdRequest(pluginId), Sdk.ExtensionAuthoringJsonContext.Default.ExtensionIdRequest);
-        await SendAuthoringAsync(active, Sdk.ExtensionProtocol.ExtensionsDiscard, payload, RequestBudget, ct)
+        await SendAuthoringAsync(
+                active, Sdk.ExtensionProtocol.ExtensionsDiscard, new Sdk.ExtensionIdRequest(pluginId), RequestBudget, ct)
             .ConfigureAwait(false);
     }
 
@@ -106,17 +100,15 @@ public sealed partial class ExtensionHostClient
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         var active = RequireRunning();
-        var payload = JsonSerializer.SerializeToElement(
-            new Sdk.PluginVersionRequest(pluginId, version),
-            Sdk.ExtensionAuthoringJsonContext.Default.PluginVersionRequest);
-        await SendAuthoringAsync(active, operation, payload, RequestBudget, ct).ConfigureAwait(false);
+        await SendAuthoringAsync(active, operation, new Sdk.PluginVersionRequest(pluginId, version), RequestBudget, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Sends one authoring request with this call's own budget. An expired budget is recorded in
     /// <see cref="Diagnostics"/> before <see cref="IpcTimeoutException"/> reaches the caller; host business errors and
     /// caller cancellation are never touched here.</summary>
-    private async Task<IpcMessage> SendAuthoringAsync(
-        IpcPeer active, string operation, JsonElement payload, TimeSpan? budget, CancellationToken ct)
+    private async Task<IpcMessage> SendAuthoringAsync<TArgs>(
+        IpcPeer active, string operation, TArgs payload, TimeSpan? budget, CancellationToken ct)
     {
         try
         {
@@ -199,64 +191,59 @@ public sealed partial class ExtensionHostClient
     /// <summary>Reads an <c>extensions.pending</c> answer. Every item is validated on its own and one unusable item
     /// makes the whole answer unusable instead of hiding the item that needs review.</summary>
     private static bool TryReadPendingExtensions(
-        JsonElement? payload, out IReadOnlyList<Sdk.StagedExtension> pending, out string problem)
+        IpcMessage response, out IReadOnlyList<Sdk.StagedExtension> pending, out string problem)
     {
         pending = [];
-        problem = string.Empty;
-        if (payload is not { ValueKind: JsonValueKind.Object } response ||
-            !response.TryGetProperty("items", out var list) || list.ValueKind != JsonValueKind.Array)
+        if (!HostAnswerRules.TryRead<Sdk.StagedExtensionList>(response, out var list, out problem) ||
+            list.Items is not { } items)
         {
             problem = "The Extension Host returned no pending extension list.";
             return false;
         }
 
-        var staged = new List<Sdk.StagedExtension>(list.GetArrayLength());
-        var index = 0;
-        foreach (var item in list.EnumerateArray())
+        var staged = new Sdk.StagedExtension[items.Count];
+        for (var index = 0; index < items.Count; index++)
         {
-            if (!TryReadStagedExtension(item, $"items[{index}]", out var extension, out problem))
+            if (!TryReadStagedExtension(items[index], $"items[{index}]", out staged[index], out problem))
             {
                 return false;
             }
-
-            staged.Add(extension);
-            index++;
         }
 
         pending = staged;
         return true;
     }
 
+    private static bool TryReadStagedAnswer(IpcMessage response, out Sdk.StagedExtension staged, out string problem)
+    {
+        const string Label = "The staged extension";
+        staged = null!;
+        if (!response.HasPayload)
+        {
+            problem = $"{Label} is missing from the response.";
+            return false;
+        }
+
+        if (!HostAnswerRules.TryRead<Sdk.StagedExtension>(response, out var decoded, out var detail))
+        {
+            problem = $"{Label} cannot be decoded: {detail}";
+            return false;
+        }
+
+        return TryReadStagedExtension(decoded, Label, out staged, out problem);
+    }
+
     /// <summary>Validates one staged extension field by field. A draft that does not compile legitimately carries no
     /// hashes as long as it carries diagnostics; everything else must be complete, because the approval card and the
     /// later commit depend on it.</summary>
     private static bool TryReadStagedExtension(
-        JsonElement? payload, string label, out Sdk.StagedExtension staged, out string problem)
+        Sdk.StagedExtension? decoded, string label, out Sdk.StagedExtension staged, out string problem)
     {
         staged = null!;
         problem = string.Empty;
-        if (payload is not { ValueKind: JsonValueKind.Object } row)
-        {
-            problem = payload is { } other
-                ? $"{label} is {HostProtocolJson.DescribeJson(other)} instead of a staged extension object."
-                : $"{label} is missing from the response.";
-            return false;
-        }
-
-        Sdk.StagedExtension? decoded;
-        try
-        {
-            decoded = JsonSerializer.Deserialize(row, Sdk.ExtensionAuthoringJsonContext.Default.StagedExtension);
-        }
-        catch (JsonException ex)
-        {
-            problem = $"{label} cannot be decoded: {ex.Message}";
-            return false;
-        }
-
         if (decoded is null)
         {
-            problem = $"{label} cannot be decoded as a staged extension.";
+            problem = $"{label} is null instead of a staged extension object.";
             return false;
         }
 
@@ -282,18 +269,17 @@ public sealed partial class ExtensionHostClient
             return false;
         }
 
-        if (!TryReadStagedFiles(row, decoded, identity, out problem) ||
-            !TryReadStagedPermissions(row, decoded, identity, out problem) ||
-            !TryReadStagedDependencies(row, decoded, identity, out problem) ||
-            !TryReadStagedDiagnostics(row, decoded, identity, out problem) ||
+        if (!TryReadStagedFiles(decoded, identity, out problem) ||
+            !HostAnswerRules.TryReadPermissions(decoded.Permissions, identity, out problem) ||
+            !TryReadStagedDependencies(decoded, identity, out problem) ||
+            !TryReadStagedDiagnostics(decoded, identity, out problem) ||
             !TryReadStagedHashes(decoded, identity, out problem))
         {
             return false;
         }
 
-        // A missing hash binds as null through the source-generated constructor while the record declares it
-        // non-nullable (the same shape plugins.status reports for a draft that could not compile). Only nulls are
-        // replaced; a value the host supplied is kept verbatim.
+        // A nil hash binds as null although the record declares it non-nullable (a draft that could not compile).
+        // Only nulls are replaced; a value the host supplied is kept verbatim.
         staged = decoded with
         {
             SourceHash = decoded.SourceHash ?? string.Empty,
@@ -303,28 +289,19 @@ public sealed partial class ExtensionHostClient
         return true;
     }
 
-    private static bool TryReadStagedFiles(
-        JsonElement row, Sdk.StagedExtension staged, string identity, out string problem)
+    private static bool TryReadStagedFiles(Sdk.StagedExtension staged, string identity, out string problem)
     {
         problem = string.Empty;
-        if (!row.TryGetProperty("files", out var list) || list.ValueKind != JsonValueKind.Array ||
-            staged.Files is not { } files)
+        if (staged.Files is not { } files)
         {
             problem = $"{identity} has no file list.";
             return false;
         }
 
-        if (files.Count != list.GetArrayLength())
-        {
-            problem = $"{identity} reports {list.GetArrayLength()} file(s) but lists {files.Count}.";
-            return false;
-        }
-
-        var position = 0;
-        foreach (var item in list.EnumerateArray())
+        for (var position = 0; position < files.Count; position++)
         {
             var file = files[position];
-            if (item.ValueKind != JsonValueKind.Object || file is null)
+            if (file is null)
             {
                 problem = $"{identity} has an unusable file at files[{position}].";
                 return false;
@@ -341,78 +318,48 @@ public sealed partial class ExtensionHostClient
                 problem = $"{identity} has no text for files[{position}] ('{file.Path}').";
                 return false;
             }
-
-            position++;
         }
 
         return true;
     }
 
-    /// <summary>Permissions are checked against the raw JSON and the decoded list, exactly like <c>plugins.status</c>:
-    /// a permission object without <c>kind</c> would otherwise decode as the enum default <c>ReadFile</c>.</summary>
-    private static bool TryReadStagedPermissions(
-        JsonElement row, Sdk.StagedExtension staged, string identity, out string problem) =>
-        HostProtocolJson.TryReadPermissions(row, staged.Permissions, identity, out problem);
-
-    private static bool TryReadStagedDependencies(
-        JsonElement row, Sdk.StagedExtension staged, string identity, out string problem)
+    private static bool TryReadStagedDependencies(Sdk.StagedExtension staged, string identity, out string problem)
     {
         problem = string.Empty;
-        if (!row.TryGetProperty("dependencies", out var list) || list.ValueKind != JsonValueKind.Array ||
-            staged.Dependencies is not { } dependencies)
+        if (staged.Dependencies is not { } dependencies)
         {
             problem = $"{identity} has no dependency list.";
             return false;
         }
 
-        if (dependencies.Count != list.GetArrayLength())
+        for (var position = 0; position < dependencies.Count; position++)
         {
-            problem = $"{identity} reports {list.GetArrayLength()} dependency(ies) but lists {dependencies.Count}.";
-            return false;
-        }
-
-        var position = 0;
-        foreach (var item in list.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object || dependencies[position] is null)
+            if (dependencies[position] is null)
             {
                 problem = $"{identity} has an unusable dependency at dependencies[{position}].";
                 return false;
             }
-
-            position++;
         }
 
         return true;
     }
 
-    private static bool TryReadStagedDiagnostics(
-        JsonElement row, Sdk.StagedExtension staged, string identity, out string problem)
+    private static bool TryReadStagedDiagnostics(Sdk.StagedExtension staged, string identity, out string problem)
     {
         problem = string.Empty;
-        if (!row.TryGetProperty("diagnostics", out var list) || list.ValueKind != JsonValueKind.Array ||
-            staged.Diagnostics is not { } diagnostics)
+        if (staged.Diagnostics is not { } diagnostics)
         {
             problem = $"{identity} has no diagnostic list.";
             return false;
         }
 
-        if (diagnostics.Count != list.GetArrayLength())
+        for (var position = 0; position < diagnostics.Count; position++)
         {
-            problem = $"{identity} reports {list.GetArrayLength()} diagnostic(s) but lists {diagnostics.Count}.";
-            return false;
-        }
-
-        var position = 0;
-        foreach (var item in list.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.String || diagnostics[position] is null)
+            if (diagnostics[position] is null)
             {
                 problem = $"{identity} has an unusable diagnostic at diagnostics[{position}].";
                 return false;
             }
-
-            position++;
         }
 
         return true;
@@ -451,72 +398,45 @@ public sealed partial class ExtensionHostClient
     /// <summary>Reads an <c>extensions.commit</c> answer: the plugin status goes through the <c>plugins.status</c> row
     /// rules unchanged and the registered tool names must be a list of non-blank names.</summary>
     private static bool TryReadCommitResult(
-        JsonElement? payload, out Sdk.ExtensionCommitResult result, out string problem)
+        IpcMessage response, out Sdk.ExtensionCommitResult result, out string problem)
     {
         result = null!;
-        problem = string.Empty;
-        if (payload is not { ValueKind: JsonValueKind.Object } response)
+        if (!response.HasPayload)
         {
-            problem = payload is { } other
-                ? $"The commit result is {HostProtocolJson.DescribeJson(other)} instead of a commit result object."
-                : "The Extension Host returned no commit result.";
+            problem = "The Extension Host returned no commit result.";
             return false;
         }
 
-        Sdk.ExtensionCommitResult? decoded;
-        try
+        if (!HostAnswerRules.TryRead<Sdk.ExtensionCommitResult>(response, out var decoded, out var detail))
         {
-            decoded = JsonSerializer.Deserialize(response, Sdk.ExtensionAuthoringJsonContext.Default.ExtensionCommitResult);
-        }
-        catch (JsonException ex)
-        {
-            problem = $"The commit result cannot be decoded: {ex.Message}";
+            problem = $"The commit result cannot be decoded: {detail}";
             return false;
         }
 
-        if (decoded is null)
+        if (decoded.Status is null)
         {
-            problem = "The commit result cannot be decoded as a commit result.";
+            problem = "The commit result carries no plugin status.";
             return false;
         }
 
-        if (!response.TryGetProperty("status", out var statusRow) || statusRow.ValueKind != JsonValueKind.Object)
-        {
-            problem = response.TryGetProperty("status", out var broken)
-                ? $"status is {HostProtocolJson.DescribeJson(broken)} instead of a plugin status object."
-                : "The commit result carries no plugin status.";
-            return false;
-        }
-
-        if (!HostProtocolJson.TryReadPluginStatus(statusRow, "status", out var status, out problem))
+        if (!HostAnswerRules.TryReadPluginStatus(decoded.Status, "status", out var status, out problem))
         {
             return false;
         }
 
-        if (!response.TryGetProperty("toolNames", out var list) || list.ValueKind != JsonValueKind.Array ||
-            decoded.ToolNames is not { } toolNames)
+        if (decoded.ToolNames is not { } toolNames)
         {
             problem = "The commit result carries no tool name list.";
             return false;
         }
 
-        if (toolNames.Count != list.GetArrayLength())
+        for (var position = 0; position < toolNames.Count; position++)
         {
-            problem = $"The commit result reports {list.GetArrayLength()} tool name(s) but lists {toolNames.Count}.";
-            return false;
-        }
-
-        var position = 0;
-        foreach (var item in list.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.String || item.GetString() is not { } name ||
-                string.IsNullOrWhiteSpace(name))
+            if (string.IsNullOrWhiteSpace(toolNames[position]))
             {
                 problem = $"The commit result has an unusable tool name at toolNames[{position}].";
                 return false;
             }
-
-            position++;
         }
 
         result = decoded with { Status = status };

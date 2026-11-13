@@ -7,6 +7,8 @@ using TextMateSharp.Grammars;
 using TextMateSharp.Registry;
 using TextMateSharp.Themes;
 using FontStyle = Avalonia.Media.FontStyle;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Changes;
 
@@ -89,7 +91,7 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IndexOutOfRangeException)
         {
-            Trace.WriteLine("[diff] syntax colouring failed: " + exception.Message);
+            AppLogs.Diff.ZLogWarning($"syntax colouring failed: {exception.Message}");
         }
     }
 
@@ -150,7 +152,7 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
         catch (Exception exception) when (exception is IOException or InvalidOperationException or KeyNotFoundException
             or NotSupportedException or FormatException or System.Text.Json.JsonException or UnauthorizedAccessException)
         {
-            Trace.WriteLine("[diff] syntax theme failed: " + exception.Message);
+            AppLogs.Diff.ZLogWarning($"syntax theme failed: {exception.Message}");
         }
 
         return context;
@@ -188,7 +190,7 @@ internal sealed class DiffSyntaxColorizer : DocumentColorizingTransformer
                 catch (Exception exception) when (exception is IOException or InvalidOperationException or KeyNotFoundException
                     or NotSupportedException or FormatException or System.Text.Json.JsonException)
                 {
-                    Trace.WriteLine("[diff] grammar failed: " + exception.Message);
+                    AppLogs.Diff.ZLogWarning($"grammar failed: {exception.Message}");
                     grammar = null;
                 }
 

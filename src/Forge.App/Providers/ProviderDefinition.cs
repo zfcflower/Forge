@@ -70,8 +70,17 @@ internal sealed record ProviderDefinition
     /// <summary>OpenAI-compatible: send <c>prompt_cache_key</c>; never for DeepSeek (the provider itself refuses it).</summary>
     public bool SendPromptCacheKey { get; init; }
 
-    /// <summary>Anthropic message-breakpoint cache TTL, <c>"5m"</c> or <c>"1h"</c>; null = the provider default.</summary>
+    /// <summary>
+    /// The prompt-cache lifetime to ask for — <c>"auto"</c> (default), <c>"5m"</c> or <c>"1h"</c>; null reads as <c>auto</c>.
+    /// </summary>
     public string? PromptCacheTtl { get; init; }
+
+    /// <summary>
+    /// Whether this provider has a cache lifetime to choose at all: Anthropic takes breakpoints with a lifetime and OpenAI takes a
+    /// retention, while every other vendor caches on its own terms with nothing to set. The settings row shows the control only here.
+    /// </summary>
+    public bool SupportsPromptCacheTtl =>
+        Protocol == ProviderProtocol.Anthropic || Preset.CacheWiring is ProviderCacheWiring.OpenAi;
 
     /// <summary>Extra request headers for a gateway with its own scheme (never a credential).</summary>
     public IReadOnlyDictionary<string, string> Headers { get; init; } =
@@ -179,9 +188,41 @@ internal sealed record ProviderDefinition
             EnvironmentVariable = preset.EnvironmentVariable,
             SecretReference = null,
             Models = models,
-            DefaultModel = models.Count > 0 ? models[0] : string.Empty,
+            DefaultModel = PreferredDefaultModel(preset.Id, models),
             Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
         };
+    }
+
+    /// <summary>
+    /// The model a fresh definition starts on. Anthropic's listing is newest-first across every family, so "the first id"
+    /// would move a fresh Claude sign-in onto whichever family shipped last; its default is the newest Opus instead, which
+    /// is where both official clients' <c>Default</c> row lands. Every other preset keeps the first id, because that is what
+    /// its seeds and its listing order mean.
+    /// </summary>
+    /// <param name="presetId">The preset the definition was built from.</param>
+    /// <param name="models">The models the definition starts with, in the order they should be offered.</param>
+    public static string PreferredDefaultModel(string presetId, IReadOnlyList<string> models)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        if (models.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        if (!string.Equals(presetId, ProviderPresets.AnthropicId, StringComparison.Ordinal))
+        {
+            return models[0];
+        }
+
+        foreach (var model in models)
+        {
+            if (model.Contains("opus", StringComparison.OrdinalIgnoreCase))
+            {
+                return model;
+            }
+        }
+
+        return models[0];
     }
 
     /// <summary>
@@ -274,14 +315,22 @@ internal sealed record ProviderDefinition
             Overrides = FromMetadataDocument(entry.ModelMeta),
             Headers = headers,
             SendPromptCacheKey = entry.SendPromptCacheKey ?? false,
-            PromptCacheTtl = (entry.PromptCacheTtl ?? string.Empty).Trim().ToLowerInvariant() switch
-            {
-                "5m" => "5m",
-                "1h" => "1h",
-                _ => null,
-            },
+            PromptCacheTtl = ProviderDefinition.ParsePromptCacheTtl(entry.PromptCacheTtl),
         };
     }
+
+    /// <summary>
+    /// <c>promptCacheTtl</c>: <c>"auto"</c> (default — short lifetime until the session pauses, then the hour), <c>"5m"</c>,
+    /// <c>"1h"</c>. Anything else reads as <c>auto</c>, which is the product default rather than a silent off switch.
+    /// </summary>
+    public static string? ParsePromptCacheTtl(string? value) =>
+        (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "5m" => "5m",
+            "1h" => "1h",
+            "auto" => "auto",
+            _ => null,
+        };
 
     /// <summary>
     /// The metadata overrides as resolved values: a window needs a positive number, and a price entry only counts when at

@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.Scripting;
 using Forge.ScriptRuntime;
@@ -59,36 +59,30 @@ internal sealed class SingleUseExecutorSession : IAsyncDisposable
     /// <summary>Optional override for <c>host.tool_call</c>: when set, the session answers inner tool calls with it
     /// instead of the default refusal. It receives the bound request (run id, name, arguments), so a test can check
     /// the binding and reply with a canned result.</summary>
-    public Func<BoundToolCallRequest, ToolResultPayload>? ToolResponder { get; set; }
+    public Func<HostToolCallRequest, ToolResult>? ToolResponder { get; set; }
 
     private static Task DispatchAsync(IpcPeer peer, SingleUseExecutorSession? session, IpcMessage message, CancellationToken ct)
     {
         if (session?.ToolResponder is { } responder &&
-            string.Equals(message.Operation, ScriptExecutorProtocol.HostToolCall, StringComparison.Ordinal) &&
-            message.Arguments is { } args)
+            string.Equals(message.Operation, ExtensionProtocol.HostToolCall, StringComparison.Ordinal) &&
+            message.HasPayload)
         {
-            BoundToolCallRequest? call = null;
+            HostToolCallRequest? call = null;
             try
             {
-                call = args.Deserialize(ScriptExecutorJsonContext.Default.BoundToolCallRequest);
+                call = message.Read<HostToolCallRequest>();
             }
-            catch (JsonException)
+            catch (IpcProtocolException)
             {
             }
 
             if (call is not null)
             {
-                return peer.RespondAsync(
-                    message.Id,
-                    JsonSerializer.SerializeToElement(responder(call), ScriptExecutorJsonContext.Default.ToolResultPayload),
-                    ct);
+                return peer.RespondAsync(message.Id, responder(call), ct);
             }
         }
 
-        return peer.RespondAsync(
-            message.Id,
-            JsonDocument.Parse("{\"content\":\"the test host provides no tools.\",\"isError\":true}").RootElement.Clone(),
-            ct);
+        return peer.RespondAsync(message.Id, new ToolResult("the test host provides no tools.", IsError: true), ct);
     }
 
     public bool HasExited
@@ -279,7 +273,7 @@ internal static class SingleUseExecutorArtifacts
         ArgumentNullException.ThrowIfNull(compiled);
         Assert.NotNull(compiled.Image);
         Assert.NotNull(compiled.Descriptor);
-        return session.Peer.SendRequestAsync(ScriptExecutorProtocol.Load, LoadArgs(compiled.Image, compiled.Descriptor), ct);
+        return session.Peer.RequestAsync(ScriptExecutorProtocol.Load, LoadArgs(compiled.Image, compiled.Descriptor), ct);
     }
 
     /// <summary>Builds the <c>executor.run</c> arguments for one bound run.</summary>
@@ -299,14 +293,9 @@ internal static class SingleUseExecutorArtifacts
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(request);
-        var response = await session.Peer.SendRequestAsync(
-            ScriptExecutorProtocol.Run,
-            JsonSerializer.SerializeToElement(request, ScriptExecutorJsonContext.Default.ScriptRunRequest),
-            ct).ConfigureAwait(false);
-        Assert.True(response.Result.HasValue, "The executor.run response carries no result.");
-        var result = response.Result.Value.Deserialize(ScriptExecutorJsonContext.Default.CodeExecutionResult);
-        Assert.NotNull(result);
-        return result;
+        var response = await session.Peer.RequestAsync(ScriptExecutorProtocol.Run, request, ct).ConfigureAwait(false);
+        Assert.True(response.HasPayload, "The executor.run response carries no result.");
+        return response.Read<CodeExecutionResult>();
     }
 
     public static ScriptArtifactDescriptor Describe(byte[] image) => new(
@@ -321,16 +310,14 @@ internal static class SingleUseExecutorArtifacts
         PeSha256: Sha256Hex(image),
         PeLength: image.Length);
 
-    public static JsonElement LoadArgs(byte[] image, ScriptArtifactDescriptor descriptor) =>
-        JsonSerializer.SerializeToElement(
-            new ScriptArtifactLoadRequest(Convert.ToBase64String(image), descriptor),
-            ScriptExecutorJsonContext.Default.ScriptArtifactLoadRequest);
+    public static ScriptArtifactLoadRequest LoadArgs(byte[] image, ScriptArtifactDescriptor descriptor) =>
+        new(image, descriptor);
 
     public static async Task<IpcRemoteException> ExpectLoadRejectedAsync(
         SingleUseExecutorSession session, byte[] image, ScriptArtifactDescriptor descriptor, CancellationToken ct)
     {
         var remote = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => session.Peer.SendRequestAsync(ScriptExecutorProtocol.Load, LoadArgs(image, descriptor), ct));
+            () => session.Peer.RequestAsync(ScriptExecutorProtocol.Load, LoadArgs(image, descriptor), ct));
         Assert.False(string.IsNullOrWhiteSpace(remote.Message), "The executor rejection carried no error detail.");
         Assert.Equal("invalid_artifact", remote.Code);
         return remote;
@@ -474,7 +461,7 @@ public sealed class SingleUseExecutorRejectionTests
             ScriptArtifact.IsCompatibleRuntimeVersion(patched),
             $"A patch-only runtime '{patched}' should be compatible with '{compiled.Descriptor.RuntimeVersion}'.");
         await using var session = await SingleUseExecutorSession.StartAsync(ct);
-        await session.Peer.SendRequestAsync(
+        await session.Peer.RequestAsync(
             ScriptExecutorProtocol.Load,
             SingleUseExecutorArtifacts.LoadArgs(compiled.Image, compiled.Descriptor with { RuntimeVersion = patched }),
             ct);
@@ -487,15 +474,13 @@ public sealed class SingleUseExecutorRejectionTests
     }
 
     [Fact]
-    public void Decode_WithOverlongBase64_IsRejectedBeforeAllocating()
+    public void Image_above_the_artifact_bound_IsRefusedAtTheImagesOwnSize()
     {
-        // This trips the encoded-length bound inside ScriptArtifact.Decode itself. The oversized executor.load
-        // test only trips the descriptor PeLength check, which is a different bound on a different field.
-        var overlong = new string('A', ScriptArtifact.MaxEncodedAssemblyChars + 1);
-        Assert.True(
-            overlong.Length > ScriptArtifact.MaxEncodedAssemblyChars,
-            "The test input must exceed the encoded-image bound.");
-        var exception = Assert.Throws<ScriptArtifactException>(() => ScriptArtifact.Decode(overlong));
+        // The image now travels as MessagePack bin, so the bound is on the decoded bytes: one byte over the limit is
+        // refused at the artifact layer, before anything is serialized or allocated for a frame.
+        ScriptArtifact.EnsureImageWithinBounds(ScriptArtifact.MaxAssemblyBytes);
+        var exception = Assert.Throws<ScriptArtifactException>(
+            () => ScriptArtifact.EnsureImageWithinBounds(ScriptArtifact.MaxAssemblyBytes + 1));
         Assert.Contains("the limit is", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

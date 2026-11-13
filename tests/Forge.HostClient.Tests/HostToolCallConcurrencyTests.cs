@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Forge.Abstractions;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
@@ -132,10 +131,7 @@ public sealed class HostToolCallConcurrencyTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        var hold = new InFlightRoot
-        {
-            ResultJson = "{\"content\":" + JsonSerializer.Serialize(big) + ",\"isError\":false}",
-        };
+        var hold = new InFlightRoot { Content = big };
         BoundRoots.ParkRoot(host, "code.execute", hold);
         var proxy = client.CreateRunCodeTool(registry, new RunCodeProxyOptions { Execution = execution });
 
@@ -168,7 +164,7 @@ public sealed class HostToolCallConcurrencyTests
                 return ApprovalDecision.Allow;
             });
         using var limit = TestLimit.Create();
-        var hold = new InFlightRoot { ResultJson = """{"content":"script-ok","isError":false}""" };
+        var hold = new InFlightRoot { Content = "script-ok" };
         BoundRoots.ParkRoot(host, "code.execute", hold);
         var proxy = client.CreateRunCodeTool(registry);
         var rootTask = proxy.InvokeAsync(

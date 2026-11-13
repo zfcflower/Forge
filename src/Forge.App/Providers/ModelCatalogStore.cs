@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Forge.Core.Providers;
 using Forge.IO;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Providers;
 
@@ -109,14 +111,14 @@ internal sealed class ModelCatalogStore
                 {
                     // A damaged cache is not worth a startup failure: the next refresh replaces it whole.
                     loadProblem = error;
-                    Trace.WriteLine("[model-catalog] " + error);
+                    AppLogs.ModelCatalog.ZLogWarning($"{error}");
                 }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             loadProblem = exception.Message;
-            Trace.TraceWarning("[model-catalog] read failed: " + exception.Message);
+            AppLogs.ModelCatalog.ZLogWarning($"read failed: {exception.Message}");
         }
         finally
         {

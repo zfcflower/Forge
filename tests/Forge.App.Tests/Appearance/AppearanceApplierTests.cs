@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Forge.App.Appearance;
 using Forge.App.Preferences;
+using Forge.App.Tests.Logging;
 using Xunit;
 
 namespace Forge.App.Tests.Appearance;
@@ -174,42 +175,19 @@ public sealed class AppearanceApplierTests : IDisposable
     [Fact]
     public void A_repeated_bad_family_text_is_reported_once()
     {
-        var listener = new CountingListener();
-        System.Diagnostics.Trace.Listeners.Add(listener);
-        try
-        {
-            preferences.UiFontFamily = ",";
-            var afterFirst = listener.Count;
-            applier.Apply();
-            applier.Apply();
-            preferences.UiFontSize = 14;
-            preferences.UiFontSize = 15;
+        using var log = new LogCapture();
+        preferences.UiFontFamily = ",";
+        var afterFirst = AppearanceLines(log);
+        applier.Apply();
+        applier.Apply();
+        preferences.UiFontSize = 14;
+        preferences.UiFontSize = 15;
 
-            Assert.True(afterFirst >= 1);
-            Assert.Equal(afterFirst, listener.Count);
-        }
-        finally
-        {
-            System.Diagnostics.Trace.Listeners.Remove(listener);
-        }
+        Assert.True(afterFirst >= 1);
+        Assert.Equal(afterFirst, AppearanceLines(log));
     }
 
-    private sealed class CountingListener : System.Diagnostics.TraceListener
-    {
-        public int Count { get; private set; }
-
-        public override void Write(string? message)
-        {
-        }
-
-        public override void WriteLine(string? message)
-        {
-            if (message?.Contains("[appearance]", StringComparison.Ordinal) == true)
-            {
-                Count++;
-            }
-        }
-    }
+    private static int AppearanceLines(LogCapture log) => log.Entries.Count(static entry => entry.Category == "appearance");
 
     private T Value<T>(string key)
     {

@@ -1,13 +1,15 @@
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
+using TerminalStartRequest = Forge.Abstractions.TerminalStartRequest;
+using WireTerminalStart = Forge.Ipc.Protocol.TerminalStartRequest;
 
 namespace Forge.HostClient;
 
 /// <summary>
 /// Terminal half of <see cref="ExtensionHostClient"/>: starts pseudo-terminals in the Extension Host, keeps the
 /// registry of the terminals of the current connection generation, and turns <c>terminal.output</c>/<c>terminal.exit</c>
-/// notifications into the sessions' readers and exit tasks. The wire format lives in <see cref="TerminalProtocol"/>.
+/// notifications into the sessions' readers and exit tasks. The payloads are the <see cref="TerminalOperations"/> records.
 /// </summary>
 public sealed partial class ExtensionHostClient : ITerminalHost
 {
@@ -62,14 +64,14 @@ public sealed partial class ExtensionHostClient : ITerminalHost
         }
 
         var generation = Volatile.Read(ref activeGeneration);
-        var payload = TerminalProtocol.SerializeStart(request);
+        var payload = ToWire(request);
         ct.ThrowIfCancellationRequested();
 
         // The request itself is not tied to ct: cancelling it would make the peer drop the answer, and with it the only
         // way to learn the id of a terminal the host may already have built. The caller stops waiting on ct instead,
         // and an answer that still arrives is cleaned up by AbandonStartAsync. The request stays bounded by the
         // client's budget (or the peer's default deadline) and the connection lifetime.
-        var startTask = SendAsync(active, TerminalOps.Start, payload, RequestBudget, CancellationToken.None);
+        var startTask = SendAsync(active, TerminalOperations.Start, payload, RequestBudget, CancellationToken.None);
         IpcMessage response;
         try
         {
@@ -81,11 +83,11 @@ public sealed partial class ExtensionHostClient : ITerminalHost
             throw;
         }
 
-        if (!TerminalProtocol.TryReadStartResult(response.Result, out var terminalId, out var problem))
+        if (!TryReadStartResult(response, out var terminalId, out var problem))
         {
             Diagnose("terminal.start returned unusable data: " + problem);
             throw new InvalidDataException(
-                $"{TerminalOps.Start} returned a response that cannot be decoded: {problem}");
+                $"{TerminalOperations.Start} returned a response that cannot be decoded: {problem}");
         }
 
         if (generation != Volatile.Read(ref activeGeneration) || active.IsClosed)
@@ -109,7 +111,7 @@ public sealed partial class ExtensionHostClient : ITerminalHost
         try
         {
             var response = await startTask.ConfigureAwait(false);
-            if (!TerminalProtocol.TryReadStartResult(response.Result, out terminalId, out _))
+            if (!TryReadStartResult(response, out terminalId, out _))
             {
                 return;
             }
@@ -122,7 +124,7 @@ public sealed partial class ExtensionHostClient : ITerminalHost
             DiscardEarlyFrames(terminalId);
             using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await SendAsync(
-                    active, TerminalOps.Stop, TerminalProtocol.SerializeTerminalId(terminalId), RequestBudget, budget.Token)
+                    active, TerminalOperations.Stop, new TerminalIdRequest(terminalId), RequestBudget, budget.Token)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -174,8 +176,8 @@ public sealed partial class ExtensionHostClient : ITerminalHost
     internal void NoteTerminalProblem(string message) => Diagnose(message);
 
     /// <summary>Sends one terminal request with the client's per-call budget, on the connection the session belongs to.</summary>
-    internal Task<IpcMessage> SendTerminalRequestAsync(
-        IpcPeer active, string operation, JsonElement args, CancellationToken ct) =>
+    internal Task<IpcMessage> SendTerminalRequestAsync<TArgs>(
+        IpcPeer active, string operation, TArgs args, CancellationToken ct) =>
         SendAsync(active, operation, args, RequestBudget, ct);
 
     /// <summary>Registers the session of a successful start and replays what the host sent before the answer was
@@ -230,6 +232,87 @@ public sealed partial class ExtensionHostClient : ITerminalHost
         return session;
     }
 
+    /// <summary>The <c>terminal.start</c> payload: a blank shell, an empty argument list and an empty environment are
+    /// sent as null so the host applies its defaults.</summary>
+    private static WireTerminalStart ToWire(TerminalStartRequest request) =>
+        new(
+            request.SessionId,
+            request.WorkingDirectory,
+            request.Size.Columns,
+            request.Size.Rows,
+            string.IsNullOrWhiteSpace(request.Shell) ? null : request.Shell,
+            request.Arguments is { Count: > 0 } arguments ? arguments : null,
+            request.Environment is { Count: > 0 } environment ? environment : null);
+
+    private static bool TryReadStartResult(IpcMessage response, out string terminalId, out string problem)
+    {
+        terminalId = string.Empty;
+        if (!HostAnswerRules.TryRead<TerminalStartResponse>(response, out var started, out problem))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(started.TerminalId))
+        {
+            problem = "the response carries no terminal id.";
+            return false;
+        }
+
+        terminalId = started.TerminalId;
+        return true;
+    }
+
+    /// <summary>Reads a <c>terminal.output</c> payload. The data is the inbound frame's memory, which the transport
+    /// never reuses, so it is handed on without a copy.</summary>
+    private static bool TryReadOutput(
+        IpcMessage message, out string terminalId, out long seq, out ReadOnlyMemory<byte> data, out string problem)
+    {
+        terminalId = string.Empty;
+        seq = 0;
+        data = ReadOnlyMemory<byte>.Empty;
+        if (!HostAnswerRules.TryRead<TerminalData>(message, out var output, out problem))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(output.TerminalId))
+        {
+            problem = "the message carries no terminal id.";
+            return false;
+        }
+
+        if (output.Sequence < 0)
+        {
+            problem = $"the message carries a negative sequence number ({output.Sequence}).";
+            return false;
+        }
+
+        terminalId = output.TerminalId;
+        seq = output.Sequence;
+        data = output.Data;
+        return true;
+    }
+
+    private static bool TryReadExit(IpcMessage message, out string terminalId, out int exitCode, out string problem)
+    {
+        terminalId = string.Empty;
+        exitCode = 0;
+        if (!HostAnswerRules.TryRead<TerminalExit>(message, out var exit, out problem))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(exit.TerminalId))
+        {
+            problem = "the message carries no terminal id.";
+            return false;
+        }
+
+        terminalId = exit.TerminalId;
+        exitCode = exit.ExitCode;
+        return true;
+    }
+
     private static void ValidateTerminalStart(TerminalStartRequest request)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
@@ -260,9 +343,9 @@ public sealed partial class ExtensionHostClient : ITerminalHost
     /// still in flight (the host writes output before the client's continuation runs), so its frames are buffered here
     /// and replayed by <see cref="RegisterTerminal"/> instead of being dropped.
     /// </summary>
-    private void OnTerminalOutput(long generation, JsonElement? payload)
+    private void OnTerminalOutput(long generation, IpcMessage message)
     {
-        if (!TerminalProtocol.TryReadOutput(payload, out var terminalId, out var seq, out var data, out var problem))
+        if (!TryReadOutput(message, out var terminalId, out var seq, out var data, out var problem))
         {
             Diagnose("terminal.output carried no usable payload: " + problem);
             return;
@@ -288,9 +371,9 @@ public sealed partial class ExtensionHostClient : ITerminalHost
 
     /// <summary>Handles one <c>terminal.exit</c> notification: the terminal is removed from the registry and its
     /// session reports the exit code. An early exit is buffered like early output and replayed at registration.</summary>
-    private void OnTerminalExit(long generation, JsonElement? payload)
+    private void OnTerminalExit(long generation, IpcMessage message)
     {
-        if (!TerminalProtocol.TryReadExit(payload, out var terminalId, out var exitCode, out var problem))
+        if (!TryReadExit(message, out var terminalId, out var exitCode, out var problem))
         {
             Diagnose("terminal.exit carried no usable payload: " + problem);
             return;
@@ -321,7 +404,7 @@ public sealed partial class ExtensionHostClient : ITerminalHost
     /// with a protocol error) instead of growing without limit. A frame that arrives after its terminal's exit is the
     /// only other way in here: the wire contract makes <c>terminal.exit</c> the last message of an id, so such a frame
     /// is buffered (never replayed) and evicted like any other stale entry.</summary>
-    private void BufferEarlyFrame(string terminalId, long seq, byte[] data)
+    private void BufferEarlyFrame(string terminalId, long seq, ReadOnlyMemory<byte> data)
     {
         if (earlyTerminalBytes + data.Length > MaxEarlyTerminalBytes)
         {
@@ -396,7 +479,7 @@ public sealed partial class ExtensionHostClient : ITerminalHost
     /// <summary>Frames of one terminal that arrived before its <c>terminal.start</c> answer was handled.</summary>
     private sealed class EarlyTerminalFrames
     {
-        public List<(long Seq, byte[] Data)> Frames { get; } = [];
+        public List<(long Seq, ReadOnlyMemory<byte> Data)> Frames { get; } = [];
 
         public long Bytes { get; set; }
 

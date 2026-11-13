@@ -5,6 +5,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.Core.Providers;
 using Forge.IO;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Providers;
 
@@ -17,14 +19,35 @@ namespace Forge.App.Providers;
 internal sealed class ProviderStore
 {
     private readonly string settingsPath;
+    private readonly Func<string?> claudeVersion;
+    private readonly IUsageRecorder? usageRecorder;
 
-    public ProviderStore(string settingsPath)
+    /// <param name="claudeVersion">
+    /// What version to claim when the section is first written. Defaults to asking the locally installed CLI, so the claim names a
+    /// build the user actually has; a machine without the CLI falls back to the shipped default. Injectable so a test asserts the
+    /// section's shape without a 300 MB program on the test machine.
+    /// </param>
+    /// <param name="usageRecorder">
+    /// Where model requests are recorded once the user turns the usage log on; null in a test or a build without the composition root.
+    /// </param>
+    public ProviderStore(string settingsPath, Func<string?>? claudeVersion = null, IUsageRecorder? usageRecorder = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(settingsPath);
         this.settingsPath = settingsPath;
+        this.claudeVersion = claudeVersion ?? DefaultClaudeVersion;
+        this.usageRecorder = usageRecorder;
     }
 
+    private static string? DefaultClaudeVersion() => ClaudeCliProbe.ReadVersion(ClaudeCliProbe.Locate());
+
     public string SettingsPath => settingsPath;
+
+    /// <summary>
+    /// The options an empty or unreadable catalogue still carries: the model catalog layer when there is one, and the wire
+    /// claim's default — an absent <c>claudeWire</c> section means "claim", so a missing file must not read as "off".
+    /// </summary>
+    private ProviderCatalogOptions EmptyOptions(ModelCatalogStore? modelCatalog) =>
+        new(ModelCatalog: modelCatalog, Wire: ClaudeWireSettings.Resolve(null), UsageRecorder: usageRecorder);
 
     /// <summary>
     /// Loads the connected providers. Never throws for file problems: the returned catalogue carries the sentence that says
@@ -41,7 +64,7 @@ internal sealed class ProviderStore
 
         if (!File.Exists(settingsPath))
         {
-            return ProviderCatalog.Empty(ProviderStrings.SettingsMissingText(), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
+            return ProviderCatalog.Empty(ProviderStrings.SettingsMissingText(), EmptyOptions(modelCatalog));
         }
 
         SettingsDocument? document;
@@ -52,12 +75,12 @@ internal sealed class ProviderStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            return ProviderCatalog.Empty(ProviderStrings.SettingsUnreadableText(exception.Message), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
+            return ProviderCatalog.Empty(ProviderStrings.SettingsUnreadableText(exception.Message), EmptyOptions(modelCatalog));
         }
 
         if (document is null)
         {
-            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText(), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
+            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText(), EmptyOptions(modelCatalog));
         }
 
         // The global window and the catalog address are read once: the same two values go to every catalogue this load
@@ -65,7 +88,9 @@ internal sealed class ProviderStore
         var catalogSettings = new ProviderCatalogOptions(
             ContextWindowDefault.FromJson(document.ModelCatalog?.DefaultContextWindow),
             document.ModelCatalog?.SourceUrl,
-            modelCatalog);
+            modelCatalog,
+            Wire: ClaudeWireSettings.Resolve(document.ClaudeWire),
+            UsageRecorder: usageRecorder);
 
         var entries = document.Providers?.Items;
         if (entries is null or { Count: 0 })
@@ -112,7 +137,7 @@ internal sealed class ProviderStore
 
         if (definitions.Count == 0)
         {
-            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText(), new ProviderCatalogOptions(ModelCatalog: modelCatalog));
+            return ProviderCatalog.Empty(ProviderStrings.SectionMissingText(), EmptyOptions(modelCatalog));
         }
 
         return ProviderCatalog.Create(
@@ -151,6 +176,7 @@ internal sealed class ProviderStore
         };
         root["providers"] = JsonSerializer.SerializeToNode(section, ProvidersJsonContext.Default.ProvidersSectionDocument);
         root.Remove("provider");
+        ReconcileWireSection(root, definitions);
 
         // The catalog section keeps any field this build does not know (an older build's pointers, a field added later);
         // only the two values the page edits are written, and an empty value removes just that property.
@@ -189,6 +215,42 @@ internal sealed class ProviderStore
 
         var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
         AtomicFile.WriteAllBytes(settingsPath, System.Text.Encoding.UTF8.GetBytes(json));
+    }
+
+    /// <summary>
+    /// Keeps <c>claudeWire</c> in step with what is connected: a Claude subscription provider is what the claim governs, so the
+    /// section exists as soon as one is saved, and it is removed once none is left — a section nothing reads would be a note
+    /// about a provider that is no longer there. An existing section is never rewritten: its values are the user's, including
+    /// <c>"enabled": false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only a save triggers this, never a load: starting the app must not edit the user's file. The consequence worth knowing is
+    /// that an explicit <c>off</c> does not survive removing the last Claude provider — re-adding one restores the default claim.
+    /// </remarks>
+    private void ReconcileWireSection(JsonObject root, IReadOnlyList<ProviderDefinition> definitions)
+    {
+        var claimsIdentity = definitions.Any(definition =>
+            definition.CredentialKind == ProviderCredentialKind.ClaudeSubscription);
+        if (!claimsIdentity)
+        {
+            root.Remove(ClaudeWireSettings.SectionName);
+            return;
+        }
+
+        if (root[ClaudeWireSettings.SectionName] is not null)
+        {
+            return;
+        }
+
+        root[ClaudeWireSettings.SectionName] = new JsonObject
+        {
+            ["enabled"] = true,
+            // The version is what the locally installed CLI reports, so the claim names a build the user actually has; the build
+            // suffix is deliberately absent — it is not stable per build, so it is read from the CLI at request time instead.
+            ["version"] = claudeVersion() ?? ClaudeWireSettings.DefaultVersion,
+            ["entrypoint"] = ClaudeWireSettings.DefaultEntrypoint,
+            ["note"] = ClaudeWireSettings.Documentation,
+        };
     }
 
     /// <summary>
@@ -288,12 +350,7 @@ internal sealed class ProviderStore
             // The single-provider section carried these two; dropping them on migration would silently change how prompts
             // are cached on the first save.
             SendPromptCacheKey = legacy.SendPromptCacheKey ?? false,
-            PromptCacheTtl = (legacy.PromptCacheTtl ?? string.Empty).Trim().ToLowerInvariant() switch
-            {
-                "5m" => "5m",
-                "1h" => "1h",
-                _ => null,
-            },
+            PromptCacheTtl = ProviderDefinition.ParsePromptCacheTtl(legacy.PromptCacheTtl),
         };
 
         if (reference is not null)
@@ -339,7 +396,7 @@ internal sealed class ProviderStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            Trace.TraceWarning("[providers] could not move a stored key into the secret store: " + exception.GetType().Name);
+            AppLogs.Providers.ZLogWarning($"could not move a stored key into the secret store: {exception.GetType().Name}");
         }
     }
 }

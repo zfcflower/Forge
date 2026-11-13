@@ -119,7 +119,7 @@ public sealed class PrCheckToolSmokeTests
         var result = await InvokeAsync(CreateTools(rig).Checks, """{"pr":7}""");
 
         Assert.Contains("Verdict: READY. All 2 check(s) passed (1 of them skipped/neutral) and the merge state is CLEAN.", result.Content, StringComparison.Ordinal);
-        Assert.Contains("Forge never merges", result.Content, StringComparison.Ordinal);
+        Assert.Contains("Never merge the pull request yourself", result.Content, StringComparison.Ordinal);
     }
 
     [Fact]

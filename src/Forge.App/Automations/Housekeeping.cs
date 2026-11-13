@@ -1,6 +1,8 @@
 using System.Globalization;
 using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Automations;
 
@@ -46,7 +48,7 @@ internal sealed class HousekeepingRunner(
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
             {
-                System.Diagnostics.Trace.WriteLine("[housekeeping] prune failed for " + project.RootPath + ": " + exception.Message);
+                AppLogs.Housekeeping.ZLogWarning($"prune failed for {project.RootPath}: {exception.Message}");
             }
         }
 
@@ -128,7 +130,7 @@ internal sealed class HousekeepingRunner(
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                System.Diagnostics.Trace.WriteLine("[housekeeping] scratch folder kept: " + exception.Message);
+                AppLogs.Housekeeping.ZLogWarning($"scratch folder kept: {exception.Message}");
             }
         }
 
@@ -154,7 +156,7 @@ internal sealed class HousekeepingRunner(
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                System.Diagnostics.Trace.WriteLine("[housekeeping] scratch folder kept: " + exception.Message);
+                AppLogs.Housekeeping.ZLogWarning($"scratch folder kept: {exception.Message}");
             }
         }
 
@@ -179,7 +181,7 @@ internal sealed class HousekeepingRunner(
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
-            System.Diagnostics.Trace.WriteLine("[housekeeping] fork references unreadable: " + exception.Message);
+            AppLogs.Housekeeping.ZLogWarning($"fork references unreadable: {exception.Message}");
             return null;
         }
 
@@ -222,7 +224,7 @@ internal sealed class HousekeepingRunner(
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
             {
-                System.Diagnostics.Trace.WriteLine("[housekeeping] archive cleanup failed: " + exception.Message);
+                AppLogs.Housekeeping.ZLogWarning($"archive cleanup failed: {exception.Message}");
             }
         }
 

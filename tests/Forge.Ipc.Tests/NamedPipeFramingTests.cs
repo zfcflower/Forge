@@ -20,11 +20,11 @@ public sealed class NamedPipeFramingTests
         await using var server = await serverTask.Bounded();
         var sink = new FrameSink(server);
 
-        var oversized = FrameCodec.Default.Serialize(IpcMessage.Notification("big", Json.Parse($"\"{TestFrames.Padded(2000)}\"")));
+        var oversized = TestFrames.Notification("big", TestFrames.Padded(2000));
         await Assert.ThrowsAsync<ArgumentException>(async () => await client.SendAsync(oversized, CancellationToken.None));
         Assert.True(client.IsConnected);
 
-        await client.SendAsync(FrameCodec.Default.Serialize(IpcMessage.Notification("small")), CancellationToken.None);
+        await client.SendAsync(TestFrames.Notification("small", IpcEmpty.Instance), CancellationToken.None);
         var first = await sink.NextMessageAsync();
 
         Assert.Equal("small", first.Operation);
@@ -44,7 +44,7 @@ public sealed class NamedPipeFramingTests
 
         await WriteAsync(raw, TestFrames.Header(2000));
         await WriteAsync(raw, TestFrames.Filler(2000));
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("after")));
+        await WriteAsync(raw, TestFrames.Notification("after", IpcEmpty.Instance));
         var next = await sink.NextMessageAsync();
 
         Assert.Equal("after", next.Operation);
@@ -64,7 +64,7 @@ public sealed class NamedPipeFramingTests
         server.ProtocolError += protocolErrors.Enqueue;
 
         await WriteAsync(raw, TestFrames.Header(0));
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("after")));
+        await WriteAsync(raw, TestFrames.Notification("after", IpcEmpty.Instance));
         var next = await sink.NextMessageAsync();
 
         Assert.Equal("after", next.Operation);
@@ -91,12 +91,12 @@ public sealed class NamedPipeFramingTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await WriteAsync(raw, TestFrames.Prefix(System.Text.Encoding.UTF8.GetBytes("not json")));
+        await WriteAsync(raw, TestFrames.Prefix([0xC1, 0xC1, 0xC1]));
         await TestAwait.UntilAsync(() => errors.Count == 1, "the malformed-frame protocol error");
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("after")));
+        await WriteAsync(raw, TestFrames.Notification("after", IpcEmpty.Instance));
         await delivered.Task.Bounded();
 
-        Assert.Contains("valid message", Assert.Single(errors).Message, StringComparison.Ordinal);
+        Assert.Contains("valid header", Assert.Single(errors).Message, StringComparison.Ordinal);
         Assert.Equal(["after"], notifications.ToArray());
         Assert.False(peer.IsClosed);
     }
@@ -130,7 +130,7 @@ public sealed class NamedPipeFramingTests
 
         await WriteAsync(raw, TestFrames.Header(SmallResynchronizeCap));
         await WriteAsync(raw, TestFrames.Filler(SmallResynchronizeCap));
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("after")));
+        await WriteAsync(raw, TestFrames.Notification("after", IpcEmpty.Instance));
         var next = await sink.NextMessageAsync();
 
         Assert.Equal("after", next.Operation);
@@ -165,7 +165,7 @@ public sealed class NamedPipeFramingTests
         using var release = new ManualResetEventSlim(false);
         server.FrameReceived += frame =>
         {
-            var message = FrameCodec.Default.Deserialize(frame);
+            var message = FrameCodec.Default.Decode(frame);
             events.Enqueue(message.Operation);
             if (message.Operation == "block")
             {
@@ -175,11 +175,11 @@ public sealed class NamedPipeFramingTests
         };
         server.Closed += _ => events.Enqueue("closed");
 
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("block", Json.Parse($"\"{TestFrames.Padded(300)}\""))));
+        await WriteAsync(raw, TestFrames.Notification("block", TestFrames.Padded(300)));
         await entered.Task.Bounded();
         for (var i = 1; i <= 4; i++)
         {
-            await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification($"f{i}", Json.Parse($"\"{TestFrames.Padded(300)}\""))));
+            await WriteAsync(raw, TestFrames.Notification($"f{i}", TestFrames.Padded(300)));
         }
 
         release.Set();
@@ -203,7 +203,7 @@ public sealed class NamedPipeFramingTests
         using var release = new ManualResetEventSlim(false);
         server.FrameReceived += frame =>
         {
-            var message = FrameCodec.Default.Deserialize(frame);
+            var message = FrameCodec.Default.Decode(frame);
             events.Enqueue(message.Operation);
             if (message.Operation == "block")
             {
@@ -213,13 +213,13 @@ public sealed class NamedPipeFramingTests
         };
         server.Closed += cause => closed.TrySetResult(cause);
 
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("block")));
+        await WriteAsync(raw, TestFrames.Notification("block", IpcEmpty.Instance));
         await entered.Task.Bounded();
         for (var i = 1; i <= 8; i++)
         {
             try
             {
-                await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification($"f{i}")));
+                await WriteAsync(raw, TestFrames.Notification($"f{i}", IpcEmpty.Instance));
             }
             catch (IOException)
             {
@@ -247,7 +247,7 @@ public sealed class NamedPipeFramingTests
         using var release = new ManualResetEventSlim(false);
         server.FrameReceived += frame =>
         {
-            var message = FrameCodec.Default.Deserialize(frame);
+            var message = FrameCodec.Default.Decode(frame);
             events.Enqueue(message.Operation);
             if (message.Operation == "block")
             {
@@ -261,8 +261,8 @@ public sealed class NamedPipeFramingTests
             closed.TrySetResult();
         };
 
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("block")));
-        await WriteAsync(raw, FrameCodec.Default.Serialize(IpcMessage.Notification("after")));
+        await WriteAsync(raw, TestFrames.Notification("block", IpcEmpty.Instance));
+        await WriteAsync(raw, TestFrames.Notification("after", IpcEmpty.Instance));
         raw.Dispose();
         await entered.Task.Bounded();
         await Task.WhenAny(closed.Task, Task.Delay(TimeSpan.FromSeconds(2)));
@@ -285,22 +285,22 @@ public sealed class NamedPipeFramingTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         server.FrameReceived += frame =>
         {
-            if (FrameCodec.Default.Deserialize(frame).Operation == "A")
+            if (FrameCodec.Default.Decode(frame).Operation == "A")
             {
                 entered.TrySetResult();
                 release.Wait(TestTimeouts.Limit);
             }
         };
         await using var clientPeer = Peers.Create(client, TestTimeouts.Short);
-        var big = Json.Parse($"\"{TestFrames.Padded(bodyBytes)}\"");
+        var big = TestFrames.Padded(bodyBytes);
 
         try
         {
-            await client.SendAsync(FrameCodec.Default.Serialize(IpcMessage.Notification("A", big)), CancellationToken.None).AsTask().Bounded();
+            await client.SendAsync(TestFrames.Notification("A", big), CancellationToken.None).AsTask().Bounded();
             await entered.Task.Bounded();
-            await client.SendAsync(FrameCodec.Default.Serialize(IpcMessage.Notification("B", big)), CancellationToken.None).AsTask().Bounded();
+            await client.SendAsync(TestFrames.Notification("B", big), CancellationToken.None).AsTask().Bounded();
 
-            var call = clientPeer.SendRequestAsync("R", big, CancellationToken.None);
+            var call = clientPeer.RequestAsync("R", big, CancellationToken.None);
             await Assert.ThrowsAsync<IpcTimeoutException>(() => call.Bounded());
         }
         finally

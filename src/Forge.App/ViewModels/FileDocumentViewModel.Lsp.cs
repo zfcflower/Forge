@@ -6,6 +6,8 @@ using Forge.App.Notifications;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -481,7 +483,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (IsLspFailure(exception))
         {
-            Trace.WriteLine("[file] pulling diagnostics failed: " + exception.Message);
+            AppLogs.File.ZLogWarning($"pulling diagnostics failed: {exception.Message}");
         }
         finally
         {
@@ -568,7 +570,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (IsLspFailure(exception))
         {
-            Trace.WriteLine("[file] folding ranges failed: " + exception.Message);
+            AppLogs.File.ZLogWarning($"folding ranges failed: {exception.Message}");
             return null;
         }
     }
@@ -583,7 +585,7 @@ internal sealed partial class FileDocumentViewModel
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                Trace.WriteLine("[file] language server open failed before diagnostics attach: " + exception.Message);
+                AppLogs.File.ZLogWarning($"language server open failed before diagnostics attach: {exception.Message}");
                 ReportEditorLspError(exception, doc, generation);
             }
 
@@ -620,7 +622,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception)
         {
-            Trace.WriteLine("[file] attaching editor diagnostics failed: " + exception);
+            AppLogs.File.ZLogError(exception, $"attaching editor diagnostics failed");
             ReportEditorLspError(exception, doc, generation);
         }
     }
@@ -647,7 +649,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception)
         {
-            Trace.WriteLine("[file] mapping diagnostics failed: " + exception);
+            AppLogs.File.ZLogError(exception, $"mapping diagnostics failed");
             ReportEditorLspError(exception, doc, generation);
         }
     }
@@ -697,7 +699,7 @@ internal sealed partial class FileDocumentViewModel
             }
             catch (Exception exception)
             {
-                Trace.WriteLine("[file] language server open failed: " + exception.Message);
+                AppLogs.File.ZLogWarning($"language server open failed: {exception.Message}");
                 return null;
             }
         }
@@ -746,7 +748,7 @@ internal sealed partial class FileDocumentViewModel
 
     private void ReportEditorLspFailure(Exception exception)
     {
-        Trace.WriteLine("[file] language server request failed: " + exception.Message);
+        AppLogs.File.ZLogWarning($"language server request failed: {exception.Message}");
         SetLspStatus(new LocText(InspectorStrings.FilesLspUnavailable, LocText.Literal(exception.Message)));
     }
 

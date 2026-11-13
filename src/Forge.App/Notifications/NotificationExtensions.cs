@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Notifications;
 
@@ -48,7 +50,7 @@ internal static class NotificationExtensions
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[notify] the notification failed: " + exception.Message);
+            AppLogs.Notify.ZLogWarning($"the notification failed: {exception.Message}");
         }
     }
 }

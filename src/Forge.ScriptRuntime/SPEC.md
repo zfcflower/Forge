@@ -15,8 +15,8 @@ depends-on: [forge-plugin-sdk]
 
 - **脚本可见表面。** `ScriptGlobals`(`Tools`/`Log`/`Cancellation`)、`ToolsFacade`(`Call`/`Call<T>`/`CallJson`/`CallJson<T>`/`Json`/`Json<T>`)、`ToolCallException`。类型仍在 `Forge.Scripting` 命名空间,脚本源码因此与旧引擎完全兼容;`ScriptGlobals` 不再 `sealed`,编译出的脚本类型从它派生,`Log`/`Tools`/`Cancellation` 就是脚本自己的成员(与旧 Roslyn 提交类同一形态)。
 - **运行回路。** `ScriptHarness.RunAsync(entry, host, settings, ct)`:每次运行新建 facade/log/令牌,在 `Task.Run` 上启动入口委托,`WaitAsync(runToken)` 收口预算,1 s 宽限后仍未停下即判为“被放弃”并返回 `RequiresTermination=true`;脚本返回 `Task` 时在同一预算下等待并解包其 `Result`;结果按 `MaxResultChars` 截断、日志按 `MaxLogChars` 有界后附在结果之后。
-- **产物校验。** `ScriptArtifact`:格式版本、`MaxAssemblyBytes`(8 MiB)、`MaxEncodedAssemblyChars`(base64 上界)、`MaxLoadFrameBytes`(base64 + 描述 + 信封上界,用于证明仍低于 Ipc 16 MiB 帧)、`Encode`/`Decode`(解码前先按编码长度拒收,不为不可信长度分配)、`ValidateDescriptor`/`Validate`(长度、SHA-256、globals 程序集 MVID、运行时 major.minor、契约版本(必须与运行中的 `ScriptArtifact.ContractVersion` 逐字相等)、入口名形状任一不符即抛 `ScriptArtifactException`,不装载)、`GlobalsMvid`/`RuntimeVersion`/`Sha256`。
-- **执行器协议形状。** `ScriptExecutorProtocol`(`executor.load`/`executor.run`/`executor.stop` 与 `host.tool_call`)、`ScriptArtifactLoadRequest`、`ScriptRunRequest`、`BoundToolCallRequest`(`{runId,name,args}`)、`ToolResultPayload`,以及源生成的 `ScriptExecutorJsonContext`(camelCase)。
+- **产物校验。** `ScriptArtifact`:格式版本、`MaxAssemblyBytes`(8 MiB)、`MaxLoadFrameBytes`(映像 + 描述 + 帧开销上界,用于证明仍低于 Ipc 16 MiB 帧)、`EnsureImageWithinBounds`、`ValidateDescriptor`/`Validate`(长度、SHA-256、globals 程序集 MVID、运行时 major.minor、契约版本(必须与运行中的 `ScriptArtifact.ContractVersion` 逐字相等)、入口名形状任一不符即抛 `ScriptArtifactException`,不装载)、`GlobalsMvid`/`RuntimeVersion`/`Sha256`。
+- **执行器协议形状。** `ScriptExecutorProtocol`(`executor.load`/`executor.run`/`executor.stop`)、`ScriptArtifactLoadRequest`(原始 PE 字节 + 描述)、`ScriptRunRequest`,均为 MessagePack 类型;内层工具调用复用 `ExtensionProtocol.HostToolCall` 与 `Forge.Ipc.Protocol.HostToolCallRequest` → `ToolResult`。
 
 ## 边界
 

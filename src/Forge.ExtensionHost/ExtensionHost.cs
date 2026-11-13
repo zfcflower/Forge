@@ -1,6 +1,6 @@
-using System.Text.Json;
 using Forge.Approval;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.Scripting;
 
@@ -58,7 +58,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         catalog = new PluginCatalog(options.PluginsDirectory);
         staging = new ExtensionStagingArea(options.PluginsDirectory);
         scriptExecutors = new ScriptExecutorSupervisor(options, scriptCompiler, ForwardToolCallAsync, stop, cleanup);
-        terminals = new TerminalManager(stop, cleanup, SendTerminalNotificationAsync);
+        terminals = new TerminalManager(stop, cleanup, new TerminalNotifier(this));
 #if DEBUG
         testHook = FileHostTestHook.Activate(options.PipeName);
 #endif
@@ -188,7 +188,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         // tearing the connection down and cannot vouch for a reply, so the close that follows is the only truthful answer,
         // and the caller sees the connection end rather than a result from a host that is gone.
         var stoppingWhenDispatched = stop.IsStopping;
-        JsonElement result;
+        HostReply result;
         try
         {
             result = await DispatchAsync(message, ct).ConfigureAwait(false);
@@ -228,7 +228,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
         try
         {
-            await peer.RespondAsync(message.Id, result, CancellationToken.None).ConfigureAwait(false);
+            await result.SendAsync(peer, message.Id, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException)
         {
@@ -250,15 +250,15 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     {
         switch (message.Operation)
         {
-            case TerminalProtocol.Input:
-                if (TryReadNotification(message, TerminalJsonContext.Default.TerminalInputNotification) is { } input)
+            case TerminalOperations.Input:
+                if (HostArguments.TryRead<TerminalData>(message) is { } input)
                 {
                     terminals.WriteInput(input);
                 }
 
                 break;
-            case TerminalProtocol.Ack:
-                if (TryReadNotification(message, TerminalJsonContext.Default.TerminalAckNotification) is { } ack)
+            case TerminalOperations.Ack:
+                if (HostArguments.TryRead<TerminalAck>(message) is { } ack)
                 {
                     terminals.Acknowledge(ack);
                 }
@@ -267,30 +267,17 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
     }
 
-    /// <summary>Reads a notification payload; an unreadable one is dropped, because a notification has no reply channel.</summary>
-    private static T? TryReadNotification<T>(
-        IpcMessage message,
-        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
-        where T : class
-    {
-        try
-        {
-            return TerminalProtocol.Read(message, typeInfo);
-        }
-        catch (HostOperationException)
-        {
-            return null;
-        }
-    }
-
     /// <summary>
-    /// Writes one terminal notification on the main-program connection. A host that is stopping sends nothing, and a
+    /// Writes terminal notifications on the main-program connection. A host that is stopping sends nothing, and a
     /// connection that can no longer be trusted reports the frame as unsent so the terminal ends itself.
     /// </summary>
-    private Task<bool> SendTerminalNotificationAsync(string operation, JsonElement payload, CancellationToken ct) =>
-        mainPeer is { } peer ? SendAsync(peer, operation, payload, ct) : Task.FromResult(false);
+    private sealed class TerminalNotifier(ExtensionHost host) : ITerminalNotifier
+    {
+        public Task<bool> SendAsync<T>(string operation, T payload, CancellationToken ct) =>
+            host.mainPeer is { } peer ? host.SendAsync(peer, operation, payload, ct) : Task.FromResult(false);
+    }
 
-    private Task<JsonElement> DispatchAsync(IpcMessage message, CancellationToken ct)
+    private Task<HostReply> DispatchAsync(IpcMessage message, CancellationToken ct)
     {
         // Everything except the stop request itself is refused once shutdown has begun, instead of racing the teardown
         // for a worker slot. The stop operation must stay answerable so the caller can finish its own shutdown.
@@ -302,21 +289,21 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         switch (message.Operation)
         {
             case ExtensionProtocol.PluginExecute:
-                return ExecuteAsync(HostJson.Read<PluginExecuteRequest>(message), ct);
+                return HostReply.From(ExecuteAsync(HostArguments.Read<PluginExecuteRequest>(message), ct));
             case ExtensionProtocol.PluginApprove:
-                return ApproveAsync(HostJson.Read<PluginApproveRequest>(message), ct);
+                return HostReply.From(ApproveAsync(HostArguments.Read<PluginApproveRequest>(message), ct));
             case ExtensionProtocol.PluginRevoke:
-                return RevokeAsync(HostJson.Read<PluginRevokeRequest>(message), ct);
+                return HostReply.From(RevokeAsync(HostArguments.Read<PluginVersionRequest>(message), ct));
             case ExtensionProtocol.PluginsRefresh:
-                return RefreshAsync(ct);
+                return HostReply.From(RefreshAsync(ct));
             case ExtensionProtocol.PluginsStatus:
-                return StatusAsync(ct);
+                return HostReply.From(StatusAsync(ct));
             case ExtensionProtocol.CodeExecute:
-                return CodeExecuteAsync(HostJson.Read<CodeExecutionRequest>(message), ct);
+                return HostReply.From(CodeExecuteAsync(HostArguments.Read<CodeExecutionRequest>(message), ct));
             case ExtensionProtocol.PluginCommand:
-                return CommandAsync(HostJson.Read<CommandExecutionRequest>(message), ct);
+                return HostReply.From(CommandAsync(HostArguments.Read<CommandExecutionRequest>(message), ct));
             case ExtensionProtocol.PluginPrompt:
-                return PromptAsync(HostJson.Read<PromptExecutionRequest>(message), ct);
+                return HostReply.From(PromptAsync(HostArguments.Read<PromptExecutionRequest>(message), ct));
             case ExtensionProtocol.HostStop:
                 Interlocked.Exchange(ref stopRequested, 1);
 
@@ -324,45 +311,44 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                 // flight (the startup refresh is the one that matters) is cancelled the moment the stop is received, so
                 // host.stop cannot be answered by a host that is still waiting out a connect or a load window.
                 stop.Begin();
-                return Task.FromResult(HostJson.EmptyObject);
+                return Task.FromResult(HostReply.Of(IpcEmpty.Instance));
 
             // Terminal operations only touch the terminal registry; they share no state with the plugin gates above them.
-            case TerminalProtocol.Start:
-                return terminals.Start(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalStartRequest));
-            case TerminalProtocol.Resize:
-                return terminals.Resize(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalResizeRequest));
-            case TerminalProtocol.Foreground:
-                return terminals.Foreground(
-                    TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalForegroundRequest));
-            case TerminalProtocol.Stop:
-                return terminals.StopAsync(TerminalProtocol.Read(message, TerminalJsonContext.Default.TerminalStopRequest));
+            case TerminalOperations.Start:
+                return Task.FromResult(HostReply.Of(terminals.Start(HostArguments.Read<TerminalStartRequest>(message))));
+            case TerminalOperations.Resize:
+                return Task.FromResult(HostReply.Of(terminals.Resize(HostArguments.Read<TerminalResizeRequest>(message))));
+            case TerminalOperations.Foreground:
+                return Task.FromResult(HostReply.Of(terminals.Foreground(HostArguments.Read<TerminalIdRequest>(message))));
+            case TerminalOperations.Stop:
+                return HostReply.From(terminals.StopAsync(HostArguments.Read<TerminalIdRequest>(message)));
             case ExtensionProtocol.ExtensionsStage:
-                return StageExtensionAsync(HostJson.Read<ExtensionStageRequest>(message), ct);
+                return HostReply.From(StageExtensionAsync(HostArguments.Read<ExtensionStageRequest>(message), ct));
             case ExtensionProtocol.ExtensionsPending:
-                return PendingExtensionsAsync(ct);
+                return HostReply.From(PendingExtensionsAsync(ct));
             case ExtensionProtocol.ExtensionsCommit:
-                return CommitExtensionAsync(HostJson.Read<ExtensionCommitRequest>(message), ct);
+                return HostReply.From(CommitExtensionAsync(HostArguments.Read<ExtensionCommitRequest>(message), ct));
             case ExtensionProtocol.ExtensionsDiscard:
-                return DiscardExtensionAsync(HostJson.Read<ExtensionIdRequest>(message), ct);
+                return HostReply.From(DiscardExtensionAsync(HostArguments.Read<ExtensionIdRequest>(message), ct));
             case ExtensionProtocol.PluginDisable:
-                return DisablePluginAsync(HostJson.Read<PluginVersionRequest>(message), ct);
+                return HostReply.From(DisablePluginAsync(HostArguments.Read<PluginVersionRequest>(message), ct));
             case ExtensionProtocol.PluginEnable:
-                return EnablePluginAsync(HostJson.Read<PluginVersionRequest>(message), ct);
+                return HostReply.From(EnablePluginAsync(HostArguments.Read<PluginVersionRequest>(message), ct));
             case ExtensionProtocol.PluginDelete:
-                return DeletePluginAsync(HostJson.Read<PluginVersionRequest>(message), ct);
+                return HostReply.From(DeletePluginAsync(HostArguments.Read<PluginVersionRequest>(message), ct));
             default:
                 throw new HostOperationException("unsupported_operation", $"The extension host does not serve '{message.Operation}'.");
         }
     }
 
-    private async Task<JsonElement> ExecuteAsync(PluginExecuteRequest request, CancellationToken ct)
+    private async Task<ToolResult> ExecuteAsync(PluginExecuteRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.PluginId) || string.IsNullOrWhiteSpace(request.Tool))
         {
             throw new HostOperationException("invalid_request", "pluginId and tool are required.");
         }
 
-        var context = CallBinding.ResolveForPluginExecute(request);
+        var context = CallBinding.Require(request.Context, request.PluginId, ExtensionProtocol.PluginExecute);
         var nested = context.PluginChain.Count > 0;
 
         // One absolute deadline for the whole call. The gate wait, the re-hash/re-approval, the worker load and the queue
@@ -428,15 +414,13 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         {
             using (workflow)
             {
-                var result = await RunWorkflowAsync(workflow, request, budget, ct).ConfigureAwait(false);
-                return HostJson.ToElement(new PluginExecuteResponse(result.Content, result.IsError));
+                return await RunWorkflowAsync(workflow, request, budget, ct).ConfigureAwait(false);
             }
         }
 
         using (lease)
         {
-            var result = await slot!.ExecuteAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
-            return HostJson.ToElement(new PluginExecuteResponse(result.Content, result.IsError));
+            return await slot!.ExecuteAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
         }
     }
 
@@ -445,7 +429,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     /// re-hashed and re-approved, the worker is loaded only from those bytes, and a worker crash or timeout charges the
     /// plugin's failure budget - and only then reaches the command body.
     /// </summary>
-    private async Task<JsonElement> CommandAsync(CommandExecutionRequest request, CancellationToken ct)
+    private async Task<CommandOutput> CommandAsync(CommandExecutionRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.PluginId) || string.IsNullOrWhiteSpace(request.Command))
         {
@@ -467,13 +451,12 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
         using (lease)
         {
-            var output = await slot.ExecuteCommandAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
-            return HostJson.ToElement(output);
+            return await slot.ExecuteCommandAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
         }
     }
 
     /// <summary>Evaluates one prompt contributor under the same approved-image, timeout and failure-budget rules.</summary>
-    private async Task<JsonElement> PromptAsync(PromptExecutionRequest request, CancellationToken ct)
+    private async Task<PromptOutput> PromptAsync(PromptExecutionRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.PluginId) || string.IsNullOrWhiteSpace(request.ContributorId))
         {
@@ -495,8 +478,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
         using (lease)
         {
-            var output = await slot.EvaluatePromptAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
-            return HostJson.ToElement(output);
+            return await slot.EvaluatePromptAsync(request with { Context = context }, budget, ct).ConfigureAwait(false);
         }
     }
 
@@ -594,7 +576,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     /// top-level entry point only, and the budget (queue + compile + run) is preserved up to the documented maximum
     /// instead of being cut to the old two-minute IPC default.
     /// </summary>
-    private async Task<JsonElement> CodeExecuteAsync(CodeExecutionRequest request, CancellationToken ct)
+    private async Task<CodeExecutionResult> CodeExecuteAsync(CodeExecutionRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Code))
         {
@@ -602,10 +584,9 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
 
         var context = CallBinding.Require(request.Context, CallBinding.RunCodeIdentity, ExtensionProtocol.CodeExecute);
-        var result = await scriptExecutors
+        return await scriptExecutors
             .ExecuteAsync(request with { Context = context }, ct)
             .ConfigureAwait(false);
-        return HostJson.ToElement(result);
     }
 
     /// <summary>
@@ -613,7 +594,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     /// revoke shows up) and a pure evaluation of the discovered hashes. It never loads or runs plugin code, so an
     /// unapproved plugin's permissions and errors can be shown before the user approves anything.
     /// </summary>
-    private Task<JsonElement> StatusAsync(CancellationToken ct)
+    private Task<PluginStatusResponse> StatusAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         PluginEntry[] entries;
@@ -630,7 +611,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             statuses.Add(BuildStatus(entry));
         }
 
-        return Task.FromResult(HostJson.ToElement(new PluginStatusResponse(statuses)));
+        return Task.FromResult(new PluginStatusResponse(statuses));
     }
 
     /// <summary>
@@ -752,7 +733,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
     }
 
-    private async Task<JsonElement> ApproveAsync(PluginApproveRequest request, CancellationToken ct)
+    private async Task<IpcEmpty> ApproveAsync(PluginApproveRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.PluginId))
         {
@@ -792,7 +773,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             state.Exit();
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
     /// <summary>
@@ -1075,7 +1056,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         }
     }
 
-    private async Task<JsonElement> RevokeAsync(PluginRevokeRequest request, CancellationToken ct)
+    private async Task<IpcEmpty> RevokeAsync(PluginVersionRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.PluginId))
         {
@@ -1113,10 +1094,10 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             state.Exit();
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
-    private async Task<JsonElement> RefreshAsync(CancellationToken ct)
+    private async Task<IpcEmpty> RefreshAsync(CancellationToken ct)
     {
         await refreshGate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -1206,7 +1187,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                 Console.Error.WriteLine("forge-extension-host: " + issue);
             }
 
-            return HostJson.EmptyObject;
+            return IpcEmpty.Instance;
         }
         finally
         {
@@ -1440,10 +1421,8 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             return;
         }
 
-        var toolsPayload = HostJson.ToElement(tools);
-        var contributionsPayload = HostJson.ToElement(contributions);
-        var toolsText = toolsPayload.GetRawText();
-        var contributionsText = contributionsPayload.GetRawText();
+        var toolsBytes = IpcSerializer.Serialize(tools);
+        var contributionsBytes = IpcSerializer.Serialize(contributions);
 
         var publication = PublicationOf(pluginId);
         await publication.Gate.WaitAsync(ct).ConfigureAwait(false);
@@ -1460,8 +1439,8 @@ public sealed partial class ExtensionHost : IAsyncDisposable
                     return;
                 }
 
-                sendTools = !string.Equals(toolsText, publication.Tools, StringComparison.Ordinal);
-                sendContributions = !string.Equals(contributionsText, publication.Contributions, StringComparison.Ordinal);
+                sendTools = !SameBytes(toolsBytes, publication.Tools);
+                sendContributions = !SameBytes(contributionsBytes, publication.Contributions);
                 if (!sendTools && !sendContributions)
                 {
                     publication.Generation = Math.Max(publication.Generation, generation);
@@ -1476,26 +1455,26 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
             using var deadline = new CancellationTokenSource(PublicationSendWindow);
             if (sendTools &&
-                await SendAsync(peer, ExtensionProtocol.ToolsRegister, toolsPayload, deadline.Token).ConfigureAwait(false))
+                await SendAsync(peer, ExtensionProtocol.ToolsRegister, tools, deadline.Token).ConfigureAwait(false))
             {
                 lock (sync)
                 {
                     if (generation >= publication.Generation)
                     {
-                        publication.Tools = toolsText;
+                        publication.Tools = toolsBytes;
                         publication.Generation = generation;
                     }
                 }
             }
 
             if (sendContributions &&
-                await SendAsync(peer, ExtensionProtocol.ContributionsRegister, contributionsPayload, deadline.Token).ConfigureAwait(false))
+                await SendAsync(peer, ExtensionProtocol.ContributionsRegister, contributions, deadline.Token).ConfigureAwait(false))
             {
                 lock (sync)
                 {
                     if (generation >= publication.Generation)
                     {
-                        publication.Contributions = contributionsText;
+                        publication.Contributions = contributionsBytes;
                         publication.Generation = generation;
                     }
                 }
@@ -1554,7 +1533,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
             }
 
             using var deadline = new CancellationTokenSource(PublicationSendWindow);
-            var payload = HostJson.ToElement(new ToolsUnregisterNotification(pluginId));
+            var payload = new ExtensionIdRequest(pluginId);
             if (hadTools && await SendAsync(peer, ExtensionProtocol.ToolsUnregister, payload, deadline.Token).ConfigureAwait(false))
             {
                 lock (sync)
@@ -1628,6 +1607,10 @@ public sealed partial class ExtensionHost : IAsyncDisposable
         await PublishAsync(pluginId, loadout, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Whether a snapshot serializes to exactly the bytes last delivered.</summary>
+    private static bool SameBytes(byte[] current, byte[]? delivered) =>
+        delivered is not null && current.AsSpan().SequenceEqual(delivered);
+
     private Publication PublicationOf(string pluginId)
     {
         lock (sync)
@@ -1647,7 +1630,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
     /// the frame was not handed to the pipe completely, so the caller must not record it as published; the main program may
     /// or may not have seen a prefix, which is why a cancelled frame is treated as an unsafe connection.
     /// </summary>
-    private async Task<bool> SendAsync(IIpcPeer peer, string operation, JsonElement payload, CancellationToken ct)
+    private async Task<bool> SendAsync<T>(IIpcPeer peer, string operation, T payload, CancellationToken ct)
     {
         if (Volatile.Read(ref connectionUnsafe) != 0)
         {
@@ -1656,7 +1639,7 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
         try
         {
-            await peer.SendNotificationAsync(operation, payload, ct).ConfigureAwait(false);
+            await peer.NotifyAsync(operation, payload, ct).ConfigureAwait(false);
             return true;
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException)
@@ -1914,17 +1897,17 @@ public sealed partial class ExtensionHost : IAsyncDisposable
 
     /// <summary>
     /// Relays one bound <c>host.tool_call</c> to the main program, which owns permission checks and auditing. The payload
-    /// is the host's own <c>{runId, pluginId, name, args}</c>; the main program accepts it only when the run id is in its
-    /// pending table and the plugin identity matches.
+    /// is a <see cref="HostToolCallForward"/> built from the host's own run table; the main program accepts it only when
+    /// the run id is in its pending table and the plugin identity matches.
     /// </summary>
-    private Task<IpcMessage> ForwardToolCallAsync(JsonElement payload, CancellationToken ct)
+    private Task<ToolResult> ForwardToolCallAsync(HostToolCallForward payload, CancellationToken ct)
     {
         if (mainPeer is not { } peer || peer.IsClosed || ConnectionUnsafe)
         {
             throw new HostOperationException("main_disconnected", "The main program is not connected.");
         }
 
-        return peer.SendRequestAsync(ExtensionProtocol.HostToolCall, payload, ct);
+        return peer.RequestAsync<HostToolCallForward, ToolResult>(ExtensionProtocol.HostToolCall, payload, ct);
     }
 
     private PluginEntry? Find(string pluginId)

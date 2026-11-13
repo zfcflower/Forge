@@ -1,5 +1,6 @@
 using System.Collections;
-using System.Text.Json;
+using Forge.Ipc;
+using Forge.Ipc.Protocol;
 
 namespace Forge.ExtensionHost;
 
@@ -33,16 +34,17 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
 
     private readonly HostStopSignal stop;
     private readonly HostCleanupReport cleanup;
-    private readonly Func<string, JsonElement, CancellationToken, Task<bool>> send;
+    private readonly ITerminalNotifier send;
     private readonly Dictionary<string, TerminalSession> sessions = new(StringComparer.Ordinal);
     private readonly Lock sync = new();
     private int starting;
     private int disposed;
 
+    /// <param name="send">Writes one notification on the main-program connection.</param>
     internal TerminalManager(
         HostStopSignal stop,
         HostCleanupReport cleanup,
-        Func<string, JsonElement, CancellationToken, Task<bool>> send)
+        ITerminalNotifier send)
     {
         this.stop = stop;
         this.cleanup = cleanup;
@@ -65,15 +67,15 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
     /// A closing host sends no frames at all: the connection ending is how a caller learns the terminals are gone, and a
     /// half-written notification would only be noise.
     /// </summary>
-    public Task<bool> SendAsync(string operation, JsonElement payload, CancellationToken ct) =>
-        stop.IsStopping ? Task.FromResult(false) : send(operation, payload, ct);
+    public Task<bool> SendAsync<T>(string operation, T payload, CancellationToken ct) =>
+        stop.IsStopping ? Task.FromResult(false) : send.SendAsync(operation, payload, ct);
 
     /// <summary>
     /// Starts one terminal: validates the request, resolves the shell and the environment, creates the pseudo-terminal and
     /// registers the session. Every failure mode the contract names is answered with its own code, and a start that fails
     /// leaves nothing running.
     /// </summary>
-    internal Task<JsonElement> Start(TerminalStartRequest request)
+    internal TerminalStartResponse Start(TerminalStartRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.WorkingDirectory) || !Path.IsPathFullyQualified(request.WorkingDirectory))
         {
@@ -165,17 +167,14 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
                 $"The extension host is stopping; terminal '{id}' was not started.");
         }
 
-        return Task.FromResult(
-            TerminalProtocol.Serialize(
-                new TerminalStartResponse(id, session.ProcessId, shell),
-                TerminalJsonContext.Default.TerminalStartResponse));
+        return new TerminalStartResponse(id, session.ProcessId, shell);
     }
 
     /// <summary>
     /// Answers <c>terminal.resize</c>. An unknown or already exited id is success: the caller cannot tell the difference
     /// between a lost race with the exit and a terminal that was never there, and neither is worth an error.
     /// </summary>
-    internal Task<JsonElement> Resize(TerminalResizeRequest request)
+    internal IpcEmpty Resize(TerminalResizeRequest request)
     {
         if (request.Columns is < 1 or > MaxColumns || request.Rows is < 1 or > MaxRows)
         {
@@ -185,57 +184,43 @@ internal sealed class TerminalManager : ITerminalNotifier, IAsyncDisposable
         }
 
         Find(request.TerminalId)?.Resize(request.Columns, request.Rows);
-        return Task.FromResult(HostJson.EmptyObject);
+        return IpcEmpty.Instance;
     }
 
     /// <summary>Answers <c>terminal.foreground</c>; an unknown id has no foreground child.</summary>
-    internal Task<JsonElement> Foreground(TerminalForegroundRequest request)
-    {
-        var busy = Find(request.TerminalId)?.HasForegroundChild() ?? false;
-        return Task.FromResult(
-            TerminalProtocol.Serialize(
-                new TerminalForegroundResponse(busy),
-                TerminalJsonContext.Default.TerminalForegroundResponse));
-    }
+    internal TerminalForegroundResponse Foreground(TerminalIdRequest request) =>
+        new(Find(request.TerminalId)?.HasForegroundChild() ?? false);
 
     /// <summary>
     /// Answers <c>terminal.stop</c> after the terminal is over, which means after its <c>terminal.exit</c> notification was
     /// written. Idempotent: a second stop of the same id, or a stop that raced the shell's own exit, awaits the same
     /// single-flight shutdown.
     /// </summary>
-    internal async Task<JsonElement> StopAsync(TerminalStopRequest request)
+    internal async Task<IpcEmpty> StopAsync(TerminalIdRequest request)
     {
         if (Find(request.TerminalId) is { } session)
         {
             await session.StopAsync().ConfigureAwait(false);
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
     /// <summary>Queues <c>terminal.input</c> bytes for the terminal; an unknown or exited id is silently ignored.</summary>
-    internal void WriteInput(TerminalInputNotification notification)
+    internal void WriteInput(TerminalData notification)
     {
-        if (string.IsNullOrEmpty(notification.Data) || Find(notification.TerminalId) is not { } session)
+        if (notification.Data.IsEmpty || Find(notification.TerminalId) is not { } session)
         {
             return;
         }
 
-        byte[] data;
-        try
-        {
-            data = Convert.FromBase64String(notification.Data);
-        }
-        catch (FormatException)
-        {
-            return;
-        }
-
-        session.WriteInput(data);
+        // The payload slices the inbound frame and is only valid while that message is alive; the input queue outlives
+        // it, so this is the one copy the input path makes.
+        session.WriteInput(notification.Data.ToArray());
     }
 
     /// <summary>Applies <c>terminal.ack</c>, which reopens the flow-control window of the terminal.</summary>
-    internal void Acknowledge(TerminalAckNotification notification) =>
+    internal void Acknowledge(TerminalAck notification) =>
         Find(notification.TerminalId)?.Acknowledge(notification.Bytes);
 
     /// <summary>

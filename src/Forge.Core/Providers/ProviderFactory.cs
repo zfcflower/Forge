@@ -31,8 +31,8 @@ public static class ProviderFactory
         return config.Kind?.Trim().ToLowerInvariant() switch
         {
             OpenAiCompatibleKind => new OpenAiCompatibleProvider(config, httpClient, options: options),
-            AnthropicKind => new AnthropicProvider(config, httpClient),
-            OpenAiResponsesKind => new OpenAiResponsesProvider(config, httpClient),
+            AnthropicKind => new AnthropicProvider(config, httpClient, options: options),
+            OpenAiResponsesKind => new OpenAiResponsesProvider(config, httpClient, options: options),
             _ => throw new ArgumentException(
                 $"Unsupported provider kind '{config.Kind}'; expected '{OpenAiCompatibleKind}', '{AnthropicKind}' or '{OpenAiResponsesKind}'.",
                 nameof(config)),

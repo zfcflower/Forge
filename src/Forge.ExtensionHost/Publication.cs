@@ -24,13 +24,13 @@ internal sealed class Publication
     /// <summary>Serializes this plugin's registration and unregistration notifications.</summary>
     public SemaphoreSlim Gate { get; } = new(1, 1);
 
-    /// <summary>Last tool payload whose frame was written and flushed, or <c>null</c> when the main program has none. It is
+    /// <summary>Serialized form of the last tool payload whose frame was written and flushed, or <c>null</c> when the main program has none. It is
     /// also the pending-unregister tombstone: an unregister clears it only after its own frame was flushed.</summary>
-    public string? Tools { get; set; }
+    public byte[]? Tools { get; set; }
 
-    /// <summary>Last contribution payload whose frame was written and flushed, or <c>null</c> when the main program has none.
+    /// <summary>Serialized form of the last contribution payload whose frame was written and flushed, or <c>null</c> when the main program has none.
     /// It is also the pending-unregister tombstone: an unregister clears it only after its own frame was flushed.</summary>
-    public string? Contributions { get; set; }
+    public byte[]? Contributions { get; set; }
 
     /// <summary>Generation of the snapshot the main program has, or <see cref="long.MinValue"/> before the first one.</summary>
     public long Generation { get; set; } = long.MinValue;

@@ -8,6 +8,8 @@ using Forge.Core.Providers;
 using Forge.Core.Tools;
 using Forge.HostClient;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Agents;
 
@@ -37,6 +39,13 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>Agent defaults resolved from settings.json; null when the runtime has no store (a unit test).</summary>
     public Func<string, ModelSettings?>? AgentDefaults { get; set; }
+
+    /// <summary>
+    /// Whether subscription requests claim the official client's identity (<c>claudeWire.enabled</c>). Decides which built-in
+    /// system text a session uses when no template supplies one: the neutral one while the claim is on, the named one when the
+    /// user turned it off. Defaults to on, which is the product default.
+    /// </summary>
+    public Func<bool>? ClaimsOfficialIdentity { get; set; }
 
     /// <summary>
     /// Commits a TODO step when the agent marks it done (handed to <c>AgentHostOptions.StepCommitter</c>). Null when the
@@ -92,8 +101,12 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public Func<IReadOnlyList<string>>? DisabledTools { get; set; }
 
-    /// <summary>The message-breakpoint prompt-cache TTL (<c>provider.promptCacheTtl</c>) handed to <see cref="AgentOptions.MessageCacheTtl"/>; null = provider default.</summary>
-    public string? MessageCacheTtl { get; set; }
+    /// <summary>
+    /// The prompt-cache lifetime policy of a provider (<c>provider.promptCacheTtl</c>) handed to <see cref="AgentOptions.CacheTtl"/>:
+    /// <c>"auto"</c>/null, <c>"5m"</c> or <c>"1h"</c>. A lookup rather than a value because the policy belongs to the provider the
+    /// session is pointed at, and that can change between hosts.
+    /// </summary>
+    public Func<string?, string?>? PromptCacheTtl { get; set; }
 
     // --- compaction (feature B) ---
     /// <summary>Effective context window of a model (the catalog's resolution chain); null = unknown, no automatic compaction.</summary>
@@ -551,7 +564,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[session] the web tools could not be refreshed: " + exception.Message);
+            AppLogs.Session.ZLogWarning($"the web tools could not be refreshed: {exception.Message}");
         }
     }
 
@@ -649,7 +662,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         // One snapshot per build: the system slot, the agent kinds and the compaction prompt stay fixed for this host.
         var templates = services.PromptTemplates?.Resolve(Session.WorkspacePath)
             ?? PromptTemplateSet.BuiltIn(Prompts.AppPromptTexts.Registry);
-        var layers = LayerSources.Resolve(templates.Slot(PromptSlotIds.System), AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
+        // No template text from the user means the built-in one; which built-in text depends on what the request claims, so the
+        // two never contradict each other.
+        var systemSlot = templates.Slot(PromptSlotIds.System);
+        if (string.IsNullOrWhiteSpace(systemSlot) && services.ClaimsOfficialIdentity is { } claims && !claims())
+        {
+            systemSlot = BuiltInPrompts.SystemNamed;
+        }
+
+        var mainModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model;
+        var layers = LayerSources.Resolve(systemSlot, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
         var compaction = services.CurrentCompaction();
         var built = new AgentHost(
             new AgentHostOptions
@@ -669,8 +691,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Agents = ResolveAgentDefaults(templates),
                 Options = new AgentOptions
                 {
-                    DefaultModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model,
-                    MessageCacheTtl = services.MessageCacheTtl,
+                    DefaultModel = mainModel,
+                    // The policy belongs to the provider this session is pointed at; "auto" is resolved per request afterwards.
+                    CacheTtl = services.PromptCacheTtl?.Invoke(mainModel.ProviderId),
                     // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
                     // this host through ApplyCompaction.
                     Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens),
@@ -916,7 +939,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[session] the external tool surface could not be replaced: " + exception.Message);
+            AppLogs.Session.ZLogWarning($"the external tool surface could not be replaced: {exception.Message}");
         }
     }
 

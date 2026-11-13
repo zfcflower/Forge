@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 using static Forge.HostClient.Tests.ToolFixtures;
 
 namespace Forge.HostClient.Tests;
@@ -14,10 +15,10 @@ namespace Forge.HostClient.Tests;
 public sealed class RootInvocationIdentityTests
 {
     [Fact]
-    public async Task Top_level_plugin_execute_carries_its_own_runId_as_camelCase_rootRunId()
+    public async Task Top_level_plugin_execute_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", """{"content":"ok","isError":false}""");
+        host.Answer("plugin.execute", new Sdk.ToolResult("ok"));
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
@@ -28,7 +29,7 @@ public sealed class RootInvocationIdentityTests
             limit.Token);
 
         Assert.False(result.IsError);
-        var context = Assert.Single(host.Requests("plugin.execute")).Arguments!.Value.GetProperty("context");
+        var context = BoundRoots.ContextOf(Assert.Single(host.Requests("plugin.execute")));
         AssertRootIsSelf(context);
     }
 
@@ -36,7 +37,7 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_code_execute_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.Answer("code.execute", """{"content":"ok","isError":false}""");
+        host.Answer("code.execute", new Sdk.CodeExecutionResult("ok"));
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var proxy = client.CreateRunCodeTool(new TestRegistry());
@@ -47,7 +48,7 @@ public sealed class RootInvocationIdentityTests
             limit.Token);
 
         Assert.False(result.IsError);
-        var context = Assert.Single(host.Requests("code.execute")).Arguments!.Value.GetProperty("context");
+        var context = BoundRoots.ContextOf(Assert.Single(host.Requests("code.execute")));
         AssertRootIsSelf(context);
     }
 
@@ -55,7 +56,7 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_command_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.command", """{"output":"hello","promptToSend":"next","isError":false}""");
+        host.Answer("plugin.command", new Sdk.CommandOutput("hello", "next", false));
         await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var command = await RegisterCommandAsync(host, client, "alpha", "hi");
@@ -64,7 +65,7 @@ public sealed class RootInvocationIdentityTests
             "args", new CommandContext("sess-cmd", BoundRoots.AbsoluteDir("root-cmd")), limit.Token);
 
         Assert.False(result.IsError);
-        var context = Assert.Single(host.Requests("plugin.command")).Arguments!.Value.GetProperty("context");
+        var context = BoundRoots.ContextOf(Assert.Single(host.Requests("plugin.command")));
         AssertRootIsSelf(context);
     }
 
@@ -72,7 +73,7 @@ public sealed class RootInvocationIdentityTests
     public async Task Top_level_prompt_carries_its_own_runId_as_rootRunId()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.prompt", """{"text":"t"}""");
+        host.Answer("plugin.prompt", new Sdk.PromptOutput("t"));
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
@@ -83,7 +84,7 @@ public sealed class RootInvocationIdentityTests
             limit.Token);
 
         Assert.Equal("t", text);
-        var context = Assert.Single(host.Requests("plugin.prompt")).Arguments!.Value.GetProperty("context");
+        var context = BoundRoots.ContextOf(Assert.Single(host.Requests("plugin.prompt")));
         AssertRootIsSelf(context);
     }
 
@@ -104,17 +105,15 @@ public sealed class RootInvocationIdentityTests
         var callback = host.CallClientAsync(
             "host.tool_call", BoundRoots.BoundPayload(setup.RunA, "alpha", "bridge", "{}"), limit.Token);
         var nested = await setup.NestedArrived.Task.Bounded();
-        var nestedArgs = nested.Arguments!.Value;
-        var nestedContext = nestedArgs.GetProperty("context");
-        var nestedRunId = nestedContext.GetProperty("runId").GetString()!;
+        var nestedContext = BoundRoots.ContextOf(nested);
+        var nestedRunId = nestedContext.RunId;
 
         Assert.NotEqual(setup.RunA, nestedRunId);
         Assert.Equal(setup.RunA, setup.RootA);
-        Assert.Equal(setup.RootA, nestedContext.GetProperty("rootRunId").GetString());
-        Assert.Equal(["alpha"], nestedContext.GetProperty("pluginChain").EnumerateArray()
-            .Select(element => element.GetString()!).ToArray());
+        Assert.Equal(setup.RootA, nestedContext.RootRunId);
+        Assert.Equal(["alpha"], nestedContext.PluginChain);
 
-        setup.HoldB.ResultJson = """{"content":"work-done","isError":false}""";
+        setup.HoldB.Content = "work-done";
         setup.HoldB.Gate.TrySetResult();
         Assert.Equal(("work-done", false), BoundRoots.OutputOf(await callback.Bounded()));
         setup.HoldA.Gate.TrySetResult();
@@ -135,26 +134,26 @@ public sealed class RootInvocationIdentityTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host, resolver: bridge.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
-        var nestedCalls = new ConcurrentQueue<JsonElement>();
+        var nestedCalls = new ConcurrentQueue<Sdk.ExtensionCallContext>();
         var bothNested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var holdA = new InFlightRoot { ResultJson = """{"content":"root-ok","isError":false}""" };
+        var holdA = new InFlightRoot();
         host.On("plugin.execute", async (message, ct) =>
         {
-            var plugin = message.Arguments!.Value.GetProperty("pluginId").GetString();
+            var plugin = message.Read<PluginExecuteRequest>().PluginId;
             if (!string.Equals(plugin, "beta", StringComparison.Ordinal))
             {
                 holdA.Arrived.TrySetResult(message);
                 await holdA.Gate.Task.WaitAsync(ct).ConfigureAwait(false);
-                return Json.Element(holdA.ResultJson);
+                return holdA.Reply(message.Operation);
             }
 
-            nestedCalls.Enqueue(message.Arguments!.Value.Clone());
+            nestedCalls.Enqueue(BoundRoots.ContextOf(message));
             if (nestedCalls.Count >= 2)
             {
                 bothNested.TrySetResult();
             }
 
-            return Json.Element("""{"content":"work","isError":false}""");
+            return HostReply.Of(new Sdk.ToolResult("work"));
         });
         var alphaProxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
         var betaProxy = await BoundRoots.RegisterPluginToolAsync(client, host, "beta", "work");
@@ -172,15 +171,13 @@ public sealed class RootInvocationIdentityTests
 
         var pair = nestedCalls.ToArray();
         Assert.Equal(2, pair.Length);
-        var firstContext = pair[0].GetProperty("context");
-        var secondContext = pair[1].GetProperty("context");
-        Assert.NotEqual(
-            firstContext.GetProperty("runId").GetString(),
-            secondContext.GetProperty("runId").GetString());
-        Assert.NotEqual(runA, firstContext.GetProperty("runId").GetString());
-        Assert.NotEqual(runA, secondContext.GetProperty("runId").GetString());
-        Assert.Equal(runA, firstContext.GetProperty("rootRunId").GetString());
-        Assert.Equal(runA, secondContext.GetProperty("rootRunId").GetString());
+        var firstContext = pair[0];
+        var secondContext = pair[1];
+        Assert.NotEqual(firstContext.RunId, secondContext.RunId);
+        Assert.NotEqual(runA, firstContext.RunId);
+        Assert.NotEqual(runA, secondContext.RunId);
+        Assert.Equal(runA, firstContext.RootRunId);
+        Assert.Equal(runA, secondContext.RootRunId);
 
         Assert.Equal(("work+work", false), BoundRoots.OutputOf(callback));
         holdA.Gate.TrySetResult();
@@ -191,11 +188,11 @@ public sealed class RootInvocationIdentityTests
     public async Task Independent_same_plugin_roots_have_different_roots()
     {
         await using var host = new FakeHost();
-        var seen = new ConcurrentQueue<JsonElement>();
+        var seen = new ConcurrentQueue<Sdk.ExtensionCallContext>();
         host.On("plugin.execute", (message, _) =>
         {
-            seen.Enqueue(message.Arguments!.Value.Clone());
-            return Task.FromResult(Json.Element("""{"content":"ok","isError":false}"""));
+            seen.Enqueue(BoundRoots.ContextOf(message));
+            return Task.FromResult(new Sdk.ToolResult("ok"));
         });
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
@@ -209,12 +206,10 @@ public sealed class RootInvocationIdentityTests
 
         var pair = seen.ToArray();
         Assert.Equal(2, pair.Length);
-        var first = pair[0].GetProperty("context");
-        var second = pair[1].GetProperty("context");
-        Assert.NotEqual(
-            first.GetProperty("runId").GetString(), second.GetProperty("runId").GetString());
-        Assert.NotEqual(
-            first.GetProperty("rootRunId").GetString(), second.GetProperty("rootRunId").GetString());
+        var first = pair[0];
+        var second = pair[1];
+        Assert.NotEqual(first.RunId, second.RunId);
+        Assert.NotEqual(first.RootRunId, second.RootRunId);
         AssertRootIsSelf(first);
         AssertRootIsSelf(second);
     }
@@ -223,11 +218,11 @@ public sealed class RootInvocationIdentityTests
     public async Task Independent_scripts_have_different_roots()
     {
         await using var host = new FakeHost();
-        var seen = new ConcurrentQueue<JsonElement>();
+        var seen = new ConcurrentQueue<Sdk.ExtensionCallContext>();
         host.On("code.execute", (message, _) =>
         {
-            seen.Enqueue(message.Arguments!.Value.Clone());
-            return Task.FromResult(Json.Element("""{"content":"ok","isError":false}"""));
+            seen.Enqueue(BoundRoots.ContextOf(message));
+            return Task.FromResult(new Sdk.CodeExecutionResult("ok"));
         });
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
@@ -243,10 +238,9 @@ public sealed class RootInvocationIdentityTests
 
         var pair = seen.ToArray();
         Assert.Equal(2, pair.Length);
-        var first = pair[0].GetProperty("context");
-        var second = pair[1].GetProperty("context");
-        Assert.NotEqual(
-            first.GetProperty("rootRunId").GetString(), second.GetProperty("rootRunId").GetString());
+        var first = pair[0];
+        var second = pair[1];
+        Assert.NotEqual(first.RootRunId, second.RootRunId);
         AssertRootIsSelf(first);
         AssertRootIsSelf(second);
     }
@@ -265,35 +259,42 @@ public sealed class RootInvocationIdentityTests
         using var limit = TestLimit.Create();
         var setup = await StartChainAsync(host, client, betaSource, limit.Token);
 
-        var plain = BoundRoots.BoundPayload(setup.RunA, "alpha", "bridge", "{}");
-        var forged = plain.Substring(0, plain.Length - 1)
-            + ",\"rootRunId\":\"forged-root\",\"context\":{\"runId\":\"forged\",\"sessionId\":\"FORGED\","
-            + "\"workingDirectory\":\"C:/forged\",\"depth\":9,\"pluginChain\":[],\"rootRunId\":\"forged-root\"}}";
-        var callback = host.CallClientAsync("host.tool_call", forged, limit.Token);
+        var callback = host.CallClientAsync("host.tool_call", ForgedRootPayload(setup.RunA), limit.Token);
         var nested = await setup.NestedArrived.Task.Bounded();
-        var nestedContext = nested.Arguments!.Value.GetProperty("context");
+        var nestedContext = BoundRoots.ContextOf(nested);
 
-        Assert.NotEqual("forged", nestedContext.GetProperty("runId").GetString());
-        Assert.NotEqual("forged-root", nestedContext.GetProperty("rootRunId").GetString());
-        Assert.Equal(setup.RootA, nestedContext.GetProperty("rootRunId").GetString());
-        Assert.NotEqual(setup.RunA, nestedContext.GetProperty("runId").GetString());
+        Assert.NotEqual("forged", nestedContext.RunId);
+        Assert.NotEqual("forged-root", nestedContext.RootRunId);
+        Assert.Equal(setup.RootA, nestedContext.RootRunId);
+        Assert.NotEqual(setup.RunA, nestedContext.RunId);
 
-        setup.HoldB.ResultJson = """{"content":"work-done","isError":false}""";
+        setup.HoldB.Content = "work-done";
         setup.HoldB.Gate.TrySetResult();
         Assert.Equal(("work-done", false), BoundRoots.OutputOf(await callback.Bounded()));
         setup.HoldA.Gate.TrySetResult();
         Assert.False((await setup.RootTask.Bounded()).IsError);
     }
 
-    private static void AssertRootIsSelf(JsonElement context)
+    private static void AssertRootIsSelf(Sdk.ExtensionCallContext context)
     {
-        var names = context.EnumerateObject().Select(property => property.Name).ToArray();
-        Assert.Contains("rootRunId", names);
-        Assert.DoesNotContain("RootRunId", names);
-        Assert.Equal(
-            context.GetProperty("runId").GetString(),
-            context.GetProperty("rootRunId").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(context.GetProperty("rootRunId").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(context.RootRunId));
+        Assert.Equal(context.RunId, context.RootRunId);
+    }
+
+    /// <summary>A bound <c>bridge</c> callback for <paramref name="runId"/> followed by a worker-supplied root id and a
+    /// whole forged context (run "forged", root "forged-root") after the four documented elements.</summary>
+    private static RawPayload ForgedRootPayload(string runId)
+    {
+        var bound = IpcSerializer.Serialize(HostWire.Forward(runId, "alpha", "bridge", "{}"));
+        Assert.Equal(0x94, bound[0]);
+        var forgedContext = new Sdk.ExtensionCallContext("forged", "FORGED", "C:/forged", 9, [])
+        {
+            RootRunId = "forged-root",
+        };
+        var payload = new List<byte>(bound) { [0] = 0x96 };
+        payload.AddRange(IpcSerializer.Serialize("forged-root"));
+        payload.AddRange(IpcSerializer.Serialize(forgedContext));
+        return new RawPayload(payload.ToArray());
     }
 
     private sealed record ChainSetup(
@@ -305,22 +306,22 @@ public sealed class RootInvocationIdentityTests
         TaskCompletionSource<ExtensionHostTool> betaSource, CancellationToken ct)
     {
         var directory = BoundRoots.AbsoluteDir("rootchain");
-        var holdA = new InFlightRoot { ResultJson = """{"content":"root-ok","isError":false}""" };
-        var holdB = new InFlightRoot { ResultJson = """{"content":"work-done","isError":false}""" };
+        var holdA = new InFlightRoot();
+        var holdB = new InFlightRoot { Content = "work-done" };
         var nestedArrived = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On("plugin.execute", async (message, ct2) =>
         {
-            var plugin = message.Arguments!.Value.GetProperty("pluginId").GetString();
+            var plugin = message.Read<PluginExecuteRequest>().PluginId;
             if (string.Equals(plugin, "beta", StringComparison.Ordinal))
             {
                 nestedArrived.TrySetResult(message);
                 await holdB.Gate.Task.WaitAsync(ct2).ConfigureAwait(false);
-                return Json.Element(holdB.ResultJson);
+                return holdB.Reply(message.Operation);
             }
 
             holdA.Arrived.TrySetResult(message);
             await holdA.Gate.Task.WaitAsync(ct2).ConfigureAwait(false);
-            return Json.Element(holdA.ResultJson);
+            return holdA.Reply(message.Operation);
         });
         var alphaProxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
         var betaProxy = await BoundRoots.RegisterPluginToolAsync(client, host, "beta", "work");
@@ -330,19 +331,20 @@ public sealed class RootInvocationIdentityTests
             new ToolContext("sess-chain", directory, 0),
             ct).AsTask();
         var rootRequest = await holdA.Arrived.Task.Bounded();
-        var rootContext = rootRequest.Arguments!.Value.GetProperty("context");
+        var rootContext = BoundRoots.ContextOf(rootRequest);
         return new ChainSetup(
             BoundRoots.RunIdOf(rootRequest),
-            rootContext.GetProperty("rootRunId").GetString()!,
+            rootContext.RootRunId!,
             holdA, holdB, rootTask, nestedArrived);
     }
 
     private static async Task<ExtensionHostCommand> RegisterCommandAsync(
         FakeHost host, ExtensionHostClient client, string pluginId, string name)
     {
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"commands\":["
-            + "{\"name\":\"" + name + "\",\"description\":\"d\",\"argumentHint\":\"\"}]}}");
+        await host.NotifyAndSyncAsync(
+            Sdk.ExtensionProtocol.ContributionsRegister,
+            HostWire.Contributions(
+                pluginId, new Sdk.PluginContributionSet { Commands = [new Sdk.CommandDeclaration(name, "d", "")] }));
         return (ExtensionHostCommand)client.Commands.Single(c => c.Definition.Name == name);
     }
 

@@ -95,6 +95,17 @@ internal sealed class PermissionDocument
     public string? Scope { get; set; }
 }
 
+/// <summary>Generated metadata for <c>manifest.json</c>, the on-disk package document the host reads and the staging area
+/// writes: camelCase, case-insensitive on the way in, nulls omitted on the way out.</summary>
+[JsonSourceGenerationOptions(
+    JsonSerializerDefaults.Web,
+    PropertyNameCaseInsensitive = true,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    WriteIndented = false)]
+[JsonSerializable(typeof(PluginManifestDocument))]
+[JsonSerializable(typeof(string))]
+internal sealed partial class PluginManifestJsonContext : JsonSerializerContext;
+
 /// <summary>Reads <c>manifest.json</c>. Every failure is reported through the returned issue kind instead of throwing.</summary>
 internal static class PluginManifestReader
 {
@@ -136,7 +147,7 @@ internal static class PluginManifestReader
                 return false;
             }
 
-            var document = JsonSerializer.Deserialize<PluginManifestDocument>(File.ReadAllText(path), HostJson.Options);
+            var document = JsonSerializer.Deserialize(File.ReadAllText(path), PluginManifestJsonContext.Default.PluginManifestDocument);
             if (document is null)
             {
                 kind = PluginIssueKind.ManifestInvalid;

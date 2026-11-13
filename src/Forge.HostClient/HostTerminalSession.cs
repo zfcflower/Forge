@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Text.Json;
 using System.Threading.Channels;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 
 namespace Forge.HostClient;
 
@@ -175,10 +175,11 @@ internal sealed class HostTerminalSession : ITerminalSession
                 }
 
                 var length = Math.Min(MaxFramePayloadBytes, input.Length - offset);
-                var payload = TerminalProtocol.SerializeInput(Id, input.Span.Slice(offset, length));
+                // The frame is encoded before the send's first await, so the caller's memory is not retained.
+                var payload = new TerminalData(Id, 0, input.Slice(offset, length));
                 try
                 {
-                    await peer.SendNotificationAsync(TerminalOps.Input, payload, ct).ConfigureAwait(false);
+                    await peer.NotifyAsync(TerminalOperations.Input, payload, ct).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is IpcConnectionClosedException or IOException
                     or ObjectDisposedException or InvalidOperationException)
@@ -210,7 +211,8 @@ internal sealed class HostTerminalSession : ITerminalSession
 
         try
         {
-            await client.SendTerminalRequestAsync(peer, TerminalOps.Resize, TerminalProtocol.SerializeResize(Id, size), ct)
+            await client.SendTerminalRequestAsync(
+                    peer, TerminalOperations.Resize, new TerminalResizeRequest(Id, size.Columns, size.Rows), ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IpcConnectionClosedException or IOException
@@ -235,15 +237,15 @@ internal sealed class HostTerminalSession : ITerminalSession
         try
         {
             var response = await client.SendTerminalRequestAsync(
-                    peer, TerminalOps.Foreground, TerminalProtocol.SerializeTerminalId(Id), ct)
+                    peer, TerminalOperations.Foreground, new TerminalIdRequest(Id), ct)
                 .ConfigureAwait(false);
-            if (!TerminalProtocol.TryReadBusy(response.Result, out var busy, out var problem))
+            if (!HostAnswerRules.TryRead<TerminalForegroundResponse>(response, out var foreground, out var problem))
             {
                 client.NoteTerminalProblem($"terminal.foreground for '{Id}' returned unusable data: {problem}");
                 return false;
             }
 
-            return busy;
+            return foreground.Busy;
         }
         catch (Exception ex) when (ex is IpcRemoteException or IpcTimeoutException or IpcConnectionClosedException
             or IOException or ObjectDisposedException or InvalidOperationException)
@@ -279,7 +281,7 @@ internal sealed class HostTerminalSession : ITerminalSession
             try
             {
                 await client.SendTerminalRequestAsync(
-                        peer, TerminalOps.Stop, TerminalProtocol.SerializeTerminalId(Id), budget.Token)
+                        peer, TerminalOperations.Stop, new TerminalIdRequest(Id), budget.Token)
                     .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IpcRemoteException or IpcTimeoutException or IpcConnectionClosedException
@@ -329,8 +331,7 @@ internal sealed class HostTerminalSession : ITerminalSession
     {
         try
         {
-            await peer.SendNotificationAsync(
-                    TerminalOps.Ack, TerminalProtocol.SerializeAck(Id, bytes), CancellationToken.None)
+            await peer.NotifyAsync(TerminalOperations.Ack, new TerminalAck(Id, bytes), CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IpcConnectionClosedException or IOException

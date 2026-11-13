@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Forge.Approval;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.Workflows;
 
@@ -75,7 +76,7 @@ public sealed partial class ExtensionHost
     /// engine never gets a fresh timer - and the run's own token is the linked caller/shutdown/deadline token, so a
     /// cancelled call stops scheduling new steps at once.
     /// </summary>
-    private async Task<ToolCallResult> RunWorkflowAsync(
+    private async Task<ToolResult> RunWorkflowAsync(
         WorkflowCall call,
         PluginExecuteRequest request,
         CallDeadline budget,
@@ -84,8 +85,9 @@ public sealed partial class ExtensionHost
         var remaining = budget.Remaining;
         var options = new RunOptions
         {
-            // The tool call's arguments are the workflow's input: steps reach them through {"$ref": "$input..."}.
-            Input = request.Args,
+            // The tool call's arguments are the workflow's input: steps reach them through {"$ref": "$input..."}. The host
+            // is the endpoint that runs this tool, so this is the one place the argument bytes are parsed.
+            Input = ParseWorkflowInput(request),
             Timeout = remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(1),
 
             // Cancellation drains for the same window a worker call gets before its process tree is killed, so a workflow
@@ -97,6 +99,25 @@ public sealed partial class ExtensionHost
             .RunAsync(call.Definition, new WorkflowHostFacade(this, call.Run), options, budget.Token)
             .ConfigureAwait(false);
         return DescribeWorkflowResult(call.Entry, result);
+    }
+
+    private static readonly byte[] EmptyArguments = "{}"u8.ToArray();
+
+    /// <summary>The workflow's <c>$input</c>: the call's argument JSON, where an empty payload means <c>{}</c>.</summary>
+    private static JsonElement ParseWorkflowInput(PluginExecuteRequest request)
+    {
+        var bytes = request.ArgumentsJson.IsEmpty ? EmptyArguments : request.ArgumentsJson;
+        try
+        {
+            using var document = JsonDocument.Parse(bytes);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException exception)
+        {
+            throw new HostOperationException(
+                "invalid_request",
+                $"The arguments of '{request.Tool}' are not valid JSON: {exception.Message}");
+        }
     }
 
     /// <summary>Publishes a workflow's snapshot: its one tool and its declared permissions, replacing the previous one.</summary>
@@ -114,7 +135,7 @@ public sealed partial class ExtensionHost
 
     /// <summary>
     /// Relays one workflow step's tool call to the main program. The forwarded payload is the same
-    /// <c>{runId, pluginId, name, args}</c> a worker callback produces, filled from the registered run and never from the
+    /// <see cref="HostToolCallForward"/> a worker callback produces, filled from the registered run and never from the
     /// workflow document, so the main program's run binding, permission checks and approvals apply unchanged.
     /// </summary>
     private async Task<HostToolResult> CallToolForWorkflowAsync(
@@ -137,11 +158,11 @@ public sealed partial class ExtensionHost
         }
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(run.Lifetime, ct);
-        IpcMessage forwarded;
+        ToolResult forwarded;
         try
         {
             forwarded = await ForwardToolCallAsync(
-                    HostJson.ToElement(new HostToolCallForward(run.RunId, run.PluginId, name, arguments)),
+                    new HostToolCallForward(run.RunId, run.PluginId, name, HostToolCalls.ArgumentsUtf8(arguments)),
                     linked.Token)
                 .ConfigureAwait(false);
         }
@@ -152,35 +173,25 @@ public sealed partial class ExtensionHost
         }
         catch (Exception exception) when (exception is IOException
             or IpcConnectionClosedException
+            or IpcProtocolException
             or InvalidOperationException
             or HostOperationException)
         {
             return new HostToolResult($"'{name}' could not be relayed to the main program: {exception.Message}", IsError: true);
         }
 
-        var payload = forwarded.Result ?? HostJson.EmptyObject;
-        try
-        {
-            var parsed = payload.Deserialize<ToolCallResult>(HostJson.Options);
-            return parsed is null
-                ? new HostToolResult(string.Empty)
-                : new HostToolResult(parsed.Content, parsed.IsError);
-        }
-        catch (JsonException)
-        {
-            return new HostToolResult(payload.GetRawText());
-        }
+        return new HostToolResult(forwarded.Content ?? string.Empty, forwarded.IsError);
     }
 
     /// <summary>
     /// Turns a finished run into what the calling tool returns: on success the content of the last step nothing depends on
     /// (the workflow's output), and on failure the failing step and its reason with <c>isError</c> set.
     /// </summary>
-    private static ToolCallResult DescribeWorkflowResult(PluginEntry entry, WorkflowRunResult result)
+    private static ToolResult DescribeWorkflowResult(PluginEntry entry, WorkflowRunResult result)
     {
         if (result.Status == WorkflowRunStatus.Completed)
         {
-            return new ToolCallResult(TerminalContent(result), IsError: false);
+            return new ToolResult(TerminalContent(result), IsError: false);
         }
 
         var label = result.Status switch
@@ -196,14 +207,14 @@ public sealed partial class ExtensionHost
             if (step.Status == StepStatus.Failed)
             {
                 var reason = step.Error ?? result.Error ?? "no reason was recorded";
-                return new ToolCallResult(
+                return new ToolResult(
                     $"workflow '{entry.Id}' {label}: step '{step.Id}' ({step.Tool}) failed: {reason}",
                     IsError: true);
             }
         }
 
         var detail = string.IsNullOrWhiteSpace(result.Error) ? "no reason was recorded" : result.Error;
-        return new ToolCallResult($"workflow '{entry.Id}' {label}: {detail}", IsError: true);
+        return new ToolResult($"workflow '{entry.Id}' {label}: {detail}", IsError: true);
     }
 
     /// <summary>

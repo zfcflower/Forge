@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests.Terminal;
@@ -17,39 +18,39 @@ public sealed class TerminalStartCancellationTests
         const string terminalId = "t-cancelled";
         var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On(
-            TerminalOps.Start,
+            TerminalOperations.Start,
             async (_, ct) =>
             {
                 await releaseAnswer.Task.WaitAsync(ct).ConfigureAwait(false);
-                return Json.Element(TerminalFixtures.StartResultJson(terminalId));
+                return HostReply.Of(TerminalFixtures.StartResult(terminalId));
             });
 
         using var cancellation = new CancellationTokenSource();
         var starting = client.StartAsync(TerminalFixtures.Request(), cancellation.Token).AsTask();
-        await host.WaitForRequestsAsync(TerminalOps.Start, 1).Bounded();
+        await host.WaitForRequestsAsync(TerminalOperations.Start, 1).Bounded();
 
         // The host already produced output for the terminal it is about to announce.
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "stale"));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "stale"));
         await host.SyncAsync();
 
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => starting.Bounded());
 
         // The answer has not arrived, so no terminal id is known and nothing may be stopped yet.
-        Assert.Empty(host.Requests(TerminalOps.Stop));
+        Assert.Empty(host.Requests(TerminalOperations.Stop));
 
         releaseAnswer.TrySetResult();
-        var stops = await host.WaitForRequestsAsync(TerminalOps.Stop, 1).Bounded();
+        var stops = await host.WaitForRequestsAsync(TerminalOperations.Stop, 1).Bounded();
         var stop = Assert.Single(stops);
-        Assert.Equal(terminalId, stop.Arguments!.Value.GetProperty("terminalId").GetString());
+        Assert.Equal(terminalId, stop.Read<TerminalIdRequest>().TerminalId);
 
         // The stale frame was dropped: a later terminal that reuses the id sees only its own output.
         TerminalFixtures.AnswerStart(host, terminalId);
         using var limit = TestLimit.Create();
         var second = client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask();
         var session = await second.Bounded();
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "fresh"));
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 0));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "fresh"));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 0));
         await host.SyncAsync();
 
         var body = await TerminalFixtures.DrainAsync(session);
@@ -67,8 +68,8 @@ public sealed class TerminalStartCancellationTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => client.StartAsync(TerminalFixtures.Request(), cancelled.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
-        Assert.Empty(host.Requests(TerminalOps.Stop));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Stop));
     }
 
     [Fact]
@@ -83,11 +84,11 @@ public sealed class TerminalStartCancellationTests
         // cancellation is observed. The race cannot be pinned to one order from outside, but either order must end with
         // the terminal stopped (before the fix, the answer-first order orphaned it).
         host.On(
-            TerminalOps.Start,
+            TerminalOperations.Start,
             (_, _) =>
             {
                 cancellation.Cancel();
-                return Task.FromResult(Json.Element(TerminalFixtures.StartResultJson(terminalId)));
+                return Task.FromResult(TerminalFixtures.StartResult(terminalId));
             });
 
         var starting = client.StartAsync(TerminalFixtures.Request(), cancellation.Token).AsTask();
@@ -98,8 +99,8 @@ public sealed class TerminalStartCancellationTests
         }
         catch (OperationCanceledException)
         {
-            var stops = await host.WaitForRequestsAsync(TerminalOps.Stop, 1).Bounded();
-            Assert.Equal(terminalId, Assert.Single(stops).Arguments!.Value.GetProperty("terminalId").GetString());
+            var stops = await host.WaitForRequestsAsync(TerminalOperations.Stop, 1).Bounded();
+            Assert.Equal(terminalId, Assert.Single(stops).Read<TerminalIdRequest>().TerminalId);
         }
     }
 
@@ -122,7 +123,7 @@ public sealed class TerminalStartCancellationTests
             await using var client = await ClientFactory.StartAsync(host);
             var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             host.On(
-                TerminalOps.Start,
+                TerminalOperations.Start,
                 async (_, ct) =>
                 {
                     await releaseAnswer.Task.WaitAsync(ct).ConfigureAwait(false);
@@ -131,7 +132,7 @@ public sealed class TerminalStartCancellationTests
 
             using var cancellation = new CancellationTokenSource();
             var starting = client.StartAsync(TerminalFixtures.Request(), cancellation.Token).AsTask();
-            await host.WaitForRequestsAsync(TerminalOps.Start, 1).Bounded();
+            await host.WaitForRequestsAsync(TerminalOperations.Start, 1).Bounded();
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => starting.Bounded());
 
@@ -139,7 +140,7 @@ public sealed class TerminalStartCancellationTests
             // Round trip: the refusal frame reached the client (frames are handled in order) before the check below.
             await host.SyncAsync();
 
-            Assert.Empty(host.Requests(TerminalOps.Stop));
+            Assert.Empty(host.Requests(TerminalOperations.Stop));
             ForceFinalization();
             Assert.DoesNotContain(Snapshot(unobserved), exception => exception.ToString().Contains("refused-after-cancel", StringComparison.Ordinal));
         }
@@ -166,18 +167,18 @@ public sealed class TerminalStartCancellationTests
         {
             await using var host = new FakeHost();
             await using var client = await host.StartTrackedAsync(out var statuses);
-            host.On(TerminalOps.Start, FakeHost.NeverAnswer);
+            host.On(TerminalOperations.Start, FakeHost.NeverAnswer);
 
             using var cancellation = new CancellationTokenSource();
             var starting = client.StartAsync(TerminalFixtures.Request(), cancellation.Token).AsTask();
-            await host.WaitForRequestsAsync(TerminalOps.Start, 1).Bounded();
+            await host.WaitForRequestsAsync(TerminalOperations.Start, 1).Bounded();
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => starting.Bounded());
 
             await host.DropConnectionAsync();
             await statuses.UntilAsync(events => events.Any(e => e.Status == HostStatus.Failed));
 
-            Assert.Empty(host.Requests(TerminalOps.Stop));
+            Assert.Empty(host.Requests(TerminalOperations.Stop));
             ForceFinalization();
             Assert.DoesNotContain(
                 Snapshot(unobserved),

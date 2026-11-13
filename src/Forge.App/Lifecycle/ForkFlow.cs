@@ -7,6 +7,8 @@ using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.Core.Agents;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Lifecycle;
 
@@ -392,7 +394,7 @@ internal sealed class ForkFlow
             }
             catch (Exception exception) when (IsExpected(exception))
             {
-                Trace.WriteLine("[fork] could not take back the session row: " + exception.Message);
+                AppLogs.Fork.ZLogWarning($"could not take back the session row: {exception.Message}");
             }
         }
 
@@ -402,7 +404,7 @@ internal sealed class ForkFlow
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            Trace.WriteLine("[fork] could not take back the worktree: " + exception.Message);
+            AppLogs.Fork.ZLogWarning($"could not take back the worktree: {exception.Message}");
         }
     }
 

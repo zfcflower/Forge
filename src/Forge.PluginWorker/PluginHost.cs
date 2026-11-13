@@ -17,11 +17,19 @@ internal sealed record PluginLoadout(PluginContributionSet Contributions, ToolDe
 /// context is reachable only from <see cref="LoadedPlugin"/>, so dropping that reference releases it.</summary>
 internal sealed class PluginHost
 {
+    private static readonly JsonElement EmptyObject = ParseEmptyObject();
+
     private readonly SemaphoreSlim mutation = new(1, 1);
     private LoadedPlugin? loaded;
 
     /// <summary>How long an unload waits for the collectible load context to be collected.</summary>
     public TimeSpan UnloadTimeout { get; init; } = PluginLoadContext.DefaultUnloadTimeout;
+
+    private static JsonElement ParseEmptyObject()
+    {
+        using var document = JsonDocument.Parse("{}"u8.ToArray());
+        return document.RootElement.Clone();
+    }
 
     public async Task<PluginLoadout> LoadAsync(
         string pluginId,
@@ -73,7 +81,7 @@ internal sealed class PluginHost
     public async Task<ToolResult> ExecuteAsync(
         string? pluginId,
         string toolName,
-        JsonElement arguments,
+        ReadOnlyMemory<byte> argumentsJson,
         HostCallFacade host,
         ExtensionCallContext? context,
         int timeoutMilliseconds,
@@ -95,7 +103,24 @@ internal sealed class PluginHost
             return Error($"the plugin does not declare a tool named '{toolName}'");
         }
 
-        var invocation = new ToolInvocation(host.SessionId, host.WorkingDirectory, arguments, host, context);
+        // The one place the raw argument bytes become a JsonElement; the document lives until the tool returns.
+        JsonDocument? arguments = null;
+        try
+        {
+            arguments = argumentsJson.IsEmpty ? null : JsonDocument.Parse(argumentsJson);
+        }
+        catch (JsonException ex)
+        {
+            return Error($"the arguments of tool '{toolName}' are not valid JSON: {ex.Message}");
+        }
+
+        using var argumentsLifetime = arguments;
+        var invocation = new ToolInvocation(
+            host.SessionId,
+            host.WorkingDirectory,
+            arguments?.RootElement ?? EmptyObject,
+            host,
+            context);
         try
         {
             var result = await InvokeWithinBudgetAsync(

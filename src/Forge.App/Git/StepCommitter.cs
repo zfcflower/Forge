@@ -4,6 +4,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Git;
 
@@ -417,7 +419,7 @@ internal sealed class StepCommitter : IStepCommitter
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            Trace.WriteLine($"[step-commit] could not re-read HEAD in '{directory}' after a cancelled commit: {exception.Message}");
+            AppLogs.StepCommit.ZLogWarning($"could not re-read HEAD in '{directory}' after a cancelled commit: {exception.Message}");
             return null;
         }
     }
@@ -433,12 +435,12 @@ internal sealed class StepCommitter : IStepCommitter
             var result = await git.RunAsync(directory, ["reset", "-q"], CancellationToken.None).ConfigureAwait(false);
             if (!result.Success)
             {
-                Trace.WriteLine($"[step-commit] could not unstage '{directory}' (git reset -q exited {result.ExitCode}): {result.StandardError.Trim()}");
+                AppLogs.StepCommit.ZLogWarning($"could not unstage '{directory}' (git reset -q exited {result.ExitCode}): {result.StandardError.Trim()}");
             }
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            Trace.WriteLine($"[step-commit] could not unstage '{directory}' after a failed commit: {exception.Message}");
+            AppLogs.StepCommit.ZLogWarning($"could not unstage '{directory}' after a failed commit: {exception.Message}");
         }
     }
 
@@ -485,7 +487,7 @@ internal sealed class StepCommitter : IStepCommitter
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            Trace.WriteLine($"[step-commit] could not re-read the checklist of '{item.SessionId}': {exception.Message}");
+            AppLogs.StepCommit.ZLogWarning($"could not re-read the checklist of '{item.SessionId}': {exception.Message}");
         }
 
         return item.CommitError is not null;
@@ -499,7 +501,7 @@ internal sealed class StepCommitter : IStepCommitter
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            Trace.WriteLine($"[step-commit] could not record the commit result of '{id}': {exception.Message}");
+            AppLogs.StepCommit.ZLogWarning($"could not record the commit result of '{id}': {exception.Message}");
         }
     }
 

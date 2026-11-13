@@ -5,6 +5,8 @@ using Forge.App.Lifecycle;
 using Forge.App.Localization;
 using Forge.Workspace;
 using ICommand = System.Windows.Input.ICommand;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -332,7 +334,7 @@ internal sealed partial class ProjectTreeViewModel
                     }
                     catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
                     {
-                        Trace.WriteLine($"[tree] could not read the checkout state of '{directory}': {exception.Message}");
+                        AppLogs.Tree.ZLogWarning($"could not read the checkout state of '{directory}': {exception.Message}");
                     }
 
                     gitStates[directory] = (state, Stopwatch.GetTimestamp());
@@ -371,7 +373,7 @@ internal sealed partial class ProjectTreeViewModel
                     }
                     catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
                     {
-                        Trace.WriteLine($"[tree] could not read the default branch of '{root}': {exception.Message}");
+                        AppLogs.Tree.ZLogWarning($"could not read the default branch of '{root}': {exception.Message}");
                     }
 
                     defaultBranches[root] = (branch, Stopwatch.GetTimestamp());
@@ -437,14 +439,14 @@ internal sealed partial class ProjectTreeViewModel
                 if (list.Count == 0)
                 {
                     // git always lists the main worktree first; an empty answer is not one to judge the workspaces by.
-                    Trace.WriteLine($"[tree] the worktree list of '{root}' came back empty; its workspaces stay unverified");
+                    AppLogs.Tree.ZLogWarning($"the worktree list of '{root}' came back empty; its workspaces stay unverified");
                     list = null;
                 }
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
         {
-            Trace.WriteLine($"[tree] could not list the worktrees of '{root}': {exception.Message}");
+            AppLogs.Tree.ZLogWarning($"could not list the worktrees of '{root}': {exception.Message}");
         }
 
         if (list is not null)

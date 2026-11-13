@@ -14,6 +14,8 @@ using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Terminal.Vt;
 using VtMouseButton = Forge.App.Terminal.Vt.MouseButton;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Terminal;
 
@@ -1442,7 +1444,7 @@ internal sealed class TerminalControl : Control
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            Trace.WriteLine("[terminal] the link could not be opened: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"the link could not be opened: {exception.Message}");
         }
     }
 
@@ -1480,7 +1482,7 @@ internal sealed class TerminalControl : Control
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[terminal] the selection could not be copied: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"the selection could not be copied: {exception.Message}");
         }
     }
 
@@ -1498,7 +1500,7 @@ internal sealed class TerminalControl : Control
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[terminal] the clipboard could not be read: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"the clipboard could not be read: {exception.Message}");
             return;
         }
 

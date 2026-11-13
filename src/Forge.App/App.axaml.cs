@@ -7,6 +7,8 @@ using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.IO;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App;
 
@@ -85,7 +87,7 @@ public partial class App : Application
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[shell] shutdown failed: " + exception);
+            AppLogs.Shell.ZLogError(exception, $"shutdown failed");
         }
         finally
         {

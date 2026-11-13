@@ -3,6 +3,8 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Preferences;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Services;
 
@@ -124,7 +126,7 @@ internal sealed class SessionInstrumentSources : ISessionInstrumentSources
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
         {
-            Trace.WriteLine("[instruments] launch failed: " + exception.Message);
+            AppLogs.Instruments.ZLogWarning($"launch failed: {exception.Message}");
         }
     }
 

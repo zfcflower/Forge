@@ -4,6 +4,8 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Forge.App.ViewModels;
 using Forge.App.Workbench.Controls;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Settings;
 
@@ -90,7 +92,7 @@ internal sealed partial class SettingsWindow : Window
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Trace.TraceWarning("[settings] reload failed: " + exception.GetType().Name);
+            AppLogs.Settings.ZLogWarning($"reload failed: {exception.GetType().Name}");
         }
     }
 

@@ -1,6 +1,7 @@
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
@@ -8,6 +9,9 @@ namespace Forge.HostClient.Tests;
 /// name-clash resolution, malformed payloads and SDK validation.</summary>
 public sealed class ContributionSnapshotTests
 {
+    private const string Register = Sdk.ExtensionProtocol.ContributionsRegister;
+    private const string Unregister = Sdk.ExtensionProtocol.ContributionsUnregister;
+
     [Fact]
     public async Task Register_builds_every_non_tool_view()
     {
@@ -15,10 +19,11 @@ public sealed class ContributionSnapshotTests
         await using var client = await ClientFactory.StartAsync(host);
 
         await RegisterAsync(host, "alpha",
-            """{"name":"hi","description":"says hi","argumentHint":"who"}""",
-            """{"name":"guide","description":"how to","body":"# Steps"}""",
-            """{"name":"helper","description":"helps","prompt":"Be helpful.","model":{"model":"m","thinking":1,"maxOutputTokens":64},"toolNames":["search"]}""",
-            """{"id":"tone"}""");
+            new Sdk.CommandDeclaration("hi", "says hi", "who"),
+            new Sdk.WorkflowDeclaration("guide", "how to", "# Steps"),
+            new Sdk.AgentDeclaration(
+                "helper", "helps", "Be helpful.", new Sdk.AgentModelSettings("m", Sdk.AgentThinkingEffort.Low, 64), ["search"]),
+            new Sdk.PromptContributorDeclaration("tone"));
 
         var command = Assert.Single(client.Commands);
         Assert.Equal("hi", command.Definition.Name);
@@ -40,14 +45,9 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackContributionsChanged();
-        await RegisterAsync(host, "alpha",
-            """{"name":"old","description":"d","argumentHint":""}""",
-            """{"name":"w","description":"d","body":"b"}""",
-            null, null);
+        await RegisterAsync(host, "alpha", Command("old"), new Sdk.WorkflowDeclaration("w", "d", "b"), null, null);
 
-        await RegisterAsync(host, "alpha",
-            """{"name":"fresh","description":"d","argumentHint":""}""",
-            null, null, null);
+        await RegisterAsync(host, "alpha", Command("fresh"), null, null, null);
 
         Assert.Equal("fresh", Assert.Single(client.Commands).Definition.Name);
         Assert.Empty(client.Workflows);
@@ -59,14 +59,12 @@ public sealed class ContributionSnapshotTests
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        var payload = Contributions("alpha",
-            """{"name":"hi","description":"d","argumentHint":""}""",
-            null, null, null);
-        await host.NotifyAndSyncAsync("contributions.register", payload);
+        var payload = Contributions("alpha", Command("hi"), null, null, null);
+        await host.NotifyAndSyncAsync(Register, payload);
         var changes = client.TrackContributionsChanged();
         var before = client.Commands;
 
-        await host.NotifyAndSyncAsync("contributions.register", payload);
+        await host.NotifyAndSyncAsync(Register, payload);
 
         Assert.Empty(changes.Snapshot());
         Assert.Same(before, client.Commands);
@@ -78,10 +76,8 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackContributionsChanged();
-        await RegisterAsync(host, "alpha",
-            """{"name":"a","description":"d","argumentHint":""}""", null, null, null);
-        await RegisterAsync(host, "beta",
-            """{"name":"b","description":"d","argumentHint":""}""", null, null, """{"id":"p"}""");
+        await RegisterAsync(host, "alpha", Command("a"), null, null, null);
+        await RegisterAsync(host, "beta", Command("b"), null, null, new Sdk.PromptContributorDeclaration("p"));
 
         await UnregisterAsync(host, "alpha");
 
@@ -95,8 +91,7 @@ public sealed class ContributionSnapshotTests
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await RegisterAsync(host, "alpha",
-            """{"name":"a","description":"d","argumentHint":""}""", null, null, null);
+        await RegisterAsync(host, "alpha", Command("a"), null, null, null);
         var changes = client.TrackContributionsChanged();
 
         await UnregisterAsync(host, "ghost");
@@ -110,8 +105,7 @@ public sealed class ContributionSnapshotTests
     {
         await using var host = new FakeHost();
         await using var client = await host.StartTrackedAsync(out var statuses);
-        await RegisterAsync(host, "alpha",
-            """{"name":"a","description":"d","argumentHint":""}""", null, null, """{"id":"p"}""");
+        await RegisterAsync(host, "alpha", Command("a"), null, null, new Sdk.PromptContributorDeclaration("p"));
         Assert.Single(client.Commands);
 
         await host.DropAndAwaitFailedAsync(statuses);
@@ -130,11 +124,10 @@ public sealed class ContributionSnapshotTests
     public async Task Revoked_proxy_is_stale_while_a_new_registration_is_usable()
     {
         await using var host = new FakeHost();
-        host.On("plugin.command", (_, _) => throw new FakeHostError("unknown_command", "command 'hi' is not installed"));
+        host.On(Sdk.ExtensionProtocol.PluginCommand, (_, _) => throw new FakeHostError("unknown_command", "command 'hi' is not installed"));
         await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
-        await RegisterAsync(host, "alpha",
-            """{"name":"hi","description":"d","argumentHint":""}""", null, null, null);
+        await RegisterAsync(host, "alpha", Command("hi"), null, null, null);
         var stale = Assert.Single(client.Commands);
         var directory = BoundRoots.AbsoluteDir("revoke");
         var context = new CommandContext("sess", directory);
@@ -147,9 +140,8 @@ public sealed class ContributionSnapshotTests
         Assert.Contains("alpha", staleResult.Output);
         Assert.Contains("hi", staleResult.Output);
 
-        host.Answer("plugin.command", """{"output":"fresh-ok"}""");
-        await RegisterAsync(host, "alpha",
-            """{"name":"hi","description":"d","argumentHint":""}""", null, null, null);
+        host.Answer(Sdk.ExtensionProtocol.PluginCommand, new Sdk.CommandOutput("fresh-ok"));
+        await RegisterAsync(host, "alpha", Command("hi"), null, null, null);
         var current = Assert.Single(client.Commands);
 
         Assert.NotSame(stale, current);
@@ -162,10 +154,8 @@ public sealed class ContributionSnapshotTests
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await RegisterAsync(host, "beta",
-            """{"name":"dup","description":"from beta","argumentHint":""}""", null, null, null);
-        await RegisterAsync(host, "alpha",
-            """{"name":"dup","description":"from alpha","argumentHint":""}""", null, null, null);
+        await RegisterAsync(host, "beta", Command("dup", "from beta"), null, null, null);
+        await RegisterAsync(host, "alpha", Command("dup", "from alpha"), null, null, null);
 
         var winner = Assert.Single(client.Commands);
         Assert.Equal("alpha", ((ExtensionHostCommand)winner).PluginId);
@@ -175,22 +165,23 @@ public sealed class ContributionSnapshotTests
     }
 
     [Theory]
-    [InlineData("[]")]
-    [InlineData("\"text\"")]
-    [InlineData("null")]
-    [InlineData("{}")]
-    [InlineData("{\"pluginId\":\"\",\"contributions\":{}}")]
-    [InlineData("{\"pluginId\":\"alpha\",\"contributions\":5}")]
-    [InlineData("{\"pluginId\":\"alpha\",\"contributions\":[]}")]
-    public async Task Malformed_complete_snapshot_is_atomically_refused_and_keeps_the_previous_state(string payload)
+    [InlineData("empty array")]
+    [InlineData("text")]
+    [InlineData("nil")]
+    [InlineData("map")]
+    [InlineData("no payload")]
+    [InlineData("empty plugin id")]
+    [InlineData("numeric contributions")]
+    [InlineData("text contributions")]
+    [InlineData("nil command name")]
+    public async Task Malformed_complete_snapshot_is_atomically_refused_and_keeps_the_previous_state(string shape)
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await RegisterAsync(host, "alpha",
-            """{"name":"kept","description":"d","argumentHint":""}""", null, null, null);
+        await RegisterAsync(host, "alpha", Command("kept"), null, null, null);
         var changes = client.TrackContributionsChanged();
 
-        await host.NotifyAndSyncAsync("contributions.register", payload);
+        await host.NotifyAndSyncAsync(Register, MalformedSnapshot(shape));
 
         Assert.Equal("kept", Assert.Single(client.Commands).Definition.Name);
         Assert.Empty(changes.Snapshot());
@@ -204,17 +195,40 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"alpha\",\"contributions\":{"
-            + "\"commands\":[{\"name\":\"ok\",\"description\":\"d\",\"argumentHint\":\"\"},{\"description\":\"no name\"},{\"name\":\"\"}],"
-            + "\"workflows\":[{\"name\":\"w\",\"description\":\"d\",\"body\":\"steps\"},{\"name\":\"nobody\",\"description\":\"d\"}],"
-            + "\"agents\":[{\"name\":\"a\",\"description\":\"d\",\"prompt\":\"p\",\"model\":{\"model\":\"m\",\"thinking\":1}}],"
-            + "\"promptContributors\":[{\"id\":\"p1\"},{}]"
-            + "}}");
+        await host.NotifyAndSyncAsync(Register, HostWire.Contributions("alpha", new Sdk.PluginContributionSet
+        {
+            Commands = [Command("ok"), Command(""), Command("   ")],
+            Workflows = [new Sdk.WorkflowDeclaration("w", "d", "steps"), new Sdk.WorkflowDeclaration("nobody", "d", "")],
+            Agents = [new Sdk.AgentDeclaration("a", "d", "p", new Sdk.AgentModelSettings("m", Sdk.AgentThinkingEffort.Low))],
+            PromptContributors = [new Sdk.PromptContributorDeclaration("p1"), new Sdk.PromptContributorDeclaration(" ")],
+        }));
 
         Assert.Equal("ok", Assert.Single(client.Commands).Definition.Name);
         Assert.Equal("w", Assert.Single(client.Workflows).Name);
         Assert.Equal("a", Assert.Single(client.Agents).Name);
+        Assert.Equal(new PluginPromptReference("alpha", "p1"), Assert.Single(client.PromptContributors));
+        Assert.True(client.Diagnostics.Count >= 4);
+    }
+
+    [Fact]
+    public async Task Nil_entries_are_dropped_while_valid_siblings_survive()
+    {
+        await using var host = new FakeHost();
+        await using var client = await ClientFactory.StartAsync(host);
+
+        // ["alpha", [[], [nil, ok], [nil], [nil], [nil, p1]]]: a nil entry cannot be written through the typed lists,
+        // so the snapshot goes out raw; each nil decodes as a null declaration and is dropped on its own.
+        await host.NotifyAndSyncAsync(Register, Raw(
+            [0x92],
+            Pack("alpha"),
+            [0x95, 0x90, 0x92, 0xc0],
+            Pack(Command("ok")),
+            [0x91, 0xc0, 0x91, 0xc0, 0x92, 0xc0],
+            Pack(new Sdk.PromptContributorDeclaration("p1"))));
+
+        Assert.Equal("ok", Assert.Single(client.Commands).Definition.Name);
+        Assert.Empty(client.Workflows);
+        Assert.Empty(client.Agents);
         Assert.Equal(new PluginPromptReference("alpha", "p1"), Assert.Single(client.PromptContributors));
         Assert.True(client.Diagnostics.Count >= 4);
     }
@@ -225,12 +239,14 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"alpha\",\"contributions\":{"
-            + "\"agents\":["
-            + "{\"name\":\"bad\",\"description\":\"d\",\"prompt\":\"p\",\"model\":{\"model\":\"m\",\"thinking\":99}},"
-            + "{\"name\":\"good\",\"description\":\"d\",\"prompt\":\"p\",\"model\":{\"model\":\"m\",\"thinking\":2}}"
-            + "]}}");
+        await host.NotifyAndSyncAsync(Register, HostWire.Contributions("alpha", new Sdk.PluginContributionSet
+        {
+            Agents =
+            [
+                new Sdk.AgentDeclaration("bad", "d", "p", new Sdk.AgentModelSettings("m", (Sdk.AgentThinkingEffort)99)),
+                new Sdk.AgentDeclaration("good", "d", "p", new Sdk.AgentModelSettings("m", Sdk.AgentThinkingEffort.Medium)),
+            ],
+        }));
 
         var agent = Assert.Single(client.Agents);
         Assert.Equal("good", agent.Name);
@@ -244,11 +260,11 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"alpha\",\"contributions\":{"
-            + "\"commands\":[{\"name\":\"c\",\"description\":\"d\",\"argumentHint\":\"\"}],"
-            + "\"panels\":[{\"id\":\"p\",\"title\":\"t\",\"schema\":{\"kind\":\"text\",\"definition\":{}}}]"
-            + "}}");
+        await host.NotifyAndSyncAsync(Register, HostWire.Contributions("alpha", new Sdk.PluginContributionSet
+        {
+            Commands = [Command("c")],
+            Panels = [new Sdk.PanelDeclaration("p", "t", new Sdk.UiSchema("text", "{}"))],
+        }));
 
         Assert.Equal("c", Assert.Single(client.Commands).Definition.Name);
         Assert.Empty(client.Workflows);
@@ -262,11 +278,9 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("tools.register",
-            """{"pluginId":"$run_code","tools":[{"name":"evil","description":"d","inputSchemaJson":"{}","sideEffect":0}]}""");
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"$run_code\",\"contributions\":{"
-            + "\"commands\":[{\"name\":\"evil\",\"description\":\"d\",\"argumentHint\":\"\"}]}}");
+        await host.NotifyAndSyncAsync(Sdk.ExtensionProtocol.ToolsRegister, HostWire.Tools("$run_code", HostWire.Tool("evil")));
+        await host.NotifyAndSyncAsync(
+            Register, HostWire.Contributions("$run_code", new Sdk.PluginContributionSet { Commands = [Command("evil")] }));
 
         Assert.Empty(client.Tools);
         Assert.Empty(client.Commands);
@@ -279,8 +293,9 @@ public sealed class ContributionSnapshotTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("tools.register",
-            """{"pluginId":"alpha","tools":[{"name":"run_code","description":"shadow","inputSchemaJson":"{}","sideEffect":0},{"name":"real","description":"d","inputSchemaJson":"{}","sideEffect":0}]}""");
+        await host.NotifyAndSyncAsync(
+            Sdk.ExtensionProtocol.ToolsRegister,
+            HostWire.Tools("alpha", HostWire.Tool("run_code", description: "shadow"), HostWire.Tool("real")));
 
         Assert.Equal("real", Assert.Single(client.Tools).Definition.Name);
         BoundRoots.AssertDiagnostic(client, "run_code");
@@ -291,12 +306,21 @@ public sealed class ContributionSnapshotTests
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await RegisterAsync(host, "alpha",
-            """{"name":"a","description":"d","argumentHint":""}""", null, null, null);
+        await RegisterAsync(host, "alpha", Command("a"), null, null, null);
 
-        foreach (var payload in new[] { """{"pluginId":5}""", """{"pluginId":""}""", """{"other":"x"}""", "[]", "null" })
+        // [5], [""], [nil], [], nil and no payload: none names a plugin.
+        RawPayload[] payloads =
+        [
+            Raw([0x91], Pack(5)),
+            HostWire.Payload(HostWire.Plugin(string.Empty)),
+            Raw([0x91, 0xc0]),
+            Raw([0x90]),
+            HostWire.Nil,
+            RawPayload.None,
+        ];
+        foreach (var payload in payloads)
         {
-            await host.NotifyClientAsync("contributions.unregister", payload);
+            await host.NotifyClientAsync(Unregister, payload);
         }
 
         await host.SyncAsync();
@@ -307,37 +331,53 @@ public sealed class ContributionSnapshotTests
 
     /// <summary>Registers <paramref name="pluginId"/>'s contribution snapshot and waits until the client applied it.</summary>
     private static async Task RegisterAsync(
-        FakeHost host, string pluginId, string? command, string? workflow, string? agent, string? prompt) =>
-        await host.NotifyAndSyncAsync("contributions.register", Contributions(pluginId, command, workflow, agent, prompt));
+        FakeHost host,
+        string pluginId,
+        Sdk.CommandDeclaration? command,
+        Sdk.WorkflowDeclaration? workflow,
+        Sdk.AgentDeclaration? agent,
+        Sdk.PromptContributorDeclaration? prompt) =>
+        await host.NotifyAndSyncAsync(Register, Contributions(pluginId, command, workflow, agent, prompt));
 
     /// <summary>Removes every contribution of <paramref name="pluginId"/> and waits until the client applied it.</summary>
     private static async Task UnregisterAsync(FakeHost host, string pluginId) =>
-        await host.NotifyAndSyncAsync("contributions.unregister", "{\"pluginId\":\"" + pluginId + "\"}");
+        await host.NotifyAndSyncAsync(Unregister, HostWire.Plugin(pluginId));
 
-    private static string Contributions(
-        string pluginId, string? command, string? workflow, string? agent, string? prompt)
+    private static Sdk.CommandDeclaration Command(string name, string description = "d") => new(name, description, "");
+
+    private static Sdk.PluginContributionsNotification Contributions(
+        string pluginId,
+        Sdk.CommandDeclaration? command,
+        Sdk.WorkflowDeclaration? workflow,
+        Sdk.AgentDeclaration? agent,
+        Sdk.PromptContributorDeclaration? prompt) =>
+        HostWire.Contributions(pluginId, new Sdk.PluginContributionSet
+        {
+            Commands = command is null ? [] : [command],
+            Workflows = workflow is null ? [] : [workflow],
+            Agents = agent is null ? [] : [agent],
+            PromptContributors = prompt is null ? [] : [prompt],
+        });
+
+    /// <summary>A <c>contributions.register</c> payload that carries no usable snapshot.</summary>
+    private static RawPayload MalformedSnapshot(string shape) => shape switch
     {
-        var parts = new List<string>();
-        if (command is not null)
-        {
-            parts.Add("\"commands\":[" + command + "]");
-        }
+        "empty array" => Raw([0x90]),
+        "text" => HostWire.Payload("text"),
+        "nil" => HostWire.Nil,
+        // An empty map: the notification is an array, so a map is not a notification at all.
+        "map" => Raw([0x80]),
+        "no payload" => RawPayload.None,
+        "empty plugin id" => HostWire.Payload(HostWire.Contributions(string.Empty, new Sdk.PluginContributionSet())),
+        "numeric contributions" => Raw([0x92], Pack("alpha"), Pack(5)),
+        "text contributions" => Raw([0x92], Pack("alpha"), Pack("x")),
+        // ["alpha", [[], [<bad command>]]]: declaration members are non-nullable, so one nil makes the snapshot
+        // undecodable as a whole.
+        "nil command name" => Raw([0x92], Pack("alpha"), [0x92, 0x90, 0x91, 0x93, 0xc0], Pack("d"), Pack("")),
+        _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+    };
 
-        if (workflow is not null)
-        {
-            parts.Add("\"workflows\":[" + workflow + "]");
-        }
+    private static byte[] Pack<T>(T value) => IpcSerializer.Serialize(value);
 
-        if (agent is not null)
-        {
-            parts.Add("\"agents\":[" + agent + "]");
-        }
-
-        if (prompt is not null)
-        {
-            parts.Add("\"promptContributors\":[" + prompt + "]");
-        }
-
-        return "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{" + string.Join(',', parts) + "}}";
-    }
+    private static RawPayload Raw(params byte[][] parts) => new(parts.SelectMany(part => part).ToArray());
 }

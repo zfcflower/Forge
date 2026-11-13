@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Forge.Ipc.Tests.Support;
 using Xunit;
 
@@ -87,7 +86,7 @@ public sealed class NamedPipeTransportTests
         Assert.True(server.IsConnected);
 
         await using var serverPeer = Peers.Create(server);
-        serverPeer.RequestReceived += async (message, ct) => await serverPeer.RespondAsync(message.Id, message.Arguments!.Value, ct);
+        serverPeer.RequestReceived += async (message, ct) => await serverPeer.RespondAsync(message.Id, message.Read<EchoArgs>(), ct);
         await serverPeer.StartAsync(CancellationToken.None);
         await using var clientPeer = Peers.Create(client);
         var clientClosed = new ConcurrentQueue<Exception?>();
@@ -95,9 +94,9 @@ public sealed class NamedPipeTransportTests
         var serverClosed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.Closed += cause => serverClosed.TrySetResult(cause);
 
-        var args = Json.Parse("""{ "text" : "h\u00e9", "n" : 1.50 }""");
-        var result = await clientPeer.SendRequestAsync<JsonElement>("echo", args, CancellationToken.None).Bounded();
-        Assert.Equal(args.GetRawText(), result.GetRawText());
+        var args = new EchoArgs("hé", 150);
+        var result = await clientPeer.RequestAsync<EchoArgs, EchoArgs>("echo", args, CancellationToken.None).Bounded();
+        Assert.Equal(args, result);
 
         await clientPeer.StopAsync(CancellationToken.None);
 
@@ -143,7 +142,7 @@ public sealed class NamedPipeTransportTests
         var clientCause = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         clientPeer.Closed += cause => clientCause.TrySetResult(cause);
 
-        var call = clientPeer.SendRequestAsync("hang", null, CancellationToken.None);
+        var call = clientPeer.RequestAsync("hang", IpcEmpty.Instance, CancellationToken.None);
         await received.Task.Bounded();
         await serverPeer.StopAsync(CancellationToken.None);
 

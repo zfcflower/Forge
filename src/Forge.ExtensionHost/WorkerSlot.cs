@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 
 namespace Forge.ExtensionHost;
@@ -26,14 +26,14 @@ internal sealed record WorkerLoadout(
 /// working directory or depth, and a call that arrives after its execution ended (or from another worker) is refused.
 /// </para>
 /// </summary>
-/// <param name="forwardToolCall">Forwards one bound <c>{runId, pluginId, name, args}</c> call to the main program.</param>
+/// <param name="forwardToolCall">Forwards one bound call to the main program and returns its result.</param>
 /// <param name="stop">The host's shutdown fence; every path that could start, load or recover a worker rechecks it under
 /// the slot gate, and an in-flight start is cancelled by it.</param>
 internal sealed class WorkerSlot(
     string pluginId,
     HostOptions options,
     PluginState state,
-    Func<JsonElement, CancellationToken, Task<IpcMessage>> forwardToolCall,
+    Func<HostToolCallForward, CancellationToken, Task<ToolResult>> forwardToolCall,
     HostStopSignal stop,
     RootWaitGraph waits,
     HostCleanupReport cleanup) : IAsyncDisposable
@@ -152,7 +152,7 @@ internal sealed class WorkerSlot(
     /// <summary>Forwards one tool execution to the worker under the request's own deadline. A dead or hung worker is
     /// killed and restarted, and the in-flight call fails with an error that names the cause. The deadline is the one the
     /// host derived at request entry, so a call that waited for a slot gets only what is left of it.</summary>
-    public async Task<ToolCallResult> ExecuteAsync(PluginExecuteRequest request, CallDeadline budget, CancellationToken ct)
+    public async Task<ToolResult> ExecuteAsync(PluginExecuteRequest request, CallDeadline budget, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(budget);
         var context = request.Context ??
@@ -161,21 +161,20 @@ internal sealed class WorkerSlot(
             request.PluginId,
             context,
             ExtensionProtocol.WorkerExecute,
-            remaining => HostJson.ToElement(new WorkerExecuteRequest(
+            remaining => new WorkerExecuteRequest(
                 request.PluginId,
                 request.Tool,
-                request.Args,
-                context.SessionId,
-                context.WorkingDirectory,
-                context.Depth,
+                request.ArgumentsJson,
                 options.PipeName,
                 context,
-                remaining)),
+                remaining),
             $"Tool '{request.Tool}' of plugin '{PluginId}'",
-            response => Deserialize<ToolCallResult>(response, "tool result") ?? new ToolCallResult(string.Empty, false),
+            response => Decode(response, "tool result", EmptyToolResult),
             budget,
             ct).ConfigureAwait(false);
     }
+
+    private static readonly ToolResult EmptyToolResult = new(string.Empty);
 
     /// <summary>Runs one contributed command in the worker under the request's own deadline.</summary>
     public async Task<CommandOutput> ExecuteCommandAsync(CommandExecutionRequest request, CallDeadline budget, CancellationToken ct)
@@ -187,9 +186,9 @@ internal sealed class WorkerSlot(
             request.PluginId,
             context,
             ExtensionProtocol.WorkerCommand,
-            remaining => HostJson.ToElement(request with { Context = context, TimeoutMilliseconds = remaining }),
+            remaining => request with { Context = context, TimeoutMilliseconds = remaining },
             $"Command '{request.Command}' of plugin '{PluginId}'",
-            response => Deserialize<CommandOutput>(response, "command result") ?? new CommandOutput(null, null, true),
+            response => Decode(response, "command result", new CommandOutput(null, null, true)),
             budget,
             ct).ConfigureAwait(false);
     }
@@ -204,9 +203,9 @@ internal sealed class WorkerSlot(
             request.PluginId,
             context,
             ExtensionProtocol.WorkerPrompt,
-            remaining => HostJson.ToElement(request with { Context = context, TimeoutMilliseconds = remaining }),
+            remaining => request with { Context = context, TimeoutMilliseconds = remaining },
             $"Prompt contributor '{request.ContributorId}' of plugin '{PluginId}'",
-            response => Deserialize<PromptOutput>(response, "prompt result") ?? new PromptOutput(null),
+            response => Decode(response, "prompt result", new PromptOutput(null)),
             budget,
             ct).ConfigureAwait(false);
     }
@@ -304,11 +303,11 @@ internal sealed class WorkerSlot(
     /// the process tree is killed, while an expired deadline kills it immediately - the two cases stay distinct.
     /// </para>
     /// </summary>
-    private async Task<TResult> RunAsync<TResult>(
+    private async Task<TResult> RunAsync<TArgs, TResult>(
         string targetPluginId,
         ExtensionCallContext context,
         string operation,
-        Func<int, JsonElement> payloadForBudget,
+        Func<int, TArgs> payloadForBudget,
         string description,
         Func<IpcMessage, TResult> readResult,
         CallDeadline budget,
@@ -434,17 +433,17 @@ internal sealed class WorkerSlot(
     /// process tree is killed, the host's shutdown fence ends the call without killing a worker the teardown already owns,
     /// and the call's absolute deadline - not a timer restarted after the queue - kills the tree when it expires.
     /// </summary>
-    private async Task<IpcMessage> DispatchAsync(
+    private async Task<IpcMessage> DispatchAsync<TArgs>(
         WorkerSession session,
         string operation,
-        JsonElement payload,
+        TArgs payload,
         string description,
         CallDeadline budget,
         CancellationToken ct)
     {
         using var execution = new CancellationTokenSource();
         ct.ThrowIfCancellationRequested();
-        var pending = session.Process.Peer.SendRequestAsync(operation, payload, execution.Token);
+        var pending = session.Process.Peer.RequestAsync(operation, payload, execution.Token);
         try
         {
             try
@@ -642,19 +641,19 @@ internal sealed class WorkerSlot(
         try
         {
             session = await StartAsync(ct).ConfigureAwait(false);
-            var payload = HostJson.ToElement(new WorkerLoadRequest(
+            var payload = new WorkerLoadRequest(
                 PluginId,
                 pluginVersion,
                 pluginImage.AssemblyPath,
                 pluginImage.AssemblySha256,
                 pluginImage.Files,
-                manifestPermissions));
+                manifestPermissions);
             using var deadline = new CancellationTokenSource(LoadTimeout);
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
             IpcMessage response;
             try
             {
-                response = await session.Process.Peer.SendRequestAsync(ExtensionProtocol.WorkerLoad, payload, wait.Token)
+                response = await session.Process.Peer.RequestAsync(ExtensionProtocol.WorkerLoad, payload, wait.Token)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -664,9 +663,10 @@ internal sealed class WorkerSlot(
                     $"The plugin worker for '{PluginId}' did not load the plugin within {LoadTimeout.TotalSeconds:0.#} s.");
             }
 
-            var result = Deserialize<WorkerLoadResponse>(response, "load result");
-            session.Tools = result?.Tools is { Count: > 0 } tools ? [.. tools] : [];
-            session.Contributions = result?.Contributions ?? new PluginContributionSet();
+            var contributions = Decode<WorkerLoadResponse?>(response, "load result", null)?.Contributions
+                ?? new PluginContributionSet();
+            session.Tools = contributions.Tools is { Count: > 0 } tools ? [.. tools] : [];
+            session.Contributions = contributions;
             session.Loaded = true;
             loaded = true;
             session.Generation = state.NextLoadGeneration();
@@ -738,20 +738,20 @@ internal sealed class WorkerSlot(
     private Task HandleWorkerRequestAsync(WorkerSession session, IpcMessage message, CancellationToken ct) =>
         BoundToolCallHandler.ServeAsync(session.Process, session.Runs, message, forwardToolCall, ct);
 
-    private static TResult? Deserialize<TResult>(IpcMessage response, string what)
-        where TResult : class
+    /// <summary>Decodes a worker's result; a response without a payload yields <paramref name="missing"/>, and one that is
+    /// not the documented type is a <c>worker_protocol</c> failure.</summary>
+    private static TResult Decode<TResult>(IpcMessage response, string what, TResult missing)
     {
-        if (response.Result is not { } element)
+        if (!response.HasPayload)
         {
-            return null;
+            return missing;
         }
 
         try
         {
-            return element.Deserialize<TResult>(HostJson.Options)
-                ?? throw new HostOperationException("worker_protocol", $"The plugin worker returned no {what}.");
+            return response.Read<TResult>();
         }
-        catch (JsonException exception)
+        catch (IpcProtocolException exception)
         {
             throw new HostOperationException("worker_protocol", $"The plugin worker returned an unreadable {what}: {exception.Message}");
         }

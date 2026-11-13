@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
+using System.Text;
 using Forge.Abstractions;
 using Forge.HostClient;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -18,10 +19,11 @@ public sealed class RunBindingTests
     public async Task Missing_runId_rejected_before_resolver_and_approval()
     {
         await using var fake = await FakeHost.StartAsync();
-        var result = await fake.CallHostToolAsync(new { pluginId = "p1", name = "t1", args = new { } });
+        // Not the run-bound shape at all: three strings where the four members are expected.
+        var result = await fake.CallHostToolAsync(WirePayload.Array(3).Text("p1").Text("t1").Text("{}"));
 
         Assert.True(result.IsError, result.Content);
-        Assert.Contains("not bound to a run id", result.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cannot be decoded", result.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(fake.ResolverCalls);
         Assert.Empty(fake.ApprovalCalls);
     }
@@ -31,14 +33,17 @@ public sealed class RunBindingTests
     {
         await using var fake = await FakeHost.StartAsync();
 
-        var blank = await fake.CallHostToolAsync(new { runId = "", pluginId = "p1", name = "t1", args = new { } });
+        var blank = await fake.CallHostToolAsync(
+            new HostToolCallForward("", "p1", "t1", Encoding.UTF8.GetBytes("{}")));
         Assert.True(blank.IsError);
         Assert.Contains("run id", blank.Content, StringComparison.OrdinalIgnoreCase);
 
+        // The retired unbound shape: identity fields only, no run id, no arguments payload. Whichever check refuses
+        // it, the call must not reach the resolver or the approval path.
         var legacy = await fake.CallHostToolAsync(
-            new { pluginId = "p1", name = "t1", sessionId = "s", workingDir = fake.Root, depth = 0 });
+            WirePayload.Array(5).Text("p1").Text("t1").Text("s").Text(fake.Root).Value(0));
         Assert.True(legacy.IsError);
-        Assert.Contains("not bound to a run id", legacy.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not part of an execution", legacy.Content, StringComparison.OrdinalIgnoreCase);
 
         Assert.Empty(fake.ResolverCalls);
         Assert.Empty(fake.ApprovalCalls);
@@ -49,7 +54,7 @@ public sealed class RunBindingTests
     {
         await using var fake = await FakeHost.StartAsync();
         var result = await fake.CallHostToolAsync(
-            new { runId = "deadbeefcafe0001", pluginId = "p1", name = "t1", args = new { } });
+            new HostToolCallForward("deadbeefcafe0001", "p1", "t1", Encoding.UTF8.GetBytes("{}")));
 
         Assert.True(result.IsError);
         Assert.Empty(fake.ResolverCalls);
@@ -67,7 +72,8 @@ public sealed class RunBindingTests
         var run = fake.InvokeAsync("p1", "t1");
         var runId = await fake.WaitForExecuteAsync("p1", "t1");
 
-        var forged = await fake.CallHostToolAsync(new { runId, pluginId = "p2", name = "t2", args = new { } });
+        var forged = await fake.CallHostToolAsync(
+            new HostToolCallForward(runId, "p2", "t2", Encoding.UTF8.GetBytes("{}")));
         Assert.True(forged.IsError);
         Assert.Contains("p2", forged.Content, StringComparison.Ordinal);
         Assert.Contains("p1", forged.Content, StringComparison.Ordinal);
@@ -90,7 +96,8 @@ public sealed class RunBindingTests
         Assert.False(completed.IsError, completed.Content);
         var runId = Assert.Single(fake.ExecuteRunIds);
 
-        var replay = await fake.CallHostToolAsync(new { runId, pluginId = "p1", name = "t1", args = new { } });
+        var replay = await fake.CallHostToolAsync(
+            new HostToolCallForward(runId, "p1", "t1", Encoding.UTF8.GetBytes("{}")));
         Assert.True(replay.IsError);
         Assert.Contains("in flight", replay.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(fake.ResolverCalls);
@@ -107,7 +114,8 @@ public sealed class RunBindingTests
         var run = fake.InvokeAsync("p1", "t1");
         var runId = await fake.WaitForExecuteAsync("p1", "t1");
 
-        var nested = await fake.CallHostToolAsync(new { runId, pluginId = "p1", name = "run_code", args = new { } });
+        var nested = await fake.CallHostToolAsync(
+            new HostToolCallForward(runId, "p1", "run_code", Encoding.UTF8.GetBytes("{}")));
         Assert.True(nested.IsError);
         Assert.Contains("run_code", nested.Content, StringComparison.Ordinal);
         Assert.Empty(fake.ResolverCalls);
@@ -128,7 +136,8 @@ public sealed class RunBindingTests
         var run = fake.InvokeAsync("p1", "t1");
         var runId = await fake.WaitForExecuteAsync("p1", "t1");
 
-        var forwarded = await fake.CallHostToolAsync(new { runId, pluginId = "p1", name = "inner", args = new { v = 1 } });
+        var forwarded = await fake.CallHostToolAsync(
+            new HostToolCallForward(runId, "p1", "inner", Encoding.UTF8.GetBytes("{\"v\":1}")));
         Assert.False(forwarded.IsError, forwarded.Content);
         Assert.Equal("inner-ok", forwarded.Content);
         Assert.Contains("inner", fake.ResolverCalls);
@@ -169,10 +178,8 @@ public sealed class RunBindingTests
                 new Sdk.PromptContributorDeclaration("brief"),
             ],
         };
-        var payload = JsonSerializer.SerializeToElement(
-            new Sdk.PluginContributionsNotification("p9", set),
-            Sdk.ExtensionExecutionJsonContext.Default.PluginContributionsNotification);
-        await fake.Peer.SendNotificationAsync(Sdk.ExtensionProtocol.ContributionsRegister, payload, fake.Ct);
+        await fake.Peer.NotifyAsync(
+            Sdk.ExtensionProtocol.ContributionsRegister, new Sdk.PluginContributionsNotification("p9", set), fake.Ct);
 
         await fake.WaitUntilAsync(() => fake.Client.Commands.Count == 1, "the single valid command");
         var command = Assert.Single(fake.Client.Commands);
@@ -271,57 +278,37 @@ public sealed class RunBindingTests
             switch (message.Operation)
             {
                 case Sdk.ExtensionProtocol.PluginExecute:
-                    var runId = ReadRunId(message.Arguments);
-                    if (runId is not null)
+                    var request = message.HasPayload ? message.Read<PluginExecuteRequest>() : null;
+                    if (request?.Context?.RunId is { } runId)
                     {
                         fake.runIds.Enqueue(runId);
                     }
 
-                    fake.executes.Enqueue(new ExecuteSeen(message.Arguments?.GetRawText() ?? "{}"));
+                    fake.executes.Enqueue(new ExecuteSeen(request is null
+                        ? "{}"
+                        : Encoding.UTF8.GetString(request.ArgumentsJson.Span) is { Length: > 0 } text ? text : "{}"));
                     if (fake.HoldExecutes)
                     {
                         await fake.executeGate.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
                     }
                     await fake.Peer.RespondAsync(
-                        message.Id,
-                        JsonSerializer.SerializeToElement(new { content = fake.executeResult, isError = false }),
-                        CancellationToken.None);
+                        message.Id, new Sdk.ToolResult(fake.executeResult), CancellationToken.None);
                     break;
                 case Sdk.ExtensionProtocol.HostStop:
-                    await fake.Peer.RespondAsync(
-                        message.Id, JsonDocument.Parse("{}").RootElement.Clone(), CancellationToken.None);
+                    await fake.Peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None);
                     break;
                 default:
-                    await fake.Peer.RespondAsync(
-                        message.Id, JsonDocument.Parse("{}").RootElement.Clone(), CancellationToken.None);
+                    await fake.Peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None);
                     break;
             }
-        }
-
-        private static string? ReadRunId(JsonElement? arguments)
-        {
-            if (arguments is not { ValueKind: JsonValueKind.Object } root)
-            {
-                return null;
-            }
-
-            if (root.TryGetProperty("context", out var context) && context.ValueKind == JsonValueKind.Object &&
-                context.TryGetProperty("runId", out var runId) && runId.ValueKind == JsonValueKind.String)
-            {
-                return runId.GetString();
-            }
-
-            return null;
         }
 
         public async Task RegisterToolAsync(string pluginId, string tool)
         {
-            var payload = JsonSerializer.SerializeToElement(new
-            {
+            var payload = new ToolsRegisterNotification(
                 pluginId,
-                tools = new[] { new { name = tool, description = "fake tool " + tool, inputSchemaJson = "{}", sideEffect = 0 } },
-            });
-            await Peer.SendNotificationAsync(Sdk.ExtensionProtocol.ToolsRegister, payload, Ct);
+                [new Sdk.ToolDeclaration(tool, "fake tool " + tool, "{}", Sdk.ToolSideEffect.ReadOnly)]);
+            await Peer.NotifyAsync(Sdk.ExtensionProtocol.ToolsRegister, payload, Ct);
             await WaitUntilAsync(
                 () => Client.Tools.Any(candidate =>
                     candidate.Definition.Name == tool &&
@@ -367,14 +354,20 @@ public sealed class RunBindingTests
             executeGate.TrySetResult();
         }
 
-        public async Task<ToolResult> CallHostToolAsync(object args)
+        /// <summary>The host relaying one run-bound tool call to the client under test.</summary>
+        public Task<ToolResult> CallHostToolAsync(HostToolCallForward forward) =>
+            CallHostToolAsync(WirePayload.Array(4)
+                .Value(forward.RunId)
+                .Value(forward.PluginId)
+                .Value(forward.Name)
+                .Value(forward.ArgumentsJson));
+
+        /// <summary>A payload the client must refuse; the caller decides the shape.</summary>
+        public async Task<ToolResult> CallHostToolAsync(WirePayload payload)
         {
-            var element = JsonSerializer.SerializeToElement(args);
-            var response = await Peer.SendRequestAsync(Sdk.ExtensionProtocol.HostToolCall, element, Ct);
-            var result = response.Result!.Value;
-            return new ToolResult(
-                result.TryGetProperty("content", out var content) ? content.GetString() ?? string.Empty : result.GetRawText(),
-                result.TryGetProperty("isError", out var isError) && isError.GetBoolean());
+            var response = await Peer.AskRawAsync(Sdk.ExtensionProtocol.HostToolCall, payload, Ct);
+            var result = response.Read<Sdk.ToolResult>();
+            return new ToolResult(result.Content ?? string.Empty, result.IsError);
         }
 
         public async Task WaitUntilAsync(Func<bool> condition, string what)

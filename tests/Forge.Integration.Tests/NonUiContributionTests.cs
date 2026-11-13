@@ -414,8 +414,8 @@ public sealed class NonUiContributionTests
             """{"id":"legacy","version":"1.0.0","entry":"legacy.dll"}""");
 
         await using var peer = await RawHost.ConnectAsync(host.Pipe, budget.Token);
-        await peer.SendRequestAsync(
-            Sdk.ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), budget.Token);
+        await peer.RequestAsync(
+            Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, budget.Token);
 
         var diagnostic = await host.WaitForStderrAsync("legacy plugin.json", TestBudgets.Condition);
         Assert.Contains("not compatible", diagnostic, StringComparison.OrdinalIgnoreCase);

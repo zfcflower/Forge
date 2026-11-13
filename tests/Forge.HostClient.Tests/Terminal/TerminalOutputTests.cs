@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests.Terminal;
@@ -21,12 +22,12 @@ public sealed class TerminalOutputTests
         new Random(7).NextBytes(chunk);
         for (var seq = 0; seq < 5; seq++)
         {
-            await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, seq, chunk));
+            await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, seq, chunk));
         }
 
         await host.SyncAsync();
 
-        Assert.Empty(host.Notifications(TerminalOps.Ack));
+        Assert.Empty(host.Notifications(TerminalOperations.Ack));
         await session.DisposeAsync();
     }
 
@@ -48,7 +49,7 @@ public sealed class TerminalOutputTests
             var chunk = new byte[16 * 1024];
             random.NextBytes(chunk);
             expected.AddRange(chunk);
-            await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, seq, chunk));
+            await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, seq, chunk));
         }
 
         await host.SyncAsync();
@@ -61,9 +62,9 @@ public sealed class TerminalOutputTests
 
         Assert.Equal(expected.ToArray(), received.ToArray());
 
-        var acks = await host.WaitForNotificationsAsync(TerminalOps.Ack, 2);
+        var acks = await host.WaitForNotificationsAsync(TerminalOperations.Ack, 2);
         Assert.Equal(2, acks.Count);
-        var sizes = acks.Select(ack => ack.Arguments!.Value.GetProperty("bytes").GetInt64()).ToArray();
+        var sizes = acks.Select(ack => ack.Read<TerminalAck>().Bytes).ToArray();
         Assert.Equal([65536L, 16384L], sizes);
         foreach (var size in sizes)
         {
@@ -73,7 +74,7 @@ public sealed class TerminalOutputTests
         Assert.Equal(5L * 16 * 1024, TerminalFixtures.AckTotal(acks));
         foreach (var ack in acks)
         {
-            Assert.Equal(terminalId, ack.Arguments!.Value.GetProperty("terminalId").GetString());
+            Assert.Equal(terminalId, ack.Read<TerminalAck>().TerminalId);
         }
 
         await session.DisposeAsync();
@@ -88,11 +89,11 @@ public sealed class TerminalOutputTests
         const string terminalId = "t-gap";
         var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "first"));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "first"));
         await host.SyncAsync();
         Assert.Equal("first", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(limit.Token)).ToArray()));
 
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 2, "skipped-one"));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 2, "skipped-one"));
         await host.SyncAsync();
 
         var outputFailure = await Assert.ThrowsAsync<InvalidDataException>(
@@ -112,6 +113,67 @@ public sealed class TerminalOutputTests
     }
 
     [Fact]
+    public async Task Output_without_a_terminal_id_is_dropped_with_a_diagnostic()
+    {
+        await using var host = new FakeHost();
+        await using var client = await ClientFactory.StartAsync(host);
+        using var limit = TestLimit.Create();
+        const string terminalId = "t-no-id";
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+
+        await host.NotifyClientAsync(TerminalOperations.Output, new TerminalData("", 0, "lost"u8.ToArray()));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "kept"));
+        await host.SyncAsync();
+
+        BoundRoots.AssertDiagnostic(client, "terminal.output carried no usable payload: the message carries no terminal id.");
+        Assert.Equal("kept", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(limit.Token)).ToArray()));
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Output_with_a_negative_sequence_is_dropped_with_a_diagnostic()
+    {
+        await using var host = new FakeHost();
+        await using var client = await ClientFactory.StartAsync(host);
+        using var limit = TestLimit.Create();
+        const string terminalId = "t-negative";
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, -3, "lost"));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "kept"));
+        await host.SyncAsync();
+
+        BoundRoots.AssertDiagnostic(client, "the message carries a negative sequence number (-3).");
+        Assert.Equal("kept", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(limit.Token)).ToArray()));
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Undecodable_output_and_exit_are_dropped_with_diagnostics()
+    {
+        await using var host = new FakeHost();
+        await using var client = await ClientFactory.StartAsync(host);
+        using var limit = TestLimit.Create();
+        const string terminalId = "t-undecodable";
+        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+
+        await host.NotifyClientAsync(TerminalOperations.Output, HostWire.Payload("not terminal data"));
+        await host.NotifyClientAsync(TerminalOperations.Output, RawPayload.None);
+        await host.NotifyClientAsync(TerminalOperations.Exit, HostWire.Nil);
+        await host.NotifyClientAsync(TerminalOperations.Exit, new TerminalExit("", 1));
+        await host.SyncAsync();
+
+        BoundRoots.AssertDiagnostic(client, "terminal.output carried no usable payload: The payload of 'terminal.output' is not a 'TerminalData'.");
+        BoundRoots.AssertDiagnostic(client, "terminal.output carried no usable payload: 'terminal.output' carries no payload.");
+        BoundRoots.AssertDiagnostic(client, "terminal.exit carried no usable payload: The payload of 'terminal.exit' is nil.");
+        BoundRoots.AssertDiagnostic(client, "terminal.exit carried no usable payload: the message carries no terminal id.");
+        Assert.False(session.Exited.IsCompleted);
+
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 6));
+        Assert.Equal(6, await session.Exited.Bounded());
+    }
+
+    [Fact]
     public async Task Output_before_the_start_answer_is_buffered_and_replayed_in_order()
     {
         // 早到输出是显式设计：start 应答在途时先到的 output/exit 缓存在客户端，
@@ -121,20 +183,20 @@ public sealed class TerminalOutputTests
         const string terminalId = "t-early";
         var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On(
-            TerminalOps.Start,
+            TerminalOperations.Start,
             async (_, ct) =>
             {
                 await releaseAnswer.Task.WaitAsync(ct).ConfigureAwait(false);
-                return Json.Element(TerminalFixtures.StartResultJson(terminalId));
+                return HostReply.Of(TerminalFixtures.StartResult(terminalId));
             });
 
         using var limit = TestLimit.Create();
         var starting = client.StartAsync(TerminalFixtures.Request(), CancellationToken.None).AsTask();
-        await host.WaitForRequestsAsync(TerminalOps.Start, 1);
+        await host.WaitForRequestsAsync(TerminalOperations.Start, 1);
 
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "hello "));
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 1, "world"));
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 5));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "hello "));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 1, "world"));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 5));
         // 往返一次：确认 Host 发出的三帧都已在客户端处理完，应答才放行，
         // 于是三帧必走 early-buffer 路径而非注册后的直达路径。
         await host.SyncAsync();
@@ -156,17 +218,17 @@ public sealed class TerminalOutputTests
         const string terminalId = "t-early-exit";
         var releaseAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On(
-            TerminalOps.Start,
+            TerminalOperations.Start,
             async (_, ct) =>
             {
                 await releaseAnswer.Task.WaitAsync(ct).ConfigureAwait(false);
-                return Json.Element(TerminalFixtures.StartResultJson(terminalId));
+                return HostReply.Of(TerminalFixtures.StartResult(terminalId));
             });
 
         var starting = client.StartAsync(TerminalFixtures.Request(), CancellationToken.None).AsTask();
-        await host.WaitForRequestsAsync(TerminalOps.Start, 1);
+        await host.WaitForRequestsAsync(TerminalOperations.Start, 1);
 
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 3));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 3));
         await host.SyncAsync();
         releaseAnswer.TrySetResult();
 

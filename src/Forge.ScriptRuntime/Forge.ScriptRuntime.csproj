@@ -3,6 +3,10 @@
     <RootNamespace>Forge.ScriptRuntime</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MessagePack" Version="4.0.0-rc.1" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Forge.Plugin.Sdk\Forge.Plugin.Sdk.csproj" />
+    <ProjectReference Include="..\Forge.Ipc.Protocol\Forge.Ipc.Protocol.csproj" />
   </ItemGroup>
 </Project>

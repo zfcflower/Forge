@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 
 namespace Forge.PluginWorker;
@@ -60,11 +60,7 @@ internal sealed class WorkerSession
 
     private async Task HandleLoadAsync(IpcMessage message, CancellationToken ct)
     {
-        var request = WorkerJson.TryDeserialize(
-            message.Arguments,
-            WorkerJsonContext.Default.WorkerLoadRequest,
-            out var error);
-        if (request is null)
+        if (!TryRead<WorkerLoadRequest>(message, out var request, out var error))
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", error).ConfigureAwait(false);
             return;
@@ -94,10 +90,9 @@ internal sealed class WorkerSession
                     request.Permissions,
                     ct)
                 .ConfigureAwait(false);
-            var result = WorkerJson.Serialize(
-                new WorkerLoadResult { Tools = loadout.Tools, Contributions = loadout.Contributions },
-                WorkerJsonContext.Default.WorkerLoadResult);
-            await peer.RespondAsync(message.Id, result, CancellationToken.None).ConfigureAwait(false);
+            await peer
+                .RespondAsync(message.Id, new WorkerLoadResponse(loadout.Contributions), CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -117,11 +112,7 @@ internal sealed class WorkerSession
 
     private async Task HandleExecuteAsync(IpcMessage message, CancellationToken ct)
     {
-        var request = WorkerJson.TryDeserialize(
-            message.Arguments,
-            WorkerJsonContext.Default.WorkerExecuteRequest,
-            out var error);
-        if (request is null)
+        if (!TryRead<WorkerExecuteRequest>(message, out var request, out var error))
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", error).ConfigureAwait(false);
             return;
@@ -165,10 +156,10 @@ internal sealed class WorkerSession
                     .ExecuteAsync(
                         request.PluginId,
                         request.Tool,
-                        WorkerJson.ObjectOrEmpty(request.Arguments),
+                        request.ArgumentsJson,
                         host,
                         context,
-                        request.TimeoutMilliseconds ?? 0,
+                        request.TimeoutMilliseconds,
                         ct)
                     .ConfigureAwait(false);
             }
@@ -181,10 +172,7 @@ internal sealed class WorkerSession
                 result = new ToolResult($"{ex.GetType().Name}: {ex.Message}", IsError: true);
             }
 
-            var payload = WorkerJson.Serialize(
-                new ToolResultPayload { Content = result.Content, IsError = result.IsError },
-                WorkerJsonContext.Default.ToolResultPayload);
-            await peer.RespondAsync(message.Id, payload, CancellationToken.None).ConfigureAwait(false);
+            await peer.RespondAsync(message.Id, result, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -194,11 +182,7 @@ internal sealed class WorkerSession
 
     private async Task HandleCommandAsync(IpcMessage message, CancellationToken ct)
     {
-        var request = WorkerJson.TryDeserialize(
-            message.Arguments,
-            ExtensionExecutionJsonContext.Default.CommandExecutionRequest,
-            out var error);
-        if (request is null)
+        if (!TryRead<CommandExecutionRequest>(message, out var request, out var error))
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", error).ConfigureAwait(false);
             return;
@@ -236,8 +220,7 @@ internal sealed class WorkerSession
                 output = new CommandOutput($"{ex.GetType().Name}: {ex.Message}", IsError: true);
             }
 
-            var payload = WorkerJson.Serialize(output, ExtensionExecutionJsonContext.Default.CommandOutput);
-            await peer.RespondAsync(message.Id, payload, CancellationToken.None).ConfigureAwait(false);
+            await peer.RespondAsync(message.Id, output, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -247,11 +230,7 @@ internal sealed class WorkerSession
 
     private async Task HandlePromptAsync(IpcMessage message, CancellationToken ct)
     {
-        var request = WorkerJson.TryDeserialize(
-            message.Arguments,
-            ExtensionExecutionJsonContext.Default.PromptExecutionRequest,
-            out var error);
-        if (request is null)
+        if (!TryRead<PromptExecutionRequest>(message, out var request, out var error))
         {
             await RespondErrorAsync(message.Id, "invalid_arguments", error).ConfigureAwait(false);
             return;
@@ -290,8 +269,7 @@ internal sealed class WorkerSession
                 return;
             }
 
-            var payload = WorkerJson.Serialize(output, ExtensionExecutionJsonContext.Default.PromptOutput);
-            await peer.RespondAsync(message.Id, payload, CancellationToken.None).ConfigureAwait(false);
+            await peer.RespondAsync(message.Id, output, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -301,15 +279,13 @@ internal sealed class WorkerSession
 
     private async Task HandleUnloadAsync(IpcMessage message, CancellationToken ct)
     {
-        var request = WorkerJson.TryDeserialize(
-            message.Arguments,
-            WorkerJsonContext.Default.WorkerUnloadRequest,
-            out _);
+        // An unload without a readable id unloads whatever is loaded.
+        TryRead<ExtensionIdRequest>(message, out var request, out _);
 
         try
         {
             await plugins.UnloadAsync(request?.PluginId, ct).ConfigureAwait(false);
-            await peer.RespondAsync(message.Id, WorkerJson.EmptyObject, CancellationToken.None).ConfigureAwait(false);
+            await peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -325,8 +301,25 @@ internal sealed class WorkerSession
 
     private async Task HandleStopAsync(IpcMessage message)
     {
-        await peer.RespondAsync(message.Id, WorkerJson.EmptyObject, CancellationToken.None).ConfigureAwait(false);
+        await peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None).ConfigureAwait(false);
         RequestStop();
+    }
+
+    private static bool TryRead<T>(IpcMessage message, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? value, out string? error)
+        where T : class
+    {
+        try
+        {
+            value = message.Read<T>();
+            error = null;
+            return true;
+        }
+        catch (IpcProtocolException ex)
+        {
+            value = null;
+            error = ex.Message;
+            return false;
+        }
     }
 
     private void RequestStop() => stopRequested.TrySetResult();

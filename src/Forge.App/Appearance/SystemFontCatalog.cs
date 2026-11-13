@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Avalonia.Media;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Appearance;
 
@@ -51,7 +53,7 @@ internal sealed class SystemFontCatalog
         catch (Exception exception)
         {
             // A font backend problem must not take the settings page down; an empty list only means the user types.
-            Trace.WriteLine("[appearance] the system font families could not be enumerated: " + exception.Message);
+            AppLogs.Appearance.ZLogWarning($"the system font families could not be enumerated: {exception.Message}");
             return [];
         }
     }

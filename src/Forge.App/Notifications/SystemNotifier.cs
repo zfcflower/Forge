@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Notifications;
 
@@ -105,7 +107,7 @@ internal sealed class SystemNotifier : ISystemNotifier
         var info = CreateStartInfo(title, body);
         if (info is null)
         {
-            Trace.WriteLine("[notify] skipped: no notification tool for this platform");
+            AppLogs.Notify.ZLogInformation($"skipped: no notification tool for this platform");
             return;
         }
 
@@ -116,16 +118,16 @@ internal sealed class SystemNotifier : ISystemNotifier
             var exitCode = await run(info, linked.Token).ConfigureAwait(false);
             if (exitCode != 0)
             {
-                Trace.WriteLine("[notify] " + info.FileName + " exited with code " + exitCode);
+                AppLogs.Notify.ZLogWarning($"{info.FileName} exited with code {exitCode}");
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            Trace.WriteLine("[notify] " + info.FileName + " did not finish within " + Timeout.TotalSeconds + " seconds");
+            AppLogs.Notify.ZLogWarning($"{info.FileName} did not finish within {Timeout.TotalSeconds} seconds");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Trace.WriteLine("[notify] " + info.FileName + " failed: " + exception.Message);
+            AppLogs.Notify.ZLogWarning($"{info.FileName} failed: {exception.Message}");
         }
     }
 
@@ -240,7 +242,8 @@ internal sealed class SystemNotifier : ISystemNotifier
 
             if (captured.Length > 0)
             {
-                Trace.WriteLine("[notify] stderr: " + captured);
+                // The tool may echo the notification title or body, so only its size goes into the log.
+                AppLogs.Notify.ZLogDebug($"exit {process.ExitCode}, {captured.Length} chars on stderr");
             }
         }
 

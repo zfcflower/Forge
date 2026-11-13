@@ -59,7 +59,7 @@ public sealed class PluginQueueBudgetTests
         var release = Path.Combine(host.Root, "release.txt");
         var waitMarker = Path.Combine(host.Root, "waiter-ran.txt");
 
-        var holder = peer.SendRequestAsync(
+        var holder = peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
             PluginQueueBudgetWire.Execute(
                 host.Root, "gate", PluginQueueBudgetSources.HoldTool,
@@ -74,7 +74,7 @@ public sealed class PluginQueueBudgetTests
             bound.CancelAfter(AnswerLimit);
             try
             {
-                await peer.SendRequestAsync(
+                await peer.RequestAsync(
                     Sdk.ExtensionProtocol.PluginCommand,
                     PluginQueueBudgetWire.ExecuteCommand(
                         host.Root, "gate", "markcmd",
@@ -104,7 +104,7 @@ public sealed class PluginQueueBudgetTests
         Assert.False(held.IsError, held.Content);
         Assert.Equal(workerPid, await PidAsync(peer, host.Root, "budget-command-after", ct));
 
-        var later = await peer.SendRequestAsync(
+        var later = await peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginCommand,
             PluginQueueBudgetWire.ExecuteCommand(
                 host.Root, "gate", "markcmd",
@@ -211,7 +211,7 @@ public sealed class PluginQueueBudgetTests
         var release = Path.Combine(host.Root, "release.txt");
         var waitMarker = Path.Combine(host.Root, "waiter-ran.txt");
 
-        var holder = peer.SendRequestAsync(
+        var holder = peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
             PluginQueueBudgetWire.Execute(
                 host.Root, "gate", PluginQueueBudgetSources.HoldTool,
@@ -233,7 +233,7 @@ public sealed class PluginQueueBudgetTests
         Assert.Equal("held:released", held.Content);
         Assert.Equal(workerPid, await PidAsync(peer, host.Root, "pid-after-" + holdRun, ct));
 
-        var later = await peer.SendRequestAsync(
+        var later = await peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
             PluginQueueBudgetWire.Execute(
                 host.Root, "gate", PluginQueueBudgetSources.EchoTool,
@@ -260,7 +260,7 @@ public sealed class PluginQueueBudgetTests
         bound.CancelAfter(AnswerLimit);
         try
         {
-            await peer.SendRequestAsync(
+            await peer.RequestAsync(
                 Sdk.ExtensionProtocol.PluginExecute,
                 PluginQueueBudgetWire.Execute(root, "gate", PluginQueueBudgetSources.MarkTool, new { marker }, runId, rootRunId, chain, 1500),
                 bound.Token);
@@ -280,7 +280,7 @@ public sealed class PluginQueueBudgetTests
 
     private static async Task<int> PidAsync(IpcPeer peer, string root, string runId, CancellationToken ct)
     {
-        var response = await peer.SendRequestAsync(
+        var response = await peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
             PluginQueueBudgetWire.Execute(root, "gate", PluginQueueBudgetSources.PidTool, new { }, runId, runId, [], 60_000),
             ct);

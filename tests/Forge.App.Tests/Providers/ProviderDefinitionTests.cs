@@ -335,4 +335,51 @@ public sealed class ProviderDefinitionTests
         Assert.Null(resolved["window"].Pricing);
         Assert.Equal(new ModelPricing(1, 2, 0.1, 0.3), resolved["full"].Pricing);
     }
+
+    [Fact]
+    public void The_anthropic_preset_lists_its_models_and_its_plan_starts_on_the_newest_opus()
+    {
+        var preset = ProviderPresets.Find(ProviderPresets.AnthropicId)!;
+
+        // Both ways in can list: an API key and the account's own login answer the same /v1/models.
+        Assert.True(preset.SupportsModelListing);
+        Assert.Equal(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], preset.SeedModels);
+
+        var plan = ProviderDefinition.FromPreset(
+            preset, "claude", credentialKind: ProviderCredentialKind.ClaudeSubscription);
+        Assert.Equal(preset.SeedModels, plan.Models);
+        Assert.Equal("claude-opus-5-5", plan.DefaultModel);
+    }
+
+    [Fact]
+    public void The_preferred_default_is_the_newest_opus_for_anthropic_and_the_first_id_elsewhere()
+    {
+        string[] listing =
+        [
+            "claude-fable-5-2", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-8",
+        ];
+        Assert.Equal("claude-opus-5-5", ProviderDefinition.PreferredDefaultModel(ProviderPresets.AnthropicId, listing));
+
+        // A listing without an opus, and an empty one, keep the old meaning.
+        Assert.Equal(
+            "claude-fable-5-2",
+            ProviderDefinition.PreferredDefaultModel(ProviderPresets.AnthropicId, ["claude-fable-5-2", "claude-haiku-5-5"]));
+        Assert.Equal(string.Empty, ProviderDefinition.PreferredDefaultModel(ProviderPresets.AnthropicId, []));
+
+        // Every other preset keeps the first id even when a gateway serves an opus of its own.
+        Assert.Equal(
+            "openai/gpt-6",
+            ProviderDefinition.PreferredDefaultModel(
+                ProviderPresets.CustomId, ["openai/gpt-6", "anthropic/claude-opus-5-5"]));
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("auto", "auto")]
+    [InlineData(" AUTO ", "auto")]
+    [InlineData("5m", "5m")]
+    [InlineData("1h", "1h")]
+    [InlineData("2h", null)]
+    public void The_prompt_cache_lifetime_accepts_auto_and_falls_back_to_it(string? stored, string? expected) =>
+        Assert.Equal(expected, ProviderDefinition.ParsePromptCacheTtl(stored));
 }

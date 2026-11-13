@@ -12,6 +12,8 @@ using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Forge.App.Localization;
 using ShapePath = Avalonia.Controls.Shapes.Path;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Review;
 
@@ -454,7 +456,7 @@ internal sealed class ReviewOverlay : IDisposable
 
     private void Report(Exception exception)
     {
-        Trace.WriteLine("[review] ui action failed: " + exception);
+        AppLogs.Review.ZLogError(exception, $"ui action failed");
         ui.StatusText.Text = exception.Message;
         ui.StatusText.IsVisible = true;
     }

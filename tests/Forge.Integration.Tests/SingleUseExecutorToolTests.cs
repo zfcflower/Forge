@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.ScriptRuntime;
 using Xunit;
@@ -20,7 +21,7 @@ public sealed class SingleUseExecutorToolTests
         using var budget = new CancellationTokenSource(StepLimit);
         var ct = budget.Token;
         var runId = SingleUseExecutorArtifacts.NewRunId();
-        var seen = new ConcurrentQueue<BoundToolCallRequest>();
+        var seen = new ConcurrentQueue<HostToolCallRequest>();
         var compiled = await SingleUseExecutorArtifacts.CompileValidAsync(
             "return await Tools.Call(\"echo\", new { text = \"hi\" });", Options, ct);
         var tools = new[] { new ToolDeclaration("echo", "Echoes text.", "{\"type\":\"object\"}", ToolSideEffect.ReadOnly) };
@@ -28,7 +29,7 @@ public sealed class SingleUseExecutorToolTests
         session.ToolResponder = call =>
         {
             seen.Enqueue(call);
-            return new ToolResultPayload("echo:hi");
+            return new ToolResult("echo:hi");
         };
         await SingleUseExecutorArtifacts.LoadAsync(session, compiled, ct);
         var result = await SingleUseExecutorArtifacts.RunOnceAsync(
@@ -40,7 +41,8 @@ public sealed class SingleUseExecutorToolTests
         var callback = Assert.Single(seen);
         Assert.Equal("echo", callback.Name);
         Assert.Equal(runId, callback.RunId);
-        Assert.Equal("hi", callback.Arguments.GetProperty("text").GetString());
+        using var arguments = System.Text.Json.JsonDocument.Parse(callback.ArgumentsJson);
+        Assert.Equal("hi", arguments.RootElement.GetProperty("text").GetString());
     }
 
     [Fact]

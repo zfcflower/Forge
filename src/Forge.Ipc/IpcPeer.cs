@@ -5,18 +5,17 @@ namespace Forge.Ipc;
 public sealed record IpcPeerOptions
 {
     public TimeSpan DefaultTimeout { get; init; } = TimeSpan.FromSeconds(120);
-    public IJsonFrameCodec? Codec { get; init; }
+    public FrameCodec? Codec { get; init; }
 
     /// <summary>Maximum in-flight outgoing requests; 0 = unlimited (default). Exceeding it throws before sending.</summary>
     public int MaxOutstandingRequests { get; init; }
 }
 
-public interface IJsonFrameCodec
-{
-    ReadOnlyMemory<byte> Serialize(IpcMessage message);
-    IpcMessage Deserialize(ReadOnlyMemory<byte> frame);
-}
-
+/// <summary>
+/// One IPC connection. Payloads are typed: the sender serializes its argument or result object straight into the
+/// frame and the receiver decodes <see cref="IpcMessage.Payload"/> with <see cref="IpcMessage.Read{T}"/> into the type
+/// the operation documents. Every payload type is a source-generated MessagePack contract (AOT safe).
+/// </summary>
 public interface IIpcPeer : IAsyncDisposable
 {
     bool IsClosed { get; }
@@ -24,33 +23,31 @@ public interface IIpcPeer : IAsyncDisposable
     /// <summary>Raised exactly once when the peer closes (after pending requests are faulted); the cause is null for a clean local stop.</summary>
     event Action<Exception?>? Closed;
 
-    /// <summary>Raised for each server-initiated request (a message with an id and no result/error);
-    /// the handler must reply via <see cref="RespondAsync"/>.</summary>
+    /// <summary>Raised for each server-initiated request (a message with an id that is not a response);
+    /// the handler must reply via <see cref="RespondAsync{TResult}"/> or <see cref="RespondErrorAsync"/>.</summary>
     event Func<IpcMessage, CancellationToken, Task>? RequestReceived;
 
     /// <summary>Raised for notifications (id == 0).</summary>
     event Action<IpcMessage>? NotificationReceived;
 
-    /// <summary>Raised once for each inbound frame the peer drops (undecodable JSON, empty body, or rejected by the
+    /// <summary>Raised once for each inbound frame the peer drops (undecodable header, empty body, or rejected by the
     /// transport); the connection stays usable, so a caller can tell a malformed peer frame from a timeout.</summary>
     event Action<IpcProtocolException>? ProtocolError;
 
     Task StartAsync(CancellationToken ct);
 
-    /// <summary>Sends a request and awaits its response.</summary>
-    Task<IpcMessage> SendRequestAsync(string operation, System.Text.Json.JsonElement? args, CancellationToken ct);
+    /// <summary>Sends a request and returns the successful response undecoded; a remote error throws <see cref="IpcRemoteException"/>.</summary>
+    Task<IpcMessage> RequestAsync<TArgs>(string operation, TArgs args, CancellationToken ct);
 
-    /// <summary>Sends a request and awaits its typed result.</summary>
-    Task<T> SendRequestAsync<T>(string operation, System.Text.Json.JsonElement? args, CancellationToken ct) where T : notnull;
+    /// <summary>Sends a request and decodes its result; an undecodable result throws <see cref="IpcProtocolException"/>.</summary>
+    Task<TResult> RequestAsync<TArgs, TResult>(string operation, TArgs args, CancellationToken ct);
 
-    Task SendNotificationAsync(string operation, System.Text.Json.JsonElement? args, CancellationToken ct);
+    Task NotifyAsync<TArgs>(string operation, TArgs args, CancellationToken ct);
 
     /// <summary>Replies to a server-initiated request, preserving its id.</summary>
-    Task RespondAsync(long requestId, System.Text.Json.JsonElement result, CancellationToken ct);
+    Task RespondAsync<TResult>(long requestId, TResult result, CancellationToken ct);
 
     Task RespondErrorAsync(long requestId, IpcError error, CancellationToken ct);
 
     Task StopAsync(CancellationToken ct);
 }
-
-public sealed record IpcRequestContext(long RequestId, string Operation, System.Text.Json.JsonElement? Arguments);

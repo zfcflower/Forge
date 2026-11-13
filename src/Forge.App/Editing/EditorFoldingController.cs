@@ -7,6 +7,8 @@ using Forge.Editor.Folding;
 using Forge.Editor.Text;
 using EditorDocument = AvaloniaEdit.Document.TextDocument;
 using ForgeSnapshot = Forge.Editor.Text.TextSnapshot;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Editing;
 
@@ -197,7 +199,7 @@ internal sealed class EditorFoldingController : IDisposable
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                System.Diagnostics.Trace.WriteLine("[editor] folding ranges failed: " + exception.Message);
+                AppLogs.Editor.ZLogWarning($"folding ranges failed: {exception.Message}");
                 ranges = null;
             }
 

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using Forge.App.Notifications;
 using Forge.App.Tests.Git;
+using Forge.App.Tests.Logging;
 using Xunit;
 
 namespace Forge.App.Tests.Notifications;
@@ -231,7 +232,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task An_unsupported_platform_makes_no_call_and_is_traced_as_skipped()
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var recorder = new RunnerRecorder();
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Unsupported);
 
@@ -245,7 +246,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_runner_that_throws_does_not_throw_and_is_traced_with_the_tool_name()
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var notifier = new SystemNotifier(
             run: static (_, _) => throw new InvalidOperationException("boom-from-runner"),
             platform: NotifyPlatform.Linux);
@@ -261,7 +262,7 @@ public sealed class SystemNotifierTests
     public async Task A_missing_tool_is_a_traced_skip_not_an_exception()
     {
         // What Process.Start throws when the executable is not on PATH.
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var notifier = new SystemNotifier(
             run: static (_, _) => throw new Win32Exception(2, "The system cannot find the file specified."),
             platform: NotifyPlatform.MacOS);
@@ -277,7 +278,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_runner_that_faults_asynchronously_is_handled_the_same_way()
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var notifier = new SystemNotifier(
             run: static async (_, _) =>
             {
@@ -299,7 +300,7 @@ public sealed class SystemNotifierTests
     [InlineData(-1)]
     public async Task A_non_zero_exit_code_is_traced_and_never_throws(int exitCode)
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var notifier = new SystemNotifier(run: (_, _) => Task.FromResult(exitCode), platform: NotifyPlatform.Linux);
 
         await notifier.NotifyAsync(Title, Body, CancellationToken.None);
@@ -312,7 +313,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_zero_exit_code_leaves_no_trace_line()
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var notifier = new SystemNotifier(run: static (_, _) => Task.FromResult(0), platform: NotifyPlatform.Linux);
 
         await notifier.NotifyAsync("quiet-title", "quiet-body", CancellationToken.None);
@@ -331,7 +332,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task A_tool_that_hangs_is_abandoned_after_five_seconds_of_the_injected_clock()
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var time = new NotifyControlledTime();
         var recorder = new RunnerRecorder { WaitForToken = true };
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Windows, time: time);
@@ -371,7 +372,7 @@ public sealed class SystemNotifierTests
     [Fact]
     public async Task Cancellation_by_the_caller_propagates_and_reaches_the_runner()
     {
-        using var trace = new NotifyTraceCapture();
+        using var trace = new LogCapture();
         var time = new NotifyControlledTime();
         var recorder = new RunnerRecorder { WaitForToken = true };
         var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Linux, time: time);
@@ -554,39 +555,6 @@ internal sealed class NotifyCounter
         {
             Assert.Fail($"timed out waiting for {what} (wanted {target}, saw {Count})");
         }
-    }
-}
-
-/// <summary>Captures <see cref="Trace"/> output for the duration of a test and removes itself.</summary>
-internal sealed class NotifyTraceCapture : TraceListener
-{
-    private readonly ConcurrentQueue<string> lines = new();
-
-    public NotifyTraceCapture()
-    {
-        Trace.Listeners.Add(this);
-    }
-
-    public IReadOnlyList<string> Lines => [.. lines];
-
-    public override void Write(string? message)
-    {
-        if (!string.IsNullOrEmpty(message))
-        {
-            lines.Enqueue(message);
-        }
-    }
-
-    public override void WriteLine(string? message) => Write(message);
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            Trace.Listeners.Remove(this);
-        }
-
-        base.Dispose(disposing);
     }
 }
 

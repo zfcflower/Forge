@@ -3,6 +3,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Workbench;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Terminal;
 
@@ -226,7 +228,7 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
         }
         catch (Exception exception) when (exception is TimeoutException or OperationCanceledException)
         {
-            Trace.WriteLine("[terminal] shutdown ran out of time; the extension host stops the rest");
+            AppLogs.Terminal.ZLogWarning($"shutdown ran out of time; the extension host stops the rest");
         }
     }
 
@@ -257,12 +259,12 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
             catch (OperationCanceledException)
             {
                 // No answer in time: the safe side is "a program may be running", which shows the banner.
-                Trace.WriteLine("[terminal] the foreground probe timed out; asking the user before closing");
+                AppLogs.Terminal.ZLogWarning($"the foreground probe timed out; asking the user before closing");
                 busy = true;
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine("[terminal] foreground probe failed: " + exception.Message);
+                AppLogs.Terminal.ZLogWarning($"foreground probe failed: {exception.Message}");
             }
         }
 
@@ -326,7 +328,7 @@ internal sealed class TerminalWorkbench : IAsyncDisposable
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[terminal] the terminal did not shut down cleanly: " + exception.Message);
+            AppLogs.Terminal.ZLogError(exception, $"the terminal did not shut down cleanly");
         }
     }
 

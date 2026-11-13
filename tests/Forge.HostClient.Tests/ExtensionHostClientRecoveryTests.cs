@@ -242,7 +242,7 @@ public sealed class ExtensionHostClientRecoveryTests
         using var limit = TestLimit.Create();
         try
         {
-            host.CallClientAsync("sync", null, limit.Token).GetAwaiter().GetResult();
+            host.CallClientAsync("sync", IpcEmpty.Instance, limit.Token).GetAwaiter().GetResult();
             return false;
         }
         catch (IpcRemoteException error)
@@ -251,6 +251,6 @@ public sealed class ExtensionHostClientRecoveryTests
         }
     }
 
-    private static string Register(string pluginId, string tool) =>
-        $$"""{"pluginId":"{{pluginId}}","tools":[{"name":"{{tool}}","description":"d","inputSchemaJson":"{}","sideEffect":0}]}""";
+    private static Forge.Ipc.Protocol.ToolsRegisterNotification Register(string pluginId, string tool) =>
+        HostWire.Tools(pluginId, HostWire.Tool(tool));
 }

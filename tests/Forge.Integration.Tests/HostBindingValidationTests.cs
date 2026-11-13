@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -22,41 +23,18 @@ public sealed class HostBindingValidationTests
         WritePlugin(host, "alpha");
         await using var peer = await RawHost.ConnectAsync(host.Pipe, new CancellationTokenSource(Budget).Token);
         using var budget = new CancellationTokenSource(Budget);
-        await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), budget.Token);
+        await peer.RequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, budget.Token);
         var status = await FirstStatusAsync(peer, "alpha", budget.Token);
-        await peer.SendRequestAsync(
+        await peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginApprove,
-            JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                version = "1.0.0",
-                sourceHash = status.SourceHash,
-                dependencyHash = status.DependencyHash,
-                sdkVersion = status.SdkVersion,
-            }),
+            WireRequests.Approve("alpha", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion),
             budget.Token);
 
         var marker = Path.Combine(host.Root, "nested-missing-root.txt");
-        var context = new
-        {
-            runId = "nest-no-root-1",
-            sessionId = "s",
-            workingDirectory = host.Root,
-            depth = 1,
-            pluginChain = new[] { "other" },
-        };
-        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.SendRequestAsync(
+        var context = WireRequests.Context(host.Root, "nest-no-root-1", "s", ["other"]);
+        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
-            JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                tool = "sleep",
-                args = JsonSerializer.SerializeToElement(new { marker, ms = 1000 }),
-                sessionId = "s",
-                workingDir = host.Root,
-                depth = 1,
-                context,
-            }),
+            WireRequests.Execute("alpha", "sleep", JsonSerializer.Serialize(new { marker, ms = 1000 }), context),
             budget.Token));
 
         Assert.Equal("invalid_context", error.Code);
@@ -70,43 +48,19 @@ public sealed class HostBindingValidationTests
         WritePlugin(host, "alpha");
         await using var peer = await RawHost.ConnectAsync(host.Pipe, new CancellationTokenSource(Budget).Token);
         using var budget = new CancellationTokenSource(Budget);
-        await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), budget.Token);
+        await peer.RequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, budget.Token);
         var status = await FirstStatusAsync(peer, "alpha", budget.Token);
-        await peer.SendRequestAsync(
+        await peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginApprove,
-            JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                version = "1.0.0",
-                sourceHash = status.SourceHash,
-                dependencyHash = status.DependencyHash,
-                sdkVersion = status.SdkVersion,
-            }),
+            WireRequests.Approve("alpha", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion),
             budget.Token);
 
         var marker = Path.Combine(host.Root, "chain-cycle.txt");
         var runId = "cycle-run-1";
-        var context = new
-        {
-            runId,
-            sessionId = "s",
-            workingDirectory = host.Root,
-            depth = 1,
-            pluginChain = new[] { "alpha" },
-            rootRunId = runId,
-        };
-        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.SendRequestAsync(
+        var context = WireRequests.Context(host.Root, runId, "s", ["alpha"], rootRunId: runId);
+        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
-            JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                tool = "sleep",
-                args = JsonSerializer.SerializeToElement(new { marker, ms = 1000 }),
-                sessionId = "s",
-                workingDir = host.Root,
-                depth = 1,
-                context,
-            }),
+            WireRequests.Execute("alpha", "sleep", JsonSerializer.Serialize(new { marker, ms = 1000 }), context),
             budget.Token));
 
         Assert.Equal("chain_cycle", error.Code);
@@ -120,30 +74,13 @@ public sealed class HostBindingValidationTests
         WritePlugin(host, "alpha");
         await using var peer = await RawHost.ConnectAsync(host.Pipe, new CancellationTokenSource(Budget).Token);
         using var budget = new CancellationTokenSource(Budget);
-        await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), budget.Token);
+        await peer.RequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, budget.Token);
 
         var runId = "reserved-run-1";
-        var context = new
-        {
-            runId,
-            sessionId = "s",
-            workingDirectory = host.Root,
-            depth = 0,
-            pluginChain = Array.Empty<string>(),
-            rootRunId = runId,
-        };
-        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.SendRequestAsync(
+        var context = WireRequests.Context(host.Root, runId, "s", [], rootRunId: runId);
+        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute,
-            JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "$run_code",
-                tool = "echo",
-                args = JsonSerializer.SerializeToElement(new { text = "x" }),
-                sessionId = "s",
-                workingDir = host.Root,
-                depth = 0,
-                context,
-            }),
+            WireRequests.Execute("$run_code", "echo", JsonSerializer.Serialize(new { text = "x" }), context),
             budget.Token));
 
         Assert.Equal("reserved_identity", error.Code);
@@ -156,45 +93,24 @@ public sealed class HostBindingValidationTests
         WritePlugin(host, "alpha");
         await using var peer = await RawHost.ConnectAsync(host.Pipe, new CancellationTokenSource(Budget).Token);
         using var budget = new CancellationTokenSource(Budget);
-        await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), budget.Token);
+        await peer.RequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, budget.Token);
         var status = await FirstStatusAsync(peer, "alpha", budget.Token);
-        await peer.SendRequestAsync(
+        await peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginApprove,
-            JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                version = "1.0.0",
-                sourceHash = status.SourceHash,
-                dependencyHash = status.DependencyHash,
-                sdkVersion = status.SdkVersion,
-            }),
+            WireRequests.Approve("alpha", "1.0.0", status.SourceHash, status.DependencyHash, status.SdkVersion),
             budget.Token);
 
         var marker = Path.Combine(host.Root, "dup-holder.txt");
         var runId = "dup-run-0001";
-        JsonElement ExecutePayload() => JsonSerializer.SerializeToElement(new
-        {
-            pluginId = "alpha",
-            tool = "sleep",
-            args = JsonSerializer.SerializeToElement(new { marker, ms = 20000 }),
-            sessionId = "s",
-            workingDir = host.Root,
-            depth = 0,
-            context = new
-            {
-                runId,
-                sessionId = "s",
-                workingDirectory = host.Root,
-                depth = 0,
-                pluginChain = Array.Empty<string>(),
-                rootRunId = runId,
-            },
-        });
+        var argumentsJson = JsonSerializer.Serialize(new { marker, ms = 20000 });
+        var context = WireRequests.Context(host.Root, runId, "s", [], rootRunId: runId);
+        PluginExecuteRequest ExecutePayload() =>
+            WireRequests.Execute("alpha", "sleep", argumentsJson, context);
 
-        var first = peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginExecute, ExecutePayload(), budget.Token);
+        var first = peer.RequestAsync(Sdk.ExtensionProtocol.PluginExecute, ExecutePayload(), budget.Token);
         await WaitForFileAsync(marker, budget.Token);
 
-        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.SendRequestAsync(
+        var error = await Assert.ThrowsAsync<IpcRemoteException>(() => peer.RequestAsync(
             Sdk.ExtensionProtocol.PluginExecute, ExecutePayload(), budget.Token));
 
         Assert.Equal("duplicate_run_id", error.Code);
@@ -234,24 +150,19 @@ public sealed class HostBindingValidationTests
             IpcMessage response;
             try
             {
-                response = await peer.SendRequestAsync(
-                    Sdk.ExtensionProtocol.PluginsStatus, RawHost.EmptyObject(), deadline.Token);
+                response = await peer.RequestAsync(
+                    Sdk.ExtensionProtocol.PluginsStatus, IpcEmpty.Instance, deadline.Token);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 throw new TimeoutException($"no plugins.status row for '{id}' appeared within {limit.TotalSeconds:0} s.");
             }
 
-            var element = response.Result!.Value;
-            foreach (var entry in element.GetProperty("plugins").EnumerateArray())
+            foreach (var entry in response.Read<Sdk.PluginStatusResponse>().Plugins)
             {
-                if (entry.TryGetProperty("pluginId", out var pluginId) &&
-                    pluginId.GetString() == id)
+                if (entry is not null && string.Equals(entry.PluginId, id, StringComparison.Ordinal))
                 {
-                    return (
-                        entry.GetProperty("sourceHash").GetString()!,
-                        entry.GetProperty("dependencyHash").GetString()!,
-                        entry.GetProperty("sdkVersion").GetString()!);
+                    return (entry.SourceHash, entry.DependencyHash, entry.SdkVersion);
                 }
             }
 

@@ -139,10 +139,10 @@ public sealed class ProcessOwnershipTests
         await peer.StartAsync(ct);
         try
         {
-            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), ct);
+            await peer.RequestAsync(ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, ct);
             var record = ApprovalDatabase.ReadRecord(layout.Data, "alpha", "1.0.0")
                 ?? throw new InvalidOperationException("the host persisted no approval record for alpha 1.0.0");
-            await peer.SendRequestAsync(ExtensionProtocol.PluginApprove, ApproveArgs(record), ct);
+            await peer.RequestAsync(ExtensionProtocol.PluginApprove, ApproveArgs(record), ct);
 
             var failed = await Assert.ThrowsAsync<IpcRemoteException>(() =>
                 ExecuteRequestAsync(
@@ -222,26 +222,10 @@ public sealed class ProcessOwnershipTests
         }
     }
 
-    private static JsonElement ApproveArgs(ApprovalRecord record) => JsonSerializer.SerializeToElement(new
-    {
-        pluginId = "alpha",
-        version = "1.0.0",
-        sourceHash = record.SourceHash,
-        dependencyHash = record.DependencyHash,
-        sdkVersion = record.SdkVersion,
-    });
+    private static Forge.Ipc.Protocol.PluginApproveRequest ApproveArgs(ApprovalRecord record) =>
+        WireRequests.Approve("alpha", "1.0.0", record.SourceHash, record.DependencyHash, record.SdkVersion);
 
-    private static Task<IpcMessage> ExecuteRequestAsync(IpcPeer peer, string pluginId, string tool, string argsJson, string workingDir, CancellationToken ct)
-    {
-        var args = JsonSerializer.SerializeToElement(new
-        {
-            pluginId,
-            tool,
-            args = JsonDocument.Parse(argsJson).RootElement.Clone(),
-            sessionId = "raw",
-            workingDir,
-            depth = 0,
-        });
-        return peer.SendRequestAsync(ExtensionProtocol.PluginExecute, args, ct);
-    }
+    private static Task<IpcMessage> ExecuteRequestAsync(IpcPeer peer, string pluginId, string tool, string argsJson, string workingDir, CancellationToken ct) =>
+        peer.RequestAsync(
+            ExtensionProtocol.PluginExecute, WireRequests.Execute(pluginId, tool, argsJson, workingDir), ct);
 }

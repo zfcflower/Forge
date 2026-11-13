@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests;
@@ -23,10 +25,17 @@ public sealed class HostToolCallRelayTests
         await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
 
-        var response = await host.CallClientAsync(Operation, """{"name":"echo","args":{}}""", limit.Token);
+        // A typed sender cannot omit the run id: a nil in its place is undecodable and refused as such.
+        var payload = RawForward.Of(
+            RawForward.Field<string?>(null),
+            RawForward.Field<string?>(null),
+            RawForward.Field("echo"),
+            RawForward.Field(Encoding.UTF8.GetBytes("{}")));
+        var response = await host.CallClientAsync(Operation, payload, limit.Token);
 
         var content = BoundRoots.RefusedContent(response);
-        Assert.Contains("not bound to a run id", content);
+        Assert.Contains("cannot be decoded", content);
+        Assert.Contains("is not a 'HostToolCallForward'", content);
         Assert.Equal(0, resolver.Calls);
     }
 
@@ -39,14 +48,21 @@ public sealed class HostToolCallRelayTests
         await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
 
-        var response = await host.CallClientAsync(
-            Operation,
-            $$"""{"name":"echo","args":{"a":1},"workingDir":"{{workingDirectory}}","sessionId":"s-9","depth":2}""",
-            limit.Token);
+        // A blank run id and no plugin, but trailing worker-supplied directory/session/depth fields after the
+        // documented four: the extras bind nothing.
+        var payload = RawForward.Of(
+            RawForward.Field(string.Empty),
+            RawForward.Field(string.Empty),
+            RawForward.Field("echo"),
+            RawForward.Field(Encoding.UTF8.GetBytes("""{"a":1}""")),
+            RawForward.Field(workingDirectory),
+            RawForward.Field("s-9"),
+            RawForward.Field(2));
+        var response = await host.CallClientAsync(Operation, payload, limit.Token);
 
         var content = BoundRoots.RefusedContent(response);
-        Assert.Contains("not bound to a run id", content);
-        Assert.Contains("unbound tool calls are refused", content);
+        Assert.Contains("carries a blank run id", content);
+        Assert.Contains("it was refused", content);
         Assert.Equal(0, resolver.Calls);
     }
 
@@ -250,8 +266,8 @@ public sealed class HostToolCallRelayTests
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
 
-        var payload = "{\"runId\":\"" + root.RunId + "\",\"pluginId\":\"alpha\",\"name\":\"echo\",\"args\":{}}";
-        var response = await host.CallClientAsync(Operation, payload, limit.Token);
+        var response = await host.CallClientAsync(
+            Operation, HostWire.Forward(root.RunId, "alpha", "echo", "{}"), limit.Token);
         await root.FinishAsync();
 
         Assert.Equal(("ran echo", false), BoundRoots.OutputOf(response));
@@ -307,29 +323,31 @@ public sealed class HostToolCallRelayTests
     [Fact]
     public async Task Bound_calls_without_a_usable_tool_name_are_rejected_before_resolution()
     {
-        var payloads = new[]
-        {
-            """{"args":{}}""",
-            """{"name":"","args":{}}""",
-            """{"name":null,"args":{}}""",
-            """{"name":5,"args":{}}""",
-            """[1]""",
-        };
         var resolver = new ResolverSpy();
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve);
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
-
-        foreach (var template in payloads)
+        var args = RawForward.Field(Encoding.UTF8.GetBytes("{}"));
+        var cases = new (RawPayload Payload, string Expected)[]
         {
-            var payload = template.StartsWith('[')
-                ? template
-                : template[..^1] + ",\"runId\":\"" + root.RunId + "\",\"pluginId\":\"alpha\"}";
+            // Name absent (the array stops after run id and plugin id) and nil are undecodable: the name is
+            // declared non-nullable on the wire.
+            (RawForward.Of(RawForward.Field(root.RunId), RawForward.Field("alpha")), "cannot be decoded"),
+            (BoundRoots.BoundPayload(root.RunId, "alpha", "", "{}"), "no tool name"),
+            (RawForward.Of(RawForward.Field(root.RunId), RawForward.Field("alpha"), RawForward.Field<string?>(null), args),
+                "cannot be decoded"),
+            (RawForward.Of(RawForward.Field(root.RunId), RawForward.Field("alpha"), RawForward.Field(5), args),
+                "cannot be decoded"),
+            (RawPayload.None, "no arguments"),
+        };
+
+        foreach (var (payload, expected) in cases)
+        {
             var response = await host.CallClientAsync(Operation, payload, limit.Token);
 
             var content = BoundRoots.RefusedContent(response);
-            Assert.Contains(template.StartsWith('[') ? "no arguments" : "no tool name", content);
+            Assert.Contains(expected, content);
         }
 
         await root.FinishAsync();
@@ -337,17 +355,30 @@ public sealed class HostToolCallRelayTests
     }
 
     [Fact]
-    public async Task Arguments_sent_as_a_JSON_string_are_normalized_to_the_object()
+    public async Task Arguments_are_handed_to_the_tool_verbatim_without_normalization()
     {
-        var tool = new StubTool("echo");
+        var seen = new ConcurrentQueue<string>();
+        var tool = new StubTool("echo", ToolSideEffect.ReadOnly, (call, _, _) =>
+        {
+            seen.Enqueue(call.ArgumentsJson);
+            return ValueTask.FromResult(new ToolResult("ok"));
+        });
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host, resolver: tool.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
 
-        await root.CallAsync(host, "echo", "\"{\\\"a\\\": 1}\"", limit.Token);
+        // The spacing of an object survives, and a JSON string literal stays a string: the typed wire carries the
+        // argument bytes as-is, so nothing unwraps or re-serializes them.
+        var arguments = new[] { """{"a": 1}""","\"{\\\"a\\\": 1}\"" };
+        foreach (var json in arguments)
+        {
+            await host.CallClientAsync(Operation, HostWire.Forward(root.RunId, "alpha", "echo", json), limit.Token);
+        }
 
-        Assert.Equal("""{"a": 1}""", Assert.Single(tool.Invocations).Call.ArgumentsJson);
+        await root.FinishAsync();
+
+        Assert.Equal(arguments, seen.ToArray());
     }
 
     [Fact]
@@ -359,7 +390,8 @@ public sealed class HostToolCallRelayTests
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
 
-        var payload = "{\"runId\":\"" + root.RunId + "\",\"pluginId\":\"alpha\",\"name\":\"echo\"}";
+        // An absent JsonElement is the empty payload on the wire, as a worker relaying no arguments sends it.
+        var payload = new HostToolCallForward(root.RunId, "alpha", "echo", HostToolCalls.ArgumentsUtf8(default(JsonElement)));
         await host.CallClientAsync(Operation, payload, limit.Token);
         await root.FinishAsync();
 
@@ -392,7 +424,7 @@ public sealed class HostToolCallRelayTests
     }
 
     [Fact]
-    public async Task An_invalid_JSON_string_argument_falls_back_to_an_empty_object()
+    public async Task Whitespace_only_arguments_fall_back_to_an_empty_object()
     {
         var tool = new StubTool("echo");
         await using var host = new FakeHost();
@@ -400,7 +432,8 @@ public sealed class HostToolCallRelayTests
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
 
-        await root.CallAsync(host, "echo", "\"not json\"", limit.Token);
+        await host.CallClientAsync(Operation, HostWire.Forward(root.RunId, "alpha", "echo", " \r\n\t "), limit.Token);
+        await root.FinishAsync();
 
         Assert.Equal("{}", Assert.Single(tool.Invocations).Call.ArgumentsJson);
     }
@@ -414,19 +447,23 @@ public sealed class HostToolCallRelayTests
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
 
-        var malformed = new[]
+        var args = RawForward.Field(Encoding.UTF8.GetBytes("{}"));
+        var echo = RawForward.Field("echo");
+        var alpha = RawForward.Field("alpha");
+        var run = RawForward.Field(root.RunId);
+        var malformed = new RawPayload[]
         {
-            "[1,2]",
-            "\"text\"",
-            "null",
-            "{}",
-            "{\"runId\":null,\"pluginId\":\"alpha\",\"name\":\"echo\"}",
-            "{\"runId\":\"   \",\"pluginId\":\"alpha\",\"name\":\"echo\"}",
-            "{\"runId\":42,\"pluginId\":\"alpha\",\"name\":\"echo\"}",
-            "{\"runId\":true,\"pluginId\":\"alpha\",\"name\":\"echo\"}",
-            "{\"runId\":\"" + root.RunId + "\",\"name\":\"echo\"}",
-            "{\"runId\":\"" + root.RunId + "\",\"pluginId\":\"\",\"name\":\"echo\"}",
-            "{\"runId\":\"" + root.RunId + "\",\"pluginId\":7,\"name\":\"echo\"}",
+            RawForward.Of(RawForward.Field(1), RawForward.Field(2)),
+            HostWire.Payload("text"),
+            HostWire.Nil,
+            RawForward.Of(),
+            RawForward.Of(RawForward.Field<string?>(null), alpha, echo, args),
+            BoundRoots.BoundPayload("   ", "alpha", "echo", "{}"),
+            RawForward.Of(RawForward.Field(42), alpha, echo, args),
+            RawForward.Of(RawForward.Field(true), alpha, echo, args),
+            RawForward.Of(run),
+            BoundRoots.BoundPayload(root.RunId, "", "echo", "{}"),
+            RawForward.Of(run, RawForward.Field(7), echo, args),
         };
         foreach (var payload in malformed)
         {
@@ -484,5 +521,25 @@ public sealed class HostToolCallRelayTests
         var statuses = await failures.UntilAsync(seen => seen.Any(e => e.Status == HostStatus.Failed));
         Assert.Equal(HostStatus.Failed, client.Status);
         Assert.Contains(statuses, e => e.Status == HostStatus.Failed && e.Detail is not null);
+    }
+}
+
+/// <summary>Hand-built <c>host.tool_call</c> arrays for the shapes a typed sender cannot produce: missing trailing
+/// elements, wrongly typed elements and extra trailing elements.</summary>
+internal static class RawForward
+{
+    public static byte[] Field<T>(T value) => IpcSerializer.Serialize(value);
+
+    /// <summary>A MessagePack fixarray of the already-encoded <paramref name="fields"/>.</summary>
+    public static RawPayload Of(params byte[][] fields)
+    {
+        Assert.InRange(fields.Length, 0, 15);
+        var payload = new List<byte> { (byte)(0x90 | fields.Length) };
+        foreach (var field in fields)
+        {
+            payload.AddRange(field);
+        }
+
+        return new RawPayload(payload.ToArray());
     }
 }

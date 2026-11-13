@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 using static Forge.HostClient.Tests.CommandFixtures;
 using static Forge.HostClient.Tests.ToolFixtures;
 
@@ -113,7 +114,7 @@ public sealed class HostClientRootContextTests
     public async Task Plugin_tool_sends_a_nonexistent_absolute_root_verbatim()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", """{"content":"ok","isError":false}""");
+        host.Answer("plugin.execute", new Sdk.ToolResult("ok"));
         await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
@@ -125,8 +126,8 @@ public sealed class HostClientRootContextTests
             limit.Token);
 
         Assert.False(result.IsError);
-        var sent = Assert.Single(host.Requests("plugin.execute")).Arguments!.Value;
-        Assert.Equal(directory, sent.GetProperty("context").GetProperty("workingDirectory").GetString());
+        var sent = BoundRoots.ContextOf(Assert.Single(host.Requests("plugin.execute")));
+        Assert.Equal(directory, sent.WorkingDirectory);
     }
 
     [Fact]
@@ -135,7 +136,7 @@ public sealed class HostClientRootContextTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
+        var hold = new InFlightRoot { Content = "ok" };
         BoundRoots.ParkRoot(host, "code.execute", hold);
         var proxy = client.CreateRunCodeTool(new TestRegistry());
         var directory = BoundRoots.AbsoluteDir("missing-code") + "/does-not-exist";
@@ -148,8 +149,8 @@ public sealed class HostClientRootContextTests
         var result = await invocation.Bounded();
 
         Assert.False(result.IsError);
-        var sent = Assert.Single(host.Requests("code.execute")).Arguments!.Value;
-        Assert.Equal(directory, sent.GetProperty("context").GetProperty("workingDirectory").GetString());
+        var sent = BoundRoots.ContextOf(Assert.Single(host.Requests("code.execute")));
+        Assert.Equal(directory, sent.WorkingDirectory);
     }
 
     [Fact]
@@ -166,15 +167,15 @@ public sealed class HostClientRootContextTests
 
         Assert.False(result.IsError);
         Assert.Equal(directory, approval.Last?.WorkingDirectory);
-        var sent = Assert.Single(host.Requests("plugin.command")).Arguments!.Value;
-        Assert.Equal(directory, sent.GetProperty("context").GetProperty("workingDirectory").GetString());
+        var sent = BoundRoots.ContextOf(Assert.Single(host.Requests("plugin.command")));
+        Assert.Equal(directory, sent.WorkingDirectory);
     }
 
     [Fact]
     public async Task Prompt_sends_a_nonexistent_absolute_root_verbatim()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.prompt", """{"text":"dynamic-text"}""");
+        host.Answer("plugin.prompt", new Sdk.PromptOutput("dynamic-text"));
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
@@ -186,7 +187,7 @@ public sealed class HostClientRootContextTests
             limit.Token);
 
         Assert.Equal("dynamic-text", text);
-        var sent = Assert.Single(host.Requests("plugin.prompt")).Arguments!.Value;
-        Assert.Equal(directory, sent.GetProperty("context").GetProperty("workingDirectory").GetString());
+        var sent = BoundRoots.ContextOf(Assert.Single(host.Requests("plugin.prompt")));
+        Assert.Equal(directory, sent.WorkingDirectory);
     }
 }

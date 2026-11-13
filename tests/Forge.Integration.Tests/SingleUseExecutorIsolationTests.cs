@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.ScriptRuntime;
 using Xunit;
@@ -30,7 +31,7 @@ public sealed class SingleUseExecutorIsolationTests
             session.ToolResponder = _ =>
             {
                 File.WriteAllText(marker, "ghost-wrote-this");
-                return new ToolResultPayload("written");
+                return new ToolResult("written");
             };
             await SingleUseExecutorArtifacts.LoadAsync(session, compiled, ct);
             var result = await SingleUseExecutorArtifacts.RunOnceAsync(

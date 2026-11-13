@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 using static Forge.HostClient.Tests.ToolFixtures;
 using static Forge.HostClient.Tests.CommandFixtures;
 
@@ -12,6 +12,8 @@ namespace Forge.HostClient.Tests;
 /// wire and output mapping (<c>Output</c>/<c>PromptToSend</c>/<c>IsError</c>).</summary>
 public sealed class ExtensionHostCommandTests
 {
+    private const string PluginCommand = Sdk.ExtensionProtocol.PluginCommand;
+
     [Fact]
     public async Task Approval_uses_Execute_and_the_working_directory_then_the_command_runs_bound()
     {
@@ -28,19 +30,20 @@ public sealed class ExtensionHostCommandTests
         Assert.Equal(new CommandResult("hello", "next", false), result);
         Assert.Equal(
             new ApprovalRequest("plugin-command:alpha:hi", "\"some args\"", ToolSideEffect.Execute, directory), approval.Last);
-        var sent = Assert.Single(host.Requests("plugin.command")).Arguments!.Value;
-        Assert.Equal("alpha", sent.GetProperty("pluginId").GetString());
-        Assert.Equal("hi", sent.GetProperty("command").GetString());
-        Assert.Equal("some args", sent.GetProperty("arguments").GetString());
-        var context = sent.GetProperty("context");
-        Assert.False(string.IsNullOrWhiteSpace(context.GetProperty("runId").GetString()));
-        Assert.Equal("sess-cmd", context.GetProperty("sessionId").GetString());
-        Assert.Equal(directory, context.GetProperty("workingDirectory").GetString());
-        Assert.Equal(0, context.GetProperty("depth").GetInt32());
-        Assert.Empty(context.GetProperty("pluginChain").EnumerateArray());
-        Assert.Equal(
-            ["pluginId", "command", "arguments", "context", "timeoutMilliseconds"],
-            sent.EnumerateObject().Select(property => property.Name).ToArray());
+        var message = Assert.Single(host.Requests(PluginCommand));
+        var sent = message.Read<Sdk.CommandExecutionRequest>();
+        Assert.Equal("alpha", sent.PluginId);
+        Assert.Equal("hi", sent.Command);
+        Assert.Equal("some args", sent.Arguments);
+        var context = sent.Context;
+        Assert.False(string.IsNullOrWhiteSpace(context.RunId));
+        Assert.Equal("sess-cmd", context.SessionId);
+        Assert.Equal(directory, context.WorkingDirectory);
+        Assert.Equal(0, context.Depth);
+        Assert.Empty(context.PluginChain);
+        Assert.True(sent.TimeoutMilliseconds > 0);
+        // The request is exactly the five documented fields: a fixarray of five elements, nothing appended.
+        Assert.Equal(0x95, message.Payload.Span[0]);
     }
 
     [Fact]
@@ -76,7 +79,7 @@ public sealed class ExtensionHostCommandTests
         Assert.True(result.IsError);
         Assert.Contains("denied", result.Output);
         Assert.Contains("'hi'", result.Output);
-        Assert.Empty(host.Requests("plugin.command"));
+        Assert.Empty(host.Requests(PluginCommand));
     }
 
     [Fact]
@@ -92,7 +95,7 @@ public sealed class ExtensionHostCommandTests
 
         Assert.True(result.IsError);
         Assert.Contains("no approval path", result.Output);
-        Assert.Empty(host.Requests("plugin.command"));
+        Assert.Empty(host.Requests(PluginCommand));
     }
 
     [Fact]
@@ -111,7 +114,7 @@ public sealed class ExtensionHostCommandTests
         Assert.True(result.IsError);
         Assert.Contains("approval path failed", result.Output);
         Assert.Contains("policy offline", result.Output);
-        Assert.Empty(host.Requests("plugin.command"));
+        Assert.Empty(host.Requests(PluginCommand));
     }
 
     [Fact]
@@ -121,7 +124,7 @@ public sealed class ExtensionHostCommandTests
         await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var command = await RegisterCommandAsync(host, client, "alpha", "hi");
-        host.On("plugin.command", (_, _) => throw new FakeHostError("denied", "not permitted"));
+        host.On(PluginCommand, (_, _) => throw new FakeHostError("denied", "not permitted"));
 
         var result = await command.ExecuteAsync(
             "args", new CommandContext("sess", BoundRoots.AbsoluteDir("cmds")), limit.Token);
@@ -139,13 +142,13 @@ public sealed class ExtensionHostCommandTests
         await using var client = await ClientFactory.StartAsync(host, approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
         var command = await RegisterCommandAsync(host, client, "alpha", "hi");
-        host.Answer("plugin.command", "\"text\"");
+        host.AnswerRaw(PluginCommand, HostWire.Payload("text"));
 
         var result = await command.ExecuteAsync(
             "args", new CommandContext("sess", BoundRoots.AbsoluteDir("cmds")), limit.Token);
 
-        Assert.True(result.IsError);
-        Assert.NotEmpty(client.Diagnostics);
+        Assert.Equal(new CommandResult("The Extension Host returned no command result.", null, true), result);
+        BoundRoots.AssertDiagnostic(client, "plugin.command returned unusable data");
     }
 
     [Fact]
@@ -160,7 +163,7 @@ public sealed class ExtensionHostCommandTests
 
         Assert.True(result.IsError);
         Assert.Contains("not a fully qualified path", result.Output);
-        Assert.Empty(host.Requests("plugin.command"));
+        Assert.Empty(host.Requests(PluginCommand));
     }
 
     [Fact]
@@ -176,7 +179,7 @@ public sealed class ExtensionHostCommandTests
             "args", new CommandContext("sess", BoundRoots.AbsoluteDir("cmds")), limit.Token).AsTask();
 
         Assert.True(result.IsError);
-        Assert.Empty(host.Requests("plugin.command"));
+        Assert.Empty(host.Requests(PluginCommand));
     }
 
     [Fact]
@@ -191,22 +194,22 @@ public sealed class ExtensionHostCommandTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host, resolver: tool.Resolver(), approval: Approvals.AllowAll);
         using var limit = TestLimit.Create();
-        var command = await RegisterCommandAsync(host, client, "alpha", "hi", """{"output":"started"}""");
+        var command = await RegisterCommandAsync(host, client, "alpha", "hi", new Sdk.CommandOutput("started"));
         var directory = BoundRoots.AbsoluteDir("cmdbound");
 
         var hold = new InFlightRoot();
-        host.On("plugin.command", async (message, ct) =>
+        host.On(PluginCommand, async (message, ct) =>
         {
             hold.Arrived.TrySetResult(message);
             await hold.Gate.Task.WaitAsync(ct).ConfigureAwait(false);
-            return Json.Element("""{"output":"started"}""");
+            return new Sdk.CommandOutput("started");
         });
         var invocation = command.ExecuteAsync("args", new CommandContext("sess-cb", directory), limit.Token).AsTask();
         var request = await hold.Arrived.Task.Bounded();
-        var runId = request.Arguments!.Value.GetProperty("context").GetProperty("runId").GetString()!;
+        var runId = BoundRoots.RunIdOf(request);
 
         var callback = await host.CallClientAsync(
-            "host.tool_call", BoundRoots.BoundPayload(runId, "alpha", "echo", "{}"), limit.Token);
+            Sdk.ExtensionProtocol.HostToolCall, BoundRoots.BoundPayload(runId, "alpha", "echo", "{}"), limit.Token);
         Assert.Equal(("cb-ok", false), BoundRoots.OutputOf(callback));
         hold.Gate.TrySetResult();
         Assert.Equal(new CommandResult("started", null, false), await invocation.Bounded());

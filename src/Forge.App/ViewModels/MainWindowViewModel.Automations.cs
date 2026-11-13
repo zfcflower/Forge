@@ -6,6 +6,8 @@ using Forge.App.Automations;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Settings;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -210,7 +212,7 @@ internal sealed partial class MainWindowViewModel : IAutomationHost
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[automation] open session failed: " + exception.Message);
+            AppLogs.Automation.ZLogWarning($"open session failed: {exception.Message}");
         }
     }
 

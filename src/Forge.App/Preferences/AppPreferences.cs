@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.IO;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Preferences;
 
@@ -713,7 +715,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            Trace.WriteLine("[preferences] the final save failed: " + exception.Message);
+            AppLogs.Preferences.ZLogError(exception, $"the final save failed");
         }
     }
 
@@ -755,7 +757,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            Trace.WriteLine("[preferences] save failed: " + exception.Message);
+            AppLogs.Preferences.ZLogError(exception, $"save failed");
         }
     }
 
@@ -882,7 +884,7 @@ internal sealed class PreferencesStore : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            Trace.WriteLine("[preferences] the existing settings.json could not be read: " + exception.Message);
+            AppLogs.Preferences.ZLogWarning($"the existing settings.json could not be read: {exception.Message}");
             return null;
         }
     }

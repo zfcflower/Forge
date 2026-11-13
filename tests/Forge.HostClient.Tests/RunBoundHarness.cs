@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -22,7 +23,17 @@ internal sealed class InFlightRoot
 
     public void Release() => Gate.TrySetResult();
 
-    public string ResultJson { get; set; } = """{"content":"root-ok","isError":false}""";
+    /// <summary>The content the parked root answers with once released.</summary>
+    public string Content { get; set; } = "root-ok";
+
+    public bool IsError { get; set; }
+
+    /// <summary>The answer to the parked request: <c>code.execute</c> returns a script result, every other root a tool
+    /// result.</summary>
+    public HostReply Reply(string operation) =>
+        string.Equals(operation, Sdk.ExtensionProtocol.CodeExecute, StringComparison.Ordinal)
+            ? HostReply.Of(new Sdk.CodeExecutionResult(Content, IsError))
+            : HostReply.Of(new Sdk.ToolResult(Content, IsError));
 }
 
 internal sealed class TestRegistry : IToolRegistry
@@ -67,7 +78,7 @@ internal sealed record ActiveRoot(string RunId, InFlightRoot Hold, Task<ToolResu
         string pluginId = "alpha", bool forgeLegacy = false)
     {
         var payload = BoundRoots.BoundPayload(RunId, pluginId, name, argsJson, forgeLegacy);
-        var response = await host.CallClientAsync("host.tool_call", payload, ct).ConfigureAwait(false);
+        var response = await host.CallClientAsync(Sdk.ExtensionProtocol.HostToolCall, payload, ct).ConfigureAwait(false);
         await FinishAsync().ConfigureAwait(false);
         return response;
     }
@@ -100,7 +111,7 @@ internal static class BoundRoots
         FakeHost host, ExtensionHostClient client, IToolRegistry registry, CancellationToken ct,
         Sdk.CodeExecutionOptions? execution = null, string code = "1+1")
     {
-        var hold = new InFlightRoot { ResultJson = """{"content":"script-ok","isError":false}""" };
+        var hold = new InFlightRoot { Content = "script-ok" };
         ParkRoot(host, "code.execute", hold);
         var proxy = client.CreateRunCodeTool(
             registry, execution is null ? null : new RunCodeProxyOptions { Execution = execution });
@@ -124,36 +135,64 @@ internal static class BoundRoots
         {
             root.Arrived.TrySetResult(message);
             await root.Gate.Task.WaitAsync(ct).ConfigureAwait(false);
-            return Json.Element(root.ResultJson);
+            return root.Reply(operation);
         });
     }
 
     public static Task<IpcMessage> WaitArrivedAsync(InFlightRoot root) => root.Arrived.Task.Bounded();
 
-    public static string RunIdOf(IpcMessage rootRequest)
-    {
-        var args = rootRequest.Arguments ?? throw new InvalidOperationException("The root request has no arguments.");
-        return args.GetProperty("context").GetProperty("runId").GetString()
-            ?? throw new InvalidOperationException("The root request carries no run id.");
-    }
+    public static string RunIdOf(IpcMessage rootRequest) =>
+        ContextOf(rootRequest).RunId ?? throw new InvalidOperationException("The root request carries no run id.");
 
-    public static string PluginOf(IpcMessage rootRequest)
-    {
-        var args = rootRequest.Arguments ?? throw new InvalidOperationException("The root request has no arguments.");
-        return args.TryGetProperty("pluginId", out var plugin) ? plugin.GetString()! : "$run_code";
-    }
+    /// <summary>The call context the client bound to a root request, decoded as the type its operation documents.</summary>
+    public static Sdk.ExtensionCallContext ContextOf(IpcMessage rootRequest) =>
+        (rootRequest.Operation switch
+        {
+            Sdk.ExtensionProtocol.PluginExecute => rootRequest.Read<PluginExecuteRequest>().Context,
+            Sdk.ExtensionProtocol.CodeExecute => rootRequest.Read<Sdk.CodeExecutionRequest>().Context,
+            Sdk.ExtensionProtocol.PluginCommand => rootRequest.Read<Sdk.CommandExecutionRequest>().Context,
+            Sdk.ExtensionProtocol.PluginPrompt => rootRequest.Read<Sdk.PromptExecutionRequest>().Context,
+            _ => throw new InvalidOperationException($"'{rootRequest.Operation}' is not a root request."),
+        }) ?? throw new InvalidOperationException("The root request carries no context.");
 
-    /// <summary>A run-bound <c>host.tool_call</c> payload. When <paramref name="forgeLegacy"/> is set,
-    /// worker-impersonating legacy fields (plus a forged <c>context</c> object) ride along; the client
-    /// must ignore all of them and use the pending record.</summary>
-    public static string BoundPayload(
+    public static string PluginOf(IpcMessage rootRequest) =>
+        rootRequest.Operation switch
+        {
+            Sdk.ExtensionProtocol.PluginExecute => rootRequest.Read<PluginExecuteRequest>().PluginId,
+            Sdk.ExtensionProtocol.PluginCommand => rootRequest.Read<Sdk.CommandExecutionRequest>().PluginId,
+            Sdk.ExtensionProtocol.PluginPrompt => rootRequest.Read<Sdk.PromptExecutionRequest>().PluginId,
+            _ => "$run_code",
+        };
+
+    /// <summary>A run-bound <c>host.tool_call</c> payload. When <paramref name="forgeLegacy"/> is set, trailing
+    /// worker-impersonating fields (a session, a directory, a depth and a forged context) ride along after the
+    /// documented ones; the client must ignore all of them and use the pending record.</summary>
+    public static RawPayload BoundPayload(
         string runId, string pluginId, string name, string argsJson, bool forgeLegacy = false)
     {
-        var forged = forgeLegacy
-            ? ""","sessionId":"FORGED","workingDir":"C:/forged","depth":99,"context":{"runId":"forged","sessionId":"FORGED","workingDirectory":"C:/forged","depth":99,"pluginChain":[]}"""
-            : string.Empty;
-        return "{\"runId\":\"" + runId + "\",\"pluginId\":\"" + pluginId + "\",\"name\":\"" + name
-            + "\",\"args\":" + argsJson + forged + "}";
+        var bound = IpcSerializer.Serialize(HostWire.Forward(runId, pluginId, name, argsJson));
+        if (!forgeLegacy)
+        {
+            return new RawPayload(bound);
+        }
+
+        // HostToolCallForward is a 4-element MessagePack array (fixarray 0x94); 0x98 declares 8 elements and the
+        // forged ones follow the documented four.
+        Assert.Equal(0x94, bound[0]);
+        byte[][] forged =
+        [
+            IpcSerializer.Serialize("FORGED"),
+            IpcSerializer.Serialize("C:/forged"),
+            IpcSerializer.Serialize(99),
+            IpcSerializer.Serialize(new Sdk.ExtensionCallContext("forged", "FORGED", "C:/forged", 99, [])),
+        ];
+        var payload = new List<byte>(bound) { [0] = 0x98 };
+        foreach (var field in forged)
+        {
+            payload.AddRange(field);
+        }
+
+        return new RawPayload(payload.ToArray());
     }
 
     /// <summary>The content of a refused callback answer; asserts <c>isError</c> so the message assertions that
@@ -165,21 +204,14 @@ internal static class BoundRoots
         return content;
     }
 
-    public static (string Content, bool IsError) OutputOf(IpcMessage response)
-    {
-        var result = response.Result
-            ?? throw new InvalidOperationException("The relay answered with an error envelope.");
-        return (
-            result.GetProperty("content").GetString()!,
-            result.GetProperty("isError").GetBoolean());
-    }
+    public static (string Content, bool IsError) OutputOf(IpcMessage response) => HostWire.ToolOutput(response);
 
     public static async Task<ExtensionHostTool> RegisterPluginToolAsync(
-        ExtensionHostClient client, FakeHost host, string pluginId, string tool, int sideEffect = 0)
+        ExtensionHostClient client, FakeHost host, string pluginId, string tool,
+        Sdk.ToolSideEffect sideEffect = Sdk.ToolSideEffect.ReadOnly)
     {
-        await host.NotifyAndSyncAsync("tools.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"tools\":[{\"name\":\"" + tool
-            + "\",\"description\":\"d\",\"inputSchemaJson\":\"{}\",\"sideEffect\":" + sideEffect + "}]}");
+        await host.NotifyAndSyncAsync(
+            Sdk.ExtensionProtocol.ToolsRegister, HostWire.Tools(pluginId, HostWire.Tool(tool, sideEffect)));
         return (ExtensionHostTool)client.Tools.Single(t => t.Definition.Name == tool);
     }
 

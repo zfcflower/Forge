@@ -10,6 +10,8 @@ using Avalonia.Media;
 using Avalonia.VisualTree;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -442,7 +444,7 @@ internal sealed class PanelChrome : TemplatedControl
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[workbench] closing the preview group failed: " + exception.Message);
+            AppLogs.Workbench.ZLogWarning($"closing the preview group failed: {exception.Message}");
         }
     }
 

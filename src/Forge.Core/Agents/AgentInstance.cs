@@ -23,6 +23,27 @@ public sealed class AgentInstance
     private int pendingInterjections;
     private string lastText = string.Empty;
     private int running;
+    private DateTimeOffset? lastRequestAt;
+    private string? cacheTtlInUse;
+
+    /// <summary>
+    /// The gap since this instance's previous model request, then records this one. The cache-lifetime policy reads the gap; the
+    /// state belongs to the instance because what it measures is the pause between two turns of one agent, not of one request.
+    /// </summary>
+    internal TimeSpan? TakeRequestGap(DateTimeOffset now)
+    {
+        var previous = lastRequestAt;
+        lastRequestAt = now;
+        return previous is { } at ? now - at : null;
+    }
+
+    /// <summary>Moves this instance to the hour-long cache for good; never reversed, since reversing it would force a write.</summary>
+    internal void PromoteCacheTtl() => cacheTtlInUse = "1h";
+
+    /// <summary>The lifetime the last request asked for, reported to the shell so the strip can show which one is in force.</summary>
+    internal string? CacheTtlInUse => cacheTtlInUse;
+
+    internal void NoteCacheTtl(string ttl) => cacheTtlInUse = ttl;
 
     internal AgentInstance(
         string id,

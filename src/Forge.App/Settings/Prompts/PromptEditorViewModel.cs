@@ -4,6 +4,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.Core.Prompts.Templates;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Settings.Prompts;
 
@@ -321,7 +323,7 @@ internal sealed class PromptEditorViewModel : NotifyingObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Trace.WriteLine("[prompts] validate failed: " + exception.Message);
+            AppLogs.Prompts.ZLogWarning($"validate failed: {exception.Message}");
             return;
         }
 
@@ -644,7 +646,7 @@ internal sealed class PromptEditorViewModel : NotifyingObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Trace.WriteLine("[prompts] validation failed: " + exception.Message);
+            AppLogs.Prompts.ZLogWarning($"validation failed: {exception.Message}");
         }
     }
 

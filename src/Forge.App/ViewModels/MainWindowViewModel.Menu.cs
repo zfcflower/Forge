@@ -4,6 +4,8 @@ using Forge.App.Lifecycle;
 using Forge.App.Localization;
 using Forge.Core.Storage;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -48,7 +50,7 @@ internal sealed partial class MainWindowViewModel
         catch (Exception exception) when (exception is not OutOfMemoryException and not OperationCanceledException)
         {
             // The handover reads the workspace again and reports what it cannot do; the stored branch stands meanwhile.
-            Trace.WriteLine($"[menu] could not read the HEAD of '{directory}': {exception.Message}");
+            AppLogs.Menu.ZLogWarning($"could not read the HEAD of '{directory}': {exception.Message}");
             head = new GitHead(GitHeadKind.Branch, create.Branch);
         }
 
@@ -227,7 +229,7 @@ internal sealed partial class MainWindowViewModel
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine($"[menu] branch rename records failed for '{directory}': {exception.Message}");
+            AppLogs.Menu.ZLogWarning($"branch rename records failed for '{directory}': {exception.Message}");
             try
             {
                 await Task.Run(() => git.RenameBranchAsync(directory, newName, oldName, CancellationToken.None)).ConfigureAwait(true);

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Forge.Editor.Languages;
 using Forge.Editor.TextMate;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Composition;
 
@@ -68,7 +70,7 @@ internal sealed class EditorServices : IAsyncDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            Trace.WriteLine("[editor] language server discovery failed: " + exception.Message);
+            AppLogs.Editor.ZLogWarning($"language server discovery failed: {exception.Message}");
         }
 
         return new EditorServices(languages, new LanguageSessionPool(languages), grammars, problem, discovered);

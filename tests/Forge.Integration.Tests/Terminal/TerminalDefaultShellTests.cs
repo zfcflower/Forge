@@ -129,11 +129,11 @@ public sealed class TerminalDefaultShellTests
 
         public async Task<(string TerminalId, int ProcessId, string Shell)> StartAsync(string? shell, CancellationToken ct)
         {
-            var response = await peer.SendRequestAsync(
+            var response = await peer.RequestAsync(
                 TerminalWire.Start,
                 TerminalWire.StartArgs(scratch, 80, 24, shell),
                 ct).ConfigureAwait(false);
-            return TerminalWire.ReadStartResult(response.Result);
+            return TerminalWire.ReadStartResult(response);
         }
 
         public async Task StopAsync(string terminalId)
@@ -141,7 +141,7 @@ public sealed class TerminalDefaultShellTests
             using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             try
             {
-                await peer.SendRequestAsync(TerminalWire.Stop, TerminalWire.IdArgs(terminalId), limit.Token).ConfigureAwait(false);
+                await peer.RequestAsync(TerminalWire.Stop, TerminalWire.IdArgs(terminalId), limit.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IpcRemoteException or OperationCanceledException or IpcConnectionClosedException)
             {

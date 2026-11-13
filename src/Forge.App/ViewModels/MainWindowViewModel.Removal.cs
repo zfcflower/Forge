@@ -3,6 +3,8 @@ using Forge.Abstractions;
 using Forge.App.Lifecycle;
 using Forge.App.Localization;
 using Forge.Core.Storage;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -732,7 +734,7 @@ internal sealed partial class MainWindowViewModel
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[lifecycle] could not list the removed sessions: " + exception.Message);
+            AppLogs.Lifecycle.ZLogWarning($"could not list the removed sessions: {exception.Message}");
             await NotifyOrReportAsync(RemovalStrings.PurgeTitle, exception.Message).ConfigureAwait(true);
             return [];
         }

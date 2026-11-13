@@ -281,7 +281,7 @@ internal static class PluginSources
                 context.AddWorkflow(new WorkflowDeclaration("guide", "Guides the agent", "---\nname: guide\n---\n\n# Steps\n\n1. Do it.\n"));
                 context.AddAgent(new AgentDeclaration("helper", "Helps the agent", "You are a helper.", new AgentModelSettings("model-x", AgentThinkingEffort.Low, 128)));
                 context.AddPromptContributor(new BriefContributor());
-                context.AddPanel(new PanelDeclaration("side", "Side panel", new UiSchema("text", JsonDocument.Parse("{\"text\":\"hello\"}").RootElement)));
+                context.AddPanel(new PanelDeclaration("side", "Side panel", new UiSchema("text", "{\"text\":\"hello\"}")));
                 context.RequirePermission(new Permission(PermissionKind.ReadFile));
             }
         }
@@ -420,7 +420,7 @@ internal static class PluginSources
             public void Register(IRegistrationContext context)
             {
                 context.AddTool(new EchoTool());
-                context.AddPanel(new PanelDeclaration("p1", "P", new UiSchema("hologram", JsonDocument.Parse("{}").RootElement)));
+                context.AddPanel(new PanelDeclaration("p1", "P", new UiSchema("hologram", "{}")));
             }
         }
 

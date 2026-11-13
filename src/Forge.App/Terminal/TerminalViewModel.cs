@@ -10,6 +10,8 @@ using Forge.App.Terminal.Vt;
 using Forge.App.ViewModels;
 using Forge.HostClient;
 using Forge.Ipc;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Terminal;
 
@@ -282,7 +284,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[terminal] foreground probe failed: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"foreground probe failed: {exception.Message}");
             return false;
         }
     }
@@ -493,7 +495,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[terminal] stopping the terminal failed: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"stopping the terminal failed: {exception.Message}");
         }
     }
 
@@ -711,7 +713,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // Cancelled or already failed: the pump has nothing left to report at this point.
-                Trace.WriteLine("[terminal] output pump ended: " + exception.Message);
+                AppLogs.Terminal.ZLogWarning($"output pump ended: {exception.Message}");
             }
         }
 
@@ -723,7 +725,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine("[terminal] input writer ended: " + exception.Message);
+                AppLogs.Terminal.ZLogWarning($"input writer ended: {exception.Message}");
             }
         }
 
@@ -750,7 +752,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
                 {
                     // Any failure of one chunk (closed session, timeout, ...) must not end the writer: later input
                     // still goes out in order. Only the tab's own cancellation ends the loop (outer catch).
-                    Trace.WriteLine("[terminal] input was not written: " + exception.Message);
+                    AppLogs.Terminal.ZLogWarning($"input was not written: {exception.Message}");
                 }
             }
         }
@@ -772,7 +774,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
         catch (Exception exception) when (exception is IpcConnectionClosedException or ObjectDisposedException
             or InvalidOperationException or IOException or OperationCanceledException)
         {
-            Trace.WriteLine("[terminal] resize was not sent: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"resize was not sent: {exception.Message}");
         }
     }
 
@@ -786,7 +788,7 @@ internal sealed class TerminalViewModel : NotifyingObject, ITerminalEmulatorHost
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[terminal] OSC 52 write failed: " + exception.Message);
+            AppLogs.Terminal.ZLogWarning($"OSC 52 write failed: {exception.Message}");
         }
     }
 }

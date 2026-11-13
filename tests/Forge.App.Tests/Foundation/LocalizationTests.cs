@@ -1,7 +1,7 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Tests.Logging;
 using Xunit;
 
 namespace Forge.App.Tests.Foundation;
@@ -69,20 +69,13 @@ public sealed class LocalizationTests : IDisposable
     [Fact]
     public void A_missing_key_is_reported_once()
     {
-        var listener = new CountingListener("missing.reported.once");
-        Trace.Listeners.Add(listener);
-        try
-        {
-            _ = Loc.Instance["missing.reported.once"];
-            _ = Loc.Instance["missing.reported.once"];
-            _ = Loc.Instance["missing.reported.once"];
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
+        using var log = new LogCapture();
 
-        Assert.Equal(1, listener.Matches);
+        _ = Loc.Instance["missing.reported.once"];
+        _ = Loc.Instance["missing.reported.once"];
+        _ = Loc.Instance["missing.reported.once"];
+
+        Assert.Equal(1, log.Lines.Count(static line => line.Contains("missing.reported.once", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -158,23 +151,5 @@ public sealed class LocalizationTests : IDisposable
     {
         Loc.Instance.Language = language;
         return Loc.Instance[key];
-    }
-
-    /// <summary>Counts the trace lines that mention one key, so "reported once" is measurable.</summary>
-    private sealed class CountingListener(string marker) : TraceListener
-    {
-        public int Matches { get; private set; }
-
-        public override void Write(string? message) => Count(message);
-
-        public override void WriteLine(string? message) => Count(message);
-
-        private void Count(string? message)
-        {
-            if (message is not null && message.Contains(marker, StringComparison.Ordinal))
-            {
-                Matches++;
-            }
-        }
     }
 }

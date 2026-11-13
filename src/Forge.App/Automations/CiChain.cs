@@ -6,6 +6,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Automations;
 
@@ -274,7 +276,7 @@ internal sealed class CiFailureWatcher
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine("[ci] poll failed: " + exception.Message);
+                AppLogs.Ci.ZLogWarning($"poll failed: {exception.Message}");
             }
 
             try
@@ -318,7 +320,7 @@ internal sealed class CiFailureWatcher
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine($"[ci] session {session.Id} poll failed: {exception.Message}");
+                AppLogs.Ci.ZLogWarning($"session {session.Id} poll failed: {exception.Message}");
             }
         }
     }

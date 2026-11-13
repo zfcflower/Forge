@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.Integration.Tests;
@@ -274,11 +276,12 @@ internal sealed class PluginQueueBudgetHost : IAsyncDisposable
     }
 }
 
-/// <summary>Wire helpers for raw <c>plugin.execute</c> calls and the status/approval handshake.</summary>
+/// <summary>Bound <c>plugin.execute</c>/<c>plugin.command</c> requests and the status/approval handshake, typed exactly
+/// as the product sends them.</summary>
 internal static class PluginQueueBudgetWire
 {
     /// <summary>A bound <c>plugin.execute</c> request; a non-empty chain makes it nested under <paramref name="rootRunId"/>.</summary>
-    public static JsonElement Execute(
+    public static PluginExecuteRequest Execute(
         string root,
         string pluginId,
         string tool,
@@ -287,34 +290,23 @@ internal static class PluginQueueBudgetWire
         string rootRunId,
         IReadOnlyList<string> chain,
         int timeoutMilliseconds) =>
-        JsonSerializer.SerializeToElement(new
-        {
+        new(
             pluginId,
             tool,
-            args = JsonSerializer.SerializeToElement(args),
-            sessionId = "queue-budget",
-            workingDir = root,
-            depth = chain.Count,
-            context = new
-            {
-                runId,
-                sessionId = "queue-budget",
-                workingDirectory = root,
-                depth = chain.Count,
-                pluginChain = chain,
-                rootRunId,
-            },
-            timeoutMilliseconds,
-        });
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(args)),
+            Context(root, runId, rootRunId, chain),
+            timeoutMilliseconds);
 
     public static (string Content, bool IsError) ReadToolResult(IpcMessage message)
     {
-        var result = message.Result ?? throw new InvalidOperationException("the plugin.execute answer carried no result");
-        return (result.GetProperty("content").GetString() ?? string.Empty, result.GetProperty("isError").GetBoolean());
+        var result = message.HasPayload
+            ? message.Read<Sdk.ToolResult>()
+            : throw new InvalidOperationException("the plugin.execute answer carried no result");
+        return (result.Content ?? string.Empty, result.IsError);
     }
 
     /// <summary>A bound <c>plugin.command</c> request sharing the caller's budget and root identity.</summary>
-    public static JsonElement ExecuteCommand(
+    public static Sdk.CommandExecutionRequest ExecuteCommand(
         string root,
         string pluginId,
         string command,
@@ -323,33 +315,23 @@ internal static class PluginQueueBudgetWire
         string rootRunId,
         IReadOnlyList<string> chain,
         int timeoutMilliseconds) =>
-        JsonSerializer.SerializeToElement(new
-        {
-            pluginId,
-            command,
-            arguments,
-            context = new
-            {
-                runId,
-                sessionId = "queue-budget",
-                workingDirectory = root,
-                depth = chain.Count,
-                pluginChain = chain,
-                rootRunId,
-            },
-            timeoutMilliseconds,
-        });
+        new(pluginId, command, arguments, Context(root, runId, rootRunId, chain), timeoutMilliseconds);
 
     public static (string Output, bool IsError) ReadCommandResult(IpcMessage message)
     {
-        var result = message.Result ?? throw new InvalidOperationException("the plugin.command answer carried no result");
-        return (result.GetProperty("output").GetString() ?? string.Empty, result.GetProperty("isError").GetBoolean());
+        var result = message.HasPayload
+            ? message.Read<Sdk.CommandOutput>()
+            : throw new InvalidOperationException("the plugin.command answer carried no result");
+        return (result.Output ?? string.Empty, result.IsError);
     }
+
+    private static Sdk.ExtensionCallContext Context(string root, string runId, string rootRunId, IReadOnlyList<string> chain) =>
+        new(runId, "queue-budget", root, chain.Count, chain) { RootRunId = rootRunId };
 
     /// <summary>Refreshes, waits for the plugin's status row and approves it with the hashes the host reports.</summary>
     public static async Task ApproveAsync(IpcPeer peer, string pluginId, CancellationToken ct)
     {
-        await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, Empty(), ct);
+        await peer.RequestAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, ct);
         var start = Stopwatch.GetTimestamp();
         var limit = TestBudgets.Condition;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -359,7 +341,8 @@ internal static class PluginQueueBudgetWire
             IpcMessage response;
             try
             {
-                response = await peer.SendRequestAsync(Sdk.ExtensionProtocol.PluginsStatus, Empty(), deadline.Token);
+                response = await peer.RequestAsync(
+                    Sdk.ExtensionProtocol.PluginsStatus, IpcEmpty.Instance, deadline.Token);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -368,23 +351,21 @@ internal static class PluginQueueBudgetWire
                     $"({Stopwatch.GetElapsedTime(start).TotalSeconds:0.###} s waited).");
             }
 
-            foreach (var entry in response.Result!.Value.GetProperty("plugins").EnumerateArray())
+            if (!response.HasPayload)
             {
-                if (entry.GetProperty("pluginId").GetString() != pluginId)
+                throw new InvalidOperationException("plugins.status answered without a registry.");
+            }
+
+            foreach (var entry in response.Read<Sdk.PluginStatusResponse>().Plugins)
+            {
+                if (entry is null || !string.Equals(entry.PluginId, pluginId, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                await peer.SendRequestAsync(
+                await peer.RequestAsync(
                     Sdk.ExtensionProtocol.PluginApprove,
-                    JsonSerializer.SerializeToElement(new
-                    {
-                        pluginId,
-                        version = entry.GetProperty("version").GetString(),
-                        sourceHash = entry.GetProperty("sourceHash").GetString(),
-                        dependencyHash = entry.GetProperty("dependencyHash").GetString(),
-                        sdkVersion = entry.GetProperty("sdkVersion").GetString(),
-                    }),
+                    new PluginApproveRequest(pluginId, entry.Version, entry.SourceHash, entry.DependencyHash, entry.SdkVersion),
                     ct);
                 return;
             }
@@ -401,8 +382,6 @@ internal static class PluginQueueBudgetWire
             }
         }
     }
-
-    public static JsonElement Empty() => JsonDocument.Parse("{}").RootElement.Clone();
 }
 
 /// <summary>Bounded polling shared by the queue-budget tests. Each wait has its own limit; none is open-ended.</summary>

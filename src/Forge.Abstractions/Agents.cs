@@ -25,6 +25,18 @@ public sealed record AgentSubAgentStarted(
     string ChildSessionId,
     DateTimeOffset At) : AgentEvent(AgentId);
 public sealed record AgentTurnCompleted(string AgentId, TokenUsage Usage, StopReason Stop) : AgentEvent(AgentId);
+
+/// <summary>
+/// A note about how the turn went that is not a failure: the request had to be downgraded, for one. Shown as a toast, never as an
+/// error and never as something that stops the turn.
+/// </summary>
+public sealed record AgentNotice(string AgentId, string Text) : AgentEvent(AgentId);
+
+/// <summary>
+/// The account's usage windows after a model response (successful or rejected). Carries no session cost: it is the
+/// provider's own meter, which is what tells the user a window is filling <em>before</em> a request is refused.
+/// </summary>
+public sealed record AgentRateLimitUpdated(string AgentId, ProviderRateLimit RateLimit) : AgentEvent(AgentId);
 public sealed record AgentFailed(string AgentId, string Error) : AgentEvent(AgentId);
 
 /// <summary>Lifecycle of one sub-agent run as shown to the user; terminal values never change again for that run.</summary>

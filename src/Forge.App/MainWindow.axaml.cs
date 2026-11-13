@@ -9,6 +9,8 @@ using Forge.App.ViewModels;
 using Forge.App.Views;
 using Forge.App.Workbench.Controls;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App;
 
@@ -60,7 +62,7 @@ public partial class MainWindow : Window
     {
         if (Screens.Primary is not { } screen)
         {
-            System.Diagnostics.Trace.WriteLine("[shell] no screen available for startup placement");
+            AppLogs.Shell.ZLogWarning($"no screen available for startup placement");
             return;
         }
 
@@ -71,7 +73,7 @@ public partial class MainWindow : Window
     {
         if (workingArea.Width <= 0 || workingArea.Height <= 0 || !double.IsFinite(scaling) || scaling <= 0)
         {
-            System.Diagnostics.Trace.WriteLine("[shell] invalid screen geometry for startup placement");
+            AppLogs.Shell.ZLogWarning($"invalid screen geometry for startup placement");
             return;
         }
 
@@ -133,7 +135,7 @@ public partial class MainWindow : Window
         }
         catch (InvalidOperationException exception)
         {
-            System.Diagnostics.Trace.WriteLine("[shell] close confirmation failed: " + exception.Message);
+            AppLogs.Shell.ZLogWarning($"close confirmation failed: {exception.Message}");
         }
         finally
         {

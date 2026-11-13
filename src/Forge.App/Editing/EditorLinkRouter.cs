@@ -4,6 +4,8 @@ using Avalonia.Platform.Storage;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Editing;
 
@@ -71,7 +73,7 @@ internal sealed class EditorLinkRouter : IDisposable
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or NotSupportedException
             or System.Runtime.InteropServices.ExternalException or UriFormatException)
         {
-            System.Diagnostics.Trace.WriteLine("[editor] link launch failed: " + exception.Message);
+            AppLogs.Editor.ZLogWarning($"link launch failed: {exception.Message}");
             notice(EditorStrings.LinkFailedText(exception.Message));
         }
     }

@@ -1,6 +1,8 @@
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using WireTerminalStart = Forge.Ipc.Protocol.TerminalStartRequest;
 
 namespace Forge.HostClient.Tests.Terminal;
 
@@ -8,7 +10,7 @@ namespace Forge.HostClient.Tests.Terminal;
 public sealed class TerminalStartProtocolTests
 {
     [Fact]
-    public async Task Start_sends_required_fields_with_values_and_camel_case_names()
+    public async Task Start_sends_required_fields_with_values()
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
@@ -21,15 +23,11 @@ public sealed class TerminalStartProtocolTests
             limit.Token);
         await session.DisposeAsync();
 
-        var sent = Assert.Single(host.Requests(TerminalOps.Start)).Arguments!.Value;
-        Assert.Equal("sess-1", sent.GetProperty("sessionId").GetString());
-        Assert.Equal(directory, sent.GetProperty("workingDirectory").GetString());
-        Assert.Equal(120, sent.GetProperty("columns").GetInt32());
-        Assert.Equal(40, sent.GetProperty("rows").GetInt32());
-        // camelCase 钉住：顺序与名字都按线协议，改名即 breaking。
-        Assert.Equal(
-            ["sessionId", "workingDirectory", "columns", "rows"],
-            sent.EnumerateObject().Select(property => property.Name).ToArray());
+        var sent = Assert.Single(host.Requests(TerminalOperations.Start)).Read<WireTerminalStart>();
+        Assert.Equal("sess-1", sent.SessionId);
+        Assert.Equal(directory, sent.WorkingDirectory);
+        Assert.Equal(120, sent.Columns);
+        Assert.Equal(40, sent.Rows);
     }
 
     [Fact]
@@ -48,15 +46,13 @@ public sealed class TerminalStartProtocolTests
             limit.Token);
         await session.DisposeAsync();
 
-        var sent = Assert.Single(host.Requests(TerminalOps.Start)).Arguments!.Value;
-        Assert.Equal("/bin/bash", sent.GetProperty("shell").GetString());
-        Assert.Equal(["-l", "-c"], sent.GetProperty("arguments").EnumerateArray().Select(e => e.GetString()!).ToArray());
-        var environment = sent.GetProperty("environment");
-        Assert.Equal("bar", environment.GetProperty("FOO").GetString());
-        Assert.Equal("qux", environment.GetProperty("BAZ").GetString());
-        Assert.Equal(
-            ["sessionId", "workingDirectory", "columns", "rows", "shell", "arguments", "environment"],
-            sent.EnumerateObject().Select(property => property.Name).ToArray());
+        var sent = Assert.Single(host.Requests(TerminalOperations.Start)).Read<WireTerminalStart>();
+        Assert.Equal("/bin/bash", sent.Shell);
+        Assert.Equal(["-l", "-c"], sent.Arguments!.ToArray());
+        var environment = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(sent.Environment);
+        Assert.Equal(2, environment.Count);
+        Assert.Equal("bar", environment["FOO"]);
+        Assert.Equal("qux", environment["BAZ"]);
     }
 
     [Fact]
@@ -70,10 +66,29 @@ public sealed class TerminalStartProtocolTests
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
         await session.DisposeAsync();
 
-        var sent = Assert.Single(host.Requests(TerminalOps.Start)).Arguments!.Value;
-        Assert.False(sent.TryGetProperty("shell", out _));
-        Assert.False(sent.TryGetProperty("arguments", out _));
-        Assert.False(sent.TryGetProperty("environment", out _));
+        var sent = Assert.Single(host.Requests(TerminalOperations.Start)).Read<WireTerminalStart>();
+        Assert.Null(sent.Shell);
+        Assert.Null(sent.Arguments);
+        Assert.Null(sent.Environment);
+    }
+
+    [Fact]
+    public async Task Start_sends_a_blank_shell_and_empty_lists_as_null()
+    {
+        await using var host = new FakeHost();
+        await using var client = await ClientFactory.StartAsync(host);
+        using var limit = TestLimit.Create();
+        TerminalFixtures.AnswerStart(host, "t-blank");
+
+        var session = await client.StartAsync(
+            TerminalFixtures.Request(shell: "  ", args: [], environment: new Dictionary<string, string>()),
+            limit.Token);
+        await session.DisposeAsync();
+
+        var sent = Assert.Single(host.Requests(TerminalOperations.Start)).Read<WireTerminalStart>();
+        Assert.Null(sent.Shell);
+        Assert.Null(sent.Arguments);
+        Assert.Null(sent.Environment);
     }
 
     [Fact]
@@ -96,12 +111,27 @@ public sealed class TerminalStartProtocolTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        host.Answer(TerminalOps.Start, """{"processId":1,"shell":"sh"}""");
+        host.Answer(TerminalOperations.Start, new TerminalStartResponse("", 1, "sh"));
 
         var failure = await Assert.ThrowsAsync<InvalidDataException>(
             () => client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask());
 
-        Assert.Contains("terminal id", failure.Message);
+        Assert.Contains("the response carries no terminal id.", failure.Message);
+    }
+
+    [Fact]
+    public async Task Start_result_that_is_not_a_start_response_is_rejected_locally()
+    {
+        await using var host = new FakeHost();
+        await using var client = await ClientFactory.StartAsync(host);
+        using var limit = TestLimit.Create();
+        host.AnswerRaw(TerminalOperations.Start, HostWire.Payload("not a start response"));
+
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(
+            () => client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask());
+
+        Assert.Contains("terminal.start returned a response that cannot be decoded", failure.Message);
+        Assert.Contains("TerminalStartResponse", failure.Message);
     }
 
     [Theory]
@@ -117,7 +147,7 @@ public sealed class TerminalStartProtocolTests
         await Assert.ThrowsAsync<ArgumentException>(
             () => client.StartAsync(TerminalFixtures.Request(columns: columns), limit.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
     }
 
     [Theory]
@@ -133,7 +163,7 @@ public sealed class TerminalStartProtocolTests
         await Assert.ThrowsAsync<ArgumentException>(
             () => client.StartAsync(TerminalFixtures.Request(rows: rows), limit.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
     }
 
     [Fact]
@@ -146,7 +176,7 @@ public sealed class TerminalStartProtocolTests
         await Assert.ThrowsAsync<ArgumentException>(
             () => client.StartAsync(TerminalFixtures.Request(workingDirectory: "relative/path"), limit.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
     }
 
     [Fact]
@@ -159,7 +189,7 @@ public sealed class TerminalStartProtocolTests
         await Assert.ThrowsAsync<ArgumentException>(
             () => client.StartAsync(TerminalFixtures.Request(sessionId: "  "), limit.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
     }
 
     [Fact]
@@ -172,7 +202,7 @@ public sealed class TerminalStartProtocolTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
     }
 
     [Fact]
@@ -187,7 +217,7 @@ public sealed class TerminalStartProtocolTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask());
 
-        Assert.Empty(host.Requests(TerminalOps.Start));
+        Assert.Empty(host.Requests(TerminalOperations.Start));
     }
 
     [Theory]
@@ -199,12 +229,12 @@ public sealed class TerminalStartProtocolTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        host.On(TerminalOps.Start, (_, _) => throw new FakeHostError(code, "refused by host"));
+        host.On(TerminalOperations.Start, (_, _) => throw new FakeHostError(code, "refused by host"));
 
         var failure = await Assert.ThrowsAsync<IpcRemoteException>(
             () => client.StartAsync(TerminalFixtures.Request(), limit.Token).AsTask());
 
         Assert.Equal(code, failure.Code);
-        Assert.Equal(TerminalOps.Start, failure.Operation);
+        Assert.Equal(TerminalOperations.Start, failure.Operation);
     }
 }

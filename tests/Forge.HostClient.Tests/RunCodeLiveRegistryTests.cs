@@ -95,8 +95,8 @@ public sealed class RunCodeLiveRegistryTests
         Console.Out.WriteLine(RunCodeRegistryChildProcess.DefinitionOk);
         Console.Out.Flush();
 
-        var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
+        var hold = new InFlightRoot { Content = "ok" };
+        BoundRoots.ParkRoot(host, Forge.Plugin.Sdk.ExtensionProtocol.CodeExecute, hold);
         var directory = BoundRoots.AbsoluteDir("child-live");
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\"}"),
@@ -106,7 +106,7 @@ public sealed class RunCodeLiveRegistryTests
         var result = await invocation.Bounded();
         RunCodeRegistryChildProcess.Check(!result.IsError, "the live-registry invoke succeeds");
         var tools = RunCodeRegistryChildProcess.ToolNamesOf(
-            Assert.Single(host.Requests("code.execute")));
+            Assert.Single(host.Requests(Forge.Plugin.Sdk.ExtensionProtocol.CodeExecute)));
         RunCodeRegistryChildProcess.Check(
             tools.Count == 1 && tools[0] == "normal", "code.execute carries only the normal tool");
         Console.Out.WriteLine(RunCodeRegistryChildProcess.InvokeOk);
@@ -132,7 +132,7 @@ public sealed class RunCodeLiveRegistryTests
             new ToolContext("sess", directory),
             CancellationToken.None);
         RunCodeRegistryChildProcess.Check(!second.IsError, "the shared-registry invoke succeeds");
-        foreach (var request in host.Requests("code.execute"))
+        foreach (var request in host.Requests(Forge.Plugin.Sdk.ExtensionProtocol.CodeExecute))
         {
             var names = RunCodeRegistryChildProcess.ToolNamesOf(request);
             RunCodeRegistryChildProcess.Check(

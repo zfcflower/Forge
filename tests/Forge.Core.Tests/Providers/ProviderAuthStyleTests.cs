@@ -10,8 +10,14 @@ namespace Forge.Core.Tests.Providers;
 /// an API key is not the same thing as an OAuth token, and a gateway may want no provider credential at all — while
 /// <see cref="ProviderConfig.Headers"/> always wins, because the caller named the header explicitly.
 /// </summary>
+[Collection("anthropic-wire")]
 public class ProviderAuthStyleTests
 {
+    /// <summary>
+    /// The downgrade memory is per process, and these cases assert the exact beta list, so each one starts from a clean slate.
+    /// </summary>
+    public ProviderAuthStyleTests() => AnthropicProvider.ForgetDegradations();
+
     private const string ApiKey = "sk-ant-api-key";
     private const string SubscriptionToken = "sk-ant-oat01-subscription";
 
@@ -26,7 +32,11 @@ public class ProviderAuthStyleTests
         Assert.Equal(ApiKey, request.Header("x-api-key"));
         Assert.Equal(AnthropicProvider.Version, request.Header("anthropic-version"));
         Assert.Null(request.Header("Authorization"));
-        Assert.Null(request.Header("anthropic-beta"));
+        // The one-hour cache lifetime is announced by both credentials, so the request shape does not fork on the credential.
+        Assert.Equal(AnthropicWire.ExtendedCacheTtlBeta, request.Header("anthropic-beta"));
+        Assert.Equal("application/json", request.Header("accept"));
+        Assert.Null(request.Header("user-agent"));
+        Assert.Null(request.Header("x-app"));
     }
 
     [Fact]
@@ -97,7 +107,8 @@ public class ProviderAuthStyleTests
         var preamble = system[0];
         Assert.Equal("text", preamble.GetProperty("type").GetString());
         Assert.Equal(ClaudeSubscriptionCredentials.IdentityPreamble, preamble.GetProperty("text").GetString());
-        Assert.False(preamble.TryGetProperty("cache_control", out _));
+        // The identity block is stable text, so it takes the first breakpoint exactly as the official client's does.
+        Assert.Equal("1h", preamble.GetProperty("cache_control").GetProperty("ttl").GetString());
 
         var prompt = system[1];
         Assert.Equal("text", prompt.GetProperty("type").GetString());

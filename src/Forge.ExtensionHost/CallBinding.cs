@@ -1,6 +1,5 @@
-using System.Security.Cryptography;
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 
 namespace Forge.ExtensionHost;
@@ -24,30 +23,7 @@ internal static class CallBinding
 
     private const int MaxRunIdLength = 128;
 
-    /// <summary>
-    /// Resolves the context of a <c>plugin.execute</c>. A request that carries a context is validated and used as-is; the
-    /// legacy field-only request of a trusted root caller is converted exactly once, into a fresh random context built
-    /// from its own fields, so old direct callers keep working while every callback still travels under a bound
-    /// <c>runId</c>. No other operation accepts a context-less request.
-    /// </summary>
-    public static ExtensionCallContext ResolveForPluginExecute(PluginExecuteRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (request.Context is { } supplied)
-        {
-            return Validate(supplied, request.PluginId, ExtensionProtocol.PluginExecute);
-        }
-
-        var context = new ExtensionCallContext(
-            NewRunId(),
-            request.SessionId ?? string.Empty,
-            request.WorkingDir ?? string.Empty,
-            request.Depth,
-            []);
-        return Validate(context, request.PluginId, ExtensionProtocol.PluginExecute);
-    }
-
-    /// <summary>Validates a context that every new operation must carry; a missing context is refused.</summary>
+    /// <summary>Validates the context every operation must carry; a missing context is refused.</summary>
     public static ExtensionCallContext Require(ExtensionCallContext? context, string targetIdentity, string operation) =>
         context is null
             ? throw new HostOperationException(
@@ -62,7 +38,7 @@ internal static class CallBinding
     /// one plugin are different roots, so they never refuse one another as busy.
     /// <para>
     /// A context without a root run id is only accepted when it is a root call (empty chain), where the root is the run
-    /// itself - that keeps the legacy field-only <c>plugin.execute</c> and older direct callers working. A nested context
+    /// itself - that keeps direct root callers that do not track a root working. A nested context
     /// that arrives without one is refused: the host cannot infer it, and guessing from plugin identities is exactly what
     /// conflated independent scripts before.
     /// </para>
@@ -76,8 +52,6 @@ internal static class CallBinding
                 "invalid_context",
                 "The call carries no root run id; a nested execution must inherit the root of its trusted parent call.");
     }
-
-    public static string NewRunId() => RandomNumberGenerator.GetHexString(32);
 
     private static ExtensionCallContext Validate(ExtensionCallContext context, string identity, string operation)
     {
@@ -363,11 +337,11 @@ internal sealed class ActiveRunTable
 }
 
 /// <summary>
-/// Serves a worker's <c>host.tool_call</c> for one worker session. The only thing a worker may say is
-/// <c>{runId, name, args}</c>; the plugin identity comes from the registered run (never from the message), and a run id
-/// that is not in flight in this session - unknown, ended, replayed, or belonging to another worker - is refused before
-/// anything is forwarded. The forwarded call is cancelled with the run, so an execution that ends takes its pending
-/// callback with it.
+/// Serves a worker's <c>host.tool_call</c> for one worker session. The only thing a worker may say is a
+/// <see cref="HostToolCallRequest"/> (run id, tool name, raw argument JSON); the plugin identity comes from the registered
+/// run (never from the message), and a run id that is not in flight in this session - unknown, ended, replayed, or
+/// belonging to another worker - is refused before anything is forwarded. The forwarded call is cancelled with the run,
+/// so an execution that ends takes its pending callback with it.
 /// </summary>
 internal static class BoundToolCallHandler
 {
@@ -375,7 +349,7 @@ internal static class BoundToolCallHandler
         WorkerProcess process,
         ActiveRunTable runs,
         IpcMessage message,
-        Func<JsonElement, CancellationToken, Task<IpcMessage>> forwardToolCall,
+        Func<HostToolCallForward, CancellationToken, Task<ToolResult>> forwardToolCall,
         CancellationToken ct)
     {
         if (!string.Equals(message.Operation, ExtensionProtocol.HostToolCall, StringComparison.Ordinal))
@@ -388,10 +362,10 @@ internal static class BoundToolCallHandler
             return;
         }
 
-        WorkerBoundToolCall? call;
+        HostToolCallRequest call;
         try
         {
-            call = HostJson.Read<WorkerBoundToolCall>(message);
+            call = HostArguments.Read<HostToolCallRequest>(message);
         }
         catch (HostOperationException exception)
         {
@@ -440,11 +414,12 @@ internal static class BoundToolCallHandler
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(run.Lifetime, ct);
-            var forwarded = await forwardToolCall(
-                    HostJson.ToElement(new HostToolCallForward(run.RunId, run.PluginId, call.Name, call.Args)),
+            // The argument bytes are relayed untouched; only the endpoint that runs the tool parses them.
+            var result = await forwardToolCall(
+                    new HostToolCallForward(run.RunId, run.PluginId, call.Name, call.ArgumentsJson),
                     linked.Token)
                 .ConfigureAwait(false);
-            await process.Peer.RespondAsync(message.Id, forwarded.Result ?? HostJson.EmptyObject, ct).ConfigureAwait(false);
+            await process.Peer.RespondAsync(message.Id, result, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

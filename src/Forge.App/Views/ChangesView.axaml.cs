@@ -3,6 +3,8 @@ using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using Forge.App.Changes;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Views;
 
@@ -84,7 +86,7 @@ public partial class ChangesView : UserControl
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {
-            System.Diagnostics.Trace.WriteLine("[changes] copy path failed: " + exception.Message);
+            AppLogs.Changes.ZLogWarning($"copy path failed: {exception.Message}");
             viewModel.ReportCopyPathFailure(exception.Message);
         }
     }

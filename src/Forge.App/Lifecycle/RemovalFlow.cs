@@ -4,6 +4,8 @@ using Forge.App.Localization;
 using Forge.Core.Storage;
 using Forge.IO;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Lifecycle;
 
@@ -535,7 +537,7 @@ internal sealed class RemovalFlow(
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine($"[lifecycle] purge cleanup of '{id}' failed: {exception.Message}");
+                AppLogs.Lifecycle.ZLogWarning($"purge cleanup of '{id}' failed: {exception.Message}");
 
                 // A purge with descendants cleans several ids: name the one that failed.
                 failures.Add(purged.Count > 1 ? id + ": " + exception.Message : exception.Message);
@@ -616,7 +618,7 @@ internal sealed class RemovalFlow(
         }
         catch (Exception exception) when (IsCheckFailure(exception, ct))
         {
-            Trace.WriteLine($"[lifecycle] could not list the worktrees of '{repositoryRoot}': {exception.Message}");
+            AppLogs.Lifecycle.ZLogWarning($"could not list the worktrees of '{repositoryRoot}': {exception.Message}");
             listFailure = exception.Message;
         }
 
@@ -658,7 +660,7 @@ internal sealed class RemovalFlow(
         }
         catch (Exception exception) when (IsCheckFailure(exception, ct))
         {
-            Trace.WriteLine($"[lifecycle] could not check '{directory}' for removal: {exception.Message}");
+            AppLogs.Lifecycle.ZLogWarning($"could not check '{directory}' for removal: {exception.Message}");
             failure = exception.Message;
         }
 
@@ -675,7 +677,7 @@ internal sealed class RemovalFlow(
             }
             catch (Exception exception) when (IsCheckFailure(exception, ct))
             {
-                Trace.WriteLine($"[lifecycle] could not check the commits of '{directory}' from '{repositoryRoot}': {exception.Message}");
+                AppLogs.Lifecycle.ZLogWarning($"could not check the commits of '{directory}' from '{repositoryRoot}': {exception.Message}");
             }
         }
 
@@ -759,7 +761,7 @@ internal sealed class RemovalFlow(
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine($"[lifecycle] git worktree prune in '{repositoryRoot}' failed: {exception.Message}");
+            AppLogs.Lifecycle.ZLogWarning($"git worktree prune in '{repositoryRoot}' failed: {exception.Message}");
         }
     }
 
@@ -845,7 +847,7 @@ internal sealed class RemovalFlow(
             }
             catch (Exception exception) when (IsCheckFailure(exception, ct) || exception is ArgumentException or InvalidOperationException)
             {
-                Trace.WriteLine($"[lifecycle] could not tell whether '{fork}' is merged into '{branch}': {exception.Message}");
+                AppLogs.Lifecycle.ZLogWarning($"could not tell whether '{fork}' is merged into '{branch}': {exception.Message}");
                 merged = false;
             }
 

@@ -14,8 +14,8 @@ public sealed class IpcPeerLifecycleTests
         var closed = new ConcurrentQueue<Exception?>();
         peer.Closed += closed.Enqueue;
 
-        var first = peer.SendRequestAsync("a", null, CancellationToken.None);
-        var second = peer.SendRequestAsync("b", null, CancellationToken.None);
+        var first = peer.RequestAsync("a", IpcEmpty.Instance, CancellationToken.None);
+        var second = peer.RequestAsync("b", IpcEmpty.Instance, CancellationToken.None);
         await remote.ReceiveMessageAsync();
         await remote.ReceiveMessageAsync();
 
@@ -64,7 +64,7 @@ public sealed class IpcPeerLifecycleTests
         var (local, remote) = await LoopbackTransport.ConnectAsync();
         await using var peer = Peers.Create(local);
 
-        var call = peer.SendRequestAsync("hang", null, CancellationToken.None);
+        var call = peer.RequestAsync("hang", IpcEmpty.Instance, CancellationToken.None);
         await remote.ReceiveMessageAsync();
         await peer.StopAsync(CancellationToken.None);
 
@@ -77,7 +77,7 @@ public sealed class IpcPeerLifecycleTests
         var (local, remote) = await LoopbackTransport.ConnectAsync();
         var peer = Peers.Create(local);
 
-        var call = peer.SendRequestAsync("hang", null, CancellationToken.None);
+        var call = peer.RequestAsync("hang", IpcEmpty.Instance, CancellationToken.None);
         await remote.ReceiveMessageAsync();
         await peer.DisposeAsync();
         await peer.DisposeAsync();
@@ -92,9 +92,9 @@ public sealed class IpcPeerLifecycleTests
         await using var peer = Peers.Create(local);
         await peer.StopAsync(CancellationToken.None);
 
-        await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.SendRequestAsync("x", null, CancellationToken.None));
-        await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.SendNotificationAsync("x", null, CancellationToken.None));
-        await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.RespondAsync(1, Json.Parse("{}"), CancellationToken.None));
+        await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.RequestAsync("x", IpcEmpty.Instance, CancellationToken.None));
+        await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.NotifyAsync("x", IpcEmpty.Instance, CancellationToken.None));
+        await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.RespondAsync(1, IpcEmpty.Instance, CancellationToken.None));
         await Assert.ThrowsAsync<IpcConnectionClosedException>(async () => await peer.RespondErrorAsync(1, new IpcError("c", "m"), CancellationToken.None));
         Assert.False(remote.IsConnected);
     }

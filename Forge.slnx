@@ -8,6 +8,7 @@
     <Project Path="src/Forge.ExtensionHost/Forge.ExtensionHost.csproj" />
     <Project Path="src/Forge.HostClient/Forge.HostClient.csproj" />
     <Project Path="src/Forge.Ipc/Forge.Ipc.csproj" />
+    <Project Path="src/Forge.Ipc.Protocol/Forge.Ipc.Protocol.csproj" />
     <Project Path="src/Forge.IO/Forge.IO.csproj" />
     <Project Path="src/Forge.Mcp/Forge.Mcp.csproj" />
     <Project Path="src/Forge.Plugin.Sdk/Forge.Plugin.Sdk.csproj" />

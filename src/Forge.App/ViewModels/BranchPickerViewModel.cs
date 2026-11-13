@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using Forge.App.Localization;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -275,7 +277,7 @@ internal sealed class BranchPickerViewModel : ObservableObject
             return;
         }
 
-        System.Diagnostics.Trace.WriteLine("[branches] reload failed: " + exception.Message);
+        AppLogs.Branches.ZLogWarning($"reload failed: {exception.Message}");
     }
 
     /// <summary>The selection a fresh list keeps: the same ref, else the default branch (remote first), else the first row.</summary>

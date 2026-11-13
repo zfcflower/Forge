@@ -6,6 +6,8 @@ using Forge.Core.Tools;
 using Forge.HostClient;
 using Forge.Ipc;
 using Forge.Plugin.Sdk;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -343,7 +345,7 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         }
         catch (Exception exception) when (!IsCallerCancellation(exception, ct))
         {
-            Trace.WriteLine("[approval] staged extensions could not be read: " + Describe(exception));
+            AppLogs.Approval.ZLogWarning($"staged extensions could not be read: {Describe(exception)}");
             return;
         }
 
@@ -495,7 +497,7 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] the previous tool names could not be read: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"the previous tool names could not be read: {exception.Message}");
         }
 
         // The approval is for this content; trust in the old code must not carry over to the new one. Rules for the old and
@@ -514,7 +516,7 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] the remembered rules could not be loaded before the commit: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"the remembered rules could not be loaded before the commit: {exception.Message}");
         }
 
         var cleared = before.Count == 0 ? 0 : rules.RemoveByToolNames(before);
@@ -596,7 +598,7 @@ internal sealed class ExtensionAuthoringService : IExtensionAuthoring, IExtensio
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] a restored extension card failed: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"a restored extension card failed: {exception.Message}");
         }
         finally
         {

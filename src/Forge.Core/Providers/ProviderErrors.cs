@@ -84,13 +84,17 @@ public static class ProviderErrors
         string providerId,
         HttpStatusCode status,
         string body,
-        RetryConditionHeaderValue? retryAfter)
+        RetryConditionHeaderValue? retryAfter,
+        ProviderRateLimit? rateLimit = null)
     {
         var code = (int)status;
         var exception = new ProviderException(
             $"{providerId} returned {code} {status}: {body}",
             IsRetryableStatus(code),
-            code);
+            code)
+        {
+            RateLimit = rateLimit,
+        };
         AttachRetryAfter(exception, retryAfter);
         return exception;
     }

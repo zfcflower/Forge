@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using Forge.App.Localization;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -150,7 +152,7 @@ internal sealed class NewBranchDialogViewModel : NotifyingObject, IDisposable
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException or GitException or UnauthorizedAccessException)
         {
             // A repository whose branches cannot be read has no start point; the dialog says so and stays uncreatable.
-            Trace.WriteLine("[new-branch] could not read the branches: " + exception.Message);
+            AppLogs.NewBranch.ZLogWarning($"could not read the branches: {exception.Message}");
         }
         finally
         {
@@ -233,7 +235,7 @@ internal sealed class NewBranchDialogViewModel : NotifyingObject, IDisposable
         {
             if (generation == sparseGeneration && !disposed)
             {
-                Trace.WriteLine("[new-branch] could not list the top-level directories: " + exception.Message);
+                AppLogs.NewBranch.ZLogWarning($"could not list the top-level directories: {exception.Message}");
                 sparseError = exception.Message;
                 sparseState = SparseState.Failed;
                 RefreshHint();
@@ -326,7 +328,7 @@ internal sealed class NewBranchDialogViewModel : NotifyingObject, IDisposable
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException or GitException or UnauthorizedAccessException)
         {
             // Without an answer from git the name stays unverified, so Create stays disabled instead of failing later.
-            Trace.WriteLine("[new-branch] could not validate the branch name: " + exception.Message);
+            AppLogs.NewBranch.ZLogWarning($"could not validate the branch name: {exception.Message}");
             Apply(generation, NameState.Unverified);
         }
     }

@@ -5,6 +5,8 @@ using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Notifications;
 
@@ -200,7 +202,7 @@ internal sealed class ToastStackPanel : Panel
         {
             // A reflow that cannot run (no animation clock in this host) must not take the toast stack down with it; the
             // offset is reset by the finally below either way.
-            Trace.WriteLine("[toast] the reflow animation failed: " + exception.Message);
+            AppLogs.Toast.ZLogWarning($"the reflow animation failed: {exception.Message}");
         }
         finally
         {

@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Forge.Plugin.Sdk;
 
@@ -25,15 +23,4 @@ public interface IRegistrationContext
     void AddCommand(IPluginCommand command) => throw new NotSupportedException("Executable commands are not supported by this registration context.");
     void AddAgent(AgentDeclaration agent) => throw new NotSupportedException("Agent declarations are not supported by this registration context.");
     void AddPromptContributor(IPluginPromptContributor contributor) => throw new NotSupportedException("Prompt contributors are not supported by this registration context.");
-}
-
-[JsonSerializable(typeof(PluginInfo))]
-[JsonSerializable(typeof(ToolDeclaration))]
-[JsonSerializable(typeof(CommandDeclaration))]
-[JsonSerializable(typeof(WorkflowDeclaration))]
-[JsonSerializable(typeof(PanelDeclaration))]
-[JsonSerializable(typeof(UiSchema))]
-[JsonSerializable(typeof(Permission))]
-public partial class PluginSdkJsonContext : JsonSerializerContext
-{
 }

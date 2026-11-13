@@ -72,6 +72,55 @@ public sealed class ComposerSuggestionTests
     }
 
     [Fact]
+    public void Files_that_tie_on_every_key_keep_their_input_order()
+    {
+        string[] files = ["src/B.cs", "Note.md", "src/b.cs", "src/B.CS", "note.md"];
+
+        Assert.Equal(["Note.md", "note.md", "src/B.cs", "src/b.cs", "src/B.CS"], ComposerSuggestions.FilterFiles(files, string.Empty));
+        Assert.Equal(["src/B.cs", "src/b.cs", "src/B.CS"], ComposerSuggestions.FilterFiles(files, "b."));
+        Assert.Empty(ComposerSuggestions.FilterFiles(files, "b.", limit: 0));
+    }
+
+    [Fact]
+    public void Filtering_files_per_keystroke_does_not_allocate_per_file()
+    {
+        // The @ picker refilters every workspace file on each keystroke; only the result list may allocate.
+        var files = Enumerable.Range(0, 5000).Select(i => "src/Module" + (i % 50) + "/Views/SessionView" + i + ".axaml.cs").ToArray();
+        string[] queries = [string.Empty, "s", "sess", "module7/v", "svw"];
+        foreach (var query in queries)
+        {
+            ComposerSuggestions.FilterFiles(files, query);
+        }
+
+        foreach (var query in queries)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            ComposerSuggestions.FilterFiles(files, query);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.True(allocated < 8 * 1024, $"query '{query}' allocated {allocated} bytes over {files.Length} files");
+        }
+    }
+
+    [Fact]
+    public void Filtering_slash_entries_per_keystroke_allocates_only_the_result()
+    {
+        SlashEntry[] entries = [.. Enumerable.Range(0, 300).Select(i => new SlashEntry("cmd-" + (299 - i) + (i % 3 == 0 ? "-review" : "-run"), "d", i % 2 == 0))];
+        string[] queries = [string.Empty, "c", "cmd-1", "review", "zz"];
+        foreach (var query in queries)
+        {
+            ComposerSuggestions.FilterSlash(entries, query);
+        }
+
+        foreach (var query in queries)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            ComposerSuggestions.FilterSlash(entries, query);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.True(allocated < 8 * 1024, $"query '{query}' allocated {allocated} bytes over {entries.Length} entries");
+        }
+    }
+
+    [Fact]
     public void Accepting_replaces_the_token_and_adds_one_space()
     {
         var token = ComposerSuggestions.FindToken("see @Ses and more", 8);

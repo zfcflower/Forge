@@ -5,6 +5,8 @@ using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.Approval;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels.Settings;
 
@@ -114,7 +116,7 @@ internal sealed class ApprovalsSettingsSectionViewModel(AppComposition compositi
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException
             or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[instruments] approvals list failed: " + exception.Message);
+            AppLogs.Instruments.ZLogWarning($"approvals list failed: {exception.Message}");
             records = [];
             unavailable = true;
         }
@@ -157,7 +159,7 @@ internal sealed class SkillsSettingsSectionViewModel(AppComposition composition)
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            Trace.WriteLine("[instruments] skills list failed: " + exception.Message);
+            AppLogs.Instruments.ZLogWarning($"skills list failed: {exception.Message}");
             skills = [];
         }
 

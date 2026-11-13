@@ -63,6 +63,15 @@
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+    <!-- The account-window reading (the provider's own 5h/7d utilization). It only takes a colour when the server said so:
+         allowed_warning is the server's "near the limit", rejected is "the next request would be refused". There is no
+         percentage threshold here, because a threshold this app invented would be a guess dressed as a measurement. -->
+    <Style Selector="TextBlock.instrument-meta.quota-warning">
+      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+    <Style Selector="TextBlock.instrument-meta.quota-rejected">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
     <Style Selector="Border.instrument-pill">
       <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
       <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
@@ -565,17 +574,32 @@
                 </Button>
               </StackPanel>
 
-              <!-- Right half: the token reading — the cache-read hit rate, then the gauge button: five segments and
-                   "<used>/<usable> · <percent>" for the root context against its model's usable budget (tokens only when the
-                   window is unknown). Hovering the strip gives the spend breakdown; hovering the gauge gives the context
-                   numbers and the trigger line. The gauge turns to the warning colour within 10 points of the trigger line
-                   and to the danger colour at it, and a click runs the same manual compaction as /compact. -->
+              <!-- Right half: the token reading — the provider's account windows when it reports them, the cache-read hit
+                   rate, then the gauge button: five segments and "<used>/<usable> · <percent>" for the root context against
+                   its model's usable budget (tokens only when the window is unknown). Hovering the strip gives the spend
+                   breakdown; hovering the gauge gives the context numbers and the trigger line. The gauge turns to the warning
+                   colour within 10 points of the trigger line and to the danger colour at it, and a click runs the same manual
+                   compaction as /compact. -->
               <StackPanel Grid.Column="2"
                           Orientation="Horizontal"
                           Spacing="8"
                           VerticalAlignment="Center"
                           ToolTip.Tip="{Binding Instruments.UsageTooltip}"
                           AutomationProperties.AutomationId="strip-context">
+                <TextBlock Classes="instrument-meta"
+                           Classes.quota-warning="{Binding Instruments.IsQuotaWarning}"
+                           Classes.quota-rejected="{Binding Instruments.IsQuotaRejected}"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding Instruments.HasQuota}"
+                           Text="{Binding Instruments.QuotaLabel}"
+                           ToolTip.Tip="{Binding Instruments.QuotaTooltip}"
+                           AutomationProperties.AutomationId="strip-quota" />
+                <TextBlock Classes="instrument-meta"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding Instruments.HasCacheTtl}"
+                           Text="{Binding Instruments.CacheTtlText}"
+                           ToolTip.Tip="{Binding Instruments.CacheTtlTooltip}"
+                           AutomationProperties.AutomationId="strip-cache-ttl" />
                 <TextBlock Classes="instrument-meta"
                            VerticalAlignment="Center"
                            Text="{Binding Instruments.CacheReadText}" />

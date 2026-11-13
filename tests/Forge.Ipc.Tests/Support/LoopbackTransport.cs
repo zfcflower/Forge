@@ -84,7 +84,7 @@ internal sealed class LoopbackTransport : IIpcTransport
         return await observed.Reader.ReadAsync(timeout.Token);
     }
 
-    public async Task<IpcMessage> ReceiveMessageAsync() => FrameCodec.Default.Deserialize(await ReceiveBodyAsync());
+    public async Task<IpcMessage> ReceiveMessageAsync() => FrameCodec.Default.Decode(await ReceiveBodyAsync());
 
     public async Task<IpcMessage> ReceiveUntilAsync(Func<IpcMessage, bool> predicate)
     {
@@ -98,11 +98,10 @@ internal sealed class LoopbackTransport : IIpcTransport
         }
     }
 
-    public ValueTask SendMessageAsync(IpcMessage message) =>
-        SendAsync(FrameCodec.Default.Serialize(message), CancellationToken.None);
+    public ValueTask SendFrameAsync(byte[] frame) => SendAsync(frame, CancellationToken.None);
 
-    public ValueTask SendBodyAsync(string json) =>
-        SendAsync(TestFrames.Prefix(System.Text.Encoding.UTF8.GetBytes(json)), CancellationToken.None);
+    /// <summary>Sends raw body bytes (length-prefixed); used to inject malformed frames.</summary>
+    public ValueTask SendBodyAsync(byte[] body) => SendAsync(TestFrames.Prefix(body), CancellationToken.None);
 
     private void Close(Exception? cause)
     {

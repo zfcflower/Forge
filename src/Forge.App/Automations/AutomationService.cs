@@ -6,6 +6,8 @@ using Forge.App.Notifications;
 using Forge.Core.Automations;
 using Forge.Core.Providers;
 using Forge.Core.Storage;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Automations;
 
@@ -60,7 +62,7 @@ internal sealed class AutomationService : IAsyncDisposable
         var probe = new ProviderQuotaProbe((model, _) => ValueTask.FromResult(providers(model)), this.time);
         var schedule = new QuotaProbeSchedule(
             time: this.time,
-            onProbeError: static (key, exception) => Trace.WriteLine("[automation] quota probe " + key + " failed: " + exception.Message));
+            onProbeError: static (key, exception) => AppLogs.Automation.ZLogWarning($"quota probe {key} failed: {exception.Message}"));
         quotaRunner = new QuotaResumeRunner(
             Mailbox,
             runs,
@@ -307,7 +309,7 @@ internal sealed class AutomationService : IAsyncDisposable
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[automation] quota resume could not start: " + exception.Message);
+            AppLogs.Automation.ZLogWarning($"quota resume could not start: {exception.Message}");
         }
     }
 
@@ -331,7 +333,7 @@ internal sealed class AutomationService : IAsyncDisposable
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine("[automation] watch tick failed: " + exception.Message);
+                AppLogs.Automation.ZLogWarning($"watch tick failed: {exception.Message}");
             }
         }
     }

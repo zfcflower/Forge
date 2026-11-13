@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Review;
 
@@ -58,7 +60,7 @@ internal static class ReviewMarking
         }
         catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
         {
-            Trace.WriteLine("[review] marking sent failed: " + exception.Message);
+            AppLogs.Review.ZLogWarning($"marking sent failed: {exception.Message}");
             foreach (var id in ids)
             {
                 unmarked.Add(id);

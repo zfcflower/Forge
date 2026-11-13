@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -340,7 +341,13 @@ internal static class RunCodeDescription
         try
         {
             using var document = JsonDocument.Parse(schemaJson);
-            return JsonSerializer.Serialize(document.RootElement, HostClientJsonContext.Default.JsonElement);
+            var buffer = new ArrayBufferWriter<byte>(schemaJson.Length);
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                document.RootElement.WriteTo(writer);
+            }
+
+            return Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
         catch (JsonException)
         {

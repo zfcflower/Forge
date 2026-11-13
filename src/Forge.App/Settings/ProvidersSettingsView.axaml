@@ -132,6 +132,23 @@
                  Text="{Binding Hint}" />
     </StackPanel>
 
+    <!-- The usage log: off by default, and the only place a user turns it on. One JSONL line per model request under the data root. -->
+    <StackPanel Spacing="3" DataContext="{Binding Usage}" x:DataType="settings:UsageLogSettingsViewModel">
+      <CheckBox IsChecked="{Binding Enabled, Mode=TwoWay}"
+                Content="{Binding Label}"
+                FontSize="{DynamicResource FontSizeSm}"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="providers-usage-log-enabled" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding Hint}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Foreground="{DynamicResource DangerBrush}"
+                 IsVisible="{Binding HasSaveError}"
+                 Text="{Binding SaveError}" />
+    </StackPanel>
+
     <!-- The fetched catalog: the layer between the compiled table and what a provider reports. -->
     <StackPanel Spacing="3">
       <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
@@ -187,7 +204,7 @@
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="settings:ProviderRowViewModel">
           <Border Classes="provider-row">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontSizeMd}" VerticalAlignment="Center" />
                 <Border IsVisible="{Binding IsDefault}"
@@ -207,7 +224,20 @@
                          VerticalAlignment="Center"
                          TextTrimming="CharacterEllipsis" />
 
-              <Ellipse Grid.Column="2"
+              <!-- The cache lifetime, on the row it belongs to and only for the vendors that have one (Anthropic's breakpoints,
+                   OpenAI's retention). It saves on change; every other vendor caches on its own terms with nothing to set. -->
+              <ComboBox Grid.Column="2"
+                        IsVisible="{Binding SupportsCacheTtl}"
+                        ItemsSource="{Binding CacheTtlOptions}"
+                        SelectedItem="{Binding SelectedCacheTtl, Mode=TwoWay}"
+                        FontSize="{DynamicResource FontSizeSm}"
+                        MinWidth="104"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="{Binding CacheTtlTooltip}"
+                        AutomationProperties.AutomationId="{Binding Id, StringFormat=provider-cache-ttl-{0}}"
+                        AutomationProperties.Name="{Binding CacheTtlTooltip}" />
+
+              <Ellipse Grid.Column="3"
                        Classes="provider-state"
                        Classes.ready="{Binding IsReady}"
                        Classes.warning="{Binding NeedsKey}"
@@ -216,7 +246,7 @@
                        ToolTip.Tip="{Binding StatusTooltip}"
                        VerticalAlignment="Center" />
 
-              <Button Grid.Column="3"
+              <Button Grid.Column="4"
                       Classes="provider-action"
                       Click="OnEditClick"
                       ToolTip.Tip="{Binding EditText}"
@@ -228,7 +258,7 @@
                 </StackPanel>
               </Button>
 
-              <Button Grid.Column="4"
+              <Button Grid.Column="5"
                       Classes="provider-action"
                       Click="OnModelsClick"
                       ToolTip.Tip="{Binding StatusText}"
@@ -239,14 +269,14 @@
                 </StackPanel>
               </Button>
 
-              <Button Grid.Column="5"
+              <Button Grid.Column="6"
                       Classes="provider-action"
                       IsVisible="{Binding !IsDefault}"
                       Click="OnMakeDefaultClick"
                       Content="{Binding MakeDefaultText}"
                       AutomationProperties.AutomationId="{Binding Id, StringFormat=provider-default-{0}}" />
 
-              <Button Grid.Column="6"
+              <Button Grid.Column="7"
                       Classes="provider-action"
                       Click="OnDeleteClick"
                       Content="{Binding DeleteText}"

@@ -60,6 +60,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private IReadOnlyList<SlashEntry> skills = [];
     private IReadOnlyList<string> tools = [];
     private TokenUsage usage = TokenUsage.Empty;
+    private ProviderRateLimit? rateLimit;
+    private string? rateLimitProvider;
+    private string? cacheTtl;
     private int? contextTokens;
     private int? usableTokens;
     private int? triggerTokens;
@@ -241,6 +244,204 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     /// <summary>"RC 98.5": the cache-read hit rate of the session, one decimal, 0.0 before any usage.</summary>
     public string CacheReadText => InstrumentsStrings.CacheRead(
         (SessionUsageMath.CacheHitRatio(usage) * 100).ToString("0.0", CultureInfo.InvariantCulture));
+
+    // ---------------------------------------------------------------- account windows
+
+    /// <summary>
+    /// True when the provider reported the account's usage windows with the last response <em>and</em> the composer still
+    /// points at that provider. A window reading belongs to the account the request went to, so switching the picker to a
+    /// different provider hides it rather than showing another account's numbers under this session.
+    /// </summary>
+    public bool HasQuota => rateLimit is { } reading
+        && (reading.HasWindows || reading.Throttle is not null)
+        && string.Equals(rateLimitProvider, currentProvider(), StringComparison.Ordinal);
+
+    /// <summary>True when the server says the next request would be refused; the reading is then coloured as a failure.</summary>
+    public bool IsQuotaRejected => HasQuota && rateLimit!.IsRejected;
+
+    /// <summary>
+    /// True when the server itself flags a window as near its limit (<c>allowed_warning</c>) without refusing. The threshold is
+    /// the server's, not one this app invents.
+    /// </summary>
+    public bool IsQuotaWarning => HasQuota && !rateLimit!.IsRejected
+        && (rateLimit.FiveHour == RateLimitStatus.AllowedWarning || rateLimit.Weekly == RateLimitStatus.AllowedWarning);
+
+    /// <summary>
+    /// "5h 62% · 2h41m 后重置   周 41% · 3d 后重置": the server's own utilization and countdown, one part per window and only
+    /// for the windows the response mentioned. Empty when nothing was reported — the segment does not exist then.
+    /// </summary>
+    public string QuotaLabel => HasQuota ? QuotaLabelFor(rateLimit!, DateTimeOffset.UtcNow) : string.Empty;
+
+    /// <summary>The hover line: one decimal per window, its absolute reset, which window is binding, the overage channel.</summary>
+    public string QuotaTooltip => HasQuota ? QuotaTooltipFor(rateLimit!, DateTimeOffset.UtcNow) : string.Empty;
+
+    /// <summary>
+    /// Which prompt-cache lifetime the last request asked for (<c>"5m"</c>/<c>"1h"</c>, Core's <c>AgentContextMeasured</c>). Shown as
+    /// its own chip because it is a cost decision the user can set, and inferring it from the bill is not a readout.
+    /// </summary>
+    public bool HasCacheTtl => !string.IsNullOrEmpty(cacheTtl);
+
+    /// <summary>"缓存 1h" — the lifetime in force, empty before the first measured request.</summary>
+    public string CacheTtlText => HasCacheTtl ? InstrumentsStrings.CacheTtlLabel(cacheTtl!) : string.Empty;
+
+    /// <summary>The hover line: which lifetime, and the one sentence that says what changing it saves.</summary>
+    public string CacheTtlTooltip => HasCacheTtl ? InstrumentsStrings.CacheTtlTooltip(cacheTtl!) : string.Empty;
+
+    public void NoteCacheTtl(string? ttl)
+    {
+        if (string.Equals(cacheTtl, ttl, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        cacheTtl = string.IsNullOrEmpty(ttl) ? null : ttl;
+        OnPropertyChanged(nameof(HasCacheTtl));
+        OnPropertyChanged(nameof(CacheTtlText));
+        OnPropertyChanged(nameof(CacheTtlTooltip));
+    }
+
+    /// <summary>
+    /// A response reported the account's windows (Core's <c>AgentRateLimitUpdated</c>). <paramref name="providerId"/> is the
+    /// provider the request went to; the reading is dropped when the picker moves away from it.
+    /// </summary>
+    public void NoteRateLimit(string? providerId, ProviderRateLimit limit)
+    {
+        ArgumentNullException.ThrowIfNull(limit);
+        rateLimit = limit;
+        rateLimitProvider = providerId;
+        RaiseQuota();
+    }
+
+    private void RaiseQuota()
+    {
+        OnPropertyChanged(nameof(HasQuota));
+        OnPropertyChanged(nameof(IsQuotaRejected));
+        OnPropertyChanged(nameof(IsQuotaWarning));
+        OnPropertyChanged(nameof(QuotaLabel));
+        OnPropertyChanged(nameof(QuotaTooltip));
+    }
+
+    internal static string QuotaLabelFor(ProviderRateLimit limit, DateTimeOffset now)
+    {
+        // One segment, two meters with different meanings: the subscription's spending windows, or an API key's per-minute rate
+        // limit. The label names which one it is, because "62%" and "43/50" do not say it on their own.
+        if (!limit.HasWindows)
+        {
+            return ThrottleLabel(limit.Throttle, now);
+        }
+
+        var fiveHour = QuotaPart(InstrumentsStrings.QuotaFiveHour, limit.FiveHourUtilization, limit.FiveHourResetAt, now);
+        var weekly = QuotaPart(InstrumentsStrings.QuotaWeekly, limit.WeeklyUtilization, limit.WeeklyResetAt, now);
+        var parts = (fiveHour, weekly) switch
+        {
+            ({ } five, { } week) => InstrumentsStrings.QuotaUsage(five, week),
+            ({ } five, null) => five,
+            (null, { } week) => week,
+            _ => string.Empty,
+        };
+        return parts.Length == 0 ? string.Empty : InstrumentsStrings.QuotaWindowsPrefix + " " + parts;
+    }
+
+    /// <summary>"限流 每分钟请求 43/50 · 12s 后重置" — the API key's ceiling, never confused with a spending window.</summary>
+    private static string ThrottleLabel(ProviderThrottle? throttle, DateTimeOffset now)
+    {
+        if (throttle is null)
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>(3);
+        if (throttle.HasRequests)
+        {
+            parts.Add(InstrumentsStrings.QuotaThrottleRequests(
+                throttle.RequestRemaining?.ToString(CultureInfo.InvariantCulture) ?? "—",
+                throttle.RequestLimit?.ToString(CultureInfo.InvariantCulture) ?? "—"));
+        }
+
+        if (throttle.HasTokens)
+        {
+            parts.Add(InstrumentsStrings.QuotaThrottleTokens(
+                throttle.TokenRemaining is { } remaining ? Scale(remaining) : "—",
+                throttle.TokenLimit is { } limit ? Scale(limit) : "—"));
+        }
+
+        if (parts.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var text = InstrumentsStrings.QuotaThrottlePrefix + " " + string.Join(" · ", parts);
+        var reset = throttle.RequestResetAt ?? throttle.TokenResetAt;
+        return reset is { } at && at > now
+            ? text + " · " + InstrumentsStrings.QuotaReset(InstrumentsStrings.QuotaCountdown(at - now))
+            : text;
+    }
+
+    private static string ThrottleTooltip(ProviderThrottle throttle, DateTimeOffset now)
+    {
+        var requests = throttle.HasRequests
+            ? (throttle.RequestRemaining?.ToString(CultureInfo.InvariantCulture) ?? "—") + "/"
+              + (throttle.RequestLimit?.ToString(CultureInfo.InvariantCulture) ?? "—")
+            : "—";
+        var tokens = throttle.HasTokens
+            ? (throttle.TokenRemaining is { } remaining ? Scale(remaining) : "—") + "/"
+              + (throttle.TokenLimit is { } limit ? Scale(limit) : "—")
+            : "—";
+        var reset = throttle.RequestResetAt ?? throttle.TokenResetAt;
+        var resetText = reset is { } at
+            ? TextFormat.ShortStamp(at) + " (" + InstrumentsStrings.QuotaCountdown(at - now) + ")"
+            : InstrumentsStrings.QuotaNoReset;
+        return InstrumentsStrings.QuotaThrottleTooltip(requests, tokens, resetText);
+    }
+
+    private static string? QuotaPart(string label, double? utilization, DateTimeOffset? resetAt, DateTimeOffset now)
+    {
+        if (utilization is null && resetAt is null)
+        {
+            return null;
+        }
+
+        var window = utilization is { } value
+            ? InstrumentsStrings.QuotaWindow(label, QuotaPercent(value, "0"))
+            : InstrumentsStrings.QuotaWindowUnknown(label);
+        return resetAt is { } at && at > now
+            ? window + " · " + InstrumentsStrings.QuotaReset(InstrumentsStrings.QuotaCountdown(at - now))
+            : window;
+    }
+
+    internal static string QuotaTooltipFor(ProviderRateLimit limit, DateTimeOffset now)
+    {
+        if (!limit.HasWindows && limit.Throttle is { } throttleOnly)
+        {
+            return ThrottleTooltip(throttleOnly, now);
+        }
+
+        var binding = limit.BindingWindow is { } window
+            ? InstrumentsStrings.QuotaBinding(InstrumentsStrings.QuotaWindowName(window))
+            : InstrumentsStrings.QuotaBindingUnknown;
+        return InstrumentsStrings.QuotaTooltip(
+            QuotaDetail(limit.FiveHourUtilization, limit.FiveHourResetAt, RateLimitWindow.FiveHour, now),
+            QuotaDetail(limit.WeeklyUtilization, limit.WeeklyResetAt, RateLimitWindow.Weekly, now),
+            binding,
+            InstrumentsStrings.QuotaOverage(InstrumentsStrings.QuotaOverageState(limit.Overage)));
+    }
+
+    private static string QuotaDetail(double? utilization, DateTimeOffset? resetAt, RateLimitWindow window, DateTimeOffset now)
+    {
+        var label = InstrumentsStrings.QuotaWindowName(window);
+        var percent = utilization is { } value ? QuotaPercent(value, "0.0") : "—";
+        var reset = resetAt is { } at
+            ? TextFormat.ShortStamp(at) + " (" + InstrumentsStrings.QuotaCountdown(at - now) + ")"
+            : InstrumentsStrings.QuotaNoReset;
+        return InstrumentsStrings.QuotaTooltipWindow(label, percent, reset);
+    }
+
+    /// <summary>
+    /// A 0-1 share as a percent string. Clamped to 100 because the server may report a window slightly past full while overage
+    /// is still open, and "103%" reads like a bug rather than a state.
+    /// </summary>
+    private static string QuotaPercent(double value, string format) =>
+        (Math.Clamp(value, 0, 1) * 100).ToString(format, CultureInfo.InvariantCulture);
 
     private double? ContextRatio => contextTokens is { } used && usableTokens is > 0
         ? Math.Clamp((double)used / usableTokens.Value, 0, 1)
@@ -522,6 +723,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         tools = availableTools() ?? [];
         mcp = sources.McpServers();
         RaiseCounters();
+        // The composer's provider can have changed since the last request; a reading from another account stops showing here.
+        RaiseQuota();
     }
 
     /// <summary>
@@ -686,6 +889,7 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(ContextLabel));
         OnPropertyChanged(nameof(ContextTooltip));
         OnPropertyChanged(nameof(UsageTooltip));
+        RaiseQuota();
         OnPropertyChanged(nameof(WorkspaceTooltip));
         OnPropertyChanged(nameof(ApprovalsLabel));
         OnPropertyChanged(nameof(SkillsLabel));

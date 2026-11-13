@@ -3,6 +3,8 @@ using Forge.App.Changes;
 using Forge.App.Localization;
 using Forge.App.Review;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -264,7 +266,7 @@ internal sealed partial class ChangesViewModel
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[changes] loading review marks failed: " + exception.Message);
+            AppLogs.Changes.ZLogWarning($"loading review marks failed: {exception.Message}");
             return;
         }
         finally
@@ -330,7 +332,7 @@ internal sealed partial class ChangesViewModel
             }
             catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
             {
-                Trace.WriteLine("[changes] saving a review mark failed: " + exception.Message);
+                AppLogs.Changes.ZLogWarning($"saving a review mark failed: {exception.Message}");
             }
         });
     }
@@ -361,7 +363,7 @@ internal sealed partial class ChangesViewModel
         catch (Exception exception) when (exception is GitException or IOException or InvalidOperationException)
         {
             // GitOutputTruncatedException is a GitException: a file too large to read whole keeps its folded stretches.
-            Trace.WriteLine("[changes] loading whole-file context failed: " + exception.Message);
+            AppLogs.Changes.ZLogWarning($"loading whole-file context failed: {exception.Message}");
             return false;
         }
 
@@ -472,7 +474,7 @@ internal sealed partial class ChangesViewModel
             }
             catch (InvalidOperationException exception)
             {
-                Trace.WriteLine("[changes] revert confirmation failed: " + exception.Message);
+                AppLogs.Changes.ZLogWarning($"revert confirmation failed: {exception.Message}");
                 return;
             }
 

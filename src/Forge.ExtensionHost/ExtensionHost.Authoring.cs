@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Forge.Ipc;
 using Forge.Approval;
 using Forge.Plugin.Sdk;
 using Forge.Scripting;
@@ -17,7 +17,7 @@ namespace Forge.ExtensionHost;
 /// </summary>
 public sealed partial class ExtensionHost
 {
-    private async Task<JsonElement> StageExtensionAsync(ExtensionStageRequest request, CancellationToken ct)
+    private async Task<StagedExtension> StageExtensionAsync(ExtensionStageRequest request, CancellationToken ct)
     {
         var draft = ExtensionStaging.Validate(request);
         RequireNotBlocked(draft.PluginId, draft.Version);
@@ -42,14 +42,14 @@ public sealed partial class ExtensionHost
             staged = staged with { Diagnostics = [.. staged.Diagnostics, collision] };
         }
 
-        return HostJson.ToElement(staged);
+        return staged;
     }
 
     /// <summary>
     /// Re-derives every staged draft from the bytes on disk, so the pending approvals of a previous run can be restored.
     /// One broken draft reports its own diagnostics instead of failing the response.
     /// </summary>
-    private async Task<JsonElement> PendingExtensionsAsync(CancellationToken ct)
+    private async Task<StagedExtensionList> PendingExtensionsAsync(CancellationToken ct)
     {
         var items = new List<StagedExtension>();
         foreach (var directory in staging.PendingDirectories())
@@ -120,10 +120,10 @@ public sealed partial class ExtensionHost
                 new DateTimeOffset(Directory.GetLastWriteTimeUtc(directory))));
         }
 
-        return HostJson.ToElement(new StagedExtensionList(items));
+        return new StagedExtensionList(items);
     }
 
-    private async Task<JsonElement> DiscardExtensionAsync(ExtensionIdRequest request, CancellationToken ct)
+    private async Task<IpcEmpty> DiscardExtensionAsync(ExtensionIdRequest request, CancellationToken ct)
     {
         var pluginId = RequirePluginId(request.PluginId);
         await refreshGate.WaitAsync(ct).ConfigureAwait(false);
@@ -145,7 +145,7 @@ public sealed partial class ExtensionHost
             refreshGate.Release();
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
     /// <summary>
@@ -154,7 +154,7 @@ public sealed partial class ExtensionHost
     /// one into place, re-prepares the plugin from its new directory, and then runs the ordinary approval path with the
     /// approved hashes. Any failure puts the old directory back and restores the previous entry and record.
     /// </summary>
-    private async Task<JsonElement> CommitExtensionAsync(ExtensionCommitRequest request, CancellationToken ct)
+    private async Task<ExtensionCommitResult> CommitExtensionAsync(ExtensionCommitRequest request, CancellationToken ct)
     {
         var pluginId = RequirePluginId(request.PluginId);
         if (string.IsNullOrWhiteSpace(request.SourceHash) ||
@@ -186,7 +186,7 @@ public sealed partial class ExtensionHost
         }
     }
 
-    private async Task<JsonElement> CommitCoreAsync(
+    private async Task<ExtensionCommitResult> CommitCoreAsync(
         string pluginId,
         ExtensionCommitRequest request,
         PluginState state,
@@ -316,7 +316,7 @@ public sealed partial class ExtensionHost
             }
         }
 
-        return HostJson.ToElement(new ExtensionCommitResult(BuildStatus(entry), [.. entry.Tools.Select(static tool => tool.Name)]));
+        return new ExtensionCommitResult(BuildStatus(entry), [.. entry.Tools.Select(static tool => tool.Name)]);
     }
 
     /// <summary>
@@ -404,7 +404,7 @@ public sealed partial class ExtensionHost
     }
 
     /// <summary>Marks the version <see cref="PluginStatus.Disabled"/>, unregisters its tools and stops its worker tree.</summary>
-    private async Task<JsonElement> DisablePluginAsync(PluginVersionRequest request, CancellationToken ct)
+    private async Task<IpcEmpty> DisablePluginAsync(PluginVersionRequest request, CancellationToken ct)
     {
         var (captured, state) = await EnterPluginGateAsync(request.PluginId, ct).ConfigureAwait(false);
         try
@@ -421,14 +421,14 @@ public sealed partial class ExtensionHost
             state.Exit();
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
     /// <summary>
     /// Lifts <see cref="PluginStatus.Disabled"/>. The plugin runs again only when its recorded approval still covers the
     /// bytes on disk; otherwise it stays installed and not running, which is exactly what the approval engine decides.
     /// </summary>
-    private async Task<JsonElement> EnablePluginAsync(PluginVersionRequest request, CancellationToken ct)
+    private async Task<IpcEmpty> EnablePluginAsync(PluginVersionRequest request, CancellationToken ct)
     {
         var (captured, state) = await EnterPluginGateAsync(request.PluginId, ct).ConfigureAwait(false);
         try
@@ -450,7 +450,7 @@ public sealed partial class ExtensionHost
             state.Exit();
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
     /// <summary>
@@ -459,7 +459,7 @@ public sealed partial class ExtensionHost
     /// and the plugin leaves discovery. A later stage of the same id and version is refused with
     /// <c>extension_blocked</c>; the agent has to pick a new version number.
     /// </summary>
-    private async Task<JsonElement> DeletePluginAsync(PluginVersionRequest request, CancellationToken ct)
+    private async Task<IpcEmpty> DeletePluginAsync(PluginVersionRequest request, CancellationToken ct)
     {
         var (captured, state) = await EnterPluginGateAsync(request.PluginId, ct).ConfigureAwait(false);
         try
@@ -520,7 +520,7 @@ public sealed partial class ExtensionHost
             state.Exit();
         }
 
-        return HostJson.EmptyObject;
+        return IpcEmpty.Instance;
     }
 
     /// <summary>

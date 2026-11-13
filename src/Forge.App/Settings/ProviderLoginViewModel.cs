@@ -217,9 +217,22 @@ internal sealed class ProviderLoginViewModel : NotifyingObject, IDisposable
 
         isBusy = true;
         RaiseBusy();
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
         try
         {
-            await CompleteAsync(Build(ProviderCredentialKind.ClaudeSubscription)).ConfigureAwait(true);
+            // The local login is usable for listing too, so the new provider starts from what the account actually serves
+            // instead of the seeds; a failed listing keeps them and the row's refresh can try again later.
+            var definition = await FetchModelsAsync(Build(ProviderCredentialKind.ClaudeSubscription), token)
+                .ConfigureAwait(true);
+            token.ThrowIfCancellationRequested();
+            await CompleteAsync(definition).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            LoginState = null;
         }
         finally
         {
@@ -571,15 +584,23 @@ internal sealed class ProviderLoginViewModel : NotifyingObject, IDisposable
                     ? ProviderStrings.LoginChatGptCodeKey
                     : ProviderStrings.EditorDeviceCodeKey;
 
-    /// <summary>Best effort: a failed listing leaves the models empty, and the row's refresh can fetch them later.</summary>
+    /// <summary>
+    /// Best effort: a listing that fails — no network, a refused credential, a body that is not a model list — leaves the
+    /// definition on its seeds, because a sign-in that already succeeded must not be undone by the optional step that
+    /// decorates it. The row's refresh can fetch the list later.
+    /// </summary>
     private async Task<ProviderDefinition> FetchModelsAsync(ProviderDefinition definition, CancellationToken token)
     {
         try
         {
             var list = await services.RefreshModelsAsync(services.CreateTransient(definition), token).ConfigureAwait(true);
-            return definition with { Models = [.. list.Ids], DefaultModel = list.Ids.FirstOrDefault() ?? string.Empty };
+            return definition with
+            {
+                Models = [.. list.Ids],
+                DefaultModel = ProviderDefinition.PreferredDefaultModel(definition.PresetId, list.Ids),
+            };
         }
-        catch (Exception exception) when (exception is ProviderException or HttpRequestException or IOException or TimeoutException)
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
         {
             return definition;
         }

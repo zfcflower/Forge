@@ -423,19 +423,16 @@ public sealed class ExtensionStageValidationTests
         await using var peer = await RawHost.ConnectAsync(raw.Pipe, budget.Token);
         var before = ExtensionAuthoringSupport.SnapshotTree(raw.Plugins);
 
-        var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-        {
-            ["pluginId"] = "weird",
-            ["version"] = "1.0.0",
-            ["kind"] = "applet",
-            ["files"] = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["Plugin.cs"] = PluginSources.Standard("weird"),
-            },
-        });
+        var args = new Sdk.ExtensionStageRequest(
+            "weird",
+            "1.0.0",
+            "applet",
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["Plugin.cs"] = PluginSources.Standard("weird") },
+            [],
+            []);
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => peer.SendRequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, budget.Token));
+            () => peer.RequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, budget.Token));
         Assert.Equal("invalid_extension", error.Code);
         ExtensionAuthoringSupport.AssertSameTree(
             before, ExtensionAuthoringSupport.SnapshotTree(raw.Plugins), "unknown-kind stage");
@@ -450,16 +447,16 @@ public sealed class ExtensionStageValidationTests
         await using var peer = await RawHost.ConnectAsync(raw.Pipe, budget.Token);
         var before = ExtensionAuthoringSupport.SnapshotTree(raw.Plugins);
 
-        var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-        {
-            ["pluginId"] = "blank",
-            ["version"] = "1.0.0",
-            ["kind"] = Sdk.ExtensionKinds.Plugin,
-            ["files"] = new Dictionary<string, string?>(StringComparer.Ordinal) { [""] = "x" },
-        });
+        var args = new Sdk.ExtensionStageRequest(
+            "blank",
+            "1.0.0",
+            Sdk.ExtensionKinds.Plugin,
+            new Dictionary<string, string>(StringComparer.Ordinal) { [""] = "x" },
+            [],
+            []);
 
         var error = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => peer.SendRequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, budget.Token));
+            () => peer.RequestAsync(Sdk.ExtensionProtocol.ExtensionsStage, args, budget.Token));
         Assert.Equal("invalid_extension", error.Code);
         ExtensionAuthoringSupport.AssertSameTree(
             before, ExtensionAuthoringSupport.SnapshotTree(raw.Plugins), "blank-path stage");

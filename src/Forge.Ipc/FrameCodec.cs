@@ -1,13 +1,15 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
+using MessagePack;
 
 namespace Forge.Ipc;
 
-/// <summary>Encodes <see cref="IpcMessage"/> as a 4-byte little-endian length header followed by the UTF-8 JSON body.</summary>
-public sealed class FrameCodec : IJsonFrameCodec
+/// <summary>
+/// Encodes a frame as a 4-byte little-endian body length followed by the body: one MessagePack <see cref="IpcHeader"/>
+/// and, for requests, notifications and successful responses, one MessagePack payload value written straight from the
+/// typed object. Encoding writes into a pooled <see cref="IpcFrameBuffer"/>, so a send allocates no frame array.
+/// </summary>
+public sealed class FrameCodec
 {
     public static FrameCodec Default { get; } = new();
 
@@ -24,27 +26,82 @@ public sealed class FrameCodec : IJsonFrameCodec
 
     public int MaxFrameBytes { get; }
 
-    public ReadOnlyMemory<byte> Serialize(IpcMessage message)
+    /// <summary>Encodes a header and its payload; the caller disposes the buffer once the transport has copied it.</summary>
+    public IpcFrameBuffer Encode<T>(in IpcHeader header, T payload)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        var body = JsonSerializer.SerializeToUtf8Bytes(message, IpcWireJsonContext.Wire.IpcMessage);
-        if (body.Length > MaxFrameBytes)
+        var buffer = new IpcFrameBuffer();
+        try
         {
-            throw new ArgumentException(
-                $"Frame of {body.Length} bytes exceeds the {MaxFrameBytes}-byte limit.", nameof(message));
+            buffer.Advance(FrameExtractor.HeaderBytes);
+            IpcSerializer.Serialize(buffer, header);
+            IpcSerializer.Serialize(buffer, payload);
+            Seal(buffer);
+            return buffer;
         }
-
-        var frame = new byte[FrameExtractor.HeaderBytes + body.Length];
-        BinaryPrimitives.WriteInt32LittleEndian(frame, body.Length);
-        body.CopyTo(frame.AsSpan(FrameExtractor.HeaderBytes));
-        return frame;
+        catch
+        {
+            buffer.Dispose();
+            throw;
+        }
     }
 
-    public IpcMessage Deserialize(ReadOnlyMemory<byte> frame)
+    /// <summary>Encodes a header followed by payload bytes the caller already encoded (a relayed frame, or a protocol
+    /// test that deliberately builds a value no formatter would produce). The bytes are appended verbatim.</summary>
+    internal IpcFrameBuffer EncodeRaw(in IpcHeader header, ReadOnlyMemory<byte> payload)
     {
-        var body = frame.Span;
+        var buffer = new IpcFrameBuffer();
+        try
+        {
+            buffer.Advance(FrameExtractor.HeaderBytes);
+            IpcSerializer.Serialize(buffer, header);
+            if (!payload.IsEmpty)
+            {
+                payload.Span.CopyTo(buffer.GetSpan(payload.Length));
+                buffer.Advance(payload.Length);
+            }
+
+            Seal(buffer);
+            return buffer;
+        }
+        catch
+        {
+            buffer.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Encodes a header without a payload (a failed response).</summary>
+    public IpcFrameBuffer Encode(in IpcHeader header)
+    {
+        var buffer = new IpcFrameBuffer();
+        try
+        {
+            buffer.Advance(FrameExtractor.HeaderBytes);
+            IpcSerializer.Serialize(buffer, header);
+            Seal(buffer);
+            return buffer;
+        }
+        catch
+        {
+            buffer.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Encodes into a standalone array, for tests and tools that keep the frame.</summary>
+    public byte[] EncodeToArray<T>(in IpcHeader header, T payload)
+    {
+        using var buffer = Encode(header, payload);
+        return buffer.WrittenMemory.ToArray();
+    }
+
+    /// <summary>Decodes a frame body (with or without its length prefix). The returned message's payload is a slice
+    /// of <paramref name="frame"/>, which the transport hands over and never reuses.</summary>
+    public IpcMessage Decode(ReadOnlyMemory<byte> frame)
+    {
+        var body = frame;
         if (body.Length > FrameExtractor.HeaderBytes &&
-            BinaryPrimitives.ReadInt32LittleEndian(body) == body.Length - FrameExtractor.HeaderBytes)
+            BinaryPrimitives.ReadInt32LittleEndian(body.Span) == body.Length - FrameExtractor.HeaderBytes)
         {
             body = body[FrameExtractor.HeaderBytes..];
         }
@@ -56,134 +113,108 @@ public sealed class FrameCodec : IJsonFrameCodec
 
         if (body.Length > MaxFrameBytes)
         {
-            throw new IpcProtocolException(
-                $"Frame of {body.Length} bytes exceeds the {MaxFrameBytes}-byte limit.");
+            throw new IpcProtocolException($"Frame of {body.Length} bytes exceeds the {MaxFrameBytes}-byte limit.");
         }
 
+        IpcHeader header;
+        int consumed;
         try
         {
-            return JsonSerializer.Deserialize(body, IpcJsonContext.Default.IpcMessage)
-                ?? throw new IpcProtocolException("The IPC frame decoded to null.");
+            var reader = new MessagePackReader(body.Span);
+            reader.Skip();
+            consumed = checked((int)reader.BytesConsumed);
+            header = MessagePackSerializer.Deserialize<IpcHeader>(body.Span[..consumed], IpcSerializer.Options);
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is MessagePackSerializationException or EndOfStreamException or FormatException or OverflowException or InvalidOperationException or ArgumentException)
         {
-            throw new IpcProtocolException("The IPC frame is not a valid message.", ex);
+            throw new IpcProtocolException("The IPC frame does not start with a valid header.", ex);
         }
+
+        return new IpcMessage(header, body[consumed..]);
+    }
+
+    private void Seal(IpcFrameBuffer buffer)
+    {
+        var length = buffer.WrittenCount - FrameExtractor.HeaderBytes;
+        if (length > MaxFrameBytes)
+        {
+            throw new ArgumentException($"Frame of {length} bytes exceeds the {MaxFrameBytes}-byte limit.");
+        }
+
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.WrittenSpanForPrefix, length);
+    }
+}
+
+/// <summary>A growable frame writer backed by <see cref="ArrayPool{T}.Shared"/>; dispose returns the array.</summary>
+public sealed class IpcFrameBuffer : IBufferWriter<byte>, IDisposable
+{
+    private const int InitialCapacity = 256;
+
+    private byte[]? array = ArrayPool<byte>.Shared.Rent(InitialCapacity);
+    private int written;
+
+    public int WrittenCount => written;
+
+    public ReadOnlyMemory<byte> WrittenMemory => Array.AsMemory(0, written);
+
+    internal Span<byte> WrittenSpanForPrefix => Array.AsSpan(0, FrameExtractor.HeaderBytes);
+
+    private byte[] Array => array ?? throw new ObjectDisposedException(nameof(IpcFrameBuffer));
+
+    public void Advance(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (written + count > Array.Length)
+        {
+            throw new InvalidOperationException("Advanced past the end of the frame buffer.");
+        }
+
+        written += count;
+    }
+
+    public Memory<byte> GetMemory(int sizeHint = 0)
+    {
+        Ensure(sizeHint);
+        return Array.AsMemory(written);
+    }
+
+    public Span<byte> GetSpan(int sizeHint = 0)
+    {
+        Ensure(sizeHint);
+        return Array.AsSpan(written);
+    }
+
+    public void Dispose()
+    {
+        var rented = Interlocked.Exchange(ref array, null);
+        if (rented is not null)
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private void Ensure(int sizeHint)
+    {
+        var current = Array;
+        var needed = written + Math.Max(sizeHint, 1);
+        if (needed <= current.Length)
+        {
+            return;
+        }
+
+        var grown = ArrayPool<byte>.Shared.Rent(Math.Max(needed, current.Length * 2));
+        current.AsSpan(0, written).CopyTo(grown);
+        ArrayPool<byte>.Shared.Return(current);
+        array = grown;
     }
 }
 
 /// <summary>Operation names the peer handles itself or emits on its own.</summary>
 public static class IpcOperations
 {
+    /// <summary>Notification whose payload is the <see cref="long"/> id of the request to cancel.</summary>
     public const string Cancel = "cancel";
+
+    /// <summary>Request answered by the peer itself with <see cref="IpcEmpty"/>.</summary>
     public const string Ping = "ping";
-    public const string RequestIdArgument = "id";
-}
-
-/// <summary>Source-generated result types available to <see cref="IIpcPeer.SendRequestAsync{T}"/> plus a registry for others.</summary>
-public static class IpcJsonTypes
-{
-    private static readonly Lock Gate = new();
-    private static JsonSerializerContext[] contexts = [IpcBuiltInJsonContext.Default];
-
-    /// <summary>Adds a context so its types can be used as typed request results; later registrations win.</summary>
-    public static void Register(JsonSerializerContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        lock (Gate)
-        {
-            if (!contexts.Contains(context))
-            {
-                contexts = [context, .. contexts];
-            }
-        }
-    }
-
-    public static JsonTypeInfo? Find(Type type)
-    {
-        ArgumentNullException.ThrowIfNull(type);
-        JsonSerializerContext[] snapshot;
-        lock (Gate)
-        {
-            snapshot = contexts;
-        }
-
-        foreach (var context in snapshot)
-        {
-            var info = context.GetTypeInfo(type);
-            if (info is not null)
-            {
-                return info;
-            }
-        }
-
-        return null;
-    }
-
-    public static T DeserializeResult<T>(JsonElement element, string operation)
-        where T : notnull
-    {
-        if (typeof(T) == typeof(JsonElement))
-        {
-            return (T)(object)element.Clone();
-        }
-
-        if (Find(typeof(T)) is not JsonTypeInfo<T> info)
-        {
-            throw new IpcProtocolException(
-                $"Type '{typeof(T).FullName}' is not registered for IPC results; register a JsonSerializerContext that covers it.");
-        }
-
-        T? value;
-        try
-        {
-            value = JsonSerializer.Deserialize(element, info);
-        }
-        catch (JsonException ex)
-        {
-            throw new IpcProtocolException($"The result of '{operation}' is not a '{typeof(T).Name}'.", ex);
-        }
-
-        return value ?? throw new IpcProtocolException($"The result of '{operation}' was null.");
-    }
-
-    public static JsonElement EmptyObject { get; } = CreateEmptyObject();
-
-    private static JsonElement CreateEmptyObject()
-    {
-        using var document = JsonDocument.Parse("{}");
-        return document.RootElement.Clone();
-    }
-
-    public static JsonElement FromId(long id)
-    {
-        var buffer = new ArrayBufferWriter<byte>(32);
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteNumber(IpcOperations.RequestIdArgument, id);
-            writer.WriteEndObject();
-        }
-
-        using var document = JsonDocument.Parse(buffer.WrittenMemory);
-        return document.RootElement.Clone();
-    }
-}
-
-[JsonSerializable(typeof(IpcMessage))]
-[JsonSerializable(typeof(IpcError))]
-[JsonSerializable(typeof(JsonElement))]
-[JsonSerializable(typeof(string))]
-[JsonSerializable(typeof(bool))]
-[JsonSerializable(typeof(int))]
-[JsonSerializable(typeof(long))]
-[JsonSerializable(typeof(double))]
-[JsonSerializable(typeof(decimal))]
-[JsonSerializable(typeof(Guid))]
-[JsonSerializable(typeof(DateTimeOffset))]
-[JsonSerializable(typeof(byte[]))]
-[JsonSerializable(typeof(Dictionary<string, JsonElement>))]
-[JsonSerializable(typeof(List<JsonElement>))]
-internal partial class IpcBuiltInJsonContext : JsonSerializerContext
-{
 }

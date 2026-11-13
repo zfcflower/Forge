@@ -7,6 +7,8 @@ using Avalonia.Threading;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Appearance;
 
@@ -82,7 +84,7 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The catalog contract says it does not throw; a failing source must still leave an editable section.
-            Trace.WriteLine("[appearance] the font catalog failed: " + exception.Message);
+            AppLogs.Appearance.ZLogWarning($"the font catalog failed: {exception.Message}");
             families = [];
         }
 
@@ -355,7 +357,7 @@ internal sealed class FontGroupViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[appearance] unparsable font family: " + family + " (" + exception.Message + ")");
+            AppLogs.Appearance.ZLogWarning($"unparsable font family: {family} ({exception.Message})");
             return FontFamily.Default;
         }
     }

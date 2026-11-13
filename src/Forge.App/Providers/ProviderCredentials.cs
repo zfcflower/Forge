@@ -1,3 +1,6 @@
+using Forge.App.Logging;
+using ZLogger;
+
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -1167,7 +1170,7 @@ internal sealed class CredentialedChatProvider : IChatProvider
                 break;
         }
 
-        Trace.TraceWarning("[providers] authentication failed; the credential will be refreshed on the next attempt");
+        AppLogs.Providers.ZLogWarning($"authentication failed; the credential will be refreshed on the next attempt");
     }
 
     private static bool IsAuthFailure(ProviderException exception) => exception.StatusCode is 401 or 403;

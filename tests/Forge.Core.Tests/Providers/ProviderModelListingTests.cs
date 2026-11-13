@@ -27,6 +27,43 @@ public class ProviderModelListingTests
     }
 
     [Fact]
+    public void The_anthropic_listing_hangs_off_its_version_segment_and_asks_for_one_page()
+    {
+        // Its messages path is {base}/v1/messages, so the base carries no version of its own; the listing lives under the
+        // same segment and defaults to 20 rows a page, hence the explicit limit.
+        var (root, query) = ProviderModelListing.ListRequest(ProviderProtocol.Anthropic, "https://api.anthropic.com/");
+
+        Assert.Equal("https://api.anthropic.com/v1", root);
+        Assert.Equal("limit=1000", query);
+        Assert.Equal(
+            "https://api.anthropic.com/v1",
+            ProviderModelListing.ListRequest(ProviderProtocol.Anthropic, "https://api.anthropic.com/v1").Root);
+    }
+
+    [Fact]
+    public void Every_other_protocol_lists_at_its_own_base_without_a_query()
+    {
+        var (root, query) = ProviderModelListing.ListRequest(
+            ProviderProtocol.OpenAiCompatible, "https://ai.example.test/v1");
+
+        Assert.Equal("https://ai.example.test/v1", root);
+        Assert.Null(query);
+    }
+
+    [Fact]
+    public async Task The_query_string_lands_on_the_listing_url()
+    {
+        var handler = new FakeHttpMessageHandler().EnqueueStatus(
+            HttpStatusCode.OK, """{"data":[{"id":"claude-opus-5-5"}]}""");
+
+        var models = await ProviderModelListing.FetchAsync(
+            "https://api.anthropic.com/v1", null, handler.CreateClient(), CancellationToken.None, "limit=1000");
+
+        Assert.Equal(["claude-opus-5-5"], models.Ids);
+        Assert.Equal("https://api.anthropic.com/v1/models?limit=1000", handler.Last.Uri.ToString());
+    }
+
+    [Fact]
     public async Task Scales_reported_per_token_prices_to_one_million_tokens()
     {
         var handler = new FakeHttpMessageHandler().EnqueueStatus(

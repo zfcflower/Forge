@@ -24,7 +24,7 @@ public class PromptComposerTests
         Assert.True(project < role);
         // PromptLayers.System is the whole system layer: it replaces the built-in text instead of extending it.
         Assert.DoesNotContain(BuiltInPrompts.System, prompt.StablePrefix, StringComparison.Ordinal);
-        Assert.DoesNotContain("You are Forge", prompt.StablePrefix, StringComparison.Ordinal);
+        Assert.DoesNotContain("You are a coding agent", prompt.StablePrefix, StringComparison.Ordinal);
         Assert.StartsWith(PromptComposer.SystemHeading + "\n\nProject-specific system text.\n\n", prompt.StablePrefix, StringComparison.Ordinal);
         Assert.EndsWith("Role text.", prompt.StablePrefix, StringComparison.Ordinal);
     }
@@ -40,6 +40,16 @@ public class PromptComposerTests
     }
 
     [Fact]
+    public void The_two_built_in_system_texts_differ_only_in_who_they_say_is_asking()
+    {
+        // The claim decides which one is used; if they drifted apart in more than that name, a user toggling the claim would
+        // silently change the agent's rules as well.
+        Assert.StartsWith("You are a coding agent", BuiltInPrompts.System, StringComparison.Ordinal);
+        Assert.StartsWith("You are Forge, a coding agent", BuiltInPrompts.SystemNamed, StringComparison.Ordinal);
+        Assert.Equal(BuiltInPrompts.System, BuiltInPrompts.SystemNamed.Replace("Forge, ", string.Empty, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void The_built_in_text_passed_as_the_system_layer_is_not_doubled()
     {
         var composer = new PromptComposer();
@@ -47,7 +57,7 @@ public class PromptComposerTests
         var explicitBuiltIn = composer.Compose(new PromptInput(new PromptLayers(BuiltInPrompts.System, null, null), null, null));
         var blank = composer.Compose(new PromptInput(new PromptLayers("", null, null), null, null));
 
-        Assert.Equal(1, CountOf(explicitBuiltIn.StablePrefix, "You are Forge"));
+        Assert.Equal(1, CountOf(explicitBuiltIn.StablePrefix, "You are a coding agent"));
         Assert.Equal(blank.StablePrefix, explicitBuiltIn.StablePrefix);
     }
 
@@ -108,7 +118,7 @@ public class PromptComposerTests
         Assert.Equal(bare.StablePrefix, bareWithNewlines.StablePrefix);
         Assert.StartsWith(PromptComposer.SystemHeading, bare.StablePrefix, StringComparison.Ordinal);
         Assert.StartsWith(PromptComposer.SystemHeading + "\n\n", bare.StablePrefix, StringComparison.Ordinal);
-        Assert.Contains("You are Forge", bare.StablePrefix, StringComparison.Ordinal);
+        Assert.Contains("You are a coding agent", bare.StablePrefix, StringComparison.Ordinal);
     }
 
     [Fact]

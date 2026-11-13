@@ -264,6 +264,72 @@ public sealed class ModelCatalogRefreshTests : IDisposable
         new AutomationDefinition(BuiltInAutomations.ModelCatalogRefresh, BuiltInAutomations.ModelCatalogRefresh));
 
     /// <summary>Answers the catalog and the provider list by URI, and records what was asked (including validators).</summary>
+    /// <summary>
+    /// A signed-in Claude provider lists the account's models instead of keeping its three seeds: the request goes to the
+    /// versioned endpoint the messages path uses (with the page size that returns the whole catalogue), carries the
+    /// account's own token, and what comes back is what the model menu then offers.
+    /// </summary>
+    [Fact]
+    public async Task A_claude_login_lists_the_accounts_models_through_the_versioned_endpoint()
+    {
+        var directory = TestTempFiles.NewDirectory("forge-claude-listing-");
+        try
+        {
+            var data = Path.Combine(directory, "data");
+            Directory.CreateDirectory(data);
+            var credentials = Path.Combine(directory, "claude-credentials.json");
+            var expiresAt = DateTimeOffset.UtcNow.AddYears(1).ToUnixTimeMilliseconds();
+            File.WriteAllText(
+                credentials,
+                $$$"""
+                {"claudeAiOauth":{"accessToken":"test-claude-token","expiresAt":{{{expiresAt}}}}}
+                """);
+            var settings = Path.Combine(directory, "settings.json");
+            File.WriteAllText(
+                settings,
+                """
+                {
+                  "providers": {
+                    "version": 1,
+                    "defaultId": "claude",
+                    "items": [
+                      {
+                        "id": "claude",
+                        "preset": "anthropic",
+                        "name": "Claude",
+                        "protocol": "anthropic",
+                        "baseUrl": "https://api.anthropic.com",
+                        "auth": { "kind": "claude-subscription" },
+                        "models": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+                        "defaultModel": "claude-opus-5-5"
+                      }
+                    ]
+                  }
+                }
+                """);
+            handler.Models(
+                """{"data":[{"id":"claude-fable-5-2"},{"id":"claude-opus-5-5"},{"id":"claude-haiku-5-5"}],"has_more":false}""");
+            var services = new ProviderServices(
+                settings, data, http, claudeCredentialsPath: credentials);
+            var provider = Assert.Single(services.Catalog.Providers);
+
+            var list = await services.RefreshModelsAsync(provider);
+
+            Assert.Equal(["claude-fable-5-2", "claude-opus-5-5", "claude-haiku-5-5"], list.Ids);
+            var request = handler.Requests[^1];
+            Assert.Equal("https://api.anthropic.com/v1/models?limit=1000", request.AbsoluteUri);
+            Assert.Equal("Bearer test-claude-token", request.Authorization);
+
+            // The menu offers what the account serves; the stored default stays the one the provider was saved with.
+            Assert.Equal(["claude-fable-5-2", "claude-opus-5-5", "claude-haiku-5-5"], provider.Models);
+            Assert.Equal("claude-opus-5-5", provider.DefaultModel);
+        }
+        finally
+        {
+            TestTempFiles.DeleteQuietly(directory);
+        }
+    }
+
     private sealed class ScriptedHandler : HttpMessageHandler
     {
         private Func<HttpResponseMessage> catalog = () => new(HttpStatusCode.NotFound);
@@ -305,7 +371,8 @@ public sealed class ModelCatalogRefreshTests : IDisposable
             var uri = request.RequestUri!;
             Requests.Add(new Recorded(
                 uri,
-                request.Headers.TryGetValues("If-None-Match", out var values) ? string.Join(",", values) : null));
+                request.Headers.TryGetValues("If-None-Match", out var values) ? string.Join(",", values) : null,
+                request.Headers.Authorization?.ToString()));
             if (uri.AbsolutePath.EndsWith("/models", StringComparison.Ordinal))
             {
                 return models is null ? new HttpResponseMessage(HttpStatusCode.NotFound) : models();
@@ -320,7 +387,7 @@ public sealed class ModelCatalogRefreshTests : IDisposable
             return catalog();
         }
 
-        public sealed record Recorded(Uri Uri, string? IfNoneMatch)
+        public sealed record Recorded(Uri Uri, string? IfNoneMatch, string? Authorization)
         {
             public string AbsoluteUri => Uri.AbsoluteUri;
         }

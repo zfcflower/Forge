@@ -14,7 +14,7 @@ depends-on: [forge-ipc]
 
 ## 边界
 
-- 只依赖 Abstractions、Ipc、Plugin.Sdk;AOT 兼容(源生成 JSON,无反射序列化)。不引用 Roslyn、ExtensionHost。
+- 只依赖 Abstractions、Ipc、Ipc.Protocol、Plugin.Sdk;AOT 兼容(MessagePack 源生成格式化器,无反射序列化)。线上负载即 `Forge.Ipc.Protocol` 与 SDK 的类型,本模块不另定义线上 DTO;工具参数文本只转换一次为 UTF-8 字节(`ToolArguments`,`Utf8JsonReader` 校验,不建 DOM)。不引用 Roslyn、ExtensionHost。
 - 提供 `ITool` 代理(`ExtensionHostTool`)、命令代理(`ExtensionHostCommand`);参数在本地校验,无效参数不发 IPC。
 - 不读审批数据库,也不携带 SQLite 依赖:插件状态与待审批信息一律经 `plugins.status` 查询。
 - 无论 Host 由本进程启动还是外部已在运行,绑定/上下文规则完全一致:谁启动 Host 不影响信任判断。
@@ -23,7 +23,8 @@ depends-on: [forge-ipc]
 
 - **回传调用必须绑定在途调用(fail-closed)。** Host 转来的 `host.tool_call` 必须是 `{runId, pluginId, name, args}`。
   缺 `runId`、空白 `runId` 或只有旧字段(`sessionId`/`workingDir`/`depth`)的**无绑定旧式调用直接拒绝**,不再执行:
-  这是协议不匹配,不是兼容路径。`runId` 必须命中本连接世代仍在途的私有 pending 记录,且记录的 plugin 身份必须与
+  这是协议不匹配,不是兼容路径。缺 `runId` 由解码拒绝(线上对非空成员上的 nil 与短数组都抛),因此代码里只剩空白
+  `runId`、空白 `pluginId`、空白 `name` 三条显式检查,没有“未绑定”这一独立分支。`runId` 必须命中本连接世代仍在途的私有 pending 记录,且记录的 plugin 身份必须与
   `pluginId` 相等(`$run_code` 为脚本保留身份),否则在 resolver 与审批之前拒绝。会话、工作目录、深度、插件链
   **只取 pending 记录**(发起调用时的 `ToolContext` 与可信链),Worker 自报的 `sessionId`/`workingDir`/`depth`
   一律忽略。未知、已结束、已取消、已超时或重放(运行已结束后再次出现)的 run 一律无效。旧的
@@ -154,24 +155,19 @@ depends-on: [forge-ipc]
   `IpcConnectionClosedException`),调用方的取消原样以 `OperationCanceledException` 传播;请求预算到期会被转成
   `IpcTimeoutException`,先记一条诊断再抛出;应答无法解码时先记诊断,再抛出携带操作名与具体问题的
   `InvalidDataException`。三者调用方都必须理解为“未知”,而不是“没有插件”。只有真正解码成功、Host 明确报告
-  `{"plugins":[]}` 的应答才返回空列表。
+  空 `Plugins` 列表的应答才返回空列表。
 - **状态逐行校验,任一行无效则整份应答无效。** `plugins` 的每一项都单独校验,不合格的那一行不会像旧实现那样被
-  静默跳过(那会把“Host 报告损坏条目”伪装成“插件更少”):数组项不是 JSON 对象、`pluginId` 缺失或空白、`status`
-  缺失或空白、`permissions` 不是数组/含未定义 `PermissionKind`/scope 空白、以及非 `invalid` 行缺 `version`、
+  静默跳过(那会把“Host 报告损坏条目”伪装成“插件更少”):列表项为 nil、`pluginId` 空白、`status`
+  空白、`permissions` 不是数组/含未定义 `PermissionKind`/scope 空白、以及非 `invalid` 行缺 `version`、
   `sourceHash`、`dependencyHash` 或 `sdkVersion` 都会拒绝**整个**应答。问题文本带数组下标(`plugins[3]`),已知身份时
   再带 `'(pluginId)'`,所以调用方与服务日志能定位到坏行。`status` 为 `invalid`(无内容、无可审批项)的行不要求
   version/哈希/SDK 版本非空,否则“为什么跑不起来”这唯一一行会被反过来判成不可读。`status` 只要求是非空 token、
   按原值透传:已文档化的 `draft`/`approved`/`disabled`/`uninstalled`/`invalid` 全数接受,Host 以后新增状态也不会让
   整份注册表变成“未知”。
-- **`invalid` 行缺元数据不等于公开记录带 `null`。** `invalid` 行允许没有 `version`/`sourceHash`/`dependencyHash`/
-  `sdkVersion`(线上仍是可选字段,合法的无内容插件就是这样报的),但 STJ 用构造器绑定缺失的非空 `string` 参数会写进
-  `null`,而 `PluginStatusInfo` 的这四个属性声明为不可空 `string`。所以行校验通过后按 `with` 记录归一:只有 `null` 变
-  `string.Empty`,Host 已给的值(含空串)原样保留,`pluginId`/`status`/`permissions`/`error` 不动。缺元数据的 `invalid`
-  行照旧作为一行返回(带 `error`),不会变成“没有这一行”,也不会被映射成 `approved` 之类的已知状态。
-- **权限按原始 JSON 与解码结果同时校验。** 缺 `kind` 的权限对象会被绑定成枚举默认值 `ReadFile`,只看解码结果会把它
-  当成一条合法权限;所以逐项比对 `permissions` 数组与解码出的列表,长度/形状不符或 `kind` 未定义都判该行不可用。
-  同一条校验也用于暂存草稿的 `permissions`(见下一条),`plugins.status` 与 `extensions.commit` 内嵌的 `status`
-  共用同一份行校验(标签区分 `plugins[i]` 与 `status`):规则只有一处,消息仍带坏行下标与已知身份。
+- **解码即形状校验。** MessagePack 解码拒绝非可空成员上的 nil 与类型不符的字段,这类应答整份以“无法解码”
+  拒绝(不再逐字段命名);之后的逐行规则只检查解码器不管的内容:空白字符串、nil 列表项、未定义的 `PermissionKind`
+  与空白 scope。`invalid` 行的 `version`/哈希/`sdkVersion` 可为空串。`plugins.status` 与 `extensions.commit` 内嵌的
+  `status` 共用同一份行校验(标签区分 `plugins[i]` 与 `status`),规则只有一处,消息带坏行下标与已知身份。
 - **授权的扩展写入同样只读 IPC、逐项校验。** `IExtensionAuthoringClient` 的七个方法先做本地参数校验——空白
   id/version/哈希、未知 `kind`、`Files`/`Permissions`/`Dependencies` 为 null 或含 null 项都抛 `ArgumentException`
   且不发 IPC;`extensions.stage`/`extensions.commit` 可能在 Host 侧跑 Roslyn 编译,预算取 `RequestTimeout` 与
@@ -190,5 +186,5 @@ depends-on: [forge-ipc]
   - **输入**:`WriteAsync` 把输入切成 ≤ 64 KiB 的 `terminal.input` 通知并串行发送。
   - **退出与断连**:退出后,写入和缩放一律忽略,`HasForegroundProcessAsync` 返回 false。该查询会把业务错误与超时也当成 false(关闭确认宁可不拦)。连接断开(Host 崩溃、重连换代)时,`Output` 以 `IpcConnectionClosedException` 完成,`Exited` 也以它失败。
   - **释放**:`DisposeAsync` 发 `terminal.stop`,限时 5 秒;超时或失败时写一条带 terminalId 的诊断,本地照常收尾(`Exited` 为 -1),属于尽力而为:Host 侧这个终端要等断连才会被清理。
-- **已知限制:** `IIpcPeer` 仍只有每 peer 一个默认超时,`SendRequestAsync` 没有 per-call 超时重载;本客户端因此把 peer
+- **已知限制:** `IIpcPeer` 仍只有每 peer 一个默认超时,`RequestAsync` 没有 per-call 超时重载;本客户端因此把 peer
   默认超时设为无限、在 `SendAsync` 里为每次调用自建 deadline。若将来 Ipc 增加 per-call 超时,这里应改为直接使用它。

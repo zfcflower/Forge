@@ -7,6 +7,8 @@ using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.App.ViewModels;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Review;
 
@@ -433,7 +435,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         }
         catch (Exception exception) when (IsStoreFailure(exception))
         {
-            Trace.WriteLine("[review] operation failed: " + exception.Message);
+            AppLogs.Review.ZLogWarning($"operation failed: {exception.Message}");
             SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
             return false;
         }
@@ -522,7 +524,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         }
         catch (Exception exception) when (IsStoreFailure(exception))
         {
-            Trace.WriteLine("[review] loading drafts failed: " + exception.Message);
+            AppLogs.Review.ZLogWarning($"loading drafts failed: {exception.Message}");
             SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
         }
         finally
@@ -671,7 +673,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         }
         catch (Exception exception) when (IsStoreFailure(exception))
         {
-            Trace.WriteLine("[review] restoring drafts failed: " + exception.Message);
+            AppLogs.Review.ZLogWarning($"restoring drafts failed: {exception.Message}");
             SetMessage(new LocText(ReviewStrings.RestoreFailed, LocText.Literal(exception.Message)));
             return false;
         }
@@ -701,7 +703,7 @@ internal sealed class FileReviewController : IReviewSurface, IDisposable
         }
         catch (Exception exception)
         {
-            Trace.WriteLine("[review] background work failed: " + exception);
+            AppLogs.Review.ZLogError(exception, $"background work failed");
             SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
         }
     }

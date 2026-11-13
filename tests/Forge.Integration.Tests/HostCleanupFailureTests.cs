@@ -54,7 +54,7 @@ public sealed class HostCleanupFailureTests
                 $"the fake worker (pid {workerPid}) exited before the stop, so the load it stalls was never in flight. " +
                 Describe(host));
 
-            var queued = stalled.SendRequestAsync(
+            var queued = stalled.RequestAsync(
                 Sdk.ExtensionProtocol.PluginExecute,
                 PluginQueueBudgetWire.Execute(
                     host.Root, "gate", PluginQueueBudgetSources.MarkTool, new { marker = Path.Combine(host.Root, "ran.txt") },
@@ -92,7 +92,7 @@ public sealed class HostCleanupFailureTests
         {
             using var answer = CancellationTokenSource.CreateLinkedTokenSource(ct);
             answer.CancelAfter(BarrierLimit);
-            await peer.SendRequestAsync(Sdk.ExtensionProtocol.HostStop, PluginQueueBudgetWire.Empty(), answer.Token);
+            await peer.RequestAsync(Sdk.ExtensionProtocol.HostStop, IpcEmpty.Instance, answer.Token);
         }
         catch (IpcConnectionClosedException)
         {
@@ -134,7 +134,7 @@ public sealed class HostCleanupFailureTests
             using var bound = CancellationTokenSource.CreateLinkedTokenSource(ct);
             bound.CancelAfter(BarrierLimit);
             var message = await pending.WaitAsync(bound.Token);
-            Assert.Fail($"the call waiting on the stopped worker succeeded: {message.Result}");
+            Assert.Fail($"the call waiting on the stopped worker succeeded: '{message.Operation}' answered request {message.Id}.");
         }
         catch (Exception exception) when (exception is IpcConnectionClosedException or IpcRemoteException or IOException)
         {

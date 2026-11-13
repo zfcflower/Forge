@@ -42,6 +42,33 @@ public static class ProviderModelListing
     /// <summary>Model discovery runs off the turn's critical path; after this long the caller is better off with the seeds.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
 
+    /// <summary>
+    /// The page size asked of a protocol whose listing paginates by default. Anthropic answers twenty rows a page, so a
+    /// caller that does not say otherwise would silently lose every model past the twentieth.
+    /// </summary>
+    private const string WholeCatalogQuery = "limit=1000";
+
+    /// <summary>
+    /// Where one provider's model list is read from. A protocol whose message path carries a version segment lists under
+    /// that same segment — Anthropic's is <c>/v1/models</c>, and its base therefore carries no version of its own — and it
+    /// gets the whole catalogue in one page; every other protocol lists at its own base and answers unpaginated.
+    /// </summary>
+    /// <param name="protocol">The provider's wire protocol.</param>
+    /// <param name="baseUrl">The provider's API root, with or without a trailing slash.</param>
+    public static (string Root, string? Query) ListRequest(ProviderProtocol protocol, string baseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        var trimmed = baseUrl.Trim().TrimEnd('/');
+        if (protocol != ProviderProtocol.Anthropic)
+        {
+            return (trimmed, null);
+        }
+
+        // A hand-edited base that already ends with the version segment is not doubled.
+        var root = trimmed.EndsWith("/v1", StringComparison.Ordinal) ? trimmed : trimmed + "/v1";
+        return (root, WholeCatalogQuery);
+    }
+
     /// <summary>The one message the caller distinguishes from a transport failure, so it names the missing array.</summary>
     private const string MissingDataMessage = "The model list response must contain a 'data' array.";
 
@@ -51,13 +78,16 @@ public static class ProviderModelListing
     /// <c>{session}</c> is left out: a listing belongs to no session.</param>
     /// <param name="http">The client to use; its own timeout should be <see cref="Timeout.InfiniteTimeSpan"/> since the call enforces its own.</param>
     /// <param name="ct">Cancelling it cancels the call and is not reported as a timeout.</param>
+    /// <param name="query">Query string for the listing (already encoded, without the <c>?</c>); <c>null</c> asks for no
+    /// query at all. <see cref="ListRequest"/> says what each protocol needs.</param>
     /// <exception cref="TimeoutException">The call did not finish within twenty seconds; the caller may retry.</exception>
     /// <exception cref="JsonException">The body is not JSON or has no <c>data</c> array.</exception>
     public static async Task<ProviderModelList> FetchAsync(
         string baseUrl,
         IReadOnlyDictionary<string, string>? headers,
         HttpClient http,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? query = null)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(baseUrl);
@@ -68,7 +98,8 @@ public static class ProviderModelListing
             throw new ArgumentException("The base URL is empty.", nameof(baseUrl));
         }
 
-        using var message = new HttpRequestMessage(HttpMethod.Get, new Uri(trimmed + "/models", UriKind.Absolute));
+        var target = query is null ? trimmed + "/models" : trimmed + "/models?" + query;
+        using var message = new HttpRequestMessage(HttpMethod.Get, new Uri(target, UriKind.Absolute));
         if (headers is { Count: > 0 })
         {
             ProviderHeaders.Apply(message, headers, sessionId: null);

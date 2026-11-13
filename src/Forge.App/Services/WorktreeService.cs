@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Forge.App.Localization;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Services;
 
@@ -94,7 +96,7 @@ internal sealed class WorktreeService
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine($"[worktree] could not remove the unused worktree '{worktree.Path}': {exception.Message}");
+            AppLogs.Worktree.ZLogWarning($"could not remove the unused worktree '{worktree.Path}': {exception.Message}");
             return;
         }
 

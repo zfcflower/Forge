@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
@@ -64,26 +65,30 @@ internal static class Approvals
         ValueTask.FromResult(ApprovalDecision.Allow);
 }
 
-/// <summary>Answers the requests of <paramref name="operation"/> with <paramref name="resultJson"/>, so a case
+/// <summary>Answers the requests of <paramref name="operation"/> with <paramref name="result"/>, so a case
 /// declares only the payload it cares about.</summary>
 internal static class HostAnswers
 {
-    public static void Answer(this FakeHost host, string operation, string resultJson) =>
-        host.On(operation, (_, _) => Task.FromResult(Json.Element(resultJson)));
+    public static void Answer<T>(this FakeHost host, string operation, T result) =>
+        host.On(operation, (_, _) => Task.FromResult(result));
+
+    /// <summary>Answers with a raw MessagePack payload (empty: a success response without a payload).</summary>
+    public static void AnswerRaw(this FakeHost host, string operation, RawPayload payload) =>
+        host.On(operation, (_, _) => Task.FromResult(HostReply.Raw(payload)));
 }
 
 internal static class CommandFixtures
 {
-    /// <summary>Answers <c>plugin.command</c> with <paramref name="commandResultJson"/> and registers one command of
+    /// <summary>Answers <c>plugin.command</c> with <paramref name="commandResult"/> and registers one command of
     /// <paramref name="pluginId"/>; returns the proxy the client built for it.</summary>
     public static async Task<ExtensionHostCommand> RegisterCommandAsync(
-        FakeHost host, ExtensionHostClient client, string pluginId, string name, string? commandResultJson = null)
+        FakeHost host, ExtensionHostClient client, string pluginId, string name, Sdk.CommandOutput? commandResult = null)
     {
-        host.On("plugin.command", (_, _) => Task.FromResult(Json.Element(
-            commandResultJson ?? """{"output":"hello","promptToSend":"next","isError":false}""")));
-        await host.NotifyAndSyncAsync("contributions.register",
-            "{\"pluginId\":\"" + pluginId + "\",\"contributions\":{\"commands\":["
-            + "{\"name\":\"" + name + "\",\"description\":\"d\",\"argumentHint\":\"\"}]}}");
+        host.Answer(Sdk.ExtensionProtocol.PluginCommand, commandResult ?? new Sdk.CommandOutput("hello", "next", false));
+        await host.NotifyAndSyncAsync(
+            Sdk.ExtensionProtocol.ContributionsRegister,
+            HostWire.Contributions(
+                pluginId, new Sdk.PluginContributionSet { Commands = [new Sdk.CommandDeclaration(name, "d", "")] }));
         return (ExtensionHostCommand)client.Commands.Single(c => c.Definition.Name == name);
     }
 }

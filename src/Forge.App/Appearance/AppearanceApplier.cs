@@ -3,6 +3,8 @@ using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Forge.App.Preferences;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Appearance;
 
@@ -156,7 +158,7 @@ internal sealed class AppearanceApplier : IDisposable
         }
 
         rejected = text;
-        Trace.WriteLine($"[appearance] the {which} font family \"{text}\" {reason}; keeping the previous family.");
+        AppLogs.Appearance.ZLogWarning($"the {which} font family \"{text}\" {reason}; keeping the previous family.");
     }
 
     /// <summary>A chain of only empty segments ("," or " ") parses to a family with no name that nothing can render.</summary>

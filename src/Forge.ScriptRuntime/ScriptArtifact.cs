@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Forge.Scripting;
+using MessagePack;
 
 namespace Forge.ScriptRuntime;
 
@@ -24,9 +25,9 @@ public static class ScriptArtifact
     public const int FormatVersion = 1;
 
     /// <summary>
-    /// Upper bound on the PE image (assembly + embedded PDB). The base64 expansion (4/3) plus the JSON envelope must
-    /// stay under <c>Forge.Ipc.IpcProtocol.MaxFrameBytes</c> (16 MiB); the executor rejects a larger image before any
-    /// allocation. The arithmetic is asserted by <see cref="IsFrameWithinBounds"/>.
+    /// Upper bound on the PE image (assembly + embedded PDB). The image travels as MessagePack <c>bin</c>, so the whole
+    /// <c>executor.load</c> frame stays under <c>Forge.Ipc.IpcProtocol.MaxFrameBytes</c> (16 MiB); the arithmetic is
+    /// asserted by <see cref="IsFrameWithinBounds"/>.
     /// </summary>
     public const int MaxAssemblyBytes = 8 * 1024 * 1024;
 
@@ -39,14 +40,11 @@ public static class ScriptArtifact
     /// <summary>The entry point method name the compiler emits.</summary>
     public const string DefaultEntryPointMethod = "Run";
 
-    /// <summary>Every base64 character the largest image can produce (<c>4 * ceil(n / 3)</c>).</summary>
-    public const int MaxEncodedAssemblyChars = ((MaxAssemblyBytes + 2) / 3) * 4;
-
     /// <summary>
-    /// What the largest possible <c>executor.load</c> frame costs: the base64 image plus the descriptor bound plus room
-    /// for the JSON envelope (property names, quotes, escaping of the four field names).
+    /// What the largest possible <c>executor.load</c> frame costs: the image plus the descriptor bound (UTF-8, at most
+    /// three bytes per char) plus room for the frame header and MessagePack framing.
     /// </summary>
-    public const int MaxLoadFrameBytes = MaxEncodedAssemblyChars + MaxDescriptorChars + 4096;
+    public const int MaxLoadFrameBytes = MaxAssemblyBytes + (MaxDescriptorChars * 3) + 4096;
 
     /// <summary>True when even the largest legal load frame fits the Ipc limit it is sent under.</summary>
     public static bool IsFrameWithinBounds(int maxFrameBytes) => MaxLoadFrameBytes < maxFrameBytes;
@@ -78,46 +76,16 @@ public static class ScriptArtifact
     /// <summary>Hex SHA-256 of one image; the value the descriptor carries as <c>PeSha256</c>.</summary>
     public static string Sha256(ReadOnlySpan<byte> image) => Convert.ToHexStringLower(SHA256.HashData(image));
 
-    /// <summary>Base64 of one image, refused before encoding when it exceeds <see cref="MaxAssemblyBytes"/>.</summary>
-    public static string Encode(ReadOnlySpan<byte> image)
+    /// <summary>Refuses an image larger than <see cref="MaxAssemblyBytes"/>; both ends call it before sending or
+    /// loading.</summary>
+    public static void EnsureImageWithinBounds(int length)
     {
-        if (image.Length > MaxAssemblyBytes)
+        if (length > MaxAssemblyBytes)
         {
             throw new ScriptArtifactException(
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"The script image is {image.Length} bytes; the limit is {MaxAssemblyBytes}."));
-        }
-
-        return Convert.ToBase64String(image);
-    }
-
-    /// <summary>
-    /// Decodes the base64 image of an <c>executor.load</c> request. The encoded length is checked against the bound
-    /// <em>before</em> the decoded array is allocated, so a hostile length cannot make the executor allocate.
-    /// </summary>
-    public static byte[] Decode(string? encoded)
-    {
-        if (encoded is null)
-        {
-            throw new ScriptArtifactException("The executor.load request carries no image.");
-        }
-
-        if (encoded.Length > MaxEncodedAssemblyChars)
-        {
-            throw new ScriptArtifactException(
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"The encoded script image is {encoded.Length} chars; the limit is {MaxEncodedAssemblyChars}."));
-        }
-
-        try
-        {
-            return Convert.FromBase64String(encoded);
-        }
-        catch (FormatException ex)
-        {
-            throw new ScriptArtifactException($"The encoded script image is not valid base64: {ex.Message}");
+                    $"The script image is {length} bytes; the limit is {MaxAssemblyBytes}."));
         }
     }
 
@@ -281,17 +249,18 @@ public static class ScriptArtifact
 /// re-checked by the executor before the bytes are loaded, so a truncated, corrupted, or wrong-runtime image is refused
 /// without ever being loaded.
 /// </summary>
-public sealed record ScriptArtifactDescriptor(
-    string AssemblyName,
-    string SourceHash,
-    string CacheKey,
-    string ContractVersion,
-    string RuntimeVersion,
-    string EntryPointType,
-    string EntryPointMethod,
-    string GlobalsMvid,
-    string PeSha256,
-    int PeLength);
+[MessagePackObject]
+public sealed partial record ScriptArtifactDescriptor(
+    [property: Key(0)] string AssemblyName,
+    [property: Key(1)] string SourceHash,
+    [property: Key(2)] string CacheKey,
+    [property: Key(3)] string ContractVersion,
+    [property: Key(4)] string RuntimeVersion,
+    [property: Key(5)] string EntryPointType,
+    [property: Key(6)] string EntryPointMethod,
+    [property: Key(7)] string GlobalsMvid,
+    [property: Key(8)] string PeSha256,
+    [property: Key(9)] int PeLength);
 
 /// <summary>The executor refused an artifact: a size bound, a length/hash mismatch, a wrong runtime or a wrong globals
 /// surface. No image was loaded and no script code ran.</summary>

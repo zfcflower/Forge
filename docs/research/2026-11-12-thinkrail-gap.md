@@ -2,6 +2,8 @@
 
 日期:2026-11-12
 
+> **已被 [2026-11-13-thinkrail-gap-plan.md](2026-11-13-thinkrail-gap-plan.md) 取代**:#4、#5、#8、#12 的状态已过时,以新文档的核查表为准;本文保留作历史。
+
 ## 方法与可信度
 
 - ThinkRail 侧:从本机安装包(`%LOCALAPPDATA%/ai.thinkrail.app/stable/app/Resources/app/views/web/assets/*.js`)抽出约 3000 个界面文案键,按前缀归成约 60 个功能区。文案键只说明"有这个界面",不说明实现深度。

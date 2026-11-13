@@ -5,6 +5,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.Core.Tools;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -183,7 +185,7 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The dispatcher went away while the card was being formatted (application shutdown): nothing to show.
-            Trace.WriteLine("[approval] the arguments could not be shown: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"the arguments could not be shown: {exception.Message}");
         }
     }
 

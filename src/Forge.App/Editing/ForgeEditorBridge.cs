@@ -11,6 +11,8 @@ using Forge.App.ViewModels;
 using TextMateSharp.Grammars;
 using EditorDocument = AvaloniaEdit.Document.TextDocument;
 using TextMateInstallation = AvaloniaEdit.TextMate.TextMate.Installation;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Editing;
 
@@ -308,7 +310,7 @@ internal sealed class ForgeEditorBridge : IDisposable
 
     private void ReportHighlightFailure(Exception exception)
     {
-        System.Diagnostics.Trace.WriteLine("[editor] highlighting failed: " + exception);
+        AppLogs.Editor.ZLogError(exception, $"highlighting failed");
         if (!disposed)
         {
             model.ReportEditorNotice(new LocText(InspectorStrings.FilesEditorHighlightFailed, LocText.Literal(exception.Message)));

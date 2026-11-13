@@ -6,39 +6,35 @@ using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
-/// <summary>Wire payloads of the authoring surface: <c>extensions.stage</c> (camelCase keys, <c>files</c> as a
-/// dictionary, <c>permissions</c> as numeric enums, <c>dependencies</c>, <c>tool.inputSchemaJson</c>),
-/// <c>extensions.commit</c>, <c>extensions.discard</c> (<c>{"pluginId":…}</c>),
-/// <c>plugin.disable</c>/<c>plugin.enable</c>/<c>plugin.delete</c> (<c>{"pluginId","version"}</c>) and
-/// <c>extensions.pending</c> (<c>{}</c>). Plus local argument validation: invalid arguments throw
+/// <summary>Wire payloads of the authoring surface: <c>extensions.stage</c> (<see cref="Sdk.ExtensionStageRequest"/>
+/// with its files dictionary, permissions, dependencies and tool), <c>extensions.commit</c>
+/// (<see cref="Sdk.ExtensionCommitRequest"/>), <c>extensions.discard</c> (<see cref="Sdk.ExtensionIdRequest"/>),
+/// <c>plugin.disable</c>/<c>plugin.enable</c>/<c>plugin.delete</c> (<see cref="Sdk.PluginVersionRequest"/>) and
+/// <c>extensions.pending</c> (<see cref="IpcEmpty"/>). Plus local argument validation: invalid arguments throw
 /// <see cref="ArgumentException"/>/<see cref="ArgumentNullException"/> before anything reaches the wire.</summary>
 public sealed class ExtensionAuthoringPayloadTests
 {
     [Fact]
-    public async Task Stage_sends_camelCase_files_dictionary_permissions_enum_dependencies_and_tool()
+    public async Task Stage_sends_files_dictionary_permissions_dependencies_and_tool()
     {
         await using var host = new FakeHost();
-        host.Answer(Sdk.ExtensionProtocol.ExtensionsStage, ValidStagedJson);
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsStage, ValidStaged);
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(ValidStageRequest(), limit.Token);
 
-        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsStage)).Arguments!.Value;
-        Assert.Equal("demo", sent.GetProperty("pluginId").GetString());
-        Assert.Equal("1.0.0", sent.GetProperty("version").GetString());
-        Assert.Equal("plugin", sent.GetProperty("kind").GetString());
-        Assert.Equal("// code", sent.GetProperty("files").GetProperty("Plugin.cs").GetString());
-        var permission = Assert.Single(sent.GetProperty("permissions").EnumerateArray());
-        Assert.Equal((int)Sdk.PermissionKind.ExecuteCommand, permission.GetProperty("kind").GetInt32());
-        Assert.Equal("review", permission.GetProperty("scope").GetString());
-        var dependency = Assert.Single(sent.GetProperty("dependencies").EnumerateArray());
-        Assert.Equal("Dep", dependency.GetProperty("name").GetString());
-        Assert.Equal("1.0.0", dependency.GetProperty("version").GetString());
-        var tool = sent.GetProperty("tool");
-        Assert.Equal("demo-tool", tool.GetProperty("name").GetString());
-        Assert.Equal("Does demo.", tool.GetProperty("description").GetString());
-        Assert.Equal("{\"type\":\"object\"}", tool.GetProperty("inputSchemaJson").GetString());
+        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsStage))
+            .Read<Sdk.ExtensionStageRequest>();
+        Assert.Equal("demo", sent.PluginId);
+        Assert.Equal("1.0.0", sent.Version);
+        Assert.Equal("plugin", sent.Kind);
+        var sentFile = Assert.Single(sent.Files);
+        Assert.Equal("Plugin.cs", sentFile.Key);
+        Assert.Equal("// code", sentFile.Value);
+        Assert.Equal(new Sdk.Permission(Sdk.PermissionKind.ExecuteCommand, "review"), Assert.Single(sent.Permissions));
+        Assert.Equal(new Sdk.ExtensionDependency("Dep", "1.0.0"), Assert.Single(sent.Dependencies));
+        Assert.Equal(new Sdk.ExtensionToolSpec("demo-tool", "Does demo.", "{\"type\":\"object\"}"), sent.Tool);
 
         Assert.Equal("demo", staged.PluginId);
         Assert.Equal("1.0.0", staged.Version);
@@ -60,16 +56,16 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Stage_sends_workflow_kind_verbatim()
     {
         await using var host = new FakeHost();
-        host.Answer(Sdk.ExtensionProtocol.ExtensionsStage,
-            ValidStagedJson.Replace("\"kind\":\"plugin\"", "\"kind\":\"workflow\""));
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsStage, ValidStaged with { Kind = Sdk.ExtensionKinds.Workflow });
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var staged = await client.StageExtensionAsync(
             ValidStageRequest() with { Kind = Sdk.ExtensionKinds.Workflow }, limit.Token);
 
-        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsStage)).Arguments!.Value;
-        Assert.Equal("workflow", sent.GetProperty("kind").GetString());
+        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsStage))
+            .Read<Sdk.ExtensionStageRequest>();
+        Assert.Equal("workflow", sent.Kind);
         Assert.Equal("workflow", staged.Kind);
     }
 
@@ -77,19 +73,15 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Commit_sends_hashes_and_decodes_status_with_tool_names()
     {
         await using var host = new FakeHost();
-        host.Answer(Sdk.ExtensionProtocol.ExtensionsCommit, ValidCommitJson);
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsCommit, ValidCommit);
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var result = await client.CommitExtensionAsync(
             new Sdk.ExtensionCommitRequest("demo", "s", "d", "sdk-1"), limit.Token);
 
-        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsCommit)).Arguments!.Value;
-        Assert.Equal("demo", sent.GetProperty("pluginId").GetString());
-        Assert.Equal("s", sent.GetProperty("sourceHash").GetString());
-        Assert.Equal("d", sent.GetProperty("dependencyHash").GetString());
-        Assert.Equal("sdk-1", sent.GetProperty("sdkVersion").GetString());
-        Assert.Equal(4, sent.EnumerateObject().Count());
+        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsCommit));
+        Assert.Equal(new Sdk.ExtensionCommitRequest("demo", "s", "d", "sdk-1"), sent.Read<Sdk.ExtensionCommitRequest>());
 
         Assert.Equal("demo", result.Status.PluginId);
         Assert.Equal("approved", result.Status.Status);
@@ -101,15 +93,14 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Discard_sends_only_the_plugin_id()
     {
         await using var host = new FakeHost();
-        host.Answer(Sdk.ExtensionProtocol.ExtensionsDiscard, "{}");
+        host.Answer(Sdk.ExtensionProtocol.ExtensionsDiscard, IpcEmpty.Instance);
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         await client.DiscardExtensionAsync("demo", limit.Token);
 
-        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsDiscard)).Arguments!.Value;
-        Assert.Equal("demo", sent.GetProperty("pluginId").GetString());
-        Assert.Equal("{\"pluginId\":\"demo\"}", sent.GetRawText());
+        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsDiscard));
+        Assert.Equal(new Sdk.ExtensionIdRequest("demo"), sent.Read<Sdk.ExtensionIdRequest>());
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
@@ -120,7 +111,7 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Plugin_version_calls_send_plugin_id_and_version(string operation)
     {
         await using var host = new FakeHost();
-        host.Answer(operation, "{}");
+        host.Answer(operation, IpcEmpty.Instance);
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
@@ -132,27 +123,24 @@ public sealed class ExtensionAuthoringPayloadTests
         };
         await call;
 
-        var sent = Assert.Single(host.Requests(operation)).Arguments!.Value;
-        Assert.Equal("demo", sent.GetProperty("pluginId").GetString());
-        Assert.Equal("1.0.0", sent.GetProperty("version").GetString());
-        Assert.Equal(2, sent.EnumerateObject().Count());
+        var sent = Assert.Single(host.Requests(operation));
+        Assert.Equal(new Sdk.PluginVersionRequest("demo", "1.0.0"), sent.Read<Sdk.PluginVersionRequest>());
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
     [Fact]
-    public async Task Pending_sends_an_empty_object_and_decodes_both_rows()
+    public async Task Pending_sends_an_empty_payload_and_decodes_both_rows()
     {
         await using var host = new FakeHost();
         host.Answer(Sdk.ExtensionProtocol.ExtensionsPending,
-            "{\"items\":[" + ValidStagedJson + "," +
-            ValidStagedJson.Replace("\"pluginId\":\"demo\"", "\"pluginId\":\"second\"") + "]}");
+            new Sdk.StagedExtensionList([ValidStaged, ValidStaged with { PluginId = "second" }]));
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 
         var pending = await client.GetPendingExtensionsAsync(limit.Token);
 
-        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsPending)).Arguments!.Value;
-        Assert.Equal("{}", sent.GetRawText());
+        var sent = Assert.Single(host.Requests(Sdk.ExtensionProtocol.ExtensionsPending));
+        Assert.Equal(IpcSerializer.Serialize(IpcEmpty.Instance), sent.Payload.ToArray());
         Assert.Equal(["demo", "second"], pending.Select(row => row.PluginId));
         Assert.All(pending, row => Assert.False(row.IsUpdate));
         Assert.Equal(HostStatus.Running, client.Status);

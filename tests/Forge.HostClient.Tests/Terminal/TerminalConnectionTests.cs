@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests.Terminal;
@@ -67,8 +68,8 @@ public sealed class TerminalConnectionTests
 
         // 新世代不受影响：建终端、收输出、拿退出码全流程正常。
         var fresh = await TerminalFixtures.StartSessionAsync(host, client, "t-new", limit.Token);
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson("t-new", 0, "hi"));
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson("t-new", 0));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output("t-new", 0, "hi"));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit("t-new", 0));
         await host.SyncAsync();
 
         var body = await TerminalFixtures.DrainAsync(fresh);
@@ -84,11 +85,11 @@ public sealed class TerminalConnectionTests
         using var limit = TestLimit.Create();
         var counter = 0;
         host.On(
-            TerminalOps.Start,
+            TerminalOperations.Start,
             (_, _) =>
             {
                 var id = "t-multi-" + Interlocked.Increment(ref counter);
-                return Task.FromResult(Json.Element(TerminalFixtures.StartResultJson(id)));
+                return Task.FromResult(TerminalFixtures.StartResult(id));
             });
 
         var sessions = new List<ITerminalSession>();

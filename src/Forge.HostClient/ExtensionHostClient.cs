@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient;
@@ -204,7 +204,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         try
         {
             response = await SendAsync(
-                    active, Sdk.ExtensionProtocol.PluginsStatus, IpcJsonTypes.EmptyObject, RequestBudget, ct)
+                    active, Sdk.ExtensionProtocol.PluginsStatus, IpcEmpty.Instance, RequestBudget, ct)
                 .ConfigureAwait(false);
         }
         catch (IpcTimeoutException ex)
@@ -213,7 +213,9 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
             throw;
         }
 
-        if (!HostProtocolJson.TryReadPluginStatuses(response.Result, out var statuses, out var problem))
+        IReadOnlyList<Sdk.PluginStatusInfo> statuses = [];
+        if (!HostAnswerRules.TryRead<Sdk.PluginStatusResponse>(response, out var decoded, out var problem) ||
+            !HostAnswerRules.TryReadPluginStatuses(decoded, out statuses, out problem))
         {
             Diagnose("plugins.status returned unusable data: " + problem);
             throw new InvalidDataException(
@@ -296,12 +298,11 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 contributor.ContributorId,
                 WireContext(run!, origin),
                 WireTimeoutMilliseconds);
-            var payload = HostProtocolJson.SerializePromptExecute(request);
             IpcMessage response;
             try
             {
                 response = await SendAsync(
-                        active, Sdk.ExtensionProtocol.PluginPrompt, payload, RequestBudget, run.Token)
+                        active, Sdk.ExtensionProtocol.PluginPrompt, request, RequestBudget, run.Token)
                     .ConfigureAwait(false);
             }
             catch (IpcRemoteException ex)
@@ -325,9 +326,9 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 return null;
             }
 
-            if (!HostProtocolJson.TryReadPromptOutput(response.Result, out var output, out var problem))
+            if (!HostAnswerRules.TryRead<Sdk.PromptOutput>(response, out var output, out var detail))
             {
-                Diagnose("plugin.prompt returned unusable data: " + problem);
+                Diagnose($"plugin.prompt returned unusable data: The Extension Host returned no prompt result. ({detail})");
                 return null;
             }
 
@@ -448,7 +449,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
     public async Task RefreshPluginsAsync(CancellationToken ct)
     {
         var active = RequireRunning();
-        await SendAsync(active, Sdk.ExtensionProtocol.PluginsRefresh, IpcJsonTypes.EmptyObject, RequestBudget, ct)
+        await SendAsync(active, Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, RequestBudget, ct)
             .ConfigureAwait(false);
     }
 
@@ -458,8 +459,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         var active = RequireRunning();
-        var payload = HostProtocolJson.SerializeApprove(
-            pluginId, version, sourceHash, dependencyHash, sdkVersion);
+        var payload = new PluginApproveRequest(pluginId, version, sourceHash, dependencyHash, sdkVersion);
         await SendAsync(active, Sdk.ExtensionProtocol.PluginApprove, payload, RequestBudget, ct)
             .ConfigureAwait(false);
     }
@@ -469,7 +469,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         var active = RequireRunning();
-        var payload = HostProtocolJson.SerializeRevoke(pluginId, version);
+        var payload = new Sdk.PluginVersionRequest(pluginId, version);
         await SendAsync(active, Sdk.ExtensionProtocol.PluginRevoke, payload, RequestBudget, ct).ConfigureAwait(false);
     }
 
@@ -511,7 +511,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(context);
         var active = RequireRunning();
-        if (!HostProtocolJson.TryParseArguments(call.ArgumentsJson, out var arguments))
+        if (!ToolArguments.TryGetUtf8(call.ArgumentsJson, out var arguments))
         {
             return new ToolResult(
                 $"The arguments of '{toolName}' are not valid JSON: {call.ArgumentsJson}", IsError: true);
@@ -554,16 +554,8 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
 
         try
         {
-            var toolContext = WireContext(run!, origin);
-            var payload = HostProtocolJson.SerializePluginExecute(
-                pluginId,
-                toolName,
-                arguments,
-                run.Context.SessionId,
-                run.Context.WorkingDirectory,
-                run.Depth,
-                toolContext,
-                WireTimeoutMilliseconds);
+            var payload = new PluginExecuteRequest(
+                pluginId, toolName, arguments, WireContext(run!, origin), WireTimeoutMilliseconds);
             IpcMessage response;
             try
             {
@@ -582,12 +574,17 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     IsError: true);
             }
 
-            if (!HostProtocolJson.TryReadToolOutput(response.Result, out var content, out var isError))
+            if (!response.HasPayload)
             {
-                return new ToolResult(content, IsError: true);
+                return new ToolResult("The Extension Host returned no tool result.", IsError: true);
             }
 
-            return new ToolResult(content, IsError: isError);
+            if (!HostAnswerRules.TryRead<Sdk.ToolResult>(response, out var output, out _))
+            {
+                return new ToolResult("The Extension Host returned a tool result that cannot be decoded.", IsError: true);
+            }
+
+            return new ToolResult(output.Content ?? string.Empty, IsError: output.IsError);
         }
         finally
         {
@@ -653,12 +650,11 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 milliseconds,
                 declarations,
                 execution);
-            var payload = HostProtocolJson.SerializeCodeExecute(request);
             IpcMessage response;
             try
             {
                 response = await SendAsync(
-                        active, Sdk.ExtensionProtocol.CodeExecute, payload, timeout, run.Token)
+                        active, Sdk.ExtensionProtocol.CodeExecute, request, timeout, run.Token)
                     .ConfigureAwait(false);
             }
             catch (IpcRemoteException ex)
@@ -672,13 +668,14 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     IsError: true);
             }
 
-            if (!HostProtocolJson.TryReadCodeExecutionResult(response.Result, out var result, out var problem))
+            if (!HostAnswerRules.TryRead<Sdk.CodeExecutionResult>(response, out var result, out var detail))
             {
-                Diagnose("code.execute returned unusable data: " + problem);
-                return new ToolResult(problem, IsError: true);
+                const string Problem = "The Extension Host returned no script result.";
+                Diagnose($"code.execute returned unusable data: {Problem} ({detail})");
+                return new ToolResult(Problem, IsError: true);
             }
 
-            var content = TextBounds.Truncate(result.Content, execution.MaxResultChars, "result");
+            var content = TextBounds.Truncate(result.Content ?? string.Empty, execution.MaxResultChars, "result");
             return new ToolResult(content, result.IsError);
         }
         finally
@@ -735,7 +732,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
             decision = await approval(
                     new ApprovalRequest(
                         PluginCommandApprovalName(command.PluginId, name),
-                        HostProtocolJson.SerializeText(arguments),
+                        ToolArguments.JsonString(arguments),
                         ToolSideEffect.Execute,
                         effectiveContext.WorkingDirectory),
                     ct)
@@ -784,12 +781,11 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 arguments,
                 WireContext(run!, origin),
                 WireTimeoutMilliseconds);
-            var payload = HostProtocolJson.SerializeCommandExecute(request);
             IpcMessage response;
             try
             {
                 response = await SendAsync(
-                        active, Sdk.ExtensionProtocol.PluginCommand, payload, RequestBudget, run.Token)
+                        active, Sdk.ExtensionProtocol.PluginCommand, request, RequestBudget, run.Token)
                     .ConfigureAwait(false);
             }
             catch (IpcRemoteException ex)
@@ -805,10 +801,11 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                     IsError: true);
             }
 
-            if (!HostProtocolJson.TryReadCommandOutput(response.Result, out var output, out var problem))
+            if (!HostAnswerRules.TryRead<Sdk.CommandOutput>(response, out var output, out var detail))
             {
-                Diagnose("plugin.command returned unusable data: " + problem);
-                return new CommandResult(Output: problem, IsError: true);
+                const string Problem = "The Extension Host returned no command result.";
+                Diagnose($"plugin.command returned unusable data: {Problem} ({detail})");
+                return new CommandResult(Output: Problem, IsError: true);
             }
 
             return new CommandResult(output.Output, output.PromptToSend, output.IsError);
@@ -857,7 +854,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 using var stopTimeout = new CancellationTokenSource(bound);
                 try
                 {
-                    await active.SendRequestAsync(Sdk.ExtensionProtocol.HostStop, IpcJsonTypes.EmptyObject, stopTimeout.Token)
+                    await active.RequestAsync(Sdk.ExtensionProtocol.HostStop, IpcEmpty.Instance, stopTimeout.Token)
                         .ConfigureAwait(false);
                     stopAcknowledged = true;
                 }
@@ -1081,37 +1078,41 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
 
         if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ToolsRegister, StringComparison.Ordinal))
         {
-            RegisterTools(generation, message.Arguments);
+            RegisterTools(generation, message);
         }
         else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ToolsUnregister, StringComparison.Ordinal))
         {
-            UnregisterTools(generation, message.Arguments);
+            UnregisterTools(generation, message);
         }
         else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ContributionsRegister, StringComparison.Ordinal))
         {
-            RegisterContributions(generation, message.Arguments);
+            RegisterContributions(generation, message);
         }
         else if (string.Equals(message.Operation, Sdk.ExtensionProtocol.ContributionsUnregister, StringComparison.Ordinal))
         {
-            UnregisterContributions(generation, message.Arguments);
+            UnregisterContributions(generation, message);
         }
-        else if (string.Equals(message.Operation, TerminalOps.Output, StringComparison.Ordinal))
+        else if (string.Equals(message.Operation, TerminalOperations.Output, StringComparison.Ordinal))
         {
-            OnTerminalOutput(generation, message.Arguments);
+            OnTerminalOutput(generation, message);
         }
-        else if (string.Equals(message.Operation, TerminalOps.Exit, StringComparison.Ordinal))
+        else if (string.Equals(message.Operation, TerminalOperations.Exit, StringComparison.Ordinal))
         {
-            OnTerminalExit(generation, message.Arguments);
+            OnTerminalExit(generation, message);
         }
     }
 
-    private void RegisterTools(long generation, JsonElement? payload)
+    private void RegisterTools(long generation, IpcMessage message)
     {
-        if (!HostProtocolJson.TryReadToolsRegister(payload, out var pluginId, out var declarations))
+        if (!HostAnswerRules.TryRead<ToolsRegisterNotification>(message, out var notification, out _) ||
+            string.IsNullOrEmpty(notification.PluginId))
         {
             Diagnose("tools.register carried no usable plugin id or tool list; it was ignored.");
             return;
         }
+
+        var pluginId = notification.PluginId;
+        var declarations = UsableDeclarations(notification.Tools);
 
         if (string.Equals(pluginId, RunCodeIdentity, StringComparison.Ordinal))
         {
@@ -1154,15 +1155,64 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         SetPluginTools(pluginId, proxies, generation);
     }
 
-    private void UnregisterTools(long generation, JsonElement? payload)
+    /// <summary>Normalizes the declarations of one <c>tools.register</c>: an entry without a name is dropped, a blank
+    /// description or schema gets its default, and an undefined side effect is treated as the most privileged one.</summary>
+    private static List<Sdk.ToolDeclaration> UsableDeclarations(IReadOnlyList<Sdk.ToolDeclaration>? declared)
     {
-        if (!HostProtocolJson.TryReadToolsUnregister(payload, out var pluginId))
+        if (declared is null || declared.Count == 0)
+        {
+            return [];
+        }
+
+        var usable = new List<Sdk.ToolDeclaration>(declared.Count);
+        foreach (var declaration in declared)
+        {
+            if (declaration is null || string.IsNullOrEmpty(declaration.Name))
+            {
+                continue;
+            }
+
+            var normalized = declaration;
+            if (declaration.Description is null || string.IsNullOrWhiteSpace(declaration.InputSchemaJson) ||
+                !Enum.IsDefined(declaration.SideEffect))
+            {
+                normalized = declaration with
+                {
+                    Description = declaration.Description ?? string.Empty,
+                    InputSchemaJson = string.IsNullOrWhiteSpace(declaration.InputSchemaJson) ? "{}" : declaration.InputSchemaJson,
+                    SideEffect = Enum.IsDefined(declaration.SideEffect) ? declaration.SideEffect : Sdk.ToolSideEffect.Execute,
+                };
+            }
+
+            usable.Add(normalized);
+        }
+
+        return usable;
+    }
+
+    private void UnregisterTools(long generation, IpcMessage message)
+    {
+        if (!TryReadPluginId(message, out var pluginId))
         {
             Diagnose("tools.unregister carried no usable plugin id; it was ignored.");
             return;
         }
 
         SetPluginTools(pluginId, null, generation);
+    }
+
+    /// <summary>Reads the <see cref="Sdk.ExtensionIdRequest"/> of <c>tools.unregister</c> and <c>contributions.unregister</c>.</summary>
+    private static bool TryReadPluginId(IpcMessage message, out string pluginId)
+    {
+        pluginId = string.Empty;
+        if (!HostAnswerRules.TryRead<Sdk.ExtensionIdRequest>(message, out var request, out _) ||
+            request.PluginId is not { Length: > 0 } id)
+        {
+            return false;
+        }
+
+        pluginId = id;
+        return true;
     }
 
     private void SetPluginTools(string pluginId, IReadOnlyList<ExtensionHostTool>? proxies, long generation)
@@ -1201,14 +1251,21 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         RaiseToolsChanged();
     }
 
-    private void RegisterContributions(long generation, JsonElement? payload)
+    private void RegisterContributions(long generation, IpcMessage message)
     {
-        if (!HostProtocolJson.TryReadContributionsRegister(
-                payload, out var pluginId, out var contributions, out var problem))
+        if (!HostAnswerRules.TryRead<Sdk.PluginContributionsNotification>(message, out var notification, out var problem))
         {
-            Diagnose("contributions.register ignored: " + problem);
+            Diagnose("contributions.register ignored: the contribution set cannot be decoded: " + problem);
             return;
         }
+
+        if (notification.PluginId is not { Length: > 0 } pluginId)
+        {
+            Diagnose("contributions.register ignored: the payload carries no plugin id.");
+            return;
+        }
+
+        var contributions = notification.Contributions ?? new Sdk.PluginContributionSet();
 
         if (string.Equals(pluginId, RunCodeIdentity, StringComparison.Ordinal))
         {
@@ -1219,17 +1276,17 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
 
         var validation = new List<string>();
         var validated = ContributionSnapshots.Validate(pluginId, contributions, validation);
-        foreach (var message in validation)
+        foreach (var entry in validation)
         {
-            Diagnose(message);
+            Diagnose(entry);
         }
 
         SetPluginContributions(pluginId, validated, generation);
     }
 
-    private void UnregisterContributions(long generation, JsonElement? payload)
+    private void UnregisterContributions(long generation, IpcMessage message)
     {
-        if (!HostProtocolJson.TryReadPluginId(payload, out var pluginId))
+        if (!TryReadPluginId(message, out var pluginId))
         {
             Diagnose("contributions.unregister carried no usable plugin id; it was ignored.");
             return;
@@ -1547,7 +1604,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
     /// working directory, depth and plugin chain come from that record, not from the message.</summary>
     private async Task HandleHostToolCallAsync(IpcPeer active, IpcMessage request, CancellationToken ct)
     {
-        if (!HostProtocolJson.TryReadBoundToolCall(request.Arguments, out var call, out var problem))
+        if (!TryReadBoundToolCall(request, out var call, out var problem))
         {
             Diagnose("host.tool_call refused: " + problem);
             await RespondToolOutputAsync(active, request.Id, problem, isError: true).ConfigureAwait(false);
@@ -1716,6 +1773,48 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         {
             run.ReleaseLease();
         }
+    }
+
+    /// <summary>Reads a run-bound <c>host.tool_call</c> (<see cref="HostToolCallForward"/>). A call whose payload does
+    /// not decode, or that carries a blank run id, plugin identity or tool name, is refused instead of being executed
+    /// unsolicited. There is no null check on the members: the wire refuses nil for a member declared non-nullable, so
+    /// a call without a run id is already undecodable.</summary>
+    private static bool TryReadBoundToolCall(IpcMessage request, out BoundToolCall call, out string problem)
+    {
+        call = default;
+        if (!request.HasPayload)
+        {
+            problem = "The host.tool_call request has no arguments.";
+            return false;
+        }
+
+        if (!HostAnswerRules.TryRead<HostToolCallForward>(request, out var forward, out var detail))
+        {
+            problem = "The host.tool_call request cannot be decoded: " + detail;
+            return false;
+        }
+
+        if (forward.RunId.Length == 0)
+        {
+            problem = "The host.tool_call request carries a blank run id; it was refused.";
+            return false;
+        }
+
+        if (forward.PluginId is not { Length: > 0 } pluginId)
+        {
+            problem = "The host.tool_call request carries no plugin identity; it was refused.";
+            return false;
+        }
+
+        if (forward.Name is not { Length: > 0 } name)
+        {
+            problem = "The host.tool_call request has no tool name.";
+            return false;
+        }
+
+        call = new BoundToolCall(forward.RunId, pluginId, name, ToolArguments.ToText(forward.ArgumentsJson));
+        problem = string.Empty;
+        return true;
     }
 
     /// <summary>Registers a new execution. It is bound to the connection generation it starts on; if the connection
@@ -1930,19 +2029,19 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
 
     /// <summary>Sends a request with a per-call deadline: the caller's token, this call's budget and the connection
     /// lifetime.</summary>
-    private static async Task<IpcMessage> SendAsync(
-        IpcPeer active, string operation, JsonElement? args, TimeSpan? budget, CancellationToken ct)
+    private static async Task<IpcMessage> SendAsync<TArgs>(
+        IpcPeer active, string operation, TArgs args, TimeSpan? budget, CancellationToken ct)
     {
         if (budget is not { } timeout)
         {
-            return await active.SendRequestAsync(operation, args, ct).ConfigureAwait(false);
+            return await active.RequestAsync(operation, args, ct).ConfigureAwait(false);
         }
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(timeout);
         try
         {
-            return await active.SendRequestAsync(operation, args, deadline.Token).ConfigureAwait(false);
+            return await active.RequestAsync(operation, args, deadline.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException oce) when (!ct.IsCancellationRequested && deadline.IsCancellationRequested)
         {
@@ -2010,8 +2109,7 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
     {
         try
         {
-            await active.RespondAsync(
-                    requestId, HostProtocolJson.SerializeHostToolOutput(content, isError), CancellationToken.None)
+            await active.RespondAsync(requestId, new Sdk.ToolResult(content ?? string.Empty, isError), CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IpcConnectionClosedException or IOException or ObjectDisposedException
@@ -2228,6 +2326,9 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
         var tail = started?.OutputTail();
         return string.IsNullOrWhiteSpace(tail) ? string.Empty : Environment.NewLine + tail;
     }
+
+    /// <summary>A decoded <c>host.tool_call</c>; the arguments are the UTF-8 decoded JSON text the tool receives.</summary>
+    private readonly record struct BoundToolCall(string RunId, string PluginId, string Name, string ArgumentsJson);
 
     private readonly record struct PeerBundle(IpcPeer Peer, NamedPipeClientTransport Transport, long Generation);
 

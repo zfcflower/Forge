@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Forge.Abstractions;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Agents;
 
@@ -14,7 +16,7 @@ internal sealed class TurnCheckpointService
 {
     private readonly GitCli git;
     private readonly ITurnCheckpointStore store;
-    private readonly Action<string> diagnostic;
+    private readonly Action<string>? diagnostic;
 
     public TurnCheckpointService(GitCli git, ITurnCheckpointStore store, Action<string>? diagnostic = null)
     {
@@ -22,7 +24,24 @@ internal sealed class TurnCheckpointService
         ArgumentNullException.ThrowIfNull(store);
         this.git = git;
         this.store = store;
-        this.diagnostic = diagnostic ?? (static message => Trace.WriteLine("[checkpoint] " + message));
+        this.diagnostic = diagnostic;
+    }
+
+    /// <summary>An injected diagnostic gets every line; otherwise a lost checkpoint is a Warning and a skip is Information.</summary>
+    private void Report(bool failure, string message)
+    {
+        if (diagnostic is not null)
+        {
+            diagnostic(message);
+        }
+        else if (failure)
+        {
+            AppLogs.Checkpoint.ZLogWarning($"{message}");
+        }
+        else
+        {
+            AppLogs.Checkpoint.ZLogInformation($"{message}");
+        }
     }
 
     /// <summary>Snapshots the tree the turn starts from; cheap enough to await before the model call.</summary>
@@ -31,7 +50,7 @@ internal sealed class TurnCheckpointService
         var tree = await SnapshotAsync(workingDirectory, ct).ConfigureAwait(false);
         if (tree is null)
         {
-            diagnostic("skipped turn " + turn.ToString(System.Globalization.CultureInfo.InvariantCulture) + ": no git tree in " + workingDirectory);
+            Report(false, "skipped turn " + turn.ToString(System.Globalization.CultureInfo.InvariantCulture) + ": no git tree in " + workingDirectory);
             return;
         }
 
@@ -79,7 +98,7 @@ internal sealed class TurnCheckpointService
         }
         catch (GitException exception)
         {
-            diagnostic("snapshot failed in " + workingDirectory + ": " + exception.Message);
+            Report(true, "snapshot failed in " + workingDirectory + ": " + exception.Message);
             return null;
         }
     }

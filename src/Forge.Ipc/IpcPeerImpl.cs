@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using System.Threading.Channels;
 
 namespace Forge.Ipc;
@@ -10,7 +9,7 @@ public sealed class IpcPeer : IIpcPeer
     private const int MaxConcurrentHandlers = 64;
 
     private readonly IIpcTransport transport;
-    private readonly IJsonFrameCodec codec;
+    private readonly FrameCodec codec;
     private readonly TimeSpan defaultTimeout;
     private readonly int maxOutstandingRequests;
     private readonly ConcurrentDictionary<long, PendingRequest> pending = new();
@@ -63,7 +62,17 @@ public sealed class IpcPeer : IIpcPeer
 
     public Task StartAsync(CancellationToken ct) => transport.StartAsync(ct);
 
-    public async Task<IpcMessage> SendRequestAsync(string operation, JsonElement? args, CancellationToken ct)
+    public Task<IpcMessage> RequestAsync<TArgs>(string operation, TArgs args, CancellationToken ct) =>
+        RequestCoreAsync(operation, new ArgsPayload<TArgs>(args), ct);
+
+    /// <summary>Sends a request whose payload the caller encoded itself. The payload bytes are placed in the frame
+    /// verbatim; the receiver decodes them like any other payload. Used by protocol tests that need a value no formatter
+    /// would produce (a missing member, a nil where the shape forbids one).</summary>
+    internal Task<IpcMessage> RequestRawAsync(string operation, ReadOnlyMemory<byte> payload, CancellationToken ct) =>
+        RequestCoreAsync(operation, new RawArgsPayload(payload), ct);
+
+    private async Task<IpcMessage> RequestCoreAsync<TPayload>(string operation, TPayload payload, CancellationToken ct)
+        where TPayload : struct, IRequestPayload
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         ThrowIfClosed(operation);
@@ -89,7 +98,11 @@ public sealed class IpcPeer : IIpcPeer
 
             try
             {
-                await transport.SendAsync(codec.Serialize(IpcMessage.Request(id, operation, args)), token).ConfigureAwait(false);
+                using (var frame = payload.Encode(codec, id, operation))
+                {
+                    await transport.SendAsync(frame.WrittenMemory, token).ConfigureAwait(false);
+                }
+
                 return EnsureNoRemoteError(operation, await completion.Task.WaitAsync(token).ConfigureAwait(false));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -133,32 +146,33 @@ public sealed class IpcPeer : IIpcPeer
         }
     }
 
-    public async Task<T> SendRequestAsync<T>(string operation, JsonElement? args, CancellationToken ct)
-        where T : notnull
+    public async Task<TResult> RequestAsync<TArgs, TResult>(string operation, TArgs args, CancellationToken ct)
     {
-        var message = await SendRequestAsync(operation, args, ct).ConfigureAwait(false);
-        if (message.Result is not { } result)
-        {
-            throw new IpcProtocolException($"The response to '{operation}' carries no result.");
-        }
-
-        return IpcJsonTypes.DeserializeResult<T>(result, operation);
+        var message = await RequestAsync(operation, args, ct).ConfigureAwait(false);
+        return IpcSerializer.Deserialize<TResult>(message.Payload, operation);
     }
 
-    public Task SendNotificationAsync(string operation, JsonElement? args, CancellationToken ct)
+    public async Task NotifyAsync<TArgs>(string operation, TArgs args, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         ThrowIfClosed(operation);
-        return transport.SendAsync(codec.Serialize(IpcMessage.Notification(operation, args)), ct).AsTask();
+        using var frame = codec.Encode(IpcHeader.Notification(operation), args);
+        await transport.SendAsync(frame.WrittenMemory, ct).ConfigureAwait(false);
     }
 
-    public Task RespondAsync(long requestId, JsonElement result, CancellationToken ct) =>
-        SendOutboundAsync(IpcMessage.ResultMessage(requestId, result), requestId, ct);
+    public async Task RespondAsync<TResult>(long requestId, TResult result, CancellationToken ct)
+    {
+        ThrowIfReplyClosed(requestId);
+        using var frame = codec.Encode(IpcHeader.Result(requestId), result);
+        await transport.SendAsync(frame.WrittenMemory, ct).ConfigureAwait(false);
+    }
 
-    public Task RespondErrorAsync(long requestId, IpcError error, CancellationToken ct)
+    public async Task RespondErrorAsync(long requestId, IpcError error, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(error);
-        return SendOutboundAsync(IpcMessage.ErrorMessage(requestId, error), requestId, ct);
+        ThrowIfReplyClosed(requestId);
+        using var frame = codec.Encode(IpcHeader.Failure(requestId, error));
+        await transport.SendAsync(frame.WrittenMemory, ct).ConfigureAwait(false);
     }
 
     public async Task StopAsync(CancellationToken ct)
@@ -204,7 +218,7 @@ public sealed class IpcPeer : IIpcPeer
         lifetime.Dispose();
     }
 
-    private async Task SendOutboundAsync(IpcMessage message, long requestId, CancellationToken ct)
+    private void ThrowIfReplyClosed(long requestId)
     {
         if (IsClosed)
         {
@@ -212,7 +226,6 @@ public sealed class IpcPeer : IIpcPeer
         }
 
         inbound.TryRemove(requestId, out _);
-        await transport.SendAsync(codec.Serialize(message), ct).ConfigureAwait(false);
     }
 
     private void OnFrame(ReadOnlyMemory<byte> frame)
@@ -220,12 +233,11 @@ public sealed class IpcPeer : IIpcPeer
         IpcMessage message;
         try
         {
-            message = codec.Deserialize(frame);
+            message = codec.Decode(frame);
         }
-        catch (Exception ex) when (ex is IpcProtocolException or JsonException or ArgumentException or FormatException or NotSupportedException)
+        catch (IpcProtocolException ex)
         {
-            RaiseProtocolError(ex as IpcProtocolException
-                ?? new IpcProtocolException($"The inbound IPC frame is not a valid message: {ex.Message}", ex));
+            RaiseProtocolError(ex);
             return;
         }
 
@@ -310,14 +322,10 @@ public sealed class IpcPeer : IIpcPeer
     private void DispatchNotification(IpcMessage message)
     {
         if (string.Equals(message.Operation, IpcOperations.Cancel, StringComparison.Ordinal) &&
-            message.Arguments is { } arguments &&
-            arguments.TryGetProperty(IpcOperations.RequestIdArgument, out var idElement) &&
-            idElement.TryGetInt64(out var cancelled))
+            TryReadCancelledId(message, out var cancelled) &&
+            inbound.TryGetValue(cancelled, out var registration))
         {
-            if (inbound.TryGetValue(cancelled, out var registration))
-            {
-                registration.Cancel();
-            }
+            registration.Cancel();
         }
 
         try
@@ -326,6 +334,20 @@ public sealed class IpcPeer : IIpcPeer
         }
         catch (Exception)
         {
+        }
+    }
+
+    private static bool TryReadCancelledId(IpcMessage message, out long id)
+    {
+        try
+        {
+            id = message.Read<long>();
+            return true;
+        }
+        catch (IpcProtocolException)
+        {
+            id = 0;
+            return false;
         }
     }
 
@@ -414,8 +436,8 @@ public sealed class IpcPeer : IIpcPeer
     {
         try
         {
-            await transport.SendAsync(codec.Serialize(IpcMessage.ResultMessage(id, IpcJsonTypes.EmptyObject)), CancellationToken.None)
-                .ConfigureAwait(false);
+            using var frame = codec.Encode(IpcHeader.Result(id), IpcEmpty.Instance);
+            await transport.SendAsync(frame.WrittenMemory, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException)
         {
@@ -426,8 +448,8 @@ public sealed class IpcPeer : IIpcPeer
     {
         try
         {
-            await transport.SendAsync(codec.Serialize(IpcMessage.ErrorMessage(id, error)), CancellationToken.None)
-                .ConfigureAwait(false);
+            using var frame = codec.Encode(IpcHeader.Failure(id, error));
+            await transport.SendAsync(frame.WrittenMemory, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException)
         {
@@ -446,9 +468,8 @@ public sealed class IpcPeer : IIpcPeer
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             try
             {
-                await transport.SendAsync(
-                    codec.Serialize(IpcMessage.Notification(IpcOperations.Cancel, IpcJsonTypes.FromId(id))),
-                    timeout.Token).ConfigureAwait(false);
+                using var frame = codec.Encode(IpcHeader.Notification(IpcOperations.Cancel), id);
+                await transport.SendAsync(frame.WrittenMemory, timeout.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or OperationCanceledException or IpcConnectionClosedException)
             {
@@ -547,6 +568,25 @@ public sealed class IpcPeer : IIpcPeer
         {
             throw new IpcConnectionClosedException($"The IPC peer is closed; '{operation}' was not sent.");
         }
+    }
+
+    /// <summary>How one request's payload reaches the frame. Two shapes, both structs, so the generic request path keeps
+    /// its no-allocation cost.</summary>
+    private interface IRequestPayload
+    {
+        IpcFrameBuffer Encode(FrameCodec codec, long id, string operation);
+    }
+
+    private readonly struct ArgsPayload<TArgs>(TArgs args) : IRequestPayload
+    {
+        public IpcFrameBuffer Encode(FrameCodec codec, long id, string operation) =>
+            codec.Encode(IpcHeader.Request(id, operation), args);
+    }
+
+    private readonly struct RawArgsPayload(ReadOnlyMemory<byte> payload) : IRequestPayload
+    {
+        public IpcFrameBuffer Encode(FrameCodec codec, long id, string operation) =>
+            codec.EncodeRaw(IpcHeader.Request(id, operation), payload);
     }
 
     private sealed class PendingRequest(string operation, TaskCompletionSource<IpcMessage> completion)

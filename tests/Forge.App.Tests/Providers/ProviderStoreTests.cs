@@ -296,6 +296,93 @@ public sealed class ProviderStoreTests : IDisposable
         TestTempFiles.DeleteQuietly(root);
     }
 
+    // ---------------------------------------------------------------- the claudeWire section
+
+    [Fact]
+    public void Saving_a_claude_subscription_provider_appends_the_wire_section_with_its_notes()
+    {
+        var path = WriteSettings("""{ "preferences": { "language": "english" } }""");
+        var (store, _, _) = CreateStack(path);
+        var claude = Claude();
+
+        store.Save([claude], claude.Id, defaultContextWindow: null);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var section = document.RootElement.GetProperty("claudeWire");
+        Assert.True(section.GetProperty("enabled").GetBoolean());
+        Assert.Equal("9.9.9", section.GetProperty("version").GetString());
+        Assert.False(
+            section.TryGetProperty("build", out _),
+            "the build suffix is not stable per build, so it is read from the CLI at request time instead of pinned");
+        Assert.Equal(ClaudeWireSettings.DefaultEntrypoint, section.GetProperty("entrypoint").GetString());
+        Assert.Equal(ClaudeWireSettings.Documentation, section.GetProperty("note").GetString());
+        Assert.Equal("english", document.RootElement.GetProperty("preferences").GetProperty("language").GetString());
+    }
+
+    [Fact]
+    public void A_section_the_user_edited_is_never_rewritten()
+    {
+        var path = WriteSettings(
+            """
+            {
+              "claudeWire": { "enabled": false, "version": "2.1.323", "entrypoint": "claude-vscode", "mine": 1 }
+            }
+            """);
+        var (store, _, _) = CreateStack(path);
+        var claude = Claude();
+
+        store.Save([claude], claude.Id, defaultContextWindow: null);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var section = document.RootElement.GetProperty("claudeWire");
+        Assert.False(section.GetProperty("enabled").GetBoolean());
+        Assert.Equal("2.1.323", section.GetProperty("version").GetString());
+        Assert.Equal("claude-vscode", section.GetProperty("entrypoint").GetString());
+        Assert.Equal(1, section.GetProperty("mine").GetInt32());
+        Assert.False(section.TryGetProperty("note", out _), "an existing section gains no generated field");
+    }
+
+    [Fact]
+    public void Removing_the_last_claude_provider_removes_the_section_and_leaves_the_rest_alone()
+    {
+        var path = WriteSettings(
+            """
+            {
+              "claudeWire": { "enabled": true },
+              "preferences": { "language": "english" },
+              "somethingThisBuildDoesNotKnow": { "keep": true }
+            }
+            """);
+        var (store, _, _) = CreateStack(path);
+        var other = ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.OpenAiId)!, "openai");
+
+        store.Save([other], other.Id, defaultContextWindow: null);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.False(document.RootElement.TryGetProperty("claudeWire", out _));
+        Assert.Equal("english", document.RootElement.GetProperty("preferences").GetProperty("language").GetString());
+        Assert.True(document.RootElement.GetProperty("somethingThisBuildDoesNotKnow").GetProperty("keep").GetBoolean());
+    }
+
+    [Fact]
+    public void A_save_without_any_claude_provider_does_not_create_the_section()
+    {
+        var path = WriteSettings(
+            """
+            { "preferences": { "language": "english" } }
+            """);
+        var (store, _, _) = CreateStack(path);
+        var other = ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.OpenAiId)!, "openai");
+
+        store.Save([other], other.Id, defaultContextWindow: null);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.False(document.RootElement.TryGetProperty("claudeWire", out _));
+    }
+
+    private static ProviderDefinition Claude() =>
+        ProviderDefinition.FromPreset(ProviderPresets.Find(ProviderPresets.AnthropicId)!, "anthropic");
+
     private (ProviderStore Store, ProviderSecretStore Secrets, ProviderCredentials Credentials) CreateStack(string settingsPath)
     {
         var secrets = new ProviderSecretStore(root);
@@ -303,7 +390,8 @@ public sealed class ProviderStoreTests : IDisposable
             new HttpClient(),
             secrets,
             claudeCredentialsPath: Path.Combine(root, "no-claude-login.json"));
-        return (new ProviderStore(settingsPath), secrets, credentials);
+        // A version stub: the append path asks the installed CLI, which a test machine may not have (and must not spawn).
+        return (new ProviderStore(settingsPath, () => "9.9.9"), secrets, credentials);
     }
 
     private string WriteSettings(string json)

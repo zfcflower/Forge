@@ -3,6 +3,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.App.Services;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Automations;
 
@@ -235,7 +237,7 @@ internal sealed class WaitingProgress(IAutomationRunContext context) : IProgress
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[automation] status update failed: " + exception.Message);
+            AppLogs.Automation.ZLogWarning($"status update failed: {exception.Message}");
         }
     }
 }

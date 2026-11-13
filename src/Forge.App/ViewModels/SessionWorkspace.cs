@@ -15,6 +15,8 @@ using Forge.App.Providers;
 using Forge.App.Services;
 using Forge.Core.Agents;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -79,6 +81,11 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
     private bool subAgentsCollapsed;
     private CancellationTokenSource? turn;
     private int turnNumber;
+
+    /// <summary>The full-prefix rewrites of this session inside the last hour, and whether the user was already told.</summary>
+    private readonly List<(DateTimeOffset At, int Tokens)> cacheRewrites = [];
+    private bool cacheRewriteNotified;
+    private const int CacheRewriteNoticeThreshold = 3;
     private DateTimeOffset turnStartedAt;
     private bool disposed;
 
@@ -1664,6 +1671,20 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
             case AgentTurnCompleted completed:
                 AddTurnUsage(completed);
                 break;
+            case AgentNotice notice:
+                // A note about how the turn went, not a failure: a toast, never an error card.
+                notifications?.Notify(
+                    NotificationLevel.Warning,
+                    SessionStrings.ProviderNoticeTitle,
+                    LocText.Literal(notice.Text),
+                    "provider-notice:" + SessionId);
+                Card(notice.AgentId)?.AddNotice(LocText.Literal(notice.Text), isError: false);
+                break;
+            case AgentRateLimitUpdated limit:
+                // The account's windows, taken from whichever agent's request reported them: the meter is per account, not
+                // per agent, and the strip belongs to the session.
+                Instruments.NoteRateLimit(Composer.ProviderId, limit.RateLimit);
+                break;
             case AgentApprovalDenied denied:
                 Card(denied.AgentId)?.AddNotice(SessionStrings.Denied(denied.Call.Name), isError: true);
                 break;
@@ -1672,6 +1693,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
                 break;
             case AgentContextMeasured context:
                 Instruments.NoteContext(context.AgentId, context.ContextTokens, context.UsableTokens, context.TriggerTokens);
+                Instruments.NoteCacheTtl(context.CacheTtl);
                 break;
             case AgentCompactionStalled stalled:
                 Card(stalled.AgentId)?.AddNotice(CompactionStrings.Stalled(stalled.ContextTokens, stalled.TriggerTokens), isError: true);
@@ -1782,6 +1804,45 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         }
 
         Card(completed.AgentId)?.AddUsage(delta, completed.Stop);
+        NoteFullCacheRewrite(completed.AgentId, delta);
+    }
+
+    /// <summary>
+    /// The expensive shape, in one place: the root agent's turn wrote cache and read none of it back. A sub-agent's own spend and the
+    /// session's first turn (which has nothing to read yet) do not count.
+    /// </summary>
+    internal static bool CountsAsFullRewrite(string agentId, TokenUsage delta) =>
+        string.Equals(agentId, "root", StringComparison.Ordinal)
+        && delta.CacheWriteTokens > 0
+        && delta.CacheReadTokens == 0;
+
+    /// <summary>
+    /// Watches for the expensive shape: a turn that wrote the whole prefix and read nothing from the cache. When that happens three
+    /// times inside an hour the user is told once, with the number of tokens involved — a full rewrite costs 1.25× (five minutes) or
+    /// 2× (an hour) the input price, and after the auto lifetime was added it usually means the prefix changed, not the lifetime.
+    /// </summary>
+    private void NoteFullCacheRewrite(string agentId, TokenUsage delta)
+    {
+        if (!CountsAsFullRewrite(agentId, delta) || cacheRewriteNotified || turnNumber <= 1)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        cacheRewrites.RemoveAll(at => now - at.At > TimeSpan.FromHours(1));
+        cacheRewrites.Add((now, delta.CacheWriteTokens));
+        if (cacheRewrites.Count < CacheRewriteNoticeThreshold)
+        {
+            return;
+        }
+
+        cacheRewriteNotified = true;
+        var written = cacheRewrites.Sum(entry => entry.Tokens);
+        notifications?.Notify(
+            NotificationLevel.Info,
+            SessionStrings.CacheRewriteTitle,
+            SessionStrings.CacheRewriteBody(written),
+            "cache-rewrite:" + SessionId);
     }
 
     private TurnCardViewModel? Card(string agentId)
@@ -1900,7 +1961,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         Cancel();
         turn?.Dispose();
         turn = null;
-        Trace.WriteLine("[session] closed tab " + SessionId);
+        AppLogs.Session.ZLogInformation($"closed tab {SessionId}");
     }
 
     /// <summary>

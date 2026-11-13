@@ -106,23 +106,32 @@ public class PromptCacheWireTests
         Assert.Equal(new TokenUsage(input, output, cacheRead, 0), events.Completed().Usage);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("1h")]
-    public async Task Anthropic_sends_no_ttl_field_until_the_ttl_ordering_question_is_decided(string? ttl)
+    [Fact]
+    public async Task Anthropic_always_asks_for_the_one_hour_lifetime()
     {
-        // Pinned on purpose: section 8.3.6 asks for "1h" on the message breakpoint only, but the prompt caching docs
-        // require longer-TTL entries to come before shorter ones (tools -> system -> messages), so the provider keeps
-        // sending the 5-minute default everywhere until the design is settled.
+        // One shape for both credentials: the official client's hour, not a five-minute default that expires between two turns of
+        // the same conversation. An API key announces the beta that admits it.
         var (provider, handler) = TestData.AnthropicProvider();
         var request = TestData.Request(
-            tools: [TestData.ReadFileTool()],
             messages: [ChatMessage.User("a"), ChatMessage.Assistant("b"), ChatMessage.User("c")],
-            cache: new CacheHint(CacheSystemAndTools: true, CacheThroughMessageIndex: 1, MessageTtl: ttl));
+            cache: new CacheHint(CacheSystemAndTools: true, CacheThroughMessageIndex: 1));
 
         await provider.CollectAsync(request);
 
-        Assert.DoesNotContain("\"ttl\"", handler.Last.Body, StringComparison.Ordinal);
-        Assert.Null(handler.Last.Header("anthropic-beta"));
+        Assert.Contains("\"ttl\":\"1h\"", handler.Last.Body, StringComparison.Ordinal);
+        Assert.Equal(AnthropicWire.ExtendedCacheTtlBeta, handler.Last.Header("anthropic-beta"));
+    }
+
+    [Fact]
+    public async Task An_asked_for_lifetime_is_written_on_the_message_breakpoint()
+    {
+        var (provider, handler) = TestData.AnthropicProvider();
+        var request = TestData.Request(
+            messages: [ChatMessage.User("a"), ChatMessage.Assistant("b"), ChatMessage.User("c")],
+            cache: new CacheHint(CacheSystemAndTools: true, CacheThroughMessageIndex: 1, Ttl: "1h"));
+
+        await provider.CollectAsync(request);
+
+        Assert.Contains("\"ttl\":\"1h\"", handler.Last.Body, StringComparison.Ordinal);
     }
 }

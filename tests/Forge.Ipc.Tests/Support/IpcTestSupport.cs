@@ -1,6 +1,4 @@
 using System.Buffers.Binary;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Channels;
 
 namespace Forge.Ipc.Tests.Support;
@@ -57,26 +55,28 @@ internal static class TestFrames
     public static byte[] Filler(int count, byte value = (byte)'x') => Enumerable.Repeat(value, count).ToArray();
 
     public static string Padded(int length) => new('x', length);
-}
 
-internal static class Json
-{
-    public static JsonElement Parse(string text)
+    public static byte[] Request<T>(long id, string operation, T args) =>
+        FrameCodec.Default.EncodeToArray(IpcHeader.Request(id, operation), args);
+
+    public static byte[] Notification<T>(string operation, T args) =>
+        FrameCodec.Default.EncodeToArray(IpcHeader.Notification(operation), args);
+
+    public static byte[] Result<T>(long id, T result) =>
+        FrameCodec.Default.EncodeToArray(IpcHeader.Result(id), result);
+
+    public static byte[] Failure(long id, IpcError error) => HeaderOnly(IpcHeader.Failure(id, error));
+
+    public static byte[] HeaderOnly(in IpcHeader header)
     {
-        using var document = JsonDocument.Parse(text);
-        return document.RootElement.Clone();
+        using var buffer = FrameCodec.Default.Encode(header);
+        return buffer.WrittenMemory.ToArray();
     }
-}
-
-internal static class Wire
-{
-    public static string BodyText(IpcMessage message) =>
-        Encoding.UTF8.GetString(FrameCodec.Default.Serialize(message).Span[TestFrames.HeaderBytes..]);
 }
 
 internal static class Peers
 {
-    public static IpcPeer Create(IIpcTransport transport, TimeSpan? timeout = null, int maxOutstanding = 0, IJsonFrameCodec? codec = null) =>
+    public static IpcPeer Create(IIpcTransport transport, TimeSpan? timeout = null, int maxOutstanding = 0, FrameCodec? codec = null) =>
         new(transport, new IpcPeerOptions
         {
             DefaultTimeout = timeout ?? TestTimeouts.Request,
@@ -107,5 +107,5 @@ internal sealed class FrameSink
         return await frames.Reader.ReadAsync(timeout.Token);
     }
 
-    public async Task<IpcMessage> NextMessageAsync() => FrameCodec.Default.Deserialize(await NextBodyAsync());
+    public async Task<IpcMessage> NextMessageAsync() => FrameCodec.Default.Decode(await NextBodyAsync());
 }

@@ -9,6 +9,8 @@ using Forge.App.Localization;
 using Forge.App.Services;
 using Forge.Workspace;
 using ICommand = System.Windows.Input.ICommand;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -1185,7 +1187,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
                     {
                         // One unreadable repository must not fail the whole refresh: it plans as "not a repository",
                         // which is exactly "no main-checkout row for this project".
-                        Trace.WriteLine($"[tree] could not read the HEAD of '{root}': {exception.Message}");
+                        AppLogs.Tree.ZLogWarning($"could not read the HEAD of '{root}': {exception.Message}");
                         head = GitHead.NotRepository;
                     }
 

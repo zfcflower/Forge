@@ -219,13 +219,13 @@ public sealed class ScriptPoolTests
         })
         {
             var refused = await Assert.ThrowsAsync<IpcRemoteException>(() =>
-                executor.SendAsync(operation, RawHost.EmptyObject(), budget.Token));
+                executor.SendAsync(operation, IpcEmpty.Instance, budget.Token));
             Assert.Equal("unsupported_operation", refused.Code);
         }
 
         // Nothing to run before an image is loaded.
         var notLoaded = await Assert.ThrowsAsync<IpcRemoteException>(() =>
-            executor.SendAsync(ScriptRuntime.ScriptExecutorProtocol.Run, RunPayload("r1", "return 1 + 1;"), budget.Token));
+            executor.SendAsync(ScriptRuntime.ScriptExecutorProtocol.Run, RunPayload("r1"), budget.Token));
         Assert.Equal("not_loaded", notLoaded.Code);
 
         var artifact = await CompileArtifactAsync("return 1 + 1;");
@@ -233,26 +233,25 @@ public sealed class ScriptPoolTests
 
         var response = await executor.SendAsync(
             ScriptRuntime.ScriptExecutorProtocol.Run,
-            RunPayload("r1", "return 1 + 1;"),
+            RunPayload("r1"),
             budget.Token);
-        var output = response.Result!.Value.Deserialize(ScriptRuntime.ScriptExecutorJsonContext.Default.CodeExecutionResult);
-        Assert.NotNull(output);
-        Assert.False(output!.IsError, output.Content);
+        var output = response.Read<Sdk.CodeExecutionResult>();
+        Assert.False(output.IsError, output.Content);
         Assert.Equal("2", output.Content.Trim());
 
         // The executor is single use: a second run is refused, never served.
         var second = await Assert.ThrowsAsync<IpcRemoteException>(() => executor.SendAsync(
-            ScriptRuntime.ScriptExecutorProtocol.Run, RunPayload("r2", "return 1 + 1;"), budget.Token));
+            ScriptRuntime.ScriptExecutorProtocol.Run, RunPayload("r2"), budget.Token));
         Assert.Equal("already_ran", second.Code);
         var secondLoad = await Assert.ThrowsAsync<IpcRemoteException>(() => executor.SendAsync(
             ScriptRuntime.ScriptExecutorProtocol.Load, LoadPayload(artifact), budget.Token));
         Assert.Equal("already_loaded", secondLoad.Code);
 
-        await executor.SendAsync(ScriptRuntime.ScriptExecutorProtocol.Stop, RawHost.EmptyObject(), budget.Token);
+        await executor.SendAsync(ScriptRuntime.ScriptExecutorProtocol.Stop, IpcEmpty.Instance, budget.Token);
     }
 
     [Fact]
-    public async Task Context_missing_at_the_executor_boundary_rejected()
+    public async Task Run_without_a_usable_bound_context_is_rejected()
     {
         await using var executor = await DirectWorker.StartExecutorAsync(
             new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
@@ -261,10 +260,16 @@ public sealed class ScriptPoolTests
         var artifact = await CompileArtifactAsync("return 1;");
         await executor.SendAsync(ScriptRuntime.ScriptExecutorProtocol.Load, LoadPayload(artifact), budget.Token);
 
-        var withoutContext = JsonDocument.Parse(
-            """{"timeoutMilliseconds":5000,"tools":[],"options":{}}""").RootElement.Clone();
+        // A run whose context member is present but not a bound context. The typed wire cannot express a *missing*
+        // context (a nil in a non-nullable member is refused on both sides), so the value is simply the wrong shape:
+        // the executor must refuse the request as invalid arguments instead of running anything.
+        var withoutContext = WirePayload.Array(4)
+            .Text("not-a-context")
+            .Value(5000)
+            .EmptyArray()
+            .Value(new Sdk.CodeExecutionOptions());
         var refused = await Assert.ThrowsAsync<IpcRemoteException>(() =>
-            executor.SendAsync(ScriptRuntime.ScriptExecutorProtocol.Run, withoutContext, budget.Token));
+            executor.SendRawAsync(ScriptRuntime.ScriptExecutorProtocol.Run, withoutContext, budget.Token));
         Assert.Equal("invalid_arguments", refused.Code);
     }
 
@@ -276,21 +281,15 @@ public sealed class ScriptPoolTests
         return compiled;
     }
 
-    private static JsonElement LoadPayload(Forge.Scripting.ScriptCompilation compiled) =>
-        JsonSerializer.SerializeToElement(
-            new ScriptRuntime.ScriptArtifactLoadRequest(
-                ScriptRuntime.ScriptArtifact.Encode(compiled.Image!),
-                compiled.Descriptor!),
-            ScriptRuntime.ScriptExecutorJsonContext.Default.ScriptArtifactLoadRequest);
+    private static ScriptRuntime.ScriptArtifactLoadRequest LoadPayload(Forge.Scripting.ScriptCompilation compiled) =>
+        new(compiled.Image!, compiled.Descriptor!);
 
-    private static JsonElement RunPayload(string runId, string code) =>
-        JsonSerializer.SerializeToElement(
-            new ScriptRuntime.ScriptRunRequest(
-                new Sdk.ExtensionCallContext(runId, "sess", Path.GetTempPath(), 0, []),
-                10_000,
-                [],
-                new Sdk.CodeExecutionOptions()),
-            ScriptRuntime.ScriptExecutorJsonContext.Default.ScriptRunRequest);
+    private static ScriptRuntime.ScriptRunRequest RunPayload(string runId) =>
+        new(
+            new Sdk.ExtensionCallContext(runId, "sess", Path.GetTempPath(), 0, []),
+            10_000,
+            [],
+            new Sdk.CodeExecutionOptions());
 
     [Fact]
     public async Task Bounds_truncate_result_and_inner_calls()
@@ -346,46 +345,34 @@ public sealed class ScriptPoolTests
     }
 
     [Fact]
-    public void Code_execute_wire_context_is_camelCase()
+    public void Code_execute_wire_round_trips_the_bound_context()
     {
+        // The wire is MessagePack now, so what has to hold is the round trip: every field of the request and of its
+        // bound context survives the serializer the host and the main program actually share.
         var request = new Sdk.CodeExecutionRequest(
             "return 1;",
-            new Sdk.ExtensionCallContext("run-1", "sess", "/tmp/work", 2, ["alpha", "beta"]),
+            new Sdk.ExtensionCallContext("run-1", "sess", "/tmp/work", 2, ["alpha", "beta"]) { RootRunId = "root-1" },
             5_000,
             [new Sdk.ToolDeclaration("add", "adds", "{}", Sdk.ToolSideEffect.ReadOnly)],
             new Sdk.CodeExecutionOptions());
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(
-            request, Sdk.ExtensionExecutionJsonContext.Default.CodeExecutionRequest));
-        var root = document.RootElement;
 
-        Assert.Equal("return 1;", root.GetProperty("code").GetString());
-        var context = root.GetProperty("context");
-        Assert.Equal("run-1", context.GetProperty("runId").GetString());
-        Assert.Equal("sess", context.GetProperty("sessionId").GetString());
-        Assert.Equal("/tmp/work", context.GetProperty("workingDirectory").GetString());
-        Assert.Equal(2, context.GetProperty("depth").GetInt32());
-        Assert.Equal(
-            new[] { "alpha", "beta" },
-            context.GetProperty("pluginChain").EnumerateArray().Select(e => e.GetString()).ToArray());
-        Assert.Equal(5_000, root.GetProperty("timeoutMilliseconds").GetInt32());
+        var decoded = Forge.Ipc.IpcSerializer.Deserialize<Sdk.CodeExecutionRequest>(
+            Forge.Ipc.IpcSerializer.Serialize(request), "code.execute");
 
-        var tool = root.GetProperty("tools").EnumerateArray().Single();
-        Assert.Equal("add", tool.GetProperty("name").GetString());
-        Assert.Equal(JsonValueKind.Number, tool.GetProperty("sideEffect").ValueKind);
-        Assert.Equal(0, tool.GetProperty("sideEffect").GetInt32());
+        Assert.Equal("return 1;", decoded.Code);
+        Assert.Equal("run-1", decoded.Context.RunId);
+        Assert.Equal("sess", decoded.Context.SessionId);
+        Assert.Equal("/tmp/work", decoded.Context.WorkingDirectory);
+        Assert.Equal(2, decoded.Context.Depth);
+        Assert.Equal(["alpha", "beta"], decoded.Context.PluginChain);
+        Assert.Equal("root-1", decoded.Context.RootRunId);
+        Assert.Equal(5_000, decoded.TimeoutMilliseconds);
 
-        var options = root.GetProperty("options");
-        Assert.Equal(8, options.GetProperty("maxConcurrentToolCalls").GetInt32());
+        var tool = Assert.Single(decoded.Tools);
+        Assert.Equal("add", tool.Name);
+        Assert.Equal(Sdk.ToolSideEffect.ReadOnly, tool.SideEffect);
 
-        foreach (var property in root.EnumerateObject())
-        {
-            Assert.True(char.IsLower(property.Name[0]), $"property '{property.Name}' is not camelCase.");
-        }
-
-        foreach (var property in context.EnumerateObject())
-        {
-            Assert.True(char.IsLower(property.Name[0]), $"property '{property.Name}' is not camelCase.");
-        }
+        Assert.Equal(8, decoded.Options.MaxConcurrentToolCalls);
     }
 
     private static async Task<object> CaptureAsync(Task<ToolResult> task)

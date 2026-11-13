@@ -19,7 +19,8 @@ depends-on: [forge-goal]
 |---|---|
 | `Forge.Abstractions` | 主程序内部共享契约(工具、审批、存储、提示词、Agent 事件);零外部依赖 |
 | `Forge.IO` | 文件与进程原语 + Agent 的文件/搜索/shell 工具:`AtomicFile`、工作区路径守卫、有界文件读写、目录遍历、`.gitignore` 匹配、grep 引擎、`ProcessRunner`、7 个 `ITool`(`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash`);只依赖 BCL 与 `Abstractions` |
-| `Forge.Ipc`(新增) | 命名管道 + 4 字节长度前缀 JSON 的协议、帧编解码、协议版本;主程序、宿主、Worker 共用;须 AOT 兼容 |
+| `Forge.Ipc`(新增) | 命名管道 + 4 字节长度前缀 MessagePack 帧的传输、帧编解码、请求关联、协议版本;主程序、宿主、Worker 共用;须 AOT 兼容 |
+| `Forge.Ipc.Protocol`(新增) | 宿主内部各操作的类型化负载(插件执行、Worker、`host.tool_call`、终端);依赖 `Ipc`、`Plugin.Sdk`,不属插件 SDK;须 AOT 兼容 |
 | `Forge.Plugin.Sdk`(新增) | 供插件源码引用的稳定 SDK 与契约,独立版本化,不依赖 Core |
 | `Forge.Core` | Agent 循环、会话、模型提供商(OpenAI 兼容、Anthropic)、SubAgent 调度与提示词缓存、提示词三层合成 |
 | `Forge.Workspace` | Git 与 Worktree、规格图(spec-graph)读写、评审意见存储 |
@@ -27,10 +28,10 @@ depends-on: [forge-goal]
 | `Forge.Editor` | 文本缓冲、LSP 客户端(含语义 token)、TextMate 着色、补全、Diff 模型;不含 UI |
 | `Forge.ExtensionHost`(新增,JIT) | 常驻进程:插件发现与注册、生命周期、Roslyn 编译与缓存、声明式工作流执行、Worker 管理、版本与依赖管理 |
 | `Forge.PluginWorker`(新增,JIT) | 独立进程:加载并执行动态 C# 插件与 run_code 脚本;可被整体终止 |
-| `Forge.HostClient`(新增,AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Plugin.Sdk |
+| `Forge.HostClient`(新增,AOT) | 主程序侧的 `ExtensionHostClient`:启动/连接 Host、`ITool` 代理、`host.tool_call` 回传(审批在主程序)、Host 崩溃保留工具快照;只依赖 Abstractions、Ipc、Ipc.Protocol、Plugin.Sdk |
 | `Forge.App` | Avalonia 桌面 UI 与组合根(含 `ExtensionHostClient`);唯一知道所有主程序项目的层 |
 
-主程序侧(Native AOT):`Abstractions`、`IO`、`Ipc` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
+主程序侧(Native AOT):`Abstractions`、`IO`、`Ipc`、`Ipc.Protocol` ← `Core`、`Workspace`、`Mcp`、`Editor` ← `App`。JIT 侧:`Plugin.Sdk`、`Ipc`、`Ipc.Protocol` ← `ExtensionHost` ← `PluginWorker`。主程序不引用 Roslyn;`ExtensionHost` 不引用 `Core`。(新分层待 Stage 0–2 验证,未确认)
 
 ## 关键决策
 
@@ -75,11 +76,24 @@ depends-on: [forge-goal]
 
 agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用源码并改命名空间内化;署名按许可证要求保留,不要求则不保留(见 `forge-goal`)。
 
-**NuGet 引用规则:** 仅针对 Forge 主程序的开发。默认仅限 BCL、官方基础包与特别指定的包。已确认白名单:Avalonia(UI)及官方同仓包——`Avalonia.Controls.DataGrid`、`Avalonia.Controls.TreeDataGrid`、`Avalonia.Controls.WebView`、`Avalonia.Headless`(含 `.XUnit`,后者连带要求 xunit v3)、`Avalonia.Skia`(含随其传递引入的 SkiaSharp)、`Avalonia.Themes.*`、`Avalonia.Fonts.*`,均不内化;`AvaloniaUI.DiagnosticsSupport` 属 Avalonia Plus 商业工具链,不在白名单内;三方主题/图标/图表库(FluentAvalonia、SukiUI、Semi.Avalonia、Irihi.Ursa、Material.Avalonia、Citrus.Avalonia、ShadUI、LiveCharts、Projektanker.Icons.*、Lucide.Avalonia、Svg.Skia 等)未批准,引入前逐项确认。Microsoft.Data.Sqlite(会话存储,含原生二进制),均不内化;Roslyn 仅用于 `ExtensionHost`/`PluginWorker`,不进入主程序;测试项目另用 xunit(仅测试,不随产品发布;未确认是否纳入);neuecc 的库(https://github.com/neuecc,如 MessagePack-CSharp、MemoryPack、ZLinq)按需选用。其他三方包默认内化源码;若某包体量大或不值得内化,开发中由 Agent 提示用户,经同意后再加入白名单。停靠布局不用三方库:曾内化的 Dock(约 5 万行)已由 `Forge.App` 自写的固定拓扑工作台取代并移除(见 `forge-app`)。
+**NuGet 引用规则:** 仅针对 Forge 主程序的开发。只用下列三方库,版本钉在引用处;新增任何包须先经用户同意。
+
+| 库 | 版本 | 用在 | 约束 |
+|---|---|---|---|
+| Avalonia、Avalonia.Desktop、Avalonia.Themes.Fluent、Avalonia.Fonts.Inter | 12.1.6 | `Forge.App` | UI |
+| Avalonia.Headless | 12.1.6 | 测试项目 | 仅测试 |
+| Avalonia.AvaloniaEdit、AvaloniaEdit.TextMate(含其传递的 TextMateSharp 语法包) | 12.0.0 | `Forge.App` | 编辑器与 diff |
+| Microsoft.Data.Sqlite | 11.* | 会话存储 | 含原生二进制,AOT 靠实测背书 |
+| Microsoft.CodeAnalysis.CSharp(.Scripting) | 5.* | `ExtensionHost`、`PluginWorker` 等 JIT 侧 | 不进入主程序 |
+| Microsoft.Extensions.Logging | 11.* | `Forge.App` | 日志抽象 |
+| ZLogger | 2.6.2 | `Forge.App` | 诊断日志输出端,见 `forge-app` 诊断日志 |
+| ZLinq | 1.6.1 | `Forge.App` | 只用在实测有分配的热路径,不启用 DropInGenerator |
+| MessagePack | 4.0.0-rc.1 | `Forge.Ipc`、`Forge.Ipc.Protocol`、`Forge.Plugin.Sdk`、`Forge.ScriptRuntime` | IPC 线格式,只用源生成格式化器,见 `forge-ipc` |
+| xunit、xunit.runner.visualstudio、Microsoft.NET.Test.Sdk | 2.* / 3.* / 18.* | 测试项目 | 仅测试 |
 
 **插件的 NuGet 依赖不受上述白名单限制,由使用者控制(已确认)。** 默认只用 BCL 与 Plugin SDK;新增依赖须经用户审批并计入 DependencyHash;支持离线 NuGet 缓存;编译缓存键包含 SDK、Contracts、依赖与编译配置版本。
 
-**编辑 UI 特例(已确认)。** 用户批准直接引用 `Avalonia.AvaloniaEdit` 及其配套额外依赖,纳入白名单,无需内化;包括 TextMate 集成的 `AvaloniaEdit.TextMate`、`TextMateSharp`、`TextMateSharp.Grammars` 及其传递依赖。此批准不扩展到与编辑控件无关的三方包。语言范围以所采用 AvaloniaEdit 着色方案实际支持的语法为准,不再限于五种语言;语法支持不等于内置 LSP 服务器,服务器安装与配置仍须明确呈现。现有 `Forge.Editor` 的无 UI 服务不能因替换控件而直接删除;须先验证 LSP、编码保存、着色、Diff 等能力迁移无损。增量渲染与 Native AOT 约束保持不变。
+**编辑器依赖(已确认)。** 语言范围以 AvaloniaEdit 着色方案实际支持的语法为准;语法支持不等于内置 LSP 服务器,服务器安装与配置仍须明确呈现。现有 `Forge.Editor` 的无 UI 服务不能因替换控件而直接删除;须先验证 LSP、编码保存、着色、Diff 等能力迁移无损。
 
 已核对的库缺口(12.0.0,以源码为准,不以 README 为准):该版本**没有多光标**(只有单 `Caret` 与 `RectangleSelection` 列选择),行尾符生成器被注释、`ShowTabs` 无读取者,`TextEditor.Load/Save(string)` 未实现。因此多光标按用户确认改用矩形列选择,`¶`/`→` 两个字形由 `Forge.App` 自己的零长度行内元素绘制,保存仍走 `Forge.Editor.TextFileCodec`。这些补位都在上层实现,不扩大库依赖。
 

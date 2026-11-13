@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 using Forge.Abstractions;
 using Forge.App.Composition;
 using Forge.App.Providers;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Services;
 
@@ -228,7 +230,7 @@ internal sealed class ComposerPreferences
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                System.Diagnostics.Trace.WriteLine("[composer] preferences could not be saved: " + exception.Message);
+                AppLogs.Composer.ZLogError(exception, $"preferences could not be saved");
             }
         });
     }

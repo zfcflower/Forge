@@ -1,5 +1,6 @@
 using System.Text;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 
 namespace Forge.Integration.Tests.Terminal;
 
@@ -265,11 +266,11 @@ internal sealed class RawTerminalHost : IAsyncDisposable
         Dictionary<string, string>? environment = null,
         CancellationToken ct = default)
     {
-        var response = await peer.SendRequestAsync(
+        var response = await peer.RequestAsync(
             TerminalWire.Start,
             TerminalWire.StartArgs(Root, columns, rows, shell, arguments, environment),
             ct).ConfigureAwait(false);
-        var (terminalId, processId, resolved) = TerminalWire.ReadStartResult(response.Result);
+        var (terminalId, processId, resolved) = TerminalWire.ReadStartResult(response);
         lock (gate)
         {
             started.Add(terminalId);
@@ -281,33 +282,33 @@ internal sealed class RawTerminalHost : IAsyncDisposable
     public Task SendInputAsync(string terminalId, string text, CancellationToken ct = default)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
-        return peer.SendNotificationAsync(TerminalWire.Input, TerminalWire.InputArgs(terminalId, bytes), ct);
+        return peer.NotifyAsync(TerminalWire.Input, TerminalWire.InputArgs(terminalId, bytes), ct);
     }
 
     public Task SendInputBytesAsync(string terminalId, byte[] bytes, CancellationToken ct = default) =>
-        peer.SendNotificationAsync(TerminalWire.Input, TerminalWire.InputArgs(terminalId, bytes), ct);
+        peer.NotifyAsync(TerminalWire.Input, TerminalWire.InputArgs(terminalId, bytes), ct);
 
     public Task AckAsync(string terminalId, long bytes, CancellationToken ct = default) =>
-        peer.SendNotificationAsync(TerminalWire.Ack, TerminalWire.AckArgs(terminalId, bytes), ct);
+        peer.NotifyAsync(TerminalWire.Ack, TerminalWire.AckArgs(terminalId, bytes), ct);
 
     public async Task ResizeAsync(string terminalId, int columns, int rows, CancellationToken ct = default)
     {
-        await peer.SendRequestAsync(TerminalWire.Resize, TerminalWire.ResizeArgs(terminalId, columns, rows), ct)
+        await peer.RequestAsync(TerminalWire.Resize, TerminalWire.ResizeArgs(terminalId, columns, rows), ct)
             .ConfigureAwait(false);
     }
 
     public async Task<bool> ForegroundAsync(string terminalId, CancellationToken ct = default)
     {
-        var response = await peer.SendRequestAsync(TerminalWire.Foreground, TerminalWire.IdArgs(terminalId), ct)
+        var response = await peer.RequestAsync(TerminalWire.Foreground, TerminalWire.IdArgs(terminalId), ct)
             .ConfigureAwait(false);
-        return TerminalWire.ReadBusy(response.Result);
+        return TerminalWire.ReadBusy(response);
     }
 
     public Task<IpcMessage> StopAsync(string terminalId, CancellationToken ct = default) =>
-        peer.SendRequestAsync(TerminalWire.Stop, TerminalWire.IdArgs(terminalId), ct);
+        peer.RequestAsync(TerminalWire.Stop, TerminalWire.IdArgs(terminalId), ct);
 
     public Task<IpcMessage> StopHostAsync(CancellationToken ct = default) =>
-        peer.SendRequestAsync(Forge.Plugin.Sdk.ExtensionProtocol.HostStop, PluginQueueBudgetWire.Empty(), ct);
+        peer.RequestAsync(Forge.Plugin.Sdk.ExtensionProtocol.HostStop, IpcEmpty.Instance, ct);
 
     public Task<int> WaitForExitAsync(CancellationToken ct) => host.WaitForExitAsync(ct);
 
@@ -441,7 +442,7 @@ internal sealed class RawTerminalHost : IAsyncDisposable
         {
             if (string.Equals(message.Operation, TerminalWire.Output, StringComparison.Ordinal))
             {
-                var (terminalId, seq, data) = TerminalWire.ReadOutput(message.Arguments);
+                var (terminalId, seq, data) = TerminalWire.ReadOutput(message);
                 lock (gate)
                 {
                     if (!frames.TryGetValue(terminalId, out var list))
@@ -460,7 +461,7 @@ internal sealed class RawTerminalHost : IAsyncDisposable
             }
             else if (string.Equals(message.Operation, TerminalWire.Exit, StringComparison.Ordinal))
             {
-                var (terminalId, exitCode) = TerminalWire.ReadExit(message.Arguments);
+                var (terminalId, exitCode) = TerminalWire.ReadExit(message);
                 lock (gate)
                 {
                     exits[terminalId] = (exitCode, DateTime.UtcNow.Ticks);

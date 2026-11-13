@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Lifecycle;
 
@@ -124,7 +126,7 @@ internal sealed class PurgeCleanupJournal(string path)
             }
             else if (line.Length > 0 && !IsSessionId(line))
             {
-                Trace.WriteLine($"[lifecycle] ignored a line of '{path}' that is not a session id");
+                AppLogs.Lifecycle.ZLogWarning($"ignored a line of '{path}' that is not a session id");
             }
         }
 
@@ -154,7 +156,7 @@ internal sealed class PurgeCleanup(
         {
             // The cleanup still runs; only its retry is lost, which the failure message says if it fails. An id the
             // journal refuses is one the stores refuse too, so that cleanup fails and says it is not retried.
-            Trace.WriteLine($"[lifecycle] could not note '{sessionId}' in '{journal.FilePath}': {exception.Message}");
+            AppLogs.Lifecycle.ZLogWarning($"could not note '{sessionId}' in '{journal.FilePath}': {exception.Message}");
             unjournaled = exception;
         }
 
@@ -185,7 +187,7 @@ internal sealed class PurgeCleanup(
             {
                 if (await sessionExists(id, ct).ConfigureAwait(false))
                 {
-                    Trace.WriteLine($"[lifecycle] '{id}' exists again; its pending purge cleanup is dropped");
+                    AppLogs.Lifecycle.ZLogInformation($"'{id}' exists again; its pending purge cleanup is dropped");
                 }
                 else
                 {
@@ -194,7 +196,7 @@ internal sealed class PurgeCleanup(
             }
             catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
             {
-                Trace.WriteLine($"[lifecycle] the purge cleanup of '{id}' failed again: {exception.Message}");
+                AppLogs.Lifecycle.ZLogWarning($"the purge cleanup of '{id}' failed again: {exception.Message}");
                 failures.Add(id + ": " + exception.Message);
                 continue;
             }
@@ -214,7 +216,7 @@ internal sealed class PurgeCleanup(
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Trace.WriteLine($"[lifecycle] could not take '{sessionId}' off '{journal.FilePath}': {exception.Message}");
+            AppLogs.Lifecycle.ZLogWarning($"could not take '{sessionId}' off '{journal.FilePath}': {exception.Message}");
         }
     }
 }

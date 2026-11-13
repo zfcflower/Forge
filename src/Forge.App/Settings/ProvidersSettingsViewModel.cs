@@ -41,6 +41,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
         Compaction = new CompactionSettingsViewModel(compaction ?? new CompactionSettingsStore(services.Store.SettingsPath));
+        Usage = new UsageLogSettingsViewModel(services.UsageLog, () => services.UsageRecorder.Directory);
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
         this.modelCatalogRefresh = modelCatalogRefresh;
         // The settings page is global, so it lists the user agents of ~/.forge/agents; project agents belong to a session.
@@ -69,6 +70,9 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
 
     /// <summary>The compaction block under the default context window: thresholds relative to each model's effective window.</summary>
     public CompactionSettingsViewModel Compaction { get; }
+
+    /// <summary>The usage-log switch: on writes one JSONL line per model request under the data root.</summary>
+    public UsageLogSettingsViewModel Usage { get; }
 
     /// <summary>The connected providers, in stored order.</summary>
     public ObservableCollection<ProviderRowViewModel> Rows { get; } = [];
@@ -208,7 +212,10 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         var catalog = services.Catalog;
         foreach (var provider in catalog.Providers)
         {
-            Rows.Add(new ProviderRowViewModel(provider, string.Equals(provider.Id, catalog.Default?.Id, StringComparison.Ordinal)));
+            Rows.Add(new ProviderRowViewModel(
+                provider,
+                string.Equals(provider.Id, catalog.Default?.Id, StringComparison.Ordinal),
+                ttl => services.SaveCacheTtlAsync(provider.Id, ttl)));
         }
 
         BuiltInRows.Clear();
@@ -296,6 +303,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         await services.ReloadAsync(cancellationToken).ConfigureAwait(true);
         agentDefaults.Reload();
         Compaction.Reload();
+        Usage.Reload();
         Reload();
     }
 
@@ -413,6 +421,7 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
 
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         Compaction.Dispose();
+        Usage.Dispose();
     }
 
     /// <summary>The catalog or a refresh changed (from either thread): re-read the row through the injected post.</summary>
@@ -617,17 +626,72 @@ internal sealed class ProviderRowViewModel : ObservableObject
 {
     private bool deleteArmed;
 
-    public ProviderRowViewModel(ConnectedProvider provider, bool isDefault)
+    /// <param name="cacheTtlChanged">
+    /// Saves a new cache lifetime for this provider; null when the row is built without a catalogue behind it (a design-time or test
+    /// instance), in which case the control still shows the current value but does nothing.
+    /// </param>
+    public ProviderRowViewModel(ConnectedProvider provider, bool isDefault, Func<string?, Task>? cacheTtlChanged = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         Provider = provider;
         IsDefault = isDefault;
+        this.cacheTtlChanged = cacheTtlChanged;
+        cacheTtl = provider.Definition.PromptCacheTtl;
         Status = provider.Status;
         ModelsLabel = ProvidersSettingsViewModel.ModelsText(provider);
         CredentialText = CredentialLine(provider, Status);
     }
 
+    private readonly Func<string?, Task>? cacheTtlChanged;
+    private string? cacheTtl;
+
     public ConnectedProvider Provider { get; }
+
+    /// <summary>Whether this vendor has a cache lifetime to set; the selector is hidden when it does not.</summary>
+    public bool SupportsCacheTtl => Provider.Definition.SupportsPromptCacheTtl;
+
+    /// <summary>The three choices, in the order the control shows them; <c>auto</c> is the default and the product's recommendation.</summary>
+    public IReadOnlyList<string> CacheTtlOptions { get; } =
+    [
+        Localization.Loc.Instance[ProviderStrings.CacheTtlAutoKey],
+        Localization.Loc.Instance[ProviderStrings.CacheTtlShortKey],
+        Localization.Loc.Instance[ProviderStrings.CacheTtlLongKey],
+    ];
+
+    /// <summary>The hover line: the two prices and what <c>auto</c> actually does.</summary>
+    public string CacheTtlTooltip => Localization.Loc.Instance[ProviderStrings.CacheTtlTooltipKey];
+
+    /// <summary>The choice shown in the control, as one of <see cref="CacheTtlOptions"/>.</summary>
+    public string SelectedCacheTtl
+    {
+        get => cacheTtl switch
+        {
+            "5m" => CacheTtlOptions[1],
+            "1h" => CacheTtlOptions[2],
+            _ => CacheTtlOptions[0],
+        };
+        set
+        {
+            var index = CacheTtlOptions.ToList().IndexOf(value ?? string.Empty);
+            var next = index switch
+            {
+                1 => "5m",
+                2 => "1h",
+                _ => null,
+            };
+            if (string.Equals(cacheTtl, next, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            cacheTtl = next;
+            OnPropertyChanged(nameof(SelectedCacheTtl));
+            if (cacheTtlChanged is { } save)
+            {
+                _ = save(next);
+            }
+        }
+    }
 
     public string Id => Provider.Id;
 

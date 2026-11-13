@@ -20,6 +20,55 @@ internal sealed class SettingsDocument
 
     [JsonPropertyName("modelCatalog")]
     public ModelCatalogSectionDocument? ModelCatalog { get; set; }
+
+    [JsonPropertyName(ClaudeWireSettings.SectionName)]
+    public ClaudeWireSectionDocument? ClaudeWire { get; set; }
+
+    [JsonPropertyName("usageLog")]
+    public UsageLogSectionDocument? UsageLog { get; set; }
+}
+
+/// <summary>
+/// The <c>usageLog</c> section: whether every model request is recorded. The recorder asks the live store before each write, so turning
+/// it on or off takes effect without a restart.
+/// </summary>
+internal sealed class UsageLogSectionDocument
+{
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+}
+
+/// <summary>
+/// The <c>claudeWire</c> section: whether a subscription request claims to be the official client, and under which identity.
+/// Hand-edited only — Forge reads it and never writes it, so the file keeps whatever the user (or a later build) put there.
+/// Allowed values and their consequences are documented in the provider spec; <see cref="Note"/> exists so a reader of the
+/// file can find them without this app.
+/// </summary>
+internal sealed class ClaudeWireSectionDocument
+{
+    /// <summary>
+    /// The switch: a JSON boolean, one spelling only. Typed as <see cref="JsonElement"/> rather than <c>bool?</c> on purpose —
+    /// a string or number here must read as "no switch given" instead of failing the whole file's deserialization (which would
+    /// hide every connected provider), so the shape is inspected rather than required.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public JsonElement? Enabled { get; set; }
+
+    /// <summary>The client version to claim, three dot-separated numbers, e.g. <c>2.1.317</c>.</summary>
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
+
+    /// <summary>The build suffix the billing header appends, lowercase alphanumerics, e.g. <c>68a</c>.</summary>
+    [JsonPropertyName("build")]
+    public string? Build { get; set; }
+
+    /// <summary>The entrypoint to claim, e.g. <c>claude-desktop-3p</c>.</summary>
+    [JsonPropertyName("entrypoint")]
+    public string? Entrypoint { get; set; }
+
+    /// <summary>A free-form sentence for whoever reads the file; ignored by the app.</summary>
+    [JsonPropertyName("note")]
+    public string? Note { get; set; }
 }
 
 /// <summary>

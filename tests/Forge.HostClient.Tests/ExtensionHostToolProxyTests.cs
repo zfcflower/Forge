@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 using static Forge.HostClient.Tests.ToolFixtures;
 
 namespace Forge.HostClient.Tests;
@@ -10,27 +12,31 @@ public sealed class ExtensionHostToolProxyTests
 {
     private static readonly string WorkingDirectory = BoundRoots.AbsoluteDir("work");
     private static readonly ToolContext Context = new("session-1", WorkingDirectory, 3);
+    private const string TestToolArgumentsText = """{"text":"hello","n":2}""";
 
     [Fact]
     public async Task Invoke_sends_plugin_execute_with_parsed_arguments_and_the_call_context()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", """{"content":"hi","isError":false}""");
+        host.Answer("plugin.execute", new Sdk.ToolResult("hi", false));
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
-        var result = await tool.InvokeAsync(new ToolCall("c1", "echo", """{"text":"hello","n":2}"""), Context, limit.Token);
+        var result = await tool.InvokeAsync(new ToolCall("c1", "echo", TestToolArgumentsText), Context, limit.Token);
 
         Assert.Equal(new ToolResult("hi", false), result);
         var request = Assert.Single(host.Requests("plugin.execute"));
-        var args = request.Arguments!.Value;
-        Assert.Equal("alpha", args.GetProperty("pluginId").GetString());
-        Assert.Equal("echo", args.GetProperty("tool").GetString());
-        Assert.Equal("session-1", args.GetProperty("sessionId").GetString());
-        Assert.Equal(WorkingDirectory, args.GetProperty("workingDir").GetString());
-        Assert.Equal(3, args.GetProperty("depth").GetInt32());
-        var sent = args.GetProperty("args");
+        var args = request.Read<PluginExecuteRequest>();
+        Assert.Equal("alpha", args.PluginId);
+        Assert.Equal("echo", args.Tool);
+        var context = Assert.IsType<Sdk.ExtensionCallContext>(args.Context);
+        Assert.Equal("session-1", context.SessionId);
+        Assert.Equal(WorkingDirectory, context.WorkingDirectory);
+        Assert.Equal(3, context.Depth);
+        Assert.Equal(TestToolArgumentsText, HostWire.Text(args.ArgumentsJson));
+        using var document = JsonDocument.Parse(args.ArgumentsJson);
+        var sent = document.RootElement;
         Assert.Equal(JsonValueKind.Object, sent.ValueKind);
         Assert.Equal("hello", sent.GetProperty("text").GetString());
         Assert.Equal(2, sent.GetProperty("n").GetInt32());
@@ -39,19 +45,19 @@ public sealed class ExtensionHostToolProxyTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task Blank_arguments_are_sent_as_an_empty_object(string arguments)
+    public async Task Blank_arguments_are_sent_as_the_empty_payload(string arguments)
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", """{"content":"ok","isError":false}""");
+        host.Answer("plugin.execute", new Sdk.ToolResult("ok", false));
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
         await tool.InvokeAsync(new ToolCall("c1", "echo", arguments), Context, limit.Token);
 
-        var sent = Assert.Single(host.Requests("plugin.execute")).Arguments!.Value.GetProperty("args");
-        Assert.Equal(JsonValueKind.Object, sent.ValueKind);
-        Assert.Empty(sent.EnumerateObject());
+        // The empty payload is the wire form of "{}"; the host hands an empty object to the tool.
+        var sent = Assert.Single(host.Requests("plugin.execute")).Read<PluginExecuteRequest>();
+        Assert.True(sent.ArgumentsJson.IsEmpty);
     }
 
     [Fact]
@@ -74,7 +80,7 @@ public sealed class ExtensionHostToolProxyTests
     public async Task Error_flag_and_content_from_the_host_are_returned_unchanged()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", """{"content":"bad input","isError":true}""");
+        host.Answer("plugin.execute", new Sdk.ToolResult("bad input", true));
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
@@ -102,10 +108,10 @@ public sealed class ExtensionHostToolProxyTests
     }
 
     [Fact]
-    public async Task A_result_that_is_not_an_object_becomes_an_error_result()
+    public async Task A_response_without_a_payload_becomes_an_error_result()
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", "\"just text\"");
+        host.AnswerRaw("plugin.execute", RawPayload.None);
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
@@ -116,18 +122,30 @@ public sealed class ExtensionHostToolProxyTests
         Assert.Equal("The Extension Host returned no tool result.", result.Content);
     }
 
-    [Fact]
-    public async Task A_malformed_result_object_becomes_an_error_result()
+    [Theory]
+    [InlineData("text")]
+    [InlineData("numeric content")]
+    [InlineData("nil")]
+    [InlineData("nil content")]
+    public async Task A_result_that_cannot_be_decoded_becomes_an_error_result(string shape)
     {
         await using var host = new FakeHost();
-        host.Answer("plugin.execute", """{"content":5,"isError":false}""");
+        host.AnswerRaw("plugin.execute", shape switch
+        {
+            "text" => HostWire.Payload("just text"),
+            // [5, false]: the content is a number instead of a string.
+            "numeric content" => new RawPayload(new byte[] { 0x92, 0x05, 0xc2 }),
+            // [nil, true]: the content member is non-nullable, so a nil content fails to decode.
+            "nil content" => new RawPayload(new byte[] { 0x92, 0xc0, 0xc3 }),
+            _ => HostWire.Nil,
+        });
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
         using var limit = TestLimit.Create();
 
         var result = await tool.InvokeAsync(new ToolCall("c1", "echo", "{}"), Context, limit.Token);
 
-        Assert.True(result.IsError);
+        Assert.Equal(new ToolResult("The Extension Host returned a tool result that cannot be decoded.", true), result);
     }
 
     [Fact]
@@ -139,7 +157,7 @@ public sealed class ExtensionHostToolProxyTests
         {
             received.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct);
-            return Json.Element("{}");
+            return new Sdk.ToolResult("never", false);
         });
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);
@@ -165,7 +183,7 @@ public sealed class ExtensionHostToolProxyTests
                 return FakeHost.NeverAnswer(default!, ct);
             }
 
-            return Task.FromResult(Json.Element("""{"content":"second","isError":false}"""));
+            return Task.FromResult(HostReply.Of(new Sdk.ToolResult("second", false)));
         });
         var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(300) };
         await using var client = await ClientFactory.StartAsync(host, options: options);
@@ -194,8 +212,9 @@ public sealed class ExtensionHostToolProxyTests
             }
 
             await gate.Task.WaitAsync(ct);
-            var n = message.Arguments!.Value.GetProperty("args").GetProperty("n").GetInt32();
-            return Json.Element($$"""{"content":"n={{n}}","isError":false}""");
+            using var document = JsonDocument.Parse(message.Read<PluginExecuteRequest>().ArgumentsJson);
+            var n = document.RootElement.GetProperty("n").GetInt32();
+            return new Sdk.ToolResult($"n={n}", false);
         });
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);

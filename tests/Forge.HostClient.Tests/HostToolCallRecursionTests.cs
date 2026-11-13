@@ -1,6 +1,6 @@
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests;
@@ -41,25 +41,21 @@ public sealed class HostToolCallRecursionTests
         var runB = BoundRoots.RunIdOf(nestedRequest);
         Assert.NotEqual(setup.RunA, runB);
 
-        var wire = nestedRequest.Arguments!.Value;
-        Assert.Equal("beta", wire.GetProperty("pluginId").GetString());
-        Assert.Equal("work", wire.GetProperty("tool").GetString());
-        var context = wire.GetProperty("context");
-        Assert.Equal(runB, context.GetProperty("runId").GetString());
-        Assert.Equal("sess-chain", context.GetProperty("sessionId").GetString());
-        Assert.Equal(setup.Directory, context.GetProperty("workingDirectory").GetString());
-        Assert.Equal(1, context.GetProperty("depth").GetInt32());
-        Assert.Equal(new[] { "alpha" }, context.GetProperty("pluginChain").EnumerateArray()
-            .Select(element => element.GetString()!).ToArray());
-        Assert.Equal("sess-chain", wire.GetProperty("sessionId").GetString());
-        Assert.Equal(setup.Directory, wire.GetProperty("workingDir").GetString());
-        Assert.Equal(1, wire.GetProperty("depth").GetInt32());
+        var wire = nestedRequest.Read<PluginExecuteRequest>();
+        Assert.Equal("beta", wire.PluginId);
+        Assert.Equal("work", wire.Tool);
+        var context = wire.Context!;
+        Assert.Equal(runB, context.RunId);
+        Assert.Equal("sess-chain", context.SessionId);
+        Assert.Equal(setup.Directory, context.WorkingDirectory);
+        Assert.Equal(1, context.Depth);
+        Assert.Equal(new[] { "alpha" }, context.PluginChain);
 
         var callbackB = await host.CallClientAsync(
             Operation, BoundRoots.BoundPayload(runB, "beta", "leaf", "{}"), limit.Token);
         Assert.Equal(("leaf-ok", false), BoundRoots.OutputOf(callbackB));
 
-        setup.HoldB.ResultJson = """{"content":"work-done","isError":false}""";
+        setup.HoldB.Content = "work-done";
         setup.HoldB.Gate.TrySetResult();
         Assert.Equal(("work-done", false), BoundRoots.OutputOf(await callbackA.Bounded()));
         setup.HoldA.Gate.TrySetResult();
@@ -204,21 +200,21 @@ public sealed class HostToolCallRecursionTests
     {
         var directory = BoundRoots.AbsoluteDir("chain");
         var holdA = new InFlightRoot();
-        var holdB = new InFlightRoot { ResultJson = """{"content":"work-done","isError":false}""" };
+        var holdB = new InFlightRoot { Content = "work-done" };
         var nestedArrived = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         host.On("plugin.execute", async (message, ct2) =>
         {
-            var plugin = message.Arguments!.Value.GetProperty("pluginId").GetString();
+            var plugin = message.Read<PluginExecuteRequest>().PluginId;
             if (string.Equals(plugin, "beta", StringComparison.Ordinal))
             {
                 nestedArrived.TrySetResult(message);
                 await holdB.Gate.Task.WaitAsync(ct2).ConfigureAwait(false);
-                return Json.Element(holdB.ResultJson);
+                return holdB.Reply(message.Operation);
             }
 
             holdA.Arrived.TrySetResult(message);
             await holdA.Gate.Task.WaitAsync(ct2).ConfigureAwait(false);
-            return Json.Element(holdA.ResultJson);
+            return holdA.Reply(message.Operation);
         });
         var alphaProxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
         var betaProxy = await BoundRoots.RegisterPluginToolAsync(client, host, "beta", "work");

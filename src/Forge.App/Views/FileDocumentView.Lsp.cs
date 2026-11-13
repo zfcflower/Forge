@@ -9,6 +9,8 @@ using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.Editor.Lsp;
 using EditorDocument = AvaloniaEdit.Document.TextDocument;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Views;
 
@@ -90,7 +92,7 @@ public partial class FileDocumentView
 
     private void ReportLspViewError(FileDocumentViewModel viewModel, int generation, Exception exception)
     {
-        System.Diagnostics.Trace.WriteLine("[editor] language feature failed: " + exception);
+        AppLogs.Editor.ZLogError(exception, $"language feature failed");
         if (IsLspCurrent(viewModel, generation))
         {
             viewModel.ReportEditorLspNotice(new LocText(InspectorStrings.FilesLspUnavailable, LocText.Literal(exception.Message)));

@@ -69,46 +69,33 @@ public sealed class ApprovalLifecycleTests
         await peer.StartAsync(ct);
         try
         {
-            await peer.SendRequestAsync(ExtensionProtocol.PluginsRefresh, RawHost.EmptyObject(), ct);
+            await peer.RequestAsync(ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance, ct);
 
-            var executeArgs = JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                tool = "echo",
-                args = new { text = "hi" },
-                sessionId = "raw",
-                workingDir = layout.Root,
-                depth = 0,
-            });
+            var executeArgs = WireRequests.Execute("alpha", "echo", """{"text":"hi"}""", layout.Root);
             var rejected = await Assert.ThrowsAsync<IpcRemoteException>(
-                () => peer.SendRequestAsync(ExtensionProtocol.PluginExecute, executeArgs, ct));
+                () => peer.RequestAsync(ExtensionProtocol.PluginExecute, executeArgs, ct));
             Assert.Equal("plugin_not_approved", rejected.Code);
 
             Assert.Empty(registrations);
 
             var record = ApprovalDatabase.ReadRecord(layout.Data, "alpha", "1.0.0")
                 ?? throw new InvalidOperationException("the host persisted no approval record for alpha 1.0.0");
-            var approveArgs = JsonSerializer.SerializeToElement(new
-            {
-                pluginId = "alpha",
-                version = "1.0.0",
-                sourceHash = record.SourceHash,
-                dependencyHash = record.DependencyHash,
-                sdkVersion = record.SdkVersion,
-            });
-            await peer.SendRequestAsync(ExtensionProtocol.PluginApprove, approveArgs, ct);
+            await peer.RequestAsync(
+                ExtensionProtocol.PluginApprove,
+                WireRequests.Approve("alpha", "1.0.0", record.SourceHash, record.DependencyHash, record.SdkVersion),
+                ct);
 
             var notification = await registered.Task.WaitAsync(ct);
-            Assert.True(notification.Arguments is { ValueKind: JsonValueKind.Object });
-            var declared = notification.Arguments!.Value.GetProperty("tools");
-            Assert.Equal(PluginSources.AllTools.Length, declared.GetArrayLength());
-            var echoDeclaration = declared.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == "echo");
-            Assert.Equal(JsonValueKind.Number, echoDeclaration.GetProperty("sideEffect").ValueKind);
-            Assert.Equal(0, echoDeclaration.GetProperty("sideEffect").GetInt32());
+            var (registeredId, declared) = WireRequests.Registered(notification);
+            Assert.Equal("alpha", registeredId);
+            Assert.Equal(PluginSources.AllTools.Length, declared.Count);
+            var echoDeclaration = declared.Single(tool => tool.Name == "echo");
+            Assert.Equal(Forge.Plugin.Sdk.ToolSideEffect.ReadOnly, echoDeclaration.SideEffect);
 
-            var executed = await peer.SendRequestAsync(ExtensionProtocol.PluginExecute, executeArgs, ct);
-            Assert.Equal("a:hi", executed.Result!.Value.GetProperty("content").GetString());
-            Assert.False(executed.Result!.Value.GetProperty("isError").GetBoolean());
+            var executed = await peer.RequestAsync(ExtensionProtocol.PluginExecute, executeArgs, ct);
+            var (content, isError) = WireRequests.ToolResultOf(executed);
+            Assert.Equal("a:hi", content);
+            Assert.False(isError);
         }
         finally
         {

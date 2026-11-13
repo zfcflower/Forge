@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests.Terminal;
@@ -18,8 +19,8 @@ public sealed class TerminalSessionLifecycleTests
         const string terminalId = "t-exit";
         var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
-        await host.NotifyClientAsync(TerminalOps.Output, TerminalFixtures.OutputJson(terminalId, 0, "tail"));
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 7));
+        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "tail"));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 7));
         await host.SyncAsync();
 
         Assert.Equal(7, await session.Exited.Bounded());
@@ -27,15 +28,15 @@ public sealed class TerminalSessionLifecycleTests
         Assert.Equal("tail", System.Text.Encoding.UTF8.GetString(body));
 
         // 退出后：写与缩放在本地直接忽略，不上 IPC；前台探测恒 false 且不发请求。
-        var inputsBefore = host.Notifications(TerminalOps.Input).Count;
+        var inputsBefore = host.Notifications(TerminalOperations.Input).Count;
         await session.WriteAsync("late"u8.ToArray(), limit.Token);
-        Assert.Equal(inputsBefore, host.Notifications(TerminalOps.Input).Count);
+        Assert.Equal(inputsBefore, host.Notifications(TerminalOperations.Input).Count);
 
         await session.ResizeAsync(new TerminalSize(100, 30), limit.Token);
-        Assert.Empty(host.Requests(TerminalOps.Resize));
+        Assert.Empty(host.Requests(TerminalOperations.Resize));
 
         Assert.False(await session.HasForegroundProcessAsync(limit.Token));
-        Assert.Empty(host.Requests(TerminalOps.Foreground));
+        Assert.Empty(host.Requests(TerminalOperations.Foreground));
     }
 
     [Fact]
@@ -47,9 +48,9 @@ public sealed class TerminalSessionLifecycleTests
         const string terminalId = "t-dup-exit";
         var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
 
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 2));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 2));
         await host.SyncAsync();
-        await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(terminalId, 9));
+        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 9));
         await host.SyncAsync();
 
         Assert.Equal(2, await session.Exited.Bounded());
@@ -64,31 +65,31 @@ public sealed class TerminalSessionLifecycleTests
         const string terminalId = "t-stop";
         TerminalFixtures.AnswerStart(host, terminalId);
         host.On(
-            TerminalOps.Stop,
+            TerminalOperations.Stop,
             async (message, _) =>
             {
-                var id = message.Arguments!.Value.GetProperty("terminalId").GetString()!;
-                await host.NotifyClientAsync(TerminalOps.Exit, TerminalFixtures.ExitJson(id, 4));
-                return Json.Element("{}");
+                var id = message.Read<TerminalIdRequest>().TerminalId;
+                await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(id, 4));
+                return HostReply.Empty;
             });
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         await session.DisposeAsync();
 
-        var stop = Assert.Single(host.Requests(TerminalOps.Stop));
-        Assert.Equal(terminalId, stop.Arguments!.Value.GetProperty("terminalId").GetString());
+        var stop = Assert.Single(host.Requests(TerminalOperations.Stop));
+        Assert.Equal(terminalId, stop.Read<TerminalIdRequest>().TerminalId);
         Assert.Equal(4, await session.Exited.Bounded());
         await session.Output.Completion.Bounded();
 
         // 幂等：重复 dispose 不再发 stop。
         await session.DisposeAsync();
-        Assert.Single(host.Requests(TerminalOps.Stop));
+        Assert.Single(host.Requests(TerminalOperations.Stop));
     }
 
     [Fact]
     public async Task Dispose_without_a_host_exit_falls_back_to_minus_one_with_normal_output_completion()
     {
-        // Host 对 stop 应答了 {} 但没发 exit：会话本地收口，Exited 为 -1（“结束了但码未知”），
+        // Host 对 stop 应答了空载荷但没发 exit：会话本地收口，Exited 为 -1（“结束了但码未知”），
         // Output 正常完成而非 fault。
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
@@ -97,7 +98,7 @@ public sealed class TerminalSessionLifecycleTests
 
         await session.DisposeAsync();
 
-        Assert.Single(host.Requests(TerminalOps.Stop));
+        Assert.Single(host.Requests(TerminalOperations.Stop));
         Assert.Equal(-1, await session.Exited.Bounded());
         await session.Output.Completion.Bounded();
     }
@@ -112,10 +113,8 @@ public sealed class TerminalSessionLifecycleTests
 
         await session.ResizeAsync(new TerminalSize(132, 43), limit.Token);
 
-        var resize = Assert.Single(host.Requests(TerminalOps.Resize));
-        Assert.Equal("t-resize", resize.Arguments!.Value.GetProperty("terminalId").GetString());
-        Assert.Equal(132, resize.Arguments!.Value.GetProperty("columns").GetInt32());
-        Assert.Equal(43, resize.Arguments!.Value.GetProperty("rows").GetInt32());
+        var resize = Assert.Single(host.Requests(TerminalOperations.Resize));
+        Assert.Equal(new TerminalResizeRequest("t-resize", 132, 43), resize.Read<TerminalResizeRequest>());
         await session.DisposeAsync();
     }
 
@@ -126,7 +125,7 @@ public sealed class TerminalSessionLifecycleTests
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-resize-err");
-        host.On(TerminalOps.Resize, (_, _) => throw new FakeHostError("gone", "unknown terminal"));
+        host.On(TerminalOperations.Resize, (_, _) => throw new FakeHostError("gone", "unknown terminal"));
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         var failure = await Assert.ThrowsAsync<IpcRemoteException>(
@@ -144,7 +143,7 @@ public sealed class TerminalSessionLifecycleTests
             host, options: new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(250) });
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-resize-timeout");
-        host.On(TerminalOps.Resize, FakeHost.NeverAnswer);
+        host.On(TerminalOperations.Resize, FakeHost.NeverAnswer);
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         await Assert.ThrowsAsync<IpcTimeoutException>(
@@ -162,13 +161,13 @@ public sealed class TerminalSessionLifecycleTests
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg");
-        host.On(TerminalOps.Foreground, (_, _) => Task.FromResult(Json.Element(busy ? """{"busy":true}""" : """{"busy":false}""")));
+        host.Answer(TerminalOperations.Foreground, new TerminalForegroundResponse(busy));
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         Assert.Equal(busy, await session.HasForegroundProcessAsync(limit.Token));
 
-        var probe = Assert.Single(host.Requests(TerminalOps.Foreground));
-        Assert.Equal("t-fg", probe.Arguments!.Value.GetProperty("terminalId").GetString());
+        var probe = Assert.Single(host.Requests(TerminalOperations.Foreground));
+        Assert.Equal("t-fg", probe.Read<TerminalIdRequest>().TerminalId);
         await session.DisposeAsync();
     }
 
@@ -180,7 +179,7 @@ public sealed class TerminalSessionLifecycleTests
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg-err");
-        host.On(TerminalOps.Foreground, (_, _) => throw new FakeHostError("gone", "unknown terminal"));
+        host.On(TerminalOperations.Foreground, (_, _) => throw new FakeHostError("gone", "unknown terminal"));
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         Assert.False(await session.HasForegroundProcessAsync(limit.Token));
@@ -198,7 +197,7 @@ public sealed class TerminalSessionLifecycleTests
             host, options: new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(250) });
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg-timeout");
-        host.On(TerminalOps.Foreground, FakeHost.NeverAnswer);
+        host.On(TerminalOperations.Foreground, FakeHost.NeverAnswer);
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         Assert.False(await session.HasForegroundProcessAsync(limit.Token));
@@ -208,19 +207,19 @@ public sealed class TerminalSessionLifecycleTests
     }
 
     [Fact]
-    public async Task Foreground_without_a_busy_flag_reports_false_and_records_a_diagnostic()
+    public async Task Foreground_with_an_undecodable_answer_reports_false_and_records_a_diagnostic()
     {
-        // 读不到 busy 字段 ≠ “没有前台进程”：实现同样按 false 处理并记诊断。
+        // 解不出 TerminalForegroundResponse ≠ “没有前台进程”：实现同样按 false 处理并记诊断。
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         TerminalFixtures.AnswerStart(host, "t-fg-bad");
-        host.Answer(TerminalOps.Foreground, "{}");
+        host.AnswerRaw(TerminalOperations.Foreground, HostWire.Payload("busy"));
         var session = await client.StartAsync(TerminalFixtures.Request(), limit.Token);
 
         Assert.False(await session.HasForegroundProcessAsync(limit.Token));
 
-        BoundRoots.AssertDiagnostic(client, "terminal.foreground");
+        BoundRoots.AssertDiagnostic(client, "terminal.foreground for 't-fg-bad' returned unusable data");
         await session.DisposeAsync();
     }
 }

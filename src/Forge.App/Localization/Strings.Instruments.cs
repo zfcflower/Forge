@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using Forge.Abstractions;
 using Forge.App.ViewModels;
 
 namespace Forge.App.Localization;
@@ -39,6 +41,35 @@ internal static class InstrumentsStrings
     public const string ContextCompactNameKey = "session.strip.context.compact";
     public const string CacheReadKey = "session.strip.cacheRead";
     public const string UsageNoneKey = "session.strip.usage.none";
+
+    // The provider's account windows. Shown only when the provider reported them with the last response; the numbers are
+    // the server's own, so nothing here estimates or extrapolates.
+    public const string QuotaFiveHourKey = "session.strip.quota.fiveHour";
+    public const string QuotaWeeklyKey = "session.strip.quota.weekly";
+    public const string QuotaFiveHourNameKey = "session.strip.quota.fiveHour.name";
+    public const string QuotaWeeklyNameKey = "session.strip.quota.weekly.name";
+    public const string QuotaWindowKey = "session.strip.quota.window";
+    public const string QuotaWindowUnknownKey = "session.strip.quota.window.unknown";
+    public const string QuotaResetKey = "session.strip.quota.reset";
+    public const string QuotaUsageKey = "session.strip.quota.usage";
+    public const string QuotaTooltipKey = "session.strip.quota.tooltip";
+    public const string QuotaTooltipWindowKey = "session.strip.quota.tooltip.window";
+    public const string QuotaBindingKey = "session.strip.quota.binding";
+    public const string QuotaBindingUnknownKey = "session.strip.quota.binding.unknown";
+    public const string QuotaOverageKey = "session.strip.quota.overage";
+    public const string QuotaNoResetKey = "session.strip.quota.noReset";
+    public const string QuotaSoonKey = "session.strip.quota.soon";
+    public const string QuotaOverageAllowedKey = "session.strip.quota.overage.allowed";
+    public const string QuotaOverageWarningKey = "session.strip.quota.overage.warning";
+    public const string QuotaOverageRejectedKey = "session.strip.quota.overage.rejected";
+    public const string QuotaOverageUnknownKey = "session.strip.quota.overage.unknown";
+    public const string QuotaWindowsPrefixKey = "session.strip.quota.windows";
+    public const string QuotaThrottlePrefixKey = "session.strip.quota.throttle";
+    public const string QuotaThrottleRequestsKey = "session.strip.quota.throttle.requests";
+    public const string QuotaThrottleTokensKey = "session.strip.quota.throttle.tokens";
+    public const string QuotaThrottleTooltipKey = "session.strip.quota.throttle.tooltip";
+    public const string CacheTtlKey = "session.strip.cache.ttl";
+    public const string CacheTtlTooltipKey = "session.strip.cache.ttl.tooltip";
 
     public const string WorkspaceTooltipKey = "session.strip.workspace.tooltip";
     public const string ProjectVsCodeKey = "session.strip.project.vscode";
@@ -150,6 +181,98 @@ internal static class InstrumentsStrings
 
     /// <summary>"RC 98.5" — the cache-read hit rate in the strip, one decimal; the gauge beside it carries the percentage.</summary>
     public static string CacheRead(string ratio) => Loc.Instance.Format(CacheReadKey, ratio);
+
+    // ---------------------------------------------------------------- account windows (quota)
+
+    public static string QuotaFiveHour => Loc.Instance[QuotaFiveHourKey];
+
+    public static string QuotaWeekly => Loc.Instance[QuotaWeeklyKey];
+
+    public static string QuotaWindow(string label, string percent) => Loc.Instance.Format(QuotaWindowKey, label, percent);
+
+    public static string QuotaWindowUnknown(string label) => Loc.Instance.Format(QuotaWindowUnknownKey, label);
+
+    public static string QuotaReset(string remaining) => Loc.Instance.Format(QuotaResetKey, remaining);
+
+    public static string QuotaUsage(string fiveHour, string weekly) => Loc.Instance.Format(QuotaUsageKey, fiveHour, weekly);
+
+    public static string QuotaTooltip(string fiveHour, string weekly, string binding, string overage) =>
+        Loc.Instance.Format(QuotaTooltipKey, fiveHour, weekly, binding, overage);
+
+    public static string QuotaTooltipWindow(string label, string percent, string reset) =>
+        Loc.Instance.Format(QuotaTooltipWindowKey, label, percent, reset);
+
+    public static string QuotaBinding(string window) => Loc.Instance.Format(QuotaBindingKey, window);
+
+    public static string QuotaBindingUnknown => Loc.Instance[QuotaBindingUnknownKey];
+
+    public static string QuotaOverage(string state) => Loc.Instance.Format(QuotaOverageKey, state);
+
+    /// <summary>The word that says which of the two things the reading is: a spending window or a short-term rate limit.</summary>
+    public static string QuotaWindowsPrefix => Loc.Instance[QuotaWindowsPrefixKey];
+
+    public static string QuotaThrottlePrefix => Loc.Instance[QuotaThrottlePrefixKey];
+
+    public static string QuotaThrottleRequests(string used, string limit) =>
+        Loc.Instance.Format(QuotaThrottleRequestsKey, used, limit);
+
+    public static string QuotaThrottleTokens(string used, string limit) =>
+        Loc.Instance.Format(QuotaThrottleTokensKey, used, limit);
+
+    public static string QuotaThrottleTooltip(string requests, string tokens, string reset) =>
+        Loc.Instance.Format(QuotaThrottleTooltipKey, requests, tokens, reset);
+
+    public static string CacheTtlLabel(string ttl) => Loc.Instance.Format(CacheTtlKey, ttl);
+
+    public static string CacheTtlTooltip(string ttl) => Loc.Instance.Format(CacheTtlTooltipKey, ttl);
+
+    public static string QuotaNoReset => Loc.Instance[QuotaNoResetKey];
+
+    public static string QuotaOverageState(RateLimitStatus status) => status switch
+    {
+        RateLimitStatus.Allowed => Loc.Instance[QuotaOverageAllowedKey],
+        RateLimitStatus.AllowedWarning => Loc.Instance[QuotaOverageWarningKey],
+        RateLimitStatus.Rejected => Loc.Instance[QuotaOverageRejectedKey],
+        _ => Loc.Instance[QuotaOverageUnknownKey],
+    };
+
+    public static string QuotaWindowName(RateLimitWindow window) => window switch
+    {
+        RateLimitWindow.FiveHour => Loc.Instance[QuotaFiveHourNameKey],
+        _ => Loc.Instance[QuotaWeeklyNameKey],
+    };
+
+    /// <summary>
+    /// A countdown to a window reset, compact because the strip has one line: <c>47m</c>, <c>2h41m</c>, <c>3d</c>. Latin
+    /// units in both languages on purpose — the strip is a readout, and these units are the ones people read on quota
+    /// meters everywhere. Rounded up, so "soon" never means "already passed".
+    /// </summary>
+    public static string QuotaCountdown(TimeSpan left)
+    {
+        if (left <= TimeSpan.FromSeconds(5))
+        {
+            return Loc.Instance[QuotaSoonKey];
+        }
+
+        // Seconds before minutes: a rate limit that rolls over in twelve seconds is exactly the case where "soon" would be the
+        // least useful thing to print.
+        var seconds = (long)Math.Ceiling(left.TotalSeconds);
+        if (seconds < 90)
+        {
+            return seconds.ToString(CultureInfo.InvariantCulture) + "s";
+        }
+
+        if (left >= TimeSpan.FromDays(1))
+        {
+            return ((long)Math.Ceiling(left.TotalDays)).ToString(CultureInfo.InvariantCulture) + "d";
+        }
+
+        var minutes = (long)Math.Ceiling(left.TotalMinutes);
+        return minutes < 60
+            ? minutes.ToString(CultureInfo.InvariantCulture) + "m"
+            : (minutes / 60).ToString(CultureInfo.InvariantCulture) + "h"
+              + (minutes % 60).ToString("00", CultureInfo.InvariantCulture) + "m";
+    }
 
     public static string WorkspaceTooltip(string path) => Loc.Instance.Format(WorkspaceTooltipKey, path);
 
@@ -281,6 +404,41 @@ internal static class InstrumentsStrings
         Loc.Register(ContextCompactNameKey, "压缩上下文", "Compact context");
         Loc.Register(CacheReadKey, "RC {0}%", "RC {0}%");
         Loc.Register(UsageNoneKey, "暂无用量", "No usage yet");
+
+        // The account windows, as the provider reported them with the last response.
+        Loc.Register(QuotaFiveHourKey, "5h", "5h");
+        Loc.Register(QuotaWeeklyKey, "周", "7d");
+        Loc.Register(QuotaFiveHourNameKey, "5 小时窗口", "5-hour window");
+        Loc.Register(QuotaWeeklyNameKey, "周额度", "weekly window");
+        Loc.Register(QuotaWindowKey, "{0} {1}%", "{0} {1}%");
+        Loc.Register(QuotaWindowUnknownKey, "{0} —", "{0} —");
+        Loc.Register(QuotaResetKey, "{0} 后重置", "resets in {0}");
+        Loc.Register(QuotaUsageKey, "{0}   {1}", "{0}   {1}");
+        Loc.Register(QuotaTooltipKey, "{0} · {1} · {2} · {3}", "{0} · {1} · {2} · {3}");
+        Loc.Register(QuotaTooltipWindowKey, "{0} {1}%（{2}）", "{0} {1}% ({2})");
+        Loc.Register(QuotaBindingKey, "当前限制 {0}", "binding: {0}");
+        Loc.Register(QuotaBindingUnknownKey, "当前限制未知", "binding unknown");
+        Loc.Register(QuotaOverageKey, "超额通道 {0}", "overage {0}");
+        Loc.Register(QuotaNoResetKey, "无重置时间", "no reset time");
+        Loc.Register(QuotaSoonKey, "即将", "soon");
+        Loc.Register(QuotaOverageAllowedKey, "允许", "allowed");
+        Loc.Register(QuotaOverageWarningKey, "允许，接近上限", "allowed, near the limit");
+        Loc.Register(QuotaOverageRejectedKey, "已关闭", "off");
+        Loc.Register(QuotaOverageUnknownKey, "未知", "unknown");
+        // Two different meters share this segment, so each says which one it is in one word.
+        Loc.Register(QuotaWindowsPrefixKey, "额度", "quota");
+        Loc.Register(QuotaThrottlePrefixKey, "限流", "rate limit");
+        Loc.Register(QuotaThrottleRequestsKey, "每分钟请求 {0}/{1}", "requests/min {0}/{1}");
+        Loc.Register(QuotaThrottleTokensKey, "每分钟令牌 {0}/{1}", "tokens/min {0}/{1}");
+        Loc.Register(CacheTtlKey, "缓存 {0}", "cache {0}");
+        Loc.Register(
+            CacheTtlTooltipKey,
+            "提示词缓存 {0}：一小时档写入按 2 倍输入价、五分钟档 1.25 倍，读取都是 0.1 倍且读一次就续命。auto 档在会话停顿超过 5 分钟后才升到一小时（那时缓存本来就已过期，升档不多付一次写入）",
+            "Prompt cache {0}: an hour costs 2× the input price to write against 1.25× for five minutes, while a read costs 0.1× either way and refreshes the entry. auto moves to the hour only after a pause longer than five minutes, when the short entry has expired anyway");
+        Loc.Register(
+            QuotaThrottleTooltipKey,
+            "限流（短期限流，不是订阅额度窗口）：请求 {0}，令牌 {1}；{2}",
+            "Rate limit (short-term throttling, not a subscription window): requests {0}, tokens {1}; {2}");
 
         Loc.Register(WorkspaceTooltipKey, "工作区：{0}", "Workspace: {0}");
         Loc.Register(ProjectVsCodeKey, "在 VS Code 中打开项目", "Open project in VS Code");

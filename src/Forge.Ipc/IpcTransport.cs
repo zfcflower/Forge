@@ -12,7 +12,8 @@ public interface IIpcTransport : IAsyncDisposable
     /// <summary>Raised exactly once per connection with the cause; <c>null</c> when stopped cleanly by the owner.</summary>
     event Action<Exception?>? Closed;
 
-    /// <summary>Raised for each complete frame; the buffer is valid only during the callback.</summary>
+    /// <summary>Raised for each complete frame body. The buffer is handed over: the transport never reuses it, so a
+    /// decoded message may keep slices of it.</summary>
     event Action<ReadOnlyMemory<byte>>? FrameReceived;
 
     /// <summary>Raised once for each inbound frame the transport rejects (zero-length body or above the frame limit);
@@ -21,6 +22,8 @@ public interface IIpcTransport : IAsyncDisposable
 
     Task StartAsync(CancellationToken ct);
 
+    /// <summary>Sends one frame; the transport copies it before the returned task completes, so the caller may
+    /// return a pooled buffer afterwards.</summary>
     ValueTask SendAsync(ReadOnlyMemory<byte> frame, CancellationToken ct);
 
     Task StopAsync(CancellationToken ct);

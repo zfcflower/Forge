@@ -511,7 +511,7 @@ internal static class ExtensionStaging
         {
             document.Permissions.Add(new PermissionDocument
             {
-                Kind = JsonSerializer.SerializeToElement(permission.Kind.ToString(), HostJson.Options),
+                Kind = JsonSerializer.SerializeToElement(permission.Kind.ToString(), PluginManifestJsonContext.Default.String),
                 Scope = permission.Scope,
             });
         }
@@ -524,11 +524,11 @@ internal static class ExtensionStaging
             {
                 Name = tool.Name,
                 Description = tool.Description,
-                InputSchema = JsonSerializer.SerializeToElement(schema.RootElement, HostJson.Options),
+                InputSchema = schema.RootElement.Clone(),
             };
         }
 
-        return JsonSerializer.SerializeToUtf8Bytes(document, HostJson.Options);
+        return JsonSerializer.SerializeToUtf8Bytes(document, PluginManifestJsonContext.Default.PluginManifestDocument);
     }
 
     private static HostOperationException Invalid(string message) => new("invalid_extension", message);

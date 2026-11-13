@@ -14,6 +14,8 @@ using Forge.App.Editing;
 using Forge.App.Localization;
 using Forge.App.Review;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Changes;
 
@@ -844,7 +846,7 @@ internal sealed partial class DiffEditorView : UserControl
         }
         catch (Exception exception) when (exception is InvalidOperationException or VisualLinesInvalidException or ArgumentException)
         {
-            System.Diagnostics.Trace.WriteLine("[diff] height priming skipped: " + exception.Message);
+            AppLogs.Diff.ZLogDebug($"height priming skipped: {exception.Message}");
         }
 
         return true;
@@ -1188,7 +1190,7 @@ internal sealed partial class DiffEditorView : UserControl
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {
-            System.Diagnostics.Trace.WriteLine("[diff] copy failed: " + exception.Message);
+            AppLogs.Diff.ZLogWarning($"copy failed: {exception.Message}");
         }
     }
 

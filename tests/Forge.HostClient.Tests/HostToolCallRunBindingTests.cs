@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
+using System.Text;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
@@ -22,22 +24,29 @@ public sealed class HostToolCallRunBindingTests
         await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve, approval: approval.Approve);
         using var limit = TestLimit.Create();
 
-        var response = await host.CallClientAsync(Operation, """{"pluginId":"alpha","name":"echo","args":{}}""", limit.Token);
+        // A typed sender cannot omit the run id: a nil in its place is undecodable and refused as such.
+        var payload = RawForward.Of(
+            RawForward.Field<string?>(null),
+            RawForward.Field("alpha"),
+            RawForward.Field("echo"),
+            RawForward.Field(Encoding.UTF8.GetBytes("{}")));
+        var response = await host.CallClientAsync(Operation, payload, limit.Token);
 
         var content = BoundRoots.RefusedContent(response);
-        Assert.Contains("not bound to a run id", content);
+        Assert.Contains("cannot be decoded", content);
+        Assert.Contains("is not a 'HostToolCallForward'", content);
         Assert.Equal(0, resolver.Calls);
         Assert.Equal(0, approval.Calls);
     }
 
     [Theory]
-    [InlineData("null")]
-    [InlineData("\"\"")]
-    [InlineData("42")]
-    [InlineData("true")]
-    [InlineData("[]")]
-    [InlineData("{}")]
-    public async Task Blank_or_non_string_runId_is_refused_before_identity_checks(string runIdJson)
+    [InlineData("null", "cannot be decoded")]
+    [InlineData("\"\"", "blank run id")]
+    [InlineData("42", "cannot be decoded")]
+    [InlineData("true", "cannot be decoded")]
+    [InlineData("[]", "cannot be decoded")]
+    [InlineData("{}", "cannot be decoded")]
+    public async Task Blank_or_non_string_runId_is_refused_before_identity_checks(string runIdCase, string expected)
     {
         var resolver = new ResolverSpy();
         var approval = new ApprovalSpy();
@@ -45,13 +54,23 @@ public sealed class HostToolCallRunBindingTests
         await using var client = await ClientFactory.StartAsync(host, resolver: resolver.Resolve, approval: approval.Approve);
         using var limit = TestLimit.Create();
 
-        var response = await host.CallClientAsync(
-            Operation,
-            "{\"runId\":" + runIdJson + ",\"pluginId\":\"alpha\",\"name\":\"echo\",\"args\":{}}",
-            limit.Token);
+        var runId = runIdCase switch
+        {
+            "null" => RawForward.Field<string?>(null),
+            "\"\"" => RawForward.Field(string.Empty),
+            "42" => RawForward.Field(42),
+            "true" => RawForward.Field(true),
+            "[]" => [0x90],
+            "{}" => [0x80],
+            _ => throw new ArgumentOutOfRangeException(nameof(runIdCase)),
+        };
+        var payload = RawForward.Of(
+            runId, RawForward.Field("alpha"), RawForward.Field("echo"), RawForward.Field(Encoding.UTF8.GetBytes("{}")));
+
+        var response = await host.CallClientAsync(Operation, payload, limit.Token);
 
         var content = BoundRoots.RefusedContent(response);
-        Assert.Contains("run id", content);
+        Assert.Contains(expected, content);
         Assert.Equal(0, resolver.Calls);
         Assert.Equal(0, approval.Calls);
     }
@@ -65,9 +84,7 @@ public sealed class HostToolCallRunBindingTests
         using var limit = TestLimit.Create();
 
         var response = await host.CallClientAsync(
-            Operation,
-            "{\"runId\":\"   \",\"pluginId\":\"alpha\",\"name\":\"echo\",\"args\":{}}",
-            limit.Token);
+            Operation, HostWire.Forward("   ", "alpha", "echo", "{}"), limit.Token);
 
         var whitespaceContent = BoundRoots.RefusedContent(response);
         Assert.Contains("not part of an execution", whitespaceContent);
@@ -84,9 +101,7 @@ public sealed class HostToolCallRunBindingTests
         using var limit = TestLimit.Create();
 
         var response = await host.CallClientAsync(
-            Operation,
-            "{\"runId\":\"" + new string('a', 32) + "\",\"pluginId\":\"alpha\",\"name\":\"echo\",\"args\":{}}",
-            limit.Token);
+            Operation, HostWire.Forward(new string('a', 32), "alpha", "echo", "{}"), limit.Token);
 
         var content = BoundRoots.RefusedContent(response);
         Assert.Contains("not part of an execution", content);
@@ -124,20 +139,21 @@ public sealed class HostToolCallRunBindingTests
         using var limit = TestLimit.Create();
         var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
 
-        foreach (var pluginJson in new[] { "null", "\"\"", "\"   \"" })
+        var args = RawForward.Field(Encoding.UTF8.GetBytes("{}"));
+        var cases = new (RawPayload Payload, string Expected)[]
         {
-            var response = await host.CallClientAsync(
-                Operation,
-                "{\"runId\":\"" + root.RunId + "\",\"pluginId\":" + pluginJson + ",\"name\":\"echo\",\"args\":{}}",
-                limit.Token);
-            Assert.True(BoundRoots.OutputOf(response).IsError);
+            // nil and absent (the array ends after the run id) are undecodable: the plugin id is non-nullable.
+            (RawForward.Of(RawForward.Field(root.RunId), RawForward.Field<string?>(null), RawForward.Field("echo"), args),
+                "cannot be decoded"),
+            (HostWire.Payload(HostWire.Forward(root.RunId, "", "echo", "{}")), "no plugin identity"),
+            (HostWire.Payload(HostWire.Forward(root.RunId, "   ", "echo", "{}")), "claims plugin '   '"),
+            (RawForward.Of(RawForward.Field(root.RunId)), "cannot be decoded"),
+        };
+        foreach (var (payload, expected) in cases)
+        {
+            var response = await host.CallClientAsync(Operation, payload, limit.Token);
+            Assert.Contains(expected, BoundRoots.RefusedContent(response));
         }
-
-        var absent = await host.CallClientAsync(
-            Operation,
-            "{\"runId\":\"" + root.RunId + "\",\"name\":\"echo\",\"args\":{}}",
-            limit.Token);
-        Assert.True(BoundRoots.OutputOf(absent).IsError);
 
         await root.FinishAsync();
         Assert.Equal(0, resolver.Calls);
@@ -247,11 +263,11 @@ public sealed class HostToolCallRunBindingTests
         var holdB = new InFlightRoot();
         host.On("plugin.execute", async (message, ct) =>
         {
-            var plugin = message.Arguments!.Value.GetProperty("pluginId").GetString();
+            var plugin = message.Read<PluginExecuteRequest>().PluginId;
             var hold = string.Equals(plugin, "alpha", StringComparison.Ordinal) ? holdA : holdB;
             hold.Arrived.TrySetResult(message);
             await hold.Gate.Task.WaitAsync(ct).ConfigureAwait(false);
-            return Json.Element("""{"content":"root-ok","isError":false}""");
+            return new Sdk.ToolResult("root-ok");
         });
         var proxyA = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entryA");
         var proxyB = await BoundRoots.RegisterPluginToolAsync(client, host, "beta", "entryB");

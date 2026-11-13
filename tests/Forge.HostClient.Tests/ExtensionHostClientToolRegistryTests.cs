@@ -1,12 +1,16 @@
-using System.Text.Json;
 using Forge.Abstractions;
+using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
 public sealed class ExtensionHostClientToolRegistryTests
 {
     private const string EchoSchema = """{"type":"object","properties":{"text":{"type":"string"}}}""";
+    private const string Register = Sdk.ExtensionProtocol.ToolsRegister;
+    private const string Unregister = Sdk.ExtensionProtocol.ToolsUnregister;
 
     [Fact]
     public async Task Register_builds_one_proxy_per_declaration_grouped_by_plugin()
@@ -14,9 +18,9 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha",
-            Declaration("search", "Searches the workspace", EchoSchema, 0),
-            Declaration("write", "Writes a file", null, 1)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha",
+            Declaration("search", "Searches the workspace", EchoSchema, Sdk.ToolSideEffect.ReadOnly),
+            Declaration("write", "Writes a file", "", Sdk.ToolSideEffect.Write)));
 
         Assert.Equal(2, client.Tools.Count);
         var search = Assert.IsType<ExtensionHostTool>(client.Tools.Single(tool => tool.Definition.Name == "search"));
@@ -35,52 +39,33 @@ public sealed class ExtensionHostClientToolRegistryTests
     }
 
     [Theory]
-    [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task Blank_input_schema_is_exposed_as_an_empty_object_schema(string? schema)
+    public async Task Blank_input_schema_is_exposed_as_an_empty_object_schema(string schema)
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("noargs", "d", schema, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("noargs", "d", schema)));
 
         Assert.Equal("{}", Assert.Single(client.Tools).Definition.InputSchemaJson);
     }
 
     [Theory]
-    [InlineData("0", ToolSideEffect.ReadOnly)]
-    [InlineData("1", ToolSideEffect.Write)]
-    [InlineData("2", ToolSideEffect.Execute)]
-    [InlineData("7", ToolSideEffect.Execute)]
-    [InlineData("-1", ToolSideEffect.Execute)]
-    [InlineData("\"ReadOnly\"", ToolSideEffect.ReadOnly)]
-    [InlineData("\"write\"", ToolSideEffect.Write)]
-    [InlineData("\"EXECUTE\"", ToolSideEffect.Execute)]
-    [InlineData("\"Bogus\"", ToolSideEffect.Execute)]
-    [InlineData("null", ToolSideEffect.Execute)]
-    [InlineData("{}", ToolSideEffect.Execute)]
-    public async Task Side_effect_accepts_ordinal_or_name_and_unknown_values_map_to_Execute(string rawSideEffect, ToolSideEffect expected)
+    [InlineData(0, ToolSideEffect.ReadOnly)]
+    [InlineData(1, ToolSideEffect.Write)]
+    [InlineData(2, ToolSideEffect.Execute)]
+    [InlineData(7, ToolSideEffect.Execute)]
+    [InlineData(-1, ToolSideEffect.Execute)]
+    public async Task Side_effect_ordinals_map_and_undefined_values_map_to_Execute(int rawSideEffect, ToolSideEffect expected)
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("tools.register",
-            $$"""{"pluginId":"alpha","tools":[{"name":"t","description":"d","inputSchemaJson":"{}","sideEffect":{{rawSideEffect}}}]}""");
+        await host.NotifyAndSyncAsync(Register,
+            HostWire.Tools("alpha", Declaration("t", "d", "{}", (Sdk.ToolSideEffect)rawSideEffect)));
 
         Assert.Equal(expected, Assert.Single(client.Tools).SideEffect);
-    }
-
-    [Fact]
-    public async Task Missing_side_effect_maps_to_Execute()
-    {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-
-        await host.NotifyAndSyncAsync("tools.register",
-            """{"pluginId":"alpha","tools":[{"name":"t","description":"d","inputSchemaJson":"{}"}]}""");
-
-        Assert.Equal(ToolSideEffect.Execute, Assert.Single(client.Tools).SideEffect);
     }
 
     [Fact]
@@ -90,8 +75,8 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
 
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.NotifyClientAsync("tools.register", Register("beta", Declaration("b1", "d", null, 0), Declaration("b2", "d", null, 0)));
+        await host.NotifyClientAsync(Register, HostWire.Tools("alpha", Declaration("a1")));
+        await host.NotifyClientAsync(Register, HostWire.Tools("beta", Declaration("b1"), Declaration("b2")));
         await host.SyncAsync();
 
         Assert.Equal(2, changes.Snapshot().Count);
@@ -105,10 +90,11 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("old", "d", null, 0), Declaration("older", "d", null, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("old"), Declaration("older")));
         var previous = client.Tools;
 
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("fresh", "d", null, 1)));
+        await host.NotifyAndSyncAsync(Register,
+            HostWire.Tools("alpha", Declaration("fresh", sideEffect: Sdk.ToolSideEffect.Write)));
 
         Assert.Equal(2, changes.Snapshot().Count);
         Assert.Equal("fresh", Assert.Single(client.Tools).Definition.Name);
@@ -122,10 +108,10 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
-        var payload = Register("alpha", Declaration("echo", "d", EchoSchema, 0));
-        await host.NotifyAndSyncAsync("tools.register", payload);
+        var payload = HostWire.Tools("alpha", Declaration("echo", "d", EchoSchema));
+        await host.NotifyAndSyncAsync(Register, payload);
 
-        await host.NotifyAndSyncAsync("tools.register", payload);
+        await host.NotifyAndSyncAsync(Register, payload);
 
         Assert.Single(changes.Snapshot());
     }
@@ -136,11 +122,11 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
-        await host.NotifyClientAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
-        await host.NotifyClientAsync("tools.register", Register("beta", Declaration("b1", "d", null, 0)));
+        await host.NotifyClientAsync(Register, HostWire.Tools("alpha", Declaration("a1")));
+        await host.NotifyClientAsync(Register, HostWire.Tools("beta", Declaration("b1")));
         await host.SyncAsync();
 
-        await host.NotifyAndSyncAsync("tools.unregister", """{"pluginId":"alpha"}""");
+        await host.NotifyAndSyncAsync(Unregister, HostWire.Plugin("alpha"));
 
         Assert.Equal(3, changes.Snapshot().Count);
         Assert.Equal("b1", Assert.Single(client.Tools).Definition.Name);
@@ -152,10 +138,10 @@ public sealed class ExtensionHostClientToolRegistryTests
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("a1")));
         var changes = client.TrackToolsChanged();
 
-        await host.NotifyAndSyncAsync("tools.unregister", """{"pluginId":"ghost"}""");
+        await host.NotifyAndSyncAsync(Unregister, HostWire.Plugin("ghost"));
 
         Assert.Empty(changes.Snapshot());
         Assert.Equal("a1", Assert.Single(client.Tools).Definition.Name);
@@ -167,9 +153,9 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("a1")));
 
-        await host.NotifyAndSyncAsync("tools.register", """{"pluginId":"alpha","tools":[]}""");
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha"));
 
         Assert.Equal(2, changes.Snapshot().Count);
         Assert.Empty(client.Tools);
@@ -183,7 +169,7 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
 
-        await host.NotifyAndSyncAsync("tools.register", """{"pluginId":"ghost","tools":[]}""");
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("ghost"));
 
         Assert.Empty(changes.Snapshot());
         Assert.Empty(client.Tools);
@@ -194,11 +180,11 @@ public sealed class ExtensionHostClientToolRegistryTests
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("a1")));
         var before = client.Tools;
 
-        await host.NotifyClientAsync("tools.register", Register("beta", Declaration("b1", "d", null, 0)));
-        await host.NotifyClientAsync("tools.unregister", """{"pluginId":"alpha"}""");
+        await host.NotifyClientAsync(Register, HostWire.Tools("beta", Declaration("b1")));
+        await host.NotifyClientAsync(Unregister, HostWire.Plugin("alpha"));
         await host.SyncAsync();
 
         Assert.Equal(new[] { "a1" }, before.Select(tool => tool.Definition.Name).ToArray());
@@ -211,60 +197,60 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
 
-        await host.NotifyAndSyncAsync("tools.register", """
-            {"pluginId":"alpha","tools":[
-              {"name":"first","description":"d","inputSchemaJson":"{}","sideEffect":0},
-              null,
-              {"description":"no name","sideEffect":0},
-              {"name":"","description":"empty name","sideEffect":0},
-              {"name":"second","description":"d","inputSchemaJson":"{}","sideEffect":1}
-            ]}
-            """);
+        // The nil entry cannot be written through the typed list, so the list goes out raw; a nil entry decodes as a
+        // null declaration, which is dropped like the unnamed one.
+        await host.NotifyAndSyncAsync(Register, RawTools("alpha",
+            Pack(Declaration("first", "d", "{}")),
+            [0xc0],
+            Pack(Declaration("", "empty name")),
+            Pack(Declaration("second", "d", "{}", Sdk.ToolSideEffect.Write))));
 
         Assert.Equal(new[] { "first", "second" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
         Assert.Equal(ToolSideEffect.Write, client.Tools[1].SideEffect);
     }
 
     [Theory]
-    [InlineData("""{"tools":[{"name":"t","sideEffect":0}]}""")]
-    [InlineData("""{"pluginId":"","tools":[{"name":"t","sideEffect":0}]}""")]
-    [InlineData("""{"pluginId":5,"tools":[{"name":"t","sideEffect":0}]}""")]
-    [InlineData("""{"pluginId":"alpha","tools":"not-an-array"}""")]
-    [InlineData("""{"pluginId":"alpha","tools":[{"name":"","sideEffect":0}]}""")]
-    [InlineData("""{"pluginId":"alpha","tools":[]}""")]
-    [InlineData("""[1,2,3]""")]
-    [InlineData("\"text\"")]
-    [InlineData("null")]
-    [InlineData("{}")]
-    public async Task Malformed_registration_payloads_are_ignored_and_the_client_keeps_running(string payload)
+    [InlineData("nil plugin id")]
+    [InlineData("empty plugin id")]
+    [InlineData("numeric plugin id")]
+    [InlineData("tools not a list")]
+    [InlineData("only an empty name")]
+    [InlineData("empty tool list")]
+    [InlineData("number list")]
+    [InlineData("text")]
+    [InlineData("nil")]
+    [InlineData("empty array")]
+    [InlineData("no payload")]
+    public async Task Malformed_registration_payloads_are_ignored_and_the_client_keeps_running(string shape)
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
 
-        await host.NotifyAndSyncAsync("tools.register", payload);
+        await host.NotifyAndSyncAsync(Register, MalformedRegistration(shape));
 
         Assert.Empty(changes.Snapshot());
         Assert.Empty(client.Tools);
         Assert.Equal(HostStatus.Running, client.Status);
 
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("after", "d", null, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("after")));
         Assert.Equal("after", Assert.Single(client.Tools).Definition.Name);
     }
 
     [Theory]
-    [InlineData("""{"pluginId":5}""")]
-    [InlineData("""{"pluginId":""}""")]
-    [InlineData("""{"version":"1.0"}""")]
-    [InlineData("""[]""")]
-    [InlineData("null")]
-    public async Task Malformed_unregister_payloads_are_ignored(string payload)
+    [InlineData("numeric plugin id")]
+    [InlineData("empty plugin id")]
+    [InlineData("nil plugin id")]
+    [InlineData("empty array")]
+    [InlineData("nil")]
+    [InlineData("no payload")]
+    public async Task Malformed_unregister_payloads_are_ignored(string shape)
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
-        await host.NotifyAndSyncAsync("tools.register", Register("alpha", Declaration("a1", "d", null, 0)));
+        await host.NotifyAndSyncAsync(Register, HostWire.Tools("alpha", Declaration("a1")));
 
-        await host.NotifyAndSyncAsync("tools.unregister", payload);
+        await host.NotifyAndSyncAsync(Unregister, MalformedUnregister(shape));
 
         Assert.Equal("a1", Assert.Single(client.Tools).Definition.Name);
         Assert.Equal(HostStatus.Running, client.Status);
@@ -277,53 +263,92 @@ public sealed class ExtensionHostClientToolRegistryTests
         await using var client = await ClientFactory.StartAsync(host);
         var changes = client.TrackToolsChanged();
 
-        await host.NotifyAndSyncAsync("tools.rename", Register("alpha", Declaration("a1", "d", null, 0)));
+        await host.NotifyAndSyncAsync("tools.rename", HostWire.Tools("alpha", Declaration("a1")));
 
         Assert.Empty(changes.Snapshot());
         Assert.Empty(client.Tools);
         Assert.Equal(HostStatus.Running, client.Status);
     }
 
-    [Fact]
-    public async Task Declaration_with_a_wrongly_typed_field_does_not_drop_its_valid_siblings()
+    [Theory]
+    [InlineData("numeric name")]
+    [InlineData("nil name")]
+    [InlineData("nil description")]
+    [InlineData("nil schema")]
+    public async Task A_declaration_with_a_wrongly_typed_or_nil_field_makes_the_registration_undecodable_and_it_is_ignored(
+        string shape)
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
+        var changes = client.TrackToolsChanged();
 
-        await host.NotifyAndSyncAsync("tools.register", """
-            {"pluginId":"alpha","tools":[
-              {"name":"valid","description":"d","inputSchemaJson":"{}","sideEffect":0},
-              {"name":5,"description":"wrong type","sideEffect":0}
-            ]}
-            """);
+        // ["alpha", [["valid","d","{}",0], <bad entry>]]: every member of a declaration is non-nullable and typed, so
+        // one bad entry makes the whole registration undecodable; nothing of it is applied and the problem is diagnosed.
+        await host.NotifyAndSyncAsync(Register, RawTools("alpha", Pack(Declaration("valid", "d", "{}")), shape switch
+        {
+            "numeric name" => Raw([0x94], Pack(5), Pack("wrong type"), Pack("{}"), Pack(0)).Bytes.ToArray(),
+            "nil name" => RawDeclaration(null, "no name", "{}", 0),
+            "nil description" => RawDeclaration("odd", null, "{}", 0),
+            "nil schema" => RawDeclaration("odd", "d", null, 0),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+        }));
 
-        Assert.Equal(new[] { "valid" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
+        Assert.Empty(changes.Snapshot());
+        Assert.Empty(client.Tools);
+        Assert.Equal(HostStatus.Running, client.Status);
+        Assert.Contains(client.Diagnostics, entry => entry.Contains(
+            "tools.register carried no usable plugin id or tool list", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task A_wrongly_typed_description_keeps_the_declaration_with_an_empty_description()
+    private static Sdk.ToolDeclaration Declaration(
+        string name,
+        string description = "d",
+        string schema = "{}",
+        Sdk.ToolSideEffect sideEffect = Sdk.ToolSideEffect.ReadOnly) =>
+        new(name, description, schema, sideEffect);
+
+    /// <summary>A <see cref="Sdk.ToolDeclaration"/> as raw MessagePack (a fixarray of four); a null field is written as
+    /// nil, which the typed record refuses to serialize.</summary>
+    private static byte[] RawDeclaration(string? name, string? description, string? schema, int sideEffect) =>
+        Raw([0x94], PackOrNil(name), PackOrNil(description), PackOrNil(schema), Pack(sideEffect)).Bytes.ToArray();
+
+    /// <summary>A <see cref="ToolsRegisterNotification"/> whose tool list is the given raw entries.</summary>
+    private static RawPayload RawTools(string pluginId, params byte[][] declarations)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-
-        await host.NotifyAndSyncAsync("tools.register", """
-            {"pluginId":"alpha","tools":[
-              {"name":"odd","description":5,"inputSchemaJson":"{}","sideEffect":0},
-              {"name":"valid","description":"d","sideEffect":1}
-            ]}
-            """);
-
-        Assert.Equal(new[] { "odd", "valid" }, client.Tools.Select(tool => tool.Definition.Name).ToArray());
-        Assert.Equal(string.Empty, client.Tools[0].Definition.Description);
-        Assert.Equal(ToolSideEffect.Write, client.Tools[1].SideEffect);
+        Assert.InRange(declarations.Length, 0, 15);
+        return Raw([[0x92], Pack(pluginId), [(byte)(0x90 | declarations.Length)], .. declarations]);
     }
 
-    private static string Register(string pluginId, params string[] declarations) =>
-        $$"""{"pluginId":"{{pluginId}}","tools":[{{string.Join(',', declarations)}}]}""";
+    private static byte[] PackOrNil(string? value) => value is null ? [0xc0] : Pack(value);
 
-    private static string Declaration(string name, string description, string? schema, int sideEffect)
+    private static RawPayload MalformedRegistration(string shape) => shape switch
     {
-        var schemaJson = schema is null ? "null" : JsonSerializer.Serialize(schema);
-        return $$"""{"name":"{{name}}","description":"{{description}}","inputSchemaJson":{{schemaJson}},"sideEffect":{{sideEffect}}}""";
-    }
+        "nil plugin id" => Raw([0x92, 0xc0, 0x91], Pack(Declaration("t"))),
+        "empty plugin id" => HostWire.Payload(HostWire.Tools("", Declaration("t"))),
+        "numeric plugin id" => Raw([0x92], Pack(5), [0x91], Pack(Declaration("t"))),
+        "tools not a list" => Raw([0x92], Pack("alpha"), Pack("not-an-array")),
+        "only an empty name" => HostWire.Payload(HostWire.Tools("alpha", Declaration(""))),
+        "empty tool list" => HostWire.Payload(HostWire.Tools("alpha")),
+        "number list" => HostWire.Payload(new[] { 1, 2, 3 }),
+        "text" => HostWire.Payload("text"),
+        "nil" => HostWire.Nil,
+        "empty array" => Raw([0x90]),
+        "no payload" => RawPayload.None,
+        _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+    };
+
+    private static RawPayload MalformedUnregister(string shape) => shape switch
+    {
+        "numeric plugin id" => Raw([0x91], Pack(5)),
+        "empty plugin id" => HostWire.Payload(HostWire.Plugin("")),
+        "nil plugin id" => Raw([0x91, 0xc0]),
+        "empty array" => Raw([0x90]),
+        "nil" => HostWire.Nil,
+        "no payload" => RawPayload.None,
+        _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+    };
+
+    private static byte[] Pack<T>(T value) => IpcSerializer.Serialize(value);
+
+    private static RawPayload Raw(params byte[][] parts) => new(parts.SelectMany(part => part).ToArray());
 }

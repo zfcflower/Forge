@@ -32,8 +32,21 @@ public sealed record AgentOptions
     public int ArtifactPreviewChars { get; init; } = 2_000;
 
     /// <summary>
-    /// Prompt-cache lifetime asked for on the message breakpoint (<see cref="CacheHint.MessageTtl"/>): null or "5m" = the
-    /// provider default, "1h" = the one-hour cache. Any other value is treated as the default.
+    /// Prompt-cache lifetime policy (<see cref="CacheHint.Ttl"/>): <c>"5m"</c>, <c>"1h"</c>, or <c>"auto"</c>/null — start at the
+    /// short lifetime and move to the hour once this instance has actually paused for longer than
+    /// <see cref="CacheTtlPromotionGap"/>. The move happens on a request that was going to write anyway, so promoting never pays
+    /// for an extra write, and it is never reversed mid-session (reversing it would force one).
     /// </summary>
-    public string? MessageCacheTtl { get; init; }
+    /// <remarks>
+    /// Why a pause is the signal: an hour-long write costs twice the input price against the short one's 1.25×, and a short-lived
+    /// entry is refreshed by any read. So the hour only ever loses when a session never pauses for five minutes — exactly the
+    /// unattended, turn-after-turn shape — and it wins from the first five-to-sixty-minute pause onward.
+    /// </remarks>
+    public string? CacheTtl { get; init; }
+
+    /// <summary>How long a gap makes <c>"auto"</c> move to the hour; the short lifetime's own expiry, with a little slack.</summary>
+    public TimeSpan CacheTtlPromotionGap { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Clock for the cache-lifetime decision only; tests move it instead of sleeping.</summary>
+    public TimeProvider CacheTtlClock { get; init; } = TimeProvider.System;
 }

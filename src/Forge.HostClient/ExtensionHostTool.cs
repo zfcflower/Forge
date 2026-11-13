@@ -21,7 +21,7 @@ public sealed class ExtensionHostTool : Forge.Abstractions.ITool
         Declaration = declaration;
         var schema = string.IsNullOrWhiteSpace(declaration.InputSchemaJson) ? "{}" : declaration.InputSchemaJson;
         definition = new Forge.Abstractions.ToolDefinition(declaration.Name, declaration.Description, schema);
-        sideEffect = HostProtocolJson.ToAbstractionsSideEffect(declaration.SideEffect);
+        sideEffect = ToAbstractionsSideEffect(declaration.SideEffect);
     }
 
     public string PluginId { get; }
@@ -41,4 +41,13 @@ public sealed class ExtensionHostTool : Forge.Abstractions.ITool
     }
 
     public override string ToString() => $"{PluginId}:{Definition.Name}";
+
+    /// <summary>An undefined SDK side effect maps to the most privileged one.</summary>
+    internal static AbstractionsToolSideEffect ToAbstractionsSideEffect(Forge.Plugin.Sdk.ToolSideEffect sideEffect) =>
+        sideEffect switch
+        {
+            Forge.Plugin.Sdk.ToolSideEffect.ReadOnly => AbstractionsToolSideEffect.ReadOnly,
+            Forge.Plugin.Sdk.ToolSideEffect.Write => AbstractionsToolSideEffect.Write,
+            _ => AbstractionsToolSideEffect.Execute,
+        };
 }

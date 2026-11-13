@@ -81,6 +81,15 @@ internal static class ProviderStrings
     public const string AgentsSaveFailedKey = "providers.agents.saveFailed";
 
     // ---------------------------------------------------------------- load / store
+    public const string CacheTtlAutoKey = "providers.cacheTtl.auto";
+    public const string CacheTtlShortKey = "providers.cacheTtl.short";
+    public const string CacheTtlLongKey = "providers.cacheTtl.long";
+    public const string CacheTtlTooltipKey = "providers.cacheTtl.tooltip";
+
+    public const string UsageLogEnabledKey = "providers.usageLog.enabled";
+    public const string UsageLogHintKey = "providers.usageLog.hint";
+    public const string UsageLogSaveFailedKey = "providers.usageLog.saveFailed";
+
     public const string SettingsMissingKey = "providers.store.settingsMissing";
 
     public const string SettingsUnreadableKey = "providers.store.settingsUnreadable";
@@ -349,6 +358,19 @@ internal static class ProviderStrings
         Loc.Register(AgentsModelKey, "模型", "Model");
         Loc.Register(AgentsThinkingKey, "思考力度", "Thinking");
         Loc.Register(AgentsSaveFailedKey, "无法写入 settings.json：{0}", "Could not write settings.json: {0}");
+        Loc.Register(CacheTtlAutoKey, "缓存自动", "Cache: auto");
+        Loc.Register(CacheTtlShortKey, "缓存 5 分钟", "Cache: 5 min");
+        Loc.Register(CacheTtlLongKey, "缓存 1 小时", "Cache: 1 hour");
+        Loc.Register(
+            CacheTtlTooltipKey,
+            "提示词缓存的存活时间。一小时档写入按 2 倍输入价、五分钟档 1.25 倍，读取都是 0.1 倍且读一次就续命；“自动”在会话停顿超过 5 分钟后才升到一小时，那时短档本来已经过期，升档不多付一次写入",
+            "How long a cached prefix survives. An hour costs 2× the input price to write against 1.25× for five minutes, while a read costs 0.1× either way and refreshes the entry. Auto moves to the hour only after a pause longer than five minutes, when the short entry has already expired, so promoting never pays for an extra write");
+        Loc.Register(UsageLogEnabledKey, "记录用量日志", "Record a usage log");
+        Loc.Register(
+            UsageLogHintKey,
+            "开启后，每次模型请求都会追加一行到 {0} 下按天分文件的 JSONL：提供商、模型、声称的入口、缓存寿命、各类 token、账号额度读数与耗时；不记录提示词正文。默认关闭",
+            "While on, every model request appends one JSONL line to a per-day file under {0}: provider, model, claimed entrypoint, cache lifetime, tokens by category, the account's meters and the latency. Prompt text is never recorded. Off by default");
+        Loc.Register(UsageLogSaveFailedKey, "无法写入 settings.json：{0}", "Could not write settings.json: {0}");
 
         Loc.Register(SettingsMissingKey, "找不到 settings.json", "settings.json was not found");
         Loc.Register(SettingsUnreadableKey, "settings.json 无法读取：{0}", "settings.json cannot be read: {0}");
@@ -514,6 +536,13 @@ internal static class ProviderStrings
     public static Localization.LocText StoreReady(string summary) => new(ReadyKey, summary);
 
     public static Localization.LocText SettingsMissingText() => new(SettingsMissingKey);
+
+    /// <summary>The usage-log row: what the switch is called, where the files go, and why a save failed.</summary>
+    public static string UsageLogEnabled => Loc.Instance[UsageLogEnabledKey];
+
+    public static string UsageLogHint(string directory) => Loc.Instance.Format(UsageLogHintKey, directory);
+
+    public static string UsageLogSaveFailed(string message) => Loc.Instance.Format(UsageLogSaveFailedKey, message);
 
     public static Localization.LocText SettingsUnreadableText(string message) => new(SettingsUnreadableKey, message);
 

@@ -6,6 +6,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.Core.Tools;
 using Forge.IO;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -373,7 +375,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            Trace.WriteLine("[approval-rules] the final save failed: " + exception.Message);
+            AppLogs.ApprovalRules.ZLogError(exception, $"the final save failed");
         }
     }
 
@@ -580,7 +582,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
                 saveProblem = new LocText(ExtensionsStrings.RulesWriteFailed, exception.Message);
             }
 
-            Trace.WriteLine("[approval-rules] save failed: " + exception.Message);
+            AppLogs.ApprovalRules.ZLogError(exception, $"save failed");
         }
     }
 
@@ -668,7 +670,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         }
         catch (Exception exception) when (IsFileFailure(exception))
         {
-            Trace.WriteLine("[approval-rules] the existing rules file could not be read: " + exception.Message);
+            AppLogs.ApprovalRules.ZLogWarning($"the existing rules file could not be read: {exception.Message}");
             return null;
         }
     }
@@ -705,7 +707,7 @@ internal sealed class ApprovalRules : IAsyncDisposable
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval-rules] a change subscriber failed: " + exception.Message);
+            AppLogs.ApprovalRules.ZLogWarning($"a change subscriber failed: {exception.Message}");
         }
     }
 

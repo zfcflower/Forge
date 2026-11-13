@@ -87,7 +87,7 @@ internal static class PrCheckText
         {
             case PrWaitOutcome.Ready:
                 return $"READY. All {N(passed)} check(s) passed" + (skipped > 0 ? $" ({N(skipped)} of them skipped/neutral)" : string.Empty) +
-                    " and the merge state is CLEAN. There is nothing left to wait for. Forge never merges a pull request: tell the user it is ready.";
+                    " and the merge state is CLEAN. There is nothing left to wait for. Never merge the pull request yourself: tell the user it is ready.";
 
             case PrWaitOutcome.ReadyWithHooks:
                 return $"READY WITH A CAVEAT. All {N(passed)} check(s) passed and the merge state is HAS_HOOKS. " +

@@ -25,8 +25,12 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
     public static bool CanCarry(string mediaType) =>
         ProviderAttachments.KindOf(mediaType) is ModelInputs.Image or ModelInputs.Pdf;
 
-    public OpenAiResponsesProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null)
-        : base(config, http, idleTimeout)
+    public OpenAiResponsesProvider(
+        ProviderConfig config,
+        HttpClient http,
+        TimeSpan? idleTimeout = null,
+        ProviderOptions? options = null)
+        : base(config, http, idleTimeout, options)
     {
     }
 

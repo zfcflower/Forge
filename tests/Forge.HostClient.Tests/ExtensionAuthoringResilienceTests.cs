@@ -66,7 +66,7 @@ public sealed class ExtensionAuthoringResilienceTests
         host.On(Sdk.ExtensionProtocol.ExtensionsStage, async (_, ct) =>
         {
             await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
-            return Json.Element(ValidStagedJson);
+            return ValidStaged;
         });
         await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
@@ -87,7 +87,7 @@ public sealed class ExtensionAuthoringResilienceTests
         host.On(Sdk.ExtensionProtocol.ExtensionsCommit, async (_, ct) =>
         {
             await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
-            return Json.Element(ValidCommitJson);
+            return ValidCommit;
         });
         await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
@@ -113,7 +113,7 @@ public sealed class ExtensionAuthoringResilienceTests
                 return FakeHost.NeverAnswer(message, ct);
             }
 
-            return Task.FromResult(Json.Element("{\"items\":[]}"));
+            return Task.FromResult(HostReply.Of(new Sdk.StagedExtensionList([])));
         });
         await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
@@ -142,7 +142,7 @@ public sealed class ExtensionAuthoringResilienceTests
         host.On(Sdk.ExtensionProtocol.ExtensionsStage, async (_, ct) =>
         {
             await Task.Delay(TimeSpan.FromMilliseconds(800), ct).ConfigureAwait(false);
-            return Json.Element(ValidStagedJson);
+            return ValidStaged;
         });
         await using var client = await ClientFactory.StartAsync(host, options: options);
         using var limit = TestLimit.Create();
@@ -267,7 +267,7 @@ public sealed class ExtensionAuthoringResilienceTests
         {
             arrived.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
-            return Json.Element("{\"items\":[]}");
+            return new Sdk.StagedExtensionList([]);
         });
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
@@ -289,7 +289,7 @@ public sealed class ExtensionAuthoringResilienceTests
         {
             arrived.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
-            return Json.Element(ValidStagedJson);
+            return ValidStaged;
         });
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();

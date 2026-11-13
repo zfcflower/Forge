@@ -99,7 +99,7 @@ public static class PrWorkflowText
         ## A failing check
         Take the job id from the snapshot and read the failed steps with pr_ci_log; the failure is at the end of the log. Reproduce it locally, fix the cause, push, and watch again. A rerun without reading the log is not a diagnosis.
 
-        Forge never merges a pull request. When everything is green, tell the user and stop.
+        Never merge a pull request yourself. When everything is green, tell the user and stop.
         """;
 
     public const string ReviewComments = """
@@ -118,7 +118,7 @@ public static class PrWorkflowText
         Resolve a thread only after you replied to it with apply or push_back. A clarify thread cannot be resolved; the reviewer answers first. Any comment that arrives after your verdict reply blocks resolving, even one written by the same account (the reviewer and you may share one gh login): read it and answer again. Outdated threads still deserve a verdict.
 
         ## Local comments
-        Comments the user left in Forge's own review (review_comments) get the same judgement. Read them with list, decide, make the change, then resolve them with resolve. Only comments that were actually sent can be resolved; a draft has nobody to answer and is refused. There is no pull request reply for these.
+        Comments the user left in the local review pane (review_comments) get the same judgement. Read them with list, decide, make the change, then resolve them with resolve. Only comments that were actually sent can be resolved; a draft has nobody to answer and is refused. There is no pull request reply for these.
 
         After pushing, watch the checks again (phase "checks"); changes made for a review can break CI.
         """;

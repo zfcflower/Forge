@@ -1,11 +1,16 @@
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
 public sealed class ExtensionHostClientPluginCommandTests
 {
+    private const string Refresh = Sdk.ExtensionProtocol.PluginsRefresh;
+    private const string Approve = Sdk.ExtensionProtocol.PluginApprove;
+    private const string Revoke = Sdk.ExtensionProtocol.PluginRevoke;
+
     [Fact]
     public async Task Refresh_sends_plugins_refresh_with_an_empty_object()
     {
@@ -15,9 +20,9 @@ public sealed class ExtensionHostClientPluginCommandTests
 
         await client.RefreshPluginsAsync(limit.Token);
 
-        var request = Assert.Single(host.Requests("plugins.refresh"));
-        Assert.Equal(JsonValueKind.Object, request.Arguments!.Value.ValueKind);
-        Assert.Empty(request.Arguments.Value.EnumerateObject());
+        var request = Assert.Single(host.Requests(Refresh));
+        Assert.Equal(IpcSerializer.Serialize(IpcEmpty.Instance), request.Payload.ToArray());
+        Assert.Equal(IpcEmpty.Instance, request.Read<IpcEmpty>());
     }
 
     [Fact]
@@ -29,15 +34,12 @@ public sealed class ExtensionHostClientPluginCommandTests
 
         await client.ApprovePluginAsync("alpha", "1.2.0", "src-hash", "dep-hash", "sdk-1.0", limit.Token);
 
-        var request = Assert.Single(host.Requests("plugin.approve"));
-        var args = request.Arguments!.Value;
-        Assert.Equal(new[] { "pluginId", "version", "sourceHash", "dependencyHash", "sdkVersion" },
-            args.EnumerateObject().Select(property => property.Name).ToArray());
-        Assert.Equal("alpha", args.GetProperty("pluginId").GetString());
-        Assert.Equal("1.2.0", args.GetProperty("version").GetString());
-        Assert.Equal("src-hash", args.GetProperty("sourceHash").GetString());
-        Assert.Equal("dep-hash", args.GetProperty("dependencyHash").GetString());
-        Assert.Equal("sdk-1.0", args.GetProperty("sdkVersion").GetString());
+        var request = Assert.Single(host.Requests(Approve));
+        // Exactly the five documented fields, in their documented order: a fixarray of five, nothing appended.
+        Assert.Equal(0x95, request.Payload.Span[0]);
+        Assert.Equal(
+            new PluginApproveRequest("alpha", "1.2.0", "src-hash", "dep-hash", "sdk-1.0"),
+            request.Read<PluginApproveRequest>());
     }
 
     [Fact]
@@ -49,10 +51,9 @@ public sealed class ExtensionHostClientPluginCommandTests
 
         await client.RevokePluginAsync("alpha", "1.2.0", limit.Token);
 
-        var args = Assert.Single(host.Requests("plugin.revoke")).Arguments!.Value;
-        Assert.Equal(new[] { "pluginId", "version" }, args.EnumerateObject().Select(property => property.Name).ToArray());
-        Assert.Equal("alpha", args.GetProperty("pluginId").GetString());
-        Assert.Equal("1.2.0", args.GetProperty("version").GetString());
+        var request = Assert.Single(host.Requests(Revoke));
+        Assert.Equal(0x92, request.Payload.Span[0]);
+        Assert.Equal(new Sdk.PluginVersionRequest("alpha", "1.2.0"), request.Read<Sdk.PluginVersionRequest>());
     }
 
     [Theory]
@@ -69,7 +70,7 @@ public sealed class ExtensionHostClientPluginCommandTests
         await Assert.ThrowsAsync<ArgumentException>(() =>
             client.ApprovePluginAsync(pluginId, version, "s", "d", "sdk", limit.Token));
 
-        Assert.Empty(host.Requests("plugin.approve"));
+        Assert.Empty(host.Requests(Approve));
     }
 
     [Theory]
@@ -83,7 +84,7 @@ public sealed class ExtensionHostClientPluginCommandTests
 
         await Assert.ThrowsAsync<ArgumentException>(() => client.RevokePluginAsync(pluginId, version, limit.Token));
 
-        Assert.Empty(host.Requests("plugin.revoke"));
+        Assert.Empty(host.Requests(Revoke));
     }
 
     [Fact]
@@ -103,7 +104,7 @@ public sealed class ExtensionHostClientPluginCommandTests
     public async Task A_host_error_on_approve_propagates_as_IpcRemoteException()
     {
         await using var host = new FakeHost();
-        host.On("plugin.approve", (_, _) => throw new FakeHostError("unknown_version", "version 1.0 is not installed"));
+        host.On(Approve, (_, _) => throw new FakeHostError("unknown_version", "version 1.0 is not installed"));
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
 

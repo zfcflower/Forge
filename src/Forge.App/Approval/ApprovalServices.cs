@@ -4,6 +4,8 @@ using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
 using Forge.HostClient;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -179,7 +181,7 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Trace.WriteLine("[approval] the pending draft could not be opened: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"the pending draft could not be opened: {exception.Message}");
             return false;
         }
     }
@@ -256,7 +258,7 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] the staged extensions could not be restored: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"the staged extensions could not be restored: {exception.Message}");
         }
         finally
         {
@@ -295,7 +297,7 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] a host-state subscriber failed: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"a host-state subscriber failed: {exception.Message}");
         }
     }
 }

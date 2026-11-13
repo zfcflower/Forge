@@ -18,21 +18,17 @@ public sealed class SingleUseExecutorProtocolTests
 {
     private static readonly TimeSpan StepLimit = TestBudgets.Safety(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10));
 
-    private static JsonElement EmptyArgs() => JsonDocument.Parse("{}").RootElement.Clone();
-
-    private static JsonElement WellFormedRunArgs() =>
-        JsonSerializer.SerializeToElement(
-            new ScriptRunRequest(
-                new ExtensionCallContext(
-                    Guid.NewGuid().ToString("N"),
-                    "executor-probe",
-                    Path.GetTempPath(),
-                    0,
-                    []),
-                5000,
-                [],
-                new CodeExecutionOptions()),
-            ScriptExecutorJsonContext.Default.ScriptRunRequest);
+    private static ScriptRunRequest WellFormedRunArgs() =>
+        new(
+            new ExtensionCallContext(
+                Guid.NewGuid().ToString("N"),
+                "executor-probe",
+                Path.GetTempPath(),
+                0,
+                []),
+            5000,
+            [],
+            new CodeExecutionOptions());
 
     [Fact]
     public async Task Run_WithoutSuccessfulLoad_IsRejected()
@@ -41,7 +37,7 @@ public sealed class SingleUseExecutorProtocolTests
         var ct = budget.Token;
         await using var session = await SingleUseExecutorSession.StartAsync(ct);
         var remote = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => session.Peer.SendRequestAsync(ScriptExecutorProtocol.Run, WellFormedRunArgs(), ct));
+            () => session.Peer.RequestAsync(ScriptExecutorProtocol.Run, WellFormedRunArgs(), ct));
         Assert.False(string.IsNullOrWhiteSpace(remote.Message), "The executor.run rejection carried no error detail.");
         Assert.Equal("not_loaded", remote.Code);
     }
@@ -53,11 +49,11 @@ public sealed class SingleUseExecutorProtocolTests
         var ct = budget.Token;
         await using var session = await SingleUseExecutorSession.StartAsync(ct);
         var pluginOp = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => session.Peer.SendRequestAsync(ExtensionProtocol.PluginExecute, EmptyArgs(), ct));
+            () => session.Peer.RequestAsync(ExtensionProtocol.PluginExecute, IpcEmpty.Instance, ct));
         Assert.False(string.IsNullOrWhiteSpace(pluginOp.Message), "The plugin.execute refusal carried no error detail.");
         Assert.Equal("unsupported_operation", pluginOp.Code);
         var workerOp = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => session.Peer.SendRequestAsync(ExtensionProtocol.WorkerLoad, EmptyArgs(), ct));
+            () => session.Peer.RequestAsync(ExtensionProtocol.WorkerLoad, IpcEmpty.Instance, ct));
         Assert.False(string.IsNullOrWhiteSpace(workerOp.Message), "The worker.load refusal carried no error detail.");
         Assert.Equal("unsupported_operation", workerOp.Code);
     }
@@ -82,7 +78,7 @@ public sealed class SingleUseExecutorProtocolTests
             secondValid with { PeSha256 = SingleUseExecutorArtifacts.CorruptHex(secondValid.PeSha256) },
             ct);
         var run = await Assert.ThrowsAsync<IpcRemoteException>(
-            () => session.Peer.SendRequestAsync(ScriptExecutorProtocol.Run, WellFormedRunArgs(), ct));
+            () => session.Peer.RequestAsync(ScriptExecutorProtocol.Run, WellFormedRunArgs(), ct));
         Assert.False(string.IsNullOrWhiteSpace(run.Message), "The post-rejection executor.run error carried no detail.");
         Assert.Equal("not_loaded", run.Code);
     }

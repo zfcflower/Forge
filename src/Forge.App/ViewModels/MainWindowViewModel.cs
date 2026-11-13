@@ -18,6 +18,8 @@ using Forge.App.Lifecycle;
 using Forge.Core.Storage;
 using Forge.HostClient;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -552,7 +554,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                             }
                             catch (Exception exception) when (exception is GitException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
                             {
-                                Trace.WriteLine("[lifecycle] merge state read failed: " + exception.Message);
+                                AppLogs.Lifecycle.ZLogWarning($"merge state read failed: {exception.Message}");
                             }
                         }),
                     ct)
@@ -724,7 +726,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             }
             catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or KeyNotFoundException)
             {
-                Trace.WriteLine("[layout] restore failed, using the default layout: " + exception.Message);
+                AppLogs.Layout.ZLogWarning($"restore failed, using the default layout: {exception.Message}");
                 return;
             }
         }
@@ -744,7 +746,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             }
             catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException)
             {
-                Trace.WriteLine("[layout] skipped session " + id + ": " + exception.Message);
+                AppLogs.Layout.ZLogWarning($"skipped session {id}: {exception.Message}");
             }
         }
 
@@ -794,7 +796,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {
-            Trace.WriteLine("[layout] floating restore failed: " + exception.Message);
+            AppLogs.Layout.ZLogWarning($"floating restore failed: {exception.Message}");
         }
     }
 
@@ -861,12 +863,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             if (!Task.Run(() => WriteStateAsync(state, CancellationToken.None), CancellationToken.None)
                     .Wait(TimeSpan.FromSeconds(3)))
             {
-                Trace.WriteLine("[layout] final save timed out");
+                AppLogs.Layout.ZLogWarning($"final save timed out");
             }
         }
         catch (Exception exception) when (exception is AggregateException or OperationCanceledException)
         {
-            Trace.WriteLine("[layout] final save failed: " + exception.Message);
+            AppLogs.Layout.ZLogError(exception, $"final save failed");
         }
     }
 
@@ -994,7 +996,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[turn] status check failed: " + exception.Message);
+            AppLogs.Turn.ZLogWarning($"status check failed: {exception.Message}");
             Status.SetWorkspaceProblem(LifecycleStrings.TurnCheckFailed(exception.Message));
             return TurnRejection.None;
         }
@@ -1055,7 +1057,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The probe only greys the button; the click checks again and reports what it finds.
-            Trace.WriteLine($"[lifecycle] could not probe whether '{info.Id}' can continue: {exception.Message}");
+            AppLogs.Lifecycle.ZLogWarning($"could not probe whether '{info.Id}' can continue: {exception.Message}");
             reason = null;
         }
 
@@ -1101,7 +1103,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
                 {
-                    Trace.WriteLine($"[lifecycle] could not list the worktrees of '{project.RootPath}': {exception.Message}");
+                    AppLogs.Lifecycle.ZLogWarning($"could not list the worktrees of '{project.RootPath}': {exception.Message}");
                 }
 
                 return WorktreeList.Judge(list, directory) switch
@@ -1823,7 +1825,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {
-            Trace.WriteLine("[lifecycle] refresh failed: " + exception.Message);
+            AppLogs.Lifecycle.ZLogWarning($"refresh failed: {exception.Message}");
         }
     }
 
@@ -1847,7 +1849,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
         {
-            Trace.WriteLine("[lifecycle] the purge cleanup retry failed: " + exception.Message);
+            AppLogs.Lifecycle.ZLogWarning($"the purge cleanup retry failed: {exception.Message}");
             failures = [exception.Message];
         }
 
@@ -1882,7 +1884,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[lifecycle] self-heal failed: " + exception.Message);
+            AppLogs.Lifecycle.ZLogWarning($"self-heal failed: {exception.Message}");
             Status.SetWorkspaceProblem(LifecycleStrings.StartupFailed(exception.Message));
         }
 
@@ -1896,7 +1898,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[lifecycle] notices failed: " + exception.Message);
+            AppLogs.Lifecycle.ZLogWarning($"notices failed: {exception.Message}");
             Status.SetWorkspaceProblem(LifecycleStrings.StartupFailed(exception.Message));
             return;
         }
@@ -1948,7 +1950,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[lifecycle] acknowledge failed: " + exception.Message);
+            AppLogs.Lifecycle.ZLogWarning($"acknowledge failed: {exception.Message}");
             Status.SetWorkspaceProblem(LifecycleStrings.StartupFailed(exception.Message));
         }
     }
@@ -2071,7 +2073,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {
-            Trace.WriteLine("[turn] refresh failed: " + exception.Message);
+            AppLogs.Turn.ZLogWarning($"refresh failed: {exception.Message}");
         }
     }
 
@@ -2434,7 +2436,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[ship] could not render the plan for the pull request body: " + exception.Message);
+            AppLogs.Ship.ZLogWarning($"could not render the plan for the pull request body: {exception.Message}");
             return null;
         }
     }
@@ -2548,7 +2550,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {
-            Trace.WriteLine("[review] panel refresh failed: " + exception.Message);
+            AppLogs.Review.ZLogWarning($"panel refresh failed: {exception.Message}");
         }
     }
 
@@ -3201,12 +3203,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             if (!terminals.DisposeAsync().AsTask().Wait(TerminalShutdownBudget))
             {
-                Trace.WriteLine("[terminal] shutdown timed out");
+                AppLogs.Terminal.ZLogWarning($"shutdown timed out");
             }
         }
         catch (AggregateException exception)
         {
-            Trace.WriteLine("[terminal] shutdown failed: " + exception.Message);
+            AppLogs.Terminal.ZLogError(exception, $"shutdown failed");
         }
     }
 

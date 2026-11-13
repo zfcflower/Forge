@@ -1,4 +1,5 @@
 using Forge.Abstractions;
+using Forge.Core.Tests.Automations;
 using Forge.Core.Agents;
 using Forge.Core.Prompts;
 using Xunit;
@@ -71,21 +72,63 @@ public class PromptCacheLoopTests
     }
 
     [Theory]
-    [InlineData(null, null)]
-    [InlineData("5m", null)]
+    [InlineData(null, "5m")]
+    [InlineData("5m", "5m")]
     [InlineData("1h", "1h")]
-    [InlineData("2h", null)]
-    public async Task Message_cache_ttl_option_reaches_the_cache_hint(string? option, string? expected)
+    [InlineData("2h", "5m")]
+    public async Task An_explicit_cache_lifetime_reaches_the_cache_hint(string? option, string? expected)
     {
         var provider = new FakeProvider((_, _) => Turn.Say("ok"));
-        var host = Host(provider, null, new AgentOptions { MessageCacheTtl = option });
+        var host = Host(provider, null, new AgentOptions { CacheTtl = option });
         var root = host.CreateRoot("s", Workspace);
         await RunAsync(host, root, "one");
         await RunAsync(host, root, "two");
 
-        Assert.All(provider.Requests, request => Assert.Equal(expected, request.Cache!.MessageTtl));
+        Assert.All(provider.Requests, request => Assert.Equal(expected, request.Cache!.Ttl));
         Assert.True(provider.Requests[1].Cache!.CacheSystemAndTools);
         Assert.Equal(provider.Requests[1].Messages.Count - 2, provider.Requests[1].Cache!.CacheThroughMessageIndex);
+    }
+
+    [Fact]
+    public async Task Auto_starts_short_and_moves_to_the_hour_only_after_a_pause()
+    {
+        // The hour costs twice the input price to write, so it is only worth asking for when the short entry would have expired
+        // anyway: the promotion happens on a request that was going to write regardless, and is never undone.
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 13, 5, 0, 0, TimeSpan.Zero));
+        var provider = new FakeProvider((_, _) => Turn.Say("ok"));
+        var host = Host(provider, null, new AgentOptions { CacheTtl = "auto", CacheTtlClock = clock });
+        var root = host.CreateRoot("s", Workspace);
+
+        await RunAsync(host, root, "one");
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await RunAsync(host, root, "two");
+        Assert.Equal(["5m", "5m"], provider.Requests.Select(request => request.Cache!.Ttl));
+
+        // A gap longer than the short lifetime's own expiry: the entry is gone, so the next write may as well last an hour.
+        clock.Advance(TimeSpan.FromMinutes(11));
+        await RunAsync(host, root, "three");
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await RunAsync(host, root, "four");
+
+        Assert.Equal(["5m", "5m", "1h", "1h"], provider.Requests.Select(request => request.Cache!.Ttl));
+    }
+
+    [Fact]
+    public async Task Auto_never_moves_to_the_hour_for_a_session_that_never_pauses()
+    {
+        // The unattended shape: turn after turn with no gap. Here the short lifetime is strictly cheaper.
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 13, 5, 0, 0, TimeSpan.Zero));
+        var provider = new FakeProvider((_, _) => Turn.Say("ok"));
+        var host = Host(provider, null, new AgentOptions { CacheTtl = "auto", CacheTtlClock = clock });
+        var root = host.CreateRoot("s", Workspace);
+
+        for (var turn = 0; turn < 5; turn++)
+        {
+            await RunAsync(host, root, "turn " + turn);
+            clock.Advance(TimeSpan.FromSeconds(20));
+        }
+
+        Assert.All(provider.Requests, request => Assert.Equal("5m", request.Cache!.Ttl));
     }
 
     [Fact]

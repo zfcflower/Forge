@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -58,27 +60,25 @@ public sealed class ExtensionWorkflowPluginTests
 
         var staged = await raw.StageWorkflowAsync("wf1", workflow, toolName: "do-it");
         var commit = await raw.CommitAsync("wf1", staged);
-        Assert.Contains("do-it", commit.GetProperty("toolNames").EnumerateArray().Select(e => e.GetString()));
+        Assert.Contains("do-it", commit.ToolNames);
 
         var runId = "run-" + Guid.NewGuid().ToString("N")[..12];
         var first = await raw.ExecuteAsync("wf1", "do-it", """{"a":1}""", runId);
-        Assert.False(first.GetProperty("isError").GetBoolean(), first.GetProperty("content").GetString());
-        Assert.Equal("step-ok", first.GetProperty("content").GetString());
+        Assert.False(first.IsError, first.Content);
+        Assert.Equal("step-ok", first.Content);
 
         var payload = Assert.Single(raw.ToolCalls);
-        Assert.Equal(runId, payload.GetProperty("runId").GetString());
-        Assert.Equal("wf1", payload.GetProperty("pluginId").GetString());
-        Assert.Equal("step-tool", payload.GetProperty("name").GetString());
-        Assert.Equal("""{"v":1,"w":"x"}""", payload.GetProperty("args").GetRawText());
+        Assert.Equal(runId, payload.RunId);
+        Assert.Equal("wf1", payload.PluginId);
+        Assert.Equal("step-tool", payload.Name);
+        Assert.Equal("""{"v":1,"w":"x"}""", Encoding.UTF8.GetString(payload.ArgumentsJson.Span));
 
         // The run id belongs to this call: a second execution gets a different one.
         var runId2 = "run-" + Guid.NewGuid().ToString("N")[..12];
         await raw.ExecuteAsync("wf1", "do-it", """{"a":2}""", runId2);
         Assert.Equal(2, raw.ToolCalls.Count);
-        Assert.Equal(runId2, raw.ToolCalls[1].GetProperty("runId").GetString());
-        Assert.NotEqual(
-            raw.ToolCalls[0].GetProperty("runId").GetString(),
-            raw.ToolCalls[1].GetProperty("runId").GetString());
+        Assert.Equal(runId2, raw.ToolCalls[1].RunId);
+        Assert.NotEqual(raw.ToolCalls[0].RunId, raw.ToolCalls[1].RunId);
     }
 
     [Fact]
@@ -397,7 +397,7 @@ public sealed class ExtensionWorkflowPluginTests
 
         public string PluginsDirectory { get; }
 
-        public List<JsonElement> ToolCalls { get; } = [];
+        public List<HostToolCallForward> ToolCalls { get; } = [];
 
         public List<(string PluginId, List<string> Tools)> Registrations { get; } = [];
 
@@ -405,35 +405,29 @@ public sealed class ExtensionWorkflowPluginTests
         {
             if (string.Equals(message.Operation, Sdk.ExtensionProtocol.HostToolCall, StringComparison.Ordinal))
             {
+                var call = message.Read<HostToolCallForward>();
                 lock (ToolCalls)
                 {
-                    ToolCalls.Add(message.Arguments!.Value.Clone());
+                    ToolCalls.Add(call);
                 }
 
-                return Peer.RespondAsync(
-                    message.Id,
-                    JsonSerializer.SerializeToElement(new { content = "step-ok", isError = false }),
-                    CancellationToken.None);
+                return Peer.RespondAsync(message.Id, new Sdk.ToolResult("step-ok"), CancellationToken.None);
             }
 
-            return Peer.RespondAsync(
-                message.Id, JsonDocument.Parse("{}").RootElement.Clone(), CancellationToken.None);
+            return Peer.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None);
         }
 
         private void OnNotification(IpcMessage message)
         {
-            if (!string.Equals(message.Operation, Sdk.ExtensionProtocol.ToolsRegister, StringComparison.Ordinal) ||
-                message.Arguments is not { ValueKind: JsonValueKind.Object } args)
+            if (!string.Equals(message.Operation, Sdk.ExtensionProtocol.ToolsRegister, StringComparison.Ordinal))
             {
                 return;
             }
 
-            var tools = args.GetProperty("tools").EnumerateArray()
-                .Select(tool => tool.GetProperty("name").GetString() ?? string.Empty)
-                .ToList();
+            var (pluginId, declared) = WireRequests.Registered(message);
             lock (Registrations)
             {
-                Registrations.Add((args.GetProperty("pluginId").GetString() ?? string.Empty, tools));
+                Registrations.Add((pluginId, declared.Select(tool => tool.Name).ToList()));
             }
         }
 
@@ -484,69 +478,45 @@ public sealed class ExtensionWorkflowPluginTests
             var peer = new IpcPeer(transport, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
             await peer.StartAsync(startup.Token);
             var host = new RawWorkflowHost(process, transport, peer, root);
-            await host.SendAsync(Sdk.ExtensionProtocol.PluginsRefresh, JsonDocument.Parse("{}").RootElement.Clone());
+            await host.SendAsync(Sdk.ExtensionProtocol.PluginsRefresh, IpcEmpty.Instance);
             return host;
         }
 
-        public async Task<JsonElement> StageWorkflowAsync(string id, string workflowJson, string toolName)
+        public async Task<Sdk.StagedExtension> StageWorkflowAsync(string id, string workflowJson, string toolName)
         {
-            var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-            {
-                ["pluginId"] = id,
-                ["version"] = "1.0.0",
-                ["kind"] = Sdk.ExtensionKinds.Workflow,
-                ["files"] = new Dictionary<string, string>(StringComparer.Ordinal) { ["workflow.json"] = workflowJson },
-                ["permissions"] = Array.Empty<object>(),
-                ["dependencies"] = Array.Empty<object>(),
-                ["tool"] = new Dictionary<string, object?>
-                {
-                    ["name"] = toolName,
-                    ["description"] = "raw workflow tool",
-                    ["inputSchemaJson"] = """{"type":"object"}""",
-                },
-            });
-            return (await SendAsync(Sdk.ExtensionProtocol.ExtensionsStage, args)).Clone();
+            var request = new Sdk.ExtensionStageRequest(
+                id,
+                "1.0.0",
+                Sdk.ExtensionKinds.Workflow,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["workflow.json"] = workflowJson },
+                [],
+                [],
+                new Sdk.ExtensionToolSpec(toolName, "raw workflow tool", """{"type":"object"}"""));
+            return (await SendAsync(Sdk.ExtensionProtocol.ExtensionsStage, request)).Read<Sdk.StagedExtension>();
         }
 
-        public async Task<JsonElement> CommitAsync(string id, JsonElement staged)
+        public async Task<Sdk.ExtensionCommitResult> CommitAsync(string id, Sdk.StagedExtension staged)
         {
-            var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-            {
-                ["pluginId"] = id,
-                ["sourceHash"] = staged.GetProperty("sourceHash").GetString(),
-                ["dependencyHash"] = staged.GetProperty("dependencyHash").GetString(),
-                ["sdkVersion"] = staged.GetProperty("sdkVersion").GetString(),
-            });
-            return (await SendAsync(Sdk.ExtensionProtocol.ExtensionsCommit, args)).Clone();
+            var request = new Sdk.ExtensionCommitRequest(
+                id, staged.SourceHash, staged.DependencyHash, staged.SdkVersion);
+            return (await SendAsync(Sdk.ExtensionProtocol.ExtensionsCommit, request))
+                .Read<Sdk.ExtensionCommitResult>();
         }
 
-        public async Task<JsonElement> ExecuteAsync(string pluginId, string tool, string argsJson, string runId)
+        public async Task<Sdk.ToolResult> ExecuteAsync(string pluginId, string tool, string argsJson, string runId)
         {
-            using var parsed = JsonDocument.Parse(argsJson);
             var workingDir = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
-            var args = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-            {
-                ["pluginId"] = pluginId,
-                ["tool"] = tool,
-                ["args"] = parsed.RootElement.Clone(),
-                ["sessionId"] = "raw-session",
-                ["workingDir"] = workingDir,
-                ["depth"] = 0,
-                ["context"] = new Dictionary<string, object?>
-                {
-                    ["runId"] = runId,
-                    ["sessionId"] = "raw-session",
-                    ["workingDirectory"] = workingDir,
-                    ["depth"] = 0,
-                    ["pluginChain"] = Array.Empty<string>(),
-                },
-                ["timeoutMilliseconds"] = 60000,
-            });
-            return (await SendAsync(Sdk.ExtensionProtocol.PluginExecute, args)).Clone();
+            var request = new PluginExecuteRequest(
+                pluginId,
+                tool,
+                Encoding.UTF8.GetBytes(argsJson),
+                WireRequests.Context(workingDir, runId, "raw-session"),
+                60000);
+            return (await SendAsync(Sdk.ExtensionProtocol.PluginExecute, request)).Read<Sdk.ToolResult>();
         }
 
-        private async Task<JsonElement> SendAsync(string operation, JsonElement args) =>
-            (await Peer.SendRequestAsync(operation, args, budget.Token)).Result!.Value.Clone();
+        private async Task<IpcMessage> SendAsync<TArgs>(string operation, TArgs args) =>
+            await Peer.RequestAsync(operation, args, budget.Token);
 
         public async ValueTask DisposeAsync()
         {

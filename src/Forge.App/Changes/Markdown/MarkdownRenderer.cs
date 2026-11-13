@@ -8,6 +8,8 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Changes.Markdown;
 
@@ -159,7 +161,7 @@ internal sealed class MarkdownTextBlock : SelectableTextBlock
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or NotSupportedException
             or System.Runtime.InteropServices.ExternalException or UriFormatException)
         {
-            System.Diagnostics.Trace.WriteLine("[markdown] link launch failed: " + exception.Message);
+            AppLogs.Markdown.ZLogWarning($"link launch failed: {exception.Message}");
         }
     }
 

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Forge.Core.Providers;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Providers;
 
@@ -124,7 +126,7 @@ internal sealed class ModelCatalogRefreshService
             switch (fetched.Status)
             {
                 case ModelCatalogFetchStatus.Failed:
-                    Trace.TraceWarning("[model-catalog] refresh failed: " + fetched.Message);
+                    AppLogs.ModelCatalog.ZLogWarning($"refresh failed: {fetched.Message}");
                     return Finish(new ModelCatalogRefreshResult(ModelCatalogRefreshOutcome.Failed, Failure: fetched.Message));
 
                 case ModelCatalogFetchStatus.Updated when fetched.Snapshot is { } snapshot:
@@ -156,7 +158,7 @@ internal sealed class ModelCatalogRefreshService
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.TraceWarning("[model-catalog] refresh threw: " + exception.Message);
+            AppLogs.ModelCatalog.ZLogWarning($"refresh threw: {exception.Message}");
             return Finish(new ModelCatalogRefreshResult(ModelCatalogRefreshOutcome.Failed, Failure: exception.Message));
         }
         finally
@@ -193,7 +195,7 @@ internal sealed class ModelCatalogRefreshService
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.TraceWarning("[model-catalog] model list of " + provider.Id + " failed: " + exception.Message);
+                AppLogs.ModelCatalog.ZLogWarning($"model list of {provider.Id} failed: {exception.Message}");
                 (problems ??= []).Add(provider.DisplayName + ": " + exception.Message);
             }
         }

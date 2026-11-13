@@ -537,12 +537,15 @@ internal sealed class AppComposition : IAsyncDisposable
             todos,
             providers.Catalog.DefaultModelSettings,
             Git: gitTools);
-        // `promptCacheTtl` is stored per provider but deliberately not wired: it is one value per runtime in AgentOptions,
-        // which cannot describe a per-provider setting, and the Anthropic adapter does not send it yet. When it does, the
-        // loop has to take the TTL from the selected provider's ModelSettings instead.
+        // `promptCacheTtl` is per provider, so it is resolved through the catalog at host build rather than baked into one runtime
+        // value; the loop then applies the "auto" policy (short until the session pauses, hour afterwards) on top of it.
+        runtimeServices.PromptCacheTtl = providerId => providers.Catalog.Providers
+            .FirstOrDefault(provider => string.Equals(provider.Id, providerId, StringComparison.Ordinal))
+            ?.Definition.PromptCacheTtl;
         runtimeServices.Approvals = approvals;
         runtimeServices.PromptTemplates = promptTemplates;
         runtimeServices.AgentDefaults = agentId => agentDefaults.Resolve(agentId, providers.Catalog);
+        runtimeServices.ClaimsOfficialIdentity = () => providers.Catalog.ClaimsOfficialIdentity;
         runtimeServices.PullRequestTools = pullRequestTools;
         // Compaction thresholds follow each model's effective window: the same resolution chain the context gauge shows
         // (catalog snapshot → provider report → default context window → per-model override).

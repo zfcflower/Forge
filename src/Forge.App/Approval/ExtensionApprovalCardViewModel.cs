@@ -4,6 +4,8 @@ using Forge.App.Localization;
 using Forge.App.ViewModels;
 using Forge.Editor.Diff;
 using Forge.Plugin.Sdk;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -316,7 +318,7 @@ internal sealed class ExtensionApprovalCardViewModel : ApprovalCardViewModel
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // The dispatcher is gone (application shutdown); the card has nobody to show itself to.
-            Trace.WriteLine("[approval] the staged files could not be shown: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"the staged files could not be shown: {exception.Message}");
         }
     }
 

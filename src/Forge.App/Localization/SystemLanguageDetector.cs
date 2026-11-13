@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 using UiLanguage = Forge.App.Preferences.UiLanguage;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Localization;
 
@@ -186,7 +188,7 @@ internal static class SystemLanguageDetector
         {
             // Security, IO, a hive that does not exist for this account: the UI language is a preference, so a value
             // that cannot be read is "not present" instead of a start-up failure. Reported once per read, not swallowed.
-            Trace.WriteLine($"[loc] reading HKCU\\{path}\\{name} failed: {exception.Message}");
+            AppLogs.Loc.ZLogWarning($"reading HKCU\\{path}\\{name} failed: {exception.Message}");
             return null;
         }
     }

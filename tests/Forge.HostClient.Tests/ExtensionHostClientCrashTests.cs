@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
@@ -17,7 +16,7 @@ public sealed class ExtensionHostClientCrashTests
         {
             received.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct);
-            return Json.Element("{}");
+            return HostReply.Empty;
         });
         await using var client = await ClientFactory.StartAsync(host);
         var tool = await RegisterEchoAsync(client, host);

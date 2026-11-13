@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.Integration.Tests;
 
@@ -140,8 +141,6 @@ internal sealed class RawHost : IAsyncDisposable
     /// its own peer around it.</summary>
     public static Task<NamedPipeClientTransport> ConnectTransportAsync(string pipe, CancellationToken ct) =>
         PipeWait.ConnectAsync(pipe, () => "The host is started by this test.", ct);
-
-    public static JsonElement EmptyObject() => JsonDocument.Parse("{}").RootElement.Clone();
 
     public async Task<string> WaitForStderrAsync(string needle, TimeSpan limit)
     {
@@ -287,7 +286,7 @@ internal sealed class DirectWorker : IAsyncDisposable
             var peer = new IpcPeer(server, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(60) });
             peer.RequestReceived += (message, requestCt) => peer.RespondAsync(
                 message.Id,
-                JsonDocument.Parse("{\"content\":\"the test host provides no tools.\",\"isError\":true}").RootElement.Clone(),
+                new Sdk.ToolResult("the test host provides no tools.", IsError: true),
                 requestCt);
             await peer.StartAsync(ct);
             TestBudgets.NoteHostStart(Stopwatch.GetElapsedTime(start));
@@ -304,11 +303,24 @@ internal sealed class DirectWorker : IAsyncDisposable
         }
     }
 
-    public async Task<IpcMessage> SendAsync(string operation, JsonElement args, CancellationToken ct)
+    public async Task<IpcMessage> SendAsync<TArgs>(string operation, TArgs args, CancellationToken ct)
     {
         try
         {
-            return await Peer.SendRequestAsync(operation, args, ct);
+            return await Peer.RequestAsync(operation, args, ct);
+        }
+        catch (IpcConnectionClosedException exception)
+        {
+            throw new IpcConnectionClosedException(exception.Message + " " + DescribeProcess(), exception);
+        }
+    }
+
+    /// <summary>Sends a hand-built payload, for the protocol tests that need a value no formatter would produce.</summary>
+    public async Task<IpcMessage> SendRawAsync(string operation, WirePayload payload, CancellationToken ct)
+    {
+        try
+        {
+            return await Peer.AskRawAsync(operation, payload, ct);
         }
         catch (IpcConnectionClosedException exception)
         {

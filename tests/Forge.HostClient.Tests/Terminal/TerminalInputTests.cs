@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Xunit;
 
 namespace Forge.HostClient.Tests.Terminal;
@@ -26,14 +27,14 @@ public sealed class TerminalInputTests
 
         await session.WriteAsync(original, limit.Token);
 
-        var frames = await host.WaitForNotificationsAsync(TerminalOps.Input, 4);
+        var frames = await host.WaitForNotificationsAsync(TerminalOperations.Input, 4);
         Assert.Equal(4, frames.Count);
         var decoded = frames.SelectMany(TerminalFixtures.DecodeData).ToArray();
         foreach (var frame in frames)
         {
             var payload = TerminalFixtures.DecodeData(frame);
             Assert.True(payload.Length <= MaxFrameBytes, $"frame of {payload.Length} bytes exceeds 64 KiB");
-            Assert.Equal("t-input", frame.Arguments!.Value.GetProperty("terminalId").GetString());
+            Assert.Equal("t-input", frame.Read<TerminalData>().TerminalId);
         }
 
         Assert.Equal(original, decoded);
@@ -52,7 +53,7 @@ public sealed class TerminalInputTests
         new Random(42).NextBytes(original);
         await session.WriteAsync(original, limit.Token);
 
-        var frames = await host.WaitForNotificationsAsync(TerminalOps.Input, 1);
+        var frames = await host.WaitForNotificationsAsync(TerminalOperations.Input, 1);
         Assert.Equal(original, TerminalFixtures.DecodeData(Assert.Single(frames)));
         await session.DisposeAsync();
     }
@@ -74,7 +75,7 @@ public sealed class TerminalInputTests
             session.WriteAsync(first, limit.Token).AsTask(),
             session.WriteAsync(second, limit.Token).AsTask());
 
-        var frames = await host.WaitForNotificationsAsync(TerminalOps.Input, 4);
+        var frames = await host.WaitForNotificationsAsync(TerminalOperations.Input, 4);
         Assert.Equal(4, frames.Count);
         var payloads = frames.Select(TerminalFixtures.DecodeData).ToArray();
         foreach (var payload in payloads)
@@ -104,7 +105,7 @@ public sealed class TerminalInputTests
 
         await session.WriteAsync(ReadOnlyMemory<byte>.Empty, limit.Token);
 
-        Assert.Empty(host.Notifications(TerminalOps.Input));
+        Assert.Empty(host.Notifications(TerminalOperations.Input));
         await session.DisposeAsync();
     }
 }

@@ -3,6 +3,8 @@ using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.Core.Providers;
 using Forge.Core.Providers.Internal;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Providers;
 
@@ -123,7 +125,7 @@ internal sealed class ProviderModelCache
 
             if (!ProviderModelsFile.TryRead(File.ReadAllBytes(path), out var lists, out var error))
             {
-                System.Diagnostics.Trace.WriteLine("[providers] " + error);
+                AppLogs.Providers.ZLogWarning($"{error}");
                 return;
             }
 
@@ -149,7 +151,7 @@ internal sealed class ProviderModelCache
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            System.Diagnostics.Trace.TraceWarning("[providers] model cache read failed: " + exception.Message);
+            AppLogs.Providers.ZLogWarning($"model cache read failed: {exception.Message}");
         }
     }
 
@@ -182,7 +184,7 @@ internal sealed class ProviderModelCache
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                System.Diagnostics.Trace.TraceWarning("[providers] model cache load failed: " + exception.Message);
+                AppLogs.Providers.ZLogWarning($"model cache load failed: {exception.Message}");
             }
         }
 
@@ -211,7 +213,7 @@ internal sealed class ProviderModelCache
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            System.Diagnostics.Trace.TraceWarning("[providers] model cache write failed: " + exception.Message);
+            AppLogs.Providers.ZLogWarning($"model cache write failed: {exception.Message}");
         }
     }
 
@@ -231,6 +233,8 @@ internal sealed class ConnectedProvider
     private readonly ProviderCredentials credentials;
     private readonly ModelCatalogStore? modelCatalog;
     private readonly ModelMetadataMemo? memo;
+    private readonly ClaudeWire? wire;
+    private readonly IUsageRecorder? usageRecorder;
 
     public ConnectedProvider(
         ProviderDefinition definition,
@@ -238,7 +242,9 @@ internal sealed class ConnectedProvider
         ProviderModelCache cache,
         ProviderCredentials credentials,
         ModelCatalogStore? modelCatalog = null,
-        ModelMetadataMemo? memo = null)
+        ModelMetadataMemo? memo = null,
+        ClaudeWire? wire = null,
+        IUsageRecorder? usageRecorder = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         Definition = definition;
@@ -247,6 +253,8 @@ internal sealed class ConnectedProvider
         this.credentials = credentials;
         this.modelCatalog = modelCatalog;
         this.memo = memo;
+        this.wire = wire;
+        this.usageRecorder = usageRecorder;
     }
 
     public ProviderDefinition Definition { get; }
@@ -429,7 +437,20 @@ internal sealed class ConnectedProvider
     }
 
     /// <summary>The per-provider wire switches that are not part of the credential or the URL.</summary>
-    internal ProviderOptions Options => new() { SendPromptCacheKey = Definition.SendPromptCacheKey };
+    /// <summary>
+    /// The cache knobs this provider gets: what its vendor documents, plus the user's own opt-in for a gateway that accepts the
+    /// fields (<c>sendPromptCacheKey</c> in the provider entry). Never a blanket switch, because a vendor that does not know a field
+    /// answers 400 to it.
+    /// </summary>
+    internal ProviderOptions Options => new()
+    {
+        SendPromptCacheKey = Definition.SendPromptCacheKey
+            || Definition.Preset.CacheWiring is ProviderCacheWiring.OpenAi,
+        SendPromptCacheRetention = Definition.Preset.CacheWiring is ProviderCacheWiring.OpenAi,
+        SendConversationCacheHeader = Definition.Preset.CacheWiring is ProviderCacheWiring.XAi,
+        SendInteractionId = Definition.Preset.CacheWiring is ProviderCacheWiring.Copilot,
+        UsageRecorder = usageRecorder,
+    };
 
     /// <summary>
     /// The wire config this definition produces once a credential is known. Shared with the credentialed provider so the
@@ -448,6 +469,9 @@ internal sealed class ConnectedProvider
         {
             headers = new Dictionary<string, string>(Definition.Headers, StringComparer.OrdinalIgnoreCase);
         }
+
+        // Only a subscription request has a client identity to claim; an API key speaks as itself.
+        var claimedWire = Definition.CredentialKind == ProviderCredentialKind.ClaudeSubscription ? wire : null;
 
         // Headers that come with the credential itself: a ChatGPT plan has to be named on every request, and the caller that
         // resolved the token is the only one that knows the account id.
@@ -484,7 +508,10 @@ internal sealed class ConnectedProvider
             apiKey,
             headers,
             style,
-            preamble);
+            // With the claim on, the preamble is the official client's sentence rather than the older interactive one: the
+            // identity block is part of what the request claims, so a caller may not supply a different string.
+            claimedWire is null ? preamble : AnthropicWire.Identity,
+            claimedWire);
     }
 
     public override string ToString() => "ConnectedProvider(" + Id + ", " + Definition.Protocol + ")";
@@ -508,7 +535,9 @@ internal sealed record ProviderCatalogOptions(
     ContextWindowDefault DefaultContextWindow = default,
     string? ModelCatalogSourceUrl = null,
     ModelCatalogStore? ModelCatalog = null,
-    ModelMetadataMemo? Memo = null);
+    ModelMetadataMemo? Memo = null,
+    ClaudeWire? Wire = null,
+    IUsageRecorder? UsageRecorder = null);
 
 /// <summary>
 /// Every connected provider plus the default one. Immutable: editing the list produces a new catalogue, which the
@@ -519,6 +548,7 @@ internal sealed class ProviderCatalog
 {
     private readonly ProviderModelCache cache;
     private readonly ModelCatalogStore? modelCatalog;
+    private readonly bool claimsOfficialIdentity;
 
     private ProviderCatalog(
         IReadOnlyList<ConnectedProvider> providers,
@@ -532,6 +562,10 @@ internal sealed class ProviderCatalog
         StatusText = status;
         this.cache = cache;
         modelCatalog = options?.ModelCatalog;
+        // The claim is a property of a request to a subscription provider: with none connected nothing claims the official
+        // identity, so the prompt must not behave as if something did (an API-key-only setup keeps its own name).
+        claimsOfficialIdentity = options?.Wire is not null
+            && providers.Any(provider => provider.Definition.CredentialKind == ProviderCredentialKind.ClaudeSubscription);
         DefaultContextWindow = options?.DefaultContextWindow ?? ContextWindowDefault.Empty;
         ModelCatalogSourceUrl = string.IsNullOrWhiteSpace(options?.ModelCatalogSourceUrl)
             ? ModelCatalogFetcher.DefaultSourceUrl
@@ -553,6 +587,12 @@ internal sealed class ProviderCatalog
 
     /// <summary>The fetched catalog layer (null in tests that do not build one).</summary>
     public ModelCatalogStore? ModelCatalog => modelCatalog;
+
+    /// <summary>
+    /// Whether a subscription request claims the official client's identity. The prompt follows it: a request that claims to be
+    /// Claude must not then introduce itself by another name, and a request that claims nothing has no reason to hide it.
+    /// </summary>
+    public bool ClaimsOfficialIdentity => claimsOfficialIdentity;
 
     /// <summary>
     /// The context window every model uses when it has no per-model override, or <see cref="ContextWindowDefault.Empty"/> to
@@ -595,7 +635,9 @@ internal sealed class ProviderCatalog
                 sharedCache,
                 sharedCredentials,
                 options?.ModelCatalog,
-                options?.Memo));
+                options?.Memo,
+                options?.Wire,
+                options?.UsageRecorder));
         }
 
         var defaultProvider = providers.FirstOrDefault(provider =>
@@ -737,7 +779,7 @@ internal sealed class ProviderCatalog
         var provider = Find(settings.ProviderId);
         if (provider is null)
         {
-            Trace.TraceWarning("[providers] unknown provider id in a model request; falling back to the default");
+            AppLogs.Providers.ZLogWarning($"unknown provider id in a model request; falling back to the default");
             provider = Default;
         }
 

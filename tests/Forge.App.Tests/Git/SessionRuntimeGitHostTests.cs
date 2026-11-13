@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Approval;
 using Forge.Core.Storage;
 using Forge.HostClient;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Workspace;
 using Xunit;
 
@@ -178,7 +178,7 @@ public sealed class SessionRuntimeGitHostTests
         }
     }
 
-    /// <summary>A pipe server speaking just enough of the Extension Host protocol: it answers every request with an empty object.</summary>
+    /// <summary>A pipe server speaking just enough of the Extension Host protocol: it answers every request with an empty payload.</summary>
     private sealed class MiniExtensionHost : IAsyncDisposable
     {
         private readonly CancellationTokenSource lifetime = new();
@@ -191,19 +191,16 @@ public sealed class SessionRuntimeGitHostTests
             var server = await IpcPipe.CreateServer(PipeName, lifetime.Token);
             var created = new IpcPeer(server, new IpcPeerOptions { DefaultTimeout = TimeSpan.FromSeconds(15) });
             created.RequestReceived += (message, _) =>
-                created.RespondAsync(message.Id, IpcJsonTypes.EmptyObject, CancellationToken.None);
+                created.RespondAsync(message.Id, IpcEmpty.Instance, CancellationToken.None);
             await created.StartAsync(CancellationToken.None);
             peer = created;
         }
 
-        public Task NotifyAsync(string operation, string argsJson)
-        {
-            using var document = JsonDocument.Parse(argsJson);
-            return (peer ?? throw new InvalidOperationException("no client connected")).SendNotificationAsync(
+        public Task NotifyAsync<T>(string operation, T args) =>
+            (peer ?? throw new InvalidOperationException("no client connected")).NotifyAsync(
                 operation,
-                document.RootElement.Clone(),
+                args,
                 CancellationToken.None);
-        }
 
         public async ValueTask DisposeAsync()
         {
@@ -302,8 +299,10 @@ public sealed class SessionRuntimeGitHostTests
             try
             {
                 await host.NotifyAsync(
-                    "tools.register",
-                    $$"""{"pluginId":"{{pluginId}}","tools":[{"name":"{{tool}}","description":"d","inputSchemaJson":"{}","sideEffect":0}]}""");
+                    Forge.Plugin.Sdk.ExtensionProtocol.ToolsRegister,
+                    new ToolsRegisterNotification(
+                        pluginId,
+                        [new Forge.Plugin.Sdk.ToolDeclaration(tool, "d", "{}", Forge.Plugin.Sdk.ToolSideEffect.ReadOnly)]));
                 await seen.Task.WaitAsync(Budget);
             }
             finally
@@ -325,7 +324,8 @@ public sealed class SessionRuntimeGitHostTests
             Client.ToolsChanged += OnChanged;
             try
             {
-                await host.NotifyAsync("tools.unregister", $$"""{"pluginId":"{{pluginId}}"}""");
+                await host.NotifyAsync(
+                    Forge.Plugin.Sdk.ExtensionProtocol.ToolsUnregister, new Forge.Plugin.Sdk.ExtensionIdRequest(pluginId));
                 await seen.Task.WaitAsync(Budget);
             }
             finally

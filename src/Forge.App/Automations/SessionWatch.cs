@@ -2,6 +2,8 @@ using System.Globalization;
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Automations;
 
@@ -139,7 +141,7 @@ internal sealed class SessionWatch(
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[automation] session watch start failed: " + exception.Message);
+            AppLogs.Automation.ZLogWarning($"session watch start failed: {exception.Message}");
         }
     }
 }

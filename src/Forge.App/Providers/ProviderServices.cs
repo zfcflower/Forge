@@ -21,13 +21,24 @@ internal sealed class ProviderServices
     private readonly HttpClient http;
     private ProviderCatalog catalog;
 
-    public ProviderServices(string settingsPath, string dataDirectory, HttpClient http, TimeProvider? time = null)
+    /// <param name="claudeCredentialsPath">Where the local Claude Code login is read from; <c>null</c> is the real
+    /// <c>~/.claude/.credentials.json</c>. Named so a test can point at its own file.</param>
+    public ProviderServices(
+        string settingsPath,
+        string dataDirectory,
+        HttpClient http,
+        TimeProvider? time = null,
+        string? claudeCredentialsPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(settingsPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         ArgumentNullException.ThrowIfNull(http);
         this.http = http;
-        Store = new ProviderStore(settingsPath);
+        // The usage log is optional by construction: the store always exists (the settings row drives it) and the recorder writes only
+        // while it is enabled, so flipping the switch takes effect on the next request without rebuilding the catalogue.
+        UsageLog = new UsageLogSettingsStore(settingsPath);
+        UsageRecorder = new JsonlUsageRecorder(Path.Combine(dataDirectory, "usage"), UsageLog, time);
+        Store = new ProviderStore(settingsPath, usageRecorder: UsageRecorder);
         Secrets = new ProviderSecretStore(dataDirectory);
         // Both caches live beside settings.json and are read on the pool: a cold start shows unknown prices until they
         // arrive instead of blocking the window on a JSON parse.
@@ -39,7 +50,7 @@ internal sealed class ProviderServices
         // The provider cache also lands asynchronously; an answer resolved before it did would be remembered as "the catalog
         // knows nothing" until the next save, so the memo is dropped again when the file has been read.
         _ = InvalidateMemoWhenModelListsLoadAsync();
-        Credentials = new ProviderCredentials(http, Secrets, time: time);
+        Credentials = new ProviderCredentials(http, Secrets, claudeCredentialsPath, time);
         // Warm the encrypted store on the pool: the first reader would otherwise be the settings page (UI thread) or the
         // first provider status line, and decrypting on the UI thread is exactly what the shell must not do.
         _ = Secrets.WarmAsync();
@@ -47,6 +58,12 @@ internal sealed class ProviderServices
     }
 
     public ProviderStore Store { get; }
+
+    /// <summary>The <c>usageLog</c> section, shared by the settings row (writes) and the recorder (reads).</summary>
+    public UsageLogSettingsStore UsageLog { get; }
+
+    /// <summary>Where model requests are recorded while the log is on; always present, silent while it is off.</summary>
+    public JsonlUsageRecorder UsageRecorder { get; }
 
     public ProviderSecretStore Secrets { get; }
 
@@ -69,6 +86,9 @@ internal sealed class ProviderServices
     /// <summary>Re-reads <c>settings.json</c>; the running sessions keep the catalogue they already captured.</summary>
     public ProviderCatalog Reload()
     {
+        // A reload is the moment the account or its settings may have changed, so what this process learned about refused betas is
+        // forgotten: an account that was fixed must not stay on the reduced shape until the next launch.
+        ProviderDegradations.Clear();
         Memo.Invalidate();
         catalog = Store.Load(Secrets, Credentials, Cache, ModelCatalog);
         Changed?.Invoke(this, EventArgs.Empty);
@@ -88,6 +108,7 @@ internal sealed class ProviderServices
                 return Store.Load(Secrets, Credentials, Cache, ModelCatalog);
             },
             cancellationToken).ConfigureAwait(true);
+        ProviderDegradations.Clear();
         Memo.Invalidate();
         catalog = loaded;
         Changed?.Invoke(this, EventArgs.Empty);
@@ -110,16 +131,27 @@ internal sealed class ProviderServices
         // Null means "the page did not touch the address"; the URL is only ever changed from the catalog row.
         var sourceUrl = modelCatalogSourceUrl ?? catalog.ModelCatalogSourceUrl;
         await Task.Run(() => Store.Save(frozen, defaultId, defaultContextWindow, sourceUrl), cancellationToken).ConfigureAwait(true);
-        // A saved definition can change an override, the default window or the provider list itself.
+        // Re-read rather than rebuild from the arguments: the file also holds the wire claim and the usage-log switch, and a catalogue
+        // assembled from the save call alone would silently drop both until the next launch.
         Memo.Invalidate();
-        catalog = ProviderCatalog.Create(
-            frozen,
-            defaultId,
-            Secrets,
-            Credentials,
-            Cache,
-            new ProviderCatalogOptions(defaultContextWindow, sourceUrl, ModelCatalog, Memo));
+        catalog = await Task.Run(() => Store.Load(Secrets, Credentials, Cache, ModelCatalog), cancellationToken).ConfigureAwait(true);
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Saves one provider's cache lifetime and swaps the catalogue in, so the next turn uses it. Only the field named here changes; every
+    /// other setting is carried over from the live catalogue, which is what keeps one row's control from rewriting another row's data.
+    /// </summary>
+    public async Task SaveCacheTtlAsync(string providerId, string? ttl, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        var normalized = string.IsNullOrWhiteSpace(ttl) || ttl == "auto" ? null : ttl;
+        ProviderDefinition[] definitions = [.. catalog.Providers.Select(provider =>
+            string.Equals(provider.Id, providerId, StringComparison.Ordinal)
+                ? provider.Definition with { PromptCacheTtl = normalized }
+                : provider.Definition)];
+        await SaveAsync(definitions, catalog.Default?.Id, catalog.DefaultContextWindow, catalog.ModelCatalogSourceUrl, cancellationToken)
+            .ConfigureAwait(true);
     }
 
     private async Task InvalidateMemoWhenModelListsLoadAsync()
@@ -190,8 +222,10 @@ internal sealed class ProviderServices
     public async Task<ProviderModelList> RefreshModelsAsync(ConnectedProvider provider, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        var (baseUrl, headers) = await ListRequestAsync(provider, cancellationToken).ConfigureAwait(false);
-        var list = await ProviderModelListing.FetchAsync(baseUrl, headers, http, cancellationToken).ConfigureAwait(false);
+        var request = await ListRequestAsync(provider, cancellationToken).ConfigureAwait(false);
+        var list = await ProviderModelListing
+            .FetchAsync(request.BaseUrl, request.Headers, http, cancellationToken, request.Query)
+            .ConfigureAwait(false);
         Cache.Set(provider.Id, list);
         // Awaited, not fire-and-forget: the refresh is only finished once the answers are also on disk for the next start.
         await Cache.SaveAsync(cancellationToken).ConfigureAwait(false);
@@ -203,7 +237,7 @@ internal sealed class ProviderServices
     /// The URL and headers for a <c>/models</c> call. Sign-in providers resolve their credential here (a network call for
     /// Copilot's session token), which is why listing is asynchronous like a turn.
     /// </summary>
-    private async Task<(string BaseUrl, IReadOnlyDictionary<string, string> Headers)> ListRequestAsync(
+    private async Task<(string BaseUrl, string? Query, IReadOnlyDictionary<string, string> Headers)> ListRequestAsync(
         ConnectedProvider provider,
         CancellationToken cancellationToken)
     {
@@ -273,7 +307,10 @@ internal sealed class ProviderServices
             headers[name] = value;
         }
 
-        return (baseUrl, headers);
+        // The protocol, not the preset, decides where a listing hangs: Anthropic's lives under the version segment its
+        // messages path uses, which the base deliberately does not carry.
+        var (root, query) = ProviderModelListing.ListRequest(definition.Protocol, baseUrl);
+        return (root, query, headers);
     }
 
     /// <summary>The sentence the shell shows when nothing is connected, resolved in the current language.</summary>

@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using UiLanguage = Forge.App.Preferences.UiLanguage;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Localization;
 
@@ -175,7 +177,7 @@ internal sealed class Loc : INotifyPropertyChanged
             }
         }
 
-        Trace.WriteLine("[loc] missing key: " + key);
+        AppLogs.Loc.ZLogWarning($"missing key: {key}");
     }
 
     /// <summary>
@@ -214,7 +216,7 @@ internal sealed class Loc : INotifyPropertyChanged
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Trace.WriteLine("[loc] a language notification subscriber failed: " + exception.Message);
+                AppLogs.Loc.ZLogWarning($"a language notification subscriber failed: {exception.Message}");
             }
         }
     }

@@ -39,7 +39,7 @@
 
 ## NuGet 白名单
 
-仅 BCL、Avalonia(含官方同仓包,逐名见 `architecture.md`)、Roslyn、Microsoft.Data.Sqlite、neuecc 的库、xunit(仅测试项目)。三方 Avalonia 主题/图标/图表库与 `AvaloniaUI.DiagnosticsSupport` 未批准。其他包默认内化源码;不值得内化的包须先问用户(见 `architecture.md`)。
+只用 `architecture.md`「NuGet 引用规则」表里的三方库,按表中范围与约束使用;新增任何包须先问用户。
 
 ## 并行与串行
 

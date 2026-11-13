@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -278,7 +280,7 @@ internal sealed class ApprovalQueue
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] a card-added subscriber failed: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"a card-added subscriber failed: {exception.Message}");
         }
     }
 
@@ -290,7 +292,7 @@ internal sealed class ApprovalQueue
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[approval] a queue subscriber failed: " + exception.Message);
+            AppLogs.Approval.ZLogWarning($"a queue subscriber failed: {exception.Message}");
         }
     }
 }

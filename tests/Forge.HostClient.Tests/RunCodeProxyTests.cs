@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Forge.Abstractions;
+using Forge.Ipc;
 using Xunit;
 using Sdk = Forge.Plugin.Sdk;
 
@@ -9,6 +9,8 @@ namespace Forge.HostClient.Tests;
 /// <c>code.execute</c> wire shape (camelCase context/tools/options, per-call expiry and recovery).</summary>
 public sealed class RunCodeProxyTests
 {
+    private const string CodeExecute = Sdk.ExtensionProtocol.CodeExecute;
+
     [Fact]
     public async Task Description_is_stable_across_tool_registration_order()
     {
@@ -53,8 +55,8 @@ public sealed class RunCodeProxyTests
         Assert.DoesNotContain("\n  run_code ", proxy.Definition.Description, StringComparison.Ordinal);
         Assert.Contains("\n  real ", proxy.Definition.Description, StringComparison.Ordinal);
 
-        var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
+        var hold = new InFlightRoot { Content = "ok" };
+        BoundRoots.ParkRoot(host, CodeExecute, hold);
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\"}"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("self")),
@@ -63,10 +65,8 @@ public sealed class RunCodeProxyTests
         var result = await invocation.Bounded();
 
         Assert.False(result.IsError);
-        var request = Assert.Single(host.Requests("code.execute"));
-        var tools = request.Arguments!.Value.GetProperty("tools").EnumerateArray()
-            .Select(element => element.GetProperty("name").GetString()!).ToArray();
-        Assert.Equal(["real"], tools);
+        var request = Assert.Single(host.Requests(CodeExecute)).Read<Sdk.CodeExecutionRequest>();
+        Assert.Equal(["real"], request.Tools.Select(tool => tool.Name).ToArray());
     }
 
     [Theory]
@@ -98,7 +98,7 @@ public sealed class RunCodeProxyTests
 
         Assert.True(result.IsError);
         Assert.Contains(fragment, result.Content);
-        Assert.Empty(host.Requests("code.execute"));
+        Assert.Empty(host.Requests(CodeExecute));
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class RunCodeProxyTests
         Assert.True(result.IsError);
         Assert.Contains("9 chars", result.Content);
         Assert.Contains("limit is 8", result.Content);
-        Assert.Empty(host.Requests("code.execute"));
+        Assert.Empty(host.Requests(CodeExecute));
     }
 
     [Fact]
@@ -127,8 +127,8 @@ public sealed class RunCodeProxyTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
+        var hold = new InFlightRoot { Content = "ok" };
+        BoundRoots.ParkRoot(host, CodeExecute, hold);
         var proxy = client.CreateRunCodeTool(new TestRegistry());
 
         var invocation = proxy.InvokeAsync(
@@ -139,8 +139,8 @@ public sealed class RunCodeProxyTests
         var result = await invocation.Bounded();
 
         Assert.False(result.IsError);
-        var request = Assert.Single(host.Requests("code.execute"));
-        Assert.Equal(600_000, request.Arguments!.Value.GetProperty("timeoutMilliseconds").GetInt32());
+        var request = Assert.Single(host.Requests(CodeExecute));
+        Assert.Equal(600_000, request.Read<Sdk.CodeExecutionRequest>().TimeoutMilliseconds);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class RunCodeProxyTests
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot();
-        BoundRoots.ParkRoot(host, "code.execute", hold);
+        BoundRoots.ParkRoot(host, CodeExecute, hold);
         var proxy = client.CreateRunCodeTool(new TestRegistry());
         var context = new ToolContext("sess", BoundRoots.AbsoluteDir("budgets"));
         hold.Release();
@@ -161,8 +161,8 @@ public sealed class RunCodeProxyTests
         await proxy.InvokeAsync(
             new ToolCall("c", "run_code", "{\"code\":\"1\",\"timeout_seconds\":30}"), context, limit.Token);
 
-        var budgets = host.Requests("code.execute")
-            .Select(message => message.Arguments!.Value.GetProperty("timeoutMilliseconds").GetInt32())
+        var budgets = host.Requests(CodeExecute)
+            .Select(message => message.Read<Sdk.CodeExecutionRequest>().TimeoutMilliseconds)
             .ToArray();
         Assert.Equal([60_000, 600_000, 30_000], budgets);
     }
@@ -174,7 +174,7 @@ public sealed class RunCodeProxyTests
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
         var hold = new InFlightRoot();
-        BoundRoots.ParkRoot(host, "code.execute", hold);
+        BoundRoots.ParkRoot(host, CodeExecute, hold);
         var proxy = client.CreateRunCodeTool(new TestRegistry());
         hold.Release();
 
@@ -183,8 +183,8 @@ public sealed class RunCodeProxyTests
             new ToolContext("sess", BoundRoots.AbsoluteDir("budgets")),
             limit.Token);
 
-        Assert.Equal(60_000, Assert.Single(host.Requests("code.execute"))
-            .Arguments!.Value.GetProperty("timeoutMilliseconds").GetInt32());
+        Assert.Equal(60_000, Assert.Single(host.Requests(CodeExecute))
+            .Read<Sdk.CodeExecutionRequest>().TimeoutMilliseconds);
     }
 
     [Fact]
@@ -192,11 +192,11 @@ public sealed class RunCodeProxyTests
     {
         await using var host = new FakeHost();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.On("code.execute", async (message, ct) =>
+        host.On(CodeExecute, async (message, ct) =>
         {
             entered.TrySetResult();
             await Task.Delay(TimeSpan.FromMilliseconds(200), ct).ConfigureAwait(false);
-            return Json.Element("""{"content":"slow-ok","isError":false}""");
+            return new Sdk.CodeExecutionResult("slow-ok");
         });
         var options = new ExtensionHostClientOptions { RequestTimeout = TimeSpan.FromMilliseconds(30) };
         await using var client = await ClientFactory.StartAsync(host, options: options);
@@ -214,7 +214,7 @@ public sealed class RunCodeProxyTests
     }
 
     [Fact]
-    public async Task Code_execute_carries_camelCase_context_tools_and_options()
+    public async Task Code_execute_carries_the_context_tools_and_options()
     {
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
@@ -225,8 +225,8 @@ public sealed class RunCodeProxyTests
             new StubTool("zeta", ToolSideEffect.Write),
             new StubTool("alpha", ToolSideEffect.ReadOnly),
         ]);
-        var hold = new InFlightRoot { ResultJson = """{"content":"ok","isError":false}""" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
+        var hold = new InFlightRoot { Content = "ok" };
+        BoundRoots.ParkRoot(host, CodeExecute, hold);
         var proxy = client.CreateRunCodeTool(
             registry, new RunCodeProxyOptions { Execution = execution });
         var directory = BoundRoots.AbsoluteDir("wire");
@@ -238,31 +238,30 @@ public sealed class RunCodeProxyTests
         hold.Release();
         await invocation.Bounded();
 
-        var args = Assert.Single(host.Requests("code.execute")).Arguments!.Value;
-        Assert.Equal(
-            ["code", "context", "timeoutMilliseconds", "tools", "options"],
-            args.EnumerateObject().Select(property => property.Name).ToArray());
-        Assert.Equal("1+1", args.GetProperty("code").GetString());
-        Assert.Equal(45_000, args.GetProperty("timeoutMilliseconds").GetInt32());
-        var context = args.GetProperty("context");
-        Assert.Equal(
-            ["runId", "sessionId", "workingDirectory", "depth", "pluginChain", "rootRunId"],
-            context.EnumerateObject().Select(property => property.Name).ToArray());
-        Assert.False(string.IsNullOrWhiteSpace(context.GetProperty("runId").GetString()));
-        Assert.Equal("sess-wire", context.GetProperty("sessionId").GetString());
-        Assert.Equal(directory, context.GetProperty("workingDirectory").GetString());
-        Assert.Equal(2, context.GetProperty("depth").GetInt32());
-        Assert.Empty(context.GetProperty("pluginChain").EnumerateArray());
-        var tools = args.GetProperty("tools").EnumerateArray().ToArray();
-        Assert.Equal(["alpha", "zeta"], tools.Select(element => element.GetProperty("name").GetString()!).ToArray());
-        Assert.Equal(
-            ["description", "inputSchemaJson", "name", "sideEffect"],
-            tools[0].EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray());
-        Assert.Equal(0, tools[0].GetProperty("sideEffect").GetInt32());
-        Assert.Equal(1, tools[1].GetProperty("sideEffect").GetInt32());
-        var wireOptions = args.GetProperty("options");
-        Assert.Equal(3, wireOptions.GetProperty("maxConcurrentToolCalls").GetInt32());
-        Assert.Equal(1234, wireOptions.GetProperty("maxResultChars").GetInt32());
+        var message = Assert.Single(host.Requests(CodeExecute));
+        // Exactly the five documented fields: a fixarray of five, nothing appended.
+        Assert.Equal(0x95, message.Payload.Span[0]);
+        var args = message.Read<Sdk.CodeExecutionRequest>();
+        Assert.Equal("1+1", args.Code);
+        Assert.Equal(45_000, args.TimeoutMilliseconds);
+        var context = args.Context;
+        Assert.False(string.IsNullOrWhiteSpace(context.RunId));
+        Assert.Equal(context.RunId, context.RootRunId);
+        Assert.Equal("sess-wire", context.SessionId);
+        Assert.Equal(directory, context.WorkingDirectory);
+        Assert.Equal(2, context.Depth);
+        Assert.Empty(context.PluginChain);
+        var tools = args.Tools.ToArray();
+        Assert.Equal(["alpha", "zeta"], tools.Select(tool => tool.Name).ToArray());
+        Assert.All(tools, tool =>
+        {
+            Assert.NotNull(tool.Description);
+            Assert.False(string.IsNullOrWhiteSpace(tool.InputSchemaJson));
+        });
+        Assert.Equal(Sdk.ToolSideEffect.ReadOnly, tools[0].SideEffect);
+        Assert.Equal(Sdk.ToolSideEffect.Write, tools[1].SideEffect);
+        Assert.Equal(3, args.Options.MaxConcurrentToolCalls);
+        Assert.Equal(1234, args.Options.MaxResultChars);
     }
 
     [Fact]
@@ -271,10 +270,10 @@ public sealed class RunCodeProxyTests
         await using var host = new FakeHost();
         await using var client = await ClientFactory.StartAsync(host);
         using var limit = TestLimit.Create();
-        host.On("code.execute", async (_, ct) =>
+        host.On(CodeExecute, async (_, ct) =>
         {
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
-            return Json.Element("""{"content":"never","isError":false}""");
+            return new Sdk.CodeExecutionResult("never");
         });
         var proxy = client.CreateRunCodeTool(new TestRegistry());
         var context = new ToolContext("sess", BoundRoots.AbsoluteDir("expiry"));
@@ -286,7 +285,7 @@ public sealed class RunCodeProxyTests
         Assert.Contains("script was stopped", expired.Content);
         Assert.Contains("run_code timeout", expired.Content);
 
-        host.Answer("code.execute", """{"content":"recovered","isError":false}""");
+        host.Answer(CodeExecute, new Sdk.CodeExecutionResult("recovered"));
         var recovered = await proxy.InvokeAsync(
             new ToolCall("rc-2", "run_code", "{\"code\":\"2\"}"), context, limit.Token);
 

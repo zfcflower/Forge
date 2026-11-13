@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
@@ -26,12 +27,94 @@ public sealed class AnthropicProvider : HttpChatProvider
     private const int DefaultMaxTokens = 8192;
     private const int ThinkingHeadroom = 4096;
 
-    public AnthropicProvider(ProviderConfig config, HttpClient http, TimeSpan? idleTimeout = null)
-        : base(config, http, idleTimeout)
+    /// <summary>
+    /// Providers whose account already refused the announced betas in this process. A capability of the account, not of the
+    /// request, so remembering it saves one wasted round trip per turn for the rest of the run.
+    /// </summary>
+    /// <summary>
+    /// Forgets which providers refused their announced betas. Called when the account or its settings change (a reloaded provider
+    /// catalogue, a re-signed-in credential) so an account that was fixed is not stuck on the reduced shape for the whole run; tests
+    /// use it to isolate one case from the next.
+    /// </summary>
+    public static void ForgetDegradations() => ProviderDegradations.Clear();
+
+    private readonly Func<string?> runtimeBuild;
+    private readonly Func<IReadOnlyList<string>?> runtimeBetas;
+    private bool downgraded;
+
+    /// <param name="runtimeBuild">
+    /// The build suffix to claim when settings do not pin one. Defaults to asking the locally installed CLI once per process;
+    /// injectable so a test can answer without a 300 MB program on the machine.
+    /// </param>
+    /// <param name="runtimeBetas">
+    /// The <c>anthropic-beta</c> list to announce. Defaults to the list the same local CLI announces — the set is version specific,
+    /// so a frozen copy disagrees with the version this request claims.
+    /// </param>
+    public AnthropicProvider(
+        ProviderConfig config,
+        HttpClient http,
+        TimeSpan? idleTimeout = null,
+        Func<string?>? runtimeBuild = null,
+        Func<IReadOnlyList<string>?>? runtimeBetas = null,
+        ProviderOptions? options = null)
+        : base(config, http, idleTimeout, options)
     {
+        this.runtimeBuild = runtimeBuild ?? (static () => ClaudeCliProbe.CachedBuild);
+        this.runtimeBetas = runtimeBetas ?? (static () => ClaudeCliProbe.Cached.Value?.Betas);
+        downgraded = ProviderDegradations.Contains(DegradationKey);
     }
 
+    /// <summary>Identity under which "this account refuses the announced betas" is remembered.</summary>
+    private string DegradationKey => Id + "|" + Config.AuthStyle + "|" + (Wire?.Entrypoint ?? string.Empty);
+
+    /// <summary>
+    /// A 400 that names <c>anthropic-beta</c> is the account (or a gateway) refusing a beta, not refusing the request: the answer is
+    /// to announce less, not to fail the turn. A context-overflow 400 is a different thing and is handled before it gets here.
+    /// </summary>
+    protected override bool CanDegrade(ProviderException failure) =>
+        !downgraded
+        && failure.StatusCode == 400
+        && failure.Message.Contains("anthropic-beta", StringComparison.OrdinalIgnoreCase);
+
+    protected override void Degrade()
+    {
+        downgraded = true;
+        ProviderDegradations.Add(DegradationKey);
+    }
+
+    /// <summary>
+    /// The sentence the shell shows when this request had to be resent in a reduced shape: what was dropped and what it costs, so the
+    /// smaller bill does not turn into an unexplained one.
+    /// </summary>
+    protected override string? DegradationNotice =>
+        "This account or gateway refused one of the announced beta features, so the request was resent with the beta list reduced to "
+        + "the ones a subscription requires and the five-minute prompt cache. The answer is unaffected; cache writes will cost more "
+        + "often until the account accepts the longer lifetime.";
+
     protected override string Endpoint => "v1/messages";
+
+    /// <summary>
+    /// Anthropic names the account's spending windows in the response, so the same request that costs the user quota also
+    /// reports how much of it is gone — including on the 429 that refuses it.
+    /// </summary>
+    protected override ProviderRateLimit? ReadRateLimit(HttpResponseMessage response) =>
+        AnthropicRateLimits.Read(response.Headers);
+
+    /// <summary>The official client posts to <c>v1/messages?beta=true</c>; the query is part of what its requests look like.</summary>
+    protected override string EndpointQuery => Wire is null ? string.Empty : "?beta=true";
+
+    /// <summary>
+    /// The claimed-identity mode, or null when this provider sends an ordinary API request. Only a bearer (subscription)
+    /// credential can claim to be the official client — an API key has no client identity to claim.
+    /// </summary>
+    private ClaudeWire? Wire => Config.AuthStyle == ProviderAuthStyle.BearerOnly ? Config.Wire : null;
+
+    /// <summary>
+    /// The wire to put on this request: a build pinned in settings wins, otherwise the one the local CLI calls itself right now,
+    /// otherwise none — the billing block then omits the dot part rather than inventing a value that no client sends.
+    /// </summary>
+    private ClaudeWire Effective(ClaudeWire wire) =>
+        wire.Build is { Length: > 0 } ? wire : wire with { Build = runtimeBuild() ?? string.Empty };
 
     protected override void ApplyAuth(HttpRequestMessage request)
     {
@@ -47,15 +130,50 @@ public sealed class AnthropicProvider : HttpChatProvider
                 request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + Config.ApiKey);
             }
 
-            request.Headers.TryAddWithoutValidation(
-                "anthropic-beta",
-                string.Join(',', ClaudeSubscriptionCredentials.Betas));
+            var betas = Wire is null || downgraded
+                ? ClaudeSubscriptionCredentials.Betas
+                : runtimeBetas() ?? (Wire.Betas is { Count: > 0 } claimed ? claimed : ClaudeSubscriptionCredentials.Betas);
+            request.Headers.TryAddWithoutValidation("anthropic-beta", string.Join(',', betas));
+
+            if (Wire is { } wire)
+            {
+                // Everything the official client sends alongside the identity it claims. Omitting any of these while claiming
+                // the entrypoint would be a request that contradicts itself.
+                request.Headers.TryAddWithoutValidation("accept", "application/json");
+                request.Headers.TryAddWithoutValidation("user-agent", AnthropicWire.UserAgent(wire));
+                request.Headers.TryAddWithoutValidation("x-app", AnthropicWire.AppHeader);
+                request.Headers.TryAddWithoutValidation("anthropic-dangerous-direct-browser-access", "true");
+                request.Headers.TryAddWithoutValidation("x-stainless-lang", AnthropicWire.Language);
+                request.Headers.TryAddWithoutValidation("x-stainless-package-version", AnthropicWire.StainlessPackageVersion);
+                request.Headers.TryAddWithoutValidation("x-stainless-os", OperatingSystemName());
+                request.Headers.TryAddWithoutValidation("x-stainless-arch", RuntimeInformation.ProcessArchitecture switch
+                {
+                    Architecture.X64 => "x64",
+                    Architecture.Arm64 => "arm64",
+                    Architecture.X86 => "ia32",
+                    _ => RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(),
+                });
+                request.Headers.TryAddWithoutValidation("x-stainless-runtime", AnthropicWire.Runtime);
+                request.Headers.TryAddWithoutValidation("x-stainless-runtime-version", AnthropicWire.StainlessRuntimeVersion);
+                request.Headers.TryAddWithoutValidation("x-stainless-retry-count", "0");
+                request.Headers.TryAddWithoutValidation("x-stainless-timeout", "600");
+            }
+
             return;
         }
 
         if (!string.IsNullOrEmpty(Config.ApiKey))
         {
             request.Headers.TryAddWithoutValidation("x-api-key", Config.ApiKey);
+        }
+
+        // One request shape for both credentials: the cache lifetime below is the one-hour beta, so an API key announces it too
+        // rather than maintaining a second, shorter-lived configuration that only differs by credential. After a downgrade the
+        // lifetime falls back to the server default and there is nothing left to announce.
+        request.Headers.TryAddWithoutValidation("accept", "application/json");
+        if (!downgraded)
+        {
+            request.Headers.TryAddWithoutValidation("anthropic-beta", AnthropicWire.ExtendedCacheTtlBeta);
         }
     }
 
@@ -85,6 +203,40 @@ public sealed class AnthropicProvider : HttpChatProvider
         WriteTools(writer, request);
     });
 
+    /// <summary>
+    /// The session header the official client sends: a per-session uuid. Forge's session ids are its own strings, so one that
+    /// is not already a uuid is hashed into one — stable for the life of the session, never a made-up constant.
+    /// </summary>
+    protected override void ApplyRequestHeaders(HttpRequestMessage request, ChatRequest chatRequest)
+    {
+        if (Wire is null || string.IsNullOrEmpty(chatRequest.SessionId))
+        {
+            return;
+        }
+
+        request.Headers.TryAddWithoutValidation("x-claude-code-session-id", SessionUuid(chatRequest.SessionId));
+    }
+
+    /// <summary>A uuid shaped from a session id: the id itself when it already is one, else a name-based (v5) uuid.</summary>
+    internal static string SessionUuid(string sessionId)
+    {
+        if (Guid.TryParse(sessionId, out var parsed))
+        {
+            return parsed.ToString("D");
+        }
+
+        var hash = System.Security.Cryptography.MD5.HashData(Encoding.UTF8.GetBytes(sessionId));
+        hash[6] = (byte)((hash[6] & 0x0F) | 0x30);
+        hash[8] = (byte)((hash[8] & 0x3F) | 0x80);
+        return new Guid(hash).ToString("D");
+    }
+
+    private static string OperatingSystemName() =>
+        OperatingSystem.IsWindows() ? "Windows"
+        : OperatingSystem.IsMacOS() ? "MacOS"
+        : OperatingSystem.IsLinux() ? "Linux"
+        : "Other";
+
     private void WriteSystem(Utf8JsonWriter writer, ChatRequest request)
     {
         var system = new StringBuilder(request.SystemPrompt);
@@ -107,21 +259,35 @@ public sealed class AnthropicProvider : HttpChatProvider
         // request the preamble is empty and the array keeps its single block.
         var preamble = Config.SystemPromptPreamble;
         var hasPreamble = !string.IsNullOrEmpty(preamble);
-        if (system.Length == 0 && !hasPreamble)
+        var billing = Wire is { } claimedWire ? AnthropicWire.BillingHeader(Effective(claimedWire)) : null;
+        if (system.Length == 0 && !hasPreamble && billing is null)
         {
             return;
         }
 
         var cache = request.Cache?.CacheSystemAndTools == true;
+        // One shape for every credential, one lifetime for every breakpoint of the request: an hour unless the caller asked for the
+        // short one. Mixing them would mean the same prefix is written twice at two prices.
+        var ttl = CacheTtl(request);
         writer.WriteStartArray("system");
+        if (billing is not null)
+        {
+            // The official client puts the billing block first, ahead of the identity block; the server strips it before the
+            // model sees anything, so it carries no instruction and gets no cache breakpoint.
+            writer.WriteStartObject();
+            writer.WriteString("type", "text");
+            writer.WriteString("text", billing);
+            writer.WriteEndObject();
+        }
+
         if (hasPreamble)
         {
             writer.WriteStartObject();
             writer.WriteString("type", "text");
             writer.WriteString("text", preamble);
-            if (cache && system.Length == 0)
+            if (cache)
             {
-                WriteCacheControl(writer);
+                WriteCacheControl(writer, ttl);
             }
 
             writer.WriteEndObject();
@@ -134,7 +300,7 @@ public sealed class AnthropicProvider : HttpChatProvider
             writer.WriteString("text", system.ToString());
             if (cache)
             {
-                WriteCacheControl(writer);
+                WriteCacheControl(writer, ttl);
             }
 
             writer.WriteEndObject();
@@ -143,38 +309,37 @@ public sealed class AnthropicProvider : HttpChatProvider
         writer.WriteEndArray();
     }
 
-    private static void WriteTools(Utf8JsonWriter writer, ChatRequest request)
+    private void WriteTools(Utf8JsonWriter writer, ChatRequest request)
     {
         if (request.Tools.Count == 0)
         {
             return;
         }
 
-        var cache = request.Cache?.CacheSystemAndTools == true;
+        // No breakpoint on the tool array, for either credential: a breakpoint is a prefix, so the one at the end of the system
+        // blocks already caches the tools, and the official client puts none here either. Dropping it costs nothing and keeps one
+        // cache shape instead of two.
         writer.WriteStartArray("tools");
-        for (var i = 0; i < request.Tools.Count; i++)
+        foreach (var tool in request.Tools)
         {
-            var tool = request.Tools[i];
             writer.WriteStartObject();
             writer.WriteString("name", tool.Name);
             writer.WriteString("description", tool.Description);
             writer.WritePropertyName("input_schema");
             ProviderJson.WriteRaw(writer, tool.InputSchemaJson);
-            if (cache && i == request.Tools.Count - 1)
-            {
-                WriteCacheControl(writer);
-            }
-
             writer.WriteEndObject();
         }
 
         writer.WriteEndArray();
     }
 
-    private static void WriteMessages(Utf8JsonWriter writer, ChatRequest request)
+    private void WriteMessages(Utf8JsonWriter writer, ChatRequest request)
     {
         var messages = BuildMessages(request.Messages);
         var cacheIndex = request.Cache?.CacheThroughMessageIndex ?? -1;
+        // The policy's own lifetime wins; the claimed-identity shape otherwise uses the hour the official client asks for, which is
+        // also the only way the message breakpoint survives a pause between turns.
+        var messageTtl = CacheTtl(request);
 
         writer.WriteStartArray("messages");
         foreach (var message in messages)
@@ -186,7 +351,7 @@ public sealed class AnthropicProvider : HttpChatProvider
             {
                 var block = message.Blocks[i];
                 var nextSource = i + 1 < message.Blocks.Count ? message.Blocks[i + 1].Source : -1;
-                WriteBlock(writer, block.Block, cacheControl: block.Source == cacheIndex && nextSource != cacheIndex);
+                WriteBlock(writer, block.Block, cacheControl: block.Source == cacheIndex && nextSource != cacheIndex, messageTtl);
             }
 
             writer.WriteEndArray();
@@ -305,7 +470,7 @@ public sealed class AnthropicProvider : HttpChatProvider
         return false;
     }
 
-    private static void WriteBlock(Utf8JsonWriter writer, ContentBlock block, bool cacheControl)
+    private static void WriteBlock(Utf8JsonWriter writer, ContentBlock block, bool cacheControl, string? ttl)
     {
         writer.WriteStartObject();
         switch (block)
@@ -368,16 +533,30 @@ public sealed class AnthropicProvider : HttpChatProvider
 
         if (cacheControl)
         {
-            WriteCacheControl(writer);
+            WriteCacheControl(writer, ttl);
         }
 
         writer.WriteEndObject();
     }
 
-    private static void WriteCacheControl(Utf8JsonWriter writer)
+    /// <summary>
+    /// The <c>ttl</c> to write: an hour by default, nothing at all when the caller asked for the short-lived default (the server's
+    /// own), which is how <c>"5m"</c> is expressed.
+    /// </summary>
+    private string? CacheTtl(ChatRequest request) =>
+        downgraded || string.Equals(request.Cache?.Ttl, "5m", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : AnthropicWire.CacheTtl;
+
+    private static void WriteCacheControl(Utf8JsonWriter writer, string? ttl)
     {
         writer.WriteStartObject("cache_control");
         writer.WriteString("type", "ephemeral");
+        if (!string.IsNullOrEmpty(ttl))
+        {
+            writer.WriteString("ttl", ttl);
+        }
+
         writer.WriteEndObject();
     }
 

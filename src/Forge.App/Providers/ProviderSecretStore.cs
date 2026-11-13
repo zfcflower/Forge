@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Forge.IO;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Providers;
 
@@ -194,7 +196,7 @@ internal sealed class ProviderSecretStore
             // A damaged store is never silently treated as "no keys": that would let a save overwrite what is left.
             unreadable = true;
             cached = null;
-            Trace.TraceWarning("[providers] secret store cannot be read: " + exception.GetType().Name);
+            AppLogs.Providers.ZLogWarning($"secret store cannot be read: {exception.GetType().Name}");
             return false;
         }
     }
@@ -285,7 +287,7 @@ internal sealed class ProviderSecretStore
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Trace.TraceWarning("[providers] could not restrict secret file permissions");
+            AppLogs.Providers.ZLogWarning($"could not restrict secret file permissions");
         }
     }
 

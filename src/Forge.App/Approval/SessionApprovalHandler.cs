@@ -1,6 +1,8 @@
 using Forge.Abstractions;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Approval;
 
@@ -103,7 +105,7 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
             {
                 // A failed rule load means "no remembered rules": the user is asked, never an exception to the agent loop.
-                System.Diagnostics.Trace.WriteLine("[approval] the remembered rules could not be loaded: " + exception.Message);
+                AppLogs.Approval.ZLogWarning($"the remembered rules could not be loaded: {exception.Message}");
             }
         }
 

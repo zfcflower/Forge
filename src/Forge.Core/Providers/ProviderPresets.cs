@@ -99,7 +99,32 @@ public sealed record ProviderPreset(
     bool SupportsModelListing,
     IReadOnlyList<string> SeedModels,
     string? Note = null,
-    ProviderSubscriptionEndpoint? Subscription = null);
+    ProviderSubscriptionEndpoint? Subscription = null,
+    ProviderCacheWiring CacheWiring = ProviderCacheWiring.None);
+
+/// <summary>
+/// Which prompt-cache knobs this vendor actually documents. Caching strategies are not portable — Anthropic takes explicit
+/// breakpoints and a lifetime, xAI only a conversation id, most others nothing at all — so each vendor gets exactly the fields it
+/// knows, and a provider whose wiring is <see cref="None"/> is left to cache on its own.
+/// </summary>
+public enum ProviderCacheWiring
+{
+    /// <summary>Automatic prefix caching with no knob the vendor documents (DeepSeek, Copilot, Kimi, Meta, OpenRouter, custom).</summary>
+    None,
+
+    /// <summary>OpenAI: <c>prompt_cache_key</c> for routing plus <c>prompt_cache_retention</c> for the lifetime.</summary>
+    OpenAi,
+
+    /// <summary>xAI: the conversation id header, which raises the automatic cache's hit rate.</summary>
+    XAi,
+
+    /// <summary>
+    /// GitHub Copilot: <c>X-Interaction-Id</c>, the header its API keys the prompt cache on. A harness that leaves it empty gets
+    /// almost no cache hits on the Claude models it serves; <c>Copilot-Integration-Id</c> (sent by the adapter already) is a
+    /// different thing — that one selects the quota bucket and model allowlist.
+    /// </summary>
+    Copilot,
+}
 
 /// <summary>The built-in provider catalogue. Order is the order the "add server" picker shows.</summary>
 public static class ProviderPresets
@@ -136,8 +161,10 @@ public static class ProviderPresets
             ProviderAuthOptions.ApiKey | ProviderAuthOptions.ClaudeSubscription,
             AnthropicEnvironmentVariable,
             "https://platform.claude.com/settings/keys",
-            SupportsModelListing: false,
-            ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"]),
+            // Both ways in list their models: /v1/models answers to an API key and to the account's OAuth token alike.
+            SupportsModelListing: true,
+            // The offline first screen only; the listing replaces these as soon as it answers.
+            ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]),
         new(
             OpenAiId,
             "OpenAI",
@@ -150,6 +177,7 @@ public static class ProviderPresets
             "https://platform.openai.com/api-keys",
             SupportsModelListing: true,
             [],
+            CacheWiring: ProviderCacheWiring.OpenAi,
             Subscription: new ProviderSubscriptionEndpoint(
                 ProviderProtocol.OpenAiResponses,
                 // The Responses adapter appends "/responses", and a plan is served at .../backend-api/codex/responses: the plain
@@ -170,7 +198,8 @@ public static class ProviderPresets
             "https://github.com/features/copilot",
             SupportsModelListing: true,
             [],
-            Note: "copilot.unofficial"),
+            Note: "copilot.unofficial",
+            CacheWiring: ProviderCacheWiring.Copilot),
         new(
             OpenRouterId,
             "OpenRouter",
@@ -214,7 +243,8 @@ public static class ProviderPresets
             "XAI_API_KEY",
             "https://console.x.ai",
             SupportsModelListing: true,
-            []),
+            [],
+            CacheWiring: ProviderCacheWiring.XAi),
     ];
 
     /// <summary>The free-form entry: any server that speaks the OpenAI protocol, at a URL the user supplies.</summary>

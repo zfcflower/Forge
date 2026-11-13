@@ -1,111 +1,70 @@
-using System.Text.Json;
+using Forge.Ipc;
+using Forge.Ipc.Protocol;
 
 namespace Forge.Integration.Tests.Terminal;
 
-/// <summary>Raw wire shapes of the <c>terminal.*</c> family, mirroring the host's
-/// <c>Forge.ExtensionHost/TerminalProtocol.cs</c> without referencing its internals.
-/// Property names are written exactly as they travel (camelCase).</summary>
+/// <summary>The <c>terminal.*</c> payloads the tests send and read. The shapes are the product's own
+/// <see cref="Forge.Ipc.Protocol.TerminalMessages"/> records, so a test cannot drift from the wire the host serves.</summary>
 internal static class TerminalWire
 {
-    public const string Start = "terminal.start";
-    public const string Input = "terminal.input";
-    public const string Resize = "terminal.resize";
-    public const string Foreground = "terminal.foreground";
-    public const string Stop = "terminal.stop";
-    public const string Ack = "terminal.ack";
-    public const string Output = "terminal.output";
-    public const string Exit = "terminal.exit";
+    public const string Start = TerminalOperations.Start;
+    public const string Input = TerminalOperations.Input;
+    public const string Resize = TerminalOperations.Resize;
+    public const string Foreground = TerminalOperations.Foreground;
+    public const string Stop = TerminalOperations.Stop;
+    public const string Ack = TerminalOperations.Ack;
+    public const string Output = TerminalOperations.Output;
+    public const string Exit = TerminalOperations.Exit;
 
-    public static JsonElement StartArgs(
+    public static TerminalStartRequest StartArgs(
         string workingDirectory,
         int columns,
         int rows,
         string? shell = null,
         string[]? arguments = null,
-        Dictionary<string, string>? environment = null)
+        Dictionary<string, string>? environment = null) =>
+        new(
+            "terminal-test-" + Guid.NewGuid().ToString("N")[..8],
+            workingDirectory,
+            columns,
+            rows,
+            shell,
+            arguments,
+            environment);
+
+    public static TerminalData InputArgs(string terminalId, byte[] data) => new(terminalId, 0, data);
+
+    public static TerminalResizeRequest ResizeArgs(string terminalId, int columns, int rows) =>
+        new(terminalId, columns, rows);
+
+    public static TerminalIdRequest IdArgs(string terminalId) => new(terminalId);
+
+    public static TerminalAck AckArgs(string terminalId, long bytes) => new(terminalId, bytes);
+
+    public static (string TerminalId, int ProcessId, string Shell) ReadStartResult(IpcMessage? response)
     {
-        var args = new Dictionary<string, object?>
-        {
-            ["sessionId"] = "terminal-test-" + Guid.NewGuid().ToString("N")[..8],
-            ["workingDirectory"] = workingDirectory,
-            ["columns"] = columns,
-            ["rows"] = rows,
-        };
-        if (shell is not null)
-        {
-            args["shell"] = shell;
-        }
-
-        if (arguments is not null)
-        {
-            args["arguments"] = arguments;
-        }
-
-        if (environment is not null)
-        {
-            args["environment"] = environment;
-        }
-
-        return JsonSerializer.SerializeToElement(args);
+        var started = Read<TerminalStartResponse>(response, "terminal.start");
+        return (started.TerminalId, started.ProcessId, started.Shell ?? string.Empty);
     }
 
-    public static JsonElement InputArgs(string terminalId, byte[] data) =>
-        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-        {
-            ["terminalId"] = terminalId,
-            ["data"] = Convert.ToBase64String(data),
-        });
+    public static bool ReadBusy(IpcMessage? response) =>
+        Read<TerminalForegroundResponse>(response, "terminal.foreground").Busy;
 
-    public static JsonElement ResizeArgs(string terminalId, int columns, int rows) =>
-        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-        {
-            ["terminalId"] = terminalId,
-            ["columns"] = columns,
-            ["rows"] = rows,
-        });
-
-    public static JsonElement IdArgs(string terminalId) =>
-        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-        {
-            ["terminalId"] = terminalId,
-        });
-
-    public static JsonElement AckArgs(string terminalId, long bytes) =>
-        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-        {
-            ["terminalId"] = terminalId,
-            ["bytes"] = bytes,
-        });
-
-    public static (string TerminalId, int ProcessId, string Shell) ReadStartResult(JsonElement? result)
+    public static (string TerminalId, long Seq, byte[] Data) ReadOutput(IpcMessage? message)
     {
-        var root = result ?? throw new InvalidOperationException("terminal.start answered without a result.");
-        return (
-            root.GetProperty("terminalId").GetString() ?? throw new InvalidOperationException("terminal.start result has no terminalId."),
-            root.GetProperty("processId").GetInt32(),
-            root.GetProperty("shell").GetString() ?? string.Empty);
+        var output = Read<TerminalData>(message, "terminal.output");
+        return (output.TerminalId, output.Sequence, output.Data.ToArray());
     }
 
-    public static bool ReadBusy(JsonElement? result)
+    public static (string TerminalId, int ExitCode) ReadExit(IpcMessage? message)
     {
-        var root = result ?? throw new InvalidOperationException("terminal.foreground answered without a result.");
-        return root.GetProperty("busy").GetBoolean();
+        var exit = Read<TerminalExit>(message, "terminal.exit");
+        return (exit.TerminalId, exit.ExitCode);
     }
 
-    public static (string TerminalId, long Seq, byte[] Data) ReadOutput(JsonElement? payload)
-    {
-        var root = payload ?? throw new InvalidOperationException("terminal.output arrived without arguments.");
-        var terminalId = root.GetProperty("terminalId").GetString() ?? string.Empty;
-        var seq = root.GetProperty("seq").GetInt64();
-        var base64 = root.GetProperty("data").GetString() ?? string.Empty;
-        return (terminalId, seq, Convert.FromBase64String(base64));
-    }
-
-    public static (string TerminalId, int ExitCode) ReadExit(JsonElement? payload)
-    {
-        var root = payload ?? throw new InvalidOperationException("terminal.exit arrived without arguments.");
-        return (
-            root.GetProperty("terminalId").GetString() ?? string.Empty,
-            root.GetProperty("exitCode").GetInt32());
-    }
+    private static T Read<T>(IpcMessage? message, string what)
+        where T : class =>
+        message is null
+            ? throw new InvalidOperationException($"{what} arrived without a payload.")
+            : message.Read<T>();
 }

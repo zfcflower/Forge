@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Linq;
 using Forge.App.Approval;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Notifications;
 
@@ -157,7 +159,7 @@ internal sealed class NotificationCenter : INotifications, IDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // Notifying the user must never be able to break the work that wanted to notify.
-            Trace.WriteLine("[notify] the desktop notification failed: " + exception.Message);
+            AppLogs.Notify.ZLogWarning($"the desktop notification failed: {exception.Message}");
         }
     }
 

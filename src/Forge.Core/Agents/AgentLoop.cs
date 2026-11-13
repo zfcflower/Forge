@@ -147,6 +147,16 @@ public sealed class AgentLoop(AgentLoopServices services)
                                 assistant = completed.Message;
                                 usage = completed.Usage;
                                 stop = completed.Stop;
+                                if (completed.RateLimit is { } limit)
+                                {
+                                    sink.Emit(new AgentRateLimitUpdated(instance.Id, limit));
+                                }
+
+                                if (!string.IsNullOrEmpty(completed.Notice))
+                                {
+                                    sink.Emit(new AgentNotice(instance.Id, completed.Notice));
+                                }
+
                                 break;
                         }
                     }
@@ -327,7 +337,7 @@ public sealed class AgentLoop(AgentLoopServices services)
         }
 
         var cacheThrough = messages.Count >= 2 ? messages.Count - 2 : (int?)null;
-        var messageTtl = string.Equals(services.Options.MessageCacheTtl, "1h", StringComparison.Ordinal) ? "1h" : null;
+        var cacheTtl = ResolveCacheTtl(instance);
         var dynamicText = DynamicText(instance);
         if (dynamicText.Length > 0)
         {
@@ -339,11 +349,41 @@ public sealed class AgentLoop(AgentLoopServices services)
             definitions,
             messages,
             instance.Definition.Model,
-            new CacheHint(CacheSystemAndTools: true, cacheThrough, messageTtl))
+            new CacheHint(CacheSystemAndTools: true, cacheThrough, cacheTtl))
         {
             CacheRoutingKey = instance.CacheState.RoutingKey ?? instance.SessionId,
             SessionId = instance.SessionId,
         };
+    }
+
+    /// <summary>
+    /// The prompt-cache lifetime for this request: an explicit setting, or <c>"auto"</c> — the short lifetime until this instance
+    /// has actually paused longer than its expiry, then the hour for the rest of the instance.
+    /// </summary>
+    private string ResolveCacheTtl(AgentInstance instance)
+    {
+        var configured = services.Options.CacheTtl;
+        if (string.Equals(configured, "1h", StringComparison.OrdinalIgnoreCase))
+        {
+            instance.NoteCacheTtl("1h");
+            return "1h";
+        }
+
+        if (string.Equals(configured, "5m", StringComparison.OrdinalIgnoreCase))
+        {
+            instance.NoteCacheTtl("5m");
+            return "5m";
+        }
+
+        var gap = instance.TakeRequestGap(services.Options.CacheTtlClock.GetUtcNow());
+        if (gap is { } paused && paused >= services.Options.CacheTtlPromotionGap)
+        {
+            instance.PromoteCacheTtl();
+        }
+
+        var ttl = instance.CacheTtlInUse ?? "5m";
+        instance.NoteCacheTtl(ttl);
+        return ttl;
     }
 
     /// <summary>
@@ -629,7 +669,10 @@ public sealed class AgentLoop(AgentLoopServices services)
             instance.Id,
             contextTokens,
             budget?.Usable,
-            budget?.TriggerTokens(policy.TriggerRatio)));
+            budget?.TriggerTokens(policy.TriggerRatio))
+        {
+            CacheTtl = instance.CacheTtlInUse,
+        });
     }
 
     /// <summary>

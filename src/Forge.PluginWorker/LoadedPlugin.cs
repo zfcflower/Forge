@@ -331,7 +331,7 @@ internal sealed class RegistrationRecorder(string pluginId) : IRegistrationConte
                 $"Panel '{panel.Id}' declares schema kind '{panel.Schema?.Kind}', which is not one of {string.Join(", ", PanelKinds)}.");
         }
 
-        if (schema.Definition.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        if (!IsJsonDefinition(schema.DefinitionJson))
         {
             throw new PluginLoadException($"Panel '{panel.Id}' declares no schema definition.");
         }
@@ -342,6 +342,24 @@ internal sealed class RegistrationRecorder(string pluginId) : IRegistrationConte
         }
 
         panels.Add(panel);
+    }
+
+    private static bool IsJsonDefinition(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind != JsonValueKind.Null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     public void RequirePermission(Permission permission)
@@ -366,13 +384,26 @@ internal sealed class RegistrationRecorder(string pluginId) : IRegistrationConte
         permissions.Add(new Permission(permission.Kind, scope));
     }
 
-    /// <summary>The complete declaration snapshot; the host publishes it as one replacement registration.</summary>
+    /// <summary>
+    /// The complete declaration snapshot; the host publishes it as one replacement registration. A tool's description
+    /// and schema are plugin-supplied, and the wire refuses nil for a member declared non-nullable, so they are
+    /// normalized here once: a null description becomes empty, a blank schema <c>{}</c>. The main program applies the
+    /// same rules on its side; normalizing at the source keeps a malformed declaration from failing the whole load.
+    /// </summary>
     public PluginContributionSet BuildContributions()
     {
         var declarations = new ToolDeclaration[tools.Count];
         for (var index = 0; index < tools.Count; index++)
         {
-            declarations[index] = tools[index].Declaration;
+            var declaration = tools[index].Declaration ??
+                throw new PluginLoadException("A registered tool returned no declaration.");
+            declarations[index] = declaration.Description is null || string.IsNullOrWhiteSpace(declaration.InputSchemaJson)
+                ? declaration with
+                {
+                    Description = declaration.Description ?? string.Empty,
+                    InputSchemaJson = string.IsNullOrWhiteSpace(declaration.InputSchemaJson) ? "{}" : declaration.InputSchemaJson,
+                }
+                : declaration;
         }
 
         return new PluginContributionSet

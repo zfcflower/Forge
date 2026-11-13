@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Text.Json;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 using Forge.Plugin.Sdk;
 using Forge.ScriptRuntime;
 using Forge.Scripting;
@@ -48,7 +48,7 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
     private readonly HostOptions options;
     private readonly string? executorPath;
     private readonly ScriptCodeCompiler compiler;
-    private readonly Func<JsonElement, CancellationToken, Task<IpcMessage>> forwardToolCall;
+    private readonly Func<HostToolCallForward, CancellationToken, Task<ToolResult>> forwardToolCall;
     private readonly HostStopSignal stop;
     private readonly HostCleanupReport cleanup;
     private readonly SemaphoreSlim slots;
@@ -69,7 +69,7 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
     public ScriptExecutorSupervisor(
         HostOptions options,
         ScriptCodeCompiler compiler,
-        Func<JsonElement, CancellationToken, Task<IpcMessage>> forwardToolCall,
+        Func<HostToolCallForward, CancellationToken, Task<ToolResult>> forwardToolCall,
         HostStopSignal stop,
         HostCleanupReport cleanup)
     {
@@ -213,11 +213,11 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
             var wireLimit = remaining <= TimeSpan.Zero
                 ? 1
                 : (int)Math.Clamp(Math.Ceiling(remaining.TotalMilliseconds), 1, MaxScriptTimeoutMilliseconds);
-            var payload = HostJson.ToElement(new ScriptRunRequest(
+            var payload = new ScriptRunRequest(
                 context,
                 wireLimit,
                 request.Tools ?? [],
-                request.Options ?? new CodeExecutionOptions()));
+                request.Options ?? new CodeExecutionOptions());
 
             dispatched = true;
             var response = await DispatchAsync(execution, payload, deadlineToken, ct).ConfigureAwait(false);
@@ -385,15 +385,16 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
     /// unclassified IPC failure.</summary>
     private static async Task LoadAsync(ScriptExecution execution, ScriptCompilation compiled, CancellationToken ct)
     {
-        var payload = HostJson.ToElement(new ScriptArtifactLoadRequest(
-            ScriptArtifact.Encode(compiled.Image!),
-            compiled.Descriptor!));
+        // The cached image travels as-is (MessagePack bin); it is shared with the compilation cache and never mutated.
+        var image = compiled.Image!;
+        ScriptArtifact.EnsureImageWithinBounds(image.Length);
+        var payload = new ScriptArtifactLoadRequest(image, compiled.Descriptor!);
         using var deadline = new CancellationTokenSource(LoadWindow);
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
         try
         {
             await execution.Process.Peer
-                .SendRequestAsync(ScriptExecutorProtocol.Load, payload, wait.Token)
+                .RequestAsync(ScriptExecutorProtocol.Load, payload, wait.Token)
                 .ConfigureAwait(false);
         }
         catch (IpcRemoteException exception)
@@ -418,14 +419,14 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
     /// </summary>
     private async Task<IpcMessage> DispatchAsync(
         ScriptExecution execution,
-        JsonElement payload,
+        ScriptRunRequest payload,
         CancellationToken deadlineToken,
         CancellationToken ct)
     {
         using var dispatch = new CancellationTokenSource();
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(deadlineToken, ct, lifetime.Token);
         ct.ThrowIfCancellationRequested();
-        var pending = execution.Process.Peer.SendRequestAsync(ScriptExecutorProtocol.Run, payload, dispatch.Token);
+        var pending = execution.Process.Peer.RequestAsync(ScriptExecutorProtocol.Run, payload, dispatch.Token);
         try
         {
             try
@@ -473,19 +474,17 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
 
     private static CodeExecutionResult ReadResult(IpcMessage response)
     {
-        if (response.Result is not { } element)
+        if (!response.HasPayload)
         {
             return new CodeExecutionResult("The script executor returned no result.", IsError: true);
         }
 
         try
         {
-            var result = element.Deserialize<CodeExecutionResult>(HostJson.Options);
-            return result is null
-                ? new CodeExecutionResult("The script executor returned no result.", IsError: true)
-                : result with { Content = result.Content ?? string.Empty };
+            var result = response.Read<CodeExecutionResult>();
+            return result with { Content = result.Content ?? string.Empty };
         }
-        catch (JsonException exception)
+        catch (IpcProtocolException exception)
         {
             return new CodeExecutionResult(
                 $"The script executor returned an unreadable result: {exception.Message}",

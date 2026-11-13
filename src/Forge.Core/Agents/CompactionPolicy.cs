@@ -116,4 +116,11 @@ public sealed record AgentCompactionStalled(string AgentId, int ContextTokens, i
 /// force; both are null when the model's window is unknown.
 /// </summary>
 public sealed record AgentContextMeasured(string AgentId, int ContextTokens, int? UsableTokens, int? TriggerTokens)
-    : AgentEvent(AgentId);
+    : AgentEvent(AgentId)
+{
+    /// <summary>
+    /// The prompt-cache lifetime the request being reported asked for (<c>"5m"</c>/<c>"1h"</c>), so the shell can say which one is
+    /// in force instead of leaving the user to infer it from the bill.
+    /// </summary>
+    public string? CacheTtl { get; init; }
+}

@@ -10,6 +10,8 @@ using AvaloniaEdit.Editing;
 using Forge.App.Editing;
 using Forge.App.Review;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Views;
 
@@ -329,7 +331,7 @@ public partial class FileDocumentView : UserControl
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.Runtime.InteropServices.ExternalException)
         {
-            System.Diagnostics.Trace.WriteLine("[file] copy failed: " + exception.Message);
+            AppLogs.File.ZLogWarning($"copy failed: {exception.Message}");
             model.ReportCopyError(exception.Message);
         }
     }

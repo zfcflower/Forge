@@ -12,7 +12,7 @@ internal enum FrameStatus
     Fatal,
 }
 
-/// <summary>Splits a byte stream into 4-byte little-endian length prefixed JSON bodies.</summary>
+/// <summary>Splits a byte stream into 4-byte little-endian length prefixed frame bodies.</summary>
 internal struct FrameExtractor
 {
     public const int HeaderBytes = 4;

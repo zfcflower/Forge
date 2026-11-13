@@ -2,6 +2,7 @@ using Forge.Abstractions;
 using Forge.Ipc;
 using Xunit;
 using static Forge.HostClient.Tests.ToolFixtures;
+using Sdk = Forge.Plugin.Sdk;
 
 namespace Forge.HostClient.Tests;
 
@@ -24,18 +25,19 @@ public sealed class PromptDisconnectTests
         var directory = BoundRoots.AbsoluteDir("prompt-drop");
         var arrived = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.On("plugin.prompt", async (message, ct) =>
+        host.On(Sdk.ExtensionProtocol.PluginPrompt, async (message, ct) =>
         {
             arrived.TrySetResult(message);
             await gate.Task.WaitAsync(ct).ConfigureAwait(false);
-            return Json.Element("""{"text":"late"}""");
+            return new Sdk.PromptOutput("late");
         });
 
         var evaluation = client.GetPluginPromptAsync(
             contributor, new ToolContext("sess", directory), CancellationToken.None);
         var request = await arrived.Task.Bounded();
-        Assert.Equal("alpha", request.Arguments!.Value.GetProperty("pluginId").GetString());
-        Assert.Equal("tone", request.Arguments!.Value.GetProperty("contributorId").GetString());
+        var sent = request.Read<Sdk.PromptExecutionRequest>();
+        Assert.Equal("alpha", sent.PluginId);
+        Assert.Equal("tone", sent.ContributorId);
 
         await host.DropConnectionAsync();
         gate.TrySetResult();
@@ -55,11 +57,11 @@ public sealed class PromptDisconnectTests
         var directory = BoundRoots.AbsoluteDir("prompt-cancel");
         var arrived = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.On("plugin.prompt", async (message, ct) =>
+        host.On(Sdk.ExtensionProtocol.PluginPrompt, async (message, ct) =>
         {
             arrived.TrySetResult(message);
             await gate.Task.WaitAsync(ct).ConfigureAwait(false);
-            return Json.Element("""{"text":"late"}""");
+            return new Sdk.PromptOutput("late");
         });
 
         using var caller = new CancellationTokenSource();

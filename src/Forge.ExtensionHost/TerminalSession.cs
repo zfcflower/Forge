@@ -1,7 +1,7 @@
 using System.Buffers;
-using System.Text.Json;
 using System.Threading.Channels;
 using Forge.Ipc;
+using Forge.Ipc.Protocol;
 
 namespace Forge.ExtensionHost;
 
@@ -11,7 +11,7 @@ internal interface ITerminalNotifier
 {
     /// <summary>Writes one notification frame. <c>false</c> means the frame was not handed to the pipe completely, which
     /// the session treats as "this terminal can no longer be served".</summary>
-    Task<bool> SendAsync(string operation, JsonElement payload, CancellationToken ct);
+    Task<bool> SendAsync<T>(string operation, T payload, CancellationToken ct);
 }
 
 /// <summary>
@@ -22,7 +22,7 @@ internal interface ITerminalNotifier
 /// Flow control, and the invariants of this file:
 /// </para>
 /// <list type="bullet">
-/// <item>Each terminal may have at most <see cref="WindowBytes"/> decoded bytes sent but not acknowledged. At the limit the
+/// <item>Each terminal may have at most <see cref="WindowBytes"/> bytes sent but not acknowledged. At the limit the
 /// reader simply stops reading the PTY, so the child's writes block exactly like they would on a real terminal. An
 /// acknowledgement continues the reader.</item>
 /// <item>No byte is ever dropped while the terminal is open, and none when the shell exits on its own: its tail is
@@ -39,7 +39,7 @@ internal interface ITerminalNotifier
 /// </summary>
 internal sealed class TerminalSession
 {
-    /// <summary>Sent-but-unacknowledged byte window, decoded. Reaching it stops the host from reading the PTY.</summary>
+    /// <summary>Sent-but-unacknowledged byte window. Reaching it stops the host from reading the PTY.</summary>
     internal const int WindowBytes = 1024 * 1024;
 
     /// <summary>Size of one PTY read, and therefore of one <c>terminal.output</c> frame.</summary>
@@ -64,7 +64,6 @@ internal sealed class TerminalSession
     private readonly HostCleanupReport cleanup;
     private readonly WorkerProcessOwnership.PtyProcess process;
     private readonly Action<TerminalSession>? finished;
-    private readonly ArrayBufferWriter<byte> frameBuffer = new(ReadChunkBytes + 512);
     private readonly Channel<byte[]> input = Channel.CreateBounded<byte[]>(
         new BoundedChannelOptions(InputQueueChunks)
         {
@@ -256,7 +255,7 @@ internal sealed class TerminalSession
                     unacknowledged += read;
                 }
 
-                if (!SendOutput(buffer.AsSpan(0, read)))
+                if (!SendOutput(buffer.AsMemory(0, read)))
                 {
                     // The frame could not be written, so no acknowledgement for it can ever arrive: keeping the terminal
                     // alive would only fill the window and leak the process tree.
@@ -273,14 +272,16 @@ internal sealed class TerminalSession
         }
     }
 
-    private bool SendOutput(ReadOnlySpan<byte> data)
+    /// <summary>Sends one read as one <c>terminal.output</c> frame. The bytes are the reader's own buffer slice; the
+    /// reader blocks until the frame was written, so the buffer outlives the send and is never copied.</summary>
+    private bool SendOutput(ReadOnlyMemory<byte> data)
     {
-        var frame = TerminalProtocol.OutputPayload(frameBuffer, Id, sequence, data);
+        var frame = new TerminalData(Id, sequence, data);
         sequence++;
         try
         {
             using var deadline = new CancellationTokenSource(SendWindow);
-            return notifier.SendAsync(TerminalProtocol.Output, frame, deadline.Token).GetAwaiter().GetResult();
+            return notifier.SendAsync(TerminalOperations.Output, frame, deadline.Token).GetAwaiter().GetResult();
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException or OperationCanceledException)
         {
@@ -360,7 +361,7 @@ internal sealed class TerminalSession
                 try
                 {
                     await notifier
-                        .SendAsync(TerminalProtocol.Exit, TerminalProtocol.ExitPayload(Id, exitCode), deadline.Token)
+                        .SendAsync(TerminalOperations.Exit, new TerminalExit(Id, exitCode), deadline.Token)
                         .ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or IpcConnectionClosedException or OperationCanceledException)

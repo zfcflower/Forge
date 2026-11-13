@@ -6,6 +6,8 @@ using Forge.App.Git;
 using Forge.App.Localization;
 using Forge.Core.Agents;
 using Forge.Workspace;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Lifecycle;
 
@@ -253,7 +255,7 @@ internal sealed class HandoverFlow
             }
             catch (Exception exception) when (IsExpected(exception))
             {
-                Trace.WriteLine("[handover] review copy failed: " + exception.Message);
+                AppLogs.Handover.ZLogWarning($"review copy failed: {exception.Message}");
                 warning = HandoverStrings.ReviewCopyFailed(exception.Message);
             }
         }

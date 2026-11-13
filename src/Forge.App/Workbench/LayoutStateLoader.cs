@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Forge.Abstractions;
 using Forge.App.ViewModels;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Workbench;
 
@@ -88,7 +90,7 @@ internal sealed class LayoutStateLoader
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[layout] ignoring stored " + key + ": " + exception.Message);
+            AppLogs.Layout.ZLogWarning($"ignoring stored {key}: {exception.Message}");
             return null;
         }
     }
@@ -103,7 +105,7 @@ internal sealed class LayoutStateLoader
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or JsonException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Trace.WriteLine("[layout] save failed: " + exception.Message);
+            AppLogs.Layout.ZLogError(exception, $"save failed");
         }
     }
 }

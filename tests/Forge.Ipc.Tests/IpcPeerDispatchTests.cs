@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Forge.Ipc.Tests.Support;
 using Xunit;
 
@@ -16,24 +15,24 @@ public sealed class IpcPeerDispatchTests
         peer.RequestReceived += async (message, ct) =>
         {
             seen.TrySetResult(message);
-            await peer.RespondAsync(message.Id, Json.Parse("""{ "ok" : true }"""), ct);
+            await peer.RespondAsync(message.Id, new EchoResult("ok", 1, true), ct);
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(42, "ask", Json.Parse("""{"q":1}""")));
+        await remote.SendFrameAsync(TestFrames.Request(42, "ask", new EchoArgs("q", 1)));
         var message = await seen.Task.Bounded();
         var reply = await remote.ReceiveMessageAsync();
 
         Assert.Equal(42, message.Id);
         Assert.Equal("ask", message.Operation);
-        Assert.Equal("""{"q":1}""", message.Arguments!.Value.GetRawText());
+        Assert.Equal(new EchoArgs("q", 1), message.Read<EchoArgs>());
         Assert.Equal(42, reply.Id);
         Assert.True(reply.IsResponse);
-        Assert.Equal("""{ "ok" : true }""", reply.Result!.Value.GetRawText());
+        Assert.Equal(new EchoResult("ok", 1, true), reply.Read<EchoResult>());
     }
 
     [Fact]
-    public async Task Ping_is_answered_with_an_empty_object_and_never_reaches_handlers()
+    public async Task Ping_is_answered_with_ipc_empty_and_never_reaches_handlers()
     {
         var (local, remote) = await LoopbackTransport.ConnectAsync();
         await using var peer = Peers.Create(local);
@@ -51,15 +50,43 @@ public sealed class IpcPeerDispatchTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(7, IpcOperations.Ping));
+        await remote.SendFrameAsync(TestFrames.Request(7, IpcOperations.Ping, IpcEmpty.Instance));
         var pong = await remote.ReceiveMessageAsync();
-        await remote.SendMessageAsync(IpcMessage.Request(8, "after"));
+        await remote.SendFrameAsync(TestFrames.Request(8, "after", IpcEmpty.Instance));
         await after.Task.Bounded();
 
         Assert.Equal(7, pong.Id);
         Assert.True(pong.IsResponse);
-        Assert.Equal("{}", pong.Result!.Value.GetRawText());
+        Assert.Equal(IpcEmpty.Instance, pong.Read<IpcEmpty>());
         Assert.Equal(["after"], surfaced.ToArray());
+    }
+
+    [Fact]
+    public async Task Ping_without_a_payload_is_still_answered()
+    {
+        var (local, remote) = await LoopbackTransport.ConnectAsync();
+        await using var peer = Peers.Create(local);
+        await peer.StartAsync(CancellationToken.None);
+
+        await remote.SendFrameAsync(TestFrames.HeaderOnly(IpcHeader.Request(7, IpcOperations.Ping)));
+        var pong = await remote.ReceiveMessageAsync();
+
+        Assert.Equal(7, pong.Id);
+        Assert.Equal(IpcEmpty.Instance, pong.Read<IpcEmpty>());
+    }
+
+    [Fact]
+    public async Task Local_ping_request_returns_ipc_empty_from_the_remote_peer()
+    {
+        var (a, b) = await LoopbackTransport.ConnectAsync();
+        await using var left = Peers.Create(a);
+        await using var right = Peers.Create(b);
+        await left.StartAsync(CancellationToken.None);
+        await right.StartAsync(CancellationToken.None);
+
+        var pong = await left.RequestAsync<IpcEmpty, IpcEmpty>(IpcOperations.Ping, IpcEmpty.Instance, CancellationToken.None).Bounded();
+
+        Assert.Equal(IpcEmpty.Instance, pong);
     }
 
     [Fact]
@@ -69,7 +96,7 @@ public sealed class IpcPeerDispatchTests
         await using var peer = Peers.Create(local);
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(7, "nobody"));
+        await remote.SendFrameAsync(TestFrames.Request(7, "nobody", IpcEmpty.Instance));
         var reply = await remote.ReceiveMessageAsync();
 
         Assert.Equal(7, reply.Id);
@@ -85,12 +112,35 @@ public sealed class IpcPeerDispatchTests
         peer.RequestReceived += (_, _) => throw new InvalidOperationException("boom");
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(11, "explode"));
+        await remote.SendFrameAsync(TestFrames.Request(11, "explode", IpcEmpty.Instance));
         var reply = await remote.ReceiveMessageAsync();
 
         Assert.Equal(11, reply.Id);
         Assert.Equal("handler_error", reply.Error!.Code);
         Assert.Equal("boom", reply.Error.Message);
+    }
+
+    [Fact]
+    public async Task Request_with_a_payload_of_the_wrong_type_surfaces_as_handler_error_and_the_peer_survives()
+    {
+        var (local, remote) = await LoopbackTransport.ConnectAsync();
+        await using var peer = Peers.Create(local);
+        peer.RequestReceived += async (message, ct) =>
+        {
+            var args = message.Read<EchoArgs>();
+            await peer.RespondAsync(message.Id, new EchoResult(args.Text, args.N, true), ct);
+        };
+        await peer.StartAsync(CancellationToken.None);
+
+        await remote.SendFrameAsync(TestFrames.Request(1, "echo", "wrong type"));
+        var bad = await remote.ReceiveMessageAsync();
+        await remote.SendFrameAsync(TestFrames.Request(2, "echo", new EchoArgs("fine", 2)));
+        var good = await remote.ReceiveMessageAsync();
+
+        Assert.Equal("handler_error", bad.Error!.Code);
+        Assert.Contains("EchoArgs", bad.Error.Message, StringComparison.Ordinal);
+        Assert.Equal(new EchoResult("fine", 2, true), good.Read<EchoResult>());
+        Assert.False(peer.IsClosed);
     }
 
     [Fact]
@@ -104,12 +154,13 @@ public sealed class IpcPeerDispatchTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(13, "guarded"));
+        await remote.SendFrameAsync(TestFrames.Request(13, "guarded", IpcEmpty.Instance));
         var reply = await remote.ReceiveMessageAsync();
 
         Assert.Equal(13, reply.Id);
         Assert.Equal("denied", reply.Error!.Code);
         Assert.Null(reply.Error.Data);
+        Assert.False(reply.HasPayload);
     }
 
     [Fact]
@@ -134,11 +185,38 @@ public sealed class IpcPeerDispatchTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(42, "long"));
+        await remote.SendFrameAsync(TestFrames.Request(42, "long", IpcEmpty.Instance));
         await entered.Task.Bounded();
-        await remote.SendMessageAsync(IpcMessage.Notification(IpcOperations.Cancel, Json.Parse("""{"id":42}""")));
+        await remote.SendFrameAsync(TestFrames.Notification(IpcOperations.Cancel, 42L));
 
         await cancelled.Task.Bounded();
+    }
+
+    [Fact]
+    public async Task Cancel_with_a_malformed_payload_is_ignored_and_the_handler_keeps_running()
+    {
+        var (local, remote) = await LoopbackTransport.ConnectAsync();
+        await using var peer = Peers.Create(local);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sawCancel = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        peer.RequestReceived += async (_, ct) =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+            sawCancel.TrySetResult(ct.IsCancellationRequested);
+        };
+        await peer.StartAsync(CancellationToken.None);
+
+        await remote.SendFrameAsync(TestFrames.Request(42, "long", IpcEmpty.Instance));
+        await entered.Task.Bounded();
+        await remote.SendFrameAsync(TestFrames.Notification(IpcOperations.Cancel, "not an id"));
+        await remote.SendFrameAsync(TestFrames.Request(43, IpcOperations.Ping, IpcEmpty.Instance));
+        await remote.ReceiveUntilAsync(message => message.Id == 43);
+        release.TrySetResult();
+
+        Assert.False(await sawCancel.Task.Bounded());
+        Assert.False(peer.IsClosed);
     }
 
     [Fact]
@@ -170,13 +248,13 @@ public sealed class IpcPeerDispatchTests
 
         for (var i = 1; i <= gate; i++)
         {
-            await remote.SendMessageAsync(IpcMessage.Request(i, "block"));
+            await remote.SendFrameAsync(TestFrames.Request(i, "block", IpcEmpty.Instance));
         }
 
         await allStarted.Task.Bounded();
-        await remote.SendMessageAsync(IpcMessage.Request(1000, "queued"));
-        await remote.SendMessageAsync(IpcMessage.Notification(IpcOperations.Cancel, IpcJsonTypes.FromId(1000)));
-        await remote.SendMessageAsync(IpcMessage.Request(2000, IpcOperations.Ping));
+        await remote.SendFrameAsync(TestFrames.Request(1000, "queued", IpcEmpty.Instance));
+        await remote.SendFrameAsync(TestFrames.Notification(IpcOperations.Cancel, 1000L));
+        await remote.SendFrameAsync(TestFrames.Request(2000, IpcOperations.Ping, IpcEmpty.Instance));
         await remote.ReceiveUntilAsync(message => message.Id == 2000);
 
         release.TrySetResult();
@@ -185,7 +263,7 @@ public sealed class IpcPeerDispatchTests
     }
 
     [Fact]
-    public async Task Remote_notification_is_surfaced_to_subscribers_with_its_argument_bytes()
+    public async Task Remote_notification_is_surfaced_to_subscribers_with_its_typed_payload()
     {
         var (local, remote) = await LoopbackTransport.ConnectAsync();
         await using var peer = Peers.Create(local);
@@ -193,27 +271,68 @@ public sealed class IpcPeerDispatchTests
         peer.NotificationReceived += message => received.TrySetResult(message);
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Notification("tick", Json.Parse("""{ "n" : 1 }""")));
+        await remote.SendFrameAsync(TestFrames.Notification("tick", new EchoArgs("t", 1)));
         var message = await received.Task.Bounded();
 
         Assert.True(message.IsNotification);
         Assert.Equal(0, message.Id);
         Assert.Equal("tick", message.Operation);
-        Assert.Equal("""{ "n" : 1 }""", message.Arguments!.Value.GetRawText());
+        Assert.Equal(new EchoArgs("t", 1), message.Read<EchoArgs>());
     }
 
     [Fact]
-    public async Task Send_notification_puts_a_notification_frame_on_the_wire()
+    public async Task Cancel_notification_is_also_surfaced_to_notification_subscribers()
+    {
+        var (local, remote) = await LoopbackTransport.ConnectAsync();
+        await using var peer = Peers.Create(local);
+        var received = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        peer.NotificationReceived += message => received.TrySetResult(message);
+        await peer.StartAsync(CancellationToken.None);
+
+        await remote.SendFrameAsync(TestFrames.Notification(IpcOperations.Cancel, 77L));
+        var message = await received.Task.Bounded();
+
+        Assert.Equal(IpcOperations.Cancel, message.Operation);
+        Assert.Equal(77L, message.Read<long>());
+    }
+
+    [Fact]
+    public async Task Notify_puts_a_notification_frame_on_the_wire()
     {
         var (local, remote) = await LoopbackTransport.ConnectAsync();
         await using var peer = Peers.Create(local);
 
-        await peer.SendNotificationAsync("tick", Json.Parse("""{ "n" : 2 }"""), CancellationToken.None);
+        await peer.NotifyAsync("tick", new EchoArgs("n", 2), CancellationToken.None);
         var message = await remote.ReceiveMessageAsync();
 
         Assert.True(message.IsNotification);
         Assert.Equal("tick", message.Operation);
-        Assert.Equal("""{ "n" : 2 }""", message.Arguments!.Value.GetRawText());
+        Assert.Equal(IpcProtocol.Version, message.Version);
+        Assert.Equal(new EchoArgs("n", 2), message.Read<EchoArgs>());
+    }
+
+    [Fact]
+    public async Task Throwing_notification_subscriber_does_not_kill_the_peer()
+    {
+        var (local, remote) = await LoopbackTransport.ConnectAsync();
+        await using var peer = Peers.Create(local);
+        var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        peer.NotificationReceived += message =>
+        {
+            if (message.Operation == "boom")
+            {
+                throw new InvalidOperationException("subscriber failed");
+            }
+
+            second.TrySetResult();
+        };
+        await peer.StartAsync(CancellationToken.None);
+
+        await remote.SendFrameAsync(TestFrames.Notification("boom", IpcEmpty.Instance));
+        await remote.SendFrameAsync(TestFrames.Notification("fine", IpcEmpty.Instance));
+        await second.Task.Bounded();
+
+        Assert.False(peer.IsClosed);
     }
 
     [Fact]
@@ -224,20 +343,20 @@ public sealed class IpcPeerDispatchTests
         var mismatches = new ConcurrentQueue<IpcVersionMismatchException>();
         peer.VersionMismatch += mismatches.Enqueue;
 
-        var call = peer.SendRequestAsync("op", null, CancellationToken.None);
+        var call = peer.RequestAsync("op", IpcEmpty.Instance, CancellationToken.None);
         var request = await remote.ReceiveMessageAsync();
-        await remote.SendMessageAsync(IpcMessage.ResultMessage(request.Id, Json.Parse("{}")) with { Version = 2 });
+        var foreign = IpcHeader.Result(request.Id) with { Version = IpcProtocol.Version + 1 };
+        await remote.SendFrameAsync(FrameCodec.Default.EncodeToArray(foreign, IpcEmpty.Instance));
 
         var ex = await Assert.ThrowsAsync<IpcVersionMismatchException>(() => call.Bounded());
-        Assert.Equal(2, ex.Received);
-        Assert.Equal(1, ex.Expected);
-        var raised = Assert.Single(mismatches);
-        Assert.Equal(2, raised.Received);
+        Assert.Equal(IpcProtocol.Version + 1, ex.Received);
+        Assert.Equal(IpcProtocol.Version, ex.Expected);
+        Assert.Equal(IpcProtocol.Version + 1, Assert.Single(mismatches).Received);
 
-        var second = peer.SendRequestAsync("op", null, CancellationToken.None);
+        var second = peer.RequestAsync<IpcEmpty, EchoResult>("op", IpcEmpty.Instance, CancellationToken.None);
         var next = await remote.ReceiveMessageAsync();
-        await remote.SendMessageAsync(IpcMessage.ResultMessage(next.Id, Json.Parse("""{"ok":true}""")));
-        Assert.Equal("""{"ok":true}""", (await second.Bounded()).Result!.Value.GetRawText());
+        await remote.SendFrameAsync(TestFrames.Result(next.Id, new EchoResult("x", 1, true)));
+        Assert.True((await second.Bounded()).Ok);
         Assert.Single(mismatches);
     }
 
@@ -262,16 +381,42 @@ public sealed class IpcPeerDispatchTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendMessageAsync(IpcMessage.Request(12, "work") with { Version = 3 });
+        var foreign = IpcHeader.Request(12, "work") with { Version = 1 };
+        await remote.SendFrameAsync(FrameCodec.Default.EncodeToArray(foreign, IpcEmpty.Instance));
         var reply = await remote.ReceiveMessageAsync();
         await TestAwait.UntilAsync(() => !mismatches.IsEmpty, "the version mismatch event");
-        await remote.SendMessageAsync(IpcMessage.Request(13, "after"));
+        await remote.SendFrameAsync(TestFrames.Request(13, "after", IpcEmpty.Instance));
         await after.Task.Bounded();
 
         Assert.Equal(12, reply.Id);
         Assert.Equal("version_mismatch", reply.Error!.Code);
         Assert.Equal(["after"], handled.ToArray());
-        Assert.Equal(3, Assert.Single(mismatches).Received);
+        Assert.Equal(1, Assert.Single(mismatches).Received);
+    }
+
+    [Fact]
+    public async Task Notification_with_a_foreign_version_is_dropped_without_a_reply()
+    {
+        var (local, remote) = await LoopbackTransport.ConnectAsync();
+        await using var peer = Peers.Create(local);
+        var mismatches = new ConcurrentQueue<IpcVersionMismatchException>();
+        peer.VersionMismatch += mismatches.Enqueue;
+        var notifications = new ConcurrentQueue<string>();
+        var after = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        peer.NotificationReceived += message =>
+        {
+            notifications.Enqueue(message.Operation);
+            after.TrySetResult();
+        };
+        await peer.StartAsync(CancellationToken.None);
+
+        var foreign = IpcHeader.Notification("old") with { Version = 1 };
+        await remote.SendFrameAsync(FrameCodec.Default.EncodeToArray(foreign, IpcEmpty.Instance));
+        await remote.SendFrameAsync(TestFrames.Notification("new", IpcEmpty.Instance));
+        await after.Task.Bounded();
+
+        Assert.Equal(["new"], notifications.ToArray());
+        Assert.Single(mismatches);
     }
 
     [Fact]
@@ -289,9 +434,10 @@ public sealed class IpcPeerDispatchTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendBodyAsync("not json");
-        await remote.SendBodyAsync("null");
-        await remote.SendBodyAsync("""{"v":1,"id":3,"op":"ok"}""");
+        var truncated = TestFrames.HeaderOnly(IpcHeader.Request(9, "cut"))[TestFrames.HeaderBytes..^3];
+        await remote.SendBodyAsync([0xC1, 0xC1, 0xC1]);
+        await remote.SendBodyAsync(truncated);
+        await remote.SendFrameAsync(TestFrames.Request(3, "ok", IpcEmpty.Instance));
         var message = await ok.Task.Bounded();
 
         Assert.Equal("ok", message.Operation);
@@ -316,9 +462,9 @@ public sealed class IpcPeerDispatchTests
         };
         await peer.StartAsync(CancellationToken.None);
 
-        await remote.SendBodyAsync(string.Empty);
+        await remote.SendBodyAsync([]);
         await TestAwait.UntilAsync(() => errors.Count == 1, "the empty-frame protocol error");
-        await remote.SendBodyAsync("""{"v":1,"id":5,"op":"ok"}""");
+        await remote.SendFrameAsync(TestFrames.Request(5, "ok", IpcEmpty.Instance));
         var message = await ok.Task.Bounded();
 
         Assert.Equal("ok", message.Operation);

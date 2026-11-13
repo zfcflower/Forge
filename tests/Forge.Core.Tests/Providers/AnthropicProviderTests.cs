@@ -85,11 +85,14 @@ public class AnthropicProviderTests
         Assert.Equal(JsonValueKind.Array, system.ValueKind);
         Assert.Equal("system-prompt", system[0].GetProperty("text").GetString());
         Assert.Equal("ephemeral", system[0].GetProperty("cache_control").GetProperty("type").GetString());
+        // One hour, the official client's lifetime, for every credential.
+        Assert.Equal("1h", system[0].GetProperty("cache_control").GetProperty("ttl").GetString());
 
+        // No breakpoint on the tools: a breakpoint is a prefix, so the one at the end of the system block already caches them.
         var tools = root.GetProperty("tools");
         Assert.Equal(2, tools.GetArrayLength());
         Assert.False(tools[0].TryGetProperty("cache_control", out _));
-        Assert.Equal("ephemeral", tools[1].GetProperty("cache_control").GetProperty("type").GetString());
+        Assert.False(tools[1].TryGetProperty("cache_control", out _));
 
         var messages = root.GetProperty("messages");
         Assert.Equal(3, messages.GetArrayLength());

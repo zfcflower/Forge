@@ -7,6 +7,8 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Forge.App.Localization;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.Workbench.Controls;
 
@@ -96,7 +98,7 @@ internal sealed class PanelTabStrip : TemplatedControl
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[workbench] closing the tab failed: " + exception.Message);
+            AppLogs.Workbench.ZLogWarning($"closing the tab failed: {exception.Message}");
         }
     }
 
@@ -373,7 +375,7 @@ internal sealed class PanelTabStrip : TemplatedControl
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            System.Diagnostics.Trace.WriteLine("[workbench] closing the other tabs failed: " + exception.Message);
+            AppLogs.Workbench.ZLogWarning($"closing the other tabs failed: {exception.Message}");
         }
     }
 

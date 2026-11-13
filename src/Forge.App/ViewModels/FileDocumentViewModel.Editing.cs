@@ -6,6 +6,8 @@ using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
 using Forge.Editor.TextMate;
+using Forge.App.Logging;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -115,7 +117,7 @@ internal sealed partial class FileDocumentViewModel
         () => CanSave,
         exception =>
         {
-            Trace.WriteLine("[file] save failed: " + exception.Message);
+            AppLogs.File.ZLogError(exception, $"save failed");
             SetSaveError(new LocText(InspectorStrings.FilesSaveFailed, LocText.Literal(exception.Message)));
         });
 
@@ -181,7 +183,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (version != loadVersion && exception is not OperationCanceledException)
         {
-            Trace.WriteLine("[file] superseded load failed: " + exception.Message);
+            AppLogs.File.ZLogWarning($"superseded load failed: {exception.Message}");
         }
         catch (NotSupportedException)
         {
@@ -189,7 +191,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            Trace.WriteLine("[file] load failed: " + exception.Message);
+            AppLogs.File.ZLogWarning($"load failed: {exception.Message}");
             SetError(LocText.Literal(exception.Message));
         }
         finally
@@ -273,7 +275,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (IsLspFailure(exception) || exception is OperationCanceledException)
         {
-            Trace.WriteLine("[file] closing the document in the language server failed: " + exception.Message);
+            AppLogs.File.ZLogWarning($"closing the document in the language server failed: {exception.Message}");
         }
     }
 
@@ -342,7 +344,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (IsLspFailure(exception))
         {
-            Trace.WriteLine("[file] language server unavailable: " + exception.Message);
+            AppLogs.File.ZLogWarning($"language server unavailable: {exception.Message}");
             if (ReferenceEquals(document, doc))
             {
                 session = null;
@@ -351,7 +353,7 @@ internal sealed partial class FileDocumentViewModel
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            Trace.WriteLine("[file] unexpected language server open failure: " + exception.Message);
+            AppLogs.File.ZLogWarning($"unexpected language server open failure: {exception.Message}");
             if (ReferenceEquals(document, doc))
             {
                 session = null;
@@ -472,7 +474,7 @@ internal sealed partial class FileDocumentViewModel
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
-                Trace.WriteLine("[file] save failed: " + exception.Message);
+                AppLogs.File.ZLogError(exception, $"save failed");
                 SetSaveError(new LocText(InspectorStrings.FilesSaveFailed, LocText.Literal(exception.Message)));
                 return;
             }
@@ -485,7 +487,7 @@ internal sealed partial class FileDocumentViewModel
                 }
                 catch (Exception exception) when (IsLspFailure(exception))
                 {
-                    Trace.WriteLine("[file] language server save notification failed: " + exception.Message);
+                    AppLogs.File.ZLogWarning($"language server save notification failed: {exception.Message}");
                     SetLspStatus(new LocText(InspectorStrings.FilesLspUnavailable, LocText.Literal(exception.Message)));
                 }
             }

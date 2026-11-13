@@ -348,7 +348,7 @@ internal sealed class WorkerProcess : IAsyncDisposable
         using var deadline = new CancellationTokenSource(StopGraceWindow);
         try
         {
-            await Peer.SendRequestAsync(ExtensionProtocol.WorkerStop, HostJson.EmptyObject, deadline.Token).ConfigureAwait(false);
+            await Peer.RequestAsync(ExtensionProtocol.WorkerStop, IpcEmpty.Instance, deadline.Token).ConfigureAwait(false);
             await Process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
         }
         catch (Exception)
