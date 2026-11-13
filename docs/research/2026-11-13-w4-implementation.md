@@ -59,15 +59,20 @@
 
 ## 四、验收口径(实测)
 
+合并 `main`(W0a/W0b)之后的最终数值:
+
 ```
 dotnet build Forge.slnx                                   → 0 警告 0 错误
-dotnet test tests/Forge.Core.Tests                        → 2106 通过 / 0 失败
-dotnet test tests/Forge.Mcp.Tests                         → 191 通过 / 0 失败
+dotnet test tests/Forge.Core.Tests                        → 2136 通过 / 0 失败
+dotnet test tests/Forge.Mcp.Tests                         → 190 通过 / 1 失败(既有环境问题,见下)
+dotnet test tests/Forge.Workspace.Tests                   → 1312 通过 / 0 失败
+dotnet test tests/Forge.Integration.Tests                 → 265 通过 / 0 失败
+dotnet test tests/Forge.App.Tests                          → 见「全量 App 套件」一行
 dotnet test tests/Forge.App.Tests --filter Workbench      → 575 通过 / 0 失败
-dotnet test tests/Forge.App.Tests --filter Localization|MinorRegression → 131 通过 / 0 失败
-dotnet test tests/Forge.App.Tests --filter Preview|Transcript|ChatSettings|FilesSettings → 168 通过 / 0 失败
-dotnet test tests/Forge.App.Tests --filter SettingsPanelTests → 5 通过 / 0 失败
+dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localization|MinorRegression → 590 通过 / 0 失败
 ```
+
+`Forge.Mcp.Tests` 的那一条失败是 `StdioTransportTests.Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines`(`initialize did not complete within 3s`);在干净的 `main` 检出(`D:/FORGE/forge` @ 5dd2068)上跑同一条测试同样失败,所以是既有环境问题,与本波无关。
 
 手测项(需真人看):工具行缩略图的观感与悬停提示;宽 CSV 的横向滚动与列对齐;大图(>4096 长边)预览的缩放质量;PDF/HTML 卡片的「用默认程序打开」在 Windows 上真的开对程序;HTML 的「查看源码」切回文本。
 
