@@ -126,6 +126,21 @@ public sealed class PalettePreviewTests : IDisposable
     }
 
     [Fact]
+    public async Task A_line_longer_than_the_budget_is_kept_truncated()
+    {
+        // A minified bundle is one line of megabytes; the preview has to stop at its character budget instead of
+        // materializing the line, so what comes back is the numbered prefix of exactly the budget.
+        var oversized = new string('x', PalettePreview.MaxPreviewChars * 2);
+        var path = TestTempFiles.WriteFile(NewRoot(), "bundle.min.js", oversized + "\nsecond\n");
+        var preview = new PalettePreview();
+
+        var text = await preview.ReadAsync(path, 0, CancellationToken.None);
+
+        Assert.NotNull(text);
+        Assert.Equal("    1  " + oversized[..PalettePreview.MaxPreviewChars], text);
+    }
+
+    [Fact]
     public async Task A_cancelled_read_throws_instead_of_previewing()
     {
         var path = NewFile(10);
