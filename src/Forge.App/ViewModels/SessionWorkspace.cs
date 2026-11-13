@@ -332,9 +332,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         get => continueBlockedReason;
         set
         {
-            if (Set(ref continueBlockedReason, value))
+            if (SetAndNotify(ref continueBlockedReason, value, nameof(ContinueLabel)))
             {
-                OnPropertyChanged(nameof(ContinueLabel));
                 continueCommand?.NotifyCanExecuteChanged();
             }
         }
@@ -440,9 +439,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         get => isRunning;
         private set
         {
-            if (Set(ref isRunning, value))
+            if (SetAndNotify(ref isRunning, value, nameof(IsIdle)))
             {
-                OnPropertyChanged(nameof(IsIdle));
                 RefreshCanSend();
                 CancelCommand.NotifyCanExecuteChanged();
             }
@@ -459,9 +457,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         get => subAgentsCollapsed;
         set
         {
-            if (Set(ref subAgentsCollapsed, value))
+            if (SetAndNotify(ref subAgentsCollapsed, value, nameof(SubAgentsVisible)))
             {
-                OnPropertyChanged(nameof(SubAgentsVisible));
                 SubAgentsChanged?.Invoke();
             }
         }
@@ -1946,7 +1943,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 /// One sub-agent of a session: its status line, its elapsed time and tokens, and its read-only transcript. There is no
 /// input box - steering, queueing and stopping belong to the main agent (plus the user's single Stop button).
 /// </summary>
-internal sealed class SubAgentViewModel : ObservableObject
+internal sealed class SubAgentViewModel : NotifyingObject
 {
     private const int TabTaskLimit = 18;
 
@@ -2018,9 +2015,8 @@ internal sealed class SubAgentViewModel : ObservableObject
         get => isReadOnly;
         set
         {
-            if (Set(ref isReadOnly, value))
+            if (SetAndNotify(ref isReadOnly, value, nameof(TabTitle)))
             {
-                OnPropertyChanged(nameof(TabTitle));
                 OnPropertyChanged(nameof(ReadOnlyBadgeVisible));
             }
         }
@@ -2035,9 +2031,8 @@ internal sealed class SubAgentViewModel : ObservableObject
         get => status;
         private set
         {
-            if (Set(ref status, value))
+            if (SetAndNotify(ref status, value, nameof(StatusText)))
             {
-                OnPropertyChanged(nameof(StatusText));
                 OnPropertyChanged(nameof(IsFinished));
                 OnPropertyChanged(nameof(IsLive));
                 StopCommand.NotifyCanExecuteChanged();

@@ -111,9 +111,8 @@ internal sealed class AutomationsSettingsViewModel : NotifyingObject, IDisposabl
         get => isRunning;
         set
         {
-            if (Set(ref isRunning, value))
+            if (SetAndNotify(ref isRunning, value, nameof(GlobalStatusText)))
             {
-                OnPropertyChanged(nameof(GlobalStatusText));
                 Track(SetPausedAsync(!value));
             }
         }

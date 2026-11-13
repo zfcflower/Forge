@@ -455,7 +455,7 @@ internal enum InstalledExtensionAction
 }
 
 /// <summary>One installed extension version: state, its tool names, and the enable/disable/delete actions.</summary>
-internal sealed class InstalledExtensionViewModel : ObservableObject
+internal sealed class InstalledExtensionViewModel : NotifyingObject
 {
     private readonly ExtensionRow row;
     private readonly Func<InstalledExtensionViewModel, InstalledExtensionAction, Task> action;
@@ -505,9 +505,8 @@ internal sealed class InstalledExtensionViewModel : ObservableObject
         get => isConfirmingDelete;
         private set
         {
-            if (Set(ref isConfirmingDelete, value))
+            if (SetAndNotify(ref isConfirmingDelete, value, nameof(ShowDelete)))
             {
-                OnPropertyChanged(nameof(ShowDelete));
                 OnPropertyChanged(nameof(ShowConfirmDelete));
             }
         }

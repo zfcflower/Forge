@@ -5,7 +5,7 @@ using Forge.App.ViewModels;
 namespace Forge.App.Approval;
 
 /// <summary>One option row of a question; the selection state is bound two-way to a radio button or a check box.</summary>
-internal sealed class QuestionOptionViewModel : ObservableObject
+internal sealed class QuestionOptionViewModel : NotifyingObject
 {
     private readonly QuestionItemViewModel owner;
     private bool isSelected;
@@ -44,9 +44,8 @@ internal sealed class QuestionOptionViewModel : ObservableObject
                 return;
             }
 
-            if (Set(ref isSelected, value))
+            if (SetAndNotify(ref isSelected, value, nameof(IsEnabled)))
             {
-                OnPropertyChanged(nameof(IsEnabled));
                 owner.OnOptionChanged(this);
             }
         }
@@ -54,7 +53,7 @@ internal sealed class QuestionOptionViewModel : ObservableObject
 }
 
 /// <summary>One question of a card: header chip, prompt, options (single or multi select) and the optional free text.</summary>
-internal sealed class QuestionItemViewModel : ObservableObject
+internal sealed class QuestionItemViewModel : NotifyingObject
 {
     private readonly Action changed;
     private string freeText = string.Empty;
@@ -126,9 +125,8 @@ internal sealed class QuestionItemViewModel : ObservableObject
         get => skipped;
         set
         {
-            if (Set(ref skipped, value))
+            if (SetAndNotify(ref skipped, value, nameof(IsEditable)))
             {
-                OnPropertyChanged(nameof(IsEditable));
                 OnPropertyChanged(nameof(IsFreeTextEnabled));
                 OnPropertyChanged(nameof(IsAnswered));
                 RefreshOptions();
@@ -270,9 +268,8 @@ internal sealed class UserQuestionCardViewModel : ApprovalCardViewModel
         get => waitingCount;
         internal set
         {
-            if (Set(ref waitingCount, value))
+            if (SetAndNotify(ref waitingCount, value, nameof(HasWaiting)))
             {
-                OnPropertyChanged(nameof(HasWaiting));
                 OnPropertyChanged(nameof(WaitingText));
             }
         }

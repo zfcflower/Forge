@@ -13,7 +13,7 @@ namespace Forge.App.Network;
 /// the selected modes are validated; a field of an unselected mode keeps its stored value when its text is invalid, so a
 /// half-typed value never blocks switching modes and never reaches the file.
 /// </summary>
-internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDisposable
+internal sealed class NetworkSettingsSectionViewModel : NotifyingObject, IDisposable
 {
     public const string DefaultTestHost = "api.anthropic.com";
 
@@ -136,13 +136,7 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
     public string ServersError
     {
         get => serversError;
-        private set
-        {
-            if (Set(ref serversError, value))
-            {
-                OnPropertyChanged(nameof(HasServersError));
-            }
-        }
+        private set => SetAndNotify(ref serversError, value, nameof(HasServersError));
     }
 
     public bool HasServersError => serversError.Length > 0;
@@ -150,13 +144,7 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
     public string DohError
     {
         get => dohError;
-        private set
-        {
-            if (Set(ref dohError, value))
-            {
-                OnPropertyChanged(nameof(HasDohError));
-            }
-        }
+        private set => SetAndNotify(ref dohError, value, nameof(HasDohError));
     }
 
     public bool HasDohError => dohError.Length > 0;
@@ -164,13 +152,7 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
     public string ProxyError
     {
         get => proxyError;
-        private set
-        {
-            if (Set(ref proxyError, value))
-            {
-                OnPropertyChanged(nameof(HasProxyError));
-            }
-        }
+        private set => SetAndNotify(ref proxyError, value, nameof(HasProxyError));
     }
 
     public bool HasProxyError => proxyError.Length > 0;
@@ -178,13 +160,7 @@ internal sealed class NetworkSettingsSectionViewModel : ObservableObject, IDispo
     public string BypassError
     {
         get => bypassError;
-        private set
-        {
-            if (Set(ref bypassError, value))
-            {
-                OnPropertyChanged(nameof(HasBypassError));
-            }
-        }
+        private set => SetAndNotify(ref bypassError, value, nameof(HasBypassError));
     }
 
     public bool HasBypassError => bypassError.Length > 0;

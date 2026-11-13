@@ -12,7 +12,7 @@ Forge 的 Native AOT 桌面主程序(Avalonia 12.1.x,仅桌面)。承载组合�
 
 ## 边界
 
-- Native AOT(`IsAotCompatible` + `PublishAot`),依赖闭包不含 Roslyn、`AssemblyLoadContext`、`Forge.Scripting`/`Forge.ScriptExecutor`;只用源生成 JSON(`SettingsJsonContext`、`WorkbenchJsonContext`);无 DI 容器/MVVM 包(手写 `INotifyPropertyChanged` + `ICommand`)。
+- Native AOT(`IsAotCompatible` + `PublishAot`),依赖闭包不含 Roslyn、`AssemblyLoadContext`、`Forge.Scripting`/`Forge.ScriptExecutor`;只用源生成 JSON(`SettingsJsonContext`、`WorkbenchJsonContext`);无 DI 容器/MVVM 包(手写 `INotifyPropertyChanged` + `ICommand`)。属性 setter 除自身外还要通知派生属性(如 `X` 之于 `HasX`)时用 `ViewModels/NotifyingObject.SetAndNotify`:它零分配(`nameof` 常量走 `ObservableObject` 的 args 缓存),不要写回 `if (Set(...)) OnPropertyChanged(nameof(...))` 的旧形态。
 - **不实现任何存储或 Git 管道。** 只经 `ISessionStore`/`ISessionCatalog`/`IProjectRegistry`/`ITodoStore`/`IUiStateStore`/`ITurnCheckpointStore`、`GitCli`、`WorktreeManager`、`SpecGraph`、`ReviewStore` 组合;`src/Forge.App` 中不得出现 `SqliteConnection`、`CREATE TABLE`、`write-tree`、`GIT_INDEX_FILE`。
 - 不直接读审批数据库做判断(哈希经 `plugins.status` 取);为状态面用只读连接数 `plugin_approval` 的行数,进程里不持有任何可写审批连接,也不建表、不迁移。计数只在文件不存在(不打开、不创建文件/`-wal`/`-shm`)或没有 `plugin_approval` 表时返回 0;其余错误上抛,设置页的 `approvals` 分区与输入框上条的计数显示"不可读",不把损坏或锁住的库显示成没有插件。
 - UI 线程不碰存储:Microsoft.Data.Sqlite 的 `*Async` 是同步执行的,所以所有存储/SQLite/文件调用(含归档、重命名、`ui_state` 写入、TODO 增删)都经后台助手,不在调度器上 await。唯一例外是退出:最后一次布局保存在后台执行,但 UI 线程最多等它 3 秒(超时只记 Trace),保证关窗时快照尽量落盘又不卡死。

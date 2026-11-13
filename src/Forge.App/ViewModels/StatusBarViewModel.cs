@@ -13,7 +13,7 @@ namespace Forge.App.ViewModels;
 /// startup problems and the provider status are kept as <see cref="LocText"/> because they are computed before they are
 /// shown; the exception message inside them is literal and is never translated.</para>
 /// </summary>
-internal sealed class StatusBarViewModel : ObservableObject, IDisposable
+internal sealed class StatusBarViewModel : NotifyingObject, IDisposable
 {
     private readonly IApprovalCounter? approvals;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
@@ -118,13 +118,7 @@ internal sealed class StatusBarViewModel : ObservableObject, IDisposable
     public string AheadBehindText
     {
         get => aheadBehindText;
-        private set
-        {
-            if (Set(ref aheadBehindText, value))
-            {
-                OnPropertyChanged(nameof(HasAheadBehind));
-            }
-        }
+        private set => SetAndNotify(ref aheadBehindText, value, nameof(HasAheadBehind));
     }
 
     public bool HasAheadBehind => aheadBehindText.Length > 0;

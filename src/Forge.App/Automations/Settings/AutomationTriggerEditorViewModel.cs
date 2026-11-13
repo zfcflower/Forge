@@ -40,7 +40,7 @@ internal sealed class AutomationDayToggleViewModel : ObservableObject
 /// One trigger row of the editor: a kind and the text fields of that kind. <see cref="TryBuild"/> validates the fields and
 /// produces the <see cref="AutomationTrigger"/>; cron syntax itself is validated by the engine's preview.
 /// </summary>
-internal sealed class AutomationTriggerEditorViewModel : ObservableObject
+internal sealed class AutomationTriggerEditorViewModel : NotifyingObject
 {
     private static readonly AutomationTriggerKind[] Kinds =
         [AutomationTriggerKind.Hourly, AutomationTriggerKind.Daily, AutomationTriggerKind.Weekly, AutomationTriggerKind.Cron];
@@ -97,9 +97,8 @@ internal sealed class AutomationTriggerEditorViewModel : ObservableObject
         get => kind;
         set
         {
-            if (Set(ref kind, value))
+            if (SetAndNotify(ref kind, value, nameof(KindIndex)))
             {
-                OnPropertyChanged(nameof(KindIndex));
                 OnPropertyChanged(nameof(IsHourly));
                 OnPropertyChanged(nameof(ShowsTimes));
                 OnPropertyChanged(nameof(IsWeekly));

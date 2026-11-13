@@ -267,9 +267,8 @@ internal sealed class PromptEditorViewModel : NotifyingObject
         get => confirmingDelete;
         private set
         {
-            if (Set(ref confirmingDelete, value))
+            if (SetAndNotify(ref confirmingDelete, value, nameof(ShowsDeleteButton)))
             {
-                OnPropertyChanged(nameof(ShowsDeleteButton));
                 ConfirmDeleteCommand.NotifyCanExecuteChanged();
             }
         }

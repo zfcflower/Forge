@@ -98,9 +98,8 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
         get => isArgumentsExpanded;
         private set
         {
-            if (Set(ref isArgumentsExpanded, value))
+            if (SetAndNotify(ref isArgumentsExpanded, value, nameof(ArgumentsToggleText)))
             {
-                OnPropertyChanged(nameof(ArgumentsToggleText));
                 OnPropertyChanged(nameof(IsArgumentsVisible));
             }
         }

@@ -67,9 +67,8 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
         get => editor;
         private set
         {
-            if (Set(ref editor, value))
+            if (SetAndNotify(ref editor, value, nameof(HasEditor)))
             {
-                OnPropertyChanged(nameof(HasEditor));
                 OnPropertyChanged(nameof(ShowsSelectHint));
             }
         }
@@ -92,9 +91,8 @@ internal sealed class PromptsSettingsViewModel : NotifyingObject, IDisposable, I
         get => filter;
         set
         {
-            if (Set(ref filter, value))
+            if (SetAndNotify(ref filter, value, nameof(IsFilterAll)))
             {
-                OnPropertyChanged(nameof(IsFilterAll));
                 OnPropertyChanged(nameof(IsFilterBuiltIn));
                 OnPropertyChanged(nameof(IsFilterCustom));
                 Rebuild();

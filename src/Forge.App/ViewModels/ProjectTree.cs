@@ -266,9 +266,8 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         get => isExpanded;
         set
         {
-            if (Set(ref isExpanded, value))
+            if (SetAndNotify(ref isExpanded, value, nameof(ChevronRotated)))
             {
-                OnPropertyChanged(nameof(ChevronRotated));
                 ExpansionChanged?.Invoke(this);
             }
         }
@@ -491,9 +490,8 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         get => forkOfBranch;
         set
         {
-            if (Set(ref forkOfBranch, value))
+            if (SetAndNotify(ref forkOfBranch, value, nameof(ForkLabel)))
             {
-                OnPropertyChanged(nameof(ForkLabel));
                 OnPropertyChanged(nameof(HasForkLabel));
                 OnPropertyChanged(nameof(MergeBackHeader));
                 OnPropertyChanged(nameof(SyncHeader));
@@ -519,9 +517,8 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
         get => rowMark;
         set
         {
-            if (Set(ref rowMark, value))
+            if (SetAndNotify(ref rowMark, value, nameof(RowMarkText)))
             {
-                OnPropertyChanged(nameof(RowMarkText));
                 OnPropertyChanged(nameof(HasRowMark));
                 OnPropertyChanged(nameof(IsRecycled));
             }

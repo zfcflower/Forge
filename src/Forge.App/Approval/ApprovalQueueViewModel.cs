@@ -9,7 +9,7 @@ namespace Forge.App.Approval;
 /// queue's own observable list, so the queue stays the single owner of the cards.
 /// <para>UI thread only: it is created by the composition root and driven by the queue's UI-thread events.</para>
 /// </summary>
-internal sealed class ApprovalQueueViewModel : ObservableObject, IDisposable
+internal sealed class ApprovalQueueViewModel : NotifyingObject, IDisposable
 {
     private readonly ApprovalQueue queue;
     private bool isExpanded = true;
@@ -38,13 +38,7 @@ internal sealed class ApprovalQueueViewModel : ObservableObject, IDisposable
     public bool IsExpanded
     {
         get => isExpanded;
-        private set
-        {
-            if (Set(ref isExpanded, value))
-            {
-                OnPropertyChanged(nameof(ToggleText));
-            }
-        }
+        private set => SetAndNotify(ref isExpanded, value, nameof(ToggleText));
     }
 
     public string ToggleText => Loc.Instance[IsExpanded ? ExtensionsStrings.QueueToggleCollapse : ExtensionsStrings.QueueToggleExpand];
