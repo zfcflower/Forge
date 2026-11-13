@@ -72,6 +72,19 @@ internal sealed class FilesSettingsSectionViewModel : ObservableObject, IDisposa
         }
     }
 
+    /// <summary>Bounds of the three controls, mirrored from the preferences' clamps so both stay one number.</summary>
+    public decimal MinRows => AppPreferences.MinFilesCsvMaxRows;
+
+    public decimal MaxRows => AppPreferences.MaxFilesCsvMaxRows;
+
+    public decimal MinNotebookKilobytes => AppPreferences.MinFilesNotebookOutputKilobytes;
+
+    public decimal MaxNotebookKilobytes => AppPreferences.MaxFilesNotebookOutputKilobytes;
+
+    public decimal MinImageMegabytes => AppPreferences.MinFilesImagePreviewMaxMegabytes;
+
+    public decimal MaxImageMegabytes => AppPreferences.MaxFilesImagePreviewMaxMegabytes;
+
     public string PreviewRowsLabel => Loc.Instance[PreviewStrings.SettingsRowsKey];
 
     public string NotebookOutputCharsLabel => Loc.Instance[PreviewStrings.SettingsNotebookCharsKey];

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Forge.Abstractions;
 using Forge.App.Localization;
 
 namespace Forge.App.ViewModels.Preview;
@@ -172,8 +173,11 @@ internal static class NotebookPreviewReader
 
         if (dataElement.TryGetProperty("image/png", out var pngElement) &&
             pngElement.ValueKind is JsonValueKind.String &&
-            pngElement.GetString() is { Length: > 0 } base64)
+            pngElement.GetString() is { Length: > 0 } base64 &&
+            ContentPlaceholders.DecodedLength(base64) <= MaxImageBytes)
         {
+            // A safety bound, not a quality one: an embedded screenshot can be arbitrarily large, so past the cap the cell
+            // simply shows no picture instead of materializing it.
             try
             {
                 outputs.Add(new NotebookImageOutputData(Convert.FromBase64String(base64)));
@@ -212,7 +216,26 @@ internal static class NotebookPreviewReader
         }
     }
 
-    /// <summary>The localized truncation marker is resolved at parse time: a preview is transient content.</summary>
-    private static string Truncate(string text, int maxOutputChars) =>
-        text.Length <= maxOutputChars ? text : text[..maxOutputChars] + PreviewStrings.TruncatedMarker;
+    /// <summary>Largest embedded picture decoded from one output, in bytes; past it the cell shows no image.</summary>
+    public const long MaxImageBytes = 5 * 1024 * 1024;
+
+    /// <summary>
+    /// The localized truncation marker is resolved at parse time: a preview is transient content. The cut never lands
+    /// between the halves of a surrogate pair, which would render a replacement glyph where a character used to be.
+    /// </summary>
+    private static string Truncate(string text, int maxOutputChars)
+    {
+        if (text.Length <= maxOutputChars)
+        {
+            return text;
+        }
+
+        var cut = maxOutputChars;
+        if (cut > 0 && char.IsHighSurrogate(text[cut - 1]))
+        {
+            cut--;
+        }
+
+        return string.Concat(text.AsSpan(0, cut), PreviewStrings.TruncatedMarker);
+    }
 }

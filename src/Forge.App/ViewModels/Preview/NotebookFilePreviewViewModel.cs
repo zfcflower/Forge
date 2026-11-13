@@ -20,9 +20,12 @@ internal sealed class NotebookFilePreviewViewModel : FilePreviewViewModel
 
     public IReadOnlyList<NotebookCellViewModel> Cells { get; }
 
+    /// <summary>Largest <c>.ipynb</c> the preview reads, matching the text document's own bound.</summary>
+    public const long MaxNotebookBytes = 8L * 1024 * 1024;
+
     public override string Caption => PreviewStrings.NotebookCaption(Name, Cells.Count).Resolve();
 
-    public override void Release()
+    protected override void ReleaseCore()
     {
         foreach (var cell in Cells)
         {
@@ -38,6 +41,15 @@ internal sealed class NotebookFilePreviewViewModel : FilePreviewViewModel
         CancellationToken ct = default)
     {
         var name = System.IO.Path.GetFileName(path);
+        if (byteSize > MaxNotebookBytes)
+        {
+            // Read as text, so it is bounded like the editor document: a notebook carrying screenshots reaches hundreds of
+            // megabytes and must not be pulled into memory just to be drawn.
+            var tooLarge = new NotebookFilePreviewViewModel(path, name, byteSize, []);
+            tooLarge.SetNotice(PreviewStrings.NotebookTooLarge(name, MaxNotebookBytes / (1024 * 1024)));
+            return tooLarge;
+        }
+
         try
         {
             var json = File.ReadAllText(path);

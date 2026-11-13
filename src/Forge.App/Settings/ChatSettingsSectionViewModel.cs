@@ -28,6 +28,9 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposab
     public static decimal MaxThumbnailEdgeDecimal => MaxThumbnailEdge;
 
     private readonly AppPreferences preferences;
+
+    /// <summary>The thread the section was built on (the UI thread).</summary>
+    private readonly int uiThread = Environment.CurrentManagedThreadId;
     private bool disposed;
 
     public ChatSettingsSectionViewModel(AppPreferences preferences)
@@ -83,5 +86,14 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposab
         }
     }
 
-    private void OnLanguageChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(SectionTitle));
+    /// <summary>Re-reads the heading; a notification that arrives after disposal, or from another thread, is not ours.</summary>
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (disposed || Environment.CurrentManagedThreadId != uiThread)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(SectionTitle));
+    }
 }

@@ -41,8 +41,18 @@ internal abstract class FilePreviewViewModel : ObservableObject
 
     public bool HasNotice => !notice.IsEmpty;
 
-    /// <summary>Disposes decoded images; called exactly once when the preview leaves the screen.</summary>
-    public virtual void Release()
+    /// <summary>How many times this preview was released; a preview is released exactly once when it leaves the screen.</summary>
+    public int ReleaseCount { get; private set; }
+
+    /// <summary>Disposes decoded images and is idempotent; the losing side of two competing loads releases itself too.</summary>
+    public void Release()
+    {
+        ReleaseCount++;
+        ReleaseCore();
+    }
+
+    /// <summary>Disposes what the preview holds; called once per <see cref="Release"/>, so an implementation must tolerate a repeat.</summary>
+    protected virtual void ReleaseCore()
     {
     }
 

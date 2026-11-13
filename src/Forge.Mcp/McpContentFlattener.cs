@@ -139,12 +139,16 @@ internal static class McpContentFlattener
             case "image":
             {
                 var mimeType = ReadString(block, "mimeType");
-                var size = EstimateBase64Bytes(ReadString(block, "data"));
+                // Read the payload once: it is the whole picture, so a second read would copy megabytes for nothing.
+                var payload = ReadString(block, "data");
+                var size = EstimateBase64Bytes(payload);
                 // Keep the payload only for a media type the app can display, within the size cap; everything
                 // else (svg, oversized bitmaps, anything the server mislabels) stays placeholder-only.
-                var data = mimeType is "image/png" or "image/jpeg" or "image/gif" or "image/webp" && size <= MaxKeptImageBytes
-                    ? ReadString(block, "data")
-                    : null;
+                var data = payload is not null &&
+                    mimeType is "image/png" or "image/jpeg" or "image/gif" or "image/webp" &&
+                    size <= MaxKeptImageBytes
+                        ? payload
+                        : null;
                 return new McpContent(type, $"[{type}: {mimeType ?? "unknown type"}, {FormatSize(size)}]", mimeType, null, size, data);
             }
 

@@ -38,7 +38,7 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
     public override string Caption =>
         PreviewStrings.ImageCaptionText(Name, PixelWidth, PixelHeight, SizeText(ByteSize)).Resolve();
 
-    public override void Release()
+    protected override void ReleaseCore()
     {
         image?.Dispose();
         image = null;

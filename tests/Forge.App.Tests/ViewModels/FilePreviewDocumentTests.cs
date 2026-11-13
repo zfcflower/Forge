@@ -113,6 +113,60 @@ public sealed class FilePreviewDocumentTests : IDisposable
     }
 
     [Fact]
+    public async Task A_preview_that_loses_the_race_is_released_and_the_winner_is_not()
+    {
+        var slow = WriteBytes("slow.png", [0x89, 0x50, 0x4E, 0x47, 0x00]);
+        var fast = Write("fast.csv", "c,d\n3,4\n");
+        var model = FileDocumentViewModel.Create(imageDecoder: StallingDecoder(out var gate, out var entered));
+
+        // Start the image load and wait until its decode is in flight, then let a second load take the document over: the
+        // first one finishes later and must release the preview nobody shows.
+        var losing = model.LoadAsync(slow, CancellationToken.None);
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "the image decode never started");
+        await model.LoadAsync(fast, CancellationToken.None);
+        var winner = Assert.IsType<TableFilePreviewViewModel>(model.Preview);
+        gate.Set();
+        await losing;
+
+        Assert.Same(winner, model.Preview);
+        Assert.Equal(0, winner.ReleaseCount);
+
+        await model.ReleaseDocumentAsync();
+        Assert.Equal(1, winner.ReleaseCount);
+    }
+
+    /// <summary>A decoder that blocks until the test releases it, so two loads really overlap.</summary>
+    private static Func<byte[], Avalonia.Media.Imaging.Bitmap?> StallingDecoder(
+        out ManualResetEventSlim gate,
+        out ManualResetEventSlim entered)
+    {
+        var open = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        gate = open;
+        entered = started;
+        return _ =>
+        {
+            started.Set();
+            open.Wait(TimeSpan.FromSeconds(30));
+            return null;
+        };
+    }
+
+    [Fact]
+    public async Task Releasing_twice_is_counted_but_harmless()
+    {
+        var csv = Write("a.csv", "x\ny\n");
+        var model = FileDocumentViewModel.Create();
+        await model.LoadAsync(csv, CancellationToken.None);
+        var preview = Assert.IsType<TableFilePreviewViewModel>(model.Preview);
+
+        await model.ReleaseDocumentAsync();
+        await model.ReleaseDocumentAsync();
+
+        Assert.Equal(1, preview.ReleaseCount);
+    }
+
+    [Fact]
     public async Task An_image_over_the_preview_limit_shows_the_placeholder_card_and_is_not_decoded()
     {
         var path = NewPath("big.png");

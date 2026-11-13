@@ -51,6 +51,8 @@ internal static class PreviewStrings
     public const string NotebookCaptionBase = "files.preview.notebook.caption";
     public const string NotebookParseFailedKey = "files.preview.notebook.parseFailed";
     public const string NotebookReadFailedKey = "files.preview.notebook.readFailed";
+
+    public const string NotebookTooLargeKey = "files.preview.notebook.tooLarge";
     public const string NotebookCellMarkdownKey = "files.preview.notebook.cell.markdown";
     public const string NotebookCellCodeKey = "files.preview.notebook.cell.code";
     public const string NotebookCellRawKey = "files.preview.notebook.cell.raw";
@@ -97,6 +99,7 @@ internal static class PreviewStrings
         Loc.Register(NotebookCaptionBase + ".other", "{0} · {1} 个单元格", "{0} · {1} cells");
         Loc.Register(NotebookParseFailedKey, "{0} 不是有效的笔记本（JSON）文件：{1}", "{0} is not a valid notebook (JSON) file: {1}");
         Loc.Register(NotebookReadFailedKey, "无法读取 {0}：{1}", "Could not read {0}: {1}");
+        Loc.Register(NotebookTooLargeKey, "{0} 超过 {1} MB，笔记本预览不打开这么大的文件。", "{0} is over {1} MB; the notebook preview does not open files that large.");
         Loc.Register(NotebookCellMarkdownKey, "Markdown", "Markdown");
         Loc.Register(NotebookCellCodeKey, "代码", "Code");
         Loc.Register(NotebookCellRawKey, "原始", "Raw");
@@ -154,6 +157,12 @@ internal static class PreviewStrings
 
     public static LocText NotebookReadFailed(string name, string message) =>
         new(NotebookReadFailedKey, LocText.Literal(name), LocText.Literal(message));
+
+    /// <summary>"<file> is over <n> MB; the notebook preview does not open files that large."</summary>
+    public static LocText NotebookTooLarge(string name, long limitMegabytes) => new(
+        NotebookTooLargeKey,
+        LocText.Literal(name),
+        LocText.Literal(TextFormat.Number(limitMegabytes)));
 
     public static string NotebookCellKindLabel(NotebookCellKind kind) => Loc.Instance[CellKindKey(kind)];
 
