@@ -33,6 +33,19 @@ public sealed record ProcessRequest
     /// any other value sets or overrides it. <c>null</c> means "inherit unchanged".
     /// </summary>
     public IReadOnlyDictionary<string, string?>? Environment { get; init; }
+
+    /// <summary>
+    /// Receives the latest tail of the live output (stdout and stderr merged in arrival order) while the child runs: a snapshot
+    /// of at most <see cref="OutputTailChars"/> characters, at most once per <see cref="OutputInterval"/>, in order (a later call
+    /// never carries older text than an earlier one), with a trailing call when output stops mid-interval while the child is
+    /// still running. Output still unreported when the child exits is dropped: the result carries all of it. Called on a pump or timer
+    /// thread, under the tail's lock; must not block. Null costs nothing: no decoding, no timer.
+    /// </summary>
+    public Action<string>? OnOutput { get; init; }
+
+    public TimeSpan OutputInterval { get; init; } = TimeSpan.FromMilliseconds(250);
+
+    public int OutputTailChars { get; init; } = 16 * 1024;
 }
 
 /// <summary>What one process run did. Output is captured as bytes with a hard cap per stream, then decoded once.</summary>

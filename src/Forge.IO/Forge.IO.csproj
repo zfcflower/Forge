@@ -3,6 +3,9 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Forge.IO.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Forge.Abstractions\Forge.Abstractions.csproj" />
   </ItemGroup>
 </Project>

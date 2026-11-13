@@ -82,20 +82,23 @@
 
 ## 三、W0:拆交叉点(串行,主 Agent 独占,必须先合入)
 
-**W0 拆成两步,各自单独提交、单独构建全绿**:**W0a**(W0-1 契约 + W0-2 schema + 流水线接线,约 2 天)与 **W0b**(W0-3 搬运/接线/预建 + W0-4 小件,约 3 天)。W0b 只在 W0a 合入后开始。
+**W0 拆成两步,各自单独提交、单独构建全绿**:**W0a**(W0-1 契约 + 流水线接线 + W0-2 进度生产侧,约 2 天)与 **W0b**(W0-3 搬运/接线/预建 + W0-4 小件,约 3 天)。W0b 只在 W0a 合入后开始。
 
 **目标:把"多个波次会碰同一个文件"这件事在 W0 里消灭。** W0 交付后仓库照常编译、**行为不变**(除了消息复制这类无交叉的小件),之后每一波只在自己那一组文件里写。
 
-### W0-1 契约定稿(全部在 `Forge.Abstractions`,一次改完)
+### W0-1 契约定稿(`Forge.Abstractions`,已按此实施)
 
-- `ToolResult` 从单串改为块列表(复用 `ContentBlock`;文本仍是默认形态),`ToolResultBlock` 同步;`ToolResult` 保留 `string Content` 的便捷构造,避免调用点全炸。
-- 新增 `AgentToolProgress`(工具流式输出/进度);`AgentToolStarted/Finished` 不动。
-- 这些改动的**所有调用点接线都在 W0 做完**:`Core/Agents/AgentLoop.cs`、`Core/Providers/*`、会话存储序列化与回放、`McpToolAdapter`、`ViewModels/SessionWorkspace.cs` 的工具事件分支、`ViewModels/Transcript.cs` 的工具行(先按原样只取文本 → 行为不变)。W0 结束时多块能力"已在流水线上通了,只是没人渲染"。
+- `ToolResult`/`ToolResultBlock` 改为块列表,只允许 `TextBlock` 与 `ImageBlock`(其余类型构造时抛 `ArgumentException`);保留 `(string, IsError)` 便捷构造,`Content` 是拉平文本(单个文本块即原串零拷贝,多块按行拼接,图片用占位文案);相等按元素比较(否则两个相等的结果因列表引用不同而不等)。
+- 占位文案与 `DecodedLength` 从 `MessageJson` 搬到 `Forge.Abstractions/ContentPlaceholders.cs`,Storage 与 Compaction 改引新位置,不留旧副本。
+- **存储不升版**:消息表是 `content_json` 文本列,`tool_result` 恒写拉平后的 `content`(旧读者与全文检索只读它),仅当块不是"恰好一个文本块"时多写一个 `blocks` 数组。旧行照常读,旧版本读新行也只丢图。原计划的"工具结果多块需要升 schema"不成立;计划修订表只有 W7 一家要,**W7 独占 schema 升版**,不构成交叉。
+- W0 触及的调用点:`AgentLoop`(带块转发;溢出归档只处理文本、图片原样保留)、`MessageJson`(读写 `blocks`)、`TokenCounter`(工具结果里每张图按附件图同一口径计)、`TranscriptReplay`(回放带块)。**`McpToolAdapter`/`McpContentFlattener`/`Core/Providers/*` 不在 W0**,归 W4(它们仍读拉平后的 `Content`,行为不变)。
 
-### W0-2 存储阶梯一次升版
+### W0-2 进度生产侧(已按此实施)
 
-- `Core/Storage/StorageSchema.cs` 一次升到下一版:加计划修订表 + 工具结果多块的表示所需的列/标记(两者同一版,避免 W4、W7 各自再升一次)。
-- 迁移民档 + 升级/降级测试骨架在 W0;W4 与 W7 只写各自的读写代码,不再碰 schema。
+- `ToolContext.Progress`(`Action<string>?`):每次调用传**最新输出尾部的快照**(不是增量,监听者可丢事件而不丢状态);事件 `AgentToolProgress(AgentId, Call, Tail)`,夹在 `AgentToolStarted`/`Finished` 之间,不落库。
+- 生产者节流在 `Forge.IO`:`ProcessRequest.OnOutput/OutputInterval(默认 250 ms)/OutputTailChars(默认 16 KiB)`,`ProcessOutputTail` 合并 stdout/stderr、每路一个 UTF-8 `Decoder`、间隔内到达的块武装一次性定时器保证"静默前最后几行"也能报出;`OnOutput` 为空时零开销;监听者抛异常不影响 pump。
+- `BashTool` 把 `context.Progress` 接到 `OnOutput`;`AgentLoop` 为每个调用派生独立 context(并行调用互不串)。`SessionWorkspace` 暂时显式忽略该事件,**W8 接手消费**。
+- 注:16 KiB 是生产者的上限,W8 的"日志尾行数"设置只能在此之内取。
 
 ### W0-3 UI 接线与占位(交叉文件的唯一写入者)
 
@@ -137,17 +140,17 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | **W1** 设置与运行参数 | 模型可见性过滤(14a)、子 Agent 并发上限与开关(14b)、闲置归档天数与范围可配(14e)、通知权限引导(14f) | `Preferences/AppPreferences.cs` 的消费点、`Agents/**`(SessionRuntime、注入 `AgentOptions`)、`Core/Agents/AgentOptions.cs`、`Automations/Housekeeping.cs`、`Notifications/**`、`Settings/ModelsVisibility*`、`ViewModels/ComposerViewModel.cs`、`INotificationPermissionGuide` 的实现 | 2 天 |
 | **W2** 编辑器 | 语义 token 叠加(可见行 + 版本号缓存,delta 只失效受影响行)、查找引用列表、问题面板 | `src/Forge.Editor/**`、`Editing/**`、`ViewModels/FileDocumentViewModel.Lsp.cs`、`Views/FileDocumentView.Lsp.cs`、`Views/ProblemsPanelView*` | 3 天 |
 | **W3** 全局搜索 / 命令面板 | 面板 + 五个来源(文件/内容/会话/命令/符号)+ 预览 + `Ctrl+P`/`Ctrl+Shift+P`/`Ctrl+Shift+F` | `ViewModels/PaletteViewModel*.cs`、`Views/PaletteView*`、`Services/Palette*.cs`、`ViewModels/MainWindowViewModel.Palette.cs`、`Localization/Strings.Palette.cs` | 4–5 天 |
-| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF/HTML 占位 + 系统默认程序打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、会话存储读写(不碰 schema)、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Resources/ToolRow.axaml`、`Views/Preview/**` | 4 天 |
+| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF/HTML 占位 + 系统默认程序打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Resources/ToolRow.axaml`、`Views/Preview/**` | 4 天 |
 | **W4b** 聊天 Markdown 渲染 | 聊天消息走 Markdown(标题/列表/表格/链接/fenced code,代码块带复制与语言标签);复用 `MarkdownRenderer`,流式增量不整段重排 | `Changes/Markdown/**`、`ViewModels/Transcript.cs`、`Views/ChatMarkdown*`、`Localization/Strings.ChatMarkdown.cs` | 4 天 |
 | **W5** PR checks 与收尾 | checks 面板(逐项状态/耗时/链接、等待、失败日志尾、让 agent 修)、`gh pr ready`、ship 补「合并后收尾」 | `Forge.Workspace/Git/IPrPlatform.cs`+`GitHubPlatform.cs`+`PrCheck*.cs`+`PrChecksPoller.cs`(**不含** `GitCli.Clone.cs`)、`Views/ChecksPanelView*`、`ViewModels/MainWindowViewModel.Checks.cs` | 3 天 |
 | **W6** MCP 管理面 | 配置写入(原子写 + 同款互斥)、增删改/启停/测试/重连/工具清单/错误与 stderr 尾、从 Claude/Cursor 导入、预设;审批卡补 command/args/cwd/env/headers 键名与即时撤销 | `Forge.Mcp/McpConfig*.cs`、`McpServerManager.cs`、`McpServerState.cs`、`ViewModels/Settings/McpSettingsSectionViewModel.cs`(W0 从 `InstrumentSettingsSections.cs` 拆出)、`Views/McpSettingsView*`、`Approval/**` | 4–5 天 |
-| **W7** Plan 会话 | 摘要面板 + 步骤与验证状态、修订历史、下一步、导出 Markdown、从计划开 PR | `Core/Storage/SqliteTodoStore.cs`(修订读写)、`ViewModels/PlanPanelViewModel*`、`Views/PlanPanelView*`、`ViewModels/MainWindowViewModel.Plan.cs` | 4–6 天 |
+| **W7** Plan 会话 | 摘要面板 + 步骤与验证状态、修订历史、下一步、导出 Markdown、从计划开 PR | `Core/Storage/SqliteTodoStore.cs`(修订读写)、`Core/Storage/StorageSchema.cs`(v10→v11,W7 独占)、`ViewModels/PlanPanelViewModel*`、`Views/PlanPanelView*`、`ViewModels/MainWindowViewModel.Plan.cs` | 4–6 天 |
 | **W8** 资源检查器 | 运行中工具/命令与子 Agent 统一列表(耗时、日志尾、停止)、消费 `AgentToolProgress` | `ViewModels/SessionWorkspace*.cs`、`ViewModels/Transcript.Tools.cs`、`ViewModels/SessionInstrumentsViewModel.cs`、`Views/ResourceInspectorView*`、`ViewModels/MainWindowViewModel.Inspector.cs` | 3 天 |
 | **W9** 首启与项目创建 | 首启向导(语言/提供商/通知权限,权限一步只调 `INotificationPermissionGuide`,不碰 `Notifications/**`)、克隆仓库(带进度与取消)、新建项目目录 + `git init` | `Views/Onboarding*`、`ViewModels/Onboarding*`、`ViewModels/MainWindowViewModel.Onboarding.cs`、`Forge.Workspace/Git/GitCli.Clone.cs`(W0 预建)、`Services/ProjectCreation*` | 3 天 |
 | **W12** 评审包 + `request_review` | 给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话);评审是产品核心目标,放在并行批里 | `Forge.Core/Prompts/BuiltInAgents.cs`、新建 `Forge.Core/Tools/RequestReview*.cs` + `ReviewPackage*.cs`、`Localization/Strings.Review.cs` | 4 天 |
 | **W11** 流程图 / Mermaid(**等拍板,且串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 
-**跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 依赖 W0 的 schema 升版;W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
+**跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 独占自己的 schema 升版(与其他波无交叉);W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
 
 **唯一的串行边**:W11(Mermaid)在 W4b 之后、且要你先批准两个包——它要往 W4b 刚建的聊天代码块渲染器里插一层,同一批文件,所以不并行。
 

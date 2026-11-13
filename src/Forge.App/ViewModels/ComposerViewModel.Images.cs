@@ -306,7 +306,7 @@ internal sealed partial class ComposerViewModel
                 {
                     Attachments.Add(new PendingImageViewModel(
                         image,
-                        MessageJson.DecodedLength(image.Data),
+                        ContentPlaceholders.DecodedLength(image.Data),
                         thumbnail: null,
                         RemoveAttachment));
                 }

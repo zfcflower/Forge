@@ -1568,6 +1568,9 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
                 break;
             case AgentThinkingDelta:
                 break;
+            case AgentToolProgress:
+                // The resource inspector is the only consumer; until it subscribes, a running tool's tail is not queued.
+                break;
             default:
                 coalescer.Enqueue(value);
                 break;

@@ -85,6 +85,7 @@ public sealed class BashTool : ToolBase
                 MaxStdoutBytes = captureBytes,
                 MaxStderrBytes = captureBytes,
                 Environment = ChildEnvironment,
+                OnOutput = context.Progress,
             };
             mode = "direct";
         }
@@ -100,6 +101,7 @@ public sealed class BashTool : ToolBase
                 MaxStdoutBytes = captureBytes,
                 MaxStderrBytes = captureBytes,
                 Environment = ChildEnvironment,
+                OnOutput = context.Progress,
             };
             mode = "script (" + shell.DialectName + ")";
         }
