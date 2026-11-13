@@ -84,6 +84,33 @@ internal static class ToolPayload
         return images;
     }
 
+    /// <summary>
+    /// Whether two block lists hold equal blocks in the same order. The lists themselves are arrays with reference equality, so
+    /// a payload's value equality compares them element by element through the blocks' own record equality.
+    /// </summary>
+    public static bool Same(IReadOnlyList<ContentBlock> left, IReadOnlyList<ContentBlock> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Count; index++)
+        {
+            if (!Equals(left[index], right[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static string Join(IReadOnlyList<ContentBlock> blocks, bool placeholders)
     {
         var builder = new System.Text.StringBuilder(256);

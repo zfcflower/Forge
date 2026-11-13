@@ -510,7 +510,7 @@ public sealed class AnthropicProvider : HttpChatProvider
                 writer.WriteString("text", ProviderJson.RenderArtifact(artifact));
                 break;
             case ImageBlock image:
-                WriteImageBlock(writer, image);
+                WriteImageProperties(writer, image);
                 break;
             case FileBlock file when ProviderAttachments.IsPdf(file.MediaType):
                 writer.WriteString("type", "document");
@@ -559,21 +559,25 @@ public sealed class AnthropicProvider : HttpChatProvider
 
         foreach (var image in result.Images)
         {
-            WriteImageBlock(writer, image);
+            writer.WriteStartObject();
+            WriteImageProperties(writer, image);
+            writer.WriteEndObject();
         }
 
         writer.WriteEndArray();
     }
 
-    private static void WriteImageBlock(Utf8JsonWriter writer, ImageBlock image)
+    /// <summary>
+    /// The fields of one <c>image</c> block, written into the object the caller already opened: both the user-turn block and the
+    /// element of a <c>tool_result</c> content array have this shape, so only the surrounding object differs.
+    /// </summary>
+    private static void WriteImageProperties(Utf8JsonWriter writer, ImageBlock image)
     {
-        writer.WriteStartObject();
         writer.WriteString("type", "image");
         writer.WriteStartObject("source");
         writer.WriteString("type", "base64");
         writer.WriteString("media_type", image.MediaType);
         writer.WriteString("data", image.Data);
-        writer.WriteEndObject();
         writer.WriteEndObject();
     }
 

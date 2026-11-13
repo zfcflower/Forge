@@ -50,6 +50,12 @@ public sealed record ToolResult
     public IReadOnlyList<ImageBlock> Images { get; }
 
     public bool IsError { get; }
+
+    /// <summary>Value equality over the blocks themselves, in order (the list is an array, which compares by reference).</summary>
+    public bool Equals(ToolResult? other) =>
+        other is not null && IsError == other.IsError && ToolPayload.Same(Blocks, other.Blocks);
+
+    public override int GetHashCode() => HashCode.Combine(IsError, Blocks.Count);
 }
 
 /// <summary>Execution context handed to every tool; the workspace root bounds file access.</summary>

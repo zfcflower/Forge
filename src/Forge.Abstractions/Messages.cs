@@ -48,6 +48,12 @@ public sealed record ToolResultBlock : ContentBlock
     public IReadOnlyList<ImageBlock> Images { get; }
 
     public bool IsError { get; }
+
+    /// <summary>Value equality over the blocks themselves, in order (the list is an array, which compares by reference).</summary>
+    public bool Equals(ToolResultBlock? other) =>
+        other is not null && CallId == other.CallId && IsError == other.IsError && ToolPayload.Same(Blocks, other.Blocks);
+
+    public override int GetHashCode() => HashCode.Combine(CallId, IsError, Blocks.Count);
 }
 
 /// <summary>
