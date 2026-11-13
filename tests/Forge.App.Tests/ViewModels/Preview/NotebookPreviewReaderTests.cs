@@ -148,4 +148,31 @@ public sealed class NotebookPreviewReaderTests
         var cell = Assert.Single(parsed.Cells);
         Assert.Empty(cell.Outputs);
     }
+
+    [Fact]
+    public void An_image_output_over_the_size_cap_is_skipped_without_decoding_it()
+    {
+        var base64 = Convert.ToBase64String(new byte[NotebookPreviewReader.MaxImageBytes + 10]);
+        var json = "{\"cells\":[{\"cell_type\":\"code\",\"source\":\"\",\"outputs\":[{\"output_type\":\"display_data\",\"data\":{\"image/png\":\"" + base64 + "\"}}]}]}";
+
+        var parsed = Parse(json);
+
+        var cell = Assert.Single(parsed.Cells);
+        Assert.Empty(cell.Outputs);
+    }
+
+    [Fact]
+    public void Truncation_never_cuts_between_the_halves_of_a_surrogate_pair()
+    {
+        using var _ = new LanguageScope(UiLanguage.English);
+        var text = new string('x', 9) + "\U0001F600" + "more";
+        var json = "{\"cells\":[{\"cell_type\":\"code\",\"source\":\"\",\"outputs\":[{\"output_type\":\"stream\",\"text\":\"" + text + "\"}]}]}";
+
+        var parsed = Parse(json, limit: 10);
+
+        var cell = Assert.Single(parsed.Cells);
+        var output = Assert.IsType<NotebookTextOutputData>(Assert.Single(cell.Outputs));
+        Assert.Equal(new string('x', 9) + "... (truncated)", output.Text);
+        Assert.DoesNotContain(output.Text, static character => char.IsHighSurrogate(character) || char.IsLowSurrogate(character));
+    }
 }
