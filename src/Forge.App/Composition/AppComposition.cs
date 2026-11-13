@@ -551,6 +551,11 @@ internal sealed class AppComposition : IAsyncDisposable
         // (catalog snapshot → provider report → default context window → per-model override).
         runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
         runtimeServices.MaxOutputTokens = model => providers.ModelCatalog.View.Find(null, model.Model)?.MaxOutputTokens;
+        // A model the catalog knows to take no image input gets a tool result's text, not its pictures; unknown stays
+        // "may take images", the same rule the composer applies to a user attachment.
+        runtimeServices.ModelInputs = model =>
+            providers.Catalog.MetadataFor(model.Model, model.ProviderId).Capabilities?.Inputs;
+        runtimeServices.SendToolImages = () => preferences.Current.SendToolImagesToModel;
         // Read before every turn and re-applied to every live session on each save, so a change reaches a running turn at
         // its next model request.
         runtimeServices.CompactionChanges = compactionSettings;

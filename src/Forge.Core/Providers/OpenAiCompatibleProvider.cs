@@ -11,6 +11,12 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
 {
     private const string StopReasonProperty = "finish_reason";
 
+    /// <summary>
+    /// The line above the images of a tool result: this protocol's tool message is text-only, so the pictures follow in their own
+    /// user turn and need one sentence saying what they are. Never shown to the user — it is model input.
+    /// </summary>
+    private const string ToolImagesFollowUp = "Images returned by the tool calls above.";
+
     private readonly bool sendPromptCacheKey;
     private readonly bool sendPromptCacheRetention;
     private readonly bool sendConversationCacheHeader;
@@ -189,7 +195,7 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
             var role = messages[i].Role;
             if (role != MessageRole.User && role != MessageRole.Assistant)
             {
-                WriteMessage(writer, messages[i]);
+                WriteMessage(writer, messages[i], request.IncludeToolImages);
                 continue;
             }
 
@@ -199,12 +205,12 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
                 end++;
             }
 
-            WriteMerged(writer, role, messages, i, end);
+            WriteMerged(writer, role, messages, i, end, request.IncludeToolImages);
             i = end;
         }
     }
 
-    private static void WriteMessage(Utf8JsonWriter writer, ChatMessage message)
+    private static void WriteMessage(Utf8JsonWriter writer, ChatMessage message, bool includeToolImages)
     {
         if (message.Role == MessageRole.System)
         {
@@ -212,16 +218,17 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
             return;
         }
 
-        WriteToolResults(writer, message.Content);
+        WriteToolResults(writer, message.Content, includeToolImages);
     }
 
-    private static void WriteMerged(Utf8JsonWriter writer, MessageRole role, IReadOnlyList<ChatMessage> messages, int start, int end)
+    private static void WriteMerged(
+        Utf8JsonWriter writer, MessageRole role, IReadOnlyList<ChatMessage> messages, int start, int end, bool includeToolImages)
     {
         if (role == MessageRole.User)
         {
             for (var i = start; i <= end; i++)
             {
-                WriteToolResults(writer, messages[i].Content);
+                WriteToolResults(writer, messages[i].Content, includeToolImages);
             }
 
             var text = MergedText(messages, start, end);
@@ -344,12 +351,7 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
                 switch (block)
                 {
                     case ImageBlock image:
-                        writer.WriteStartObject();
-                        writer.WriteString("type", "image_url");
-                        writer.WriteStartObject("image_url");
-                        writer.WriteString("url", ProviderJson.DataUrl(image));
-                        writer.WriteEndObject();
-                        writer.WriteEndObject();
+                        WriteImagePart(writer, image);
                         break;
                     case FileBlock file:
                         WriteFile(writer, file);
@@ -413,11 +415,17 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         writer.WriteEndObject();
     }
 
-    private static void WriteToolResults(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks)
+    /// <summary>
+    /// The tool messages of <paramref name="blocks"/> — a Chat Completions <c>tool</c> message carries text only — and, when the
+    /// results carry images the model may see, one user message with those images after them. That second message is the
+    /// protocol's own shape for "a tool produced this picture": the text-only tool message would otherwise have to drop it, and a
+    /// text-only result writes exactly the bytes it wrote before.
+    /// </summary>
+    private static void WriteToolResults(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks, bool includeToolImages)
     {
-        foreach (var block in blocks)
+        for (var index = 0; index < blocks.Count; index++)
         {
-            if (block is not ToolResultBlock result)
+            if (blocks[index] is not ToolResultBlock result)
             {
                 continue;
             }
@@ -428,6 +436,62 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
             writer.WriteString("content", result.Content);
             writer.WriteEndObject();
         }
+
+        if (includeToolImages && CountImages(blocks) > 0)
+        {
+            WriteToolImagesTurn(writer, blocks);
+        }
+    }
+
+    private static int CountImages(IReadOnlyList<ContentBlock> blocks)
+    {
+        var count = 0;
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (blocks[index] is ToolResultBlock result)
+            {
+                count += result.Images.Count;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>One user turn carrying every image the tool results produced, with a line saying where they came from.</summary>
+    private static void WriteToolImagesTurn(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("role", "user");
+        writer.WriteStartArray("content");
+        writer.WriteStartObject();
+        writer.WriteString("type", "text");
+        writer.WriteString("text", ToolImagesFollowUp);
+        writer.WriteEndObject();
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (blocks[index] is not ToolResultBlock result)
+            {
+                continue;
+            }
+
+            foreach (var image in result.Images)
+            {
+                WriteImagePart(writer, image);
+            }
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+    }
+
+    private static void WriteImagePart(Utf8JsonWriter writer, ImageBlock image)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("type", "image_url");
+        writer.WriteStartObject("image_url");
+        writer.WriteString("url", ProviderJson.DataUrl(image));
+        writer.WriteEndObject();
+        writer.WriteEndObject();
     }
 
     private static void WriteTools(Utf8JsonWriter writer, IReadOnlyList<ToolDefinition> tools)

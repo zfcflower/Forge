@@ -7,12 +7,12 @@ public sealed record ToolCall(string Id, string Name, string ArgumentsJson);
 /// <summary>
 /// What a tool returns: a list of content blocks. Text is the default and the only shape a text-only tool ever builds; an
 /// image block is how a tool that produced a picture (a screenshot, an MCP server's <c>image</c> content) hands it over
-/// instead of describing it. <see cref="Content"/> is the text view of the same payload — what a transcript, the search
-/// index and a provider without image support show — and never the base64 itself.
+/// instead of describing it. <see cref="Content"/> is the text view of the whole payload — placeholders included, never the
+/// base64 itself — and <see cref="Text"/> is the tool's own words without them.
 /// </summary>
 /// <remarks>
 /// <see cref="Blocks"/> is copied on construction and read-only afterwards, so the property can be kept and re-read on any
-/// thread. Both derived lists are computed once here rather than per read: the pipeline asks for <see cref="Content"/> in
+/// thread. The derived members are computed once here rather than per read: the pipeline asks for <see cref="Content"/> in
 /// several places per tool call (storage, search text, provider wire, UI).
 /// </remarks>
 public sealed record ToolResult
@@ -27,7 +27,8 @@ public sealed record ToolResult
     {
         ArgumentNullException.ThrowIfNull(Blocks);
         this.Blocks = Blocks.Count == 0 ? [] : [.. Blocks];
-        Content = ToolPayload.Text(this.Blocks);
+        Text = ToolPayload.Text(this.Blocks);
+        Content = ToolPayload.HasNonText(this.Blocks) ? ToolPayload.WithPlaceholders(this.Blocks) : Text;
         Images = ToolPayload.Images(this.Blocks);
         this.IsError = IsError;
     }
@@ -35,7 +36,14 @@ public sealed record ToolResult
     /// <summary>The blocks the tool returned, in order; empty when it returned nothing.</summary>
     public IReadOnlyList<ContentBlock> Blocks { get; }
 
-    /// <summary>The text of this result; placeholders stand in for blocks that carry no text.</summary>
+    /// <summary>The tool's own text, one text block per line, with nothing standing in for the blocks that carry no text.</summary>
+    public string Text { get; }
+
+    /// <summary>
+    /// The text view of the whole result: <see cref="Text"/> with a placeholder for each block that carries no text, such as
+    /// <c>[image: image/png]</c>. This is what a transcript, the search index and a provider that is not sending the images
+    /// itself shows; it is never the base64.
+    /// </summary>
     public string Content { get; }
 
     /// <summary>The images of this result, in order; empty for a text-only tool.</summary>

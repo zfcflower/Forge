@@ -133,7 +133,7 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
             }
 
             // A tool result answers the call, so it opens the turn the way the other adapters order it.
-            WriteToolResults(writer, message.Content);
+            WriteToolResults(writer, message.Content, request.IncludeToolImages);
 
             var text = ProviderJson.Text(message.Content);
             if (message.Role == MessageRole.User && ProviderJson.HasMedia(message.Content))
@@ -225,11 +225,16 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
         writer.WriteEndObject();
     }
 
-    private static void WriteToolResults(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks)
+    /// <summary>
+    /// One <c>function_call_output</c> per tool result. Its <c>output</c> is the result's text — byte-identical to what this
+    /// provider wrote before tool results could carry a picture — unless the result has images the model may see, in which case it
+    /// is the input-content array this protocol takes there (<c>input_text</c> first, then each <c>input_image</c>).
+    /// </summary>
+    private static void WriteToolResults(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks, bool includeToolImages)
     {
-        foreach (var block in blocks)
+        for (var index = 0; index < blocks.Count; index++)
         {
-            if (block is not ToolResultBlock result)
+            if (blocks[index] is not ToolResultBlock result)
             {
                 continue;
             }
@@ -237,7 +242,32 @@ public sealed class OpenAiResponsesProvider : HttpChatProvider
             writer.WriteStartObject();
             writer.WriteString("type", "function_call_output");
             writer.WriteString("call_id", result.CallId);
-            writer.WriteString("output", result.Content);
+            if (includeToolImages && result.Images.Count > 0)
+            {
+                writer.WriteStartArray("output");
+                if (result.Text.Length > 0)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "input_text");
+                    writer.WriteString("text", result.Text);
+                    writer.WriteEndObject();
+                }
+
+                foreach (var image in result.Images)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "input_image");
+                    writer.WriteString("image_url", ProviderJson.DataUrl(image));
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+            }
+            else
+            {
+                writer.WriteString("output", result.Content);
+            }
+
             writer.WriteEndObject();
         }
     }

@@ -353,7 +353,22 @@ public sealed class AgentLoop(AgentLoopServices services)
         {
             CacheRoutingKey = instance.CacheState.RoutingKey ?? instance.SessionId,
             SessionId = instance.SessionId,
+            IncludeToolImages = SendsToolImages(instance.Definition.Model),
         };
+    }
+
+    /// <summary>
+    /// Whether this turn's tool results may carry their images to the model: the user's switch, and a model whose catalogue
+    /// entry is known not to take image input. Both are read here, once per request, so a change applies from the next turn.
+    /// </summary>
+    private bool SendsToolImages(ModelSettings model)
+    {
+        if (!services.Options.SendToolImagesToModel)
+        {
+            return false;
+        }
+
+        return services.Options.ModelInputs?.Invoke(model) is not { } inputs || (inputs & ModelInputs.Image) != 0;
     }
 
     /// <summary>
@@ -895,7 +910,7 @@ public sealed class AgentLoop(AgentLoopServices services)
 
         result = await SpillAsync(instance, tool, result, ct).ConfigureAwait(false);
         sink.Emit(new AgentToolFinished(instance.Id, call, result));
-        return new ToolResultBlock(call.Id, result.Content, result.IsError);
+        return new ToolResultBlock(call.Id, result.Blocks, result.IsError);
     }
 
     private async ValueTask<bool> IsApprovedAsync(ApprovalRequest request, CancellationToken ct)
@@ -945,7 +960,16 @@ public sealed class AgentLoop(AgentLoopServices services)
         builder.Append("\n\n[output truncated: ").Append(bytes.Length).Append(" bytes stored as artifact '").Append(info.Id)
             .Append("'. Read it with the read_artifact tool: artifact_id \"").Append(info.Id)
             .Append("\", offset, length.]");
-        return new ToolResult(builder.ToString(), result.IsError);
+
+        // Only the text moves into the artifact; a picture the tool produced stays with its result either way.
+        if (result.Images.Count == 0)
+        {
+            return new ToolResult(builder.ToString(), result.IsError);
+        }
+
+        var blocks = new List<ContentBlock>(result.Images.Count + 1) { new TextBlock(builder.ToString()) };
+        blocks.AddRange(result.Images);
+        return new ToolResult(blocks, result.IsError);
     }
 
     private async Task PersistAsync(AgentInstance instance, ChatMessage message, TokenUsage? usage, CancellationToken ct)

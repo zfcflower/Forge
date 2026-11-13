@@ -24,7 +24,8 @@ public sealed record ToolResultBlock : ContentBlock
         ArgumentNullException.ThrowIfNull(Blocks);
         this.CallId = CallId;
         this.Blocks = Blocks.Count == 0 ? [] : [.. Blocks];
-        Content = ToolPayload.Text(this.Blocks);
+        Text = ToolPayload.Text(this.Blocks);
+        Content = ToolPayload.HasNonText(this.Blocks) ? ToolPayload.WithPlaceholders(this.Blocks) : Text;
         Images = ToolPayload.Images(this.Blocks);
         this.IsError = IsError;
     }
@@ -34,7 +35,13 @@ public sealed record ToolResultBlock : ContentBlock
     /// <summary>The blocks the tool returned: text, images, or both (see <see cref="ToolResult"/>).</summary>
     public IReadOnlyList<ContentBlock> Blocks { get; }
 
-    /// <summary>The text view of <see cref="Blocks"/>; placeholders stand in for the blocks that carry no text.</summary>
+    /// <summary>The tool's own text, without the stand-ins for blocks that carry no text.</summary>
+    public string Text { get; }
+
+    /// <summary>
+    /// The text view of <see cref="Blocks"/>, placeholders included; what a transcript, the search index and a provider that
+    /// does not send the images itself sees.
+    /// </summary>
     public string Content { get; }
 
     /// <summary>The images this result carried; a provider that cannot carry them, and every text reader, sees <see cref="Content"/> instead.</summary>

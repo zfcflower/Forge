@@ -8,9 +8,9 @@ namespace Forge.Abstractions;
 internal static class ToolPayload
 {
     /// <summary>
-    /// The text of <paramref name="blocks"/>: every <see cref="TextBlock"/> in order, one per line, and a bracketed
-    /// placeholder for a block that carries no text (so a text-only reader still knows an image arrived). A payload of
-    /// exactly one text block — the shape of every text-only tool — returns that string unchanged, copying nothing.
+    /// The result's own text — every <see cref="TextBlock"/> in order, one per line — with nothing standing in for the blocks
+    /// that carry no text. A payload of exactly one text block (the shape of every text-only tool) returns that string
+    /// unchanged, copying nothing.
     /// </summary>
     public static string Text(IReadOnlyList<ContentBlock> blocks)
     {
@@ -25,29 +25,32 @@ internal static class ToolPayload
             return only.Text;
         }
 
-        var builder = new System.Text.StringBuilder(256);
+        return Join(blocks, placeholders: false);
+    }
+
+    /// <summary>Whether any block carries something other than text (an image, a file, an artifact reference).</summary>
+    public static bool HasNonText(IReadOnlyList<ContentBlock> blocks)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
         for (var index = 0; index < blocks.Count; index++)
         {
-            var text = blocks[index] switch
+            if (blocks[index] is not TextBlock)
             {
-                TextBlock content => content.Text,
-                ContentBlock other => Describe(other),
-            };
-
-            if (text.Length == 0)
-            {
-                continue;
+                return true;
             }
-
-            if (builder.Length > 0)
-            {
-                builder.Append('\n');
-            }
-
-            builder.Append(text);
         }
 
-        return builder.ToString();
+        return false;
+    }
+
+    /// <summary>
+    /// <see cref="Text"/> with a bracketed placeholder for each block that carries no text, so a reader that only understands
+    /// text still knows what the tool returned.
+    /// </summary>
+    public static string WithPlaceholders(IReadOnlyList<ContentBlock> blocks)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
+        return blocks.Count == 0 ? string.Empty : Join(blocks, placeholders: true);
     }
 
     /// <summary>The images of <paramref name="blocks"/>, in order; an empty list when there is none.</summary>
@@ -79,6 +82,34 @@ internal static class ToolPayload
         }
 
         return images;
+    }
+
+    private static string Join(IReadOnlyList<ContentBlock> blocks, bool placeholders)
+    {
+        var builder = new System.Text.StringBuilder(256);
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            var text = blocks[index] switch
+            {
+                TextBlock content => content.Text,
+                ContentBlock other when placeholders => Describe(other),
+                _ => string.Empty,
+            };
+
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append('\n');
+            }
+
+            builder.Append(text);
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>What a text-only reader says about a block that carries no text.</summary>

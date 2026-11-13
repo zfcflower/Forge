@@ -32,6 +32,20 @@ public sealed record AgentOptions
     public int ArtifactPreviewChars { get; init; } = 2_000;
 
     /// <summary>
+    /// Whether a tool result's images may be sent to the model. The stored message keeps them either way — the transcript
+    /// shows what the tool produced — so turning this off changes only what the next request carries.
+    /// </summary>
+    public bool SendToolImagesToModel { get; init; } = true;
+
+    /// <summary>
+    /// The input kinds of the catalogue entry for a model, or null when the catalogue says nothing. Used for one decision:
+    /// a model that is known not to take images receives a tool result's text and not its pictures, so a text-only model
+    /// cannot fail a turn with a content type it never claimed to accept. Unknown means "may take images", the same rule
+    /// the composer applies to a user attachment.
+    /// </summary>
+    public Func<ModelSettings, ModelInputs?>? ModelInputs { get; init; }
+
+    /// <summary>
     /// Prompt-cache lifetime policy (<see cref="CacheHint.Ttl"/>): <c>"5m"</c>, <c>"1h"</c>, or <c>"auto"</c>/null — start at the
     /// short lifetime and move to the hour once this instance has actually paused for longer than
     /// <see cref="CacheTtlPromotionGap"/>. The move happens on a request that was going to write anyway, so promoting never pays

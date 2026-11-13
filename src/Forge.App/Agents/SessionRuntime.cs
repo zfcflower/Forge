@@ -116,6 +116,19 @@ internal sealed record AgentRuntimeServices(
     public Func<ModelSettings, int?>? MaxOutputTokens { get; set; }
 
     /// <summary>
+    /// What a model accepts from the catalog, handed to <see cref="AgentOptions.ModelInputs"/>: a model known to take no
+    /// image input receives a tool result's text instead of its pictures. A lookup rather than a value because the session
+    /// can be pointed at another provider between hosts.
+    /// </summary>
+    public Func<ModelSettings, ModelInputs?>? ModelInputs { get; set; }
+
+    /// <summary>
+    /// Whether tool results may send their images to the model (the <c>chat</c> settings switch), read when each host is
+    /// built; null (a unit test) means on.
+    /// </summary>
+    public Func<bool>? SendToolImages { get; set; }
+
+    /// <summary>
     /// The <c>compaction</c> settings, read when a session's host is built, again before every turn and whenever
     /// <see cref="CompactionChanges"/> reports a save; null = the defaults (or the store's current value when only the store
     /// is set).
@@ -697,6 +710,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                     // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
                     // this host through ApplyCompaction.
                     Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens),
+                    SendToolImagesToModel = services.SendToolImages?.Invoke() ?? true,
+                    ModelInputs = services.ModelInputs,
                 },
             });
         appliedCompaction = compaction;
