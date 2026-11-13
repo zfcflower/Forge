@@ -102,6 +102,16 @@ internal sealed record AgentRuntimeServices(
     public Func<IReadOnlyList<string>>? DisabledTools { get; set; }
 
     /// <summary>
+    /// The <c>agents</c> section's two dials: how many agents of a session tree may run at once, and whether a session may
+    /// spawn sub-agents at all. Read when a host is built and again before every turn, so a change reaches a running session
+    /// from its next turn: a raised cap lets agents that are already queued start at once, a lower one only stops new ones
+    /// from starting, and switching spawning off takes <c>spawn_agent</c> out of the model's tool set while the control tools
+    /// a parent already needs (steer, follow-up, stop) stay. Null = <see cref="SubAgentLimits.Default"/> (a unit test, or
+    /// a runtime assembled without the settings store).
+    /// </summary>
+    public Func<SubAgentLimits>? SubAgents { get; set; }
+
+    /// <summary>
     /// The prompt-cache lifetime policy of a provider (<c>provider.promptCacheTtl</c>) handed to <see cref="AgentOptions.CacheTtl"/>:
     /// <c>"auto"</c>/null, <c>"5m"</c> or <c>"1h"</c>. A lookup rather than a value because the policy belongs to the provider the
     /// session is pointed at, and that can change between hosts.
@@ -161,6 +171,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
     private CompactionSettings? appliedCompaction;
+
+    /// <summary>The sub-agent cap last handed to the host; an unchanged value never touches it. Guarded by <see cref="gate"/>.</summary>
+    private int appliedMaxParallel = SubAgentLimits.DefaultParallel;
     private bool disposed;
 
     // Sub-agent sessions aliased to this runtime in the router, by child agent id. Guarded by gate.
@@ -498,6 +511,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             if (host is not null && root is not null && !rootStale)
             {
                 ApplyDisabledTools(host);
+                ApplySubAgentLimits(host);
                 RefreshWebTools(host);
                 ApplyCompaction(host);
                 return (host, root);
@@ -515,6 +529,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             host ??= built;
             root = agent;
             ApplyDisabledTools(host);
+            ApplySubAgentLimits(host);
             RefreshWebTools(host);
             ApplyCompaction(host);
             rootStale = !SameDefinition(rootDefinition, definition);
@@ -531,14 +546,43 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
-    /// <summary>Re-applies the user's tool switches; publishes a new tool set only when a switch moved.</summary>
+    /// <summary>
+    /// Re-applies the user's tool switches, plus <c>spawn_agent</c> while sub-agents are switched off: the model then has no
+    /// way to start a child, while the control tools a parent already needs stay available, so the children a session started
+    /// before the switch can still be steered and stopped. Publishes a new tool set only when a switch moved.
+    /// </summary>
     private void ApplyDisabledTools(AgentHost target)
     {
-        if (services.DisabledTools is { } disabled)
+        var subAgents = CurrentSubAgentLimits();
+        if (services.DisabledTools is not { } disabled)
         {
-            target.SetDisabledTools(ToolCatalog.EffectiveDisabled(disabled()));
+            // A runtime without the tools store (a unit test) still honours the sub-agent switch, in both directions.
+            target.SetDisabledTools(subAgents.Enabled ? [] : [SpawnAgentTool.Name]);
+            return;
         }
+
+        var stored = ToolCatalog.EffectiveDisabled(disabled());
+        target.SetDisabledTools(subAgents.Enabled ? stored : stored.Append(SpawnAgentTool.Name));
     }
+
+    /// <summary>
+    /// Hands the current sub-agent cap to the host when it differs from the one it last got, so an unchanged value never
+    /// touches the host. Caller holds <see cref="gate"/>.
+    /// </summary>
+    private void ApplySubAgentLimits(AgentHost target)
+    {
+        var limits = CurrentSubAgentLimits();
+        if (limits.MaxParallel == appliedMaxParallel)
+        {
+            return;
+        }
+
+        target.SetMaxParallelSubAgents(limits.MaxParallel);
+        appliedMaxParallel = limits.MaxParallel;
+    }
+
+    /// <summary>The sub-agent dials in force: the settings store's values, or the built-in defaults without one.</summary>
+    private SubAgentLimits CurrentSubAgentLimits() => services.SubAgents?.Invoke() ?? SubAgentLimits.Default;
 
     /// <summary>
     /// Brings the web tools <paramref name="target"/> holds in line with the web settings: when the names the factory
@@ -671,6 +715,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         var mainModel = services.AgentDefaults?.Invoke(AgentIds.Main) ?? services.Model;
+        var subAgents = CurrentSubAgentLimits();
         var layers = LayerSources.Resolve(systemSlot, AgentRuntimeServices.UserDirectory(), Session.WorkspacePath);
         var compaction = services.CurrentCompaction();
         var built = new AgentHost(
@@ -692,6 +737,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Options = new AgentOptions
                 {
                     DefaultModel = mainModel,
+                    MaxParallelSubAgents = subAgents.MaxParallel,
                     // The policy belongs to the provider this session is pointed at; "auto" is resolved per request afterwards.
                     CacheTtl = services.PromptCacheTtl?.Invoke(mainModel.ProviderId),
                     // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
@@ -700,6 +746,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 },
             });
         appliedCompaction = compaction;
+        appliedMaxParallel = subAgents.MaxParallel;
 
         // From here on a plugin or workflow run of this session can call tools through this session's tool set and handler.
         builtHost = built;

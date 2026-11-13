@@ -65,9 +65,38 @@ public sealed class AgentLoop(AgentLoopServices services)
 {
     private const string SkippedResult = "skipped: the agent was redirected";
 
+    /// <summary>
+    /// The pool would deadlock the root agent at zero permits, so a caller that hands over a smaller number still gets one.
+    /// The settings section clamps to the same floor; this is the belt for a host configured in code.
+    /// </summary>
+    private const int SubAgentLimitsHardFloor = 1;
+
     private readonly SemaphoreSlim approvalGate = new(1, 1);
     private readonly AgentSlotPool slots = new(services.Options.MaxParallelSubAgents);
     private CompactionPolicy compactionPolicy = services.Options.Compaction;
+    private int maxParallelSubAgents = services.Options.MaxParallelSubAgents;
+
+    /// <summary>
+    /// Replaces the cap on how many agents of this tree may run at once (the <c>agents</c> settings section). Raising it lets
+    /// agents that are already queued start at once; lowering it never interrupts an agent in the middle of a turn, it only
+    /// stops new ones from starting until the tree is back under the new cap. It changes no request and resets no state, so
+    /// the prompt cache is untouched. Thread-safe, and a no-op when the cap did not move.
+    /// </summary>
+    /// <returns>Whether the cap moved.</returns>
+    internal bool SetMaxParallelSubAgents(int limit)
+    {
+        var clamped = Math.Max(SubAgentLimitsHardFloor, limit);
+        if (Interlocked.Exchange(ref maxParallelSubAgents, clamped) == clamped)
+        {
+            return false;
+        }
+
+        slots.SetLimit(clamped);
+        return true;
+    }
+
+    /// <summary>The cap in force on how many agents of this tree run at once; see <see cref="SetMaxParallelSubAgents"/>.</summary>
+    internal int MaxParallelSubAgents => Volatile.Read(ref maxParallelSubAgents);
 
     /// <summary>
     /// The compaction policy in force. It starts as <see cref="AgentOptions.Compaction"/> and is replaced through

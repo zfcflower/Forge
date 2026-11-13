@@ -346,4 +346,30 @@ public class AgentLoopTests
         Assert.Contains("upstream down", failure.Error, StringComparison.Ordinal);
         Assert.Equal(new[] { MessageRole.User }, root.History.Select(message => message.Role).ToArray());
     }
+
+    [Fact]
+    public void SetMaxParallelSubAgents_reports_whether_the_cap_moved()
+    {
+        var host = AgentTestHost.Create(new FakeProvider((_, _) => Turn.Say("unused")), options: new AgentOptions { MaxParallelSubAgents = 4 });
+
+        Assert.Equal(4, host.MaxParallelSubAgents);
+        Assert.True(host.SetMaxParallelSubAgents(2));
+        Assert.Equal(2, host.MaxParallelSubAgents);
+
+        // The settings hand the same cap to the host before every turn, so re-applying it must not touch the pool.
+        Assert.False(host.SetMaxParallelSubAgents(2));
+        Assert.Equal(2, host.MaxParallelSubAgents);
+    }
+
+    [Fact]
+    public void A_cap_below_one_is_lifted_to_a_single_permit()
+    {
+        var host = AgentTestHost.Create(new FakeProvider((_, _) => Turn.Say("unused")), options: new AgentOptions { MaxParallelSubAgents = 4 });
+
+        // Zero permits would deadlock the root agent itself, so the loop floors the cap at one instead.
+        Assert.True(host.SetMaxParallelSubAgents(0));
+        Assert.Equal(1, host.MaxParallelSubAgents);
+        Assert.False(host.SetMaxParallelSubAgents(-5));
+        Assert.Equal(1, host.MaxParallelSubAgents);
+    }
 }
