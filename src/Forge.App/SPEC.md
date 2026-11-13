@@ -370,7 +370,8 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
 ## 未决
 
-- 文件预览已支持编辑保存、TextMate 预览着色及 LSP 文档同步,非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF/HTML 占位(见「富文件查看器」);编辑模式尚为无着色 TextBox,LSP 诊断、语义 token 叠加与补全尚未接到 UI。声明式插件面板渲染未做;富查看器不含 SVG 内部渲染(按文本打开)、图片 diff 与缩放/平移,SVG 渲染需要枚举之外的 Skia SVG 包。
+- 文件预览已支持编辑保存、TextMate 着色及 LSP 文档同步(AvaloniaEdit 编辑视图),非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF/HTML 占位(见「富文件查看器」;不含 SVG 内部渲染——按文本打开——与图片 diff、缩放/平移);LSP 诊断、悬停、补全与跳转定义已接到 UI。未做:语义 token 叠加(`HighlightMerger`/`SemanticTokenMapper` 在 App 零调用)、查找引用 UI、问题列表面板、code action / rename。声明式插件面板渲染未做。
+- 聊天消息:助手回复与用户消息下各有一枚复制按钮(`CopyTextButton`,点击时读 `ICopyableText.CopyText`,整条纯文本);流式回复结束前不显示。聊天尚不过 Markdown 渲染。
 - git 写工具(`git_branch`/`git_sync`)按工具名划为写操作,经会话的审批队列逐次询问;读工具自动放行,且 git 工具不暴露给 `run_code` 脚本(脚本内调用不经逐次审批呈现)。
 - 搜索框暂无行为(占位)。
 - 会话交接的未决项:完整继承且继承前缀本身已超过触发线时,Core 的迟滞把重复压缩限制在两次无效尝试后停住(见 Core SPEC),根因(持久化压缩后的表示或历史边界)需要新的存储契约,归 T0,本阶段不引入。交接摘要不沿继承链取父会话消息;历史检索工具也不跟继承链。对话框的模型/推理档位初值、缓存剩余时间、接近压缩阈值、前缀指纹不符等提示未做。

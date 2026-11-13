@@ -1542,7 +1542,7 @@ public sealed class MainWindowSmokeTests
     }
 
     [Fact]
-    public async Task Window_header_replaces_the_search_box_with_the_magnifier_and_the_host_state()
+    public async Task Window_header_replaces_the_search_box_with_the_magnifier_button_and_the_host_state()
     {
         var session = SharedUi.Session;
         await using var shell = await ShellFixture.OpenAsync(session);
@@ -1559,7 +1559,7 @@ public sealed class MainWindowSmokeTests
                 TerminalLeftOfSettings: terminal.Bounds.X < settings.Bounds.X,
                 SameRow: ReferenceEquals(terminal.Parent, settings.Parent) && titleRow.IsVisualAncestorOf(terminal),
                 SearchBox: WorkbenchUi.TryFind<TextBox>(shell.Window, "shell-search") is not null,
-                Magnifier: WorkbenchUi.TryFind<FluentIcon>(shell.Window, "shell-search") is not null,
+                Magnifier: WorkbenchUi.TryFind<Button>(shell.Window, "shell-search") is { } search && search.GetVisualDescendants().OfType<FluentIcon>().Any(),
                 HostLabel: host.IsEffectivelyVisible ? TextOf(host) : null,
                 RightAligned: (host.TranslatePoint(default, titleRow) is { } origin)
                     && origin.X + host.Bounds.Width > titleRow.Bounds.Width / 2,

@@ -20,7 +20,7 @@ internal abstract class TranscriptItemViewModel : NotifyingObject
 /// A user message, rendered as an IM-style bubble aligned right: the typed text, image thumbnails, and a chip (icon, name,
 /// size) for each other attachment - PDF, audio, video, or a text file inlined into the message.
 /// </summary>
-internal sealed class UserMessageViewModel : TranscriptItemViewModel
+internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableText
 {
     public UserMessageViewModel(string text, DateTimeOffset at, IReadOnlyList<ContentBlock>? attachments = null)
     {
@@ -67,6 +67,8 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel
 
     public string Time { get; }
 
+    string ICopyableText.CopyText => Text;
+
     public override void RefreshText()
     {
         foreach (var file in Files)
@@ -107,6 +109,8 @@ internal sealed class TextSegmentViewModel : ObservableObject
     /// <summary>A segment that shows a localized placeholder instead of model text - a reply that never arrived.</summary>
     public TextSegmentViewModel(LocText value) => placeholder = value;
 
+    internal bool IsPlaceholder => !placeholder.IsEmpty;
+
     public string Text
     {
         get => placeholder.IsEmpty ? text : placeholder.Resolve();
@@ -121,7 +125,7 @@ internal sealed class TextSegmentViewModel : ObservableObject
 /// and land in the open segment only, so a flush never re-materializes the whole reply; a segment is closed at the next
 /// paragraph break once it reaches <see cref="SegmentLimit"/> characters.
 /// </summary>
-internal sealed class TurnTextViewModel : TurnBlockViewModel
+internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
 {
     private const int SegmentLimit = 2048;
     private const int HardLimit = SegmentLimit * 4;
@@ -140,10 +144,20 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel
         private set => Set(ref isStreaming, value);
     }
 
+    /// <summary>
+    /// The reply's whole text. Segments are cut at line breaks, so joining them restores the original exactly; the placeholder
+    /// of a reply that never arrived is not text and copies as nothing.
+    /// </summary>
+    public string CopyText => string.Concat(segments.Where(static segment => !segment.IsPlaceholder).Select(static segment => segment.Text));
+
     public void Append(string chunk)
     {
         open.Append(chunk);
         var closed = false;
+
+        // The last segment is the live one: it already shows the earlier part of the open text, so the first piece cut off
+        // replaces it instead of being added after it (which would show that text twice).
+        var liveShown = segments.Count > 0;
         while (open.Length > SegmentLimit)
         {
             var cut = LastBreak(open, '\n');
@@ -161,7 +175,17 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel
                 }
             }
 
-            segments.Add(new TextSegmentViewModel(open.ToString(0, cut)));
+            var piece = open.ToString(0, cut);
+            if (liveShown)
+            {
+                segments[^1].Text = piece;
+                liveShown = false;
+            }
+            else
+            {
+                segments.Add(new TextSegmentViewModel(piece));
+            }
+
             open.Remove(0, cut);
             closed = true;
         }

@@ -14,7 +14,6 @@ using Forge.App.Network;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
-using Forge.App.ViewModels.Preview;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
@@ -301,12 +300,6 @@ internal sealed class AppComposition : IAsyncDisposable
         // preferences do: the first file tab binds them, and the settings section below edits the same instance.
         EditorSettings.Current = new EditorSettings(preferences.Current);
 
-        // The file viewer's limits and a tool row's thumbnail edge are projections of the same preferences: both are read
-        // when a document or a tool row is built, so a change in the settings page applies to the next one. Bound before
-        // the first window opens; a host without preferences keeps the built-in defaults.
-        FilePreviewSettings.Current = new FilePreviewSettings(preferences.Current);
-        ToolImageSettings.ThumbnailEdge = () => preferences.Current.ChatToolImageThumbnailPixels;
-
         var settings = new SettingsSections();
         var appearance = AppearanceFeature.Create(preferences.Current, settings);
 
@@ -319,24 +312,6 @@ internal sealed class AppComposition : IAsyncDisposable
             EditorSettings.Current,
             SettingsGroups.Interface,
             "IconEdit"));
-
-        // The chat section (how a tool result's images read and whether the model receives them) and the files section
-        // (what the rich viewer parses) edit the live preferences directly, so both exist as soon as the preferences do.
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.Chat,
-            ChatStrings.SettingsTitle,
-            SettingsSectionIds.ChatOrder,
-            new ChatSettingsSectionViewModel(preferences.Current),
-            SettingsGroups.Interface,
-            "IconChat"));
-
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.Files,
-            PreviewStrings.SectionTitleKey,
-            SettingsSectionIds.FilesOrder,
-            new FilesSettingsSectionViewModel(preferences.Current),
-            SettingsGroups.Interface,
-            "IconEye"));
 
         // The language section edits AppPreferences.Language only: OnPreferencesChanged pushes the value into Loc and
         // PreferencesStore persists it, so it needs nothing but the preferences.
@@ -733,6 +708,7 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsGroups.Agent,
             "IconWrench"));
 
+        FeatureComposition.RegisterAll(composition, settings);
         return composition;
     }
 
