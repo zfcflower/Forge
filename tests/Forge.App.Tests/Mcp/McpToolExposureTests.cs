@@ -196,10 +196,18 @@ public sealed class McpToolExposureTests
 
         Assert.Equal(200, exposure.PinnedCount);
 
-        // tool000 was pinned first, so it is the one that fell out; the first pinned tool in catalog order is tool001.
-        var selected = exposure.Select(catalog.Tools, 1, null, out var truncated);
+        // tool000 was pinned first, so it is the one that fell out: 200 pins survive, tool001 does and tool000 does not.
+        var surviving = exposure.Select(catalog.Tools, 200, null, out var truncated).Select(tool => tool.ToolName).ToArray();
         Assert.True(truncated);
-        Assert.Equal("tool001", Assert.Single(selected).ToolName);
+        Assert.Equal(200, surviving.Length);
+        Assert.Contains("tool001", surviving);
+        Assert.Contains("tool200", surviving);
+        Assert.DoesNotContain("tool000", surviving);
+
+        // A limit below the pin count keeps the newest pins: tool200 was pinned last.
+        var selected = exposure.Select(catalog.Tools, 1, null, out var oneTruncated);
+        Assert.True(oneTruncated);
+        Assert.Equal("tool200", Assert.Single(selected).ToolName);
     }
 
     [Fact]

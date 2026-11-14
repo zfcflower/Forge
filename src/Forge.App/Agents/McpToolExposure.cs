@@ -103,11 +103,37 @@ internal sealed class McpToolExposure
         var words = Words(focus);
         var chosen = new List<McpToolAdapter>(limit);
         var chosenNames = new HashSet<string>(limit, StringComparer.Ordinal);
-        foreach (var adapter in catalog)
+
+        // The pinned tools, newest pin first: when there are more pins than the limit, the ones the conversation reached for last
+        // are the ones it is still working with. One pass over the catalog, then a sort of the few that are pinned.
+        if (pinned.Count > 0)
         {
-            if (pinned.ContainsKey(adapter.ExposedName) && chosen.Count < limit && chosenNames.Add(adapter.ExposedName))
+            var pinnedHere = new List<McpToolAdapter>(Math.Min(pinned.Count, catalog.Count));
+            foreach (var adapter in catalog)
             {
-                chosen.Add(adapter);
+                if (pinned.ContainsKey(adapter.ExposedName))
+                {
+                    pinnedHere.Add(adapter);
+                }
+            }
+
+            if (pinnedHere.Count > 1)
+            {
+                pinnedHere.Sort((left, right) =>
+                    pinned[right.ExposedName].CompareTo(pinned[left.ExposedName]));
+            }
+
+            foreach (var adapter in pinnedHere)
+            {
+                if (chosen.Count >= limit)
+                {
+                    break;
+                }
+
+                if (chosenNames.Add(adapter.ExposedName))
+                {
+                    chosen.Add(adapter);
+                }
             }
         }
 

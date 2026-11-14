@@ -74,11 +74,16 @@ internal sealed class McpServices : IAsyncDisposable
         Create(new McpConfigStore(McpConfigLoader.GlobalPath, paths.WorkspaceDirectory), preferences, notifications, http);
 
     /// <summary>Same wiring over explicit files, for a test that has no user profile to read.</summary>
+    /// <param name="transportFactory">
+    /// Replaces the transport a server would spawn. A test uses it to answer the handshake in memory, which is the only way to
+    /// reach a ready server (and therefore a ready server's tools and their server lookup) without launching a process.
+    /// </param>
     public static McpServices Create(
         McpConfigStore store,
         PreferencesStore preferences,
         INotifications? notifications = null,
-        HttpClient? http = null)
+        HttpClient? http = null,
+        Func<McpServerConfig, IMcpTransport>? transportFactory = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(preferences);
@@ -87,7 +92,7 @@ internal sealed class McpServices : IAsyncDisposable
         // connection without restarting a server or rebuilding the manager.
         var manager = new McpServerManager(
             LoadConfig(store),
-            () => ServerOptions(preferences.Current, http));
+            () => ServerOptions(preferences.Current, http, transportFactory));
         return new McpServices(manager, store, preferences, notifications, http);
     }
 
@@ -237,9 +242,13 @@ internal sealed class McpServices : IAsyncDisposable
     }
 
     /// <summary>The manager's options from the live preferences; everything else keeps the library defaults.</summary>
-    private static McpServerManagerOptions ServerOptions(AppPreferences preferences, HttpClient? http) => new()
+    private static McpServerManagerOptions ServerOptions(
+        AppPreferences preferences,
+        HttpClient? http,
+        Func<McpServerConfig, IMcpTransport>? transportFactory) => new()
     {
         HttpClient = http,
+        TransportFactory = transportFactory,
         RequestTimeout = TimeSpan.FromSeconds(preferences.McpRequestTimeoutSeconds),
         InitialReconnectDelay = TimeSpan.FromSeconds(preferences.McpReconnectInitialDelaySeconds),
     };
