@@ -21,6 +21,12 @@ namespace Forge.App.Tests;
 [Collection("forge-app-ui")]
 public sealed class PlanPanelShellTests
 {
+    /// <summary>
+    /// How long the waits for a real turn poll for: a runtime build plus one model request over a loopback listener is much
+    /// slower than the pump's default on a loaded machine, and a test that reports a missing turn must not be timing noise.
+    /// </summary>
+    private const int TurnWaitIterations = 6000;
+
     private const string HandoffPrompt = "Finish step \"收尾这一步\" (todo id t1): do the work it describes, then mark it done with the todo tool and record its summary and verification.";
 
     [Fact]
@@ -142,10 +148,11 @@ public sealed class PlanPanelShellTests
                     Assert.Equal(PlanHandoff.Sent, outcome);
                     Assert.Equal(string.Empty, live.Draft);
                     Assert.True(
-                        await TestPump.UntilAsync(() =>
-                            live.Transcript.Items.Any(item => item is UserMessageViewModel message && message.Text == HandoffPrompt)),
+                        await TestPump.UntilAsync(
+                            () => live.Transcript.Items.Any(item => item is UserMessageViewModel message && message.Text == HandoffPrompt),
+                            TurnWaitIterations),
                         "the hand-off never became a sent user message");
-                    Assert.True(await TestPump.UntilAsync(() => !live.IsRunning), "the turn never finished");
+                    Assert.True(await TestPump.UntilAsync(() => !live.IsRunning, TurnWaitIterations), "the turn never finished");
 
                     harness.Detach(viewModel);
                     return 0;
@@ -261,7 +268,7 @@ public sealed class PlanPanelShellTests
                         live.Draft = "first";
                         live.SendCommand.Execute(null);
                         Assert.True(
-                            await TestPump.UntilAsync(() => live.IsRunning && server.Requests > 0),
+                            await TestPump.UntilAsync(() => live.IsRunning && server.Requests > 0, TurnWaitIterations),
                             "the turn never reached the blocked model request");
 
                         var outcome = ((IPlanPanelHost)viewModel).HandoffToAgent(HandoffPrompt);
@@ -273,7 +280,7 @@ public sealed class PlanPanelShellTests
 
                         // Let the turn die: the dropped connection fails the request and ends it.
                         server.Dispose();
-                        Assert.True(await TestPump.UntilAsync(() => !live.IsRunning), "the turn never finished");
+                        Assert.True(await TestPump.UntilAsync(() => !live.IsRunning, TurnWaitIterations), "the turn never finished");
 
                         viewModel.Files.Attach(PanelContext.Empty);
                         viewModel.GitSync.Attach(PanelContext.Empty);
