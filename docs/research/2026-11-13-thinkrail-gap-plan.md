@@ -392,7 +392,17 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 ### 仍待用户定夺
 
-- **W14b 批量审批卡**:脚本内 `web_fetch` 扇出会同时弹 N 张卡(默认并发 8 封顶)。候选方案:同一脚本运行内同工具的连续卡折叠成一张批卡(列前几个目标 +「允许本次运行剩余全部」,作用域限本次 run、不落持久化),需要动 `SessionApprovalHandler` 与审批浮层,独立立项。
+- ~~**W14b 批量审批卡**~~ **已立项并落地(2026-11-15 用户选 B)**:见下。
+
+### W14b 交付记录(2026-11-15)
+
+**设计(用户选 B 后定稿)**:`ApprovalRequest` 增可选 `RunKey`(仅脚本运行的内层调用携带,`ExtensionHostClient` 以 `run.IsCode` 判定);`SessionApprovalHandler` 对同 (run, tool) 的待审调用串行化——首个调用建卡,其余等在卡后;卡带「允许本次运行内剩余同类调用」按钮与「本脚本还有 N 个同类调用在等待」计数行;许可只存 handler 内存(不进 `ApprovalRules`、不落盘),以唯一 runId 为键,FIFO≤64 收口。
+
+**与 B 方案草图的偏差(已声明)**:不做合并卡列前几个目标,改为逐张串行 + 等待计数——每个目标以完整参数可见后才被批准(比合并列表更安全),与既有问题卡(每会话一张 + WaitingCount)同构;拒绝只答本调用(脚本 WhenAll 异常→运行结束→等待自然取消,拒绝方向无需 run 级授权);点击数收益相同。免 `EndRun` 撤回通道的理由:runId 全局唯一,陈旧 grant 不可能再命中,FIFO 上限只收内存。
+
+**落点**:`Forge.Abstractions/Tools.cs`(请求 + RunKey)、`Forge.HostClient/ExtensionHostClient.cs`(一处命名实参)、`Forge.App/Approval/`(`ApprovalCardViewModel` 结果加 `AllowRestOfRun`、`ToolApprovalCardViewModel` 加 `RunKey`/`AllowRunCommand`/`PendingCount`、`SessionApprovalHandler` 加 grants + 串行组、`ApprovalQueueOverlay.axaml` 加按钮与计数行)、`Strings.Extensions.cs`(两个键 + 单复变体)、`ApprovalTestDoubles.ToolRequest` 加 `runKey` 形参。
+
+**测试(只跑相关)**:新 `ScriptRunApprovalTests`(8 例:单卡 + run 按钮、串行一卡 + 计数、允许剩余全部答齐 waiter 与后续调用且不写 rules、拒绝只答本调用、两 run 各自卡、null RunKey 不分组、取消退出组且计数回落、65 个 grant 后逐出最旧);回归 `Forge.App.Tests Approval` 193、`Forge.Approval.Tests` 全量 188、`Forge.HostClient.Tests RunCode|HostToolCall` 177、源码扫描门 137——全部全绿。`Forge.Integration.Tests`(`RunCodeScriptTests` 的逐次审批断言)按仓规不跑,其语义不受影响(无 grant 时逐次出卡不变)。
 
 ### 本批验证
 

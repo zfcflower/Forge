@@ -33,7 +33,9 @@ depends-on: [forge-ipc]
   `Resolve(sessionId, name)` / `ApproveAsync(sessionId, request, ct)`,`sessionId` **只取该 run 注册时的 Host 校验上下文**
   (`run.Context.SessionId`),绝不取 Worker 消息里的字段;插件命令审批同样用其有效上下文的会话。路由器未知/已关闭的会话
   必须 fail-closed(返回 null / Deny)。旧的 `Func<string, ITool?>` + 审批委托构造保持不变(无会话,测试沿用);
-  传了路由器则路由器优先。`run_code` 脚本内的调用仍用该次执行的注册表,但审批同样走路由器。
+  传了路由器则路由器优先。`run_code` 脚本内的调用仍用该次执行的注册表,但审批同样走路由器。审批请求在
+  脚本运行(`run.IsCode`)时携带 `RunKey = run.RunId`(W14b):App 侧的同级折叠与「允许本次运行内剩余同类调用」以它为键;
+  插件运行与插件命令不带(`null`,照旧逐次出卡)。`ApprovalRequest` 不跨 IPC——它在主程序内、消息已比对可信 run 记录之后才构建。
 - **可信调用链走私有 AsyncLocal。** 每次执行(tools/commands/prompts/code)都分配 128 位加密随机 `runId`、
   绑定当时连接世代、原始 `ToolContext`、完整可信链、自身取消生命周期和每运行回调门。嵌套代理只在本客户端执行
   某回调期间读取该私有上下文,并以新 `runId`、父链与父深度(深度由主程序推算,不取 Worker 值)发起新执行;
