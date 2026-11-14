@@ -18,7 +18,9 @@
 
 - `ApplyConfigAsync(McpConfig, ct)`:按名差量应用——删除→停进程并释放传输;条目变更→带新条目重启(旧进程不留在文件里已不存在的配置上);新增→注册为启用、懒启动;`Diagnostics`/`ServerNames` 变活。单台重启失败只落它自己的状态,不中断整次应用。手写的重复名字按"后者生效"折叠(与 loader 一致)。
 - `McpServerManager(McpConfig, Func<McpServerManagerOptions>)`:请求超时在**每次建客户端**时读、重连延迟在**每次退避**时读,所以设置页改完对下一次连接生效,不必重建管理器(重建会杀掉所有服务器及其工具)。
+- 条目变更时**连传输一起回收**再重启:传输在构造时捕获了 `command`/`args`/`env`/`cwd`(HTTP 是 `url`/`headers`),复用旧传输等于用旧命令行重启;启用状态以文件里的 `disabled` 为准。
 - `ConfigOfTool(exposedName)`(走与暴露名分配同一张表,消歧名也认得出)、`ToolsOf(server)`、`ProbeAsync`(连接 + `tools/list` + 耗时;未知名字与起不来的服务器都返回 `Failed` 结果,不抛)。
+- 启动失败的 stderr 尾巴会被记到服务器状态上(传输回收前抓取),否则设置页与「测试」恰好在最需要它的时候看不到原因。
 - `McpServerProbe` 记录。
 
 ### 3. 设置页(`ViewModels/Settings/McpSettingsSectionViewModel` + `Views/McpSettingsView.axaml` + `Localization/Strings.Mcp.cs`)
@@ -71,6 +73,8 @@ dotnet build Forge.slnx            → 已成功生成,0 警告 0 错误
 
 ## 五、偏差与遗留
 
+- 保存改名会在同一次写里删掉旧键(`McpConfigFile.Upsert(..., replacedName)`),不留幽灵条目。
+- 某份文件读不懂(非法 JSON / 根不是对象 / 没有 `mcpServers`)时,**来自该文件的运行中服务器原样保留**,只应用其余文件的变化;完全读不出来时什么都不应用。「重新读取」按钮走同一条 apply 路径。
 - **MCP 工具接入会话属于计划外**(计划只写"管理面"),已向用户确认后并入本波。
 - 工具选面按"本回合请求文本"打分,**没有**跨回合的使用频次记忆(需要会话级调用统计接缝);请求命中 0 个词时按目录顺序取前 N。
 - 写回 `mcp.json` 丢 JSON 注释、统一两空格缩进;`Claude Code` 的 `~/.claude.json` 只读顶层 `mcpServers`(不读 `projects.<路径>.mcpServers`)。
