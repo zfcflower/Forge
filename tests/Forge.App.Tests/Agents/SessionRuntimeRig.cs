@@ -4,6 +4,8 @@ using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.Core.Agents;
 using Forge.Core.Storage;
+using Forge.HostClient;
+using Forge.Workspace;
 using Xunit;
 
 namespace Forge.App.Tests.Agents;
@@ -22,7 +24,11 @@ internal sealed class SessionRuntimeRig : IAsyncDisposable
     private readonly SqliteTodoStore todos;
     private bool disposed;
 
-    public SessionRuntimeRig(string root, Action<AgentRuntimeServices>? configure = null)
+    public SessionRuntimeRig(
+        string root,
+        Action<AgentRuntimeServices>? configure = null,
+        ExtensionHostClient? hostClient = null,
+        GitTools? git = null)
     {
         var data = Path.Combine(root, "data-" + Guid.NewGuid().ToString("N"));
         var workspace = Path.Combine(root, "ws");
@@ -32,11 +38,12 @@ internal sealed class SessionRuntimeRig : IAsyncDisposable
         todos = new SqliteTodoStore(data);
         var services = new AgentRuntimeServices(
             _ => Provider,
-            HostClient: null,
+            hostClient,
             store,
             store,
             todos,
-            new ModelSettings("main-model"))
+            new ModelSettings("main-model"),
+            Git: git)
         {
             ContextWindow = static _ => Window,
         };

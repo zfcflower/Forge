@@ -1,0 +1,129 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:set="using:Forge.App.ViewModels.Settings"
+             x:Class="Forge.App.Views.ToolsSettingsSectionView"
+             x:DataType="set:ToolsSettingsSectionViewModel">
+  <!-- The `tools` section body: the run_code script block on top, then the active session's catalog grouped by origin:
+       built-in groups carry a switch per tool, extension and MCP tools are read-only here. -->
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="10">
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
+      <!-- Wave W14: what a run_code script may call, how many calls it keeps in flight and how much text comes back. -->
+      <StackPanel Spacing="6">
+        <TextBlock Classes="label"
+                   FontWeight="SemiBold"
+                   Text="{Binding [codeMode.settings.heading], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [codeMode.settings.hint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [codeMode.settings.concurrency], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinCodeScriptMaxConcurrentCalls}"
+                         Maximum="{Binding MaxCodeScriptMaxConcurrentCalls}"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding CodeScriptMaxConcurrentCalls, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-code-concurrency"
+                         AutomationProperties.Name="{Binding [codeMode.settings.concurrency], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [codeMode.settings.concurrencyHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [codeMode.settings.resultChars], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinCodeScriptResultChars}"
+                         Maximum="{Binding MaxCodeScriptResultChars}"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding CodeScriptResultChars, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-code-result-chars"
+                         AutomationProperties.Name="{Binding [codeMode.settings.resultChars], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [codeMode.settings.resultCharsHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [codeMode.settings.innerResultChars], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="{Binding MinCodeScriptInnerResultChars}"
+                         Maximum="{Binding MaxCodeScriptInnerResultChars}"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding CodeScriptInnerResultChars, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="settings-code-inner-result-chars"
+                         AutomationProperties.Name="{Binding [codeMode.settings.innerResultChars], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [codeMode.settings.innerResultCharsHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [codeMode.settings.tools], Source={x:Static loc:Loc.Instance}}" />
+          <TextBox Grid.Column="1"
+                   HorizontalAlignment="Stretch"
+                   Text="{Binding CodeScriptTools, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="settings-code-tools"
+                   AutomationProperties.Name="{Binding [codeMode.settings.tools], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [codeMode.settings.toolsHint], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+      <Separator Margin="0,4,0,0" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding InventoryText}"
+                 IsVisible="{Binding HasInventory}"
+                 AutomationProperties.AutomationId="settings-tools-inventory" />
+      <ItemsControl ItemsSource="{Binding Groups}" AutomationProperties.AutomationId="settings-tools-groups">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="set:ToolGroupViewModel">
+            <StackPanel Spacing="2" Margin="0,4,0,6">
+              <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding Title}" />
+              <ItemsControl ItemsSource="{Binding Tools}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="set:ToolRowViewModel">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                      <StackPanel Spacing="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}"
+                                   FontFamily="{DynamicResource FontMono}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="caption" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" />
+                      </StackPanel>
+                      <CheckBox Grid.Column="1"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding CanToggle}"
+                                IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                                AutomationProperties.Name="{Binding Name}"
+                                AutomationProperties.AutomationId="settings-tools-switch" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding EmptyText}"
+                 IsVisible="{Binding !HasGroups}" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -54,10 +54,12 @@ internal sealed class ToolRowViewModel : ObservableObject
 internal sealed record ToolGroupViewModel(string Title, IReadOnlyList<ToolRowViewModel> Tools);
 
 /// <summary>
-/// The <c>tools</c> section: the active session's tool catalog grouped by origin. Built-in groups come first, in a fixed
-/// order, each tool with a switch unless another feature needs it; extension and MCP tools follow, read-only, because their
-/// plugin or server is where they are switched. Switches write <see cref="AppPreferences.ToolsDisabled"/>; every session
-/// applies it before its next turn.
+/// The <c>tools</c> section: the active session's tool catalog grouped by origin, preceded by the <c>run_code</c> script
+/// block (wave W14). Built-in groups come first, in a fixed order, each tool with a switch unless another feature needs it;
+/// extension and MCP tools follow, read-only, because their plugin or server is where they are switched. Switches write
+/// <see cref="AppPreferences.ToolsDisabled"/>; every session applies it before its next turn. The script block edits
+/// <see cref="AppPreferences.CodeScriptMaxConcurrentCalls"/>, <see cref="AppPreferences.CodeScriptResultChars"/>,
+/// <see cref="AppPreferences.CodeScriptInnerResultChars"/> and <see cref="AppPreferences.CodeScriptTools"/> live.
 /// </summary>
 internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
@@ -106,6 +108,70 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
 
     public bool HasInventory => inventoryText.Length > 0;
 
+    // ---------------------------------------------------------------- the script (run_code) block, wave W14
+
+    /// <summary>Smallest concurrency the field offers; it is the range the preference setter clamps to.</summary>
+    public int MinCodeScriptMaxConcurrentCalls => AppPreferences.MinCodeScriptMaxConcurrentCalls;
+
+    /// <summary>Largest concurrency the field offers.</summary>
+    public int MaxCodeScriptMaxConcurrentCalls => AppPreferences.MaxCodeScriptMaxConcurrentCalls;
+
+    /// <summary>Most inner tool calls one <c>run_code</c> script keeps in flight (1 to 32). Re-read after writing, so the field shows the clamped value.</summary>
+    public int CodeScriptMaxConcurrentCalls
+    {
+        get => composition.Preferences.CodeScriptMaxConcurrentCalls;
+        set
+        {
+            composition.Preferences.CodeScriptMaxConcurrentCalls = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Smallest result length the field offers.</summary>
+    public int MinCodeScriptResultChars => AppPreferences.MinCodeScriptResultChars;
+
+    /// <summary>Largest result length the field offers.</summary>
+    public int MaxCodeScriptResultChars => AppPreferences.MaxCodeScriptResultChars;
+
+    /// <summary>Characters of the result <c>run_code</c> returns to the model (1000 to 400000), re-read after writing.</summary>
+    public int CodeScriptResultChars
+    {
+        get => composition.Preferences.CodeScriptResultChars;
+        set
+        {
+            composition.Preferences.CodeScriptResultChars = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Smallest per-call result length the field offers.</summary>
+    public int MinCodeScriptInnerResultChars => AppPreferences.MinCodeScriptInnerResultChars;
+
+    /// <summary>Largest per-call result length the field offers.</summary>
+    public int MaxCodeScriptInnerResultChars => AppPreferences.MaxCodeScriptInnerResultChars;
+
+    /// <summary>Characters of one <c>Tools.Call</c> result inside a script (500 to 400000), re-read after writing.</summary>
+    public int CodeScriptInnerResultChars
+    {
+        get => composition.Preferences.CodeScriptInnerResultChars;
+        set
+        {
+            composition.Preferences.CodeScriptInnerResultChars = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Tools a script may call (comma, semicolon or newline separated, a trailing <c>*</c> as a wildcard); blank means every candidate.</summary>
+    public string CodeScriptTools
+    {
+        get => composition.Preferences.CodeScriptTools;
+        set
+        {
+            composition.Preferences.CodeScriptTools = value;
+            OnPropertyChanged();
+        }
+    }
+
     public void Reload()
     {
         InventoryText = composition.Inventory is { } inventory
@@ -121,6 +187,12 @@ internal sealed class ToolsSettingsSectionViewModel : NotifyingObject, IDisposab
         EmptyText = InstrumentsStrings.ToolsSectionNoSession;
         OnPropertyChanged(nameof(Hint));
         OnPropertyChanged(nameof(HasGroups));
+
+        // The script block reads the live preferences, so a settings.json change picked up by the reload re-fills the fields.
+        OnPropertyChanged(nameof(CodeScriptMaxConcurrentCalls));
+        OnPropertyChanged(nameof(CodeScriptResultChars));
+        OnPropertyChanged(nameof(CodeScriptInnerResultChars));
+        OnPropertyChanged(nameof(CodeScriptTools));
     }
 
     /// <summary>Groups the catalog: built-in groups in <see cref="BuiltInOrder"/> (unknown ones after), then extension, then MCP.</summary>

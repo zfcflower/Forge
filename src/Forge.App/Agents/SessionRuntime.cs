@@ -80,8 +80,9 @@ internal sealed record AgentRuntimeServices(
     /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
     /// <see cref="ToolContext"/>. Empty in a unit test, where an agent therefore cannot touch files at all. The read-only
     /// ones pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>; <c>write</c>/<c>edit</c> ask and
-    /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. None of them is offered to <c>run_code</c> scripts, whose
-    /// calls never pass the per-call approval card.
+    /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. The read-only four are also the file half of a
+    /// <c>run_code</c> script's tool surface (wave W14: read-only is the rule, so nothing a script reaches ever needed a
+    /// card the model's own call would have raised); <c>write</c>, <c>edit</c> and <c>bash</c> stay out of it entirely.
     /// </summary>
     public IReadOnlyList<ITool> FileTools { get; set; } = [];
 
@@ -101,6 +102,14 @@ internal sealed record AgentRuntimeServices(
     /// has no MCP tools at all. The catalog, the per-turn limit and the search tool all come from here.
     /// </summary>
     public Composition.McpServices? Mcp { get; set; }
+
+    /// <summary>
+    /// The <c>tools</c> section's four <c>run_code</c> dials (wave W14): the inner-call concurrency, the two result sizes and
+    /// the visible-tool list. A lookup rather than a value because all four are settings, and every consumer reads them on
+    /// use: the description states the numbers and the registry filters by the list, so a change reaches the next turn
+    /// without rebuilding a session host. Null = <see cref="CodeModeSettings.Default"/> (a unit test).
+    /// </summary>
+    public Func<CodeModeSettings>? CodeMode { get; set; }
 
     /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
@@ -1193,20 +1202,25 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// The tools that come from outside Core: the extension host's plugin tools, the <c>run_code</c> proxy and, once the
     /// approval wiring exists, the five extension tools, then the git tools. Recomputed on every registration change so a hot reload reaches
     /// the loop before its next model request.
+    /// <para>
+    /// The <c>run_code</c> proxy gets its own registry, collected in the same pass (wave W14): the extension host's plugin
+    /// tools plus every <b>read-only</b> tool of the workspace, web and MCP families. Read-only is the whole rule, and it is
+    /// the one the approval policy already uses (<see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>), so no tool a script
+    /// can reach ever needed a card the model's own call would have raised — a script's fan-out cannot be the way a write, an
+    /// edit or a shell command runs. Everything a script may not call — <c>write</c>, <c>edit</c>, <c>bash</c>, the git and PR
+    /// write tools, the extension authoring tools — stays out of that registry entirely, so the script cannot even name it.
+    /// The MCP half is the per-server read-only allowlist (<c>readOnlyTools</c>), which is what makes those adapters read-only
+    /// in the first place; the MCP search tool is not an adapter and is left out (a script has no prompt budget to save).
+    /// </para>
     /// </summary>
     private List<ITool> CollectExternalTools()
     {
         var tools = new List<ITool>();
-        if (services.HostClient is { } client)
+        var plugins = services.HostClient?.Tools ?? [];
+        IReadOnlyList<ITool> web = [];
+        if (services.HostClient is not null)
         {
-            tools.AddRange(client.Tools);
-            if (tools.Count > 0)
-            {
-                // Scripts only see extension-host tools: a call from inside run_code never goes through the per-call
-                // approval presentation, so the git and PR write tools must stay out of its registry.
-                tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
-            }
-
+            tools.AddRange(plugins);
             if (services.Approvals?.Extensions is { } extensions)
             {
                 tools.AddRange(ExtensionTools.Create(extensions));
@@ -1222,17 +1236,54 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         tools.AddRange(services.PullRequestTools);
         if (services.WebTools is { } webTools)
         {
-            tools.AddRange(webTools());
+            web = webTools();
+            tools.AddRange(web);
         }
 
         // Last, so every tool above keeps its name when an MCP server advertises the same one (AppendMcpTools drops the MCP
         // copy), and because the selection is the only part of this list that changes on its own.
+        var mcpTools = new List<ITool>();
         if (services.Mcp is { } mcp)
         {
             AppendMcpTools(tools, mcp);
+            foreach (var tool in tools)
+            {
+                if (tool is McpToolAdapter { SideEffect: ToolSideEffect.ReadOnly })
+                {
+                    mcpTools.Add(tool);
+                }
+            }
+        }
+
+        // The script surface is decided in one place, from the same sources this list is built from (see CodeModeTools).
+        var scriptTools = CodeModeTools.Collect(plugins, services.FileTools, web, mcpTools);
+
+        // A script needs something to call: with nothing to fan out over, run_code would be a prompt line that can only
+        // compute. Its own surface is not part of the loop's tools, so this list is also the only writer of it.
+        if (services.HostClient is { } hostClient && scriptTools.Count > 0)
+        {
+            tools.Add(hostClient.CreateRunCodeTool(new CodeModeToolRegistry(scriptTools, CurrentCodeMode), RunCodeOptions()));
         }
 
         return tools;
+    }
+
+    /// <summary>The four script dials of the <c>tools</c> section right now; the defaults when the runtime has no store.</summary>
+    private CodeModeSettings CurrentCodeMode() => services.CodeMode?.Invoke() ?? CodeModeSettings.Default;
+
+    /// <summary>
+    /// The <c>run_code</c> options: the script budgets read live from the <c>tools</c> section, so a settings change reaches
+    /// the next turn's description (it states the numbers) and every later script without a new session host. The two
+    /// timeouts keep the proxy's own defaults; they are not user-facing dials.
+    /// </summary>
+    private RunCodeProxyOptions RunCodeOptions()
+    {
+        if (services.CodeMode is null)
+        {
+            return new RunCodeProxyOptions();
+        }
+
+        return new RunCodeProxyOptions { ExecutionProvider = () => CurrentCodeMode().ToExecution() };
     }
 
     /// <summary>
@@ -1359,25 +1410,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         return new DefaultApprovalPolicy { ToolRules = rules };
     }
 
-    /// <summary>The immutable tool surface a script may call; a snapshot, so a later registration cannot mutate it.</summary>
-    private sealed class SnapshotToolRegistry : IToolRegistry
-    {
-        private readonly Dictionary<string, ITool> byName = new(StringComparer.Ordinal);
-
-        public SnapshotToolRegistry(IReadOnlyList<ITool> tools)
-        {
-            foreach (var tool in tools)
-            {
-                byName[tool.Definition.Name] = tool;
-            }
-
-            Tools = [.. byName.Values];
-        }
-
-        public IReadOnlyList<ITool> Tools { get; }
-
-        public bool TryGet(string name, out ITool tool) => byName.TryGetValue(name, out tool!);
-    }
 }
 
 /// <summary>Stands in for a provider when none is configured, so a turn fails with one clear sentence instead of a null.</summary>

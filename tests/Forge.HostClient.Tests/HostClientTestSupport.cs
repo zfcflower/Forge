@@ -153,6 +153,24 @@ internal sealed class StubTool(
     }
 }
 
+/// <summary>An in-process <see cref="ITool"/> whose definition carries a test-chosen description and schema, so a
+/// test can pin whether the <c>run_code</c> description inlines them (it must not).</summary>
+internal sealed class SchemaTool(
+    string name,
+    string description,
+    string schemaJson,
+    ToolSideEffect sideEffect = ToolSideEffect.ReadOnly) : ITool
+{
+    public string Name { get; } = name;
+
+    public ToolDefinition Definition { get; } = new(name, description, schemaJson);
+
+    public ToolSideEffect SideEffect { get; } = sideEffect;
+
+    public ValueTask<ToolResult> InvokeAsync(ToolCall call, ToolContext context, CancellationToken ct) =>
+        ValueTask.FromResult(new ToolResult("ran " + Name));
+}
+
 internal static class ClientFactory
 {
     public static HostConnection Connection(FakeHost host, TimeSpan? startTimeout = null) => new()
