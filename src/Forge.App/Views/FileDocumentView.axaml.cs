@@ -8,6 +8,7 @@ using Avalonia.Interactivity;
 using AvaloniaEdit;
 using AvaloniaEdit.Editing;
 using Forge.App.Editing;
+using Forge.App.Localization;
 using Forge.App.Review;
 using Forge.App.ViewModels;
 using Forge.App.Logging;
@@ -54,13 +55,18 @@ public partial class FileDocumentView : UserControl
         base.OnAttachedToVisualTree(e);
         attached = true;
         Editor.ActualThemeVariantChanged += OnThemeChanged;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
         Connect();
+
+        // A switch made while this tab was off screen was not seen: catch up on the way back.
+        model?.RefreshText();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         attached = false;
         Editor.ActualThemeVariantChanged -= OnThemeChanged;
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
         Disconnect();
         base.OnDetachedFromVisualTree(e);
     }
@@ -127,6 +133,12 @@ public partial class FileDocumentView : UserControl
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => bridge?.ApplyTheme();
+
+    /// <summary>
+    /// The document's own texts (tab title, open label, notices, preview captions) follow the language. The view holds
+    /// the subscription only while it is on screen, so a closed tab is never kept alive by the process-wide table.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, EventArgs e) => model?.RefreshText();
 
     private void Rebind()
     {

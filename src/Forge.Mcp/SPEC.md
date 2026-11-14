@@ -26,6 +26,8 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 **服务器管理。** 懒启动,状态 Stopped/Starting/Ready/Failed;连接或初始化失败停止并回收传输;调用方取消不标记失败、不安排重连;崩溃后退避重连。
 
+**工具结果的块。** `tools/call` 的 `content` 按块保留而不是先扁平成字符串(audio 也只留占位),`McpContent` 携带 `Type`/`Text`(给人看的形态,放在字幕与日志里)/`MimeType`/`Uri`/`SizeBytes`,图片块额外带 `Data`。去程到 `Forge.Abstractions` 只留 app 能显示的四种图片格式(png/jpeg/gif/webp);单张解码后超过 5 MB 的**丢弃字节只留占位**,一次结果的图片合计超过 20 MB 时其后的图片同样只留占位(安全边界,不是可配值——它们同时是内存上限;单张上限挡不住「一次返回很多张」);`audio` 不保留字节。`McpToolAdapter` 因此返回块列表:文本优先(把已变成图片的块从文本里剔掉,免得同一张图说两遍),随后每张图一个 `ImageBlock`;`result.Text` 只在没有结构化 `content` 时作为唯一文本块。字符截断只作用于文本,图片不受字符数上限抽头。
+
 ## 未决
 
 - MCP OAuth 登录、会话 id 跨重启持久化、`resources/subscribe` 与进度通知(均按需)。

@@ -84,6 +84,16 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 **图片输入。** `ImageBlock(MediaType, Data)` 是用户消息的内容块(base64),`AgentHost.RunAsync(instance, ChatMessage, ct)` 接收带图片的用户消息。三个适配器按各自协议编码(Anthropic `image` source、OpenAI 兼容 `image_url` data URL、Responses `input_image`);`MessageJson` 原样持久化。`TokenCounter` 每张图按固定 1600 token 估算。压缩器给摘要模型的永远只是占位文本 `[image: <type>, <n> KB]`(文件为 `[file: <name>, <type>, <n> KB]`),原图与文件内容不进摘要请求。
 
+**工具结果的图片。** `ToolResult`/`ToolResultBlock` 是块列表,不只是字符串(契约的一半由 W0 定:`Blocks` 只允许 `TextBlock`/`ImageBlock` 并在 `init` 与 `with` 时校验,`Content` 是整份结果的文本视图、非文本块各占一行占位如 `[image: image/png, 12 KB]`,`Equals`/`GetHashCode` 手写为逐块比较)。本波在它上面补了两件:`Text` 是工具自己的话(只含 `TextBlock`,逐行,没有占位)给**自己把图片送上线路**的适配器——后者若还用 `Content` 就把同一张图说了两遍;`HasImages` 判断结果里有没有图而不建列表。只有一层嵌套:工具结果里放 `TextBlock`/`ImageBlock`,不嵌套工具结果。
+
+三个适配器各自的形状,以及谁来决定发不发:`ChatRequest.IncludeToolImages`(默认 true)由 `AgentLoop.BuildRequest` 每请求算一次——`AgentOptions.SendToolImagesToModel`(一个 `Func<bool>`,每次请求现问,所以设置开关下一次回合就生效,不必重建宿主)与 `AgentOptions.ModelInputs`(目录里该模型的输入种类;未知视为可收图,与输入框对用户附件的规则一致)。为 false 时**所有适配器都只写 `Content`**,图片仍在存下的消息里,界面照常显示,改回开关只影响下一次请求。
+
+- **Anthropic**:`tool_result` 的 `content` 本来就收块数组。有图且有允许时写数组(`text`(取 `Text`)在前,随后每张 `image`),否则写字符串 `Content`——纯文本结果的线路字节与以前完全一致,提示词缓存的前缀不受影响。
+- **Responses**:`function_call_output.output` 收 `input_text`/`input_image` 数组。同上,有图写数组(文本取 `Text`),否则写字符串。
+- **Chat Completions**:`tool` 角色的 `content` 只能是文本(协议如此,不是选择)。所以结果文本(带占位,`Content`)照常写进 `tool` 消息,图片随后作为**一条用户消息**发出:`content` 数组 = 一行说明 `Images returned by the tool calls above.` + 每张 `image_url` data URL。多张图只发一条,顺序与 `ToolResultBlock` 的次序一致。协议要求一次 assistant 调用的所有 `tool` 消息紧跟其后,所以连续的 `tool` 消息按一组写:整组写完之后才追加这一条携图用户消息,绝不插在两条 `tool` 消息之间。
+
+溢出与计费:文本超阈值移入 Artifact 时只搬文本,图片跟着结果留下;`TokenCounter` 把工具结果里的图片按与顶层 `ImageBlock` 相同的 1600 token 估算;压缩器给摘要模型的仍是占位文本。
+
 **文件附件。** `FileBlock(MediaType, Data, Name?)` 承载 PDF/音频/视频(base64)。各协议能承载的种类是静态表:`AnthropicProvider.WireInputs`/`OpenAiCompatibleProvider.WireInputs`/`OpenAiResponsesProvider.WireInputs`,按媒体类型细判用 `ProviderAttachments.CanCarry(kind|protocol, mediaType)`。编码:Anthropic PDF → `document` base64 块;OpenAI 兼容 PDF → `{"type":"file","file":{filename,file_data:data URL}}`、wav/mp3 → `input_audio`;Responses PDF → `input_file`(filename + file_data)。线路形状不存在的组合(Anthropic/Responses 的音视频、Chat Completions 的其他音频与视频)在**构造请求体时**抛不可重试的 `ProviderException`,请求不会发出,绝不静默丢弃。`MessageJson` 以 `"type":"file"`(media_type、data、可选 name)持久化;搜索/全文/压缩输入里只出现占位 `[file: <名称或类型>, <n> KB]`;`TokenCounter` 按每个已开始的 KB 250 token 估算(PDF 经验值,音视频同用)。文本文件不是 `FileBlock`:由 `TextAttachment` 内联成带 `File: <名称>` 头和自适应反引号围栏的 `TextBlock`。
 
 **带附件的插话。** `AgentInstance.Interject(IReadOnlyList<ContentBlock>)` 与 `Interject(string)` 并存;`TakeInterjections()` 返回 `Interjection`(`Content`、键入文本 `Text`、附件 `Attachments`)。送达时所有待送插话合并为**一条**用户消息:键入文本以空行(`"\n\n"`)连接成一个文本块在前,随后按顺序是全部附件;每条插话各发一个 `AgentInterjected(AgentId, Text, At, Attachments)`:`Text` 是键入文本(纯附件时为空),`Attachments` 是该插话的附件列表(无附件时为空列表),元素就是调用方交进来的同一批块实例,UI 据此描述纯附件插话并按实例对上自己的小片。

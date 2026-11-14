@@ -6,6 +6,21 @@ namespace Forge.Mcp;
 /// <summary>Turns MCP content blocks into the single text a model sees, keeping non-text blocks legible.</summary>
 internal static class McpContentFlattener
 {
+    /// <summary>
+    /// The largest image this side keeps as payload, in estimated decoded bytes. A safety boundary, not a quality
+    /// one: an MCP server can hand back an unbounded <c>data</c> string, and everything kept rides through the
+    /// storage, the agent context and the provider wire — five megabytes keeps screenshots and diagrams while
+    /// capping how much one tool call can inflate a session. Larger images stay legible as their placeholder text.
+    /// </summary>
+    public const int MaxKeptImageBytes = 5 * 1024 * 1024;
+
+    /// <summary>
+    /// The most image payload one tool result keeps, in estimated decoded bytes, summed over its images. The per-image
+    /// cap alone does not bound a result: a server can return any number of images. Past this budget the remaining
+    /// images stay legible as their placeholder text, exactly like an oversized one.
+    /// </summary>
+    public const long MaxKeptImageBytesPerResult = 4L * MaxKeptImageBytes;
+
     public static McpToolCallResult ToolResult(JsonElement result)
     {
         var content = ReadContent(result, "content");
@@ -129,6 +144,21 @@ internal static class McpContentFlattener
                 return new McpContent("text", block.TryGetProperty("text", out var text) ? text.GetString() ?? string.Empty : string.Empty);
 
             case "image":
+            {
+                var mimeType = ReadString(block, "mimeType");
+                // Read the payload once: it is the whole picture, so a second read would copy megabytes for nothing.
+                var payload = ReadString(block, "data");
+                var size = EstimateBase64Bytes(payload);
+                // Keep the payload only for a media type the app can display, within the size cap; everything
+                // else (svg, oversized bitmaps, anything the server mislabels) stays placeholder-only.
+                var data = payload is not null &&
+                    mimeType is "image/png" or "image/jpeg" or "image/gif" or "image/webp" &&
+                    size <= MaxKeptImageBytes
+                        ? payload
+                        : null;
+                return new McpContent(type, $"[{type}: {mimeType ?? "unknown type"}, {FormatSize(size)}]", mimeType, null, size, data);
+            }
+
             case "audio":
             {
                 var mimeType = ReadString(block, "mimeType");

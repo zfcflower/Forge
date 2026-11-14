@@ -45,7 +45,7 @@ public sealed class McpToolAdapter : ITool
         try
         {
             var result = await invoke(call.ArgumentsJson, ct).ConfigureAwait(false);
-            return new ToolResult(Truncate(result.Text), result.IsError);
+            return new ToolResult(BlocksOf(result), result.IsError);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -77,6 +77,58 @@ public sealed class McpToolAdapter : ITool
         builder.Append(text, 0, kept);
         builder.Append("\n…[output truncated: ").Append(text.Length - kept).Append(" characters omitted]");
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// The blocks the model gets: one text block holding the flattened result — with the placeholder of every image
+    /// that also travels as a real <see cref="ImageBlock"/> left out, so the model is never told about the same
+    /// picture twice — then one <see cref="ImageBlock"/> per MCP image content whose base64 was kept, up to
+    /// <see cref="McpContentFlattener.MaxKeptImageBytesPerResult"/> in total. A result with no kept image is the same
+    /// single <see cref="TextBlock"/> as before, byte for byte.
+    /// </summary>
+    private IReadOnlyList<ContentBlock> BlocksOf(McpToolCallResult result)
+    {
+        var contents = result.Content;
+        if (contents is not { Count: > 0 })
+        {
+            return [new TextBlock(Truncate(result.Text))];
+        }
+
+        var images = new List<ImageBlock>();
+        var text = new StringBuilder(256);
+        long kept = 0;
+        foreach (var content in contents)
+        {
+            // Within the per-result budget an image travels as itself; past it, as its placeholder line like any other block.
+            if (content.Data is not null &&
+                kept + (content.SizeBytes ?? 0) <= McpContentFlattener.MaxKeptImageBytesPerResult)
+            {
+                kept += content.SizeBytes ?? 0;
+                images.Add(new ImageBlock(content.MimeType!, content.Data));
+                continue;
+            }
+
+            if (text.Length > 0)
+            {
+                text.Append('\n');
+            }
+
+            text.Append(content.Text);
+        }
+
+        if (images.Count == 0)
+        {
+            return [new TextBlock(Truncate(result.Text))];
+        }
+
+        var blocks = new List<ContentBlock>(images.Count + 1);
+        if (text.Length > 0)
+        {
+            blocks.Add(new TextBlock(Truncate(text.ToString())));
+        }
+
+        blocks.AddRange(images);
+        return blocks;
     }
 
     private static string BuildDescription(string serverName, string? description) =>

@@ -51,6 +51,7 @@
 | PDF / HTML 预览 | **不做内部渲染**:占位页 + 「用本机默认程序打开」(`Launcher`)。理由:能交给 OS 的事不引渲染器,PDF 渲染器都是原生库或大依赖,HTML 渲染等于再塞一个浏览器引擎。 |
 | Plan 面板写权限 | **只读 + 「让 agent 收尾这一步」按钮**。保持「状态只由 agent 改」与 done→`StepCommitter` 自动提交语义不变,不新增存储写路径。 |
 | 富查看器范围 | 图片、CSV/TSV、`.ipynb`、LFS 指针、二进制占位 —— 全部零新依赖。 |
+| PDF / HTML 预览(2026-11-13 修订) | PDF 按上文占位; **HTML 不设占位**:在编辑器里就是可编辑源码,工具条的打开按钮对 `.html/.htm` 显示「在浏览器中打开」并交给系统浏览器。理由:不渲染网页的决定不依赖藏起源码,占位卡只会让每次看/改页面多一次点击。 |
 
 ### 待定(由你在动手前最后定,先不进波次)
 
@@ -142,7 +143,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 > **W2 已交付,且它破了下面的零重叠约束(已记录,勿再重复踩)。** `src/Forge.Editor/**`:新增 `Highlighting/TokenCategoryGroup.cs`、`Highlighting/SemanticLineIndex.cs`、`Lsp/SemanticTokenMap.cs`、`Lsp/WorkspaceDiagnostics.cs`(含 `IWorkspaceDiagnosticSource`);`Lsp/LspCapabilities.cs` 的 `ApplyEdits` 重写为两趟单次分配;`Lsp/LanguageSession.cs` 加 `SemanticTokensRefreshRequested` 与 `PositionEncoding`;`Languages/LanguageSessionPool.cs` 加 `SessionStarted`/`SessionClosed`(在启动门释放之后触发,订阅者可在处理函数里再开另一个会话)。App 侧:新增 `Editing/SemanticTokenColorizer.cs`、`ViewModels/ProblemsPanelViewModel.cs`、`ViewModels/ReferenceListViewModel.cs`、`ViewModels/MainWindowViewModel.Problems.cs`、`Views/ProblemsPanelView*`、`Views/ReferenceListView*`;`Workbench/Controls/SyntaxTokenTextBlock.cs` 改为使用新的 `TokenCategoryGroups` 表(原先那套分类重复了两份)。**破了 W0 独占的文件**:`ViewModels/MainWindowViewModel.cs`(多一个 `Problems` 属性、一行构造参数、`OpenFileAsync` 新增 `hasWorkspaceOverride` 参数并改了一行工作区取值、`Dispose` 多两行释放)、`Workbench/WorkbenchLayout.cs`、`Workbench/WorkbenchTypes.cs`、`App.axaml`、`Localization/Strings.Shell.cs` —— 因为本分支上 W0 的 host/模板未落地,而问题面板必须有宿主。`WorkbenchLayout` 的新参数是**可空追加参数**(`object? problems = null`),W5/W7/W8 再加面板时请把它扩成一组「额外 inspector 标签」列表,而不是再加一个参数。其余归各波的路径未动。**已与 W0 合并**(合并提交 `c20834e`):实际只有 4 个文件重叠、仅 `Forge.App/SPEC.md` 一处文本冲突,细节与 W0 落地后需更正的判断见 `2026-11-13-w2-after-w0-merge.md`。
 | **W3** 全局搜索 / 命令面板 | 面板 + 五个来源(文件/内容/会话/命令/符号)+ 预览 + `Ctrl+P`/`Ctrl+Shift+P`/`Ctrl+Shift+F` | `ViewModels/PaletteViewModel*.cs`、`Views/PaletteView*`、`Services/Palette*.cs`、`ViewModels/MainWindowViewModel.Palette.cs`、`Localization/Strings.Palette.cs` | 4–5 天 |
-| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF/HTML 占位 + 系统默认程序打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Views/ToolRowImagesView*`、`Views/Preview/**` | 4 天 |
+| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF 占位 + 系统默认程序打开,HTML 可编辑源码 + 在浏览器中打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Views/ToolRowImagesView*`、`Composition/ViewerSettingsComposition.cs`、`Views/Preview/**` | 4 天 |
 | **W4b** 聊天 Markdown 渲染 | 聊天消息走 Markdown(标题/列表/表格/链接/fenced code,代码块带复制与语言标签);复用 `MarkdownRenderer`,流式增量不整段重排 | `Changes/Markdown/**`、`ViewModels/Transcript.cs`、`Views/ChatMarkdown*`、`Views/TurnTextView.axaml(.cs)`(W0 从 `App.axaml` 抽出,含复制按钮)、`Localization/Strings.ChatMarkdown.cs` | 4 天 |
 | **W5** PR checks 与收尾 | checks 面板(逐项状态/耗时/链接、等待、失败日志尾、让 agent 修)、`gh pr ready`、ship 补「合并后收尾」 | `Forge.Workspace/Git/IPrPlatform.cs`+`GitHubPlatform.cs`+`PrCheck*.cs`+`PrChecksPoller.cs`(**不含** `GitCli.Clone.cs`)、`Views/ChecksPanelView*`、`ViewModels/MainWindowViewModel.Checks.cs` | 3 天 |
 | **W6** MCP 管理面 | 配置写入(原子写 + 同款互斥)、增删改/启停/测试/重连/工具清单/错误与 stderr 尾、从 Claude/Cursor 导入、预设;审批卡补 command/args/cwd/env/headers 键名与即时撤销 | `Forge.Mcp/McpConfig*.cs`、`McpServerManager.cs`、`McpServerState.cs`、`ViewModels/Settings/McpSettingsSectionViewModel.cs`(W0 已从 `InstrumentSettingsSections.cs` 拆出)、`Views/McpSettingsView*`、`Approval/**` | 4–5 天 |
@@ -213,6 +214,6 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 ## 七、明确不做
 
-隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF/HTML 预览在拍板前不做(占位页)。
+隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF 预览在拍板前不做(占位页);网页不在面板内渲染,只给可编辑源码与「在浏览器中打开」。
 
 **W0 收尾补充**:新增设置分区的视图不再改 `App.axaml`——`App.axaml` 已挂一个 `Views/SectionViewTemplate`,各波在自己的 `*Composition.Register` 里调 `SectionViewTemplate.Register<TViewModel>(() => new XView())` 即可。`chat` 分区归 W5(Mermaid 与工具图片缩略图两项设置的视图都放进 W5 的 chat 分区视图;W4 只提供数据项,不建分区)。
