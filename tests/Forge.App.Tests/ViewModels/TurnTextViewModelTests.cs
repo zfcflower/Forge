@@ -85,6 +85,21 @@ public sealed class TurnTextViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Completing_an_empty_reply_announces_the_placeholder_and_its_text()
+    {
+        // The view binds both Text and IsVisible to the placeholder, so a completion that announces only HasPlaceholder
+        // leaves the placeholder visible with the empty text it was bound to when the view was created.
+        var model = new TurnTextViewModel();
+        var changed = new List<string?>();
+        model.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        model.Complete();
+
+        Assert.Contains(nameof(TurnTextViewModel.HasPlaceholder), changed);
+        Assert.Contains(nameof(TurnTextViewModel.PlaceholderText), changed);
+    }
+
+    [Fact]
     public void The_placeholder_follows_the_language_and_refresh_text_announces_it()
     {
         var model = new TurnTextViewModel();

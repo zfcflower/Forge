@@ -154,6 +154,7 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
         if (document.IsEmpty)
         {
             placeholder = SessionStrings.NoText;
+            OnPropertyChanged(nameof(PlaceholderText));
             OnPropertyChanged(nameof(HasPlaceholder));
         }
 
