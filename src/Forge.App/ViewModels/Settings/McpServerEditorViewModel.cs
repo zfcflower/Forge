@@ -59,8 +59,9 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
 {
     private readonly McpServerEntry? original;
 
-    /// <summary>The names the other file lists, so a shadowing save can say so.</summary>
-    private readonly IReadOnlyCollection<string> shadowed;
+    /// <summary>The names each file lists, so a shadowing save can say which side wins.</summary>
+    private readonly IReadOnlyCollection<string> globalNames;
+    private readonly IReadOnlyCollection<string> projectNames;
 
     /// <summary>The name the entry had before this edit; a save renames it in the same write (null for a new entry).</summary>
     public string? OriginalName => original?.Name;
@@ -85,21 +86,24 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
     private bool timeoutInvalid;
     private bool saveToProject;
 
-    /// <param name="otherFileNames">
-    /// The names the other file already lists. Saving a name that the other file also has is legitimate — the project entry
-    /// shadows the global one — but it must say so, or the edit looks applied while the other file keeps winning.
+    /// <param name="globalNames">
+    /// The names the global file lists. Together with <paramref name="projectNames"/> this is what the shadow warning reads: saving
+    /// into the project file collides with global names, saving into the global file collides with project ones.
     /// </param>
+    /// <param name="projectNames">The names the project's file lists (empty when the workspace has none).</param>
     public McpServerEditorViewModel(
         McpServerEntry entry,
         string globalPath,
         string? projectPath,
         bool isNew,
-        IReadOnlyCollection<string>? otherFileNames = null)
+        IReadOnlyCollection<string>? globalNames = null,
+        IReadOnlyCollection<string>? projectNames = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentException.ThrowIfNullOrWhiteSpace(globalPath);
         original = isNew ? null : entry;
-        shadowed = otherFileNames ?? [];
+        this.globalNames = globalNames ?? [];
+        this.projectNames = projectNames ?? [];
         this.globalPath = globalPath;
         this.projectPath = projectPath;
         this.isNew = isNew;
@@ -136,9 +140,23 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
         get
         {
             var name = nameText.Trim();
-            return name.Length > 0 &&
-                   !string.Equals(name, original?.Name, StringComparison.Ordinal) &&
-                   shadowed.Contains(name);
+            if (name.Length == 0 || string.Equals(name, original?.Name, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // The file this save does NOT write is the one the name can collide with: a project save against the global file, a
+            // global save against the project's.
+            var other = saveToProject ? globalNames : projectNames;
+            foreach (var existing in other)
+            {
+                if (string.Equals(existing, name, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 
@@ -365,6 +383,8 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(GlobalTargetText));
         OnPropertyChanged(nameof(ProjectTargetText));
+        OnPropertyChanged(nameof(HasShadowWarning));
+        OnPropertyChanged(nameof(ShadowWarningText));
         RefreshIssues();
     }
 

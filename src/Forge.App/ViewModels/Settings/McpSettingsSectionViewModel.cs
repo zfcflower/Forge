@@ -482,7 +482,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             return false;
         }
 
-        Rebuild(snapshot, services.Manager.States, KeptServers(services, snapshot));
+        Rebuild(snapshot, services.Manager.States, KeptServers(snapshot, services.Manager.ConfiguredServers()));
         return true;
     }
 
@@ -490,7 +490,9 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     /// The running servers the file read could not see (a file whose root is unreadable contributes no entries, and the manager
     /// keeps its servers). They have no row, so the page names them and the file to fix instead of hiding them.
     /// </summary>
-    private static List<(string Name, string Source)> KeptServers(McpServices services, McpConfigSnapshot snapshot)
+    internal static List<(string Name, string Source)> KeptServers(
+        McpConfigSnapshot snapshot,
+        IReadOnlyList<McpServerConfig> configured)
     {
         var fromFiles = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in snapshot.Files)
@@ -502,15 +504,12 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         }
 
         var kept = new List<(string Name, string Source)>(2);
-        foreach (var name in services.Manager.ServerNames)
+        foreach (var config in configured)
         {
-            if (fromFiles.Contains(name))
+            if (!fromFiles.Contains(config.Name))
             {
-                continue;
+                kept.Add((config.Name, config.Source ?? string.Empty));
             }
-
-            var config = services.Manager.GetServer(name);
-            kept.Add((name, config.Source ?? string.Empty));
         }
 
         return kept;
@@ -635,20 +634,14 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             services.Store.GlobalPath,
             services.Store.ProjectPath,
             isNew,
-            NamesOfTheOtherFile(entry));
+            globalNames,
+            projectNames);
         OnPropertyChanged(nameof(Editor));
         OnPropertyChanged(nameof(IsEditing));
         ClearStatus();
     }
 
-    /// <summary>
-    /// The names listed by the file the entry does not live in — what a save can collide with. Taken from the last refresh
-    /// rather than the disk: opening an editor must not read a file on the UI thread.
-    /// </summary>
-    private IReadOnlyCollection<string> NamesOfTheOtherFile(McpServerEntry entry) =>
-        string.Equals(entry.SourcePath, composition.Mcp?.Store.ProjectPath, StringComparison.Ordinal)
-            ? globalNames
-            : projectNames;
+
 
     private void CloseEditor()
     {
@@ -885,7 +878,12 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             }
 
             var read = McpConfigFile.Read(text, source.FilePath);
-            problem ??= read.Diagnostics.Count > 0 ? read.Diagnostics[0].Message : null;
+            // Another application's config may have no `mcpServers` at all (a fresh Claude Code install): that is "nothing to
+            // import from this file", not a read that failed.
+            if (read.Entries.Count > 0)
+            {
+                problem ??= read.Diagnostics.Count > 0 ? read.Diagnostics[0].Message : null;
+            }
             foreach (var entry in read.Entries)
             {
                 if (seen.Add(entry.Name))

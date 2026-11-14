@@ -81,7 +81,16 @@ public class McpConfigFileTests
         var result = McpConfigFile.Read(json, "empty.json");
 
         Assert.Empty(result.Entries);
-        Assert.Empty(result.Diagnostics);
+        if (json is null)
+        {
+            // No file at all: nothing to report.
+            Assert.Empty(result.Diagnostics);
+            return;
+        }
+
+        // An existing but empty file is invalid JSON, exactly as the runtime read calls it.
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Null(diagnostic.ServerName);
     }
 
     [Fact]

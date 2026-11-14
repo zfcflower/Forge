@@ -251,6 +251,25 @@ public sealed class McpServerManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Every configured entry in one snapshot, taken under the same lock. A caller that walks <see cref="ServerNames"/> and asks
+    /// for each name separately can lose that race against <see cref="ApplyConfigAsync"/> removing one; this cannot.
+    /// </summary>
+    public IReadOnlyList<McpServerConfig> ConfiguredServers()
+    {
+        lock (gate)
+        {
+            var configs = new McpServerConfig[servers.Count];
+            var index = 0;
+            foreach (var server in servers.Values)
+            {
+                configs[index++] = server.Config;
+            }
+
+            return configs;
+        }
+    }
+
     /// <summary>The tools one server currently exposes; empty while it is stopped, failed or still starting.</summary>
     public IReadOnlyList<McpToolAdapter> ToolsOf(string name) => Resolve(name).Tools;
 

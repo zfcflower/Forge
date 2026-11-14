@@ -370,8 +370,10 @@ public static class McpConfigFile
     public static McpConfigEntries Read(string? json, string? sourcePath = null)
     {
         var label = sourcePath ?? "(no file)";
-        if (string.IsNullOrWhiteSpace(json))
+        if (json is null)
         {
+            // No file: nothing to report. An existing but empty file is different, and falls through to the parse below, which
+            // calls it invalid JSON — exactly what the runtime read says about it.
             return new McpConfigEntries([], []);
         }
 
