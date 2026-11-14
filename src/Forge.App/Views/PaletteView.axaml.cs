@@ -30,32 +30,37 @@ public partial class PaletteView : UserControl
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
-    private void OnDataContextChanged(object? sender, EventArgs e)
+    private void OnDataContextChanged(object? sender, EventArgs e) => Watch(DataContext as PaletteViewModel);
+
+    /// <summary>Moves the one PropertyChanged subscription the view holds to <paramref name="viewModel"/>.</summary>
+    private void Watch(PaletteViewModel? viewModel)
     {
+        if (ReferenceEquals(watched, viewModel))
+        {
+            return;
+        }
+
         if (watched is not null)
         {
             watched.PropertyChanged -= OnViewModelPropertyChanged;
-            watched = null;
         }
 
-        watched = DataContext as PaletteViewModel;
+        watched = viewModel;
         if (watched is not null)
         {
             watched.PropertyChanged += OnViewModelPropertyChanged;
         }
     }
 
-    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
-    {
-        if (watched is not null)
-        {
-            watched.PropertyChanged -= OnViewModelPropertyChanged;
-            watched = null;
-        }
-    }
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e) => Watch(null);
 
+    /// <summary>
+    /// A detach dropped the subscription, so an attach takes it again: the same view can be re-attached with its data
+    /// context unchanged (no DataContextChanged then), and it must still focus the query and follow the selection.
+    /// </summary>
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
+        Watch(DataContext as PaletteViewModel);
         if (watched is { IsOpen: true })
         {
             FocusQuery();
@@ -108,7 +113,8 @@ public partial class PaletteView : UserControl
                 viewModel.Close();
                 e.Handled = true;
                 break;
-            case Key.Enter:
+            case Key.Enter when e.Source is not Button:
+                // A focused button (the close affordance) keeps its own Enter; everywhere else Enter opens the row.
                 viewModel.Accept();
                 e.Handled = true;
                 break;

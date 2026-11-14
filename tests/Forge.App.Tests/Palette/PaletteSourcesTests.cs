@@ -133,6 +133,31 @@ public sealed class PaletteSourcesTests
     }
 
     [Fact]
+    public void Content_says_it_was_cut_only_when_more_lines_survive_the_exclusion_than_the_limit()
+    {
+        var result = Result(
+            new GrepLine("node_modules/x.js", 1, "x", true),
+            new GrepLine("src/a.cs", 1, "a", true),
+            new GrepLine("src/b.cs", 1, "b", true));
+
+        Assert.Equal(2, PaletteSources.Content(result, ["node_modules"], 2, out var fits).Count);
+        Assert.False(fits);
+
+        Assert.Single(PaletteSources.Content(result, ["node_modules"], 1, out var cut));
+        Assert.True(cut);
+    }
+
+    [Theory]
+    [InlineData(null, new string[0])]
+    [InlineData("   ", new string[0])]
+    [InlineData("node_modules", new[] { "node_modules" })]
+    [InlineData(" obj ,bin, ", new[] { "bin", "obj" })]
+    [InlineData("dist;Bin\nbin\r\n\tout", new[] { "Bin", "dist", "out" })]
+    [InlineData(",,;", new string[0])]
+    public void ParseDirectoryNames_trims_splits_dedupes_case_insensitively_and_sorts(string? raw, string[] expected) =>
+        Assert.Equal(expected, PaletteSources.ParseDirectoryNames(raw).ToArray());
+
+    [Fact]
     public void Content_of_no_lines_or_a_zero_limit_is_empty()
     {
         Assert.Empty(PaletteSources.Content(Result(), [], 10));
@@ -191,6 +216,31 @@ public sealed class PaletteSourcesTests
 
         var item = Assert.Single(items);
         Assert.Equal("feature/palette", item.Detail);
+    }
+
+    [Fact]
+    public void A_session_without_a_branch_shows_its_project_without_a_dangling_separator()
+    {
+        PaletteSessionSnapshot[] sessions =
+        [
+            new("s", "Session", "forge", string.Empty, At, IsArchived: false, IsSubAgent: false),
+        ];
+
+        var item = Assert.Single(PaletteSources.Sessions(sessions, string.Empty, 10));
+
+        Assert.Equal("forge", item.Detail);
+    }
+
+    [Fact]
+    public void A_session_query_matches_the_branch_when_there_is_no_project()
+    {
+        PaletteSessionSnapshot[] sessions =
+        [
+            new("s", "Session", string.Empty, "feature/palette", At, IsArchived: false, IsSubAgent: false),
+        ];
+
+        Assert.Equal("s", Assert.Single(PaletteSources.Sessions(sessions, "feature", 10)).SessionId);
+        Assert.Empty(PaletteSources.Sessions(sessions, "nothing-like-it", 10));
     }
 
     [Fact]

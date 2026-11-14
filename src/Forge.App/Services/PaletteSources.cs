@@ -51,10 +51,23 @@ internal static class PaletteSources
     public static IReadOnlyList<PaletteItem> Content(
         GrepResult result,
         IReadOnlyList<string> excludedDirectories,
-        int limit)
+        int limit) =>
+        Content(result, excludedDirectories, limit, out _);
+
+    /// <summary>
+    /// <see cref="Content(GrepResult, IReadOnlyList{string}, int)"/>, also saying whether more lines survived the exclusion
+    /// than the list shows - the search asks for more than <paramref name="limit"/> when directories are excluded, so the
+    /// engine's own truncation flag alone no longer says whether the list was cut.
+    /// </summary>
+    public static IReadOnlyList<PaletteItem> Content(
+        GrepResult result,
+        IReadOnlyList<string> excludedDirectories,
+        int limit,
+        out bool cut)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(excludedDirectories);
+        cut = false;
         if (limit <= 0 || result.Lines.Count == 0)
         {
             return [];
@@ -78,6 +91,7 @@ internal static class PaletteSources
         });
 
         var count = Math.Min(kept.Count, limit);
+        cut = kept.Count > limit;
         var items = new PaletteItem[count];
         for (var index = 0; index < count; index++)
         {
@@ -115,7 +129,7 @@ internal static class PaletteSources
         var ranked = sessions
             .AsValueEnumerable()
             .Where(static session => !session.IsSubAgent)
-            .Select(session => (Session: session, Rank: PaletteQuery.ScorePair(session.Title, session.Project + ' ' + session.Branch, query)))
+            .Select(session => (Session: session, Rank: PaletteQuery.ScorePair(session.Title, session.MatchText, query)))
             .Where(pair => pair.Rank >= 0)
             .OrderBy(pair => pair.Rank)
             .ThenByDescending(pair => pair.Session.LastActiveAt)
@@ -131,7 +145,7 @@ internal static class PaletteSources
                 Source = PaletteSource.Sessions,
                 Kind = PaletteItemKind.Session,
                 Title = session.Title,
-                Detail = string.IsNullOrEmpty(session.Project) ? session.Branch : session.Project + " · " + session.Branch,
+                Detail = session.DetailText,
                 Badge = session.IsArchived ? Loc.Instance[PaletteStrings.SessionArchived] : string.Empty,
                 SessionId = session.Id,
             };
@@ -256,6 +270,33 @@ internal static class PaletteSources
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The directory names of the <c>paletteExcludeDirectories</c> setting: a list separated by ',', ';', a line break or a
+    /// tab, each entry trimmed, deduplicated case-insensitively and sorted; an empty entry is dropped, so a trailing comma
+    /// is not an error. Lives with <see cref="IsExcluded"/> because the two are the two halves of one rule.
+    /// </summary>
+    public static IReadOnlyList<string> ParseDirectoryNames(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var names = new List<string>(4);
+        foreach (var part in value.Split([',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.Length == 0 || names.Contains(part, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            names.Add(part);
+        }
+
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
     }
 
     /// <summary>The badge word of a symbol kind, at the granularity the list needs.</summary>

@@ -98,7 +98,22 @@ internal sealed record PaletteSessionSnapshot(
     string Branch,
     DateTimeOffset LastActiveAt,
     bool IsArchived,
-    bool IsSubAgent);
+    bool IsSubAgent)
+{
+    /// <summary>
+    /// The text a query is matched against after the title: project and branch. Built once with the snapshot, so a
+    /// keystroke over the session list concatenates nothing.
+    /// </summary>
+    public string MatchText { get; } = Join(Project, Branch, " ");
+
+    /// <summary>The row's secondary line: <c>project · branch</c>, or whichever of the two exists.</summary>
+    public string DetailText { get; } = Join(Project, Branch, " · ");
+
+    private static string Join(string first, string second, string separator) =>
+        string.IsNullOrEmpty(first) ? second ?? string.Empty
+        : string.IsNullOrEmpty(second) ? first
+        : first + separator + second;
+}
 
 /// <summary>
 /// One document symbol as the palette offers it: the flat form of the language server's tree, with the 0-based line the
@@ -146,8 +161,11 @@ internal interface IPaletteHost
     /// <summary>Asks the active document's language server for its symbols; a no-op snapshot when none is open.</summary>
     Task<PaletteSymbolSnapshot> RefreshSymbolsAsync(CancellationToken ct);
 
-    /// <summary>Runs the workspace content search for one query.</summary>
-    Task<GrepResult> SearchContentAsync(string query, CancellationToken ct);
+    /// <summary>
+    /// Runs the workspace content search for one query, stopping after <paramref name="limit"/> matching lines (the
+    /// palette's own budget: the per-source limit, or a multiple of it while directories are excluded).
+    /// </summary>
+    Task<GrepResult> SearchContentAsync(string query, int limit, CancellationToken ct);
 
     /// <summary>Opens <paramref name="item"/>: a file at its line, a session, or the command it names.</summary>
     Task ActivateAsync(PaletteItem item, CancellationToken ct);

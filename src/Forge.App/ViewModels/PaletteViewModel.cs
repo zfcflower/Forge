@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using Forge.App.Localization;
+using Forge.App.Logging;
 using Forge.App.Preferences;
 using Forge.App.Services;
 using Forge.IO;
+using ZLogger;
 
 namespace Forge.App.ViewModels;
 
@@ -372,9 +374,12 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
         {
             await host.ActivateAsync(item, CancellationToken.None).ConfigureAwait(true);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // The host reports its own navigation failures on the status bar; nothing here can add to that.
+            // The activation runs after the palette closed, as a discarded task: an exception that escaped would be lost
+            // as an unobserved task exception, so it is logged here instead (a navigation that fails to open its file or
+            // session has nothing left on screen to report into).
+            AppLogs.Shell.ZLogWarning(exception, $"palette activation of a {item.Kind} row failed");
         }
     }
 
@@ -431,13 +436,14 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(Placeholder));
         OnPropertyChanged(nameof(EmptyText));
         OnPropertyChanged(nameof(StatusText));
-        Rebuild();
         if (target != PaletteSource.Content)
         {
             Cancel(ref contentCts);
             IsSearching = false;
         }
 
+        // Every branch of Refresh rebuilds the list once from the snapshot it installs; rebuilding here as well would
+        // filter the previous source's snapshot for nothing.
         Refresh(target);
     }
 

@@ -61,7 +61,23 @@ public sealed class PaletteSettingsSectionTests
         section.ExcludeDirectories = "  node_modules, bin  ";
 
         Assert.Equal("node_modules, bin", preferences.PaletteExcludeDirectories);
-        Assert.Equal("node_modules, bin", section.ExcludeDirectories);
+    }
+
+    [Fact]
+    public void The_exclude_editor_keeps_the_text_as_typed_so_a_trailing_space_survives_the_next_keystroke()
+    {
+        var preferences = new AppPreferences { PaletteExcludeDirectories = "bin" };
+        var section = new PaletteSettingsSectionViewModel(preferences);
+        Assert.Equal("bin", section.ExcludeDirectories);
+
+        // The text box writes the property per keystroke: "bin, " must read back as typed, or the space vanishes and
+        // the user can never get to "bin, obj".
+        section.ExcludeDirectories = "bin, ";
+        Assert.Equal("bin, ", section.ExcludeDirectories);
+        Assert.Equal("bin,", preferences.PaletteExcludeDirectories);
+
+        section.ExcludeDirectories = "bin, obj";
+        Assert.Equal("bin, obj", preferences.PaletteExcludeDirectories);
     }
 
     [Fact]

@@ -12,10 +12,12 @@ namespace Forge.App.Settings;
 internal sealed class PaletteSettingsSectionViewModel : NotifyingObject
 {
     private readonly AppPreferences preferences;
+    private string excludeText;
 
     public PaletteSettingsSectionViewModel(AppPreferences preferences)
     {
         this.preferences = preferences ?? throw new ArgumentNullException(nameof(preferences));
+        excludeText = preferences.PaletteExcludeDirectories;
     }
 
     /// <summary>The section's heading; the settings page reads it as a <see cref="Loc"/> key.</summary>
@@ -41,17 +43,23 @@ internal sealed class PaletteSettingsSectionViewModel : NotifyingObject
 
     public double MaximumLimit => AppPreferences.MaxPalettePerSourceLimit;
 
-    /// <summary>Comma-separated directory names the content search skips; empty leaves it to <c>.gitignore</c>.</summary>
+    /// <summary>
+    /// Comma-separated directory names the content search skips; empty leaves it to <c>.gitignore</c>. The editor shows the
+    /// text as typed while the preference stores it trimmed: reading the trimmed value back would strip the space the user
+    /// just typed (the text box is bound per keystroke), so the section keeps its own copy of the raw text.
+    /// </summary>
     public string ExcludeDirectories
     {
-        get => preferences.PaletteExcludeDirectories;
+        get => excludeText;
         set
         {
-            if (string.Equals(preferences.PaletteExcludeDirectories, value, StringComparison.Ordinal))
+            value ??= string.Empty;
+            if (string.Equals(excludeText, value, StringComparison.Ordinal))
             {
                 return;
             }
 
+            excludeText = value;
             preferences.PaletteExcludeDirectories = value;
             OnPropertyChanged();
         }

@@ -103,6 +103,24 @@ public sealed class PalettePreviewTests : IDisposable
     }
 
     [Fact]
+    public async Task A_binary_file_previews_as_an_empty_string_instead_of_decoder_noise()
+    {
+        var path = Path.Combine(NewRoot(), "image.png");
+        await File.WriteAllBytesAsync(path, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48]);
+
+        Assert.Equal(string.Empty, await new PalettePreview().ReadAsync(path, 0, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_text_file_with_a_utf16_byte_order_mark_is_not_mistaken_for_binary()
+    {
+        var path = Path.Combine(NewRoot(), "wide.txt");
+        await File.WriteAllTextAsync(path, "first\nsecond", System.Text.Encoding.Unicode);
+
+        Assert.Equal("    1  first\n    2  second", await new PalettePreview().ReadAsync(path, 0, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_missing_file_previews_as_null()
     {
         var path = Path.Combine(NewRoot(), "missing.txt");

@@ -20,6 +20,9 @@ internal sealed partial class PaletteViewModel
     /// </summary>
     private const int ContentDebounceMilliseconds = 180;
 
+    /// <summary>Over-fetch of the content search while directories are excluded; see <see cref="ContentSearchBudget"/>.</summary>
+    internal const int ExcludedSearchFactor = 4;
+
     private string? excludedRaw;
     private IReadOnlyList<string> excluded = [];
 
@@ -48,6 +51,7 @@ internal sealed partial class PaletteViewModel
 
     private IReadOnlyList<PaletteItem> BuildContent(int limit)
     {
+        isTruncated = false;
         if (effectiveQuery.Length == 0)
         {
             return [];
@@ -64,7 +68,21 @@ internal sealed partial class PaletteViewModel
             return [];
         }
 
-        return PaletteSources.Content(contentResult, ExcludedDirectories(), limit);
+        var items = PaletteSources.Content(contentResult, ExcludedDirectories(), limit, out var cut);
+        isTruncated = contentResult.Truncated || cut;
+        return items;
+    }
+
+    /// <summary>
+    /// How many matching lines the content search asks the engine for. The engine takes no exclusion hook, so excluded
+    /// directories are dropped from its answer afterwards; asking for <see cref="ExcludedSearchFactor"/> times the limit
+    /// keeps a workspace whose matches mostly sit under an excluded directory from showing an empty list. Without an
+    /// exclusion the budget is the limit itself.
+    /// </summary>
+    internal int ContentSearchBudget()
+    {
+        var limit = PaletteQuery.ClampLimit(preferences.PalettePerSourceLimit);
+        return ExcludedDirectories().Count == 0 ? limit : limit * ExcludedSearchFactor;
     }
 
     private IReadOnlyList<PaletteItem> BuildSessions(int limit)
@@ -98,7 +116,7 @@ internal sealed partial class PaletteViewModel
         var raw = preferences.PaletteExcludeDirectories;
         if (!string.Equals(raw, excludedRaw, StringComparison.Ordinal))
         {
-            excluded = Forge.App.Preferences.AppPreferences.ParseDirectoryNames(raw);
+            excluded = PaletteSources.ParseDirectoryNames(raw);
             excludedRaw = raw;
         }
 
@@ -255,8 +273,10 @@ internal sealed partial class PaletteViewModel
         catch (OperationCanceledException)
         {
         }
-        catch (Exception exception) when (IsRecoverable(exception))
+        catch (Exception exception)
         {
+            // Same rule as the content search: a failure that escaped would leave the list saying "reading" forever.
+            LogUnexpected("snapshot refresh", exception);
             if (IsCurrent(generation, cts))
             {
                 statusProblem = describeFailure(exception);
@@ -300,16 +320,16 @@ internal sealed partial class PaletteViewModel
         contentCts = cts;
         IsSearching = true;
         Rebuild();
-        _ = RunContentSearchAsync(effectiveQuery, cts);
+        _ = RunContentSearchAsync(effectiveQuery, ContentSearchBudget(), cts);
     }
 
-    private async Task RunContentSearchAsync(string query, CancellationTokenSource cts)
+    private async Task RunContentSearchAsync(string query, int budget, CancellationTokenSource cts)
     {
         var completed = false;
         try
         {
             await Task.Delay(ContentDebounceMilliseconds, cts.Token).ConfigureAwait(true);
-            var result = await host.SearchContentAsync(query, cts.Token).ConfigureAwait(true);
+            var result = await host.SearchContentAsync(query, budget, cts.Token).ConfigureAwait(true);
             if (!cts.IsCancellationRequested)
             {
                 contentResult = result;
@@ -322,8 +342,11 @@ internal sealed partial class PaletteViewModel
         catch (OperationCanceledException)
         {
         }
-        catch (Exception exception) when (IsRecoverable(exception))
+        catch (Exception exception)
         {
+            // A fire-and-forget task: whatever escapes here is lost, so every failure - expected or not - becomes the
+            // list's notice and the unexpected ones also reach the log.
+            LogUnexpected("content search", exception);
             if (!cts.IsCancellationRequested)
             {
                 contentResult = GrepResult.Empty;
@@ -353,8 +376,17 @@ internal sealed partial class PaletteViewModel
     private bool IsCurrent(int generation, CancellationTokenSource cts) =>
         generation == refreshGeneration && !cts.IsCancellationRequested;
 
-    /// <summary>The failures a search may report: what a missing directory, a hostile file or a stopped server throws.</summary>
-    private static bool IsRecoverable(Exception exception) =>
+    /// <summary>The failures a search may report as a matter of course: a missing directory, a hostile file, a stopped server.</summary>
+    private static bool IsExpected(Exception exception) =>
         exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or
             TimeoutException or NotSupportedException;
+
+    /// <summary>Logs a failure that is not one of the <see cref="IsExpected"/> kinds: it is shown, but it is also a bug report.</summary>
+    private static void LogUnexpected(string operation, Exception exception)
+    {
+        if (!IsExpected(exception))
+        {
+            AppLogs.Shell.ZLogWarning(exception, $"palette {operation} failed unexpectedly");
+        }
+    }
 }

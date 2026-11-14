@@ -31,8 +31,9 @@ internal sealed class PalettePreview
 
     /// <summary>
     /// The preview text of <paramref name="absolutePath"/>: numbered lines, the head when <paramref name="line"/> is 0 or
-    /// 1, otherwise the window around the 1-based line. Null when the file cannot be read (missing, unreadable, oversized
-    /// before the position was reached).
+    /// 1, otherwise the window around the 1-based line. A line past what the character budget kept shows the tail of the
+    /// kept text; a binary file (a NUL in its first chunk) and an empty file preview as the empty string. Null when the
+    /// file cannot be read (missing, unreadable).
     /// </summary>
     public async Task<string?> ReadAsync(string absolutePath, int line, CancellationToken ct)
     {
@@ -93,6 +94,7 @@ internal sealed class PalettePreview
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var buffer = new char[8 * 1024];
         var line = new StringBuilder(256);
+        var first = true;
         while (budget > 0)
         {
             ct.ThrowIfCancellationRequested();
@@ -103,6 +105,17 @@ internal sealed class PalettePreview
             }
 
             var remaining = buffer.AsSpan(0, read);
+            if (first)
+            {
+                // The file list carries images, archives and executables too. A NUL in the first chunk is the same
+                // "binary" test the content search applies; such a file has no lines to show, only decoder noise.
+                first = false;
+                if (remaining.Contains('\0'))
+                {
+                    return [];
+                }
+            }
+
             while (remaining.Length > 0 && budget > 0)
             {
                 var newline = remaining.IndexOf(LineBreak);

@@ -193,13 +193,13 @@ internal sealed class FakePaletteHost : IPaletteHost
         return SymbolsAnswer;
     }
 
-    public async Task<GrepResult> SearchContentAsync(string query, CancellationToken ct)
+    public async Task<GrepResult> SearchContentAsync(string query, int limit, CancellationToken ct)
     {
         TaskCompletionSource<GrepResult>? held;
         GrepResult answer;
         lock (gate)
         {
-            searches.Add(new SearchRecord(query, ct));
+            searches.Add(new SearchRecord(query, limit, ct));
             heldSearches.TryGetValue(query, out held);
             if (!searchAnswers.TryGetValue(query, out answer!))
             {
@@ -222,7 +222,10 @@ internal sealed class FakePaletteHost : IPaletteHost
         return answer;
     }
 
-    public Task ActivateAsync(PaletteItem item, CancellationToken ct)
+    /// <summary>Thrown by <see cref="ActivateAsync"/> after recording the call; null means the activation succeeds.</summary>
+    public Exception? ActivationFailure { get; set; }
+
+    public async Task ActivateAsync(PaletteItem item, CancellationToken ct)
     {
         var open = ObserveOpen?.Invoke() ?? false;
         lock (gate)
@@ -230,7 +233,11 @@ internal sealed class FakePaletteHost : IPaletteHost
             activations.Add(new ActivationRecord(item, open));
         }
 
-        return Task.CompletedTask;
+        if (ActivationFailure is { } failure)
+        {
+            await Task.Yield();
+            throw failure;
+        }
     }
 
     /// <summary>One content search as the palette requested it, with the token it handed over.</summary>
@@ -238,13 +245,17 @@ internal sealed class FakePaletteHost : IPaletteHost
     {
         private readonly CancellationToken token;
 
-        public SearchRecord(string query, CancellationToken token)
+        public SearchRecord(string query, int limit, CancellationToken token)
         {
             Query = query;
+            Limit = limit;
             this.token = token;
         }
 
         public string Query { get; }
+
+        /// <summary>The match budget the palette asked the engine for.</summary>
+        public int Limit { get; }
 
         public bool IsCancelled => token.IsCancellationRequested;
     }

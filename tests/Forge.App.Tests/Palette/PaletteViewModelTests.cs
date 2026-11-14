@@ -322,7 +322,130 @@ public sealed class PaletteViewModelTests
         Assert.Equal(["src/a.cs:3"], Titles(viewModel));
     }
 
+    [Fact]
+    public async Task Without_an_exclusion_the_search_asks_the_engine_for_exactly_the_limit()
+    {
+        var preferences = new AppPreferences { PalettePerSourceLimit = 20 };
+        var host = new FakePaletteHost();
+        using var viewModel = new PaletteViewModel(host, preferences);
+        viewModel.Open(PaletteSource.Content);
+
+        viewModel.Query = "alpha";
+
+        Assert.True(await TestPump.UntilAsync(() => host.Searches.Count == 1, Bound));
+        Assert.Equal(20, host.Searches[0].Limit);
+    }
+
+    [Fact]
+    public async Task An_exclusion_that_swallows_most_matches_still_fills_the_list_to_the_limit()
+    {
+        // Ten rows allowed; the engine reports the excluded directory's thirty matches first. With a budget of only the
+        // limit the list would have been empty - the over-fetch is what lets the src/ matches through.
+        var preferences = new AppPreferences { PalettePerSourceLimit = 10, PaletteExcludeDirectories = "node_modules" };
+        var host = new FakePaletteHost();
+        var lines = Enumerable.Range(1, 30).Select(number => Line("node_modules/pkg/index.js", number, "alpha"))
+            .Concat(Enumerable.Range(1, 12).Select(number => Line("src/a.cs", number, "alpha")))
+            .ToArray();
+        host.Answer("alpha", Found(lines));
+        using var viewModel = new PaletteViewModel(host, preferences);
+        viewModel.Open(PaletteSource.Content);
+
+        viewModel.Query = "alpha";
+
+        Assert.True(await TestPump.UntilAsync(() => viewModel.Items.Count == 10, Bound));
+        Assert.Equal(10 * PaletteViewModel.ExcludedSearchFactor, host.Searches[^1].Limit);
+        Assert.All(viewModel.Items, static item => Assert.StartsWith("src/a.cs:", item.Title, StringComparison.Ordinal));
+
+        // Twelve lines survived the exclusion and ten are shown: the list was cut even though the engine did not
+        // truncate, and the status line has to say so.
+        Assert.Equal(
+            Loc.Instance.Format(PaletteStrings.StatusTruncated, TextFormat.Number(10)),
+            viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task A_result_that_fits_after_the_exclusion_is_not_reported_as_truncated()
+    {
+        var preferences = new AppPreferences { PaletteExcludeDirectories = "node_modules" };
+        var host = new FakePaletteHost { WorkspaceLabel = "demo" };
+        host.Answer("alpha", Found(Line("node_modules/a.js", 1, "alpha"), Line("src/a.cs", 3, "alpha")));
+        using var viewModel = new PaletteViewModel(host, preferences);
+        viewModel.Open(PaletteSource.Content);
+
+        viewModel.Query = "alpha";
+
+        Assert.True(await TestPump.UntilAsync(() => viewModel.Items.Count == 1 && !viewModel.IsSearching, Bound));
+        Assert.Equal("demo", viewModel.StatusText);
+    }
+
     // ---------------------------------------------------------------- failures
+
+    [Fact]
+    public async Task An_unexpected_refresh_failure_still_ends_the_reading_state_and_reports_itself()
+    {
+        // Not one of the expected I/O kinds: before, it escaped the discarded task and the list said "reading" forever.
+        var host = new FakePaletteHost { FilesFailure = new FormatException("bad index") };
+        using var viewModel = new PaletteViewModel(host, new AppPreferences());
+
+        viewModel.Open(PaletteSource.Files);
+
+        var failure = Loc.Instance.Format(PaletteStrings.NoticeFilesFailed, "bad index");
+        Assert.True(await TestPump.UntilAsync(() => viewModel.StatusText == failure, Bound));
+        Assert.NotEqual(Loc.Instance[PaletteStrings.StatusLoading], viewModel.EmptyText);
+    }
+
+    [Fact]
+    public async Task An_unexpected_search_failure_becomes_the_notice_of_the_content_list()
+    {
+        var host = new FakePaletteHost { SearchFailure = new FormatException("bad pattern") };
+        using var viewModel = new PaletteViewModel(host, new AppPreferences());
+        viewModel.Open(PaletteSource.Content);
+
+        viewModel.Query = "alpha";
+
+        Assert.True(await TestPump.UntilAsync(() => viewModel.Items.Count == 1, Bound));
+        Assert.Equal(Loc.Instance.Format(PaletteStrings.NoticeSearchFailed, "bad pattern"), viewModel.Items[0].Title);
+        Assert.False(viewModel.IsSearching);
+    }
+
+    [Fact]
+    public async Task A_failing_activation_is_contained_and_the_palette_can_open_again()
+    {
+        var host = new FakePaletteHost
+        {
+            CachedFiles = ["src/Main.cs"],
+            FilesAnswer = ["src/Main.cs"],
+            ActivationFailure = new FormatException("no such tab"),
+        };
+        var unobserved = 0;
+        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, args) =>
+        {
+            if (args.Exception.InnerExceptions.Any(static inner => inner is FormatException { Message: "no such tab" }))
+            {
+                Interlocked.Increment(ref unobserved);
+            }
+        };
+        TaskScheduler.UnobservedTaskException += handler;
+        try
+        {
+            using var viewModel = new PaletteViewModel(host, new AppPreferences());
+            viewModel.Open(PaletteSource.Files);
+            viewModel.Accept();
+
+            Assert.True(await TestPump.UntilAsync(() => host.Activations.Count == 1, Bound));
+            await Task.Delay(20);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+
+            Assert.Equal(0, Volatile.Read(ref unobserved));
+            viewModel.Open(PaletteSource.Files);
+            Assert.True(viewModel.IsOpen);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= handler;
+        }
+    }
 
     [Fact]
     public async Task A_failed_file_refresh_becomes_the_status_line_and_never_escapes()

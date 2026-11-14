@@ -271,7 +271,8 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref gitChecksMaxWaitMinutes, Math.Clamp(value, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes));
     }
 
-    /// <summary>Whether the user wants to be told about things at all: off means neither a toast in the window nor a desktop
+    /// <summary>
+    /// Whether the user wants to be told about things at all: off means neither a toast in the window nor a desktop
     /// notification. Read at the start of every notification, so a change applies without a restart.
     /// </summary>
     public bool Notifications { get => notifications; set => Set(ref notifications, value); }
@@ -761,32 +762,6 @@ internal sealed class AppPreferences : ObservableObject
             default:
                 return false;
         }
-    }
-
-    /// <summary>
-    /// The directory names of a comma-separated list (also accepting ';', a line break and whitespace), trimmed,
-    /// deduplicated case-insensitively and sorted; an empty entry is dropped, so a trailing comma is not an error.
-    /// </summary>
-    internal static IReadOnlyList<string> ParseDirectoryNames(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return [];
-        }
-
-        var names = new List<string>(4);
-        foreach (var part in value.Split([',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (part.Length == 0 || names.Contains(part, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            names.Add(part);
-        }
-
-        names.Sort(StringComparer.OrdinalIgnoreCase);
-        return names;
     }
 
     private static string LanguageToken(UiLanguage language) => language switch

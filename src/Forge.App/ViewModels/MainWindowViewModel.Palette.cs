@@ -114,20 +114,26 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
     {
         // Main sessions only: a sub-agent session is not something the palette can open (the shell refuses it too), so the
         // snapshot never carries one and the palette's own filter only has to defend against a foreign host.
+        // A null status asks for every row, deleted ones included; a deleted session is gone for the user, so it is skipped
+        // here rather than offered as an "archived" row that opens something the tree no longer shows.
         var infos = await composition.Catalog.QueryAsync(new SessionQuery { ParentSessionId = string.Empty }, ct)
             .ConfigureAwait(true);
-        var sessions = new PaletteSessionSnapshot[infos.Count];
-        for (var index = 0; index < infos.Count; index++)
+        var sessions = new List<PaletteSessionSnapshot>(infos.Count);
+        foreach (var info in infos)
         {
-            var info = infos[index];
-            sessions[index] = new PaletteSessionSnapshot(
+            if (info.Status == SessionStatus.Deleted)
+            {
+                continue;
+            }
+
+            sessions.Add(new PaletteSessionSnapshot(
                 info.Id,
                 info.Title,
                 info.ProjectId is { Length: > 0 } projectId && projectNames.TryGetValue(projectId, out var project) ? project : string.Empty,
                 info.Branch ?? string.Empty,
                 info.LastActiveAt,
                 info.Status != SessionStatus.Active,
-                info.ParentSessionId is not null);
+                info.ParentSessionId is not null));
         }
 
         paletteSessions = sessions;
@@ -152,8 +158,9 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
         return paletteSymbols;
     }
 
-    async Task<GrepResult> IPaletteHost.SearchContentAsync(string query, CancellationToken ct)
+    async Task<GrepResult> IPaletteHost.SearchContentAsync(string query, int limit, CancellationToken ct)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         if (activeSession is not { WorkDir.Length: > 0 } session)
         {
             return GrepResult.Empty;
@@ -166,7 +173,7 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
             Pattern = query,
             Regex = false,
             CaseSensitive = false,
-            Limit = PaletteQuery.ClampLimit(composition.Preferences.PalettePerSourceLimit),
+            Limit = limit,
         };
         return await Task.Run(() => GrepEngine.SearchAsync(request, ct), ct).ConfigureAwait(true);
     }

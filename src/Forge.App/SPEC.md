@@ -378,15 +378,15 @@ Cmd/Ctrl+P 三个入口之外没有第四种面板:一个覆盖层、五个来�
 
 **入口。** `Ctrl+P` 文件、`Ctrl+Shift+P` 命令、`Ctrl+Shift+F` 工作区文本;同一个手势再按一次关闭(手势属于来源,不属于"打开"这个动作,重复按不会清掉已输入的查询)。标题栏的放大镜是同一个动作的按钮(`OpenPaletteCommand`,`AutomationId` 仍是 `shell-search`)。覆盖层的宿主是 `MainWindow.axaml` 里最后那个 `ContentControl Content="{Binding Palette}"`:关闭时属性为 null,视图不存在;打开时 `App.axaml` 按视图模型类型模板出 `PaletteView`,所以它画在审批卡与 toast 之上。来源内还接受首字符前缀 `>` 命令、`#` 内容、`:` 会话、`@` 符号,与点击来源条等价;前缀只在第一位生效,所以 `a>b` 仍是文件查询。切换前台会话即关闭面板(否则它列的是刚离开的那个工作区的文件)。
 
-**五个来源。** 文件来自 `FileIndex`(仓库内 `git ls-files`,否则有界遍历,`.gitignore` 与构建目录一样遵守),匹配复用输入框 `@` 弹层的 `ComposerSuggestions.FilterFiles`,两处排序一致;内容来自 `GrepEngine`(字面量、大小写不敏感、`Limit` = 每来源上限),结果按路径与行号排序后取前 N;会话来自 `ISessionCatalog.QueryAsync` 的内存快照,标题为主、`项目 + 分支` 为次,子 Agent 会话不入列,归档会话带徽标(打开为只读);命令是 `PaletteCommandCatalog` 的静态表,id 与 `MainWindowViewModel.RunPaletteCommand` 的 switch 一一对应,行里带手势;符号来自当前编辑器文档的语言服务器(`FileDocumentViewModel.Symbols.cs` 复用编辑器的请求闸门),位置取 `SelectionRange` 起点,上限 2000 个后再排序。
+**五个来源。** 文件来自 `FileIndex`(仓库内 `git ls-files`,否则有界遍历,`.gitignore` 与构建目录一样遵守),匹配复用输入框 `@` 弹层的 `ComposerSuggestions.FilterFiles`,两处排序一致;内容来自 `GrepEngine`(字面量、大小写不敏感、`Limit` = 每来源上限),结果按路径与行号排序后取前 N;会话来自 `ISessionCatalog.QueryAsync` 的内存快照,标题为主、`项目 + 分支` 为次,子 Agent 会话与已删除(软删除)会话不入列,归档会话带徽标(打开为只读);命令是 `PaletteCommandCatalog` 的静态表,id 与 `MainWindowViewModel.RunPaletteCommand` 的 switch 一一对应,行里带手势;符号来自当前编辑器文档的语言服务器(`FileDocumentViewModel.Symbols.cs` 复用编辑器的请求闸门),位置取 `SelectionRange` 起点,上限 2000 个后再排序。
 
 **刷新模型。** 每个来源是"快照 + 后台刷新":打开或切来源时先用上一次的快照立刻出列表,同时发起一次刷新,回来再重建;每次刷新带代号,换代(切来源、关面板、换会话)后到达的答案被丢弃。文件快照按工作区缓存在 `PaletteFileCache`(引用原子换出,读者只会看到旧数组或新数组),内容搜索 180 ms 去抖后一次只有一个在跑,前一次取消。UI 线程每敲一键只做一遍快照过滤(两万文件的列表也是一帧内),分配只在排好序的结果对和结果行(默认上限 50 行)。
 
-**预览。** 命令与会话直接由行字段拼出;文件、匹配行、符号走 `PalettePreview`:最多保留 256 K 字符、首 40 行或命中行 ±12 行、带行号,解码在后台线程,最近一个文件留在缓存里,所以在同一文件的行之间移动不再读盘。读不到(文件没了、无权限、位置超出预算)时给"没有可预览的内容",不留空白。
+**预览。** 命令与会话直接由行字段拼出;文件、匹配行、符号走 `PalettePreview`:最多保留 256 K 字符、首 40 行或命中行 ±12 行、带行号,解码在后台线程,最近一个文件留在缓存里,所以在同一文件的行之间移动不再读盘。读不到(文件没了、无权限)、空文件或二进制文件(首块含 NUL,与内容搜索同一判据)时给"没有可预览的内容",不留空白;位置落在字符预算截掉的部分时显示已读部分的末尾。
 
 **空与失败。** 列表为空时说清原因:没有会话、没有打开的编辑器文件、没有语言服务器、搜索失败(带原因)、或首份快照还在读;这些都以一条不可打开的 notice 行呈现,Enter 对它无效。
 
-**可配置项。** `preferences.palettePerSourceLimit`(默认 50,钳在 [10, 500])与 `preferences.paletteExcludeDirectories`(逗号/分号/换行分隔的目录名,任意层级整段匹配、大小写不敏感;留空表示只遵循 `.gitignore`)。两者都在设置页 `palette` 分区(界面组,`SettingsSectionIds.PaletteOrder`)里编辑,写穿到活偏好,下一次按键即生效;分区由 `Composition/PaletteComposition.cs` 注册视图模型与视图(`SectionViewTemplate`),不改 `App.axaml`。排除目录在结果侧过滤:`GrepEngine` 不接受排除钩子,扫描成本仍由 `.gitignore` 与引擎的字节/行数上限压住。
+**可配置项。** `preferences.palettePerSourceLimit`(默认 50,钳在 [10, 500])与 `preferences.paletteExcludeDirectories`(逗号/分号/换行分隔的目录名,任意层级整段匹配、大小写不敏感;留空表示只遵循 `.gitignore`)。两者都在设置页 `palette` 分区(界面组,`SettingsSectionIds.PaletteOrder`)里编辑,写穿到活偏好,下一次按键即生效;分区由 `Composition/PaletteComposition.cs` 注册视图模型与视图(`SectionViewTemplate`),不改 `App.axaml`。排除目录在结果侧过滤:`GrepEngine` 不接受排除钩子,所以配了排除目录时搜索向引擎要 4 倍上限的匹配行再丢掉排除目录下的行(否则匹配多半落在 `node_modules` 之类目录里的工作区会显示空列表),过滤后仍多于上限或引擎自己截断时状态行注明"只显示前 N 条";扫描成本仍由 `.gitignore` 与引擎的字节/行数上限压住。
 
 ## 未决
 

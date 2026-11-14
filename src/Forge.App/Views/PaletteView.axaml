@@ -16,13 +16,14 @@
     </Style>
 
     <!-- One elevated card, centred horizontally and pinned near the top, so the list grows downward over the workbench
-         instead of jumping around as the result count changes. -->
+         instead of jumping around as the result count changes. The width is a cap, not a size: in a window narrower
+         than the card it shrinks to the window minus the side margins instead of being cut off at both edges. -->
     <Style Selector="Border.palette-card">
-      <Setter Property="Width" Value="920" />
+      <Setter Property="MaxWidth" Value="920" />
       <Setter Property="MaxHeight" Value="600" />
-      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="VerticalAlignment" Value="Top" />
-      <Setter Property="Margin" Value="0,56,0,0" />
+      <Setter Property="Margin" Value="24,56,24,24" />
       <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
       <Setter Property="BorderThickness" Value="1" />
