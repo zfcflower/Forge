@@ -336,15 +336,12 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
             RaiseRunState(beginning: false);
 
             // A failed or cancelled creation removes the folder it half-wrote, so the occupancy answer taken before the run
-            // is stale from here on. It is dropped at once, because the very next thing the dialog does is ask whether the
-            // input is usable again; the check scheduled below then confirms it off the UI thread.
-            if (createdDirectory is null && targetOccupied)
+            // is stale from here on. It is dropped at once — on this thread, before the run reports its end — because the
+            // very next thing the dialog does is ask whether the input is usable again; the check scheduled below then
+            // confirms it off the UI thread.
+            if (createdDirectory is null)
             {
-                targetOccupied = false;
-                OnPropertyChanged(nameof(Hint));
-                OnPropertyChanged(nameof(HasHint));
-                OnPropertyChanged(nameof(CanStart));
-                StartCommand.NotifyCanExecuteChanged();
+                ForgetOccupancy();
             }
 
             ScheduleOccupancyCheck();
@@ -443,6 +440,17 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
     }
 
     /// <summary>
+    /// Drops the answer the last check gave and makes every answer still in flight stale, so a read that started before the
+    /// disk changed cannot write its verdict back afterwards (a failed run and an in-flight check race otherwise: the flag
+    /// is set from the thread pool, so clearing it alone would leave the race open).
+    /// </summary>
+    private void ForgetOccupancy()
+    {
+        Interlocked.Increment(ref occupancyGeneration);
+        SetOccupancy(occupied: false);
+    }
+
+    /// <summary>
     /// Asks a newer check to read the target folder off the UI thread; a name that already breaks a rule needs no disk read,
     /// so that case simply clears the previous answer.
     /// </summary>
@@ -494,7 +502,18 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
     /// <summary>Applies one occupancy answer unless a newer input already asked for another one.</summary>
     private void ApplyOccupancy(int generation, bool occupied)
     {
-        if (generation != Volatile.Read(ref occupancyGeneration) || disposed || targetOccupied == occupied)
+        if (generation != Volatile.Read(ref occupancyGeneration) || disposed)
+        {
+            return;
+        }
+
+        SetOccupancy(occupied);
+    }
+
+    /// <summary>Stores one occupancy answer and tells every reader of it; the hint and the button follow from the flag.</summary>
+    private void SetOccupancy(bool occupied)
+    {
+        if (targetOccupied == occupied)
         {
             return;
         }

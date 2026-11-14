@@ -223,6 +223,9 @@ public sealed class ProjectCreationViewModelTests
             Assert.Equal(0, completed);
             Assert.False(model.IsRunning);
             Assert.True(model.HasError);
+
+            // The run drops the answer taken before it on the thread that finishes it, so what the dialog reads here is the
+            // answer the next click will use: no stale "occupied" is still on its way back from the thread pool.
             Assert.True(model.CanStart, "a failed run has to leave the input usable");
 
             // The retry is a real second attempt: another address, another run, and this time it lands.
@@ -254,6 +257,7 @@ public sealed class ProjectCreationViewModelTests
             Assert.Null(model.CreatedDirectory);
             Assert.Equal(0, completed);
             Assert.False(model.IsRunning);
+            Assert.True(model.CanStart, "a stopped run leaves the input usable for another attempt");
             Assert.False(Directory.Exists(Path.Combine(sandbox.Path, "stopped")), "a stopped creation must clean up after itself");
         });
     }
