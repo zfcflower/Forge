@@ -19,11 +19,11 @@ internal static class ReviewMarking
     /// </summary>
     public static async Task<LocText> MarkAsync(ReviewServices svc, long[] ids, bool retry)
     {
-        var gate = FileReviewController.GateOf(svc.Store);
+        var gate = ReviewSurfaceCore.GateOf(svc.Store);
         await gate.WaitAsync().ConfigureAwait(true);
         try
         {
-            var unmarked = FileReviewController.UnmarkedOf(svc.Store);
+            var unmarked = ReviewSurfaceCore.UnmarkedOf(svc.Store);
             var targets = retry ? ids.Where(unmarked.Contains).ToArray() : ids;
             return targets.Length > 0 ? await MarkCoreAsync(svc, targets).ConfigureAwait(true) : default;
         }
@@ -36,7 +36,7 @@ internal static class ReviewMarking
     /// <summary>Marks one batch and reports the ids the store did not record, or the store failure itself.</summary>
     private static async Task<LocText> MarkCoreAsync(ReviewServices svc, long[] ids)
     {
-        var unmarked = FileReviewController.UnmarkedOf(svc.Store);
+        var unmarked = ReviewSurfaceCore.UnmarkedOf(svc.Store);
         try
         {
             var done = await svc.Store.MarkSentAsync(ids).ConfigureAwait(true);
@@ -58,7 +58,7 @@ internal static class ReviewMarking
                 ? default
                 : new LocText(ReviewStrings.SentNotMarked, LocText.Literal($"{missing}/{ids.Length}"));
         }
-        catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
+        catch (Exception exception) when (ReviewSurfaceCore.IsStoreFailure(exception))
         {
             AppLogs.Review.ZLogWarning($"marking sent failed: {exception.Message}");
             foreach (var id in ids)

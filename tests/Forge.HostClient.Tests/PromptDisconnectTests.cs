@@ -18,46 +18,42 @@ public sealed class PromptDisconnectTests
     [Fact]
     public async Task Mid_flight_transport_drop_returns_null_with_a_diagnostic()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
+        await using var harness = await HostClientHarness.StartAsync();
+        var contributor = await RegisterPromptAsync(harness.Host, harness.Client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("prompt-drop");
         var arrived = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.On(Sdk.ExtensionProtocol.PluginPrompt, async (message, ct) =>
+        harness.Host.On(Sdk.ExtensionProtocol.PluginPrompt, async (message, ct) =>
         {
             arrived.TrySetResult(message);
             await gate.Task.WaitAsync(ct).ConfigureAwait(false);
             return new Sdk.PromptOutput("late");
         });
 
-        var evaluation = client.GetPluginPromptAsync(
+        var evaluation = harness.Client.GetPluginPromptAsync(
             contributor, new ToolContext("sess", directory), CancellationToken.None);
         var request = await arrived.Task.Bounded();
         var sent = request.Read<Sdk.PromptExecutionRequest>();
         Assert.Equal("alpha", sent.PluginId);
         Assert.Equal("tone", sent.ContributorId);
 
-        await host.DropConnectionAsync();
+        await harness.Host.DropConnectionAsync();
         gate.TrySetResult();
 
         var text = await evaluation.Bounded();
         Assert.Null(text);
-        Assert.NotEmpty(client.Diagnostics);
+        Assert.NotEmpty(harness.Client.Diagnostics);
     }
 
     [Fact]
     public async Task Caller_cancellation_still_throws()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
+        await using var harness = await HostClientHarness.StartAsync();
+        var contributor = await RegisterPromptAsync(harness.Host, harness.Client, "alpha", "tone");
         var directory = BoundRoots.AbsoluteDir("prompt-cancel");
         var arrived = new TaskCompletionSource<IpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        host.On(Sdk.ExtensionProtocol.PluginPrompt, async (message, ct) =>
+        harness.Host.On(Sdk.ExtensionProtocol.PluginPrompt, async (message, ct) =>
         {
             arrived.TrySetResult(message);
             await gate.Task.WaitAsync(ct).ConfigureAwait(false);
@@ -65,7 +61,7 @@ public sealed class PromptDisconnectTests
         });
 
         using var caller = new CancellationTokenSource();
-        var evaluation = client.GetPluginPromptAsync(
+        var evaluation = harness.Client.GetPluginPromptAsync(
             contributor, new ToolContext("sess", directory), caller.Token);
         await arrived.Task.Bounded();
         caller.Cancel();

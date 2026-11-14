@@ -149,14 +149,12 @@ public sealed class ExtensionAuthoringPayloadTests
     [Fact]
     public async Task Stage_rejects_a_null_request_without_ipc()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => client.StageExtensionAsync(null!, limit.Token));
+            () => harness.Client.StageExtensionAsync(null!, harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -165,14 +163,12 @@ public sealed class ExtensionAuthoringPayloadTests
     [InlineData("   ")]
     public async Task Stage_rejects_a_blank_plugin_id_without_ipc(string? pluginId)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
-            () => client.StageExtensionAsync(ValidStageRequest() with { PluginId = pluginId! }, limit.Token));
+            () => harness.Client.StageExtensionAsync(ValidStageRequest() with { PluginId = pluginId! }, harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -181,14 +177,12 @@ public sealed class ExtensionAuthoringPayloadTests
     [InlineData("   ")]
     public async Task Stage_rejects_a_blank_version_without_ipc(string? version)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
-            () => client.StageExtensionAsync(ValidStageRequest() with { Version = version! }, limit.Token));
+            () => harness.Client.StageExtensionAsync(ValidStageRequest() with { Version = version! }, harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -199,32 +193,28 @@ public sealed class ExtensionAuthoringPayloadTests
     [InlineData("PLUGIN")]
     public async Task Stage_rejects_an_unknown_kind_without_ipc(string? kind)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         var error = await Assert.ThrowsAsync<ArgumentException>(
-            () => client.StageExtensionAsync(ValidStageRequest() with { Kind = kind! }, limit.Token));
+            () => harness.Client.StageExtensionAsync(ValidStageRequest() with { Kind = kind! }, harness.Limit.Token));
 
         Assert.Contains("kind", error.Message, StringComparison.OrdinalIgnoreCase);
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Fact]
     public async Task Stage_rejects_null_collections_without_ipc()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => client.StageExtensionAsync(ValidStageRequest() with { Files = null! }, limit.Token));
+            () => harness.Client.StageExtensionAsync(ValidStageRequest() with { Files = null! }, harness.Limit.Token));
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => client.StageExtensionAsync(ValidStageRequest() with { Permissions = null! }, limit.Token));
+            () => harness.Client.StageExtensionAsync(ValidStageRequest() with { Permissions = null! }, harness.Limit.Token));
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => client.StageExtensionAsync(ValidStageRequest() with { Dependencies = null! }, limit.Token));
+            () => harness.Client.StageExtensionAsync(ValidStageRequest() with { Dependencies = null! }, harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -232,52 +222,46 @@ public sealed class ExtensionAuthoringPayloadTests
     [InlineData("   ")]
     public async Task Stage_rejects_a_blank_file_key_without_ipc(string key)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => client.StageExtensionAsync(
+            () => harness.Client.StageExtensionAsync(
                 ValidStageRequest() with { Files = new Dictionary<string, string> { [key] = "x" } },
-                limit.Token));
+                harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Fact]
     public async Task Stage_rejects_null_entries_without_ipc()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => client.StageExtensionAsync(
+            () => harness.Client.StageExtensionAsync(
                 ValidStageRequest() with { Files = new Dictionary<string, string> { ["Plugin.cs"] = null! } },
-                limit.Token));
+                harness.Limit.Token));
         await Assert.ThrowsAsync<ArgumentException>(
-            () => client.StageExtensionAsync(
+            () => harness.Client.StageExtensionAsync(
                 ValidStageRequest() with { Permissions = new List<Sdk.Permission> { null! } },
-                limit.Token));
+                harness.Limit.Token));
         await Assert.ThrowsAsync<ArgumentException>(
-            () => client.StageExtensionAsync(
+            () => harness.Client.StageExtensionAsync(
                 ValidStageRequest() with { Dependencies = new List<Sdk.ExtensionDependency> { null! } },
-                limit.Token));
+                harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Fact]
     public async Task Commit_rejects_a_null_request_without_ipc()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => client.CommitExtensionAsync(null!, limit.Token));
+            () => harness.Client.CommitExtensionAsync(null!, harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -287,9 +271,7 @@ public sealed class ExtensionAuthoringPayloadTests
     [InlineData("sdk")]
     public async Task Commit_rejects_blank_identity_and_hashes_without_ipc(string field)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         foreach (var blank in new string?[] { null, "", "   " })
         {
@@ -301,10 +283,10 @@ public sealed class ExtensionAuthoringPayloadTests
                 _ => ValidCommitRequest() with { SdkVersion = blank! },
             };
             await Assert.ThrowsAnyAsync<ArgumentException>(
-                () => client.CommitExtensionAsync(request, limit.Token));
+                () => harness.Client.CommitExtensionAsync(request, harness.Limit.Token));
         }
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -313,14 +295,12 @@ public sealed class ExtensionAuthoringPayloadTests
     [InlineData("   ")]
     public async Task Discard_rejects_a_blank_plugin_id_without_ipc(string? pluginId)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
-            () => client.DiscardExtensionAsync(pluginId!, limit.Token));
+            () => harness.Client.DiscardExtensionAsync(pluginId!, harness.Limit.Token));
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     [Theory]
@@ -337,19 +317,17 @@ public sealed class ExtensionAuthoringPayloadTests
     public async Task Plugin_version_calls_reject_blank_arguments_without_ipc(
         string operation, string? pluginId, string? version)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         var call = operation switch
         {
-            "disable" => client.DisablePluginAsync(pluginId!, version!, limit.Token),
-            "enable" => client.EnablePluginAsync(pluginId!, version!, limit.Token),
-            _ => client.DeletePluginAsync(pluginId!, version!, limit.Token),
+            "disable" => harness.Client.DisablePluginAsync(pluginId!, version!, harness.Limit.Token),
+            "enable" => harness.Client.EnablePluginAsync(pluginId!, version!, harness.Limit.Token),
+            _ => harness.Client.DeletePluginAsync(pluginId!, version!, harness.Limit.Token),
         };
         await Assert.ThrowsAnyAsync<ArgumentException>(() => call);
 
-        AssertNoAuthoringTraffic(host);
+        AssertNoAuthoringTraffic(harness.Host);
     }
 
     internal static Sdk.ExtensionStageRequest ValidStageRequest() => new(

@@ -85,17 +85,15 @@ public sealed class ExtensionHostCommandTests
     [Fact]
     public async Task Missing_approval_path_fails_closed_without_IPC()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var command = await RegisterCommandAsync(host, client, "alpha", "hi");
+        await using var harness = await HostClientHarness.StartAsync();
+        var command = await RegisterCommandAsync(harness.Host, harness.Client, "alpha", "hi");
 
         var result = await command.ExecuteAsync(
-            "args", new CommandContext("sess", BoundRoots.AbsoluteDir("cmds")), limit.Token);
+            "args", new CommandContext("sess", BoundRoots.AbsoluteDir("cmds")), harness.Limit.Token);
 
         Assert.True(result.IsError);
         Assert.Contains("no approval path", result.Output);
-        Assert.Empty(host.Requests(PluginCommand));
+        Assert.Empty(harness.Host.Requests(PluginCommand));
     }
 
     [Fact]

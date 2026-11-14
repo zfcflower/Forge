@@ -128,17 +128,15 @@ public sealed class HostToolCallConcurrencyTests
         var execution = new Sdk.CodeExecutionOptions { MaxResultChars = 100, MaxInnerResultChars = 10_000 };
         var big = new string('y', 500);
         var registry = new TestRegistry();
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var hold = new InFlightRoot { Content = big };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
-        var proxy = client.CreateRunCodeTool(registry, new RunCodeProxyOptions { Execution = execution });
+        BoundRoots.ParkRoot(harness.Host, "code.execute", hold);
+        var proxy = harness.Client.CreateRunCodeTool(registry, new RunCodeProxyOptions { Execution = execution });
 
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\"}"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("trunc")),
-            limit.Token).AsTask();
+            harness.Limit.Token).AsTask();
         hold.Release();
         var result = await invocation.Bounded();
 

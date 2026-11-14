@@ -14,13 +14,11 @@ public sealed class ExtensionHostClientPluginCommandTests
     [Fact]
     public async Task Refresh_sends_plugins_refresh_with_an_empty_object()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
-        await client.RefreshPluginsAsync(limit.Token);
+        await harness.Client.RefreshPluginsAsync(harness.Limit.Token);
 
-        var request = Assert.Single(host.Requests(Refresh));
+        var request = Assert.Single(harness.Host.Requests(Refresh));
         Assert.Equal(IpcSerializer.Serialize(IpcEmpty.Instance), request.Payload.ToArray());
         Assert.Equal(IpcEmpty.Instance, request.Read<IpcEmpty>());
     }
@@ -28,13 +26,11 @@ public sealed class ExtensionHostClientPluginCommandTests
     [Fact]
     public async Task Approve_sends_every_field_of_the_approval_under_the_documented_names()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
-        await client.ApprovePluginAsync("alpha", "1.2.0", "src-hash", "dep-hash", "sdk-1.0", limit.Token);
+        await harness.Client.ApprovePluginAsync("alpha", "1.2.0", "src-hash", "dep-hash", "sdk-1.0", harness.Limit.Token);
 
-        var request = Assert.Single(host.Requests(Approve));
+        var request = Assert.Single(harness.Host.Requests(Approve));
         // Exactly the five documented fields, in their documented order: a fixarray of five, nothing appended.
         Assert.Equal(0x95, request.Payload.Span[0]);
         Assert.Equal(
@@ -45,13 +41,11 @@ public sealed class ExtensionHostClientPluginCommandTests
     [Fact]
     public async Task Revoke_sends_plugin_id_and_version_under_the_documented_names()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
-        await client.RevokePluginAsync("alpha", "1.2.0", limit.Token);
+        await harness.Client.RevokePluginAsync("alpha", "1.2.0", harness.Limit.Token);
 
-        var request = Assert.Single(host.Requests(Revoke));
+        var request = Assert.Single(harness.Host.Requests(Revoke));
         Assert.Equal(0x92, request.Payload.Span[0]);
         Assert.Equal(new Sdk.PluginVersionRequest("alpha", "1.2.0"), request.Read<Sdk.PluginVersionRequest>());
     }
@@ -63,14 +57,12 @@ public sealed class ExtensionHostClientPluginCommandTests
     [InlineData("alpha", "  ")]
     public async Task Approve_rejects_blank_identity_locally(string pluginId, string version)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            client.ApprovePluginAsync(pluginId, version, "s", "d", "sdk", limit.Token));
+            harness.Client.ApprovePluginAsync(pluginId, version, "s", "d", "sdk", harness.Limit.Token));
 
-        Assert.Empty(host.Requests(Approve));
+        Assert.Empty(harness.Host.Requests(Approve));
     }
 
     [Theory]
@@ -78,13 +70,11 @@ public sealed class ExtensionHostClientPluginCommandTests
     [InlineData("alpha", " ")]
     public async Task Revoke_rejects_blank_identity_locally(string pluginId, string version)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
 
-        await Assert.ThrowsAsync<ArgumentException>(() => client.RevokePluginAsync(pluginId, version, limit.Token));
+        await Assert.ThrowsAsync<ArgumentException>(() => harness.Client.RevokePluginAsync(pluginId, version, harness.Limit.Token));
 
-        Assert.Empty(host.Requests(Revoke));
+        Assert.Empty(harness.Host.Requests(Revoke));
     }
 
     [Fact]

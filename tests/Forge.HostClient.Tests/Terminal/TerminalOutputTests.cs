@@ -12,22 +12,20 @@ public sealed class TerminalOutputTests
     [Fact]
     public async Task Output_is_not_acknowledged_before_the_consumer_reads_it()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         const string terminalId = "t-ack-quiet";
-        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, terminalId, harness.Limit.Token);
 
         var chunk = new byte[16 * 1024];
         new Random(7).NextBytes(chunk);
         for (var seq = 0; seq < 5; seq++)
         {
-            await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, seq, chunk));
+            await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, seq, chunk));
         }
 
-        await host.SyncAsync();
+        await harness.Host.SyncAsync();
 
-        Assert.Empty(host.Notifications(TerminalOperations.Ack));
+        Assert.Empty(harness.Host.Notifications(TerminalOperations.Ack));
         await session.DisposeAsync();
     }
 
@@ -36,11 +34,9 @@ public sealed class TerminalOutputTests
     {
         // 实现规则：累计未确认 ≥64 KiB 或队列读空时发一次 ack。5×16 KiB 应收敛为
         // 65536（第 4 块读完触发）+ 16384（读空触发），累计恰好等于解码总字节。
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         const string terminalId = "t-ack";
-        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, terminalId, harness.Limit.Token);
 
         var expected = new List<byte>();
         var random = new Random(11);
@@ -49,20 +45,20 @@ public sealed class TerminalOutputTests
             var chunk = new byte[16 * 1024];
             random.NextBytes(chunk);
             expected.AddRange(chunk);
-            await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, seq, chunk));
+            await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, seq, chunk));
         }
 
-        await host.SyncAsync();
+        await harness.Host.SyncAsync();
 
         var received = new List<byte>();
         for (var index = 0; index < 5; index++)
         {
-            received.AddRange((await session.Output.ReadAsync(limit.Token)).ToArray());
+            received.AddRange((await session.Output.ReadAsync(harness.Limit.Token)).ToArray());
         }
 
         Assert.Equal(expected.ToArray(), received.ToArray());
 
-        var acks = await host.WaitForNotificationsAsync(TerminalOperations.Ack, 2);
+        var acks = await harness.Host.WaitForNotificationsAsync(TerminalOperations.Ack, 2);
         Assert.Equal(2, acks.Count);
         var sizes = acks.Select(ack => ack.Read<TerminalAck>().Bytes).ToArray();
         Assert.Equal([65536L, 16384L], sizes);
@@ -83,18 +79,16 @@ public sealed class TerminalOutputTests
     [Fact]
     public async Task Skipped_sequence_faults_output_and_exited_with_a_protocol_error()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         const string terminalId = "t-gap";
-        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, terminalId, harness.Limit.Token);
 
-        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "first"));
-        await host.SyncAsync();
-        Assert.Equal("first", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(limit.Token)).ToArray()));
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "first"));
+        await harness.Host.SyncAsync();
+        Assert.Equal("first", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(harness.Limit.Token)).ToArray()));
 
-        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 2, "skipped-one"));
-        await host.SyncAsync();
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 2, "skipped-one"));
+        await harness.Host.SyncAsync();
 
         var outputFailure = await Assert.ThrowsAsync<InvalidDataException>(
             () => session.Output.Completion.Bounded());
@@ -106,7 +100,7 @@ public sealed class TerminalOutputTests
 
         // 通道读端看到的是 ChannelClosedException，其 Inner 才是协议错误本身。
         var readFailure = await Assert.ThrowsAsync<ChannelClosedException>(
-            () => session.Output.ReadAsync(limit.Token).AsTask());
+            () => session.Output.ReadAsync(harness.Limit.Token).AsTask());
         Assert.IsType<InvalidDataException>(readFailure.InnerException);
 
         await session.DisposeAsync();
@@ -115,61 +109,55 @@ public sealed class TerminalOutputTests
     [Fact]
     public async Task Output_without_a_terminal_id_is_dropped_with_a_diagnostic()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         const string terminalId = "t-no-id";
-        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, terminalId, harness.Limit.Token);
 
-        await host.NotifyClientAsync(TerminalOperations.Output, new TerminalData("", 0, "lost"u8.ToArray()));
-        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "kept"));
-        await host.SyncAsync();
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, new TerminalData("", 0, "lost"u8.ToArray()));
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "kept"));
+        await harness.Host.SyncAsync();
 
-        BoundRoots.AssertDiagnostic(client, "terminal.output carried no usable payload: the message carries no terminal id.");
-        Assert.Equal("kept", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(limit.Token)).ToArray()));
+        BoundRoots.AssertDiagnostic(harness.Client, "terminal.output carried no usable payload: the message carries no terminal id.");
+        Assert.Equal("kept", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(harness.Limit.Token)).ToArray()));
         await session.DisposeAsync();
     }
 
     [Fact]
     public async Task Output_with_a_negative_sequence_is_dropped_with_a_diagnostic()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         const string terminalId = "t-negative";
-        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, terminalId, harness.Limit.Token);
 
-        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, -3, "lost"));
-        await host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "kept"));
-        await host.SyncAsync();
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, -3, "lost"));
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, TerminalFixtures.Output(terminalId, 0, "kept"));
+        await harness.Host.SyncAsync();
 
-        BoundRoots.AssertDiagnostic(client, "the message carries a negative sequence number (-3).");
-        Assert.Equal("kept", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(limit.Token)).ToArray()));
+        BoundRoots.AssertDiagnostic(harness.Client, "the message carries a negative sequence number (-3).");
+        Assert.Equal("kept", System.Text.Encoding.UTF8.GetString((await session.Output.ReadAsync(harness.Limit.Token)).ToArray()));
         await session.DisposeAsync();
     }
 
     [Fact]
     public async Task Undecodable_output_and_exit_are_dropped_with_diagnostics()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         const string terminalId = "t-undecodable";
-        var session = await TerminalFixtures.StartSessionAsync(host, client, terminalId, limit.Token);
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, terminalId, harness.Limit.Token);
 
-        await host.NotifyClientAsync(TerminalOperations.Output, HostWire.Payload("not terminal data"));
-        await host.NotifyClientAsync(TerminalOperations.Output, RawPayload.None);
-        await host.NotifyClientAsync(TerminalOperations.Exit, HostWire.Nil);
-        await host.NotifyClientAsync(TerminalOperations.Exit, new TerminalExit("", 1));
-        await host.SyncAsync();
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, HostWire.Payload("not terminal data"));
+        await harness.Host.NotifyClientAsync(TerminalOperations.Output, RawPayload.None);
+        await harness.Host.NotifyClientAsync(TerminalOperations.Exit, HostWire.Nil);
+        await harness.Host.NotifyClientAsync(TerminalOperations.Exit, new TerminalExit("", 1));
+        await harness.Host.SyncAsync();
 
-        BoundRoots.AssertDiagnostic(client, "terminal.output carried no usable payload: The payload of 'terminal.output' is not a 'TerminalData'.");
-        BoundRoots.AssertDiagnostic(client, "terminal.output carried no usable payload: 'terminal.output' carries no payload.");
-        BoundRoots.AssertDiagnostic(client, "terminal.exit carried no usable payload: The payload of 'terminal.exit' is nil.");
-        BoundRoots.AssertDiagnostic(client, "terminal.exit carried no usable payload: the message carries no terminal id.");
+        BoundRoots.AssertDiagnostic(harness.Client, "terminal.output carried no usable payload: The payload of 'terminal.output' is not a 'TerminalData'.");
+        BoundRoots.AssertDiagnostic(harness.Client, "terminal.output carried no usable payload: 'terminal.output' carries no payload.");
+        BoundRoots.AssertDiagnostic(harness.Client, "terminal.exit carried no usable payload: The payload of 'terminal.exit' is nil.");
+        BoundRoots.AssertDiagnostic(harness.Client, "terminal.exit carried no usable payload: the message carries no terminal id.");
         Assert.False(session.Exited.IsCompleted);
 
-        await host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 6));
+        await harness.Host.NotifyClientAsync(TerminalOperations.Exit, TerminalFixtures.Exit(terminalId, 6));
         Assert.Equal(6, await session.Exited.Bounded());
     }
 

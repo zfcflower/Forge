@@ -69,12 +69,10 @@ public sealed class HostToolCallRelayTests
     [Fact]
     public async Task Without_a_resolver_the_bound_call_is_answered_as_an_unknown_tool()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var root = await BoundRoots.StartPluginToolRootAsync(host, client, limit.Token);
+        await using var harness = await HostClientHarness.StartAsync();
+        var root = await BoundRoots.StartPluginToolRootAsync(harness.Host, harness.Client, harness.Limit.Token);
 
-        var response = await root.CallAsync(host, "echo", "{}", limit.Token);
+        var response = await root.CallAsync(harness.Host, "echo", "{}", harness.Limit.Token);
 
         Assert.Equal(("Unknown tool 'echo'.", true), BoundRoots.OutputOf(response));
     }

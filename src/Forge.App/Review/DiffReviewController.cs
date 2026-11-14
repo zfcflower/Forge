@@ -1,11 +1,7 @@
-using System.Diagnostics;
 using AvaloniaEdit.Document;
 using Forge.App.Changes;
 using Forge.App.Localization;
-using Forge.App.Notifications;
 using Forge.Workspace;
-using Forge.App.Logging;
-using ZLogger;
 
 namespace Forge.App.Review;
 
@@ -14,38 +10,27 @@ namespace Forge.App.Review;
 /// new-file coordinates (<see cref="DraftInfo"/>): the store, the anchor and the quote never see document lines. Sending
 /// does not save any file; the messages are built per file like the single-file editor does.
 /// </summary>
-internal sealed class DiffReviewController : IReviewSurface, IDisposable
+internal sealed class DiffReviewController : ReviewSurfaceCore, IDisposable
 {
-    private readonly List<ReviewDraft> drafts = [];
     private readonly Dictionary<ReviewDraft, DraftInfo> infos = [];
     private IReadOnlyList<IDiffFileItem> files = [];
     private DiffRowMap map = DiffRowMap.Empty;
     private TextDocument? document;
     private DiffReviewContext? context;
-    private LocText message;
-    private int generation;
-    private bool busy;
-    private bool loading;
-    private bool reloadPending;
-    private bool disposed;
 
-    public event EventHandler? Changed;
+    public override TextDocument? Document => document;
 
-    public event EventHandler? DocumentReset;
-
-    public IReadOnlyList<ReviewDraft> Drafts => drafts;
-
-    public bool IsBusy => busy || loading;
-
-    public TextDocument? Document => document;
-
-    public bool CanCompose => !disposed && context is not null && document is not null && files.Count > 0;
+    public override bool CanCompose => !disposed && context is not null && document is not null && files.Count > 0;
 
     /// <summary>
     /// Without an owner the diff stays silent: headers and block bars work without comments, and a status line at the top edge
     /// would sit on the first file header's buttons. (The single-file editor keeps its own "no owner" message.)
     /// </summary>
-    public LocText Status => context is null ? default : message;
+    public override LocText Status => context is null ? default : message;
+
+    protected override ReviewServices? Services => context?.Services;
+
+    protected override string FailureNotificationKey => "review-diff";
 
     /// <summary>Sets (or clears) the review services; reloads the drafts.</summary>
     public void Configure(DiffReviewContext? value)
@@ -63,10 +48,10 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         _ = Fire(ReloadAsync);
     }
 
-    public bool CanCommentOn(int startLine, int endLine) =>
+    public override bool CanCommentOn(int startLine, int endLine) =>
         CanCompose && map.TryMapRange(startLine, endLine, out _);
 
-    public ReviewDraft? BeginDraft(int startLine, int endLine)
+    public override ReviewDraft? BeginDraft(int startLine, int endLine)
     {
         if (!CanCompose || document is not { LineCount: > 0 } doc)
         {
@@ -85,7 +70,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         return draft;
     }
 
-    public void Discard(ReviewDraft draft)
+    public override void Discard(ReviewDraft draft)
     {
         if (!IsBusy)
         {
@@ -94,54 +79,13 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         }
     }
 
-    public bool IsLost(ReviewDraft draft) => document is not { } doc || draft.IsLostCached(doc, generation);
+    public override bool IsLost(ReviewDraft draft) => document is not { } doc || draft.IsLostCached(doc, generation);
 
-    public Task<bool> SaveAsync(ReviewDraft draft, string body) =>
-        RunAsync(async (g, doc) =>
-        {
-            if (!await PersistAsync(g, doc, draft, body).ConfigureAwait(true))
-            {
-                return false;
-            }
-
-            SetMessage(new LocText(ReviewStrings.Saved));
-            context?.Services.Changed();
-            return true;
-        });
-
-    public Task<bool> DeleteAsync(ReviewDraft draft) =>
-        RunAsync(async (g, doc) =>
-        {
-            if (draft.Id != 0 && context?.Services is { } svc)
-            {
-                if (!await svc.Store.DeleteAsync(draft.Id).ConfigureAwait(true))
-                {
-                    _ = Fire(ReloadAsync);
-                    throw new InvalidOperationException("The comment no longer exists.");
-                }
-
-                FileReviewController.UnmarkedOf(svc.Store).Remove(draft.Id);
-                FileReviewController.RestorePendingOf(svc.Store).Remove(draft.Id);
-                if (Stale(g, doc))
-                {
-                    svc.Changed();
-                    return true;
-                }
-            }
-
-            draft.Release();
-            infos.Remove(draft);
-            drafts.Remove(draft);
-            Raise();
-            context?.Services.Changed();
-            return true;
-        });
-
-    public Task<bool> SendAsync(ReviewDraft draft, string body) =>
+    public override Task<bool> SendAsync(ReviewDraft draft, string body) =>
         SendBatchAsync([draft], draft, body, single: true, PathOf(draft));
 
     /// <summary>Sends every unsent draft of the shown files, one message per file.</summary>
-    public async Task<bool> SendFileAsync()
+    public override async Task<bool> SendFileAsync()
     {
         var targets = drafts.Where(static draft => !draft.IsSent).ToArray();
         if (targets.Length == 0)
@@ -237,7 +181,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
                 return FailChanged();
             }
 
-            if (targets.Any(target => FileReviewController.IsBlocked(svc.Store, target)))
+            if (targets.Any(target => IsBlocked(svc.Store, target)))
             {
                 SetMessage(new LocText(ReviewStrings.SentNotMarked, LocText.Literal(string.Empty)));
                 return false;
@@ -323,15 +267,14 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
                 return true;
             }
 
-            var unmarked = FileReviewController.UnmarkedOf(svc.Store);
+            var unmarked = UnmarkedOf(svc.Store);
             foreach (var target in targets)
             {
                 target.IsSent = true;
                 if (!unmarked.Contains(target.Id))
                 {
                     target.Release();
-                    infos.Remove(target);
-                    drafts.Remove(target);
+                    RemoveDraft(target);
                 }
             }
 
@@ -345,111 +288,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
             return true;
         });
 
-    /// <summary>Marks this surface's ids sent through <see cref="ReviewMarking" /> and shows what it reported.</summary>
-    private async Task MarkAsync(ReviewServices svc, long[] ids, bool retry = false)
-    {
-        var reported = await ReviewMarking.MarkAsync(svc, ids, retry).ConfigureAwait(true);
-        if (!reported.IsEmpty)
-        {
-            SetMessage(reported);
-        }
-    }
-
-    private async Task<bool> RetryUnmarkedAsync(ReviewServices svc)
-    {
-        var pending = FileReviewController.RestorePendingOf(svc.Store);
-        if (pending.Count > 0)
-        {
-            await TryRestoreAsync(svc, pending.ToArray()).ConfigureAwait(true);
-        }
-
-        var unmarked = FileReviewController.UnmarkedOf(svc.Store);
-        if (unmarked.Count == 0)
-        {
-            return pending.Count == 0;
-        }
-
-        foreach (var id in unmarked.ToArray())
-        {
-            if (await svc.Store.GetAsync(id).ConfigureAwait(true) is null)
-            {
-                unmarked.Remove(id);
-            }
-        }
-
-        if (unmarked.Count > 0)
-        {
-            await MarkAsync(svc, unmarked.ToArray(), retry: true).ConfigureAwait(true);
-        }
-
-        foreach (var done in drafts.Where(draft => draft.IsSent && !unmarked.Contains(draft.Id)).ToArray())
-        {
-            done.Release();
-            infos.Remove(done);
-            drafts.Remove(done);
-        }
-
-        Raise();
-        return unmarked.Count == 0 && pending.Count == 0;
-    }
-
-    private async Task<bool> TryRestoreAsync(ReviewServices svc, long[] ids)
-    {
-        var pending = FileReviewController.RestorePendingOf(svc.Store);
-        foreach (var id in ids)
-        {
-            pending.Add(id);
-        }
-
-        var gate = FileReviewController.GateOf(svc.Store);
-        await gate.WaitAsync().ConfigureAwait(true);
-        try
-        {
-            var unmarked = FileReviewController.UnmarkedOf(svc.Store);
-            foreach (var id in ids)
-            {
-                unmarked.Remove(id);
-                pending.Add(id);
-            }
-
-            try
-            {
-                await svc.Store.RestoreDraftsAsync(ids).ConfigureAwait(true);
-                foreach (var id in ids)
-                {
-                    pending.Remove(id);
-                }
-
-                return true;
-            }
-            catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
-            {
-                AppLogs.Review.ZLogWarning($"restoring drafts failed: {exception.Message}");
-                SetMessage(new LocText(ReviewStrings.RestoreFailed, LocText.Literal(exception.Message)));
-                return false;
-            }
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
-
-    private async Task RestoreAsync(ReviewServices svc, long[] ids)
-    {
-        if (await TryRestoreAsync(svc, ids).ConfigureAwait(true))
-        {
-            SetMessage(new LocText(ReviewStrings.Restored));
-        }
-
-        svc.Changed();
-        if (!disposed)
-        {
-            _ = Fire(ReloadAsync);
-        }
-    }
-
-    private async Task<bool> PersistAsync(int g, TextDocument doc, ReviewDraft draft, string? body)
+    protected override async Task<bool> PersistAsync(int g, TextDocument doc, ReviewDraft draft, string? body)
     {
         if (context?.Services is not { } svc || context.Owner is not { } scope || !infos.TryGetValue(draft, out var info)
             || (uint)info.File >= (uint)files.Count)
@@ -459,7 +298,7 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
 
         var item = files[info.File];
         var text = (body ?? draft.Body).Trim();
-        if (FileReviewController.IsBlocked(svc.Store, draft))
+        if (IsBlocked(svc.Store, draft))
         {
             SetMessage(new LocText(ReviewStrings.SentNotMarked, LocText.Literal(string.Empty)));
             return false;
@@ -541,125 +380,57 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         return true;
     }
 
-    private async Task<bool> RunAsync(Func<int, TextDocument, Task<bool>> body)
+    protected override async Task LoadAsync(int current, TextDocument? doc)
     {
-        if (IsBusy)
-        {
-            SetMessage(new LocText(ReviewStrings.Busy));
-            return false;
-        }
-
-        if (!CanCompose || document is not { } doc)
-        {
-            Raise();
-            return false;
-        }
-
-        busy = true;
-        Raise();
-        try
-        {
-            return await body(generation, doc).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
-        {
-            AppLogs.Review.ZLogWarning($"operation failed: {exception.Message}");
-            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
-            return false;
-        }
-        finally
-        {
-            busy = false;
-            if (reloadPending && !disposed)
-            {
-                reloadPending = false;
-                _ = Fire(ReloadAsync);
-            }
-
-            Raise();
-        }
-    }
-
-    private async Task ReloadAsync()
-    {
-        var current = ++generation;
-        var doc = document;
         var shown = files;
         var rows = map;
-        ReleaseAll();
-        DocumentReset?.Invoke(this, EventArgs.Empty);
-        if (busy)
+        if (disposed || doc is null || context?.Services is not { } svc || context.Owner is not { } scope)
         {
-            reloadPending = true;
-            Raise();
             return;
         }
 
-        loading = true;
-        Raise();
-        try
+        await RetryUnmarkedAsync(svc).ConfigureAwait(true);
+        var stored = await Task.Run(() => svc.Store.GetDraftsAsync(scope.WorkspacePath, scope.SessionId)).ConfigureAwait(true);
+        if (stored.Count == 0 || current != generation)
         {
-            if (disposed || doc is null || context?.Services is not { } svc || context.Owner is not { } scope)
-            {
-                return;
-            }
-
-            await RetryUnmarkedAsync(svc).ConfigureAwait(true);
-            var stored = await Task.Run(() => svc.Store.GetDraftsAsync(scope.WorkspacePath, scope.SessionId)).ConfigureAwait(true);
-            if (stored.Count == 0 || current != generation)
-            {
-                return;
-            }
-
-            var unmarked = FileReviewController.UnmarkedOf(svc.Store);
-            var resolvers = new DiffAnchorResolver?[shown.Count];
-            foreach (var comment in stored)
-            {
-                var file = IndexOf(shown, comment.FilePath);
-                if (file < 0 || !rows.Contains(rows.HeaderLine(file)))
-                {
-                    continue;
-                }
-
-                var resolver = resolvers[file] ??= new DiffAnchorResolver(shown[file].Diff);
-                var match = comment.Anchor is { } anchor ? resolver.Resolve(anchor) : null;
-                ReviewDraft draft;
-                DraftInfo info;
-                if (match is null || match.State == DiffAnchorState.Stale || match.NewCount < 1)
-                {
-                    var header = rows.HeaderLine(file);
-                    draft = ReviewDraft.Detached(comment with { NewLineStart = header, NewLineEnd = header });
-                    info = new DraftInfo(file, comment.NewLineStart, comment.NewLineEnd, string.Empty);
-                }
-                else
-                {
-                    var start = match.NewStart;
-                    var end = match.NewStart + match.NewCount - 1;
-                    var (first, last) = DisplayLines(rows, shown, file, start, end);
-                    draft = ReviewDraft.Create(doc, first, last, comment.Id, comment.Body);
-                    info = new DraftInfo(file, start, end, QuoteOf(shown, file, start, end));
-                }
-
-                draft.IsSent = unmarked.Contains(comment.Id);
-                drafts.Add(draft);
-                infos[draft] = info;
-            }
-
-            drafts.Sort(static (a, b) => a.StoredStart.CompareTo(b.StoredStart));
+            return;
         }
-        catch (Exception exception) when (FileReviewController.IsStoreFailure(exception))
+
+        var unmarked = UnmarkedOf(svc.Store);
+        var resolvers = new DiffAnchorResolver?[shown.Count];
+        foreach (var comment in stored)
         {
-            AppLogs.Review.ZLogWarning($"loading drafts failed: {exception.Message}");
-            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
-        }
-        finally
-        {
-            if (current == generation)
+            var file = IndexOf(shown, comment.FilePath);
+            if (file < 0 || !rows.Contains(rows.HeaderLine(file)))
             {
-                loading = false;
-                Raise();
+                continue;
             }
+
+            var resolver = resolvers[file] ??= new DiffAnchorResolver(shown[file].Diff);
+            var match = comment.Anchor is { } anchor ? resolver.Resolve(anchor) : null;
+            ReviewDraft draft;
+            DraftInfo info;
+            if (match is null || match.State == DiffAnchorState.Stale || match.NewCount < 1)
+            {
+                var header = rows.HeaderLine(file);
+                draft = ReviewDraft.Detached(comment with { NewLineStart = header, NewLineEnd = header });
+                info = new DraftInfo(file, comment.NewLineStart, comment.NewLineEnd, string.Empty);
+            }
+            else
+            {
+                var start = match.NewStart;
+                var end = match.NewStart + match.NewCount - 1;
+                var (first, last) = DisplayLines(rows, shown, file, start, end);
+                draft = ReviewDraft.Create(doc, first, last, comment.Id, comment.Body);
+                info = new DraftInfo(file, start, end, QuoteOf(shown, file, start, end));
+            }
+
+            draft.IsSent = unmarked.Contains(comment.Id);
+            drafts.Add(draft);
+            infos[draft] = info;
         }
+
+        drafts.Sort(static (a, b) => a.StoredStart.CompareTo(b.StoredStart));
     }
 
     /// <summary>
@@ -727,65 +498,18 @@ internal sealed class DiffReviewController : IReviewSurface, IDisposable
         return -1;
     }
 
-    private bool Stale(int g, TextDocument doc) => disposed || g != generation || !ReferenceEquals(document, doc);
+    protected override bool Stale(int g, TextDocument doc) => disposed || g != generation || !ReferenceEquals(document, doc);
 
-    private bool FailChanged()
+    protected override void RemoveDraft(ReviewDraft draft)
     {
-        SetMessage(new LocText(ReviewStrings.ChangedDuringSave));
-        return false;
+        infos.Remove(draft);
+        base.RemoveDraft(draft);
     }
 
-    private void ReleaseAll()
+    protected override void ReleaseAll()
     {
-        foreach (var draft in drafts)
-        {
-            draft.Release();
-        }
-
-        drafts.Clear();
+        base.ReleaseAll();
         infos.Clear();
-    }
-
-
-    /// <summary>Shows the failure in the panel and announces it: a review that could not be saved is missed otherwise.</summary>
-    private void SetFailure(LocText value)
-    {
-        SetMessage(value);
-        NotificationCenter.Current?.Notify(
-            NotificationLevel.Error,
-            NotificationsStrings.EditorFailedTitle,
-            value,
-            "review-diff");
-    }
-
-    private void SetMessage(LocText value)
-    {
-        message = value;
-        Raise();
-    }
-
-    private void Raise()
-    {
-        if (!disposed)
-        {
-            Changed?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    private async Task Fire(Func<Task> work)
-    {
-        try
-        {
-            await work().ConfigureAwait(true);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception exception)
-        {
-            AppLogs.Review.ZLogError(exception, $"background work failed");
-            SetFailure(new LocText(ReviewStrings.StoreFailed, LocText.Literal(exception.Message)));
-        }
     }
 
     /// <summary>A draft in new-file coordinates: file index, new-side range and the new-side text it quotes.</summary>

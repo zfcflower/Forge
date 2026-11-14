@@ -95,19 +95,17 @@ public sealed class HostClientRootContextTests
     [MemberData(nameof(InvalidRoots))]
     public async Task Prompt_with_an_invalid_root_returns_null_without_ipc(string? root)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var contributor = await RegisterPromptAsync(host, client, "alpha", "tone");
+        await using var harness = await HostClientHarness.StartAsync();
+        var contributor = await RegisterPromptAsync(harness.Host, harness.Client, "alpha", "tone");
 
-        var text = await client.GetPluginPromptAsync(
+        var text = await harness.Client.GetPluginPromptAsync(
             contributor,
             new ToolContext("sess", root!),
-            limit.Token);
+            harness.Limit.Token);
 
         Assert.Null(text);
-        Assert.Empty(host.Requests("plugin.prompt"));
-        Assert.NotEmpty(client.Diagnostics);
+        Assert.Empty(harness.Host.Requests("plugin.prompt"));
+        Assert.NotEmpty(harness.Client.Diagnostics);
     }
 
     [Fact]
@@ -133,23 +131,21 @@ public sealed class HostClientRootContextTests
     [Fact]
     public async Task Run_code_sends_a_nonexistent_absolute_root_verbatim()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var hold = new InFlightRoot { Content = "ok" };
-        BoundRoots.ParkRoot(host, "code.execute", hold);
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        BoundRoots.ParkRoot(harness.Host, "code.execute", hold);
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
         var directory = BoundRoots.AbsoluteDir("missing-code") + "/does-not-exist";
 
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\"}"),
             new ToolContext("sess", directory),
-            limit.Token).AsTask();
+            harness.Limit.Token).AsTask();
         hold.Release();
         var result = await invocation.Bounded();
 
         Assert.False(result.IsError);
-        var sent = BoundRoots.ContextOf(Assert.Single(host.Requests("code.execute")));
+        var sent = BoundRoots.ContextOf(Assert.Single(harness.Host.Requests("code.execute")));
         Assert.Equal(directory, sent.WorkingDirectory);
     }
 

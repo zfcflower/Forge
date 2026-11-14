@@ -316,36 +316,32 @@ public sealed class HostToolCallRunBindingTests
     [Fact]
     public async Task Plugin_tool_root_with_a_relative_working_directory_is_rejected_locally()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var proxy = await BoundRoots.RegisterPluginToolAsync(client, host, "alpha", "entry");
+        await using var harness = await HostClientHarness.StartAsync();
+        var proxy = await BoundRoots.RegisterPluginToolAsync(harness.Client, harness.Host, "alpha", "entry");
 
         var result = await proxy.InvokeAsync(
             new ToolCall("root-1", "entry", "{}"),
             new ToolContext("sess", "relative/dir"),
-            limit.Token);
+            harness.Limit.Token);
 
         Assert.True(result.IsError);
         Assert.Contains("fully qualified", result.Content);
-        Assert.Empty(host.Requests("plugin.execute"));
+        Assert.Empty(harness.Host.Requests("plugin.execute"));
     }
 
     [Fact]
     public async Task Run_code_root_with_a_relative_working_directory_is_rejected_locally()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        await using var harness = await HostClientHarness.StartAsync();
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
 
         var result = await proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\"}"),
             new ToolContext("sess", "relative/dir"),
-            limit.Token);
+            harness.Limit.Token);
 
         Assert.True(result.IsError);
         Assert.Contains("fully qualified", result.Content);
-        Assert.Empty(host.Requests("code.execute"));
+        Assert.Empty(harness.Host.Requests("code.execute"));
     }
 }

@@ -11,12 +11,10 @@ public sealed class TerminalConnectionTests
     [Fact]
     public async Task Dropped_connection_faults_output_and_exited_with_a_connection_error()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var session = await TerminalFixtures.StartSessionAsync(host, client, "t-drop", limit.Token);
+        await using var harness = await HostClientHarness.StartAsync();
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, "t-drop", harness.Limit.Token);
 
-        await host.DropConnectionAsync();
+        await harness.Host.DropConnectionAsync();
 
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() => session.Output.Completion.Bounded());
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() => session.Exited.Bounded());
@@ -25,12 +23,10 @@ public sealed class TerminalConnectionTests
     [Fact]
     public async Task Client_stop_faults_output_and_exited_with_a_connection_error()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var session = await TerminalFixtures.StartSessionAsync(host, client, "t-stop-client", limit.Token);
+        await using var harness = await HostClientHarness.StartAsync();
+        var session = await TerminalFixtures.StartSessionAsync(harness.Host, harness.Client, "t-stop-client", harness.Limit.Token);
 
-        await client.StopAsync(limit.Token);
+        await harness.Client.StopAsync(harness.Limit.Token);
 
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() => session.Output.Completion.Bounded());
         await Assert.ThrowsAsync<IpcConnectionClosedException>(() => session.Exited.Bounded());
@@ -80,11 +76,9 @@ public sealed class TerminalConnectionTests
     [Fact]
     public async Task Dropped_connection_faults_every_registered_terminal_not_just_the_first()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var counter = 0;
-        host.On(
+        harness.Host.On(
             TerminalOperations.Start,
             (_, _) =>
             {
@@ -95,12 +89,12 @@ public sealed class TerminalConnectionTests
         var sessions = new List<ITerminalSession>();
         for (var index = 0; index < 3; index++)
         {
-            sessions.Add(await client.StartAsync(TerminalFixtures.Request(), limit.Token));
+            sessions.Add(await harness.Client.StartAsync(TerminalFixtures.Request(), harness.Limit.Token));
         }
 
         Assert.Equal(["t-multi-1", "t-multi-2", "t-multi-3"], sessions.Select(session => session.Id).ToArray());
 
-        await host.DropConnectionAsync();
+        await harness.Host.DropConnectionAsync();
 
         foreach (var session in sessions)
         {

@@ -287,24 +287,22 @@ public sealed class PluginStatusPromptTests
     [Fact]
     public async Task Unregistered_prompt_returns_null_and_sends_nothing()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        await RegisterPromptAsync(host, client, "alpha", "tone");
+        await using var harness = await HostClientHarness.StartAsync();
+        await RegisterPromptAsync(harness.Host, harness.Client, "alpha", "tone");
 
-        var missing = await client.GetPluginPromptAsync(
+        var missing = await harness.Client.GetPluginPromptAsync(
             new PluginPromptReference("alpha", "ghost"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("prompts")),
-            limit.Token);
-        var blank = await client.GetPluginPromptAsync(
+            harness.Limit.Token);
+        var blank = await harness.Client.GetPluginPromptAsync(
             new PluginPromptReference("", ""),
             new ToolContext("sess", BoundRoots.AbsoluteDir("prompts")),
-            limit.Token);
+            harness.Limit.Token);
 
         Assert.Null(missing);
         Assert.Null(blank);
-        Assert.Empty(host.Requests("plugin.prompt"));
-        Assert.NotEmpty(client.Diagnostics);
+        Assert.Empty(harness.Host.Requests("plugin.prompt"));
+        Assert.NotEmpty(harness.Client.Diagnostics);
     }
 
     [Fact]

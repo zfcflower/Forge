@@ -46,26 +46,24 @@ public sealed class RunCodeProxyTests
     [Fact]
     public async Task Own_run_code_tool_is_excluded_from_the_description_and_declarations()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var registry = new TestRegistry([new StubTool("run_code"), new StubTool("real")]);
-        var proxy = client.CreateRunCodeTool(registry);
+        var proxy = harness.Client.CreateRunCodeTool(registry);
 
         Assert.DoesNotContain("\n  run_code ", proxy.Definition.Description, StringComparison.Ordinal);
         Assert.Contains("\n  real ", proxy.Definition.Description, StringComparison.Ordinal);
 
         var hold = new InFlightRoot { Content = "ok" };
-        BoundRoots.ParkRoot(host, CodeExecute, hold);
+        BoundRoots.ParkRoot(harness.Host, CodeExecute, hold);
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\"}"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("self")),
-            limit.Token).AsTask();
+            harness.Limit.Token).AsTask();
         hold.Release();
         var result = await invocation.Bounded();
 
         Assert.False(result.IsError);
-        var request = Assert.Single(host.Requests(CodeExecute)).Read<Sdk.CodeExecutionRequest>();
+        var request = Assert.Single(harness.Host.Requests(CodeExecute)).Read<Sdk.CodeExecutionRequest>();
         Assert.Equal(["real"], request.Tools.Select(tool => tool.Name).ToArray());
     }
 
@@ -86,82 +84,74 @@ public sealed class RunCodeProxyTests
     [InlineData("{\"code\":\"x\",\"timeout_seconds\":-5}", "'timeout_seconds' must be a positive number")]
     public async Task Invalid_arguments_are_rejected_locally_without_any_request(string arguments, string fragment)
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        await using var harness = await HostClientHarness.StartAsync();
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
 
         var result = await proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", arguments),
             new ToolContext("sess", BoundRoots.AbsoluteDir("args")),
-            limit.Token);
+            harness.Limit.Token);
 
         Assert.True(result.IsError);
         Assert.Contains(fragment, result.Content);
-        Assert.Empty(host.Requests(CodeExecute));
+        Assert.Empty(harness.Host.Requests(CodeExecute));
     }
 
     [Fact]
     public async Task Oversize_script_is_rejected_locally()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var execution = new Sdk.CodeExecutionOptions { MaxScriptChars = 8 };
-        var proxy = client.CreateRunCodeTool(new TestRegistry(), new RunCodeProxyOptions { Execution = execution });
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry(), new RunCodeProxyOptions { Execution = execution });
 
         var result = await proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"123456789\"}"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("args")),
-            limit.Token);
+            harness.Limit.Token);
 
         Assert.True(result.IsError);
         Assert.Contains("9 chars", result.Content);
         Assert.Contains("limit is 8", result.Content);
-        Assert.Empty(host.Requests(CodeExecute));
+        Assert.Empty(harness.Host.Requests(CodeExecute));
     }
 
     [Fact]
     public async Task Finite_huge_timeout_clamps_to_the_maximum_without_overflow()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var hold = new InFlightRoot { Content = "ok" };
-        BoundRoots.ParkRoot(host, CodeExecute, hold);
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        BoundRoots.ParkRoot(harness.Host, CodeExecute, hold);
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
 
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\",\"timeout_seconds\":1e300}"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("huge")),
-            limit.Token).AsTask();
+            harness.Limit.Token).AsTask();
         hold.Release();
         var result = await invocation.Bounded();
 
         Assert.False(result.IsError);
-        var request = Assert.Single(host.Requests(CodeExecute));
+        var request = Assert.Single(harness.Host.Requests(CodeExecute));
         Assert.Equal(600_000, request.Read<Sdk.CodeExecutionRequest>().TimeoutMilliseconds);
     }
 
     [Fact]
     public async Task Default_timeout_is_60s_and_values_above_600s_clamp()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var hold = new InFlightRoot();
-        BoundRoots.ParkRoot(host, CodeExecute, hold);
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        BoundRoots.ParkRoot(harness.Host, CodeExecute, hold);
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
         var context = new ToolContext("sess", BoundRoots.AbsoluteDir("budgets"));
         hold.Release();
 
-        await proxy.InvokeAsync(new ToolCall("a", "run_code", "{\"code\":\"1\"}"), context, limit.Token);
+        await proxy.InvokeAsync(new ToolCall("a", "run_code", "{\"code\":\"1\"}"), context, harness.Limit.Token);
         await proxy.InvokeAsync(
-            new ToolCall("b", "run_code", "{\"code\":\"1\",\"timeout_seconds\":10000}"), context, limit.Token);
+            new ToolCall("b", "run_code", "{\"code\":\"1\",\"timeout_seconds\":10000}"), context, harness.Limit.Token);
         await proxy.InvokeAsync(
-            new ToolCall("c", "run_code", "{\"code\":\"1\",\"timeout_seconds\":30}"), context, limit.Token);
+            new ToolCall("c", "run_code", "{\"code\":\"1\",\"timeout_seconds\":30}"), context, harness.Limit.Token);
 
-        var budgets = host.Requests(CodeExecute)
+        var budgets = harness.Host.Requests(CodeExecute)
             .Select(message => message.Read<Sdk.CodeExecutionRequest>().TimeoutMilliseconds)
             .ToArray();
         Assert.Equal([60_000, 600_000, 30_000], budgets);
@@ -170,20 +160,18 @@ public sealed class RunCodeProxyTests
     [Fact]
     public async Task Null_timeout_uses_the_default_budget()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var hold = new InFlightRoot();
-        BoundRoots.ParkRoot(host, CodeExecute, hold);
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        BoundRoots.ParkRoot(harness.Host, CodeExecute, hold);
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
         hold.Release();
 
         await proxy.InvokeAsync(
             new ToolCall("a", "run_code", "{\"code\":\"1\",\"timeout_seconds\":null}"),
             new ToolContext("sess", BoundRoots.AbsoluteDir("budgets")),
-            limit.Token);
+            harness.Limit.Token);
 
-        Assert.Equal(60_000, Assert.Single(host.Requests(CodeExecute))
+        Assert.Equal(60_000, Assert.Single(harness.Host.Requests(CodeExecute))
             .Read<Sdk.CodeExecutionRequest>().TimeoutMilliseconds);
     }
 
@@ -216,9 +204,7 @@ public sealed class RunCodeProxyTests
     [Fact]
     public async Task Code_execute_carries_the_context_tools_and_options()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
+        await using var harness = await HostClientHarness.StartAsync();
         var execution = new Sdk.CodeExecutionOptions { MaxConcurrentToolCalls = 3, MaxResultChars = 1234 };
         var registry = new TestRegistry(
         [
@@ -226,19 +212,19 @@ public sealed class RunCodeProxyTests
             new StubTool("alpha", ToolSideEffect.ReadOnly),
         ]);
         var hold = new InFlightRoot { Content = "ok" };
-        BoundRoots.ParkRoot(host, CodeExecute, hold);
-        var proxy = client.CreateRunCodeTool(
+        BoundRoots.ParkRoot(harness.Host, CodeExecute, hold);
+        var proxy = harness.Client.CreateRunCodeTool(
             registry, new RunCodeProxyOptions { Execution = execution });
         var directory = BoundRoots.AbsoluteDir("wire");
 
         var invocation = proxy.InvokeAsync(
             new ToolCall("rc-1", "run_code", "{\"code\":\"1+1\",\"timeout_seconds\":45}"),
             new ToolContext("sess-wire", directory, 2),
-            limit.Token).AsTask();
+            harness.Limit.Token).AsTask();
         hold.Release();
         await invocation.Bounded();
 
-        var message = Assert.Single(host.Requests(CodeExecute));
+        var message = Assert.Single(harness.Host.Requests(CodeExecute));
         // Exactly the five documented fields: a fixarray of five, nothing appended.
         Assert.Equal(0x95, message.Payload.Span[0]);
         var args = message.Read<Sdk.CodeExecutionRequest>();
@@ -267,29 +253,27 @@ public sealed class RunCodeProxyTests
     [Fact]
     public async Task Expired_script_call_fails_and_the_next_call_recovers()
     {
-        await using var host = new FakeHost();
-        await using var client = await ClientFactory.StartAsync(host);
-        using var limit = TestLimit.Create();
-        host.On(CodeExecute, async (_, ct) =>
+        await using var harness = await HostClientHarness.StartAsync();
+        harness.Host.On(CodeExecute, async (_, ct) =>
         {
             await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
             return new Sdk.CodeExecutionResult("never");
         });
-        var proxy = client.CreateRunCodeTool(new TestRegistry());
+        var proxy = harness.Client.CreateRunCodeTool(new TestRegistry());
         var context = new ToolContext("sess", BoundRoots.AbsoluteDir("expiry"));
 
         var expired = await proxy.InvokeAsync(
-            new ToolCall("rc-1", "run_code", "{\"code\":\"1\",\"timeout_seconds\":0.3}"), context, limit.Token);
+            new ToolCall("rc-1", "run_code", "{\"code\":\"1\",\"timeout_seconds\":0.3}"), context, harness.Limit.Token);
 
         Assert.True(expired.IsError);
         Assert.Contains("script was stopped", expired.Content);
         Assert.Contains("run_code timeout", expired.Content);
 
-        host.Answer(CodeExecute, new Sdk.CodeExecutionResult("recovered"));
+        harness.Host.Answer(CodeExecute, new Sdk.CodeExecutionResult("recovered"));
         var recovered = await proxy.InvokeAsync(
-            new ToolCall("rc-2", "run_code", "{\"code\":\"2\"}"), context, limit.Token);
+            new ToolCall("rc-2", "run_code", "{\"code\":\"2\"}"), context, harness.Limit.Token);
 
         Assert.Equal(new ToolResult("recovered", false), recovered);
-        Assert.Equal(HostStatus.Running, client.Status);
+        Assert.Equal(HostStatus.Running, harness.Client.Status);
     }
 }
