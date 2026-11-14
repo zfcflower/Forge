@@ -193,8 +193,7 @@ internal static class MarkdownRenderer
         MdBlockKind.Paragraph => Text(block.Inlines, "md-p"),
         MdBlockKind.List => RenderList(block),
         MdBlockKind.Quote => RenderQuote(block),
-        MdBlockKind.Code => RenderCode(block.Text, block.Info),
-        MdBlockKind.Html => RenderCode(block.Text, "html"),
+        MdBlockKind.Code or MdBlockKind.Html => RenderCode(block.Text, CodeInfo(block)),
         MdBlockKind.Table => RenderTable(block),
         MdBlockKind.Rule => new Border { Classes = { "md-rule" } },
         _ => new Control(),
@@ -210,6 +209,12 @@ internal static class MarkdownRenderer
     }
 
     private static MarkdownCodeBlock RenderCode(string text, string info) => new(text, info);
+
+    /// <summary>
+    /// The language label of a code block: its fence info string, or "html" for a block the parser read as raw HTML. One owner,
+    /// because a streaming block is refreshed in place from the same block and would otherwise lose the label it first got.
+    /// </summary>
+    internal static string CodeInfo(MdBlock block) => block.Kind == MdBlockKind.Html ? "html" : block.Info;
 
     private static Control RenderQuote(MdBlock block)
     {

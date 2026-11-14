@@ -188,7 +188,7 @@ public partial class ChatMarkdownView : UserControl
 
         if (block.Kind is MdBlockKind.Code or MdBlockKind.Html && control is MarkdownCodeBlock code)
         {
-            code.Update(block.Text, block.Info);
+            code.Update(block.Text, MarkdownRenderer.CodeInfo(block));
             blocks[position] = (block, control);
             return;
         }

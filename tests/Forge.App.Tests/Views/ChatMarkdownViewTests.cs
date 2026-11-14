@@ -123,6 +123,32 @@ public sealed class ChatMarkdownViewTests
     }
 
     [Fact]
+    public async Task A_streaming_html_block_keeps_its_html_label_when_it_is_refreshed()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+
+                model.Append("<!-- note\n");
+                var html = Assert.IsType<MarkdownCodeBlock>(Assert.Single(body.Children));
+                Assert.True(Language(html).IsVisible);
+
+                model.Append("more\n");
+
+                Assert.Same(html, Assert.Single(body.Children));
+                Assert.Equal("html", Language(html).Text);
+                Assert.True(Language(html).IsVisible);
+                Assert.Equal("html", Avalonia.Automation.AutomationProperties.GetName(html));
+            });
+    }
+
+    /// <summary>The language label of a rendered code block.</summary>
+    private static TextBlock Language(MarkdownCodeBlock code) =>
+        Assert.Single(code.GetLogicalDescendants().OfType<TextBlock>(), static block => block.Classes.Contains("md-code-lang"));
+
+    [Fact]
     public async Task A_view_attached_to_a_reply_that_already_streamed_shows_all_of_it()
     {
         await SharedUi.RunAsync(
