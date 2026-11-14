@@ -3177,7 +3177,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             approvalServices.Queue.Changed -= OnApprovalQueueChanged;
         }
 
-        // The overlay reads one session's live work; it goes before the sessions it reads do.
+        // The overlay reads every open session's live work; it goes before the sessions it reads do.
         CloseInspector();
 
         DetachAutomations();

@@ -490,7 +490,7 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref inspectorLogTailLines, Math.Clamp(value, MinInspectorLogTailLines, MaxInspectorLogTailLines));
     }
 
-    /// <summary>How often the resource inspector refreshes its elapsed times (wave W8). Clamped to [<see cref="MinInspectorRefreshMilliseconds"/>, <see cref="MaxInspectorRefreshMilliseconds"/>].</summary>
+    /// <summary>How often the resource inspector pulls its rows and elapsed times from the open sessions (wave W8). Clamped to [<see cref="MinInspectorRefreshMilliseconds"/>, <see cref="MaxInspectorRefreshMilliseconds"/>].</summary>
     public int InspectorRefreshMilliseconds
     {
         get => inspectorRefreshMilliseconds;
