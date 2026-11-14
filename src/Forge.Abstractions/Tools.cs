@@ -111,7 +111,19 @@ public interface IToolRegistry
 public enum ApprovalMode { Allow, Ask, Deny }
 public enum ApprovalDecision { Allow, Deny }
 
-public sealed record ApprovalRequest(string ToolName, string ArgumentsJson, ToolSideEffect SideEffect, string WorkingDirectory);
+/// <summary>
+/// One approval ask. <paramref name="RunKey"/> is the run a <c>run_code</c> script's inner tool call belongs to, or null
+/// for every other caller (the agent loop, plugin commands, plugin executions): a non-null key lets the session's approval
+/// handler serialize the calls of one run for one tool and offer "allow the rest of this run". It is opaque to the
+/// contract and unique per run, so a stale grant can never match a later one, and it never crosses IPC - the request is
+/// built in the main program after the wire message was matched against the trusted run record.
+/// </summary>
+public sealed record ApprovalRequest(
+    string ToolName,
+    string ArgumentsJson,
+    ToolSideEffect SideEffect,
+    string WorkingDirectory,
+    string? RunKey = null);
 
 /// <summary>Pure policy evaluation; configurable per tool/directory in settings.</summary>
 public interface IApprovalPolicy

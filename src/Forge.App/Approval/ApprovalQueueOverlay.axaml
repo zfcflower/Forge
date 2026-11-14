@@ -106,6 +106,11 @@
                   AutomationProperties.AutomationId="approval-arguments-toggle"
                   AutomationProperties.Name="{Binding [Extensions.Tool.Arguments], Source={x:Static loc:Loc.Instance}}" />
 
+          <TextBlock IsVisible="{Binding HasPendingCalls}"
+                     Classes="muted"
+                     Margin="0,6,0,0"
+                     Text="{Binding RunPendingText}"
+                     AutomationProperties.AutomationId="approval-run-pending" />
           <WrapPanel Margin="0,6,0,0">
             <Button Classes="primary"
                     Margin="0,0,6,6"
@@ -119,6 +124,14 @@
                     Content="{Binding [Extensions.Tool.Deny], Source={x:Static loc:Loc.Instance}}"
                     AutomationProperties.AutomationId="approval-deny"
                     AutomationProperties.Name="{Binding [Extensions.Tool.Deny], Source={x:Static loc:Loc.Instance}}" />
+          </WrapPanel>
+          <WrapPanel IsVisible="{Binding HasRunScope}" Margin="0,0,0,6">
+            <Button Classes="ghost"
+                    Margin="0,0,6,6"
+                    Command="{Binding AllowRunCommand}"
+                    Content="{Binding [Extensions.Tool.RunScopeAllow], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="approval-allow-run"
+                    AutomationProperties.Name="{Binding [Extensions.Tool.RunScopeAllow], Source={x:Static loc:Loc.Instance}}" />
           </WrapPanel>
           <WrapPanel IsVisible="{Binding CanRemember}">
             <Button Classes="ghost"

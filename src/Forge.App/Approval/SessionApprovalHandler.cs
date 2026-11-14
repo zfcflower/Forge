@@ -53,9 +53,20 @@ internal sealed class ApprovalSessionDirectory
 /// <para>Several requests of one session can be open at once: Core's approval gate serializes the agent loop's own calls, but
 /// plugin and workflow <c>host.tool_call</c> steps reach this handler through <see cref="SessionToolCallRouter"/> without it.
 /// Each request owns its card and its own wait, so decisions and cancellations never touch another request's card.</para>
+/// <para>A <c>run_code</c> script's inner calls (<see cref="ApprovalRequest.RunKey"/> non-null) are serialized per tool of one
+/// run: the first call shows its card with how many more wait behind it, the rest queue without cards, and the card's
+/// "allow the rest of this run" answers them all plus the calls the script has not made yet. The grant lives only in this
+/// handler (never in the rule store), keyed by a run id that is unique per run, so it cannot outlive its run semantically;
+/// the map is capped so a long-lived session cannot accumulate one.</para>
 /// </summary>
 internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
 {
+    /// <summary>
+    /// How many run grants and run groups are kept before the oldest is dropped. A run key is unique per run, so the entry
+    /// of a finished run is inert (it can never match again) and dropping it only frees memory; dropping the entry of a
+    /// live run costs one extra card, never a wrong allow.
+    /// </summary>
+    private const int RunStateCap = 64;
     private readonly ApprovalQueue queue;
     private readonly ApprovalRules rules;
     private readonly string projectId;
@@ -94,6 +105,34 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
     /// <summary>Empty when the session has no project; the project "remember" button is then disabled.</summary>
     public string ProjectId => projectId;
 
+    /// <summary>Tools whose rest was allowed for one run, by that run's key; see the class summary.</summary>
+    private readonly Dictionary<string, HashSet<string>> runGrants = new(StringComparer.Ordinal);
+
+    /// <summary>Insertion order of <see cref="runGrants"/>, for dropping the oldest at the cap.</summary>
+    private readonly Queue<string> grantOrder = new();
+
+    /// <summary>The per-(run, tool) serialization groups of script inner calls.</summary>
+    private readonly Dictionary<(string RunKey, string Tool), RunCallGroup> runGroups = new();
+
+    /// <summary>Insertion order of <see cref="runGroups"/>, for dropping the oldest idle group at the cap.</summary>
+    private readonly Queue<(string RunKey, string Tool)> groupOrder = new();
+
+    /// <summary>Guards the two maps, their queues and every group's counter and leader slot.</summary>
+    private readonly Lock batchGate = new();
+
+    /// <summary>One run's calls of one tool waiting to be asked: the first holds the turn and shows the card, the rest wait.</summary>
+    private sealed class RunCallGroup
+    {
+        /// <summary>Held while one call is being asked (its card is queued); the next waiter takes it after that ask ends.</summary>
+        public SemaphoreSlim Turn { get; } = new(1, 1);
+
+        /// <summary>Calls inside this group that have not been answered yet (the current ask included).</summary>
+        public int Pending;
+
+        /// <summary>The card the current ask is showing, for the waiting-count line; null while the group has no ask.</summary>
+        public ToolApprovalCardViewModel? Leader;
+    }
+
     public async ValueTask<ApprovalDecision> RequestAsync(ApprovalRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -123,6 +162,12 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
             return ApprovalDecision.Allow;
         }
 
+        // A run-scoped allow answers like a remembered rule, but only for that run's calls of that tool.
+        if (request.RunKey is { } grantedRun && IsGranted(grantedRun, request.ToolName))
+        {
+            return ApprovalDecision.Allow;
+        }
+
         return await AskAsync(request, ct).ConfigureAwait(false);
     }
 
@@ -140,39 +185,215 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
 
     private async Task<ApprovalDecision> AskAsync(ApprovalRequest request, CancellationToken ct)
     {
-        var card = new ToolApprovalCardViewModel(
-            new ToolApprovalCardRequest(
-                SessionId,
-                SessionTitle,
-                projectId.Length == 0 ? null : projectId,
-                request.ToolName,
-                request.SideEffect,
-                request.WorkingDirectory,
-                request.ArgumentsJson,
-                mcpToolInfo?.Invoke(request.ToolName)),
-            queue.Dispatcher,
-            rules);
-
-        await queue.EnqueueAsync(card, ct).ConfigureAwait(false);
-        notifications.Notify(
-            NotificationLevel.Warning,
-            NotificationsStrings.ApprovalWaitingTitle,
-            NotificationsStrings.ApprovalWaiting(SessionTitle, request.ToolName),
-            "approval:" + card.Id);
+        // A script run's inner calls join their (run, tool) group first: the group hands out one ask at a time, so a
+        // fanned-out call waits behind the card the fan-out's first call already showing instead of stacking its own.
+        RunCallGroup? group = null;
+        var held = false;
         try
         {
-            var outcome = await card.Decision.WaitAsync(ct).ConfigureAwait(false);
-            if (outcome.Remember is { } scope)
+            if (request.RunKey is { } runKey)
             {
-                Remember(request, scope);
+                group = JoinGroup(runKey, request.ToolName);
+                await group.Turn.WaitAsync(ct).ConfigureAwait(false);
+                held = true;
+
+                // The user may have allowed the rest of this run while this call was waiting behind the leader.
+                if (IsGranted(runKey, request.ToolName))
+                {
+                    return ApprovalDecision.Allow;
+                }
             }
 
-            return outcome.IsAllowed ? ApprovalDecision.Allow : ApprovalDecision.Deny;
+            var card = new ToolApprovalCardViewModel(
+                new ToolApprovalCardRequest(
+                    SessionId,
+                    SessionTitle,
+                    projectId.Length == 0 ? null : projectId,
+                    request.ToolName,
+                    request.SideEffect,
+                    request.WorkingDirectory,
+                    request.ArgumentsJson,
+                    mcpToolInfo?.Invoke(request.ToolName),
+                    request.RunKey),
+                queue.Dispatcher,
+                rules);
+
+            if (group is not null)
+            {
+                SetLeader(group, card);
+            }
+
+            await queue.EnqueueAsync(card, ct).ConfigureAwait(false);
+            notifications.Notify(
+                NotificationLevel.Warning,
+                NotificationsStrings.ApprovalWaitingTitle,
+                NotificationsStrings.ApprovalWaiting(SessionTitle, request.ToolName),
+                "approval:" + card.Id);
+            try
+            {
+                var outcome = await card.Decision.WaitAsync(ct).ConfigureAwait(false);
+                if (outcome.Remember is { } scope)
+                {
+                    Remember(request, scope);
+                }
+
+                if (outcome.AllowRestOfRun && request.RunKey is { } grantedRun)
+                {
+                    GrantRestOfRun(grantedRun, request.ToolName);
+                }
+
+                return outcome.IsAllowed ? ApprovalDecision.Allow : ApprovalDecision.Deny;
+            }
+            finally
+            {
+                if (group is not null)
+                {
+                    ClearLeader(group, card);
+                }
+
+                // Whatever happened - a decision, a cancellation or a session release - the card leaves the queue here.
+                await queue.WithdrawAsync(card).ConfigureAwait(false);
+            }
         }
         finally
         {
-            // Whatever happened - a decision, a cancellation or a session release - the card leaves the queue here.
-            await queue.WithdrawAsync(card).ConfigureAwait(false);
+            if (group is not null)
+            {
+                LeaveGroup(request.RunKey!, request.ToolName, group, held);
+            }
+        }
+    }
+
+    /// <summary>Joins the run's group for this tool and counts the caller in; creates the group at its first caller.</summary>
+    private RunCallGroup JoinGroup(string runKey, string toolName)
+    {
+        RunCallGroup group;
+        lock (batchGate)
+        {
+            if (!runGroups.TryGetValue((runKey, toolName), out group!))
+            {
+                group = new RunCallGroup();
+                runGroups[(runKey, toolName)] = group;
+                groupOrder.Enqueue((runKey, toolName));
+                if (runGroups.Count > RunStateCap)
+                {
+                    // Drop the oldest idle group; a busy one is kept and re-queued, so the map may temporarily overshoot
+                    // the cap by as many runs as are actually asking at once - which the app already bounds.
+                    for (var visited = 0; visited < groupOrder.Count; visited++)
+                    {
+                        var oldest = groupOrder.Dequeue();
+                        if (runGroups.TryGetValue(oldest, out var candidate) && candidate.Pending == 0)
+                        {
+                            runGroups.Remove(oldest);
+                            break;
+                        }
+
+                        groupOrder.Enqueue(oldest);
+                    }
+                }
+            }
+
+            group.Pending++;
+        }
+
+        // The shown card's waiting line counts the callers behind it, so it grows as callers join.
+        RefreshLeaderCount(group);
+        return group;
+    }
+
+    /// <summary>Answers the caller out of the group: one fewer pending call, the turn (if held) back, the leader's count refreshed.</summary>
+    private void LeaveGroup(string runKey, string toolName, RunCallGroup group, bool held)
+    {
+        lock (batchGate)
+        {
+            group.Pending--;
+            if (held)
+            {
+                group.Turn.Release();
+            }
+        }
+
+        RefreshLeaderCount(group);
+    }
+
+    /// <summary>Makes <paramref name="card"/> the group's shown card and tells it how many calls wait behind it.</summary>
+    private void SetLeader(RunCallGroup group, ToolApprovalCardViewModel card)
+    {
+        lock (batchGate)
+        {
+            group.Leader = card;
+        }
+
+        RefreshLeaderCount(group);
+    }
+
+    /// <summary>Clears the leader slot when the ask that owned it ends (its card is leaving the queue with it).</summary>
+    private void ClearLeader(RunCallGroup group, ToolApprovalCardViewModel card)
+    {
+        lock (batchGate)
+        {
+            if (ReferenceEquals(group.Leader, card))
+            {
+                group.Leader = null;
+            }
+        }
+    }
+
+    /// <summary>Pushes the waiting count to the shown card; nothing to do while the group has no card (the count is only context).</summary>
+    private void RefreshLeaderCount(RunCallGroup group)
+    {
+        ToolApprovalCardViewModel? leader;
+        int waiting;
+        lock (batchGate)
+        {
+            leader = group.Leader;
+            waiting = group.Pending - 1;
+        }
+
+        if (leader is null)
+        {
+            return;
+        }
+
+        var count = Math.Max(0, waiting);
+        try
+        {
+            // Fire and forget: the count is context, not correctness, and the card lives on the UI thread.
+            _ = queue.Dispatcher.InvokeAsync(() => leader.PendingCount = count);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Approval.ZLogWarning($"the waiting count could not be shown: {exception.Message}");
+        }
+    }
+
+    /// <summary>Whether the rest of this run's calls of this tool were allowed.</summary>
+    private bool IsGranted(string runKey, string toolName)
+    {
+        lock (batchGate)
+        {
+            return runGrants.TryGetValue(runKey, out var tools) && tools.Contains(toolName);
+        }
+    }
+
+    /// <summary>Allows the rest of this run's calls of this tool; the grant never enters the rule store.</summary>
+    private void GrantRestOfRun(string runKey, string toolName)
+    {
+        lock (batchGate)
+        {
+            if (!runGrants.TryGetValue(runKey, out var tools))
+            {
+                tools = new HashSet<string>(StringComparer.Ordinal);
+                runGrants[runKey] = tools;
+                grantOrder.Enqueue(runKey);
+                if (runGrants.Count > RunStateCap)
+                {
+                    // The oldest entry goes; see RunStateCap for why dropping a live run's grant is acceptable.
+                    runGrants.Remove(grantOrder.Dequeue());
+                }
+            }
+
+            tools.Add(toolName);
         }
     }
 

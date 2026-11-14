@@ -1692,9 +1692,12 @@ public sealed partial class ExtensionHostClient : IExtensionContributionClient, 
                 ApprovalDecision decision;
                 try
                 {
+                    // A script run's inner calls carry the run key so the approval handler can serialize them per tool and
+                    // offer "allow the rest of this run"; plugin executions pass null and keep asking per call.
                     decision = await approval(
                             new ApprovalRequest(
-                                call.Name, call.ArgumentsJson, tool.SideEffect, run.Context.WorkingDirectory),
+                                call.Name, call.ArgumentsJson, tool.SideEffect, run.Context.WorkingDirectory,
+                                RunKey: run.IsCode ? run.RunId : null),
                             token)
                         .ConfigureAwait(false);
                 }

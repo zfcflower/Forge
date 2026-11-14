@@ -35,6 +35,8 @@ internal static class ExtensionsStrings
     public const string ToolRememberSession = "Extensions.Tool.RememberSession";
     public const string ToolRememberProject = "Extensions.Tool.RememberProject";
     public const string ToolRememberGlobal = "Extensions.Tool.RememberGlobal";
+    public const string ToolRunScopeAllow = "Extensions.Tool.RunScopeAllow";
+    public const string ToolRunPendingBase = "Extensions.Tool.RunPending";
     public const string ToolNoProject = "Extensions.Tool.NoProject";
     public const string ToolDecidedAllow = "Extensions.Tool.DecidedAllow";
     public const string ToolDecidedDeny = "Extensions.Tool.DecidedDeny";
@@ -67,6 +69,10 @@ internal static class ExtensionsStrings
     /// <summary>The card's revoke button text with the count of remembered rules for this tool.</summary>
     public static string ToolMcpRevokeRemembered(long count) =>
         Loc.Instance.FormatPlural(ToolMcpRevokeRememberedBase, count);
+
+    /// <summary>The waiting-count line of a script run's batched card: {0} calls of this tool behind the one shown.</summary>
+    public static string ToolRunPending(int count) =>
+        Loc.Instance.FormatPlural(ToolRunPendingBase, count);
 
     // ---------------------------------------------------------------- extension card
 
@@ -182,6 +188,18 @@ internal static class ExtensionsStrings
         Loc.Register(ToolRememberSession, "本会话记住", "Remember for this session");
         Loc.Register(ToolRememberProject, "本项目记住", "Remember for this project");
         Loc.Register(ToolRememberGlobal, "永久记住", "Always allow");
+        Loc.Register(
+            ToolRunScopeAllow,
+            "允许本次运行剩余同类调用",
+            "Allow the rest of this run");
+        Loc.Register(
+            LocText.PluralKey(ToolRunPendingBase, 1),
+            "本脚本还有 {0} 个同类调用在等待",
+            "{0} more call of this tool from this script is waiting");
+        Loc.Register(
+            LocText.PluralKey(ToolRunPendingBase, 2),
+            "本脚本还有 {0} 个同类调用在等待",
+            "{0} more calls of this tool from this script are waiting");
         Loc.Register(ToolNoProject, "没有项目，无法记住本项目。", "There is no project, so this cannot be remembered for one.");
         Loc.Register(ToolDecidedAllow, "已允许", "Allowed");
         Loc.Register(ToolDecidedDeny, "已拒绝", "Denied");

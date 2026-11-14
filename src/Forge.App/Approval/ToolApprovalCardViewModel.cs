@@ -19,7 +19,8 @@ internal sealed record ToolApprovalCardRequest(
     ToolSideEffect SideEffect,
     string WorkingDirectory,
     string ArgumentsJson,
-    McpApprovalServer? McpServer = null);
+    McpApprovalServer? McpServer = null,
+    string? RunKey = null);
 
 /// <summary>
 /// One tool call waiting for the user: session, tool name, side effect, working directory and the arguments as indented
@@ -68,6 +69,8 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
             () => Decide(ApprovalCardDecision.Allow, ApprovalScope.Project), () => CanRememberProject && !IsDecided);
         RememberGlobalCommand = new RelayCommand(
             () => Decide(ApprovalCardDecision.Allow, ApprovalScope.Global), () => CanRemember && !IsDecided);
+        AllowRunCommand = new RelayCommand(
+            () => Decide(ApprovalCardDecision.Allow, remember: null, allowRestOfRun: true), () => HasRunScope && !IsDecided);
         ToggleArgumentsCommand = new RelayCommand(ToggleArguments);
         McpRevokeCommand = new RelayCommand(RevokeMcp, () => CanRevokeRemembered && !IsDecided);
 
@@ -180,6 +183,32 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
     /// <summary>Explains the disabled project button.</summary>
     public string RememberProjectHint => CanRememberProject ? string.Empty : Loc.Instance[ExtensionsStrings.ToolNoProject];
 
+    /// <summary>True when the card carries a script run's key: the call is one of a script's inner tool calls, so the
+    /// "allow the rest of this run" action and the waiting count line appear.</summary>
+    public bool HasRunScope => request.RunKey is not null;
+
+    /// <summary>How many further calls of this tool the same script run has waiting behind this card; kept current by the
+    /// session's approval handler while they arrive and leave. Not part of the decision - context for it.</summary>
+    public int PendingCount
+    {
+        get => pendingCount;
+        internal set
+        {
+            if (SetAndNotify(ref pendingCount, value, nameof(RunPendingText)))
+            {
+                OnPropertyChanged(nameof(HasPendingCalls));
+            }
+        }
+    }
+
+    private int pendingCount;
+
+    /// <summary>Whether the waiting-count line has anything to show.</summary>
+    public bool HasPendingCalls => pendingCount > 0;
+
+    /// <summary>The waiting-count line in the current language.</summary>
+    public string RunPendingText => ExtensionsStrings.ToolRunPending(pendingCount);
+
     public RelayCommand AllowCommand { get; }
 
     public RelayCommand DenyCommand { get; }
@@ -189,6 +218,8 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
     public RelayCommand RememberProjectCommand { get; }
 
     public RelayCommand RememberGlobalCommand { get; }
+
+    public RelayCommand AllowRunCommand { get; }
 
     public RelayCommand ToggleArgumentsCommand { get; }
 
@@ -371,7 +402,7 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
 
     private void ToggleArguments() => IsArgumentsExpanded = !IsArgumentsExpanded;
 
-    private void Decide(ApprovalCardDecision decision, ApprovalScope? remember)
+    private void Decide(ApprovalCardDecision decision, ApprovalScope? remember, bool allowRestOfRun = false)
     {
         if (IsDecided)
         {
@@ -383,7 +414,7 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
             return;
         }
 
-        TryComplete(new ApprovalCardOutcome(decision, remember));
+        TryComplete(new ApprovalCardOutcome(decision, remember, allowRestOfRun));
     }
 
     private bool CanRememberScope(ApprovalScope scope) =>
@@ -399,5 +430,6 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
         OnPropertyChanged(nameof(McpTransportText));
         OnPropertyChanged(nameof(RememberedRulesText));
         OnPropertyChanged(nameof(CanRevokeRemembered));
+        OnPropertyChanged(nameof(RunPendingText));
     }
 }

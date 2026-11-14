@@ -25,9 +25,13 @@ internal enum ApprovalCardDecision
 
 /// <summary>
 /// The result of one card: allow or deny, plus the scope whose "remember" button was used (<see langword="null"/> when the
-/// user just allowed once). Extension cards use only the decision.
+/// user just allowed once), plus - for a script run's batched card - whether the user allowed the rest of that run's calls
+/// of the same tool. Extension cards use only the decision.
 /// </summary>
-internal readonly record struct ApprovalCardOutcome(ApprovalCardDecision Decision, ApprovalScope? Remember = null)
+internal readonly record struct ApprovalCardOutcome(
+    ApprovalCardDecision Decision,
+    ApprovalScope? Remember = null,
+    bool AllowRestOfRun = false)
 {
     public static ApprovalCardOutcome Allow { get; } = new(ApprovalCardDecision.Allow);
 

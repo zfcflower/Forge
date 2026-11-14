@@ -241,8 +241,9 @@ internal static class ApprovalFixtures
     public static ApprovalRequest ToolRequest(
         string tool = "shell_run",
         ToolSideEffect sideEffect = ToolSideEffect.Execute,
-        string args = "{}") =>
-        new(tool, args, sideEffect, Path.GetTempPath());
+        string args = "{}",
+        string? runKey = null) =>
+        new(tool, args, sideEffect, Path.GetTempPath(), runKey);
 
     public static StagedExtension Staged(
         string pluginId,
