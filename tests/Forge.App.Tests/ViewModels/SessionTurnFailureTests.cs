@@ -66,7 +66,7 @@ public sealed class SessionTurnFailureTests
 
         var card = Assert.Single(outcome.Transcript.OfType<TurnCardViewModel>());
         var text = Assert.Single(card.Blocks.OfType<TurnTextViewModel>());
-        Assert.Contains(ScriptedProvider.Answer, text.Segments.Select(static segment => segment.Text));
+        Assert.Contains(ScriptedProvider.Answer, text.CopyText, StringComparison.Ordinal);
     }
 
     private static bool IsCheckpointNotice(string notice) =>

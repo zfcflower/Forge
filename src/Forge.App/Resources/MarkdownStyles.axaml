@@ -81,4 +81,12 @@
   <Style Selector="SelectableTextBlock.md-th">
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
+  <Style Selector="Grid.md-code-head">
+    <Setter Property="Margin" Value="0,0,0,4" />
+  </Style>
+  <Style Selector="TextBlock.md-code-lang">
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
 </Styles>

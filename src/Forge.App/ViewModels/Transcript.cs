@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text;
 using Forge.Abstractions;
+using Forge.App.Changes.Markdown;
 using Forge.App.Localization;
 
 namespace Forge.App.ViewModels;
@@ -98,45 +99,21 @@ internal abstract class TurnBlockViewModel : ObservableObject
     }
 }
 
-/// <summary>One rendered stretch of a reply; a delta updates only this segment's text.</summary>
-internal sealed class TextSegmentViewModel : ObservableObject
-{
-    private string text = string.Empty;
-    private readonly LocText placeholder;
-
-    public TextSegmentViewModel(string value) => text = value;
-
-    /// <summary>A segment that shows a localized placeholder instead of model text - a reply that never arrived.</summary>
-    public TextSegmentViewModel(LocText value) => placeholder = value;
-
-    internal bool IsPlaceholder => !placeholder.IsEmpty;
-
-    public string Text
-    {
-        get => placeholder.IsEmpty ? text : placeholder.Resolve();
-        set => Set(ref text, value);
-    }
-
-    internal void RefreshText() => OnPropertyChanged(nameof(Text));
-}
-
 /// <summary>
-/// One run of reply text, rendered as an <c>ItemsControl</c> of text blocks. Deltas are coalesced once per dispatcher pass
-/// and land in the open segment only, so a flush never re-materializes the whole reply; a segment is closed at the next
-/// paragraph break once it reaches <see cref="SegmentLimit"/> characters.
+/// One run of reply text. The text streams into a <see cref="StreamingMarkdown" /> document that commits block boundaries as
+/// they close, so a flush hands the view only the new blocks and the unfinished tail instead of re-laying out the whole reply.
 /// </summary>
 internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
 {
-    private const int SegmentLimit = 2048;
-    private const int HardLimit = SegmentLimit * 4;
-
-    private readonly StringBuilder open = new();
-    private readonly ObservableCollection<TextSegmentViewModel> segments = [];
+    private readonly StreamingMarkdown document = new();
+    private LocText placeholder;
     private bool isStreaming = true;
 
-    public TurnTextViewModel() => Segments = new ReadOnlyObservableCollection<TextSegmentViewModel>(segments);
+    /// <summary>Raised on the UI thread after <see cref="Append"/> or <see cref="Complete"/> changed the document.</summary>
+    public event EventHandler? ContentChanged;
 
-    public ReadOnlyObservableCollection<TextSegmentViewModel> Segments { get; }
+    /// <summary>The incremental document the chat view renders.</summary>
+    public StreamingMarkdown Document => document;
 
     public bool IsStreaming
     {
@@ -144,91 +121,48 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
         private set => Set(ref isStreaming, value);
     }
 
-    /// <summary>
-    /// The reply's whole text. Segments are cut at line breaks, so joining them restores the original exactly; the placeholder
-    /// of a reply that never arrived is not text and copies as nothing.
-    /// </summary>
-    public string CopyText => string.Concat(segments.Where(static segment => !segment.IsPlaceholder).Select(static segment => segment.Text));
+    /// <summary>Whether to show the "the model returned no text" placeholder instead of content.</summary>
+    public bool HasPlaceholder => !placeholder.IsEmpty;
+
+    /// <summary>The placeholder in the current language; empty unless the reply arrived empty.</summary>
+    public string PlaceholderText => placeholder.Resolve();
+
+    /// <summary>The reply's whole text, exactly as it arrived; the placeholder of a reply that never arrived is not text.</summary>
+    public string CopyText => document.Source;
 
     public void Append(string chunk)
     {
-        open.Append(chunk);
-        var closed = false;
-
-        // The last segment is the live one: it already shows the earlier part of the open text, so the first piece cut off
-        // replaces it instead of being added after it (which would show that text twice).
-        var liveShown = segments.Count > 0;
-        while (open.Length > SegmentLimit)
+        if (chunk.Length == 0)
         {
-            var cut = LastBreak(open, '\n');
-            if (cut <= 0)
-            {
-                if (open.Length <= HardLimit)
-                {
-                    break;
-                }
-
-                cut = LastBreak(open, ' ');
-                if (cut <= 0)
-                {
-                    cut = open.Length;
-                }
-            }
-
-            var piece = open.ToString(0, cut);
-            if (liveShown)
-            {
-                segments[^1].Text = piece;
-                liveShown = false;
-            }
-            else
-            {
-                segments.Add(new TextSegmentViewModel(piece));
-            }
-
-            open.Remove(0, cut);
-            closed = true;
-        }
-
-        if (closed || segments.Count == 0)
-        {
-            segments.Add(new TextSegmentViewModel(open.ToString()));
             return;
         }
 
-        segments[^1].Text = open.ToString();
+        document.Append(chunk);
+        RaiseContentChanged();
     }
 
+    /// <summary>Closes the reply; idempotent, so a text block cut off by a tool row can be sealed and finished alike.</summary>
     public void Complete()
     {
+        if (!isStreaming)
+        {
+            return;
+        }
+
         IsStreaming = false;
-        if (segments.Count == 0 && open.Length == 0)
+        document.Complete();
+        if (document.IsEmpty)
         {
-            segments.Add(new TextSegmentViewModel(SessionStrings.NoText));
-        }
-    }
-
-    public override void RefreshText()
-    {
-        foreach (var segment in segments)
-        {
-            segment.RefreshText();
-        }
-    }
-
-    /// <summary>Position just past the last <paramref name="marker" /> in the open segment, or -1 when there is none.</summary>
-    private static int LastBreak(StringBuilder buffer, char marker)
-    {
-        for (var index = buffer.Length - 1; index >= 0; index--)
-        {
-            if (buffer[index] == marker)
-            {
-                return index + 1;
-            }
+            placeholder = SessionStrings.NoText;
+            OnPropertyChanged(nameof(HasPlaceholder));
         }
 
-        return -1;
+        RaiseContentChanged();
     }
+
+    public override void RefreshText() => OnPropertyChanged(nameof(PlaceholderText));
+
+    private void RaiseContentChanged() => ContentChanged?.Invoke(this, EventArgs.Empty);
 }
 
 /// <summary>A note inside a turn card, such as a redirected or stopped sub-agent.</summary>
@@ -324,7 +258,7 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
     /// <summary>Adds a running tool call's row and hands it back: the session attaches the live state (wave W8).</summary>
     public ToolRowViewModel AddTool(ToolCall call)
     {
-        openText = null;
+        SealText();
         var row = new ToolRowViewModel(call.Name, call.ArgumentsJson);
         toolRows[call.Id] = row;
         blocks.Add(row);
@@ -346,8 +280,18 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
 
     public void AddNotice(LocText text, bool isError = false)
     {
-        openText = null;
+        SealText();
         blocks.Add(new TurnNoticeViewModel(text, isError));
+    }
+
+    /// <summary>
+    /// Closes the open reply text before a tool row or a note takes over: a sealed block no longer streams, so it shows its
+    /// copy button and its rendering stops being provisional.
+    /// </summary>
+    private void SealText()
+    {
+        openText?.Complete();
+        openText = null;
     }
 
     public void AddUsage(TokenUsage usage, StopReason stopReason)

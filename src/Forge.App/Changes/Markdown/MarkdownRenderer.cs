@@ -1,9 +1,7 @@
 using System.Globalization;
 using Avalonia;
-using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -195,8 +193,7 @@ internal static class MarkdownRenderer
         MdBlockKind.Paragraph => Text(block.Inlines, "md-p"),
         MdBlockKind.List => RenderList(block),
         MdBlockKind.Quote => RenderQuote(block),
-        MdBlockKind.Code => RenderCode(block.Text, block.Info),
-        MdBlockKind.Html => RenderCode(block.Text, "html"),
+        MdBlockKind.Code or MdBlockKind.Html => RenderCode(block.Text, CodeInfo(block)),
         MdBlockKind.Table => RenderTable(block),
         MdBlockKind.Rule => new Border { Classes = { "md-rule" } },
         _ => new Control(),
@@ -211,25 +208,13 @@ internal static class MarkdownRenderer
         return tb;
     }
 
-    private static Control RenderCode(string text, string info)
-    {
-        var tb = new SelectableTextBlock { Text = text };
-        tb.Classes.Add("md-code-text");
-        var scroller = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = tb,
-        };
-        var border = new Border { Child = scroller };
-        border.Classes.Add("md-code");
-        if (info.Length > 0)
-        {
-            AutomationProperties.SetName(border, info);
-        }
+    private static MarkdownCodeBlock RenderCode(string text, string info) => new(text, info);
 
-        return border;
-    }
+    /// <summary>
+    /// The language label of a code block: its fence info string, or "html" for a block the parser read as raw HTML. One owner,
+    /// because a streaming block is refreshed in place from the same block and would otherwise lose the label it first got.
+    /// </summary>
+    internal static string CodeInfo(MdBlock block) => block.Kind == MdBlockKind.Html ? "html" : block.Info;
 
     private static Control RenderQuote(MdBlock block)
     {
@@ -242,9 +227,17 @@ internal static class MarkdownRenderer
     {
         var stack = new StackPanel { Spacing = 2 };
         stack.Classes.Add("md-list");
-        var number = block.Items.Count > 0 ? block.Items[0].Number ?? 1 : 1;
-        foreach (var item in block.Items)
+        AddListItems(stack, block, 0);
+        return stack;
+    }
+
+    /// <summary>Appends the rows of <paramref name="block"/>'s items from <paramref name="from"/> on.</summary>
+    private static void AddListItems(StackPanel stack, MdBlock block, int from)
+    {
+        var first = block.Items.Count > 0 ? block.Items[0].Number ?? 1 : 1;
+        for (var index = from; index < block.Items.Count; index++)
         {
+            var item = block.Items[index];
             var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
             var marker = new TextBlock
             {
@@ -261,22 +254,19 @@ internal static class MarkdownRenderer
             }
             else if (block.Ordered)
             {
-                marker.Text = number.ToString(CultureInfo.InvariantCulture) + ".";
+                marker.Text = (first + index).ToString(CultureInfo.InvariantCulture) + ".";
             }
             else
             {
                 marker.Text = "•";
             }
 
-            number++;
             var content = RenderBlocks(item.Blocks, 2);
             Grid.SetColumn(content, 1);
             grid.Children.Add(marker);
             grid.Children.Add(content);
             stack.Children.Add(grid);
         }
-
-        return stack;
     }
 
     private static Control RenderTable(MdBlock block)
@@ -288,28 +278,83 @@ internal static class MarkdownRenderer
             grid.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Star));
         }
 
-        var rowCount = block.Rows.Count + 1;
-        for (var r = 0; r < rowCount; r++)
-        {
-            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-        }
-
+        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         for (var c = 0; c < columns; c++)
         {
             grid.Children.Add(Cell(block.Header[c], block.Aligns[c], 0, c, header: true));
         }
 
-        for (var r = 0; r < block.Rows.Count; r++)
+        AddTableRows(grid, block, 0);
+        var outer = new Border { Child = grid };
+        outer.Classes.Add("md-table");
+        return outer;
+    }
+
+    /// <summary>Appends the body rows of <paramref name="block"/> from <paramref name="from"/> on (grid row = body row + 1).</summary>
+    private static void AddTableRows(Grid grid, MdBlock block, int from)
+    {
+        var columns = block.Aligns.Length;
+        for (var r = from; r < block.Rows.Count; r++)
         {
+            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             for (var c = 0; c < columns; c++)
             {
                 grid.Children.Add(Cell(block.Rows[r][c], block.Aligns[c], r + 1, c, header: false));
             }
         }
+    }
 
-        var outer = new Border { Child = grid };
-        outer.Classes.Add("md-table");
-        return outer;
+    /// <summary>
+    /// Grows a rendered list or table in place into <paramref name="next"/>, the next parse of the same streaming block: the
+    /// item rows and table rows that come only from lines that had ended when <paramref name="rendered"/> was parsed
+    /// (<paramref name="completeLines"/>) cannot change any more, so they are kept, and only the rest is rebuilt. Returns false
+    /// when the block changed shape (another list type, other table columns) and the caller must render it afresh.
+    /// </summary>
+    internal static bool TryGrow(Control control, MdBlock rendered, MdBlock next, int completeLines)
+    {
+        if (rendered.Kind != next.Kind || rendered.StartLine != next.StartLine)
+        {
+            return false;
+        }
+
+        switch (next.Kind)
+        {
+            case MdBlockKind.List when control is StackPanel stack && stack.Classes.Contains("md-list") &&
+                rendered.Ordered == next.Ordered && stack.Children.Count == rendered.Items.Count:
+            {
+                // An item is final once the item after it starts on an ended line: its lines are then fixed.
+                var keep = 0;
+                while (keep + 1 < rendered.Items.Count && keep < next.Items.Count &&
+                    rendered.Items[keep + 1].StartLine <= completeLines &&
+                    rendered.Items[keep].StartLine == next.Items[keep].StartLine &&
+                    rendered.Items[keep].EndLine == next.Items[keep].EndLine &&
+                    rendered.Items[keep].Number == next.Items[keep].Number)
+                {
+                    keep++;
+                }
+
+                stack.Children.RemoveRange(keep, stack.Children.Count - keep);
+                AddListItems(stack, next, keep);
+                return true;
+            }
+
+            case MdBlockKind.Table when control is Border { Child: Grid grid } border && border.Classes.Contains("md-table") &&
+                next.Aligns.AsSpan().SequenceEqual(rendered.Aligns) && rendered.StartLine + 1 <= completeLines &&
+                grid.RowDefinitions.Count == rendered.Rows.Count + 1:
+            {
+                // Header and delimiter have ended, so the columns are fixed; a body row is one line, final once that line ended.
+                var keep = Math.Min(Math.Max(0, completeLines - (rendered.StartLine + 1)), Math.Min(rendered.Rows.Count, next.Rows.Count));
+                var columns = next.Aligns.Length;
+                var cells = (keep + 1) * columns;
+                grid.Children.RemoveRange(cells, grid.Children.Count - cells);
+                grid.RowDefinitions.RemoveRange(keep + 1, grid.RowDefinitions.Count - keep - 1);
+                AddTableRows(grid, next, keep);
+                return true;
+            }
+
+            default:
+                return false;
+        }
     }
 
     private static Border Cell(IReadOnlyList<MdInline> inlines, MdAlign align, int row, int column, bool header)

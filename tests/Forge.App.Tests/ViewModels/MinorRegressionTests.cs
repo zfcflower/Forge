@@ -119,56 +119,45 @@ public sealed class MinorRegressionTests
     // ---------------------------------------------------------------- streaming text segments
 
     [Fact]
-    public void A_closed_text_segment_is_never_rewritten_by_later_streaming()
+    public void A_committed_text_block_is_never_rewritten_by_later_streaming()
     {
         var text = new TurnTextViewModel();
         for (var i = 0; i < Repeats; i++)
         {
-            text.Append(LineChunk);
+            text.Append(LineChunk + "\n\n");
         }
 
-        var closed = text.Segments.Take(text.Segments.Count - 1).ToList();
-        Assert.NotEmpty(closed);
-        var before = closed.Select(static segment => segment.Text).ToList();
-        var rewrites = 0;
-        foreach (var segment in closed)
-        {
-            segment.PropertyChanged += (_, args) =>
-            {
-                if (args.PropertyName == nameof(TextSegmentViewModel.Text))
-                {
-                    rewrites++;
-                }
-            };
-        }
+        var committed = text.Document.Stable.ToList();
+        Assert.NotEmpty(committed);
+        var ranges = committed.Select(static block => (block.Kind, block.StartLine, block.EndLine)).ToList();
 
         for (var i = 0; i < Repeats; i++)
         {
-            text.Append(LineChunk);
+            text.Append(LineChunk + "\n\n");
         }
 
-        Assert.Equal(before, closed.Select(static segment => segment.Text));
-        Assert.Equal(0, rewrites);
+        Assert.Equal(ranges, committed.Select(static block => (block.Kind, block.StartLine, block.EndLine)));
+        Assert.Equal(committed, text.Document.Stable.Take(committed.Count));
     }
 
     [Fact]
-    public void A_closed_text_segment_keeps_its_place_in_the_segment_list()
+    public void A_committed_text_block_keeps_its_place_in_the_committed_list()
     {
         var text = new TurnTextViewModel();
         for (var i = 0; i < Repeats; i++)
         {
-            text.Append(LineChunk);
+            text.Append(LineChunk + "\n\n");
         }
 
-        var snapshot = text.Segments.ToList();
-        Assert.True(snapshot.Count > 1, "the streamed text must have closed at least one segment");
+        var snapshot = text.Document.Stable.ToList();
+        Assert.True(snapshot.Count > 1, "the streamed text must have committed more than one block");
 
-        text.Append(LineChunk);
+        text.Append(LineChunk + "\n\n");
 
-        // Closed segments keep both their instance and their place; only the open one at the end may grow.
-        for (var index = 0; index < snapshot.Count - 1; index++)
+        // The committed prefix is append-only: every earlier block keeps both its instance and its index.
+        for (var index = 0; index < snapshot.Count; index++)
         {
-            Assert.Same(snapshot[index], text.Segments[index]);
+            Assert.Same(snapshot[index], text.Document.Stable[index]);
         }
     }
 

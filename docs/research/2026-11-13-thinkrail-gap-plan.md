@@ -165,6 +165,8 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | **W11** 流程图 / Mermaid(**已批准(有条件,见「已定」),串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 | **W13** 聊天时间轴版式(**串在 W4b 之后;与 W11 可并行,W13 不改 `Changes/Markdown/**`**) | 把聊天记录排成时间轴:轴线 + 图标节点 + 右侧内容,铺满窗口、窗口内边距一致;图标映射表与节点状态见「已定」;键盘/读屏:节点图标不抢焦点、有可读的名称;随主题与语言切换;长会话仍走虚拟化,不因轴线/节点增加每条消息的分配 | `Views/Timeline*`(新建:轴线、节点、行容器)、`ViewModels/TimelineNodeViewModel*.cs`(节点类型与图标键的映射,从现有 `TranscriptItemViewModel` 派生,不改其业务数据)、`Views/SessionView.axaml` 的转录区、`App.axaml` 里转录条目的模板、`Resources/Icons.axaml`(只增不改)、`Localization/Strings.Timeline.cs`。**越界声明**:W13 期间独占上述 `App.axaml`/`SessionView.axaml` 的转录部分;`TurnTextView*`/`ToolRow*View*` 只改最外层容器与内边距,不改其内部渲染(归 W4b/W4/W8) | 4 天 |
 
+**W4b 已实施**:聊天助手回复按 Markdown 增量渲染(标题/段落/列表/引用/表格/链接/围栏代码块),代码块带语言标签与复制按钮;新增纯状态机 `Changes/Markdown/StreamingMarkdown.cs` 与 `Views/ChatMarkdownView*`,删除 `TextSegmentViewModel`。方案、被否备选、四条判据、与上表独占路径的三处偏差(`Resources/MarkdownStyles.axaml` 的追加式两条样式、不建 `Strings.ChatMarkdown.cs`、用户消息仍按纯文本)见 `2026-11-13-w4b-implementation.md`。
+
 **W6 已实施**:实现记录、被否备选与验收见 `2026-11-13-w6-implementation.md`。计划外并入一项(已与用户确认):MCP 工具此前从未进入会话(`McpServerManager.Tools` 零消费),本波一并接上,`工具检索上限` 因此才有意义。
 
 **跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 独占自己的 schema 升版(与其他波无交叉);W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**

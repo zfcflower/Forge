@@ -1,0 +1,13 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Forge.App.Views.ChatMarkdownView">
+  <!--
+    The rendered Markdown of one streaming reply. The blocks live in the code-behind: the view model publishes a committed
+    block prefix and a live tail, and only the tail is rebuilt per flush, so this is not a bindable collection.
+    Blocks carry the md-* classes; the presentation is the shared dictionary the diff preview and the plan panel also use.
+  -->
+  <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/MarkdownStyles.axaml" />
+  </UserControl.Styles>
+  <StackPanel x:Name="Body" Spacing="8" />
+</UserControl>

@@ -352,8 +352,7 @@ public sealed class SessionEventRoutingTests
                     texts.Add(notice.Text);
                     break;
                 case TurnCardViewModel card:
-                    texts.AddRange(card.Blocks.OfType<TurnTextViewModel>().Select(static text => text.Segments
-                        .Aggregate(string.Empty, static (all, segment) => all + segment.Text)));
+                    texts.AddRange(card.Blocks.OfType<TurnTextViewModel>().Select(static text => text.CopyText));
                     break;
             }
         }

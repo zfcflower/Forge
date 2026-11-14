@@ -5,8 +5,9 @@ using Xunit;
 namespace Forge.App.Tests.ViewModels;
 
 /// <summary>
-/// Pins the copy-button text of transcript items: a reply's segments join back to exactly what was appended (also when
-/// it was split into several segments), the "no text" placeholder copies as nothing, and a user message copies its text.
+/// Pins the copy-button text of transcript items: a reply copies back exactly what was appended, whatever the chunking was
+/// (the streaming Markdown document splits it into blocks internally, the copy text never sees that split), the "no text"
+/// placeholder copies as nothing, and a user message copies its text.
 /// </summary>
 public sealed class TranscriptCopyTextTests
 {
@@ -32,19 +33,18 @@ public sealed class TranscriptCopyTextTests
     }
 
     [Fact]
-    public void A_reply_longer_than_the_segment_limit_is_split_yet_copies_exactly()
+    public void A_long_reply_copies_exactly()
     {
-        var original = Lines(400); // ~8 KB in short lines, far over the 2048 segment limit
+        var original = Lines(400);
         var text = new TurnTextViewModel();
 
         text.Append(original);
 
-        Assert.True(text.Segments.Count > 1, "the reply should have been split into several segments");
         Assert.Equal(original, text.CopyText);
     }
 
     [Fact]
-    public void A_reply_streamed_in_small_chunks_copies_exactly_across_splits()
+    public void A_reply_streamed_in_small_chunks_copies_exactly_across_block_boundaries()
     {
         var original = Lines(500);
         var text = new TurnTextViewModel();
@@ -56,19 +56,17 @@ public sealed class TranscriptCopyTextTests
 
         text.Complete();
 
-        Assert.True(text.Segments.Count > 1);
         Assert.Equal(original, text.CopyText);
     }
 
     [Fact]
-    public void A_long_line_without_newlines_is_split_at_spaces_and_copies_exactly()
+    public void A_long_line_without_newlines_copies_exactly()
     {
-        var original = string.Join(' ', Enumerable.Repeat("word", 4000)); // ~20 KB, no newline
+        var original = string.Join(' ', Enumerable.Repeat("word", 4000));
         var text = new TurnTextViewModel();
 
         text.Append(original);
 
-        Assert.True(text.Segments.Count > 1);
         Assert.Equal(original, text.CopyText);
     }
 
@@ -84,25 +82,41 @@ public sealed class TranscriptCopyTextTests
     }
 
     [Fact]
-    public void Completing_a_reply_with_no_text_copies_as_empty_not_as_the_placeholder()
+    public void Completing_a_reply_with_no_text_shows_the_placeholder_and_copies_as_empty()
     {
         var text = new TurnTextViewModel();
 
         text.Complete();
 
-        var segment = Assert.Single(text.Segments);
-        Assert.True(segment.IsPlaceholder);
+        Assert.True(text.HasPlaceholder);
+        Assert.NotEmpty(text.PlaceholderText);
         Assert.Equal(string.Empty, text.CopyText);
     }
 
     [Fact]
-    public void Completing_a_reply_that_has_text_keeps_the_text()
+    public void Completing_a_reply_that_has_text_keeps_the_text_and_no_placeholder()
     {
         var text = new TurnTextViewModel();
         text.Append("done");
         text.Complete();
 
+        Assert.False(text.HasPlaceholder);
         Assert.Equal("done", text.CopyText);
+        Assert.False(text.IsStreaming);
+    }
+
+    [Fact]
+    public void A_reply_stops_streaming_once_completed_and_completion_is_idempotent()
+    {
+        var text = new TurnTextViewModel();
+        text.Append("body");
+        Assert.True(text.IsStreaming);
+
+        text.Complete();
+        text.Complete();
+
+        Assert.False(text.IsStreaming);
+        Assert.Equal("body", text.CopyText);
     }
 
     [Fact]

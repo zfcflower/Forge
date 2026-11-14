@@ -129,9 +129,9 @@ public sealed class FinishedSubAgentReplayTests
                     yield return user.Text;
                     break;
                 case TurnCardViewModel card:
-                    foreach (var segment in card.Blocks.OfType<TurnTextViewModel>().SelectMany(static text => text.Segments))
+                    foreach (var text in card.Blocks.OfType<TurnTextViewModel>())
                     {
-                        yield return segment.Text;
+                        yield return text.CopyText;
                     }
 
                     break;
