@@ -43,6 +43,7 @@ internal sealed class PlanPanelViewModel : NotifyingObject, IDisposable, ICopyab
     private int progressTotal;
     private LocText statusText;
     private bool statusIsFailure;
+    private bool statusIsReadFailure;
     private PlanRevisionViewModel? viewingRevision;
     private PlanRowViewModel? nextStep;
     private int generation;
@@ -331,6 +332,7 @@ internal sealed class PlanPanelViewModel : NotifyingObject, IDisposable, ICopyab
         {
             AppLogs.Session.ZLogWarning($"could not read the plan of session '{current.Id}': {exception.Message}");
             SetStatus(PlanStrings.Failed(exception.Message), failure: true);
+            statusIsReadFailure = true;
         }
         finally
         {
@@ -366,6 +368,13 @@ internal sealed class PlanPanelViewModel : NotifyingObject, IDisposable, ICopyab
         }
 
         SyncRevisions(load.Revisions);
+
+        // A read that succeeds again retires the report of the one that failed; a hand-off or export report stays.
+        if (statusIsReadFailure)
+        {
+            SetStatus(default);
+        }
+
         if (summaryChanged)
         {
             RaiseSummaryChanged();
@@ -578,8 +587,10 @@ internal sealed class PlanPanelViewModel : NotifyingObject, IDisposable, ICopyab
             return;
         }
 
+        // The store's order (newest recorded first) is the order; re-sorting by time would disagree with the comparison above
+        // whenever two stamps are out of order (a clock step back) and rebuild the list on every read.
         Revisions.Clear();
-        foreach (var revision in revisions.OrderByDescending(static revision => revision.ReplacedAt))
+        foreach (var revision in revisions)
         {
             Revisions.Add(new PlanRevisionViewModel(this, revision));
         }
@@ -616,6 +627,7 @@ internal sealed class PlanPanelViewModel : NotifyingObject, IDisposable, ICopyab
     private void SetStatus(LocText text, bool failure = false)
     {
         statusText = text;
+        statusIsReadFailure = false;
         statusIsFailure = failure;
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(HasStatus));

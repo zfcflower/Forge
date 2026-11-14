@@ -53,7 +53,7 @@ internal static class PlanStrings
     // ---------------------------------------------------------------- the revision history
     public const string RevisionsTitle = "plan.revisions";
     public const string RevisionsEmpty = "plan.revisions.empty";
-    public const string RevisionsCountPattern = "plan.revisions.count";
+    public const string RevisionsCountBase = "plan.revisions.count";
     public const string RevisionView = "plan.revisions.view";
 
     // ---------------------------------------------------------------- the status line
@@ -87,8 +87,8 @@ internal static class PlanStrings
     /// <summary>"Export failed: {0}".</summary>
     public static LocText ExportFailed(string reason) => new(ExportFailedPattern, reason);
 
-    /// <summary>"{0} versions".</summary>
-    public static LocText RevisionCount(long count) => new(RevisionsCountPattern, TextFormat.Number(count));
+    /// <summary>"1 version" / "{0} versions".</summary>
+    public static LocText RevisionCount(long count) => LocText.Plural(RevisionsCountBase, count, TextFormat.Number(count));
 
     /// <summary>"Could not read the plan: {0}".</summary>
     public static LocText Failed(string reason) => new(FailedPattern, reason);
@@ -142,8 +142,8 @@ internal static class PlanStrings
         Loc.Register(HandoffQueuedPattern, "已排队,本回合结束后发送:{0}", "Queued for after this turn: {0}");
         Loc.Register(
             HandoffBlocked,
-            "输入框里有还没发送的内容。先发送或清空它,再让 agent 收尾这一步。",
-            "The composer holds unsent text. Send or clear it first, then hand the step to the agent.");
+            "输入框里有还没发送的文字或附件。先发送或清空它们,再让 agent 收尾这一步。",
+            "The composer holds unsent text or attachments. Send or clear them first, then hand the step to the agent.");
         Loc.Register(
             HandoffReadOnly,
             "这是只读会话,不能再给 agent 发消息。",
@@ -167,7 +167,8 @@ internal static class PlanStrings
 
         Loc.Register(RevisionsTitle, "修订历史", "Revision history");
         Loc.Register(RevisionsEmpty, "还没有被替换过的版本。", "No version has been replaced yet.");
-        Loc.Register(RevisionsCountPattern, "{0} 个版本", "{0} versions");
+        Loc.Register(RevisionsCountBase + ".one", "{0} 个版本", "{0} version");
+        Loc.Register(RevisionsCountBase + ".other", "{0} 个版本", "{0} versions");
         Loc.Register(RevisionView, "查看这个版本", "View this version");
 
         Loc.Register(Loading, "正在读取计划…", "Reading the plan…");

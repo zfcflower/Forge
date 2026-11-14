@@ -100,3 +100,17 @@
 - 两个读“以相反顺序完成”这条已不可能通过公开 API 构造(`RefreshAsync` 的 `refreshing` 守卫让读严格串行);其可观测等价面被覆盖:读中请求只补读一次、Dispose 后 `Changed` 不再读、慢读在 Dispose 后不落地。
 - 壳侧“旧面板释放后不再被存储唤醒”无法从外部触发真实 `SqliteTodoStore.Changed`,同语义在 VM 层覆盖。
 - “打开 PR 的对话框正文以计划开头”是壳/视图层面的手测项(三条线路共用 `GitSyncViewModel.ComposePullRequestCommand`,正文由 `DescribePullRequestAsync` 给出,已列在手测项里)。
+
+## 七、合并 `main`(W0/W1/W2)后的评审修正
+
+合并冲突两处:`MainWindowViewModel.Dispose` 的释放行(两边都保留)与 `StringTableTests.KnownPrefixes`(取并集,`plan` 追加在末尾)。`main` 的 schema 仍是 v10,本波的 v11 不需要改号。
+
+| 问题 | 修正 |
+|---|---|
+| 交接只看输入框文字:有附件而无文字时,发送会把用户还没发的附件夹带进交接消息 | `HandoffToAgent` 把 `Composer.HasAttachments` 也当作未发送草稿(`BlockedByDraft`),提示文案改为“文字或附件” |
+| 面板的“从计划开 PR”可用性只在存储刷新时重算,推送完成/PR 出现后按钮不跟;且只看 `CanComposePullRequest`,与实际执行的 `CanExecute`(含 git 行忙)不一致 | 宿主改用 `ComposePullRequestCommand.CanExecute`,面板打开期间订阅它的 `CanExecuteChanged`,关闭(含窗口释放)时退订 |
+| 读失败的状态行在下一次读成功后仍留着 | 读失败单独记一位,下一次成功应用时撤掉;交接/导出回执不受影响 |
+| 修订列表按 `ReplacedAt` 再排序,而比较按存储顺序:时钟回拨时每次刷新都清空重建 | 以存储顺序(按记录先后)为准 |
+| 修订计数 `1 versions` | 改为 `plan.revisions.count.one/.other` 复数键 |
+
+补的测试:VM 两例(读恢复撤掉失败但保留交接回执;修订保持存储顺序且历史不变时不重建、单复数)、壳两例(附件阻止交接且附件保留;PR 门随 git 行变化、关面板后退订)、Core 两例(v11 步骤重跑保留数据;20 路并发替换每条旧文本恰好记一次)。

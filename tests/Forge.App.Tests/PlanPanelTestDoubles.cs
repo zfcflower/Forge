@@ -22,7 +22,7 @@ internal sealed class FakePlanStore : ITodoStore
     /// <summary>The plan summary the next read returns; null when none was written.</summary>
     public PlanSummary? Summary { get; set; }
 
-    /// <summary>The replaced summaries, in the order the store hands them out (the panel sorts them anyway).</summary>
+    /// <summary>The replaced summaries, in the order the store hands them out (newest first, per the contract).</summary>
     public List<PlanRevision> Revisions { get; } = [];
 
     /// <summary>When set, the next summary read fails with it (an unreadable plan).</summary>

@@ -234,6 +234,58 @@ public sealed class SqlitePlanRevisionTests
     }
 
     [Fact]
+    public async Task A_v11_step_that_runs_again_over_its_own_table_keeps_the_rows()
+    {
+        using var directory = new TempDirectory();
+        await using (var seed = new SqliteTodoStore(directory.Path))
+        {
+            await seed.SetPlanSummaryAsync(SessionA, "A", default);
+            await seed.SetPlanSummaryAsync(SessionA, "B", default);
+        }
+
+        // A second process that read user_version 10 before the first one committed runs the step over the finished
+        // table: every statement of the step is IF NOT EXISTS / DROP-then-CREATE, so the history survives.
+        SqliteConnection.ClearAllPools();
+        await TodoSchemaRaw.ExecuteAsync(directory, "PRAGMA user_version = 10;");
+        SqliteConnection.ClearAllPools();
+
+        await using var store = new SqliteTodoStore(directory.Path);
+        Assert.Equal("A", Assert.Single(await store.ListPlanRevisionsAsync(SessionA, 10, default)).Text);
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
+        await store.SetPlanSummaryAsync(SessionA, "C", default);
+        Assert.Equal(
+            ["B", "A"],
+            (await store.ListPlanRevisionsAsync(SessionA, 10, default)).Select(revision => revision.Text).ToArray());
+    }
+
+    [Fact]
+    public async Task Concurrent_replacements_record_every_replaced_text_once()
+    {
+        using var directory = new TempDirectory();
+        await using var store = new SqliteTodoStore(directory.Path);
+        await store.SetPlanSummaryAsync(SessionA, "seed", default);
+
+        const int writers = 20;
+        await Task.WhenAll(
+            Enumerable.Range(0, writers)
+                .Select(index => Task.Run(() => store.SetPlanSummaryAsync(SessionA, "v" + index.ToString(CultureInfo.InvariantCulture), default))));
+
+        // Each write read the text it replaced inside its own write transaction, so the history is a chain: the seed and
+        // every text but the final one appear exactly once, and the final text is the current summary.
+        var current = (await store.GetPlanSummaryAsync(SessionA, default))!.Text;
+        var replaced = (await store.ListPlanRevisionsAsync(SessionA, SqliteTodoStore.PlanRevisionLimit, default))
+            .Select(revision => revision.Text)
+            .ToArray();
+        Assert.Equal(writers, replaced.Length);
+        Assert.Equal(replaced.Length, replaced.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain(current, replaced);
+        Assert.Equal("seed", replaced[^1]);
+        var expected = new HashSet<string>(StringComparer.Ordinal) { "seed" };
+        expected.UnionWith(Enumerable.Range(0, writers).Select(index => "v" + index.ToString(CultureInfo.InvariantCulture)));
+        Assert.True(expected.SetEquals(replaced.Append(current)));
+    }
+
+    [Fact]
     public async Task Handover_copies_the_revision_history_and_leaves_the_source_untouched()
     {
         using var directory = new TempDirectory();

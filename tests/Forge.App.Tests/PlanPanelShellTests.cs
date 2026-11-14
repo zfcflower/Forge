@@ -199,6 +199,85 @@ public sealed class PlanPanelShellTests
     }
 
     [Fact]
+    public async Task Handoff_does_not_send_the_users_pending_attachments()
+    {
+        var sessionDir = TestTempFiles.NewDirectory("forge-plan-attached-");
+        try
+        {
+            var session = SharedUi.Session;
+            await session.Dispatch(
+                async () =>
+                {
+                    await using var harness = await GitAppHarness.OpenWithSession(sessionDir);
+                    var viewModel = harness.ViewModel;
+                    var live = Assert.IsType<SessionWorkspaceViewModel>(viewModel.ActiveSession);
+                    Assert.Equal(
+                        AttachmentRejection.None,
+                        await live.Composer.AddFileAsync(System.Text.Encoding.UTF8.GetBytes("notes"), "notes.txt"));
+                    Assert.True(live.Composer.HasAttachments);
+                    Assert.Equal(string.Empty, live.Draft);
+
+                    var outcome = ((IPlanPanelHost)viewModel).HandoffToAgent(HandoffPrompt);
+
+                    // The attachment the user is still composing must not ride along with the hand-off message.
+                    Assert.Equal(PlanHandoff.BlockedByDraft, outcome);
+                    Assert.True(live.Composer.HasAttachments);
+                    Assert.Equal(string.Empty, live.Draft);
+                    Assert.False(live.IsRunning);
+                    Assert.DoesNotContain(live.Transcript.Items, item => item is UserMessageViewModel message && message.Text == HandoffPrompt);
+
+                    harness.Detach(viewModel);
+                    return 0;
+                },
+                CancellationToken.None);
+        }
+        finally
+        {
+            TestTempFiles.DeleteTree(sessionDir);
+        }
+    }
+
+    [Fact]
+    public async Task The_open_panels_pull_request_button_follows_the_git_rows_gate_until_it_closes()
+    {
+        var sessionDir = TestTempFiles.NewDirectory("forge-plan-prgate-");
+        try
+        {
+            var session = SharedUi.Session;
+            await session.Dispatch(
+                async () =>
+                {
+                    await using var harness = await GitAppHarness.OpenWithSession(sessionDir);
+                    var viewModel = harness.ViewModel;
+                    viewModel.OpenPlanCommand.Execute(null);
+                    var panel = Assert.IsType<PlanPanelViewModel>(viewModel.Plan);
+                    var host = (IPlanPanelHost)viewModel;
+                    Assert.Equal(viewModel.GitSync.ComposePullRequestCommand.CanExecute(null), host.CanOpenPlanPullRequest);
+                    Assert.Equal(host.CanOpenPlanPullRequest, panel.OpenPullRequestCommand.CanExecute(null));
+
+                    var raised = 0;
+                    panel.OpenPullRequestCommand.CanExecuteChanged += (_, _) => raised++;
+                    viewModel.GitSync.ComposePullRequestCommand.NotifyCanExecuteChanged();
+                    Assert.Equal(1, raised);
+
+                    // A closed panel is no longer told: the shell dropped its subscription with the panel.
+                    viewModel.OpenPlanCommand.Execute(null);
+                    Assert.Null(viewModel.Plan);
+                    viewModel.GitSync.ComposePullRequestCommand.NotifyCanExecuteChanged();
+                    Assert.Equal(1, raised);
+
+                    harness.Detach(viewModel);
+                    return 0;
+                },
+                CancellationToken.None);
+        }
+        finally
+        {
+            TestTempFiles.DeleteTree(sessionDir);
+        }
+    }
+
+    [Fact]
     public async Task Handoff_on_a_read_only_session_is_unavailable_and_keeps_the_draft()
     {
         var sessionDir = TestTempFiles.NewDirectory("forge-plan-readonly-");

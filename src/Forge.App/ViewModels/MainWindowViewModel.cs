@@ -3203,7 +3203,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Todos.Dispose();
         Reviews.Dispose();
         Specs.Dispose();
-        plan?.Dispose();
+        ClosePlan();
         PropertyChanged -= OnPlanActiveSessionChanged;
         Problems.Dispose();
         problemsDiagnostics?.Dispose();

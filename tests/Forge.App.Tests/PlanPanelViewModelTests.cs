@@ -432,8 +432,9 @@ public sealed class PlanPanelViewModelTests
     {
         var store = new FakePlanStore();
         store.Summary = new PlanSummary(SessionId, "当前摘要", At);
-        store.Revisions.Add(new PlanRevision(SessionId, "旧版本内容", At.AddMinutes(-10)));
+        // The store hands the history out newest first (the ITodoStore contract); the panel keeps that order.
         store.Revisions.Add(new PlanRevision(SessionId, "较新版本内容", At.AddMinutes(-2)));
+        store.Revisions.Add(new PlanRevision(SessionId, "旧版本内容", At.AddMinutes(-10)));
 
         await SharedUi.RunAsync(async () =>
         {
@@ -732,6 +733,87 @@ public sealed class PlanPanelViewModelTests
                 Assert.True(await TestPump.UntilAsync(() => panel.StatusIsFailure), "the read failure never landed in the status line");
                 Assert.StartsWith(PlanStrings.Failed(string.Empty).Resolve().TrimEnd(), panel.StatusText, StringComparison.Ordinal);
                 Assert.True(panel.HasStatus);
+            }
+            finally
+            {
+                panel.Dispose();
+            }
+        });
+    }
+
+    [Fact]
+    public async Task A_read_that_succeeds_again_clears_the_failure_but_not_a_handoff_report()
+    {
+        var store = new FakePlanStore();
+        store.Seed(new TodoItem("t1", SessionId, "一步", TodoStatus.Pending, null, 0, At));
+        store.SummaryFailure = new IOException("the plan store is gone");
+
+        await SharedUi.RunAsync(async () =>
+        {
+            using var language = new LanguageScope(UiLanguage.Chinese);
+            var host = new FakePlanHost { PlanSession = new PlanPanelSession(SessionId, "会话一", IsReadOnly: false) };
+            var panel = new PlanPanelViewModel(store, host);
+            panel.Open();
+            try
+            {
+                Assert.True(await TestPump.UntilAsync(() => panel.StatusIsFailure), "the read failure never landed in the status line");
+
+                // The store recovers: the next read puts the plan on screen and retires the stale failure.
+                store.SummaryFailure = null;
+                await panel.RefreshAsync(CancellationToken.None);
+                Assert.Equal(2, panel.Rows.Count);
+                Assert.False(panel.StatusIsFailure);
+                Assert.False(panel.HasStatus);
+                Assert.Equal(string.Empty, panel.StatusText);
+
+                // A hand-off report is not a read report: a later successful read leaves it on screen.
+                panel.Handoff(panel.Rows[1]);
+                var report = panel.StatusText;
+                Assert.NotEqual(string.Empty, report);
+                await panel.RefreshAsync(CancellationToken.None);
+                Assert.Equal(report, panel.StatusText);
+            }
+            finally
+            {
+                panel.Dispose();
+            }
+        });
+    }
+
+    [Fact]
+    public async Task Revisions_keep_the_store_order_and_an_unchanged_history_keeps_its_rows()
+    {
+        var store = new FakePlanStore();
+        store.Summary = new PlanSummary(SessionId, "当前摘要", At);
+
+        // Newest recorded first, but the stamps run backwards (the clock stepped back between the two writes).
+        store.Revisions.Add(new PlanRevision(SessionId, "后记的版本", At.AddMinutes(-10)));
+        store.Revisions.Add(new PlanRevision(SessionId, "先记的版本", At.AddMinutes(-2)));
+
+        await SharedUi.RunAsync(async () =>
+        {
+            using var language = new LanguageScope(UiLanguage.English);
+            var host = new FakePlanHost { PlanSession = new PlanPanelSession(SessionId, "s", IsReadOnly: false) };
+            var panel = await LoadedPanelAsync(store, host, expectedRows: 0);
+            try
+            {
+                Assert.True(await TestPump.UntilAsync(() => panel.Revisions.Count == 2), "the revisions never loaded");
+                Assert.Equal(["后记的版本", "先记的版本"], panel.Revisions.Select(revision => revision.Text).ToArray());
+                var first = panel.Revisions[0];
+                var second = panel.Revisions[1];
+                var resets = 0;
+                panel.Revisions.CollectionChanged += (_, _) => resets++;
+
+                await panel.RefreshAsync(CancellationToken.None);
+
+                Assert.Equal(0, resets);
+                Assert.Same(first, panel.Revisions[0]);
+                Assert.Same(second, panel.Revisions[1]);
+                Assert.Equal("2 versions", panel.RevisionsCountText);
+
+                store.Revisions.RemoveAt(1);
+                await panel.RefreshAsync(CancellationToken.None);
+                Assert.Equal("1 version", panel.RevisionsCountText);
             }
             finally
             {

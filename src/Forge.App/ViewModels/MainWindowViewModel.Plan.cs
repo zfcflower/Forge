@@ -60,6 +60,7 @@ internal sealed partial class MainWindowViewModel : IPlanPanelHost
 
         var panel = new PlanPanelViewModel(composition.Todos, this);
         Plan = panel;
+        GitSync.ComposePullRequestCommand.CanExecuteChanged += OnPlanPullRequestGateChanged;
         panel.Open();
     }
 
@@ -70,6 +71,7 @@ internal sealed partial class MainWindowViewModel : IPlanPanelHost
             return;
         }
 
+        GitSync.ComposePullRequestCommand.CanExecuteChanged -= OnPlanPullRequestGateChanged;
         Plan = null;
         closing.Dispose();
     }
@@ -81,11 +83,15 @@ internal sealed partial class MainWindowViewModel : IPlanPanelHost
             ? new PlanPanelSession(session.SessionId, session.Title, session.IsReadOnlyView)
             : null;
 
-    bool IPlanPanelHost.CanOpenPlanPullRequest => GitSync.CanComposePullRequest;
+    /// <summary>The same gate <see cref="IPlanPanelHost.OpenPlanPullRequest"/> runs through (it includes the row's busy state).</summary>
+    bool IPlanPanelHost.CanOpenPlanPullRequest => GitSync.ComposePullRequestCommand.CanExecute(null);
+
+    /// <summary>The git row's pull-request gate moved (a push finished, a PR appeared): the open panel's button follows it.</summary>
+    private void OnPlanPullRequestGateChanged(object? sender, EventArgs e) => plan?.OpenPullRequestCommand.NotifyCanExecuteChanged();
 
     void IPlanPanelHost.OpenPlanPullRequest()
     {
-        // The same command the 提交目标 row runs, so the dialog, its body (this plan) and its checks stay one path.
+        // The same command the ship-target row runs, so the dialog, its body (this plan) and its checks stay one path.
         if (GitSync.ComposePullRequestCommand.CanExecute(null))
         {
             GitSync.ComposePullRequestCommand.Execute(null);
@@ -96,7 +102,7 @@ internal sealed partial class MainWindowViewModel : IPlanPanelHost
 
     /// <summary>
     /// Writes the hand-off message into the session's composer and sends it, or queues it while a turn runs. An unsent draft
-    /// the user typed is never overwritten: the panel reports that instead. A read-only view, a handing-over session and a
+    /// the user typed (text or attachments) is never overwritten or sent along: the panel reports that instead. A read-only view, a handing-over session and a
     /// composer that cannot send (compacting, gated) all report "unavailable" and leave nothing behind.
     /// </summary>
     PlanHandoff IPlanPanelHost.HandoffToAgent(string prompt)
@@ -106,7 +112,8 @@ internal sealed partial class MainWindowViewModel : IPlanPanelHost
             return PlanHandoff.Unavailable;
         }
 
-        if (!string.IsNullOrWhiteSpace(session.Draft))
+        // Attachments count as unsent input too: the send would take them into the hand-off message.
+        if (!string.IsNullOrWhiteSpace(session.Draft) || session.Composer.HasAttachments)
         {
             return PlanHandoff.BlockedByDraft;
         }
