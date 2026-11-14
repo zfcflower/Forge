@@ -29,7 +29,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task The_start_request_carries_the_client_the_scopes_and_the_referrer()
     {
-        var handler = ScriptedXAiHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
         var client = Client(handler);
 
         var code = await client.StartAsync(CancellationToken.None);
@@ -57,7 +57,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_complete_url_is_optional_and_falls_back_to_the_plain_one()
     {
-        var client = Client(ScriptedXAiHandler.Answering(
+        var client = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """
             {"device_code":"d","user_code":"u","verification_uri":"https://accounts.x.ai/device","expires_in":600}
@@ -72,12 +72,12 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_verification_url_that_is_not_https_or_a_missing_expiry_is_an_invalid_response()
     {
-        var plainHttp = Client(ScriptedXAiHandler.Answering(
+        var plainHttp = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """
             {"device_code":"d","user_code":"u","verification_uri":"http://accounts.x.ai/device","expires_in":600}
             """));
-        var noExpiry = Client(ScriptedXAiHandler.Answering(
+        var noExpiry = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """
             {"device_code":"d","user_code":"u","verification_uri":"https://accounts.x.ai/device"}
@@ -96,7 +96,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_failed_start_reports_the_status_and_the_body()
     {
-        var client = Client(ScriptedXAiHandler.Answering(HttpStatusCode.Forbidden, """{"error":"invalid_client"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Forbidden, """{"error":"invalid_client"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(() => client.StartAsync(CancellationToken.None));
 
@@ -108,7 +108,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_pending_poll_keeps_the_interval_and_a_later_poll_returns_the_bundle()
     {
-        var handler = new ScriptedXAiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"authorization_pending"}""")
             .Then(HttpStatusCode.OK, TokenBody);
@@ -131,18 +131,16 @@ public sealed class XAiAuthenticationTests
 
         var poll = handler.Requests[2];
         Assert.Equal("https://auth.x.ai/oauth2/token", poll.Uri!.AbsoluteUri);
-        Assert.Contains("device_code=xai-device-code", poll.Body, StringComparison.Ordinal);
-        Assert.Contains("client_id=" + XAiAuthentication.ClientId, poll.Body, StringComparison.Ordinal);
-        Assert.Contains(
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code",
-            poll.Body,
-            StringComparison.Ordinal);
+        // The exact body pins the field order the wire format carries; the shared skeleton must not reshuffle it.
+        Assert.Equal(
+            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id=" + XAiAuthentication.ClientId + "&device_code=xai-device-code",
+            poll.Body);
     }
 
     [Fact]
     public async Task Polling_too_fast_raises_the_interval()
     {
-        var handler = new ScriptedXAiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"slow_down"}""")
             .Then(HttpStatusCode.OK, """{"error":"slow_down","interval":12}""")
@@ -166,11 +164,11 @@ public sealed class XAiAuthenticationTests
     public async Task An_expired_code_and_a_denied_login_end_the_flow_with_their_own_reason()
     {
         var expired = Client(
-            new ScriptedXAiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"expired_token"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"expired_token"}"""));
         var denied = Client(
-            new ScriptedXAiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"access_denied"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"access_denied"}"""));
         var deniedOther = Client(
-            new ScriptedXAiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"authorization_denied"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"authorization_denied"}"""));
 
         var expiredCode = await expired.StartAsync(CancellationToken.None);
         var deniedCode = await denied.StartAsync(CancellationToken.None);
@@ -196,7 +194,7 @@ public sealed class XAiAuthenticationTests
     public async Task A_token_response_without_a_refresh_token_is_not_a_usable_login()
     {
         var client = Client(
-            new ScriptedXAiHandler()
+            new ScriptedDeviceCodeHandler()
                 .Then(HttpStatusCode.OK, DeviceCodeBody)
                 .Then(HttpStatusCode.OK, """{"access_token":"only-access","expires_in":3600}"""));
 
@@ -212,7 +210,7 @@ public sealed class XAiAuthenticationTests
     public async Task A_server_fault_fails_the_poll_instead_of_looking_pending()
     {
         var client = Client(
-            new ScriptedXAiHandler()
+            new ScriptedDeviceCodeHandler()
                 .Then(HttpStatusCode.OK, DeviceCodeBody)
                 .Then(HttpStatusCode.InternalServerError, "upstream is down"));
 
@@ -227,7 +225,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_refresh_that_omits_the_rotating_token_keeps_the_one_it_used_and_defaults_to_an_hour()
     {
-        var handler = ScriptedXAiHandler.Answering(HttpStatusCode.OK, """{"access_token":"fresh-access"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, """{"access_token":"fresh-access"}""");
         var client = Client(handler);
 
         var bundle = await client.RefreshAsync("kept-refresh", CancellationToken.None);
@@ -245,7 +243,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_refresh_that_rotates_the_token_replaces_it()
     {
-        var handler = ScriptedXAiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"new-access","refresh_token":"new-refresh","expires_in":1800}""");
 
@@ -259,7 +257,7 @@ public sealed class XAiAuthenticationTests
     [Fact]
     public async Task A_throttled_refresh_is_retried_and_then_succeeds()
     {
-        var handler = new ScriptedXAiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.TooManyRequests, """{"error":"rate_limited"}""")
             .Then(HttpStatusCode.OK, """{"access_token":"second-access","refresh_token":"second-refresh","expires_in":600}""");
 
@@ -273,7 +271,7 @@ public sealed class XAiAuthenticationTests
     public async Task A_rejected_refresh_means_signing_in_again()
     {
         var client = Client(
-            new ScriptedXAiHandler().Then(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => client.RefreshAsync("stale-refresh", CancellationToken.None));
@@ -359,7 +357,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
         Assert.Equal(ProviderFactory.OpenAiResponsesKind, stored.Protocol);
         Assert.Equal(ProviderProtocol.OpenAiResponses, ProviderDefinition.FromDocument(stored, "meta").Protocol);
 
-        var transient = Services(new ScriptedXAiHandler()).CreateTransient(metaDefinition);
+        var transient = Services(new ScriptedDeviceCodeHandler()).CreateTransient(metaDefinition);
         Assert.Equal(
             ProviderFactory.OpenAiResponsesKind,
             transient.BuildConfig("key", metaDefinition.BaseUrl, ProviderAuthStyle.Default, preamble: null).Kind);
@@ -374,7 +372,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
             "chatgpt",
             credentialKind: ProviderCredentialKind.ChatGptSubscription);
 
-        var transient = Services(new ScriptedXAiHandler()).CreateTransient(chatGpt);
+        var transient = Services(new ScriptedDeviceCodeHandler()).CreateTransient(chatGpt);
 
         Assert.Equal(ProviderProtocol.OpenAiResponses, chatGpt.Protocol);
         Assert.Equal(
@@ -386,7 +384,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public void A_xai_row_without_a_bundle_needs_a_sign_in()
     {
-        var provider = Services(new ScriptedXAiHandler()).CreateTransient(Xai());
+        var provider = Services(new ScriptedDeviceCodeHandler()).CreateTransient(Xai());
 
         Assert.Equal(ProviderStatusKind.NeedsSignIn, provider.Status.Kind);
         Assert.Equal(ProviderStrings.XAiSignInRequiredText().Resolve(), provider.Status.Detail.Resolve());
@@ -395,7 +393,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_missing_bundle_throws_the_sign_in_reason()
     {
-        var services = Services(new ScriptedXAiHandler());
+        var services = Services(new ScriptedDeviceCodeHandler());
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => services.Credentials.GetXAiAccessTokenAsync("xai", CancellationToken.None));
@@ -407,7 +405,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_successful_sign_in_persists_the_bundle_and_never_writes_it_to_the_settings()
     {
-        var handler = new ScriptedXAiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, TokenBody);
+        var handler = new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, TokenBody);
         var services = Services(handler);
         XAiDeviceCode? shown = null;
 
@@ -454,7 +452,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_cancelled_sign_in_stores_nothing()
     {
-        var services = Services(ScriptedXAiHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
@@ -468,7 +466,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_token_outside_the_five_minute_skew_is_used_without_a_network_call()
     {
-        var handler = new ScriptedXAiHandler();
+        var handler = new ScriptedDeviceCodeHandler();
         var services = Services(handler);
         Store(services, "still-good-access", "refresh-token", DateTimeOffset.UtcNow.AddMinutes(6));
 
@@ -481,7 +479,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_token_inside_the_five_minute_skew_is_refreshed_and_the_new_bundle_is_stored()
     {
-        var handler = ScriptedXAiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}""");
         var services = Services(handler);
@@ -504,7 +502,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_refused_refresh_drops_the_bundle_so_the_row_asks_for_a_sign_in_again()
     {
-        var services = Services(ScriptedXAiHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
         Store(services, "dead-access", "dead-refresh", DateTimeOffset.UtcNow.AddSeconds(-60));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
@@ -518,7 +516,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_rejected_refresh_keeps_a_stored_bundle_whose_refresh_token_is_already_newer()
     {
-        var handler = ScriptedXAiHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
         var services = Services(handler);
         Store(services, "stale-access", "rejected-refresh", DateTimeOffset.UtcNow.AddSeconds(-60));
         // Another caller rotates the bundle while this refresh is on the wire, so the token the server refused is already
@@ -539,7 +537,7 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task Two_concurrent_reads_share_one_refresh_and_return_the_same_access_token()
     {
-        var handler = ScriptedXAiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}""");
         var services = Services(handler);
@@ -598,26 +596,3 @@ public sealed class XAiAuthenticationCredentialTests : IDisposable
         Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
     };
 }
-
-/// <summary>
-/// Answers in order, one queued response per request, and records what was asked: the device flow is a sequence, so a
-/// handler that answers everything the same way cannot express "pending, then approved".
-/// </summary>
-internal sealed class ScriptedXAiHandler : ScriptedAuthHandler<RecordedXAiRequest>
-{
-    public static ScriptedXAiHandler Answering(HttpStatusCode status, string body)
-    {
-        var handler = new ScriptedXAiHandler();
-        handler.Then(status, body);
-        return handler;
-    }
-
-    protected override RecordedXAiRequest Record(HttpRequestMessage request, string body) =>
-        new(
-            request.RequestUri,
-            body,
-            [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)]);
-}
-
-/// <summary>One request a scripted flow made, captured so a test can assert the wire shape.</summary>
-internal sealed record RecordedXAiRequest(Uri? Uri, string Body, IReadOnlyList<string> Accept);

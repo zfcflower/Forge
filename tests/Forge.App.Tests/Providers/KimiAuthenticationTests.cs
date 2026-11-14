@@ -29,7 +29,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task The_start_response_yields_the_user_code_and_both_urls()
     {
-        var handler = ScriptedKimiHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
         var client = Client(handler);
 
         var code = await client.StartAsync(CancellationToken.None);
@@ -52,7 +52,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_missing_interval_and_expiry_fall_back_to_the_documented_defaults()
     {
-        var handler = ScriptedKimiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """
             {"device_code":"d","user_code":"u","verification_uri":"https://auth.kimi.com/d","verification_uri_complete":"https://auth.kimi.com/d?c=u"}
@@ -68,7 +68,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_failed_start_reports_the_status_and_the_body()
     {
-        var client = Client(ScriptedKimiHandler.Answering(HttpStatusCode.Forbidden, """{"error":"invalid_client"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Forbidden, """{"error":"invalid_client"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(() => client.StartAsync(CancellationToken.None));
 
@@ -80,7 +80,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_start_response_without_the_codes_or_urls_is_an_invalid_response()
     {
-        var client = Client(ScriptedKimiHandler.Answering(
+        var client = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """
             {"device_code":"d","user_code":"u","verification_uri":"https://auth.kimi.com/d"}
@@ -95,7 +95,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_pending_poll_keeps_the_interval_and_a_later_poll_returns_the_bundle()
     {
-        var handler = new ScriptedKimiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"authorization_pending"}""")
             .Then(HttpStatusCode.OK, TokenBody);
@@ -118,17 +118,16 @@ public sealed class KimiAuthenticationTests
 
         var poll = handler.Requests[2];
         Assert.EndsWith("/api/oauth/token", poll.Uri!.AbsoluteUri, StringComparison.Ordinal);
-        Assert.Contains("device_code=device-code-value", poll.Body, StringComparison.Ordinal);
-        Assert.Contains(
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code",
-            poll.Body,
-            StringComparison.Ordinal);
+        // The exact body pins the field order the wire format carries; the shared skeleton must not reshuffle it.
+        Assert.Equal(
+            "client_id=" + KimiAuthentication.ClientId + "&device_code=device-code-value&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code",
+            poll.Body);
     }
 
     [Fact]
     public async Task Polling_too_fast_raises_the_interval()
     {
-        var handler = new ScriptedKimiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"slow_down"}""")
             .Then(HttpStatusCode.OK, """{"error":"slow_down","interval":12}""")
@@ -152,9 +151,9 @@ public sealed class KimiAuthenticationTests
     public async Task An_expired_code_and_a_denied_login_end_the_flow_with_their_own_reason()
     {
         var expired = Client(
-            new ScriptedKimiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"expired_token"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"expired_token"}"""));
         var denied = Client(
-            new ScriptedKimiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"access_denied"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"access_denied"}"""));
 
         var expiredCode = await expired.StartAsync(CancellationToken.None);
         var deniedCode = await denied.StartAsync(CancellationToken.None);
@@ -163,9 +162,9 @@ public sealed class KimiAuthenticationTests
         var deniedError = await Assert.ThrowsAsync<ProviderException>(
             () => denied.PollAsync(deniedCode, 5, CancellationToken.None));
 
-        Assert.Contains("expired", expiredError.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("restart", expiredError.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("denied", deniedError.Message, StringComparison.OrdinalIgnoreCase);
+        // The exact messages pin the shared template's wording; a shared-skeleton edit cannot drift them silently.
+        Assert.Equal("Kimi: the device authorization expired. Please restart the login.", expiredError.Message);
+        Assert.Equal("Kimi: the login was denied.", deniedError.Message);
         Assert.False(expiredError.Retryable);
         Assert.False(deniedError.Retryable);
     }
@@ -174,7 +173,7 @@ public sealed class KimiAuthenticationTests
     public async Task An_unrecognised_answer_reports_the_status_and_the_error_code()
     {
         var client = Client(
-            new ScriptedKimiHandler()
+            new ScriptedDeviceCodeHandler()
                 .Then(HttpStatusCode.OK, DeviceCodeBody)
                 .Then(HttpStatusCode.BadRequest, """{"error":"invalid_request","error_description":"bad device code"}"""));
         var code = await client.StartAsync(CancellationToken.None);
@@ -191,7 +190,7 @@ public sealed class KimiAuthenticationTests
     public async Task A_server_fault_fails_the_poll_instead_of_looking_pending()
     {
         var client = Client(
-            new ScriptedKimiHandler()
+            new ScriptedDeviceCodeHandler()
                 .Then(HttpStatusCode.OK, DeviceCodeBody)
                 .Then(HttpStatusCode.InternalServerError, "upstream is down"));
         var code = await client.StartAsync(CancellationToken.None);
@@ -208,7 +207,7 @@ public sealed class KimiAuthenticationTests
     public async Task A_token_response_without_a_refresh_token_is_not_a_usable_login()
     {
         var client = Client(
-            new ScriptedKimiHandler()
+            new ScriptedDeviceCodeHandler()
                 .Then(HttpStatusCode.OK, DeviceCodeBody)
                 .Then(HttpStatusCode.OK, """{"access_token":"only-access","expires_in":3600}"""));
         var code = await client.StartAsync(CancellationToken.None);
@@ -223,7 +222,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_cancelled_poll_throws_the_cancellation_and_not_a_provider_error()
     {
-        var client = Client(ScriptedKimiHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
         var code = await client.StartAsync(CancellationToken.None);
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
@@ -235,7 +234,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_refresh_returns_the_rotated_bundle()
     {
-        var handler = ScriptedKimiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"new-access","refresh_token":"new-refresh","expires_in":1800}""");
         var client = Client(handler);
@@ -254,7 +253,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_throttled_refresh_is_retried_and_then_succeeds()
     {
-        var handler = new ScriptedKimiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.TooManyRequests, """{"error":"rate_limited"}""")
             .Then(HttpStatusCode.TooManyRequests, """{"error":"rate_limited"}""")
             .Then(HttpStatusCode.OK, """{"access_token":"third-access","refresh_token":"third-refresh","expires_in":600}""");
@@ -269,7 +268,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task A_refresh_that_keeps_failing_costs_only_the_retries_it_is_allowed()
     {
-        var handler = new ScriptedKimiHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.InternalServerError, "down")
             .Then(HttpStatusCode.InternalServerError, "down")
             .Then(HttpStatusCode.InternalServerError, "down")
@@ -288,7 +287,7 @@ public sealed class KimiAuthenticationTests
     public async Task A_rejected_refresh_means_signing_in_again()
     {
         var client = Client(
-            new ScriptedKimiHandler().Then(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => client.RefreshAsync("stale-refresh", CancellationToken.None));
@@ -301,7 +300,7 @@ public sealed class KimiAuthenticationTests
     [Fact]
     public async Task The_oauth_host_can_be_overridden_and_never_ends_with_a_slash()
     {
-        var handler = ScriptedKimiHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
         var client = Client(handler);
 
         var previous = Environment.GetEnvironmentVariable(KimiAuthentication.OAuthHostVariable);
@@ -390,7 +389,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public void A_kimi_row_without_a_bundle_needs_a_sign_in()
     {
-        var provider = Services(new ScriptedKimiHandler()).CreateTransient(Kimi());
+        var provider = Services(new ScriptedDeviceCodeHandler()).CreateTransient(Kimi());
 
         Assert.Equal(ProviderStatusKind.NeedsSignIn, provider.Status.Kind);
         Assert.Equal(ProviderStrings.KimiSignInRequiredText().Resolve(), provider.Status.Detail.Resolve());
@@ -399,7 +398,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_missing_bundle_throws_the_sign_in_reason_the_copilot_path_uses()
     {
-        var services = Services(new ScriptedKimiHandler());
+        var services = Services(new ScriptedDeviceCodeHandler());
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => services.Credentials.GetKimiAccessTokenAsync("kimi", CancellationToken.None));
@@ -411,7 +410,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_successful_sign_in_persists_the_bundle_and_never_writes_it_to_the_settings()
     {
-        var handler = new ScriptedKimiHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, TokenBody);
+        var handler = new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, TokenBody);
         var services = Services(handler);
         KimiDeviceCode? shown = null;
 
@@ -458,7 +457,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_cancelled_sign_in_stores_nothing()
     {
-        var services = Services(ScriptedKimiHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
@@ -472,7 +471,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_valid_stored_access_token_is_used_without_a_network_call()
     {
-        var handler = new ScriptedKimiHandler();
+        var handler = new ScriptedDeviceCodeHandler();
         var services = Services(handler);
         Store(services, "still-good-access", "refresh-token", DateTimeOffset.UtcNow.AddMinutes(30));
 
@@ -485,7 +484,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task An_access_token_near_expiry_is_refreshed_and_the_rotated_bundle_is_stored()
     {
-        var handler = ScriptedKimiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}""");
         var services = Services(handler);
@@ -508,7 +507,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_refused_refresh_drops_the_bundle_so_the_row_asks_for_a_sign_in_again()
     {
-        var services = Services(ScriptedKimiHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
         Store(services, "dead-access", "dead-refresh", DateTimeOffset.UtcNow.AddSeconds(-60));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
@@ -522,7 +521,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task Two_concurrent_reads_share_one_refresh_and_return_the_same_access_token()
     {
-        var handler = ScriptedKimiHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}""");
         var services = Services(handler);
@@ -552,7 +551,7 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_rejected_refresh_keeps_a_stored_bundle_whose_refresh_token_is_already_newer()
     {
-        var handler = ScriptedKimiHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
         var services = Services(handler);
         Store(services, "stale-access", "rejected-refresh", DateTimeOffset.UtcNow.AddSeconds(-60));
         // Another caller rotates the bundle while this refresh is on the wire, so the token the server refused is already
@@ -609,86 +608,4 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
         DefaultModel = "k3",
         Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
     };
-}
-
-/// <summary>
-/// Answers in order, one queued response per request, and records what was asked: the device flow is a sequence, so a
-/// handler that answers everything the same way cannot express "pending, then approved".
-/// </summary>
-internal sealed class ScriptedKimiHandler : ScriptedAuthHandler<RecordedKimiRequest>
-{
-    public static ScriptedKimiHandler Answering(HttpStatusCode status, string body)
-    {
-        var handler = new ScriptedKimiHandler();
-        handler.Then(status, body);
-        return handler;
-    }
-
-    protected override RecordedKimiRequest Record(HttpRequestMessage request, string body) =>
-        new(
-            request.RequestUri,
-            body,
-            [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)]);
-}
-
-/// <summary>One request a scripted flow made, captured so a test can assert the wire shape.</summary>
-internal sealed record RecordedKimiRequest(Uri? Uri, string Body, IReadOnlyList<string> Accept);
-
-/// <summary>
-/// A clock for the device-flow tests: its timers fire at once and move it forward by the wait they were asked for, so the poll
-/// interval and the refresh backoff cost no real time while the two timestamps <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/>
-/// compares still advance by exactly that much.
-/// </summary>
-internal sealed class InstantTime(DateTimeOffset start) : TimeProvider
-{
-    private long ticks;
-
-    public override DateTimeOffset GetUtcNow() => start + TimeSpan.FromTicks(Interlocked.Read(ref ticks));
-
-    public override long GetTimestamp() => Interlocked.Read(ref ticks);
-
-    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-    {
-        // The runtime creates the timer for a Task.Delay and expects it to be scheduled from this call: nothing calls Change.
-        var timer = new InstantTimer(this, callback, state);
-        timer.Change(dueTime, period);
-        return timer;
-    }
-
-    /// <summary>Moves the clock to the moment the timer was scheduled for, then runs its callback on the pool.</summary>
-    internal void Fire(TimerCallback callback, object? state, TimeSpan dueTime)
-    {
-        if (dueTime != Timeout.InfiniteTimeSpan && dueTime > TimeSpan.Zero)
-        {
-            Interlocked.Add(ref ticks, dueTime.Ticks);
-        }
-
-        ThreadPool.QueueUserWorkItem(_ => callback(state));
-    }
-}
-
-internal sealed class InstantTimer(InstantTime time, TimerCallback callback, object? state) : ITimer
-{
-    private int disposed;
-
-    public bool Change(TimeSpan dueTime, TimeSpan period)
-    {
-        if (Volatile.Read(ref disposed) != 0)
-        {
-            return false;
-        }
-
-        time.Fire(callback, state, dueTime);
-        return true;
-    }
-
-    public void Dispose() => Interlocked.Exchange(ref disposed, 1);
-
-    public ValueTask DisposeAsync()
-    {
-        Dispose();
-        return ValueTask.CompletedTask;
-    }
 }

@@ -31,7 +31,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task The_start_request_is_form_encoded_with_the_client_and_reads_the_complete_url()
     {
-        var handler = ScriptedMetaHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody);
         var client = Client(handler);
 
         var code = await client.StartAsync(CancellationToken.None);
@@ -54,7 +54,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task The_plain_url_stands_in_when_no_complete_url_comes_back()
     {
-        var client = Client(ScriptedMetaHandler.Answering(
+        var client = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"device_code":"d","user_code":"u","verification_uri":"https://auth.meta.com/device"}"""));
 
@@ -69,7 +69,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task A_response_without_the_two_codes_is_unusable()
     {
-        var client = Client(ScriptedMetaHandler.Answering(HttpStatusCode.OK, """{"user_code":"u"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, """{"user_code":"u"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(() => client.StartAsync(CancellationToken.None));
 
@@ -80,7 +80,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task A_failed_start_reports_the_status_and_the_body()
     {
-        var client = Client(ScriptedMetaHandler.Answering(HttpStatusCode.Forbidden, """{"error":"invalid_client"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Forbidden, """{"error":"invalid_client"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(() => client.StartAsync(CancellationToken.None));
 
@@ -92,7 +92,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task A_pending_poll_keeps_the_interval_and_a_later_poll_returns_the_identity_token()
     {
-        var handler = new ScriptedMetaHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"authorization_pending"}""")
             .Then(HttpStatusCode.OK, IdentityBody);
@@ -113,18 +113,16 @@ public sealed class MetaAuthenticationTests
         var poll = handler.Requests[2];
         Assert.Equal("https://auth.meta.com/oidc/device/token/", poll.Uri!.AbsoluteUri);
         Assert.Equal(["application/json"], poll.Accept);
-        Assert.Contains(
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code",
-            poll.Body,
-            StringComparison.Ordinal);
-        Assert.Contains("device_code=meta-device-code", poll.Body, StringComparison.Ordinal);
-        Assert.Contains("client_id=1031625952748946", poll.Body, StringComparison.Ordinal);
+        // The exact body pins the field order the wire format carries; the shared skeleton must not reshuffle it.
+        Assert.Equal(
+            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code=meta-device-code&client_id=1031625952748946",
+            poll.Body);
     }
 
     [Fact]
     public async Task Polling_too_fast_raises_the_interval()
     {
-        var handler = new ScriptedMetaHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"slow_down"}""")
             .Then(HttpStatusCode.OK, """{"error":"slow_down","interval":12}""")
@@ -148,9 +146,9 @@ public sealed class MetaAuthenticationTests
     public async Task An_expired_code_and_a_denied_login_end_the_flow_with_their_own_reason()
     {
         var expired = Client(
-            new ScriptedMetaHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"expired_token"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"expired_token"}"""));
         var denied = Client(
-            new ScriptedMetaHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"access_denied"}"""));
+            new ScriptedDeviceCodeHandler().Then(HttpStatusCode.OK, DeviceCodeBody).Then(HttpStatusCode.OK, """{"error":"access_denied"}"""));
 
         var expiredCode = await expired.StartAsync(CancellationToken.None);
         var deniedCode = await denied.StartAsync(CancellationToken.None);
@@ -169,16 +167,16 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task An_unrecognised_error_reports_whatever_field_carried_the_detail()
     {
-        var asDescription = Client(new ScriptedMetaHandler()
+        var asDescription = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.BadRequest, """{"error":"invalid_request","error_description":"device_code is malformed"}"""));
-        var asDetail = Client(new ScriptedMetaHandler()
+        var asDetail = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.BadRequest, """{"error":"invalid_request","detail":"device_code is malformed"}"""));
-        var asMessage = Client(new ScriptedMetaHandler()
+        var asMessage = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.BadRequest, """{"message":"device_code is malformed"}"""));
-        var asCode = Client(new ScriptedMetaHandler()
+        var asCode = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.BadRequest, """{"error":"device_code is malformed"}"""));
 
@@ -195,7 +193,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task A_server_fault_fails_the_poll_instead_of_looking_pending()
     {
-        var client = Client(new ScriptedMetaHandler()
+        var client = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.InternalServerError, "upstream is down"));
 
@@ -210,7 +208,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task The_mint_carries_the_identity_token_and_the_api_version_and_returns_the_key()
     {
-        var handler = ScriptedMetaHandler.Answering(HttpStatusCode.OK, MintBody);
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, MintBody);
 
         var bundle = await Client(handler).MintAsync("meta-identity-token", CancellationToken.None);
 
@@ -231,7 +229,7 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task A_refused_mint_means_the_session_expired()
     {
-        var client = Client(ScriptedMetaHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => client.MintAsync("stale-identity-token", CancellationToken.None));
@@ -245,10 +243,10 @@ public sealed class MetaAuthenticationTests
     [Fact]
     public async Task A_mint_without_a_key_says_where_to_finish_the_setup()
     {
-        var withAction = Client(ScriptedMetaHandler.Answering(
+        var withAction = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"action_url":"https://api.meta.ai/muse-code/setup?account=7"}"""));
-        var without = Client(ScriptedMetaHandler.Answering(HttpStatusCode.OK, """{}"""));
+        var without = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, """{}"""));
 
         var actionable = await Assert.ThrowsAsync<ProviderException>(
             () => withAction.MintAsync("meta-identity-token", CancellationToken.None));
@@ -324,7 +322,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public void A_meta_row_without_a_bundle_needs_a_sign_in()
     {
-        var provider = Services(new ScriptedMetaHandler()).CreateTransient(Meta());
+        var provider = Services(new ScriptedDeviceCodeHandler()).CreateTransient(Meta());
 
         Assert.Equal(ProviderStatusKind.NeedsSignIn, provider.Status.Kind);
         Assert.Equal(ProviderStrings.MetaSignInRequiredText().Resolve(), provider.Status.Detail.Resolve());
@@ -333,7 +331,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_missing_bundle_throws_the_sign_in_reason()
     {
-        var services = Services(new ScriptedMetaHandler());
+        var services = Services(new ScriptedDeviceCodeHandler());
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => services.Credentials.GetMetaApiKeyAsync("meta", CancellationToken.None));
@@ -345,7 +343,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_successful_sign_in_shows_the_code_then_enables_access_and_persists_the_bundle()
     {
-        var handler = new ScriptedMetaHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, DeviceCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"authorization_pending"}""")
             .Then(HttpStatusCode.OK, IdentityBody)
@@ -409,7 +407,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_cancelled_sign_in_stores_nothing()
     {
-        var services = Services(ScriptedMetaHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, DeviceCodeBody));
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
@@ -423,7 +421,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_key_outside_the_five_minute_skew_is_used_without_a_network_call()
     {
-        var handler = new ScriptedMetaHandler();
+        var handler = new ScriptedDeviceCodeHandler();
         var services = Services(handler);
         Store(services, "still-good-key", "identity-token", DateTimeOffset.UtcNow.AddMinutes(6));
 
@@ -436,7 +434,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_key_inside_the_five_minute_skew_is_re_minted_with_the_stored_identity_token()
     {
-        var handler = ScriptedMetaHandler.Answering(HttpStatusCode.OK, """{"api_key":"reminted-key"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, """{"api_key":"reminted-key"}""");
         var services = Services(handler);
         // Four minutes of life left: the key counts as expiring five minutes early, so it is re-minted now.
         Store(services, "almost-expired-key", "stored-identity-token", DateTimeOffset.UtcNow.AddMinutes(4));
@@ -460,7 +458,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_refused_re_mint_drops_the_bundle_so_the_row_asks_for_a_sign_in_again()
     {
-        var services = Services(ScriptedMetaHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
         Store(services, "dead-key", "dead-identity-token", DateTimeOffset.UtcNow.AddSeconds(-60));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
@@ -474,7 +472,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_refused_re_mint_keeps_a_stored_bundle_whose_identity_token_is_already_newer()
     {
-        var handler = ScriptedMetaHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
         var services = Services(handler);
         Store(services, "stale-key", "rejected-identity-token", DateTimeOffset.UtcNow.AddSeconds(-60));
         // Another caller re-mints while this request is on the wire, so the identity token the server refused is already gone
@@ -499,7 +497,7 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task Two_concurrent_reads_share_one_re_mint_and_return_the_same_key()
     {
-        var handler = ScriptedMetaHandler.Answering(HttpStatusCode.OK, """{"api_key":"reminted-key"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, """{"api_key":"reminted-key"}""");
         var services = Services(handler);
         Store(services, "expired-key", "stored-identity-token", DateTimeOffset.UtcNow.AddSeconds(-60));
         // Keep the first mint on the wire until both callers are inside, so the overlap is guaranteed.
@@ -553,37 +551,4 @@ public sealed class MetaAuthenticationCredentialTests : IDisposable
         DefaultModel = string.Empty,
         Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
     };
-}
-
-/// <summary>
-/// Answers in order, one queued response per request, and records what was asked: the device flow is a sequence, so a
-/// handler that answers everything the same way cannot express "pending, then approved".
-/// </summary>
-internal sealed class ScriptedMetaHandler : ScriptedAuthHandler<RecordedAuthRequest>
-{
-    public static ScriptedMetaHandler Answering(HttpStatusCode status, string body)
-    {
-        var handler = new ScriptedMetaHandler();
-        handler.Then(status, body);
-        return handler;
-    }
-
-    protected override RecordedAuthRequest Record(HttpRequestMessage request, string body) =>
-        new(
-            request.RequestUri,
-            body,
-            [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)],
-            request.Headers.ToDictionary(static header => header.Key, static header => string.Join(',', header.Value), StringComparer.OrdinalIgnoreCase),
-            request.Content?.Headers.ContentType?.MediaType ?? string.Empty);
-}
-
-/// <summary>One request a scripted auth flow made, captured so a test can assert the wire shape.</summary>
-internal sealed record RecordedAuthRequest(
-    Uri? Uri,
-    string Body,
-    IReadOnlyList<string> Accept,
-    IReadOnlyDictionary<string, string> Headers,
-    string ContentType)
-{
-    public string? Header(string name) => Headers.TryGetValue(name, out var value) ? value : null;
 }

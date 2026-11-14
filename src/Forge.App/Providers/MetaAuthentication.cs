@@ -97,10 +97,49 @@ internal sealed class MetaAuthentication
     /// <summary>A start answer that leaves <c>expires_in</c> out still needs a deadline for the poll loop.</summary>
     private const int DefaultExpiresInSeconds = 900;
 
-    private const int SlowDownIntervalIncrementSeconds = 5;
-
     private readonly HttpClient http;
     private readonly TimeProvider time;
+
+    /// <summary>How a finished poll answer is read, and which error spellings end the login; built once, so polling allocates nothing new.</summary>
+    private static readonly DeviceCodePoll<MetaPollResult> PollProfile = new(
+        // The completed answer is the identity token, not the API credential: the caller still has to mint a key with it.
+        Complete: static (element, time, waited) =>
+            ProviderSignInJson.Text(element, "access_token") is { Length: > 0 } identityToken
+                ? MetaPollResult.Complete(identityToken, waited)
+                : null,
+        Pending: static waited => MetaPollResult.Pending(waited),
+        DeniedCodes: ["access_denied", "authorization_denied"],
+        Detail: Detail,
+        NullDetail: Detail,
+        NoAnswerPhrase: "returned no identity token and no error code",
+        NoAnswerWithDetailPhrase: "returned no identity token");
+
+    /// <summary>How a start answer becomes the pending authorization Meta's dialog shows.</summary>
+    private static readonly Func<JsonElement, DateTimeOffset, MetaDeviceCode> ParseStart =
+        static (element, now) =>
+        {
+            var deviceCode = ProviderSignInJson.Text(element, "device_code");
+            var userCode = ProviderSignInJson.Text(element, "user_code");
+            if (deviceCode is null || userCode is null)
+            {
+                throw new ProviderException(
+                    "Meta: the device authorization response carried no device_code and user_code.",
+                    retryable: false);
+            }
+
+            // Both URLs are optional and the complete one is preferred: it carries the code, so the user confirms instead of
+            // typing it. A plain http page is never offered, because the code is typed there.
+            var verificationUri = ProviderDeviceCode.SecureUrl(element, "verification_uri");
+            var verificationUriComplete = ProviderDeviceCode.SecureUrl(element, "verification_uri_complete") ?? verificationUri;
+
+            return new MetaDeviceCode(
+                deviceCode,
+                userCode,
+                verificationUri,
+                verificationUriComplete,
+                ProviderSignInJson.Interval(element, MinimumIntervalSeconds),
+                now + TimeSpan.FromSeconds(ProviderSignInJson.PositiveInt(element, "expires_in") ?? DefaultExpiresInSeconds));
+        };
 
     /// <param name="http">Must be the same client the API calls use, so its handler pool is shared.</param>
     /// <param name="time">Clock for the code lifetime and the key expiry; tests inject one instead of sleeping.</param>
@@ -114,42 +153,11 @@ internal sealed class MetaAuthentication
     /// <summary>Asks Meta for a user code the user types on the verification page.</summary>
     public async Task<MetaDeviceCode> StartAsync(CancellationToken ct)
     {
-        using var message = FormRequest(
-            DeviceAuthorizationPath,
+        using var message = ProviderDeviceCode.FormRequest(
+            AuthorizationHost + DeviceAuthorizationPath,
             [new KeyValuePair<string, string>("client_id", ClientId)]);
-        var (status, root, body) = await SendForJsonAsync(message, "device authorization", ct).ConfigureAwait(false);
-        using var document = root;
-
-        if (status is < 200 or >= 300)
-        {
-            throw new ProviderException(
-                "Meta: the device authorization failed with HTTP " + status + Describe(body),
-                ProviderErrors.IsRetryableStatus(status),
-                status);
-        }
-
-        var element = document!.RootElement;
-        var deviceCode = ProviderSignInJson.Text(element, "device_code");
-        var userCode = ProviderSignInJson.Text(element, "user_code");
-        if (deviceCode is null || userCode is null)
-        {
-            throw new ProviderException(
-                "Meta: the device authorization response carried no device_code and user_code.",
-                retryable: false);
-        }
-
-        // Both URLs are optional and the complete one is preferred: it carries the code, so the user confirms instead of
-        // typing it. A plain http page is never offered, because the code is typed there.
-        var verificationUri = SecureUrl(element, "verification_uri");
-        var verificationUriComplete = SecureUrl(element, "verification_uri_complete") ?? verificationUri;
-
-        return new MetaDeviceCode(
-            deviceCode,
-            userCode,
-            verificationUri,
-            verificationUriComplete,
-            ProviderSignInJson.Interval(element, MinimumIntervalSeconds),
-            time.GetUtcNow() + TimeSpan.FromSeconds(ProviderSignInJson.PositiveInt(element, "expires_in") ?? DefaultExpiresInSeconds));
+        return await ProviderDeviceCode.StartAsync(http, time, "Meta", message, "device authorization", ParseStart, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -160,74 +168,15 @@ internal sealed class MetaAuthentication
     public async Task<MetaPollResult> PollAsync(MetaDeviceCode code, int intervalSeconds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(code);
-        var waited = Math.Max(MinimumIntervalSeconds, intervalSeconds);
-
-        using var message = FormRequest(
-            DeviceTokenPath,
+        using var message = ProviderDeviceCode.FormRequest(
+            AuthorizationHost + DeviceTokenPath,
             [
                 new KeyValuePair<string, string>("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
                 new KeyValuePair<string, string>("device_code", code.DeviceCode),
                 new KeyValuePair<string, string>("client_id", ClientId),
             ]);
-        var (status, root, body) = await SendForJsonAsync(message, "device token", ct).ConfigureAwait(false);
-        using var document = root;
-
-        // A server-side fault is not an answer about this authorization: it fails the login instead of looking like "pending".
-        if (status >= 500)
-        {
-            throw new ProviderException(
-                "Meta: the device token request failed with HTTP " + status + Describe(body),
-                retryable: true,
-                status);
-        }
-
-        var element = document?.RootElement ?? default;
-        if (status is >= 200 and < 300 && ProviderSignInJson.Text(element, "access_token") is { Length: > 0 } identityToken)
-        {
-            // This is the identity token, not the API credential: the caller still has to mint a key with it.
-            return MetaPollResult.Complete(identityToken, waited);
-        }
-
-        switch (ProviderSignInJson.Text(element, "error"))
-        {
-            case "authorization_pending":
-                return MetaPollResult.Pending(waited);
-
-            case "slow_down":
-                // The server names the interval when it wants a specific one; otherwise five seconds are added.
-                return MetaPollResult.Pending(
-                    ProviderSignInJson.PositiveInt(element, "interval") is { } named
-                        ? Math.Max(MinimumIntervalSeconds, named)
-                        : waited + SlowDownIntervalIncrementSeconds);
-
-            case "expired_token":
-                throw new ProviderException(
-                    "Meta: the device authorization expired. Please restart the login.",
-                    retryable: false);
-
-            case "access_denied":
-            case "authorization_denied":
-                throw new ProviderException("Meta: the login was denied.", retryable: false);
-
-            case null:
-                // No error code still has to say what the server said, or the failure reads as a bare status number.
-                var unexplained = Detail(element);
-                throw new ProviderException(
-                    unexplained is null
-                        ? "Meta: the device token request returned no identity token and no error code (HTTP " + status + ")"
-                        : "Meta: the device token request returned no identity token (HTTP " + status + "): " + unexplained,
-                    retryable: false,
-                    status);
-
-            case var error:
-                var detail = Detail(element);
-                throw new ProviderException(
-                    detail is null
-                        ? $"Meta: the device token request ended with '{error}' (HTTP {status})"
-                        : $"Meta: the device token request ended with '{error}': {detail}",
-                    retryable: false,
-                    status);
-        }
+        return await ProviderDeviceCode.PollAsync(http, time, "Meta", message, MinimumIntervalSeconds, intervalSeconds, PollProfile, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -250,7 +199,8 @@ internal sealed class MetaAuthentication
         message.Headers.TryAddWithoutValidation("Accept", "application/json");
         message.Headers.TryAddWithoutValidation("x-api-version", ApiVersion);
 
-        var (status, root, body) = await SendForJsonAsync(message, "key mint", ct).ConfigureAwait(false);
+        var (status, root, body) = await ProviderDeviceCode.SendForJsonAsync(http, message, "Meta", "key mint", ct)
+            .ConfigureAwait(false);
         using var document = root;
 
         // A refused identity token means the session is gone: the bundle is worthless and the user must sign in again.
@@ -265,7 +215,7 @@ internal sealed class MetaAuthentication
         if (status is < 200 or >= 300)
         {
             throw new ProviderException(
-                "Meta: enabling API access failed with HTTP " + status + Describe(body),
+                "Meta: enabling API access failed with HTTP " + status + ProviderDeviceCode.Describe(body),
                 ProviderErrors.IsRetryableStatus(status),
                 status);
         }
@@ -292,29 +242,6 @@ internal sealed class MetaAuthentication
     internal Task WaitAsync(int intervalSeconds, CancellationToken ct) =>
         Task.Delay(TimeSpan.FromSeconds(Math.Max(0, intervalSeconds)), time, ct);
 
-    private static HttpRequestMessage FormRequest(string path, IEnumerable<KeyValuePair<string, string>> fields)
-    {
-        var message = new HttpRequestMessage(HttpMethod.Post, AuthorizationHost + path)
-        {
-            Content = new FormUrlEncodedContent(fields),
-        };
-        message.Headers.TryAddWithoutValidation("Accept", "application/json");
-        return message;
-    }
-
-    /// <summary>
-    /// Sends one authorization request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
-    /// mapping and the single body read, this class only names the provider and the step.
-    /// </summary>
-    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
-        HttpRequestMessage message,
-        string operation,
-        CancellationToken ct) =>
-        ProviderSignInHttp.SendForJsonAsync(http, message, "Meta", "authorization", operation, ct);
-
-    /// <summary>The tail of a failed request's error message: what the server said, if it said anything.</summary>
-    private static string Describe(string body) => body.Length == 0 ? string.Empty : ": " + body;
-
     /// <summary>
     /// What the server said about a failure. Meta's error shape is not one name: depending on the step it fills
     /// <c>error_description</c>, <c>detail</c>, <c>message</c> or only <c>error</c>, so the first one present is the sentence.
@@ -324,15 +251,4 @@ internal sealed class MetaAuthentication
         ?? ProviderSignInJson.Text(element, "detail")
         ?? ProviderSignInJson.Text(element, "message")
         ?? ProviderSignInJson.Text(element, "error");
-
-    /// <summary>
-    /// A verification URL has to be an absolute https address before the app offers to open it: the user code is typed
-    /// there, so it is never opened over plain http.
-    /// </summary>
-    private static string? SecureUrl(JsonElement element, string name) =>
-        ProviderSignInJson.Text(element, name) is { } text
-        && Uri.TryCreate(text, UriKind.Absolute, out var uri)
-        && uri.Scheme == Uri.UriSchemeHttps
-            ? text
-            : null;
 }

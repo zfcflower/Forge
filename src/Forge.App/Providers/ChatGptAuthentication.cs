@@ -152,13 +152,14 @@ internal sealed class ChatGptAuthentication
     public async Task<ChatGptDeviceCode> StartAsync(CancellationToken ct)
     {
         using var message = JsonRequest(UserCodePath, UserCodeBody);
-        var (status, root, body) = await SendForJsonAsync(message, "device code", ct).ConfigureAwait(false);
+        var (status, root, body) = await ProviderDeviceCode.SendForJsonAsync(http, message, "ChatGPT", "device code", ct)
+            .ConfigureAwait(false);
         using var document = root;
 
         if (status == 404)
         {
             throw new ProviderException(
-                "ChatGPT: device login is not enabled for this server (HTTP 404)" + Describe(body),
+                "ChatGPT: device login is not enabled for this server (HTTP 404)" + ProviderDeviceCode.Describe(body),
                 retryable: false,
                 status);
         }
@@ -166,7 +167,7 @@ internal sealed class ChatGptAuthentication
         if (status is < 200 or >= 300)
         {
             throw new ProviderException(
-                "ChatGPT: the device code request failed with HTTP " + status + Describe(body),
+                "ChatGPT: the device code request failed with HTTP " + status + ProviderDeviceCode.Describe(body),
                 ProviderErrors.IsRetryableStatus(status),
                 status);
         }
@@ -202,7 +203,8 @@ internal sealed class ChatGptAuthentication
             DeviceTokenPath,
             "{\"device_auth_id\":\"" + JsonEncodedText.Encode(code.DeviceAuthId) +
             "\",\"user_code\":\"" + JsonEncodedText.Encode(code.UserCode) + "\"}");
-        var (status, root, body) = await SendForJsonAsync(message, "device token", ct).ConfigureAwait(false);
+        var (status, root, body) = await ProviderDeviceCode.SendForJsonAsync(http, message, "ChatGPT", "device token", ct)
+            .ConfigureAwait(false);
         using var document = root;
 
         // The endpoint answers "not yet" with 403/404 as well as with a body code, so the status is read before the body:
@@ -216,7 +218,7 @@ internal sealed class ChatGptAuthentication
         if (status >= 500)
         {
             throw new ProviderException(
-                "ChatGPT: the device token request failed with HTTP " + status + Describe(body),
+                "ChatGPT: the device token request failed with HTTP " + status + ProviderDeviceCode.Describe(body),
                 retryable: true,
                 status);
         }
@@ -287,8 +289,8 @@ internal sealed class ChatGptAuthentication
         ArgumentException.ThrowIfNullOrWhiteSpace(authorizationCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(codeVerifier);
 
-        using var message = FormRequest(
-            TokenPath,
+        using var message = ProviderDeviceCode.FormRequest(
+            AuthHost + TokenPath,
             [
                 new KeyValuePair<string, string>("grant_type", "authorization_code"),
                 new KeyValuePair<string, string>("client_id", ClientId),
@@ -296,7 +298,8 @@ internal sealed class ChatGptAuthentication
                 new KeyValuePair<string, string>("code_verifier", codeVerifier),
                 new KeyValuePair<string, string>("redirect_uri", RedirectUri),
             ]);
-        var (status, root, body) = await SendForJsonAsync(message, "token exchange", ct).ConfigureAwait(false);
+        var (status, root, body) = await ProviderDeviceCode.SendForJsonAsync(http, message, "ChatGPT", "token exchange", ct)
+            .ConfigureAwait(false);
         using var document = root;
 
         if (status is 400 or 401 or 403)
@@ -310,7 +313,7 @@ internal sealed class ChatGptAuthentication
         if (status is < 200 or >= 300)
         {
             throw new ProviderException(
-                "ChatGPT: the token exchange failed with HTTP " + status + Describe(body),
+                "ChatGPT: the token exchange failed with HTTP " + status + ProviderDeviceCode.Describe(body),
                 ProviderErrors.IsRetryableStatus(status),
                 status);
         }
@@ -329,14 +332,15 @@ internal sealed class ChatGptAuthentication
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(refreshToken);
 
-        using var message = FormRequest(
-            TokenPath,
+        using var message = ProviderDeviceCode.FormRequest(
+            AuthHost + TokenPath,
             [
                 new KeyValuePair<string, string>("grant_type", "refresh_token"),
                 new KeyValuePair<string, string>("client_id", ClientId),
                 new KeyValuePair<string, string>("refresh_token", refreshToken),
             ]);
-        var (status, root, body) = await SendForJsonAsync(message, "token refresh", ct).ConfigureAwait(false);
+        var (status, root, body) = await ProviderDeviceCode.SendForJsonAsync(http, message, "ChatGPT", "token refresh", ct)
+            .ConfigureAwait(false);
         using var document = root;
 
         if (status is 400 or 401 or 403)
@@ -350,7 +354,7 @@ internal sealed class ChatGptAuthentication
         if (status is < 200 or >= 300)
         {
             throw new ProviderException(
-                "ChatGPT: the token refresh failed with HTTP " + status + Describe(body),
+                "ChatGPT: the token refresh failed with HTTP " + status + ProviderDeviceCode.Describe(body),
                 ProviderErrors.IsRetryableStatus(status),
                 status);
         }
@@ -438,29 +442,6 @@ internal sealed class ChatGptAuthentication
         message.Headers.TryAddWithoutValidation("Accept", "application/json");
         return message;
     }
-
-    private static HttpRequestMessage FormRequest(string path, IEnumerable<KeyValuePair<string, string>> fields)
-    {
-        var message = new HttpRequestMessage(HttpMethod.Post, AuthHost + path)
-        {
-            Content = new FormUrlEncodedContent(fields),
-        };
-        message.Headers.TryAddWithoutValidation("Accept", "application/json");
-        return message;
-    }
-
-    /// <summary>
-    /// Sends one authorization request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
-    /// mapping and the single body read, this class only names the provider and the step.
-    /// </summary>
-    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
-        HttpRequestMessage message,
-        string operation,
-        CancellationToken ct) =>
-        ProviderSignInHttp.SendForJsonAsync(http, message, "ChatGPT", "authorization", operation, ct);
-
-    /// <summary>The tail of a failed request's error message: what the server said, if it said anything.</summary>
-    private static string Describe(string body) => body.Length == 0 ? string.Empty : ": " + body;
 
     /// <summary>
     /// The error code a poll answer carries. The endpoint spells it either as a bare <c>error</c> string or inside an

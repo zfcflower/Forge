@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
 using Forge.App.Localization;
@@ -22,7 +21,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task The_user_code_request_is_json_and_reads_an_interval_that_arrives_as_a_string()
     {
-        var handler = ScriptedChatGptHandler.Answering(HttpStatusCode.OK, UserCodeBody);
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, UserCodeBody);
         var client = Client(handler);
 
         var code = await client.StartAsync(CancellationToken.None);
@@ -40,13 +39,13 @@ public sealed class ChatGptAuthenticationTests
         Assert.Equal("""{"client_id":"app_EMoamEEZ73f0CkXaXp7hrann"}""", request.Body);
 
         // The interval is a string often enough that both shapes have to be read.
-        var asString = Client(ScriptedChatGptHandler.Answering(
+        var asString = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"device_auth_id":"d","user_code":"u","interval":"8"}"""));
         Assert.Equal(8, (await asString.StartAsync(CancellationToken.None)).IntervalSeconds);
 
         // No interval at all falls back to the floor.
-        var withoutInterval = Client(ScriptedChatGptHandler.Answering(
+        var withoutInterval = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"device_auth_id":"d","user_code":"u"}"""));
         Assert.Equal(
@@ -57,7 +56,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_server_that_has_no_device_login_says_so()
     {
-        var client = Client(ScriptedChatGptHandler.Answering(HttpStatusCode.NotFound, "not found"));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.NotFound, "not found"));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(() => client.StartAsync(CancellationToken.None));
 
@@ -69,7 +68,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_failed_user_code_request_reports_the_status_and_the_body()
     {
-        var client = Client(ScriptedChatGptHandler.Answering(HttpStatusCode.BadRequest, """{"error":"invalid_request"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.BadRequest, """{"error":"invalid_request"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(() => client.StartAsync(CancellationToken.None));
 
@@ -81,7 +80,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_pending_poll_is_a_403_or_a_404_and_neither_ends_the_login()
     {
-        var handler = new ScriptedChatGptHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.Forbidden, "{}")
             .Then(HttpStatusCode.NotFound, "{}")
@@ -112,7 +111,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_pending_poll_can_also_be_carried_in_the_error_code()
     {
-        var handler = new ScriptedChatGptHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"deviceauth_authorization_pending"}""")
             .Then(HttpStatusCode.OK, """{"error":{"code":"deviceauth_authorization_pending"}}""");
@@ -129,7 +128,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task Polling_too_fast_raises_the_interval()
     {
-        var handler = new ScriptedChatGptHandler()
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.OK, """{"error":"slow_down"}""")
             .Then(HttpStatusCode.OK, """{"error":"slow_down","interval":11}""");
@@ -147,13 +146,13 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_poll_answer_that_is_neither_a_code_nor_pending_ends_the_login()
     {
-        var half = Client(new ScriptedChatGptHandler()
+        var half = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.OK, """{"authorization_code":"auth-code"}"""));
-        var unknown = Client(new ScriptedChatGptHandler()
+        var unknown = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.BadRequest, """{"error":"invalid_device_code"}"""));
-        var silent = Client(new ScriptedChatGptHandler()
+        var silent = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.BadRequest, "{}"));
 
@@ -180,7 +179,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_server_fault_fails_the_poll_instead_of_looking_pending()
     {
-        var client = Client(new ScriptedChatGptHandler()
+        var client = Client(new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.BadGateway, "upstream is down"));
 
@@ -195,8 +194,8 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task The_exchange_posts_the_code_and_reads_the_account_out_of_the_access_token()
     {
-        var accessToken = Jwt("acct_123");
-        var handler = ScriptedChatGptHandler.Answering(
+        var accessToken = ChatGptTestTokens.Jwt("acct_123");
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":""" + JsonSerializer.Serialize(accessToken) +
             ""","refresh_token":"refresh-1","expires_in":3600}""");
@@ -226,12 +225,12 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task An_exchange_answer_without_a_refresh_token_or_a_lifetime_is_not_a_usable_login()
     {
-        var noRefresh = Client(ScriptedChatGptHandler.Answering(
+        var noRefresh = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
-            """{"access_token":""" + JsonSerializer.Serialize(Jwt("acct_1")) + ""","expires_in":3600}"""));
-        var noLifetime = Client(ScriptedChatGptHandler.Answering(
+            """{"access_token":""" + JsonSerializer.Serialize(ChatGptTestTokens.Jwt("acct_1")) + ""","expires_in":3600}"""));
+        var noLifetime = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
-            """{"access_token":""" + JsonSerializer.Serialize(Jwt("acct_1")) + ""","refresh_token":"refresh-1"}"""));
+            """{"access_token":""" + JsonSerializer.Serialize(ChatGptTestTokens.Jwt("acct_1")) + ""","refresh_token":"refresh-1"}"""));
 
         var withoutRefresh = await Assert.ThrowsAsync<ProviderException>(
             () => noRefresh.ExchangeAsync("auth-code", "verifier", CancellationToken.None));
@@ -247,11 +246,11 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_token_without_the_account_claim_cannot_name_a_plan()
     {
-        var noClaim = Client(ScriptedChatGptHandler.Answering(
+        var noClaim = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
-            """{"access_token":""" + JsonSerializer.Serialize(Jwt(accountId: null)) +
+            """{"access_token":""" + JsonSerializer.Serialize(ChatGptTestTokens.Jwt(accountId: null)) +
             ""","refresh_token":"refresh-1","expires_in":3600}"""));
-        var notAJwt = Client(ScriptedChatGptHandler.Answering(
+        var notAJwt = Client(ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":"not-a-jwt","refresh_token":"refresh-1","expires_in":3600}"""));
 
@@ -269,9 +268,9 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_refresh_re_reads_the_account_id_from_the_new_access_token()
     {
-        var handler = ScriptedChatGptHandler.Answering(
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
-            """{"access_token":""" + JsonSerializer.Serialize(Jwt("acct_new")) +
+            """{"access_token":""" + JsonSerializer.Serialize(ChatGptTestTokens.Jwt("acct_new")) +
             ""","refresh_token":"refresh-2","expires_in":1800}""");
 
         var bundle = await Client(handler).RefreshAsync("refresh-1", CancellationToken.None);
@@ -290,7 +289,7 @@ public sealed class ChatGptAuthenticationTests
     [Fact]
     public async Task A_rejected_refresh_means_signing_in_again()
     {
-        var client = Client(ScriptedChatGptHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+        var client = Client(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => client.RefreshAsync("stale-refresh", CancellationToken.None));
@@ -305,23 +304,6 @@ public sealed class ChatGptAuthenticationTests
 
     private static ChatGptAuthentication Client(HttpMessageHandler handler) =>
         new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, new InstantTime(Epoch));
-
-    /// <summary>
-    /// A real base64url JWT whose payload carries the OpenAI auth claim. The signature is not verified by the client, so its
-    /// content does not matter; what matters is that the payload decodes like the tokens the server issues.
-    /// </summary>
-    private static string Jwt(string? accountId)
-    {
-        var header = Base64Url("""{"alg":"RS256","typ":"JWT"}""");
-        var payload = Base64Url(accountId is null
-            ? """{"sub":"user"}"""
-            : """{"sub":"user","https://api.openai.com/auth":{"chatgpt_account_id":""" +
-              JsonSerializer.Serialize(accountId) + "}}");
-        return header + "." + payload + ".not-verified";
-    }
-
-    private static string Base64Url(string json) =>
-        Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
 
 /// <summary>
@@ -381,7 +363,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public void A_chatgpt_row_without_a_bundle_needs_a_sign_in()
     {
-        var provider = Services(new ScriptedChatGptHandler()).CreateTransient(ChatGpt());
+        var provider = Services(new ScriptedDeviceCodeHandler()).CreateTransient(ChatGpt());
 
         Assert.Equal(ProviderStatusKind.NeedsSignIn, provider.Status.Kind);
         Assert.Equal(ProviderStrings.ChatGptSignInRequiredText().Resolve(), provider.Status.Detail.Resolve());
@@ -390,7 +372,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_missing_bundle_throws_the_sign_in_reason()
     {
-        var services = Services(new ScriptedChatGptHandler());
+        var services = Services(new ScriptedDeviceCodeHandler());
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
             () => services.Credentials.GetChatGptTokenAsync("chatgpt", CancellationToken.None));
@@ -402,8 +384,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_successful_sign_in_persists_the_bundle_and_never_writes_it_to_the_settings()
     {
-        var accessToken = Jwt("acct_123");
-        var handler = new ScriptedChatGptHandler()
+        var accessToken = ChatGptTestTokens.Jwt("acct_123");
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.Forbidden, "{}")
             .Then(HttpStatusCode.OK, """{"authorization_code":"auth-code","code_verifier":"verifier"}""")
@@ -457,7 +439,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_cancelled_sign_in_stores_nothing()
     {
-        var services = Services(ScriptedChatGptHandler.Answering(HttpStatusCode.OK, UserCodeBody));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.OK, UserCodeBody));
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
@@ -471,7 +453,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_token_outside_the_five_minute_skew_is_used_without_a_network_call()
     {
-        var handler = new ScriptedChatGptHandler();
+        var handler = new ScriptedDeviceCodeHandler();
         var services = Services(handler);
         Store(services, "still-good-access", "refresh-1", "acct_123", DateTimeOffset.UtcNow.AddMinutes(6));
 
@@ -485,8 +467,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_token_inside_the_five_minute_skew_is_refreshed_and_the_new_account_id_is_stored()
     {
-        var rotated = Jwt("acct_rotated");
-        var handler = ScriptedChatGptHandler.Answering(
+        var rotated = ChatGptTestTokens.Jwt("acct_rotated");
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":""" + JsonSerializer.Serialize(rotated) +
             ""","refresh_token":"refresh-2","expires_in":3600}""");
@@ -513,8 +495,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task Two_concurrent_reads_share_one_refresh_and_return_the_same_rotated_bundle()
     {
-        var rotated = Jwt("acct_rotated");
-        var handler = ScriptedChatGptHandler.Answering(
+        var rotated = ChatGptTestTokens.Jwt("acct_rotated");
+        var handler = ScriptedDeviceCodeHandler.Answering(
             HttpStatusCode.OK,
             """{"access_token":""" + JsonSerializer.Serialize(rotated) +
             ""","refresh_token":"refresh-2","expires_in":3600}""");
@@ -553,7 +535,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_refused_refresh_drops_the_bundle_so_the_row_asks_for_a_sign_in_again()
     {
-        var services = Services(ScriptedChatGptHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
+        var services = Services(ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}"""));
         Store(services, "dead-access", "dead-refresh", "acct_123", DateTimeOffset.UtcNow.AddSeconds(-60));
 
         var exception = await Assert.ThrowsAsync<ProviderException>(
@@ -567,7 +549,7 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task A_rejected_refresh_keeps_a_stored_bundle_whose_refresh_token_is_already_newer()
     {
-        var handler = ScriptedChatGptHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
+        var handler = ScriptedDeviceCodeHandler.Answering(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
         var services = Services(handler);
         Store(services, "stale-access", "rejected-refresh", "acct_123", DateTimeOffset.UtcNow.AddSeconds(-60));
         // Another caller rotates the bundle while this refresh is on the wire, so the token the server refused is already
@@ -593,8 +575,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task The_chat_path_sends_the_bearer_the_account_and_the_experimental_beta_header()
     {
-        var accessToken = Jwt("acct_123");
-        var handler = new ScriptedChatGptHandler()
+        var accessToken = ChatGptTestTokens.Jwt("acct_123");
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, UserCodeBody)
             .Then(HttpStatusCode.OK, """{"authorization_code":"auth-code","code_verifier":"verifier"}""")
             .Then(HttpStatusCode.OK,
@@ -620,8 +602,8 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
     [Fact]
     public async Task The_listing_path_sends_the_same_four_headers()
     {
-        var accessToken = Jwt("acct_123");
-        var handler = new ScriptedChatGptHandler()
+        var accessToken = ChatGptTestTokens.Jwt("acct_123");
+        var handler = new ScriptedDeviceCodeHandler()
             .Then(HttpStatusCode.OK, """{"data":[{"id":"gpt-5-codex"}]}""");
         var services = Services(handler);
         Store(services, accessToken, "refresh-1", "acct_123", DateTimeOffset.UtcNow.AddHours(1));
@@ -703,45 +685,4 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
         DefaultModel = "gpt-5-codex",
         Overrides = new Dictionary<string, ModelMetadata>(StringComparer.Ordinal),
     };
-
-    /// <summary>
-    /// A real base64url JWT whose payload carries the OpenAI auth claim; the signature is not verified by the client, so only
-    /// the payload shape matters. Duplicated from the flow tests on purpose: each class asserts against its own token.
-    /// </summary>
-    private static string Jwt(string accountId)
-    {
-        var header = Base64Url("""{"alg":"RS256","typ":"JWT"}""");
-        var payload = Base64Url(
-            """{"sub":"user","https://api.openai.com/auth":{"chatgpt_account_id":""" +
-            JsonSerializer.Serialize(accountId) + "}}");
-        return header + "." + payload + ".not-verified";
-    }
-
-    private static string Base64Url(string json) =>
-        Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-}
-
-/// <summary>
-/// Answers in order, one queued response per request, and records what was asked: the device flow is a sequence, so a
-/// handler that answers everything the same way cannot express "pending, then approved".
-/// </summary>
-internal sealed class ScriptedChatGptHandler : ScriptedAuthHandler<RecordedAuthRequest>
-{
-    public static ScriptedChatGptHandler Answering(HttpStatusCode status, string body)
-    {
-        var handler = new ScriptedChatGptHandler();
-        handler.Then(status, body);
-        return handler;
-    }
-
-    protected override RecordedAuthRequest Record(HttpRequestMessage request, string body) =>
-        new(
-            request.RequestUri,
-            body,
-            [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)],
-            request.Headers.ToDictionary(static header => header.Key, static header => string.Join(',', header.Value), StringComparer.OrdinalIgnoreCase),
-            request.Content?.Headers.ContentType?.MediaType ?? string.Empty);
-
-    protected override string ContentTypeFor(string body) =>
-        body.StartsWith("data:", StringComparison.Ordinal) ? "text/event-stream" : "application/json";
 }

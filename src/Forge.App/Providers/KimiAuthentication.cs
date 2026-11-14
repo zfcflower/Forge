@@ -53,7 +53,8 @@ internal sealed record KimiPollResult(KimiTokenBundle? Bundle, int IntervalSecon
 /// <summary>
 /// Kimi For Coding's OAuth device-code flow, the way the reference client signs in: no browser redirect, no client secret,
 /// and nothing the user has to paste. It is three calls — start (a user code), poll (until the user approved it in the
-/// browser) and refresh (the rotated token bundle) — all form-encoded against the same OAuth host.
+/// browser) and refresh (the rotated token bundle) — all form-encoded against the same OAuth host, and all three run on
+/// the shared <see cref="ProviderDeviceCode"/> skeleton with only Kimi's names, endpoints and error spellings passed in.
 /// </summary>
 /// <remarks>
 /// The poll cadence is the server's to decide: the start response carries an interval and the poll can raise it with
@@ -79,12 +80,50 @@ internal sealed class KimiAuthentication
 
     private const int DefaultExpiresInSeconds = 900;
 
-    private const int SlowDownIntervalIncrementSeconds = 5;
-
-    private const int MaxRefreshRetries = 3;
-
     private readonly HttpClient http;
     private readonly TimeProvider time;
+
+    /// <summary>How a finished poll answer is read, and which error spellings end the login; built once, so polling allocates nothing new.</summary>
+    private static readonly DeviceCodePoll<KimiPollResult> PollProfile = new(
+        Complete: static (element, time, waited) =>
+            ProviderSignInJson.Text(element, "access_token") is { Length: > 0 }
+                ? KimiPollResult.Complete(Bundle(time, element, "poll"), waited)
+                : null,
+        Pending: static waited => KimiPollResult.Pending(waited),
+        DeniedCodes: ["access_denied"],
+        Detail: static element => ProviderSignInJson.Text(element, "error_description"),
+        NullDetail: null,
+        NoAnswerPhrase: "returned no token and no error code",
+        NoAnswerWithDetailPhrase: "returned no token");
+
+    /// <summary>How a start answer becomes the pending authorization Kimi's dialog shows.</summary>
+    private static readonly Func<JsonElement, DateTimeOffset, KimiDeviceCode> ParseStart =
+        static (element, now) =>
+        {
+            var deviceCode = ProviderSignInJson.Text(element, "device_code");
+            var userCode = ProviderSignInJson.Text(element, "user_code");
+            var verificationUri = ProviderDeviceCode.TrustedUrl(element, "verification_uri");
+            var verificationUriComplete = ProviderDeviceCode.TrustedUrl(element, "verification_uri_complete");
+            if (deviceCode is null || userCode is null || verificationUri is null || verificationUriComplete is null)
+            {
+                throw new ProviderException(
+                    "Kimi: the device authorization response carried no device_code, user_code or verification URL.",
+                    retryable: false);
+            }
+
+            var expiresIn = ProviderSignInJson.PositiveInt(element, "expires_in") ?? DefaultExpiresInSeconds;
+            return new KimiDeviceCode(
+                deviceCode,
+                userCode,
+                verificationUri,
+                verificationUriComplete,
+                ProviderSignInJson.Interval(element, MinimumIntervalSeconds),
+                now + TimeSpan.FromSeconds(expiresIn));
+        };
+
+    /// <summary>How a refresh answer becomes the rotated bundle.</summary>
+    private static readonly Func<JsonElement, string, TimeProvider, KimiTokenBundle> ParseRefresh =
+        static (element, refreshToken, time) => Bundle(time, element, "refresh");
 
     /// <param name="http">Must be the same client the API calls use, so its handler pool is shared.</param>
     /// <param name="time">Clock for the code and token lifetimes and the refresh backoff; tests inject one instead of sleeping.</param>
@@ -108,40 +147,11 @@ internal sealed class KimiAuthentication
     /// <summary>Asks the OAuth host for a user code the user types into <see cref="KimiDeviceCode.VerificationUri"/>.</summary>
     public async Task<KimiDeviceCode> StartAsync(CancellationToken ct)
     {
-        using var message = FormRequest(
-            "/api/oauth/device_authorization",
+        using var message = ProviderDeviceCode.FormRequest(
+            ResolveHost() + "/api/oauth/device_authorization",
             [new KeyValuePair<string, string>("client_id", ClientId)]);
-        var (status, root, body) = await SendForJsonAsync(message, "device authorization", ct).ConfigureAwait(false);
-        using var document = root;
-
-        if (status is < 200 or >= 300)
-        {
-            throw new ProviderException(
-                "Kimi: the device authorization failed with HTTP " + status + Describe(body),
-                ProviderErrors.IsRetryableStatus(status),
-                status);
-        }
-
-        var element = document!.RootElement;
-        var deviceCode = ProviderSignInJson.Text(element, "device_code");
-        var userCode = ProviderSignInJson.Text(element, "user_code");
-        var verificationUri = TrustedUrl(element, "verification_uri");
-        var verificationUriComplete = TrustedUrl(element, "verification_uri_complete");
-        if (deviceCode is null || userCode is null || verificationUri is null || verificationUriComplete is null)
-        {
-            throw new ProviderException(
-                "Kimi: the device authorization response carried no device_code, user_code or verification URL.",
-                retryable: false);
-        }
-
-        var expiresIn = ProviderSignInJson.PositiveInt(element, "expires_in") ?? DefaultExpiresInSeconds;
-        return new KimiDeviceCode(
-            deviceCode,
-            userCode,
-            verificationUri,
-            verificationUriComplete,
-            ProviderSignInJson.Interval(element, MinimumIntervalSeconds),
-            time.GetUtcNow() + TimeSpan.FromSeconds(expiresIn));
+        return await ProviderDeviceCode.StartAsync(http, time, "Kimi", message, "device authorization", ParseStart, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -152,68 +162,15 @@ internal sealed class KimiAuthentication
     public async Task<KimiPollResult> PollAsync(KimiDeviceCode code, int intervalSeconds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(code);
-        var waited = Math.Max(MinimumIntervalSeconds, intervalSeconds);
-
-        using var message = FormRequest(
-            "/api/oauth/token",
+        using var message = ProviderDeviceCode.FormRequest(
+            ResolveHost() + "/api/oauth/token",
             [
                 new KeyValuePair<string, string>("client_id", ClientId),
                 new KeyValuePair<string, string>("device_code", code.DeviceCode),
                 new KeyValuePair<string, string>("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ]);
-        var (status, root, body) = await SendForJsonAsync(message, "device token", ct).ConfigureAwait(false);
-        using var document = root;
-
-        // A server-side fault is not an answer about this authorization: it fails the login instead of looking like "pending".
-        if (status >= 500)
-        {
-            throw new ProviderException(
-                "Kimi: the device token request failed with HTTP " + status + Describe(body),
-                retryable: true,
-                status);
-        }
-
-        var element = document?.RootElement ?? default;
-        if (status is >= 200 and < 300 && ProviderSignInJson.Text(element, "access_token") is { Length: > 0 })
-        {
-            return KimiPollResult.Complete(Bundle(element, "poll"), waited);
-        }
-
-        switch (ProviderSignInJson.Text(element, "error"))
-        {
-            case "authorization_pending":
-                return KimiPollResult.Pending(waited);
-
-            case "slow_down":
-                // The server names the interval when it wants a specific one; otherwise the reference client adds five seconds.
-                return KimiPollResult.Pending(
-                    ProviderSignInJson.PositiveInt(element, "interval") is { } named
-                        ? Math.Max(MinimumIntervalSeconds, named)
-                        : waited + SlowDownIntervalIncrementSeconds);
-
-            case "expired_token":
-                throw new ProviderException(
-                    "Kimi: the device authorization expired. Please restart the login.",
-                    retryable: false);
-
-            case "access_denied":
-                throw new ProviderException("Kimi: the login was denied.", retryable: false);
-
-            case null:
-                throw new ProviderException(
-                    "Kimi: the device token request returned no token and no error code (HTTP " + status + ")",
-                    retryable: false,
-                    status);
-
-            case var error:
-                var description = ProviderSignInJson.Text(element, "error_description");
-                throw new ProviderException(
-                    description is null
-                        ? $"Kimi: the device token request ended with '{error}' (HTTP {status})"
-                        : $"Kimi: the device token request ended with '{error}': {description}",
-                    retryable: false,
-                    status);
-        }
+        return await ProviderDeviceCode.PollAsync(http, time, "Kimi", message, MinimumIntervalSeconds, intervalSeconds, PollProfile, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -227,94 +184,30 @@ internal sealed class KimiAuthentication
     public async Task<KimiTokenBundle> RefreshAsync(string refreshToken, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(refreshToken);
-
-        for (var attempt = 0; attempt <= MaxRefreshRetries; attempt++)
-        {
-            if (attempt > 0)
-            {
-                await WaitAsync(1 << (attempt - 1), ct).ConfigureAwait(false);
-            }
-
-            ct.ThrowIfCancellationRequested();
-            using var message = FormRequest(
-                "/api/oauth/token",
-                [
-                    new KeyValuePair<string, string>("client_id", ClientId),
-                    new KeyValuePair<string, string>("grant_type", "refresh_token"),
-                    new KeyValuePair<string, string>("refresh_token", refreshToken),
-                ]);
-            var (status, root, body) = await SendForJsonAsync(message, "token refresh", ct).ConfigureAwait(false);
-            using var document = root;
-
-            if (status is >= 200 and < 300)
-            {
-                return Bundle(document!.RootElement, "refresh");
-            }
-
-            var element = document?.RootElement ?? default;
-
-            // A refused refresh token is reported as 401 whatever the server called it, so the caller has one rule.
-            if (status is 401 or 403 || ProviderSignInJson.Text(element, "error") == "invalid_grant")
-            {
-                throw new ProviderException(
-                    "Kimi: the token refresh was rejected (HTTP " + status + "). Please sign in again.",
-                    retryable: false,
-                    status is 401 or 403 ? status : 401);
-            }
-
-            if (status != 429 && status < 500)
-            {
-                throw new ProviderException(
-                    "Kimi: the token refresh failed with HTTP " + status + Describe(body),
-                    retryable: false,
-                    status);
-            }
-
-            if (attempt == MaxRefreshRetries)
-            {
-                throw new ProviderException(
-                    "Kimi: the token refresh failed with HTTP " + status + Describe(body),
-                    retryable: true,
-                    status);
-            }
-        }
-
-        // Unreachable: the last attempt either returned a bundle or threw.
-        throw new ProviderException("Kimi: the token refresh failed.", retryable: false);
+        return await ProviderDeviceCode.RefreshAsync(
+            http,
+            time,
+            "Kimi",
+            ResolveHost() + "/api/oauth/token",
+            [
+                new KeyValuePair<string, string>("client_id", ClientId),
+                new KeyValuePair<string, string>("grant_type", "refresh_token"),
+                new KeyValuePair<string, string>("refresh_token", refreshToken),
+            ],
+            refreshToken,
+            ParseRefresh,
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>Waits one poll interval on the injected clock, so a test drives the wait instead of sleeping through it.</summary>
     internal Task WaitAsync(int intervalSeconds, CancellationToken ct) =>
         Task.Delay(TimeSpan.FromSeconds(Math.Max(0, intervalSeconds)), time, ct);
 
-    private static HttpRequestMessage FormRequest(string path, IEnumerable<KeyValuePair<string, string>> fields)
-    {
-        var message = new HttpRequestMessage(HttpMethod.Post, ResolveHost() + path)
-        {
-            Content = new FormUrlEncodedContent(fields),
-        };
-        message.Headers.TryAddWithoutValidation("Accept", "application/json");
-        return message;
-    }
-
-    /// <summary>
-    /// Sends one authorization request and reads its body once; <see cref="ProviderSignInHttp" /> owns the timeout, the error
-    /// mapping and the single body read, this class only names the provider and the step.
-    /// </summary>
-    private Task<(int Status, JsonDocument? Root, string Body)> SendForJsonAsync(
-        HttpRequestMessage message,
-        string operation,
-        CancellationToken ct) =>
-        ProviderSignInHttp.SendForJsonAsync(http, message, "Kimi", "authorization", operation, ct);
-
-    /// <summary>The tail of a failed request's error message: what the server said, if it said anything.</summary>
-    private static string Describe(string body) => body.Length == 0 ? string.Empty : ": " + body;
-
     /// <summary>
     /// The bundle a token response carries. The access token alone is not enough: without a rotating refresh token the next
     /// expiry would force a full sign-in, and without a positive lifetime the token would have to count as already dead.
     /// </summary>
-    private KimiTokenBundle Bundle(JsonElement root, string operation)
+    private static KimiTokenBundle Bundle(TimeProvider time, JsonElement root, string operation)
     {
         var access = ProviderSignInJson.Text(root, "access_token");
         var refresh = ProviderSignInJson.Text(root, "refresh_token");
@@ -331,12 +224,4 @@ internal sealed class KimiAuthentication
 
     private static string? FirstEnvironmentValue(string name) =>
         Environment.GetEnvironmentVariable(name) is { } value && value.Trim().Length > 0 ? value : null;
-
-    /// <summary>A device-flow URL has to be an absolute http(s) address before the app offers to open it.</summary>
-    private static string? TrustedUrl(JsonElement element, string name) =>
-        ProviderSignInJson.Text(element, name) is { } text
-        && Uri.TryCreate(text, UriKind.Absolute, out var uri)
-        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
-            ? text
-            : null;
 }
