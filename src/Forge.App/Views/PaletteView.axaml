@@ -1,7 +1,246 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:svc="using:Forge.App.Services"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.PaletteView"
-             x:DataType="vm:PaletteViewModel">
-  <!-- Placeholder: wave W3 owns this file. -->
+             x:DataType="vm:PaletteViewModel"
+             AutomationProperties.AutomationId="palette">
+
+  <UserControl.Styles>
+    <!-- The scrim takes the whole workbench row: a click anywhere outside the card closes the palette, and the dimmed
+         workbench behind it makes clear that typing goes to the palette. -->
+    <Style Selector="Border.palette-scrim">
+      <Setter Property="Background" Value="#55000000" />
+    </Style>
+
+    <!-- One elevated card, centred horizontally and pinned near the top, so the list grows downward over the workbench
+         instead of jumping around as the result count changes. The width is a cap, not a size: in a window narrower
+         than the card it shrinks to the window minus the side margins instead of being cut off at both edges. -->
+    <Style Selector="Border.palette-card">
+      <Setter Property="MaxWidth" Value="920" />
+      <Setter Property="MaxHeight" Value="600" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Margin" Value="24,56,24,24" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
+      <Setter Property="BoxShadow" Value="{DynamicResource ShadowMd}" />
+    </Style>
+
+    <!-- Source strip: a flat row of words; the selected one carries the accent so the current source reads at a glance. -->
+    <Style Selector="ListBox.palette-sources">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.palette-sources ListBoxItem">
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.palette-sources ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="ListBox.palette-sources ListBoxItem:selected TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+
+    <!-- The query line is the palette's only text input: no border of its own, one rule under it. -->
+    <Style Selector="TextBox.palette-query">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
+      <Setter Property="Padding" Value="2,4" />
+      <Setter Property="Margin" Value="14,10,14,6" />
+    </Style>
+
+    <!-- Result rows: no chrome of their own, one accent-tinted row for the selection. -->
+    <Style Selector="ListBox.palette-list">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="6,2" />
+    </Style>
+    <Style Selector="ListBox.palette-list ListBoxItem">
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.palette-list ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="ListBox.palette-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+
+    <!-- A notice row explains an empty list; it reads muted rather than like a result the user can open. -->
+    <Style Selector="TextBlock.palette-title.notice">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+      <Setter Property="FontStyle" Value="Italic" />
+    </Style>
+
+    <Style Selector="TextBlock.palette-title">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style Selector="Border.palette-preview">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1,0,0,0" />
+      <Setter Property="Padding" Value="10,6" />
+    </Style>
+
+    <Style Selector="Border.palette-badge">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="5,1" />
+      <Setter Property="Margin" Value="8,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.palette-badge > TextBlock">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeXs}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Panel x:Name="Surface">
+    <Border Classes="palette-scrim" PointerPressed="OnScrimPointerPressed" AutomationProperties.AutomationId="palette-scrim" />
+
+    <Border Classes="palette-card" AutomationProperties.AutomationId="palette-card">
+      <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Header: the five sources with their gestures, and the close affordance. -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="14,10,10,0">
+          <ListBox Grid.Column="0"
+                   Classes="palette-sources"
+                   ItemsSource="{Binding Sources}"
+                   SelectedItem="{Binding SelectedSource, Mode=TwoWay}"
+                   AutomationProperties.AutomationId="palette-sources">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="svc:PaletteSourceOption">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Label}" />
+                  <TextBlock Classes="caption"
+                             VerticalAlignment="Center"
+                             Text="{Binding Gesture}"
+                             IsVisible="{Binding HasGesture}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <Button Grid.Column="1"
+                  Classes="ghost icon"
+                  Width="28"
+                  Height="24"
+                  Command="{Binding CloseCommand}"
+                  AutomationProperties.AutomationId="palette-close"
+                  AutomationProperties.Name="{Binding [palette.hint.close], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+          </Button>
+        </Grid>
+
+        <TextBox Grid.Row="1"
+                 x:Name="QueryBox"
+                 Classes="palette-query"
+                 Text="{Binding Query, Mode=TwoWay}"
+                 PlaceholderText="{Binding Placeholder}"
+                 AutomationProperties.AutomationId="palette-query"
+                 AutomationProperties.Name="{Binding [palette.automation.name], Source={x:Static loc:Loc.Instance}}" />
+
+        <!-- Results on the left, the preview of the selected row on the right. -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,330" Margin="0,0,0,0">
+          <Panel Grid.Column="0">
+            <ListBox x:Name="Results"
+                     Classes="palette-list"
+                     ItemsSource="{Binding Items}"
+                     SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="palette-results"
+                     AutomationProperties.Name="{Binding HeaderText}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="svc:PaletteItem">
+                  <Grid ColumnDefinitions="*,Auto" AutomationProperties.Name="{Binding Title}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Classes="palette-title" Classes.notice="{Binding IsNotice}" Text="{Binding Title}" />
+                      <TextBlock Classes="caption"
+                                 Text="{Binding Detail}"
+                                 IsVisible="{Binding HasDetail}"
+                                 TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Border Grid.Column="1" Classes="palette-badge" IsVisible="{Binding HasBadge}">
+                      <TextBlock Text="{Binding Badge}" />
+                    </Border>
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- The empty list says why it is empty; the notice row above already explains a failure, so this only
+                 shows when there is no row at all. -->
+            <TextBlock Classes="caption"
+                       Margin="16,10"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Top"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Text="{Binding EmptyText}"
+                       IsVisible="{Binding IsEmpty}"
+                       AutomationProperties.AutomationId="palette-empty" />
+          </Panel>
+
+          <Border Grid.Column="1" Classes="palette-preview">
+            <Grid RowDefinitions="Auto,Auto,*">
+              <TextBlock Classes="label"
+                         Text="{Binding PreviewTitle}"
+                         TextTrimming="CharacterEllipsis"
+                         IsVisible="{Binding HasSelectedItem}"
+                         AutomationProperties.AutomationId="palette-preview-title" />
+              <TextBlock Grid.Row="1"
+                         Classes="caption"
+                         Margin="0,4,0,0"
+                         Text="{Binding [palette.status.loading], Source={x:Static loc:Loc.Instance}}"
+                         IsVisible="{Binding IsPreviewLoading}" />
+              <ScrollViewer Grid.Row="2"
+                            Margin="0,6,0,0"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto">
+                <SelectableTextBlock Classes="mono"
+                                     Text="{Binding PreviewText}"
+                                     TextWrapping="NoWrap"
+                                     AutomationProperties.AutomationId="palette-preview-text" />
+              </ScrollViewer>
+            </Grid>
+          </Border>
+        </Grid>
+
+        <!-- Footer: the keys that drive the list on the left, what is being listed on the right. -->
+        <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" Margin="14,6,14,10">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <TextBlock Classes="caption" Text="{Binding [palette.hint.navigate], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption" Text="{Binding [palette.hint.open], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption" Text="{Binding [palette.hint.close], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption" Text="{Binding [palette.hint.sources], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+          <TextBlock Grid.Column="2"
+                     Classes="caption"
+                     VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis"
+                     Text="{Binding StatusText}"
+                     AutomationProperties.AutomationId="palette-status" />
+        </Grid>
+      </Grid>
+    </Border>
+  </Panel>
 </UserControl>

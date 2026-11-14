@@ -325,6 +325,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // overlay in MainWindow.axaml has its data context from the first frame.
         InitializePlan();
 
+        // The palette's view model and its three opening gestures. Created here, before the window binds, so the overlay
+        // in MainWindow.axaml has its data context from the first frame.
+        InitializePalette();
+
         clock = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         clock.Tick += OnClockTick;
         clock.Start();
@@ -3197,6 +3201,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         // The long-lived owners subscribe to the string table themselves; they drop it with the window.
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        PropertyChanged -= OnPaletteActiveSessionChanged;
+        paletteViewModel.PropertyChanged -= OnPaletteOpenChanged;
+        paletteViewModel.Dispose();
         Status.Dispose();
         Settings.Dispose();
         Projects.Dispose();
