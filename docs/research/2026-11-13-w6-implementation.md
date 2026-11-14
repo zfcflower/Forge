@@ -32,7 +32,7 @@
 ### 5. MCP 工具进入会话(计划外,已获批)
 
 - 之前 `McpServerManager.Tools` 在 App 零消费,MCP 工具从未到达模型。`SessionRuntime.CollectExternalTools` 现在追加 MCP 适配器,`DescribeExternal` 追加 `ToolOrigin.Mcp` 描述符。
-- `Agents/McpToolExposure`:`mcpToolSearchLimit` 为 0(默认)时全给;大于 0 时选面 = 固定的(pin) → 按本回合用户文本打分的前若干名 → 按目录顺序补足,结果按暴露名排序(集合不变则工具定义字节不变)。打分是小写词包含(暴露名 4 分 > 工具名/服务器名 3 分 > 描述 1 分),每个(目录快照, 上限, 请求文本)算一次并缓存;`Lock` 保护(回合线程与工具线程都会碰)。
+- `Agents/McpToolExposure`:`mcpToolSearchLimit` 为 0(默认)时全给;大于 0 时选面 = 固定的(pin;多于上限时取最近固定的)→ 按本回合用户文本打分的前若干名 → 按目录顺序补足,结果按暴露名排序(集合不变则工具定义字节不变)。打分是小写词包含(暴露名 4 分 > 工具名/服务器名 3 分 > 描述 1 分),每个(目录快照, 上限, 请求文本)算一次并缓存;`Lock` 保护(回合线程与工具线程都会碰)。
 - `Forge.Mcp/McpToolSearchTool`(`mcp_tool_search`,只读):命中即 pin 并**当场重新发布**工具面,所以上限永远不会让某台服务器的工具不可达;`SessionRuntime.RefreshMcpTools` 每回合开始比较"选中的名字"与"宿主持有的名字",不一致才 `ReplaceExternalTools`(与 `web_search` 有无的同一机制),集合没变就不发布、提示词缓存不破。
 
 ### 6. 偏好(六·二登记的四个 MCP 项)
