@@ -113,6 +113,26 @@ public sealed class McpToolAdapterImageTests
     }
 
     [Fact]
+    public async Task Images_past_the_per_result_budget_fall_back_to_their_placeholder_text()
+    {
+        // 6_000_000 base64 characters estimate 4_500_000 decoded bytes: each fits the per-image cap, four fit the 20 MiB
+        // result budget, the fifth does not.
+        var payload = new string('A', 6_000_000);
+        var image = $$"""{"type":"image","data":"{{payload}}","mimeType":"image/png"}""";
+        var body = $$"""{"content":[{{string.Join(",", Enumerable.Repeat(image, 5))}}]}""";
+        var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ => body);
+        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => server);
+        await fixture.Manager.StartAsync("srv", CancellationToken.None);
+
+        var result = await fixture.Manager.Tools[0].InvokeAsync(Call, Context, CancellationToken.None);
+
+        Assert.Equal(4, result.Blocks.Count(static block => block is ImageBlock));
+        var text = Assert.IsType<TextBlock>(result.Blocks[0]);
+        Assert.StartsWith("[image: image/png, ", text.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain('\n', text.Text);
+    }
+
+    [Fact]
     public async Task IsError_is_preserved_alongside_a_kept_image()
     {
         var server = new ScriptedServer().On(McpProtocol.ToolsCall, _ =>

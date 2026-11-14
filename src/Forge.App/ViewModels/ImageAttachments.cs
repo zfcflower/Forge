@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.ViewModels.Preview;
 
 namespace Forge.App.ViewModels;
 
@@ -198,19 +199,9 @@ internal sealed class AvaloniaImageCodec : IImageCodec
 
         try
         {
-            // Bound the width while decoding, so a full-size bitmap is never held: a landscape image (the usual
-            // screenshot) is done in one pass. Only a portrait one keeps its height as the long edge, and only then is
-            // it decoded a second time — the first attempt already produced a small bitmap, not the full-size one.
-            using var byWidth = new MemoryStream(data, writable: false);
-            var decoded = Bitmap.DecodeToWidth(byWidth, maxLongEdge, BitmapInterpolationMode.MediumQuality);
-            if (Math.Max(decoded.PixelSize.Width, decoded.PixelSize.Height) <= maxLongEdge)
-            {
-                return decoded;
-            }
-
-            decoded.Dispose();
-            using var byHeight = new MemoryStream(data, writable: false);
-            return Bitmap.DecodeToHeight(byHeight, maxLongEdge, BitmapInterpolationMode.MediumQuality);
+            // The header gives the size, so a large image is decoded straight to the bound (one pass, never a full-size
+            // bitmap) and a small one at its own size rather than blown up to the edge.
+            return ImageHeader.DecodeBounded(data, maxLongEdge, BitmapInterpolationMode.MediumQuality);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

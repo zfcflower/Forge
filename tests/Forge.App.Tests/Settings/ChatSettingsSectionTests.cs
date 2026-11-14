@@ -15,40 +15,40 @@ public sealed class ChatSettingsSectionTests
     {
         var preferences = new AppPreferences();
         var section = new ChatSettingsSectionViewModel(preferences);
-        try
-        {
-            Assert.Equal(AppPreferences.DefaultChatToolImageThumbnailPixels, section.ThumbnailEdge);
-            Assert.True(section.SendToolImagesToModel);
 
-            section.ThumbnailEdge = 384;
-            Assert.Equal(384, preferences.ChatToolImageThumbnailPixels);
-            Assert.Equal(384, section.ThumbnailEdge);
+        Assert.Equal(AppPreferences.DefaultChatToolImageThumbnailPixels, section.ThumbnailEdge);
+        Assert.True(section.SendToolImagesToModel);
 
-            // Out of range lands on the preference's clamp (1024 is the registry's upper bound).
-            section.ThumbnailEdge = 10_000;
-            Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, preferences.ChatToolImageThumbnailPixels);
-            Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, section.ThumbnailEdge);
+        section.ThumbnailEdge = 384;
+        Assert.Equal(384, preferences.ChatToolImageThumbnailPixels);
+        Assert.Equal(384, section.ThumbnailEdge);
 
-            section.SendToolImagesToModel = false;
-            Assert.False(preferences.ChatToolImagesToModel);
-            Assert.False(section.SendToolImagesToModel);
+        // Out of range lands on the preference's clamp (1024 is the registry's upper bound).
+        section.ThumbnailEdge = 10_000;
+        Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, preferences.ChatToolImageThumbnailPixels);
+        Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, section.ThumbnailEdge);
 
-            // A fresh section built on the same preferences reads the edited values back.
-            var reread = new ChatSettingsSectionViewModel(preferences);
-            try
-            {
-                Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, reread.ThumbnailEdge);
-                Assert.False(reread.SendToolImagesToModel);
-            }
-            finally
-            {
-                reread.Dispose();
-            }
-        }
-        finally
-        {
-            section.Dispose();
-        }
+        section.SendToolImagesToModel = false;
+        Assert.False(preferences.ChatToolImagesToModel);
+        Assert.False(section.SendToolImagesToModel);
+
+        // A fresh section built on the same preferences reads the edited values back.
+        var reread = new ChatSettingsSectionViewModel(preferences);
+        Assert.Equal(AppPreferences.MaxChatToolImageThumbnailPixels, reread.ThumbnailEdge);
+        Assert.False(reread.SendToolImagesToModel);
+    }
+
+    [Fact]
+    public void A_clamped_edit_notifies_so_the_box_shows_the_value_that_was_kept()
+    {
+        var section = new ChatSettingsSectionViewModel(new AppPreferences());
+        var raised = new List<string?>();
+        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        section.ThumbnailEdge = 1;
+
+        Assert.Contains(nameof(ChatSettingsSectionViewModel.ThumbnailEdge), raised);
+        Assert.Equal(AppPreferences.MinChatToolImageThumbnailPixels, section.ThumbnailEdge);
     }
 
     [Fact]

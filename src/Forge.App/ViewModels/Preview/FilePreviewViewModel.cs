@@ -41,6 +41,17 @@ internal abstract class FilePreviewViewModel : ObservableObject
 
     public bool HasNotice => !notice.IsEmpty;
 
+    /// <summary>
+    /// Re-raises the texts resolved in the current language. The getters already re-read on every access; this is what
+    /// tells the bindings to ask again after a language switch (the owning document calls it, a preview never subscribes).
+    /// </summary>
+    public virtual void RefreshText()
+    {
+        OnPropertyChanged(nameof(Caption));
+        OnPropertyChanged(nameof(ByteSizeText));
+        OnPropertyChanged(nameof(Notice));
+    }
+
     /// <summary>How many times this preview was released; a preview is released exactly once when it leaves the screen.</summary>
     public int ReleaseCount { get; private set; }
 

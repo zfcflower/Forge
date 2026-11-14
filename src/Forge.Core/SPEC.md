@@ -88,7 +88,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 - **Anthropic**:`tool_result` 的 `content` 本来就收块数组。有图且有允许时写数组(`text`(取 `Text`)在前,随后每张 `image`),否则写字符串 `Content`——纯文本结果的线路字节与以前完全一致,提示词缓存的前缀不受影响。
 - **Responses**:`function_call_output.output` 收 `input_text`/`input_image` 数组。同上,有图写数组(文本取 `Text`),否则写字符串。
-- **Chat Completions**:`tool` 角色的 `content` 只能是文本(协议如此,不是选择)。所以结果文本(带占位,`Content`)照常写进 `tool` 消息,图片随后作为**一条用户消息**发出:`content` 数组 = 一行说明 `Images returned by the tool calls above.` + 每张 `image_url` data URL。多张图只发一条,顺序与 `ToolResultBlock` 的次序一致。
+- **Chat Completions**:`tool` 角色的 `content` 只能是文本(协议如此,不是选择)。所以结果文本(带占位,`Content`)照常写进 `tool` 消息,图片随后作为**一条用户消息**发出:`content` 数组 = 一行说明 `Images returned by the tool calls above.` + 每张 `image_url` data URL。多张图只发一条,顺序与 `ToolResultBlock` 的次序一致。协议要求一次 assistant 调用的所有 `tool` 消息紧跟其后,所以连续的 `tool` 消息按一组写:整组写完之后才追加这一条携图用户消息,绝不插在两条 `tool` 消息之间。
 
 溢出与计费:文本超阈值移入 Artifact 时只搬文本,图片跟着结果留下;`TokenCounter` 把工具结果里的图片按与顶层 `ImageBlock` 相同的 1600 token 估算;压缩器给摘要模型的仍是占位文本。
 

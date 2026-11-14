@@ -244,4 +244,49 @@ public sealed class ToolImageWireTests
         Assert.Equal("user", followUp.GetProperty("role").GetString());
         Assert.Equal(3, followUp.GetProperty("content").GetArrayLength());
     }
+
+    [Fact]
+    public async Task Chat_completions_writes_the_image_turn_after_every_tool_message_of_a_run_never_between_them()
+    {
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
+
+        // Two tool messages answering one assistant turn: the protocol wants both tool messages directly after the call,
+        // so the one picture turn has to follow the second of them.
+        await provider.CollectAsync(TestData.Request(messages:
+        [
+            ChatMessage.User("two shots"),
+            new ChatMessage(MessageRole.Assistant,
+            [
+                new ToolCallBlock("call-1", "screenshot", "{}"),
+                new ToolCallBlock("call-2", "screenshot", "{}"),
+            ]),
+            new ChatMessage(MessageRole.Tool, [new ToolResultBlock("call-1", [new TextBlock("first"), Png])]),
+            new ChatMessage(MessageRole.Tool, [new ToolResultBlock("call-2", [new TextBlock("second"), new ImageBlock("image/png", "AAAA")])]),
+        ]));
+
+        var roles = handler.Last.Root.GetProperty("messages").EnumerateArray()
+            .Select(static m => m.GetProperty("role").GetString())
+            .ToList();
+        // The request's own system prompt leads; the history follows it unchanged.
+        Assert.Equal(["system", "user", "assistant", "tool", "tool", "user"], roles);
+        var followUp = handler.Last.Root.GetProperty("messages")[5];
+        Assert.Equal(3, followUp.GetProperty("content").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Chat_completions_keeps_a_system_message_in_the_history_a_plain_system_turn()
+    {
+        var (provider, handler) = TestData.OpenAiProvider("[DONE]");
+
+        await provider.CollectAsync(TestData.Request(messages:
+        [
+            new ChatMessage(MessageRole.System, [new TextBlock("be brief")]),
+            ChatMessage.User("hi"),
+        ]));
+
+        var first = handler.Last.Root.GetProperty("messages").EnumerateArray()
+            .First(static m => m.GetProperty("content").ValueKind == JsonValueKind.String
+                && m.GetProperty("content").GetString() == "be brief");
+        Assert.Equal("system", first.GetProperty("role").GetString());
+    }
 }

@@ -8,8 +8,9 @@ namespace Forge.App.ViewModels.Preview;
 
 /// <summary>
 /// A decoded image preview. The decode runs off the UI thread and is gated behind an injectable decoder (default the
-/// real Avalonia decoder) so headless tests can skip it; the long edge is bound to <see cref="MaxLongEdge"/> pixels by
-/// scaling with <c>CreateScaledBitmap</c> and disposing the big bitmap. A decode failure is a notice, never an exception.
+/// real Avalonia decoder) so headless tests can skip it; the long edge is bound to <see cref="MaxLongEdge"/> pixels — the
+/// default decoder decodes straight to that bound, and a decoder that returns a larger bitmap is scaled down with
+/// <c>CreateScaledBitmap</c> and its big bitmap disposed. A decode failure is a notice, never an exception.
 /// </summary>
 internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
 {
@@ -97,10 +98,11 @@ internal sealed class ImageFilePreviewViewModel : FilePreviewViewModel
         return viewModel;
     }
 
-    /// <summary>The production decoder: Avalonia's own bitmap decoding, no image library.</summary>
-    private static Bitmap? DefaultDecoder(byte[] data)
-    {
-        using var input = new MemoryStream(data, writable: false);
-        return new Bitmap(input);
-    }
+    /// <summary>
+    /// The production decoder: Avalonia's own bitmap decoding, no image library, bounded to <see cref="MaxLongEdge"/> while
+    /// decoding (the header says how large the image is), so a huge image never exists as a full-size bitmap. Shared by the
+    /// notebook preview's embedded pictures.
+    /// </summary>
+    internal static Bitmap? DefaultDecoder(byte[] data) =>
+        ImageHeader.DecodeBounded(data, MaxLongEdge, BitmapInterpolationMode.HighQuality);
 }

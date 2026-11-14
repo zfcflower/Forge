@@ -193,9 +193,9 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         for (var i = 0; i < messages.Count; i++)
         {
             var role = messages[i].Role;
-            if (role != MessageRole.User && role != MessageRole.Assistant)
+            if (role == MessageRole.System)
             {
-                WriteMessage(writer, messages[i], request.IncludeToolImages);
+                WritePlain(writer, "system", ProviderJson.Text(messages[i].Content) ?? string.Empty);
                 continue;
             }
 
@@ -205,20 +205,17 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
                 end++;
             }
 
-            WriteMerged(writer, role, messages, i, end, request.IncludeToolImages);
+            if (role == MessageRole.Tool)
+            {
+                WriteToolResults(writer, messages, i, end, request.IncludeToolImages);
+            }
+            else
+            {
+                WriteMerged(writer, role, messages, i, end, request.IncludeToolImages);
+            }
+
             i = end;
         }
-    }
-
-    private static void WriteMessage(Utf8JsonWriter writer, ChatMessage message, bool includeToolImages)
-    {
-        if (message.Role == MessageRole.System)
-        {
-            WritePlain(writer, "system", ProviderJson.Text(message.Content) ?? string.Empty);
-            return;
-        }
-
-        WriteToolResults(writer, message.Content, includeToolImages);
     }
 
     private static void WriteMerged(
@@ -226,10 +223,7 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     {
         if (role == MessageRole.User)
         {
-            for (var i = start; i <= end; i++)
-            {
-                WriteToolResults(writer, messages[i].Content, includeToolImages);
-            }
+            WriteToolResults(writer, messages, start, end, includeToolImages);
 
             var text = MergedText(messages, start, end);
             if (ProviderJson.HasMedia(messages, start, end))
@@ -416,48 +410,44 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
     }
 
     /// <summary>
-    /// The tool messages of <paramref name="blocks"/> — a Chat Completions <c>tool</c> message carries text only — and, when the
-    /// results carry images the model may see, one user message with those images after them. That second message is the
-    /// protocol's own shape for "a tool produced this picture": the text-only tool message would otherwise have to drop it, and a
-    /// text-only result writes exactly the bytes it wrote before.
+    /// The tool messages of <c>messages[start..end]</c> — a Chat Completions <c>tool</c> message carries text only — and, when the
+    /// results carry images the model may see, one user message with all of those images after the last of them. That second
+    /// message is the protocol's own shape for "a tool produced this picture": the text-only tool message would otherwise have
+    /// to drop it. It comes after every tool message of the run, never between two of them, because the protocol wants all the
+    /// answers to one assistant turn's calls directly after that turn. A text-only result writes exactly the bytes it wrote
+    /// before.
     /// </summary>
-    private static void WriteToolResults(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks, bool includeToolImages)
+    private static void WriteToolResults(
+        Utf8JsonWriter writer, IReadOnlyList<ChatMessage> messages, int start, int end, bool includeToolImages)
     {
-        for (var index = 0; index < blocks.Count; index++)
+        var carriesImages = false;
+        for (var i = start; i <= end; i++)
         {
-            if (blocks[index] is not ToolResultBlock result)
+            var blocks = messages[i].Content;
+            for (var index = 0; index < blocks.Count; index++)
             {
-                continue;
-            }
+                if (blocks[index] is not ToolResultBlock result)
+                {
+                    continue;
+                }
 
-            writer.WriteStartObject();
-            writer.WriteString("role", "tool");
-            writer.WriteString("tool_call_id", result.CallId);
-            writer.WriteString("content", result.Content);
-            writer.WriteEndObject();
-        }
-
-        if (includeToolImages && CarriesImages(blocks))
-        {
-            WriteToolImagesTurn(writer, blocks);
-        }
-    }
-
-    private static bool CarriesImages(IReadOnlyList<ContentBlock> blocks)
-    {
-        for (var index = 0; index < blocks.Count; index++)
-        {
-            if (blocks[index] is ToolResultBlock result && result.HasImages)
-            {
-                return true;
+                writer.WriteStartObject();
+                writer.WriteString("role", "tool");
+                writer.WriteString("tool_call_id", result.CallId);
+                writer.WriteString("content", result.Content);
+                writer.WriteEndObject();
+                carriesImages |= result.HasImages;
             }
         }
 
-        return false;
+        if (includeToolImages && carriesImages)
+        {
+            WriteToolImagesTurn(writer, messages, start, end);
+        }
     }
 
-    /// <summary>One user turn carrying every image the tool results produced, with a line saying where they came from.</summary>
-    private static void WriteToolImagesTurn(Utf8JsonWriter writer, IReadOnlyList<ContentBlock> blocks)
+    /// <summary>One user turn carrying every image the tool results of the run produced, with a line saying where they came from.</summary>
+    private static void WriteToolImagesTurn(Utf8JsonWriter writer, IReadOnlyList<ChatMessage> messages, int start, int end)
     {
         writer.WriteStartObject();
         writer.WriteString("role", "user");
@@ -466,18 +456,22 @@ public sealed class OpenAiCompatibleProvider : HttpChatProvider
         writer.WriteString("type", "text");
         writer.WriteString("text", ToolImagesFollowUp);
         writer.WriteEndObject();
-        for (var index = 0; index < blocks.Count; index++)
+        for (var i = start; i <= end; i++)
         {
-            if (blocks[index] is not ToolResultBlock result)
+            var blocks = messages[i].Content;
+            for (var index = 0; index < blocks.Count; index++)
             {
-                continue;
-            }
-
-            foreach (var block in result.Blocks)
-            {
-                if (block is ImageBlock image)
+                if (blocks[index] is not ToolResultBlock result)
                 {
-                    WriteImagePart(writer, image);
+                    continue;
+                }
+
+                foreach (var block in result.Blocks)
+                {
+                    if (block is ImageBlock image)
+                    {
+                        WriteImagePart(writer, image);
+                    }
                 }
             }
         }

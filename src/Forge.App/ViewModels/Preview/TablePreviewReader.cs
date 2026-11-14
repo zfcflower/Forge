@@ -9,12 +9,24 @@ internal readonly record struct TablePreviewParse(int TotalRows, IReadOnlyList<I
 /// <summary>
 /// A real RFC 4180 reader for table previews: quoted fields, doubled quotes, CRLF and LF line endings, embedded
 /// newlines inside quotes, and ragged rows padded to the widest row. TSV is tab-separated without quoting. The parser
-/// stores at most <c>maxRows</c> rows, keeps streaming to count the rest, and reports them as skipped. Runs off the UI
-/// thread; pure logic over a <see cref="TextReader"/>, so tests feed it strings.
+/// stores at most <c>maxRows</c> rows, keeps streaming to count the rest (without building their strings), and reports
+/// them as skipped. A kept field holds at most <see cref="MaxFieldChars"/> characters and a kept row at most
+/// <see cref="MaxColumns"/> fields — safety bounds, not display ones: a binary file named <c>.csv</c> or a one-line dump
+/// must not become a multi-gigabyte string. The stream is cancellable throughout. Runs off the UI thread; pure logic
+/// over a <see cref="TextReader"/>, so tests feed it strings.
 /// </summary>
 internal static class TablePreviewReader
 {
-    public static TablePreviewParse Parse(TextReader reader, int maxRows, char separator)
+    /// <summary>Characters kept from one field; the rest of the field is read and dropped.</summary>
+    internal const int MaxFieldChars = 4096;
+
+    /// <summary>Fields kept from one row; further fields are read and dropped.</summary>
+    internal const int MaxColumns = 1024;
+
+    /// <summary>How many characters are read between two cancellation checks.</summary>
+    private const int CancellationStride = 64 * 1024;
+
+    public static TablePreviewParse Parse(TextReader reader, int maxRows, char separator, CancellationToken ct = default)
     {
         var rows = new List<IReadOnlyList<string>>(Math.Min(Math.Max(maxRows, 1), 256));
         var row = new List<string>(8);
@@ -26,10 +38,18 @@ internal static class TablePreviewReader
         var sawAny = false;
         var pendingCr = false;
         var quoting = separator == ',';
+        var fieldsInRow = 0;
+        var sinceCheck = 0;
 
         int value;
         while ((value = reader.Read()) >= 0)
         {
+            if (++sinceCheck == CancellationStride)
+            {
+                sinceCheck = 0;
+                ct.ThrowIfCancellationRequested();
+            }
+
             // A CR already ended the row; the LF of a CRLF pair is consumed, anything else starts the next row.
             if (pendingCr)
             {
@@ -50,7 +70,7 @@ internal static class TablePreviewReader
                 }
                 else
                 {
-                    field.Append(c);
+                    Keep(c);
                 }
 
                 sawAny = true;
@@ -63,15 +83,17 @@ internal static class TablePreviewReader
                 if (c == '"')
                 {
                     // A doubled quote: one literal quote, and the field is still quoted.
-                    field.Append('"');
+                    Keep('"');
                     inQuotes = true;
                 }
                 else if (c == separator)
                 {
+                    // The field ended and the next starts fresh, so a quote right after the separator opens it.
                     EndField();
                 }
                 else if (c is '\r' or '\n')
                 {
+                    // The row ended and nothing of the next one was seen, so a trailing newline adds no row.
                     EndField();
                     EndRow();
                     pendingCr = c == '\r';
@@ -79,10 +101,9 @@ internal static class TablePreviewReader
                 else
                 {
                     // A quote followed by other characters: liberal fallback, keep the character.
-                    field.Append(c);
+                    Keep(c);
                 }
 
-                sawAny = true;
                 continue;
             }
 
@@ -107,12 +128,12 @@ internal static class TablePreviewReader
                 continue;
             }
 
-            field.Append(c);
+            Keep(c);
             sawAny = true;
         }
 
         // A trailing CR already ended its row; a pending field completes a final row without a line break.
-        if (sawAny || row.Count > 0)
+        if (sawAny || fieldsInRow > 0)
         {
             EndField();
             EndRow();
@@ -145,23 +166,43 @@ internal static class TablePreviewReader
 
         return new TablePreviewParse(rowCount, rows, skipped);
 
+        // Only a row that is kept builds strings; a skipped row is parsed for its boundaries and counted.
+        void Keep(char c)
+        {
+            if (rowCount >= maxRows)
+            {
+                return;
+            }
+
+            // The cap never splits a surrogate pair: the low half of a pair whose high half made it in is kept too.
+            if (field.Length < MaxFieldChars || (field.Length == MaxFieldChars && char.IsLowSurrogate(c) && char.IsHighSurrogate(field[^1])))
+            {
+                field.Append(c);
+            }
+        }
+
         void EndField()
         {
-            row.Add(field.ToString());
+            if (rowCount < maxRows && row.Count < MaxColumns)
+            {
+                row.Add(field.ToString());
+            }
+
+            fieldsInRow++;
             field.Clear();
             sawAny = false;
         }
 
         void EndRow()
         {
-            // An empty line is one record with a single empty field; a trailing newline adds none.
-            if (row.Count == 0 && !sawAny)
-            {
-                row.Add(string.Empty);
-            }
-
             if (rowCount < maxRows)
             {
+                // An empty line is one record with a single empty field; a trailing newline adds none.
+                if (row.Count == 0)
+                {
+                    row.Add(string.Empty);
+                }
+
                 rows.Add(row.ToArray());
             }
             else
@@ -170,7 +211,12 @@ internal static class TablePreviewReader
             }
 
             rowCount++;
+            fieldsInRow = 0;
             row.Clear();
+            if ((rowCount & 1023) == 0)
+            {
+                ct.ThrowIfCancellationRequested();
+            }
         }
     }
 

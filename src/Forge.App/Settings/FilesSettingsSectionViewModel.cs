@@ -50,7 +50,7 @@ internal sealed class FilesSettingsSectionViewModel : ObservableObject, IDisposa
         }
     }
 
-    /// <summary>Characters kept from one <c>.ipynb</c> output.</summary>
+    /// <summary>Kilobytes kept from one <c>.ipynb</c> output (the preview counts 1,024 characters per kilobyte).</summary>
     public int NotebookOutputKilobytes
     {
         get => preferences.FilesNotebookOutputKilobytes;
@@ -87,7 +87,7 @@ internal sealed class FilesSettingsSectionViewModel : ObservableObject, IDisposa
 
     public string PreviewRowsLabel => Loc.Instance[PreviewStrings.SettingsRowsKey];
 
-    public string NotebookOutputCharsLabel => Loc.Instance[PreviewStrings.SettingsNotebookCharsKey];
+    public string NotebookOutputLabel => Loc.Instance[PreviewStrings.SettingsNotebookKilobytesKey];
 
     public string ImageLimitLabel => Loc.Instance[PreviewStrings.SettingsImageLimitKey];
 
@@ -102,7 +102,7 @@ internal sealed class FilesSettingsSectionViewModel : ObservableObject, IDisposa
         }
 
         OnPropertyChanged(nameof(PreviewRowsLabel));
-        OnPropertyChanged(nameof(NotebookOutputCharsLabel));
+        OnPropertyChanged(nameof(NotebookOutputLabel));
         OnPropertyChanged(nameof(ImageLimitLabel));
         OnPropertyChanged(nameof(Hint));
     }

@@ -25,6 +25,15 @@ internal sealed class NotebookFilePreviewViewModel : FilePreviewViewModel
 
     public override string Caption => PreviewStrings.NotebookCaption(Name, Cells.Count).Resolve();
 
+    public override void RefreshText()
+    {
+        base.RefreshText();
+        foreach (var cell in Cells)
+        {
+            cell.RefreshText();
+        }
+    }
+
     protected override void ReleaseCore()
     {
         foreach (var cell in Cells)
@@ -106,6 +115,15 @@ internal sealed class NotebookCellViewModel : ObservableObject
     /// <summary>The kind's label ("代码" / "Code"), re-read on every access so a language switch refreshes it.</summary>
     public string KindLabel => PreviewStrings.NotebookCellKindLabel(Kind);
 
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(KindLabel));
+        foreach (var output in Outputs)
+        {
+            output.RefreshText();
+        }
+    }
+
     internal void Release()
     {
         foreach (var output in Outputs)
@@ -178,8 +196,9 @@ internal sealed class NotebookOutputViewModel : ObservableObject
     public string KindLabel => PreviewStrings.NotebookOutputKindLabel(Kind);
 
     /// <summary>
-    /// The decoded PNG, decoded lazily off the UI thread the first time a view asks for it; null while decoding, when
-    /// the decoder fails, or when a test stubbed the decoder (then nothing renders).
+    /// The decoded PNG, decoded lazily off the UI thread the first time a view asks for it (by the image preview's bounded
+    /// decoder unless one was injected); null while decoding, when the decoder fails, or when a test's stub returns null
+    /// (then nothing renders).
     /// </summary>
     public Bitmap? Image
     {
@@ -194,6 +213,8 @@ internal sealed class NotebookOutputViewModel : ObservableObject
             return image;
         }
     }
+
+    internal void RefreshText() => OnPropertyChanged(nameof(KindLabel));
 
     internal void Release()
     {
@@ -212,7 +233,8 @@ internal sealed class NotebookOutputViewModel : ObservableObject
 
     private async Task DecodeAsync(byte[] bytes)
     {
-        var codec = decoder;
+        // No injected decoder is the production path: the same bounded decoder as the image preview.
+        var codec = decoder ?? ImageFilePreviewViewModel.DefaultDecoder;
         Bitmap? decoded;
         try
         {
@@ -220,7 +242,7 @@ internal sealed class NotebookOutputViewModel : ObservableObject
             {
                 try
                 {
-                    return codec?.Invoke(bytes);
+                    return codec(bytes);
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {

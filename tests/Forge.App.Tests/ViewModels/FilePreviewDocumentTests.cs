@@ -270,6 +270,47 @@ public sealed class FilePreviewDocumentTests : IDisposable
         Assert.False(model.HasDocument);
     }
 
+    [Fact]
+    public async Task A_language_refresh_renotifies_the_document_labels_and_the_table_preview()
+    {
+        var path = Write("data.csv", "name,age\nalice,30\n");
+        var model = FileDocumentViewModel.Create();
+        await model.LoadAsync(path, CancellationToken.None);
+        var table = Assert.IsType<TableFilePreviewViewModel>(model.Preview);
+        var documentChanges = Track(model);
+        var previewChanges = Track(table);
+
+        model.RefreshText();
+
+        Assert.Contains(nameof(FileDocumentViewModel.TabTitle), documentChanges);
+        Assert.Contains(nameof(FileDocumentViewModel.ExternalOpenLabel), documentChanges);
+        Assert.Contains(nameof(FilePreviewViewModel.Caption), previewChanges);
+        Assert.Contains(nameof(FilePreviewViewModel.ByteSizeText), previewChanges);
+        Assert.Contains(nameof(TableFilePreviewViewModel.Summary), previewChanges);
+    }
+
+    [Fact]
+    public async Task A_language_refresh_renotifies_the_placeholder_reason()
+    {
+        var path = WriteBytes("blob.bin", [0x00, 0x01, 0x02, 0x00, 0xFF]);
+        var model = FileDocumentViewModel.Create();
+        await model.LoadAsync(path, CancellationToken.None);
+        var card = Assert.IsType<PlaceholderFilePreviewViewModel>(model.Preview);
+        var changes = Track(card);
+
+        model.RefreshText();
+
+        Assert.Contains(nameof(PlaceholderFilePreviewViewModel.Reason), changes);
+        Assert.Contains(nameof(FilePreviewViewModel.Notice), changes);
+    }
+
+    private static List<string?> Track(System.ComponentModel.INotifyPropertyChanged source)
+    {
+        var names = new List<string?>();
+        source.PropertyChanged += (_, e) => names.Add(e.PropertyName);
+        return names;
+    }
+
     private string NewRoot()
     {
         var root = TestTempFiles.NewDirectory("forge-preview-");

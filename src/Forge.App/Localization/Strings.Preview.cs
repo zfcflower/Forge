@@ -12,7 +12,7 @@ internal static class PreviewStrings
 {
     public const string SectionTitleKey = "files.preview.settings.sectionTitle";
     public const string SettingsRowsKey = "files.preview.settings.rows";
-    public const string SettingsNotebookCharsKey = "files.preview.settings.notebookChars";
+    public const string SettingsNotebookKilobytesKey = "files.preview.settings.notebookKilobytes";
     public const string SettingsImageLimitKey = "files.preview.settings.imageLimit";
     public const string SettingsHintKey = "files.preview.settings.hint";
 
@@ -65,10 +65,10 @@ internal static class PreviewStrings
     {
         Loc.Register(SectionTitleKey, "文件预览", "File preview");
         Loc.Register(SettingsRowsKey, "CSV/TSV 预览行数", "CSV/TSV preview rows");
-        Loc.Register(SettingsNotebookCharsKey, "Notebook 输出字符数", "Notebook output characters");
+        Loc.Register(SettingsNotebookKilobytesKey, "Notebook 单个输出上限（KB）", "Notebook output limit (KB)");
         Loc.Register(SettingsImageLimitKey, "图片预览上限（MB）", "Image preview limit (MB)");
-        Loc.Register(SettingsHintKey, "文件预览的读取上限：表格预览解析的行数、Notebook 单个输出的字符数、图片预览允许的最大文件大小。超过图片上限的文件显示占位卡片而不解码。",
-            "Limits for the file viewer: rows parsed for a CSV/TSV table, characters kept per notebook output, and the largest file the image preview decodes. Files above the image limit show a placeholder card instead of being decoded.");
+        Loc.Register(SettingsHintKey, "文件预览的读取上限：表格预览解析的行数、Notebook 单个输出保留的大小、图片预览允许的最大文件大小。超过图片上限的文件显示占位卡片而不解码。",
+            "Limits for the file viewer: rows parsed for a CSV/TSV table, the size kept per notebook output, and the largest file the image preview decodes. Files above the image limit show a placeholder card instead of being decoded.");
         Loc.Register(OpenExternalKey, "用系统程序打开", "Open with the system app");
         Loc.Register(OpenInBrowserKey, "在浏览器中打开", "Open in browser");
         Loc.Register(OpenFailedKey, "无法用系统程序打开 {0}：{1}", "Could not open {0} with the system app: {1}");
@@ -105,16 +105,6 @@ internal static class PreviewStrings
         Loc.Register(NotebookOutputResultKey, "结果", "Result");
         Loc.Register(NotebookOutputErrorKey, "错误", "Error");
     }
-
-    public static string SectionTitle => Loc.Instance[SectionTitleKey];
-
-    public static string SettingsRowsLabel => Loc.Instance[SettingsRowsKey];
-
-    public static string SettingsNotebookCharsLabel => Loc.Instance[SettingsNotebookCharsKey];
-
-    public static string SettingsImageLimitLabel => Loc.Instance[SettingsImageLimitKey];
-
-    public static string SettingsHint => Loc.Instance[SettingsHintKey];
 
     /// <summary>The byte size shown on placeholder cards, grouped with its unit.</summary>
     public static string ByteSize(string bytes) => Loc.Instance.Format(SizeKey, bytes);

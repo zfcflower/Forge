@@ -29,13 +29,19 @@ internal sealed class PlaceholderFilePreviewViewModel : FilePreviewViewModel
             LfsSize = pointer.Size;
             LfsVersion = pointer.Version;
         }
-
     }
 
     /// <summary>The localized reason, re-read on every access so a language switch refreshes it.</summary>
     public string Reason => reason.Resolve();
 
     public override string Caption => Loc.Instance[CaptionKey];
+
+    public override void RefreshText()
+    {
+        base.RefreshText();
+        OnPropertyChanged(nameof(Reason));
+        OnPropertyChanged(nameof(LfsSizeText));
+    }
 
     private string CaptionKey { get; }
 

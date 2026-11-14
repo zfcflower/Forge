@@ -163,6 +163,7 @@ internal static class SettingsSectionIds
 
     /// <summary>The editor sits between the language choice and the terminal: it is a display choice like appearance, not a tool.</summary>
     public const int EditorOrder = 350;
+
     public const int TerminalOrder = 400;
     public const int GitOrder = 500;
 

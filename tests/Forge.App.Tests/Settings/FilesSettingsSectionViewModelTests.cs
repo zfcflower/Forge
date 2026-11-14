@@ -1,3 +1,4 @@
+using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Settings;
 using Xunit;
@@ -63,6 +64,16 @@ public sealed class FilesSettingsSectionViewModelTests
         preferences.FilesImagePreviewMaxMegabytes = 40;
 
         Assert.Equal(40, section.ImageLimitMiB);
+    }
+
+    [Fact]
+    public void The_notebook_row_is_labelled_in_the_kilobytes_it_edits()
+    {
+        using var section = new FilesSettingsSectionViewModel(new AppPreferences());
+
+        Assert.Equal("files.preview.settings.notebookKilobytes", PreviewStrings.SettingsNotebookKilobytesKey);
+        Assert.Equal(Loc.Instance[PreviewStrings.SettingsNotebookKilobytesKey], section.NotebookOutputLabel);
+        Assert.Contains("KB", section.NotebookOutputLabel, StringComparison.Ordinal);
     }
 
     [Fact]

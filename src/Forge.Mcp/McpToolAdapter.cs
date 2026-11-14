@@ -82,8 +82,9 @@ public sealed class McpToolAdapter : ITool
     /// <summary>
     /// The blocks the model gets: one text block holding the flattened result — with the placeholder of every image
     /// that also travels as a real <see cref="ImageBlock"/> left out, so the model is never told about the same
-    /// picture twice — then one <see cref="ImageBlock"/> per MCP image content whose base64 was kept. A result with
-    /// no kept image is the same single <see cref="TextBlock"/> as before, byte for byte.
+    /// picture twice — then one <see cref="ImageBlock"/> per MCP image content whose base64 was kept, up to
+    /// <see cref="McpContentFlattener.MaxKeptImageBytesPerResult"/> in total. A result with no kept image is the same
+    /// single <see cref="TextBlock"/> as before, byte for byte.
     /// </summary>
     private IReadOnlyList<ContentBlock> BlocksOf(McpToolCallResult result)
     {
@@ -95,10 +96,14 @@ public sealed class McpToolAdapter : ITool
 
         var images = new List<ImageBlock>();
         var text = new StringBuilder(256);
+        long kept = 0;
         foreach (var content in contents)
         {
-            if (content.Data is not null)
+            // Within the per-result budget an image travels as itself; past it, as its placeholder line like any other block.
+            if (content.Data is not null &&
+                kept + (content.SizeBytes ?? 0) <= McpContentFlattener.MaxKeptImageBytesPerResult)
             {
+                kept += content.SizeBytes ?? 0;
                 images.Add(new ImageBlock(content.MimeType!, content.Data));
                 continue;
             }

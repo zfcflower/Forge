@@ -14,6 +14,13 @@ internal static class McpContentFlattener
     /// </summary>
     public const int MaxKeptImageBytes = 5 * 1024 * 1024;
 
+    /// <summary>
+    /// The most image payload one tool result keeps, in estimated decoded bytes, summed over its images. The per-image
+    /// cap alone does not bound a result: a server can return any number of images. Past this budget the remaining
+    /// images stay legible as their placeholder text, exactly like an oversized one.
+    /// </summary>
+    public const long MaxKeptImageBytesPerResult = 4L * MaxKeptImageBytes;
+
     public static McpToolCallResult ToolResult(JsonElement result)
     {
         var content = ReadContent(result, "content");

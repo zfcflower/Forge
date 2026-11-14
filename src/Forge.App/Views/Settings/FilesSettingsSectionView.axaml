@@ -20,17 +20,17 @@
                      AutomationProperties.Name="{Binding PreviewRowsLabel}" />
     </Grid>
     <Grid ColumnDefinitions="150,*" Margin="0,3">
-      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding NotebookOutputCharsLabel}" />
+      <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding NotebookOutputLabel}" />
       <NumericUpDown Grid.Column="1"
                      MinWidth="120"
                      HorizontalAlignment="Left"
                      Minimum="{Binding MinNotebookKilobytes}"
                      Maximum="{Binding MaxNotebookKilobytes}"
-                     Increment="1000"
+                     Increment="4"
                      FormatString="0"
                      Value="{Binding NotebookOutputKilobytes, Mode=TwoWay}"
                      AutomationProperties.AutomationId="files-notebook-output"
-                     AutomationProperties.Name="{Binding NotebookOutputCharsLabel}" />
+                     AutomationProperties.Name="{Binding NotebookOutputLabel}" />
     </Grid>
     <Grid ColumnDefinitions="150,*" Margin="0,3">
       <TextBlock Classes="label" VerticalAlignment="Center" Text="{Binding ImageLimitLabel}" />

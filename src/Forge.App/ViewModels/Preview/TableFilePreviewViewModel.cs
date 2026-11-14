@@ -56,6 +56,12 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
     /// <summary>The row summary under the caption: "1,000 rows" or "showing 50, 950 skipped".</summary>
     public string Summary => PreviewStrings.TableSummary(ShownRows, SkippedRows).Resolve();
 
+    public override void RefreshText()
+    {
+        base.RefreshText();
+        OnPropertyChanged(nameof(Summary));
+    }
+
     public static TableFilePreviewViewModel Build(
         string path, long byteSize, int maxRows, char separator, double charWidth, CancellationToken ct = default)
     {
@@ -64,8 +70,8 @@ internal sealed class TableFilePreviewViewModel : FilePreviewViewModel
         try
         {
             using var reader = new StreamReader(path);
-            var parsed = TablePreviewReader.Parse(reader, maxRows, separator);
-            ct.ThrowIfCancellationRequested();
+            // Cancellable while it streams: counting the rows past the limit of a large file is the slow part.
+            var parsed = TablePreviewReader.Parse(reader, maxRows, separator, ct);
 
             var widths = ColumnWidths(parsed.Rows);
             var hasHeader = TablePreviewReader.HasHeaderRow(parsed.Rows);

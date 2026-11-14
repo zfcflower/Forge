@@ -397,6 +397,26 @@ internal sealed partial class FileDocumentViewModel
     public string ExternalOpenLabel =>
         Loc.Instance[IsHtmlDocument ? PreviewStrings.OpenInBrowserKey : PreviewStrings.OpenExternalKey];
 
+    /// <summary>
+    /// Re-raises every text this document resolves in the current language — the tab title, the toolbar's open label, the
+    /// error and notice lines and the preview's own captions — after a language switch. The document never subscribes to
+    /// <see cref="Loc.LanguageChanged"/> itself (a strong reference from the process-wide table would keep a closed tab
+    /// alive); its view does, for as long as it is on screen, and calls this.
+    /// </summary>
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(TabTitle));
+        OnPropertyChanged(nameof(ExternalOpenLabel));
+        OnPropertyChanged(nameof(Error));
+        OnPropertyChanged(nameof(SaveError));
+        OnPropertyChanged(nameof(LspStatus));
+        OnPropertyChanged(nameof(EditorNotice));
+        OnPropertyChanged(nameof(FoldingNotice));
+        OnPropertyChanged(nameof(EditorActionNotice));
+        OnPropertyChanged(nameof(CopyError));
+        preview?.RefreshText();
+    }
+
     /// <summary>Whether the current file is a page: opened as editable source, handed to the browser in one click.</summary>
     public bool IsHtmlDocument =>
         path.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ||

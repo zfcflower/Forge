@@ -93,6 +93,12 @@ dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localizat
 4. **HTML 不设占位(2026-11-13 按用户决定修订)**:计划原先写「PDF/HTML 占位 + OS 打开」,实测会与既有行为冲突(两个编辑器测试本就以 `.html` 为可编辑文本),且把「看一眼源码」变成两次点击。现在 `.html/.htm` 直接进编辑器,工具条的打开按钮对网页改用「在浏览器中打开」(`files.preview.openInBrowser`,`ExternalOpenLabel` 按文件与语言现读),依旧不在面板里渲染网页。PDF 保持占位 + OS 打开。
 5. **工具行缩略图落在 W0b 的槽里**:计划原来设想 `Resources/ToolRow.axaml`;W0b 后来把它拆成 `Views/ToolRowView.axaml`(外壳)+ `ToolRowImagesView.axaml`(W4)+ `ToolRowTailView.axaml`(W8)。本波先写进了 `App.axaml` 的内联模板,合并后按 W0b 的槽搬进 `Views/ToolRowImagesView.axaml`;两个设置分区同理搬进 `Composition/ViewerSettingsComposition.cs`(`FeatureComposition` 已注册它),`AppComposition.cs` 对本波只剩两行 `runtimeServices`(`ModelInputs`/`SendToolImages`),那是会话级接线、模块拿不到。
 6. **表格表头与数据行共用外层横向滚动**:计划未提,属实现细节;禁止横向滚动会让宽表右列不可达,按缺陷处理。
+7. **`chat` 设置分区归本波**:计划「W0 收尾补充」一行把 `chat` 分区记在 W5 名下,而 W0 自己在 `ViewerSettingsComposition` 的注释里把它分给 W4(本波的 `SendToolImages`/缩略图长边就在其中)。本波按 W0 的代码注释保留 `chat` 分区;若 W5 也要往里加项,应在同一个 `ChatSettingsSectionViewModel` 上追加,而不是另开一个同 id 分区。
+8. **评审补的安全边界(常量,非设置)**:这些是防御上限,不是显示偏好,按「性能第一」写成常量而不进设置——
+   - 表格读取单字段最多保留 4096 字符、单行最多 1024 列,超出部分照读不存;被跳过的行不建字符串;每 64K 字符、每 1024 行检查一次取消。
+   - 图片预览与缩略图按头部尺寸**直接解码到上限**(`ImageHeader.DecodeBounded`:PNG/GIF/JPEG/WebP 头部读尺寸),不再先全尺寸解码再缩;小图不再被放大。头部读不出时退回原尺寸解码再缩。
+   - MCP 一次工具结果的图片总量上限 20 MiB(单张上限 5 MiB 不变),超出的图片退回占位文本行。
+   - Chat Completions 协议要求一轮里所有 `tool` 消息紧跟 assistant 调用,故把连续的 `tool` 消息视为一组,整组之后只追加**一个**携图的 user 回合(原先逐条追加,会把 user 回合插进两条 tool 消息之间,被服务端拒收)。
 
 ## 六、未做 / 已知限制
 
@@ -101,3 +107,5 @@ dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localizat
 - 图片 diff(计划把它列在 `Changes/**`,属 W4b 的文件域)、SVG 内部渲染(需白名单外的 Skia SVG 包)不在本波。
 - `pr_screenshots` 之类的工具还没改用「把截图作为图片返回」,它仍只把图片推到 PR;流水线已就绪,换用是下一步的事。
 - 无头测试不覆盖真实解码与文件选择器;上面「手测项」需要真人过一次。
+- Notebook 的 `image/png` 输出在生产路径用与图片预览相同的有界解码器(评审修复:此前未注入解码器时一律不出图);无头测试没有 Skia,该路径只能手测。
+- 切换界面语言时,文件标签页与预览卡片的文字由视图在 `Loc.LanguageChanged` 上调用 `FileDocumentViewModel.RefreshText` 刷新;离屏标签页在重新挂上视觉树时补刷一次。

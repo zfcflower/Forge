@@ -124,4 +124,94 @@ public sealed class TablePreviewReaderTests
         Assert.Equal(3, TablePreviewReader.DisplayWidth("a中"));
         Assert.Equal(0, TablePreviewReader.DisplayWidth(""));
     }
+
+    [Fact]
+    public void A_quote_right_after_a_closing_quote_and_separator_opens_the_next_field()
+    {
+        var parsed = Parse("\"a\",\"b\"");
+
+        var row = Assert.Single(parsed.Rows);
+        AssertRow(row, "a", "b");
+    }
+
+    [Fact]
+    public void Quoted_rows_with_a_trailing_newline_add_no_extra_row()
+    {
+        var parsed = Parse("\"a\"\n\"b\"\n");
+
+        Assert.Equal(2, parsed.TotalRows);
+        Assert.Equal(2, parsed.Rows.Count);
+        AssertRow(parsed.Rows[0], "a");
+        AssertRow(parsed.Rows[1], "b");
+    }
+
+    [Fact]
+    public void A_quoted_last_field_ending_with_crlf_ends_the_row_once()
+    {
+        var parsed = Parse("x,\"y\"\r\nz,w\r\n");
+
+        Assert.Equal(2, parsed.Rows.Count);
+        AssertRow(parsed.Rows[0], "x", "y");
+        AssertRow(parsed.Rows[1], "z", "w");
+    }
+
+    [Fact]
+    public void A_field_past_the_cap_is_cut_and_the_next_field_still_parses()
+    {
+        var parsed = Parse(new string('a', TablePreviewReader.MaxFieldChars + 1000) + ",b");
+
+        var row = Assert.Single(parsed.Rows);
+        Assert.Equal(TablePreviewReader.MaxFieldChars, row[0].Length);
+        Assert.Equal("b", row[1]);
+    }
+
+    [Fact]
+    public void The_field_cap_never_splits_a_surrogate_pair()
+    {
+        var parsed = Parse(new string('a', TablePreviewReader.MaxFieldChars - 1) + "\U0001F600tail");
+
+        var field = Assert.Single(Assert.Single(parsed.Rows));
+        Assert.Equal(TablePreviewReader.MaxFieldChars + 1, field.Length);
+        Assert.True(char.IsLowSurrogate(field[^1]));
+    }
+
+    [Fact]
+    public void Fields_past_the_column_cap_are_dropped_but_the_row_still_ends()
+    {
+        var parsed = Parse(string.Join(',', Enumerable.Range(0, TablePreviewReader.MaxColumns + 50)) + "\nnext");
+
+        Assert.Equal(2, parsed.Rows.Count);
+        Assert.Equal(TablePreviewReader.MaxColumns, parsed.Rows[0].Count);
+        Assert.Equal("next", parsed.Rows[1][0]);
+    }
+
+    [Fact]
+    public void Skipped_rows_are_counted_including_a_last_row_of_empty_fields()
+    {
+        var parsed = Parse("a\nb\nc\n,", maxRows: 1);
+
+        Assert.Equal(4, parsed.TotalRows);
+        Assert.Equal(3, parsed.SkippedRows);
+        AssertRow(Assert.Single(parsed.Rows), "a");
+    }
+
+    [Fact]
+    public void A_cancelled_parse_of_a_long_single_line_throws()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            TablePreviewReader.Parse(new StringReader(new string('x', 200_000)), 10, ',', cts.Token));
+    }
+
+    [Fact]
+    public void A_cancelled_parse_of_many_short_rows_throws()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            TablePreviewReader.Parse(new StringReader(string.Concat(Enumerable.Repeat("1\n", 5000))), 10, ',', cts.Token));
+    }
 }

@@ -27,23 +27,10 @@ internal sealed class FilePreviewSettings
     /// <summary>What a preview shows before the composition root binds the real preferences.</summary>
     private static FilePreviewSettings current = new();
 
+    /// <summary>The live preferences; null keeps the built-in defaults (a host without preferences, a test).</summary>
     private readonly AppPreferences? preferences;
-    private readonly int filePreviewRows = AppPreferences.DefaultFilesCsvMaxRows;
-    private readonly int notebookOutputChars = AppPreferences.DefaultFilesNotebookOutputKilobytes * CharsPerKilobyte;
-    private readonly int previewImageBytes = AppPreferences.DefaultFilesImagePreviewMaxMegabytes * BytesPerMiB;
 
-    public FilePreviewSettings(AppPreferences? preferences = null)
-    {
-        this.preferences = preferences;
-        if (preferences is null)
-        {
-            return;
-        }
-
-        filePreviewRows = preferences.FilesCsvMaxRows;
-        notebookOutputChars = preferences.FilesNotebookOutputKilobytes * CharsPerKilobyte;
-        previewImageBytes = preferences.FilesImagePreviewMaxMegabytes * BytesPerMiB;
-    }
+    public FilePreviewSettings(AppPreferences? preferences = null) => this.preferences = preferences;
 
     /// <summary>The instance every preview reads; replaced once by the composition root.</summary>
     public static FilePreviewSettings Current
@@ -53,11 +40,11 @@ internal sealed class FilePreviewSettings
     }
 
     /// <summary>Rows a CSV/TSV preview parses before it stops.</summary>
-    public int PreviewRows => preferences?.FilesCsvMaxRows ?? filePreviewRows;
+    public int PreviewRows => preferences?.FilesCsvMaxRows ?? AppPreferences.DefaultFilesCsvMaxRows;
 
     /// <summary>Characters kept from one <c>.ipynb</c> output (the preference is in kilobytes).</summary>
     public int NotebookOutputChars =>
-        preferences is { } live ? live.FilesNotebookOutputKilobytes * CharsPerKilobyte : notebookOutputChars;
+        (preferences?.FilesNotebookOutputKilobytes ?? AppPreferences.DefaultFilesNotebookOutputKilobytes) * CharsPerKilobyte;
 
     /// <summary>
     /// Advance of one monospace character in device-independent pixels, for the table preview's column widths: it follows
@@ -68,5 +55,5 @@ internal sealed class FilePreviewSettings
 
     /// <summary>Largest image (in bytes, on disk) the image preview decodes (the preference is in megabytes).</summary>
     public int PreviewImageBytes =>
-        preferences is { } live ? live.FilesImagePreviewMaxMegabytes * BytesPerMiB : previewImageBytes;
+        (preferences?.FilesImagePreviewMaxMegabytes ?? AppPreferences.DefaultFilesImagePreviewMaxMegabytes) * BytesPerMiB;
 }

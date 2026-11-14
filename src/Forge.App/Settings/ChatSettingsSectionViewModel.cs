@@ -8,12 +8,11 @@ namespace Forge.App.Settings;
 /// The <c>chat</c> settings section (<see cref="SettingsSectionIds.Chat"/>): how large a tool result's images render in
 /// the transcript and whether those images reach the model. Edits <see cref="AppPreferences"/> directly, so the next
 /// row completion and the next request read the new values and the preferences store persists them on its debounce.
-/// <para>The labels and hints are <see cref="Loc"/> keys bound in XAML, so a language switch re-renders them without
-/// this view model raising anything; the subscription below exists for the heading the section itself exposes, and
-/// <see cref="Dispose"/> drops it like every other settings section (the composition root disposes IDisposable
-/// sections on shutdown).</para>
+/// <para>The labels and hints are <see cref="Loc"/> keys bound in XAML and the heading comes from the section's title
+/// key, so a language switch re-renders all of them without this view model raising anything — it holds no
+/// subscription and needs no disposal.</para>
 /// </summary>
-internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposable
+internal sealed class ChatSettingsSectionViewModel : ObservableObject
 {
     /// <summary>Bounds of the thumbnail-edge control, mirrored from the preference's clamp so both stay one number.</summary>
     public const int MinThumbnailEdge = AppPreferences.MinChatToolImageThumbnailPixels;
@@ -29,32 +28,11 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposab
 
     private readonly AppPreferences preferences;
 
-    /// <summary>The thread the section was built on (the UI thread).</summary>
-    private readonly int uiThread = Environment.CurrentManagedThreadId;
-    private bool disposed;
-
     public ChatSettingsSectionViewModel(AppPreferences preferences)
     {
         ArgumentNullException.ThrowIfNull(preferences);
         this.preferences = preferences;
-
-        Loc.Instance.LanguageChanged += OnLanguageChanged;
     }
-
-    /// <summary>Drops the <see cref="Loc.LanguageChanged"/> subscription; idempotent.</summary>
-    public void Dispose()
-    {
-        if (disposed)
-        {
-            return;
-        }
-
-        disposed = true;
-        Loc.Instance.LanguageChanged -= OnLanguageChanged;
-    }
-
-    /// <summary>The section heading in the current language, re-raised after a language switch.</summary>
-    public string SectionTitle => Loc.Instance[ChatStrings.SettingsTitle];
 
     /// <summary>
     /// Longest edge of a tool row's thumbnail, in device-independent pixels; the preference clamps it to
@@ -84,16 +62,5 @@ internal sealed class ChatSettingsSectionViewModel : ObservableObject, IDisposab
             preferences.ChatToolImagesToModel = value;
             OnPropertyChanged();
         }
-    }
-
-    /// <summary>Re-reads the heading; a notification that arrives after disposal, or from another thread, is not ours.</summary>
-    private void OnLanguageChanged(object? sender, EventArgs e)
-    {
-        if (disposed || Environment.CurrentManagedThreadId != uiThread)
-        {
-            return;
-        }
-
-        OnPropertyChanged(nameof(SectionTitle));
     }
 }
