@@ -1,6 +1,12 @@
+using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.VisualTree;
+using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Settings;
+using Forge.App.Tests.Workbench;
+using Forge.App.Views;
 using Xunit;
 
 namespace Forge.App.Tests.Palette;
@@ -10,6 +16,7 @@ namespace Forge.App.Tests.Palette;
 /// a change applies to the palette's next keystroke without a reload. Pins the write-through, the clamp the preference
 /// itself applies, and that the section title is a registered localization key (the settings page reads it as one).
 /// </summary>
+[Collection("forge-app-ui")]
 public sealed class PaletteSettingsSectionTests
 {
     [Fact]
@@ -55,6 +62,47 @@ public sealed class PaletteSettingsSectionTests
 
         Assert.Equal("node_modules, bin", preferences.PaletteExcludeDirectories);
         Assert.Equal("node_modules, bin", section.ExcludeDirectories);
+    }
+
+    [Fact]
+    public void The_module_registers_the_palette_section_with_its_view_template()
+    {
+        var settings = new SettingsSections();
+
+        PaletteComposition.RegisterSection(new AppPreferences(), settings);
+
+        var section = Assert.Single(settings.Items);
+        Assert.Equal(SettingsSectionIds.Palette, section.Id);
+        Assert.Equal(SettingsSectionIds.PaletteOrder, section.Order);
+        Assert.IsType<PaletteSettingsSectionViewModel>(section.ViewModel);
+    }
+
+    [Fact]
+    public async Task The_section_renders_its_two_editors_through_the_section_template()
+    {
+        await SharedUi.RunAsync(
+            () =>
+            {
+                var settings = new SettingsSections();
+                PaletteComposition.RegisterSection(new AppPreferences(), settings);
+                var content = new ContentControl { DataTemplates = { new SectionViewTemplate() } };
+
+                content.Content = Assert.Single(settings.Items).ViewModel;
+                var window = SharedUi.Show(content, 700, 300);
+                try
+                {
+                    SharedUi.Settle(window);
+
+                    Assert.NotNull(WorkbenchUi.Find<NumericUpDown>(window, "palette-settings-limit"));
+                    Assert.NotNull(WorkbenchUi.Find<TextBox>(window, "palette-settings-exclude"));
+                }
+                finally
+                {
+                    window.Close();
+                }
+
+                return Task.CompletedTask;
+            });
     }
 
     [Fact]
