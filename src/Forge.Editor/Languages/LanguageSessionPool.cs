@@ -45,6 +45,17 @@ public sealed class LanguageSessionPool : IAsyncDisposable
 
     public LanguageRegistry Registry { get; }
 
+    /// <summary>
+    /// A session was created and stored, so it now owns a diagnostics store and a document set. Raised outside the pool's
+    /// lock, on the thread that started the session.
+    /// </summary>
+    public event EventHandler<LanguageSession>? SessionStarted;
+
+    /// <summary>
+    /// A session was shut down and forgotten — closed on request, retired by the idle sweep or disposed with the pool.
+    /// </summary>
+    public event EventHandler<LanguageSession>? SessionClosed;
+
     public IReadOnlyList<LanguageSession> Sessions
     {
         get
@@ -88,6 +99,7 @@ public sealed class LanguageSessionPool : IAsyncDisposable
             return existing;
         }
 
+        LanguageSession? created = null;
         await _startGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -137,7 +149,7 @@ public sealed class LanguageSessionPool : IAsyncDisposable
                 return null;
             }
 
-            return session;
+            created = session;
         }
         catch (OperationCanceledException)
         {
@@ -152,6 +164,15 @@ public sealed class LanguageSessionPool : IAsyncDisposable
         {
             _startGate.Release();
         }
+
+        // Raised after the start gate is released: a subscriber may start another language's session from its handler, and
+        // SemaphoreSlim is not reentrant.
+        if (created is not null)
+        {
+            SessionStarted?.Invoke(this, created);
+        }
+
+        return created;
     }
 
     /// <summary>Detects the language of a document, marks it and opens it in its session.</summary>
@@ -229,6 +250,7 @@ public sealed class LanguageSessionPool : IAsyncDisposable
             session = slot.Session;
         }
 
+        SessionClosed?.Invoke(this, session);
         await session.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -263,6 +285,7 @@ public sealed class LanguageSessionPool : IAsyncDisposable
 
         foreach (var session in sessions)
         {
+            SessionClosed?.Invoke(this, session);
             await session.DisposeAsync().ConfigureAwait(false);
         }
     }
@@ -300,6 +323,7 @@ public sealed class LanguageSessionPool : IAsyncDisposable
 
         foreach (var session in sessions)
         {
+            SessionClosed?.Invoke(this, session);
             await session.DisposeAsync().ConfigureAwait(false);
         }
 
@@ -365,6 +389,7 @@ public sealed class LanguageSessionPool : IAsyncDisposable
 
         foreach (var session in idle)
         {
+            SessionClosed?.Invoke(this, session);
             try
             {
                 await session.DisposeAsync().ConfigureAwait(false);

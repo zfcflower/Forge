@@ -85,6 +85,13 @@ public sealed class LanguageSession : IAsyncDisposable
 
     public string WorkspacePath => _options.WorkspacePath;
 
+    /// <summary>
+    /// The encoding this session's positions are in: whatever the server negotiated during the handshake, or the configured
+    /// preference before the handshake completed. Callers that turn a stored position back into an offset need this, because
+    /// it is not always UTF-16.
+    /// </summary>
+    public PositionEncoding PositionEncoding => Client?.PositionEncoding ?? _options.PositionEncoding;
+
     public string? LanguageId => _options.LanguageId;
 
     public LanguageSessionState State
@@ -134,6 +141,12 @@ public sealed class LanguageSession : IAsyncDisposable
     /// diagnostics again" and is the signal a pull-diagnostics editor re-pulls on.
     /// </summary>
     public event EventHandler? DiagnosticsRefreshRequested;
+
+    /// <summary>
+    /// The server asked for its semantic tokens to be re-read (<c>workspace/semanticTokens/refresh</c>): the classification
+    /// it sent before is stale even though the text is not.
+    /// </summary>
+    public event EventHandler? SemanticTokensRefreshRequested;
 
     /// <summary>True while the server reports its own long-running work, e.g. loading a project.</summary>
     public event EventHandler<bool>? BusyChanged;
@@ -932,6 +945,10 @@ public sealed class LanguageSession : IAsyncDisposable
         if (string.Equals(method, "workspace/diagnostic/refresh", StringComparison.Ordinal))
         {
             DiagnosticsRefreshRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else if (string.Equals(method, "workspace/semanticTokens/refresh", StringComparison.Ordinal))
+        {
+            SemanticTokensRefreshRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 
