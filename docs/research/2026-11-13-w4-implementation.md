@@ -72,7 +72,9 @@ dotnet test tests/Forge.App.Tests --filter Workbench      → 575 通过 / 0 失
 dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localization|MinorRegression → 590 通过 / 0 失败
 ```
 
-`Forge.Mcp.Tests` 的那一条失败是 `StdioTransportTests.Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines`(`initialize did not complete within 3s`);在干净的 `main` 检出(`D:/FORGE/forge` @ 5dd2068)上跑同一条测试同样失败,所以是既有环境问题,与本波无关。
+`Forge.Mcp.Tests` 的那一条失败是 `StdioTransportTests.Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines`(`initialize did not complete within 3s`);在干净的 `main` 检出(`D:/FORGE/forge`)上跑同一条测试同样失败,所以是既有环境问题,与本波无关。
+
+`Workbench/MenuShellTests` 里涉及「起始目录列表」的两条在整棵树上高负载时偶发失败(同一条测试在 `main` 与合并后的分支上单独跑都 38/38 通过,本波也没有改到菜单/项目代码),是负载敏感的时序测试,不作为缺陷。
 
 手测项(需真人看):工具行缩略图的观感与悬停提示;宽 CSV 的横向滚动与列对齐;大图(>4096 长边)预览的缩放质量;PDF 卡片的「用默认程序打开」、以及 `.html` 文件上同一个按钮换成「在浏览器中打开」后在 Windows 上是否真的唤出浏览器。
 
