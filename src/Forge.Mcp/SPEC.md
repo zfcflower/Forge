@@ -21,7 +21,7 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 ## 关键决策
 
-**请求生命周期。** 每请求的截止期限覆盖发送与等待响应全程,关联调用方取消与连接生命周期;超时/取消在已发出后发 `notifications/cancelled`(`initialize` 除外)。JSON-RPC id 按类型与值精确关联(字符串 id 不匹配数字 id)。
+**请求生命周期。** 每请求的截止期限覆盖发送与等待响应全程,关联调用方取消与连接生命周期;超时/取消在发 `notifications/cancelled`(`initialize` 除外;无论请求是否已发出,服务端按协议忽略未知 id)。JSON-RPC id 按类型与值精确关联(字符串 id 不匹配数字 id)。
 
 **传输健壮性。** stdio 按字节分帧,stdout 非 JSON 行记入有界诊断环且读取继续;stderr 严格有界。stdout 与 stderr 由两个独立任务读取,两者记录到诊断日志的先后不保证。子进程退出时 `Closed` 携带的异常必须带退出码:Unix 上子进程退出时先关管道、父进程稍后才被 SIGCHLD 收割,所以 stdout 读到 EOF 后先给退出一个 500 ms 的观察窗口,进程确实没了就交给退出监控(它报 `exited with code N`),仍活着才报 `closed its standard output`;否则 Linux 上退出码会稳定丢失。可流式 HTTP 按 SSE 流分别维护 Last-Event-ID,每个 POST SSE 响应流独立取消/释放,旧代际消息不完成新请求;会话 DELETE 带原始会话号并有独立关闭期限。
 

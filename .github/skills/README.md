@@ -7,7 +7,7 @@
 加载器的规则是**一个目录只认一个 `SKILL.md`,一旦命中就不再下钻**。所以技能目录必须是平的:
 
 ```
-.github/skills/<skill-name>/SKILL.md        ← 44 份,全部在这一层
+.github/skills/<skill-name>/SKILL.md        ← 45 份,全部在这一层
 .github/skills/<skill-name>/references/…    ← 各 skill 自己的引用材料,可以带子目录
 .github/skills/README.md                    ← 无 frontmatter,扫描时会被静默忽略
 .github/skills/LICENSES/                    ← 许可证原文
@@ -45,6 +45,7 @@
 | `csharp-scripts` | `dotnet/skills` `plugins/dotnet-advanced/skills/csharp-scripts` | .NET 10 文件式 C# 应用(`dotnet run app.cs`,`#:package`/`#:property`/`#:sdk`/`#:ref`/`#:include`/`#:exclude`);在 `architecture.md` 中对应 "T3" 可选执行能力,不是 codemode 前提 |
 | `avalonia-*`(34 份) | `linuxdevel/Avalonia-skills` | Avalonia 11.3/12.0/12.1 全套子 skill;引入范围与包依赖见下节 |
 | `blazing-fast-dotnet` | `EgorBo/BlazingFastDotnet` | .NET 10/11 性能技巧;**本地为裁剪版** |
+| `forge-dispatch` | 本地新增(无上游,不参与再同步) | 主 Agent 派活模板:副本创建、预期测试过滤器、skill 路径、收据要求 |
 
 固定到上游提交,便于复核与再同步:
 
@@ -84,7 +85,7 @@
 - **需要确认**:项目级技能 `gated: true`,决策规则是"未受信任 → untrusted;已受信任但未确认 → pending-ack;确认后 → load"。面板里确认过才会进入会话技能列表。
 - **命令形态**:加载后的斜杠命令是 `/skill:<name>`,例如 `/skill:msbuild`。
 - **额外兜底**:`.pi/settings.json` 也指向同一目录(`{"skills": [".github/skills"]}`),给 pi 核心的加载器用;同一文件被两条路径发现时按规范化路径去重,不会重复注册。
-- **成本**:全量 44 份的 name+description 常驻约 5k tokens(Avalonia 34 份 ≈ 3.2k、dotnet 9 份 ≈ 1.8k)。面板里可逐项关闭,或从设置里的数组移除。
+- **成本**:全量 45 份的 name+description 常驻约 5k tokens(Avalonia 34 份 ≈ 3.2k、dotnet 9 份 ≈ 1.8k)。面板里可逐项关闭,或从设置里的数组移除。
 - **快捷开关**:`--no-skills` 可全局关闭技能发现。
 
 ## 再同步

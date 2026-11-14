@@ -6,7 +6,7 @@
 
 评审不止于找代码 Bug,三项按优先级排序:
 1. **实现是否符合架构约束**——对照 `architecture.md`/`goal-and-requirements.md`/模块 SPEC 检查边界、依赖方向、性能第一、Native AOT 兼容、扩展点契约等是否被遵守,偏差是否已记录或征得同意。
-2. **测试是否足以证明实现正确**——测试是否覆盖关键路径、边界、失败/取消/并发、错误状态,而非只测 happy path;Skip 是否都在记录真实缺陷。
+2. **测试是否足以证明实现正确**——测试是否覆盖关键路径、边界、失败/取消/并发、错误状态,而非只测 happy path;Skip 是否都在记录真实缺陷;测试范围是否与改动落点匹配(`forge-test.ps1` 收据为判据),无 `--why` 的全量视为未完成测试义务。
 3. **代码质量**——正确性、资源、并发、性能陷阱。
 
 第 1、2 项比第 3 项更重要。
@@ -15,24 +15,24 @@
 
 - **先问能不能并行,再决定派不派活**:只有当拆出的多个任务互不依赖、可以同时交给多个子 Agent 时,才用子 Agent 并行做;拆不出并行(单任务、有先后依赖、上下文紧密耦合)时,主 Agent 自己完成,不要为了“守分工”把单个任务外包给一个 Worker 再等它回来。
 - 测试与评审必须使用彼此独立的会话，模型不能与Worker模型相同。
-- 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs /R:1 /W:1 /NFL /NDL /NJH /NJS`:`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
+- 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs artifacts /R:1 /W:1 /NFL /NDL /NJH /NJS`,或 `scripts/new-copy.ps1 <副本路径>`(同参数封装):`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节在能并行时交给 Worker,不能并行时自己写。
 - 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**(见下节)、并检查是否越界改动,再决定是否采纳。
 - **进程锁(`MSB3027`/`MSB3026`)的处理:让长驻进程换目录,而不是让每次构建/测试换目录。** 锁的来源只有两类,都不是代码问题:(a) 人在开着 `Forge.App`;(b) 上一次被中断的测试留下的 `testhost`/`ExtensionHost` 孤儿进程(也会让源码扫描类测试出现假红)。
   1. **默认不要给 `dotnet build`/`dotnet test` 加 `-p:BaseOutputPath=...`**,测试用默认 `bin/`,不新建逐任务的 `artifacts/<name>/`(不会被清理,会堆积)。万一必须重定向,输出放哪都行:源码扫描类测试的仓库根在构建时由 `Forge.App.Tests.csproj` 写进程序集元数据(`ForgeRepoRoot`,由 `tests/Forge.App.Tests/RepoRoot.cs` 读取),不再依赖输出目录位置。
   2. **开 App 时设 `FORGE_RUN=1`**:`FORGE_RUN=1 dotnet run --project src/Forge.App`(PowerShell:`$env:FORGE_RUN=1`)。`Directory.Build.props` 会把 `Forge.App` 的输出固定到 `artifacts/run/`,整个仓库只有这一个目录,反复覆盖;`artifacts/` 已在 `.gitignore`,删除即清理。`src/Forge.App/bin/` 因此不会被运行中的 App 锁住。**跑测试的 shell 里不要设 `FORGE_RUN`**(否则测试项目会引用到 `artifacts/run/` 的 Forge.App)。
-  3. **遇到锁先排查再动手**:用 `tasklist`/`Get-Process Forge.App,testhost,ExtensionHost` 找占用者。是孤儿 `testhost`/`ExtensionHost` 就结束它们;是用户正在用的 `Forge.App` 就报告阻塞并请用户关闭或改用 `artifacts/run/` 启动,不要自行绕开。
-- 派活文本里写明该任务适用的 `.github/skills/...` 路径。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
+  3. **遇到锁先排查再动手**:构建入口已挂 `scripts/build-hygiene.ps1`(经 `Directory.Build.props` 的 `BeforeTargets=Build`,仅本地 Windows、CI 跳过)——孤儿 `testhost`/`ExtensionHost` 自动结束并记 `artifacts/hygiene/` 日志,活锁报 PID 与处置指引;仍需人工时用 `tasklist`/`Get-Process Forge.App,testhost,ExtensionHost` 找占用者,是孤儿就结束,是用户正在用的 `Forge.App` 就报告阻塞并请用户关闭或改用 `artifacts/run/` 启动,不要自行绕开。
+- 派活文本里写明该任务适用的 `.github/skills/...` 路径与预期测试过滤器(副本无 `.git`,Worker 用 `scripts/forge-test.ps1 -Level L1 -Project <测试项目> -Ns <命名空间> [-Gates]` 显式执行;模板见 `.github/skills/forge-dispatch/SKILL.md`),并要求完工报告附 `forge-test.ps1` 收据。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
 
 ## 测试分层与执行
 
 判定依据、落点映射与新增/删除测试的规则见 `testing.md`(id `forge-testing`)。本节只写操作口径。
 
-- **L1(每次任务)**:先 `dotnet build Forge.slnx -c Debug` 一次,之后所有 `dotnet test` 都带 `--no-build`;只跑改动落点对应的命名空间,例如 `dotnet test tests/Forge.App.Tests --no-build --filter "FullyQualifiedName~Forge.App.Tests.Workbench"`。改了任何 `.cs`/`.axaml` 源文件时追加源码扫描门槛:`--filter "FullyQualifiedName~Localization|FullyQualifiedName~MinorRegressionTests|FullyQualifiedName~KeyRegistry|FullyQualifiedName~StringTable|FullyQualifiedName~NoHardcodedChinese"`。只改文档/spec 时无需跑测试。
+- **L1(每次任务)**:一律 `scripts/forge-test.ps1 -Auto`——按 git 改动推导落点过滤器(映射在 `scripts/test-map.json`),改了任何 `.cs`/`.axaml` 自动追加源码扫描门槛,失败先重建一次再判红,收据落 `artifacts/testruns/` 并须粘贴进完工报告。手工等价:先 `dotnet build Forge.slnx -c Debug` 一次,之后所有 `dotnet test` 都带 `--no-build`,只跑改动落点对应的命名空间,例如 `dotnet test tests/Forge.App.Tests --no-build --filter "FullyQualifiedName~Forge.App.Tests.Workbench"`,改了 `.cs`/`.axaml` 时追加 `--filter "FullyQualifiedName~Localization|FullyQualifiedName~MinorRegressionTests|FullyQualifiedName~KeyRegistry|FullyQualifiedName~StringTable|FullyQualifiedName~NoHardcodedChinese"`。只改文档/spec 时无需跑测试。
 - **L2(模块完成、接口变化、较大重构)**:跑承载改动的那个测试项目全量,例如 `dotnet test tests/Forge.Core.Tests --no-build`。
-- **L3(合并前、发布、跨模块、公共协议变化)**:13 个测试项目全量。触发条件按 `testing.md`;`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests` 只在 L3 跑。
+- **L3(合并前、发布、跨模块、公共协议变化)**:13 个测试项目全量。触发条件按 `testing.md`;`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests` 只在 L3 跑。L3 经 `forge-test.ps1 -Level L3 --why merge|release|interface|infra|cross-module` 执行(缺 `--why` 直接拒绝);`-Auto` 命中 L3 落点时自动升级并代填。
 - 不跑与本次改动无关的测试,也不为“保险”跑全量;全量混着与本次改动无关的偶发失败,判不出真伪。
-- 报告里写清:实际执行的命令、用例数、耗时、结果;没跑的部分说明原因与未验证范围。
+- 报告里写清:实际执行的命令、用例数、耗时、结果,收据直接粘贴 `forge-test.ps1` 的运行清单(无收据的全量视为未完成测试义务);没跑的部分说明原因与未验证范围。
 - 新增或删除测试前先读 `testing.md` 的准入与清理规则;删除测试必须在报告里逐条说明理由。
 - 源码扫描类门槛(`StringTableTests`/`NoHardcodedChineseTests`/`KeyRegistryTests`/`MinorRegressionTests`)报“源码里明明已注册/已存在”的错误时,先 `dotnet build`(必要时加 `-t:Rebuild`)再跑一次:复用旧 `bin` 的 `--no-build` 会报假红。
 
@@ -61,7 +61,7 @@
 
 本机通过 MCP 服务 `deslop`(工具名 `mcp__deslop__*`)接入 Deslop Live:它把编辑器里的实时重复代码分析暴露成工具。**预防优于治疗**——不写重复比事后抽取便宜。服务配在用户级 `~/.pi/agent/mcp.json`,指向 VS Code 扩展自带的 `deslop-mcp.exe`(路径含扩展版本号,升级扩展后要改),`--root` 绑 `D:/FORGE/forge`。
 
-> **适用范围:只约束读 `AGENTS.md` 的 Agent(pi、Codex 系)。** 对 **Claude Code 无效**——它只读 `CLAUDE.md`;对 **Copilot 无效**——它读 `.github/copilot-instructions.md`。这两个客户端不会看到本节,默认也不会调 `find-similar`。要让它们同样遵守,必须把本节内容原样粘进各自的入口文件(`CLAUDE.md` / `.github/copilot-instructions.md`),否则本节写成什么样都不影响它们。
+> **适用范围:读 `AGENTS.md` 的 Agent(pi、Codex 系)与经 `CLAUDE.md` 桩导入的 Claude Code。** 根目录 `CLAUDE.md` 只含一行 `@AGENTS.md` 导入;Claude Code(2025-09 起无 `CLAUDE.md` 时原生读 `AGENTS.md`)、VS Code 的 Copilot/Codex/Local harness 与 Copilot coding agent 均能读到本文件——单一事实源在 `AGENTS.md`,勿在任何入口粘贴全文副本。
 
 ### 定律:写新代码前先调 `find-similar`
 

@@ -1,0 +1,41 @@
+﻿{
+  "_meta": "改动落点 -> 测试落点的数据副本,与 testing.md 落点表同步维护;脚本按最长前缀匹配,l3 优先于 l2(故 src/Forge.Ipc 不在 l2 表里);l1 的 ns 可为字符串或数组(一落点多命名空间,如 Views);根级构建/CI 配置按 testing.md「核心基础设施变化」行归 l3(why=infra)。",
+  "l3": [
+    { "prefix": "src/Forge.Abstractions/", "why": "interface" },
+    { "prefix": "src/Forge.Plugin.Sdk/", "why": "interface" },
+    { "prefix": "src/Forge.Ipc", "why": "interface" },
+    { "prefix": "directory.build.props", "why": "infra" },
+    { "prefix": "directory.build.rsp", "why": "infra" },
+    { "prefix": "global.json", "why": "infra" },
+    { "prefix": "forge.slnx", "why": "infra" },
+    { "prefix": ".github/workflows/", "why": "infra" }
+  ],
+  "l1": [
+    { "prefix": "src/Forge.App/Localization/", "gatesOnly": true },
+    { "prefix": "src/Forge.App/Workbench/", "ns": "Forge.App.Tests.Workbench" },
+    { "prefix": "src/Forge.App/Resources/", "ns": "Forge.App.Tests.Workbench" },
+    { "prefix": "src/Forge.App/Views/", "ns": ["Forge.App.Tests.Views", "Forge.App.Tests.Workbench"] },
+    { "prefix": "src/Forge.App/Providers/", "ns": "Forge.App.Tests.Providers" },
+    { "prefix": "src/Forge.App/Git/", "ns": "Forge.App.Tests.Git" },
+    { "prefix": "src/Forge.App/Terminal/", "ns": "Forge.App.Tests.Terminal" },
+    { "prefix": "src/Forge.App/Changes/", "ns": "Forge.App.Tests.Changes" },
+    { "prefix": "src/Forge.App/Editing/", "ns": "Forge.App.Tests.Editor" },
+    { "prefix": "src/Forge.App/ViewModels/", "ns": "Forge.App.Tests.ViewModels" },
+    { "prefix": "src/Forge.App/PlanPanel", "ns": "Forge.App.Tests.ViewModels" },
+    { "prefix": "src/Forge.App/Settings/", "ns": "Forge.App.Tests.Settings" }
+  ],
+  "l2": [
+    { "prefix": "src/Forge.App/", "project": "Forge.App.Tests" },
+    { "prefix": "src/Forge.Core/", "project": "Forge.Core.Tests" },
+    { "prefix": "src/Forge.Workspace/", "project": "Forge.Workspace.Tests" },
+    { "prefix": "src/Forge.IO/", "project": "Forge.IO.Tests" },
+    { "prefix": "src/Forge.Editor/", "project": "Forge.Editor.Tests" },
+    { "prefix": "src/Forge.Mcp/", "project": "Forge.Mcp.Tests" },
+    { "prefix": "src/Forge.Approval/", "project": "Forge.Approval.Tests" },
+    { "prefix": "src/Forge.Workflows/", "project": "Forge.Workflows.Tests" },
+    { "prefix": "src/Forge.Scripting/", "project": "Forge.Scripting.Tests" },
+    { "prefix": "src/Forge.ScriptRuntime/", "project": "Forge.Scripting.Tests" },
+    { "prefix": "src/Forge.ScriptExecutor/", "project": "Forge.Scripting.Tests" },
+    { "prefix": "src/Forge.HostClient/", "project": "Forge.HostClient.Tests" }
+  ]
+}

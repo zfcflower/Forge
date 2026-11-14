@@ -18,7 +18,7 @@ parent: forge-architecture
 
 ## 关键决策
 
-**组合指纹。** `ApprovedHash` = `SHA256(SourceHash + DependencyHash + SdkVersion)`,三者任一漂移即批准失效;行尾归一化(CRLF/CR/LF 等价)使纯行尾修改不失效。
+**组合指纹。** `ApprovedHash` = `SHA256(SourceHash + DependencyHash + SdkVersion)`,三者任一漂移即批准失效;行尾归一化(CRLF/CR/LF 等价)使纯行尾修改不失效。生产 `DependencyHash` 由 ExtensionHost 的 `DependencyHashSchema` v2(域分离 + 长度定帧)算出;`Hashing.DependencyHash` 的 name@version 格式仅作测试遗留(见 forge-extension-host)。
 
 **状态矩阵。** `Draft` → `RequiresApproval`(可批准提升);`Disabled`/`Uninstalled` → `Blocked`(再批准不可恢复);无记录 → `RequiresApproval`。只有三个候选哈希与记录一致且指纹等于 `ApprovedHash` 才 `Allowed`。审批操作不得绕过封锁:`SetApproved` 只刷新内容哈希并保留 `Disabled`/`Uninstalled` 状态;`Enable` 只解 `Disabled`(有 `ApprovedHash` 回 `Approved`,否则回 `Draft`);`Revoke` 对 `Disabled`/`Uninstalled` 是空操作。
 

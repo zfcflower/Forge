@@ -71,7 +71,7 @@ tags: [testing, ci, agent-cost]
 
 ### L1:快速(每次任务默认)
 
-范围 = 改动落点的直接测试 + 源码扫描硬门槛。几分钟内结束,失败就一定是本次改动引起的。
+范围 = 改动落点的直接测试 + 源码扫描硬门槛。几分钟内结束,失败就一定是本次改动引起的。执行一律经 `scripts/forge-test.ps1`:`-Auto` 按改动落点(`scripts/test-map.json`)推导过滤器、改了 `.cs`/`.axaml` 自动追加扫描门槛、失败先重建一次再判红(治旧 `bin` 假红);本节命令是手工等价操作。
 
 ```bash
 # 先构建一次,之后所有运行都带 --no-build,避免重复构建
@@ -114,24 +114,29 @@ for p in Forge.App.Tests Forge.Core.Tests Forge.Workspace.Tests; do
 done
 ```
 
+`forge-test.ps1 -Level L3` 必须带 `--why`(merge/release/interface/infra/cross-module,对应上列触发条件),缺省拒绝执行;`-Auto` 命中 L3 落点时自动代填并记录;每次运行在 `artifacts/testruns/` 落收据,范围与改动落点不匹配的全量视为未完成测试义务。
+
 ## 改动落点 → 测试落点
 
 | 改动位置 | L1 过滤器 |
 |---|---|
-| `src/Forge.App/Workbench/`、`Resources/`、`*.axaml` 视图 | `FullyQualifiedName~Forge.App.Tests.Workbench` |
+| `src/Forge.App/Workbench/`、`Resources/` | `FullyQualifiedName~Forge.App.Tests.Workbench` |
+| `src/Forge.App/Views/`(`*.axaml` 视图;对应测试在 `Views` 命名空间,另并 Workbench) | `FullyQualifiedName~Forge.App.Tests.Views|FullyQualifiedName~Forge.App.Tests.Workbench` |
 | `src/Forge.App/Providers/` | `FullyQualifiedName~Forge.App.Tests.Providers` |
 | `src/Forge.App/Git/` | `FullyQualifiedName~Forge.App.Tests.Git` |
 | `src/Forge.App/Terminal/` | `FullyQualifiedName~Forge.App.Tests.Terminal` |
-| `src/Forge.App/{Changes,Editor,Palette,PlanPanel*}` | 对应命名空间(`Changes`/`Editor`/`Palette`/`ViewModels`) |
+| `src/Forge.App/Settings/` | `FullyQualifiedName~Forge.App.Tests.Settings` |
+| `src/Forge.App/{Changes,Editing,ViewModels,PlanPanel*}`(Palette 源码散在 `ViewModels`/`Views`,由对应规则覆盖) | 对应命名空间(`Changes`/`Editor`/`ViewModels`) |
 | `src/Forge.App/Localization/`、`Resources/` 文案 | `Localization` + `KeyRegistry` + `StringTable` + `NoHardcodedChinese` |
 | `src/Forge.App/` 其他 | `dotnet test tests/Forge.App.Tests`(L2) |
+| 根级构建/CI 配置(`Directory.Build.props`、`Directory.Build.rsp`、`global.json`、`Forge.slnx`、`.github/workflows/`) | L3 |
 | `src/Forge.Core/` | `dotnet test tests/Forge.Core.Tests`(L2) |
 | `src/Forge.Workspace/` | `dotnet test tests/Forge.Workspace.Tests`(L2) |
 | `src/Forge.{IO,Editor,Mcp,Approval,Workflows,Scripting,HostClient,Ipc}/` | 同名 `tests/Forge.<M>.Tests`(L2) |
 | `src/Forge.Abstractions/`、`Plugin.Sdk/`、`Ipc*/`、存储 schema、AOT 配置 | L3 |
 | 文档、spec、`.md`、`AGENTS.md` | 不跑测试 |
 
-L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `Workbench` 与 `Git`),把过滤器用 `|` 串起来,而不是退化成 L2。
+L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `Workbench` 与 `Git`),把过滤器用 `|` 串起来,而不是退化成 L2。落点表的数据副本在 `scripts/test-map.json`(脚本按最长前缀匹配,`Ipc*` 依 L3 行优先于同名-tests 行;l1 的 `ns` 可为数组,一落点多命名空间;根级构建/CI 配置归 l3 `why=infra`);改表须两处同步。
 
 ## 新增测试的准入
 
@@ -179,7 +184,7 @@ L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `W
 ## 已知债务(未处理,按收益排序)
 
 1. **放开 `Forge.App.Tests` 的并行。** 前置条件是把数据根从进程级环境变量改成可注入的实例(或把所有读写 `AppPaths` 的测试类收进同一个串行 collection),再逐个命名空间验证;放开后需连续跑 3 轮全量确认无偶发。收益最大、风险也最大,必须单独一个任务做。
-2. **测试进程清理。** 中断的测试留下 `testhost`/`ExtensionHost` 孤儿,锁住构建输出。需要在测试侧加全局超时与退出清理。
+2. **测试进程清理。** 中断的测试留下 `testhost`/`ExtensionHost` 孤儿,锁住构建输出。需要在测试侧加全局超时与退出清理。(过渡措施已落地:`Directory.Build.props` 挂 `scripts/build-hygiene.ps1`,构建时自动结束孤儿并报活锁;测试侧全局超时仍待做。)
 3. **把 5 家供应商的认证测试合成参数化套件。** 自重复率:`XAiAuthenticationTests` 56%、`MetaAuthenticationTests` 51%、`KimiAuthenticationTests` 47%、`ChatGptAuthenticationTests` 36%(合计 2,757 行里 1,305 行重复);4 个 `Scripted*Handler` 除记录类型外逐行相同。做法:抽 `ScriptedAuthHandler<T>` 基类,再按供应商把公共用例参数化,保留各家协议特有的用例。
 4. **`throw new NotSupportedException()` 假实现样板。** 183 处,分布在 23 个测试文件里。按接口抽 abstract 基类,保留“生产代码不该调用它”的失败语义,不要直接删。
 5. **`HostClient`/`Workbench` 的 arrange 样板。** `await using var host = new FakeHost(); await using var client = await ClientFactory.StartAsync(host); using var limit = TestLimit.Create();` 重复 69 处(Deslop 簇 `e49c7b620d9adb58`,mass 2108,全仓第一);Workbench/Lifecycle 的 shell 测试自重复 21–30%。属于阅读与构建成本,不改善回归保护,优先级低于前四项。

@@ -36,5 +36,5 @@ depends-on: [forge-ipc, forge-plugin-sdk, forge-script-runtime]
 ## 验证约定
 
 - 直接对真实执行器进程验证:插件操作(`worker.load/execute/command/prompt`)被 `unsupported_operation` 拒绝、未 load 的 run 被 `not_loaded` 拒绝、第二次 load/run 被 `already_loaded`/`already_ran` 拒绝、缺 context 被 `invalid_arguments` 拒绝。
-- 发布闭包以 `dotnet publish src/Forge.ScriptExecutor` 后 grep 目录证明无 `Microsoft.CodeAnalysis*`;源码 grep 证明无 `DllImport`/`LibraryImport` 与 `Assembly.Load`。
+- 发布闭包无 Roslyn 由 csproj ProjectReference 闭包核对 + 测试查 `deps.json` 证明(`dotnet publish` 后 grep 目录不可行,测试已放弃该法);源码 grep 证明无 `DllImport`/`LibraryImport` 与 `Assembly.Load`。
 - 端到端经真实 Host:成功、放弃、超时、取消、崩溃后目标 pid 必须消失;并发调用互不污染。
