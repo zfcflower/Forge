@@ -278,8 +278,10 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
                 if (runGroups.Count > RunStateCap)
                 {
                     // Drop the oldest idle group; a busy one is kept and re-queued, so the map may temporarily overshoot
-                    // the cap by as many runs as are actually asking at once - which the app already bounds.
-                    for (var visited = 0; visited < groupOrder.Count; visited++)
+                    // the cap by as many runs as are actually asking at once - which the app already bounds. The scan never
+                    // reaches the entry this call just enqueued (the loop's bound excludes the queue's last item), so a
+                    // fully busy map keeps every group rather than evicting the one about to be used.
+                    for (var visited = 0; visited < groupOrder.Count - 1; visited++)
                     {
                         var oldest = groupOrder.Dequeue();
                         if (runGroups.TryGetValue(oldest, out var candidate) && candidate.Pending == 0)

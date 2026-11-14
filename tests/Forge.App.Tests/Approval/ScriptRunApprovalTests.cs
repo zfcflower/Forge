@@ -232,6 +232,36 @@ public sealed class ScriptRunApprovalTests
     }
 
     [Fact]
+    public async Task A_cancelled_leader_hands_the_turn_to_the_next_waiter()
+    {
+        await using var harness = Harness.Create();
+        using var handler = harness.Handler();
+
+        var cardTask = ApprovalFixtures.NextToolCardAsync(harness.Queue);
+        using var leaderCts = new CancellationTokenSource();
+        var leader = handler.RequestAsync(
+            ApprovalFixtures.ToolRequest("web_fetch", ToolSideEffect.ReadOnly, runKey: "run-1"),
+            leaderCts.Token).AsTask();
+        var card = await cardTask.WaitAsync(ApprovalFixtures.StepTimeout);
+
+        // The waiter is parked on the group's turn while the leader's card is up.
+        var waiter = Start(handler);
+        Assert.Equal(1, card.PendingCount);
+
+        // Cancelling the leader's own request withdraws its card and releases the turn; the waiter takes it and
+        // shows its own card - the group's serialization survives a leader that goes away undecided.
+        var waiterCardTask = ApprovalFixtures.NextToolCardAsync(harness.Queue);
+        leaderCts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => leader);
+
+        var waiterCard = await waiterCardTask.WaitAsync(ApprovalFixtures.StepTimeout);
+        Assert.False(waiterCard.HasPendingCalls);
+        waiterCard.AllowCommand.Execute(null);
+        Assert.Equal(ApprovalDecision.Allow, await waiter.WaitAsync(ApprovalFixtures.StepTimeout));
+        Assert.Equal(0, await harness.Queue.CountAsync());
+    }
+
+    [Fact]
     public async Task Grant_state_drops_the_oldest_run_at_the_cap()
     {
         await using var harness = Harness.Create();
