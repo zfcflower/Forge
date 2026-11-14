@@ -121,7 +121,8 @@ internal sealed class MermaidDiagramView : Control
             canvas.ClipRect(new SKRect(0, 0, (float)Bounds.Width, (float)Bounds.Height));
             if (opacity < 0.999)
             {
-                canvas.SaveLayer(new SKPaint { Color = SKColors.White.WithAlpha((byte)Math.Round(opacity * 255)) });
+                using var layer = new SKPaint { Color = SKColors.White.WithAlpha((byte)Math.Round(opacity * 255)) };
+                canvas.SaveLayer(layer);
             }
 
             canvas.Scale((float)scale);

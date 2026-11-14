@@ -155,4 +155,63 @@ public sealed class MermaidSvgColorsTests
         Assert.DoesNotContain("color-mix(", resolved, StringComparison.Ordinal);
         Assert.Contains("#", resolved, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("flowchart TD\n  A[Start] --> B{Decision}\n  B -->|yes| C[Done]\n")]
+    [InlineData("sequenceDiagram\n  Alice->>Bob: Hello\n  Bob-->>Alice: Hi back\n")]
+    [InlineData("stateDiagram-v2\n  [*] --> Idle\n  Idle --> Busy : start\n  Busy --> [*]\n")]
+    [InlineData("classDiagram\n  class Animal {\n    +name\n  }\n  Animal <|-- Dog\n")]
+    [InlineData("erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  ORDER ||--|{ LINE : contains\n")]
+    public void Every_default_type_leaves_no_unresolved_colour_and_draws_a_real_picture(string source)
+    {
+        var svg = MermaidRenderer.RenderSvg(source, new RenderOptions
+        {
+            Bg = Palette.Background,
+            Fg = Palette.Foreground,
+            Accent = Palette.Accent,
+            Muted = Palette.Muted,
+            Surface = Palette.Surface,
+            Border = Palette.Border,
+            Line = Palette.Line,
+            Transparent = true,
+            Gradient = false,
+            Elevation = 0,
+        });
+
+        Assert.True(MermaidSvgColors.TryResolve(svg, Palette, out var resolved, out var problem), problem);
+        Assert.DoesNotContain("color-mix(", resolved, StringComparison.Ordinal);
+
+        var result = MermaidRenderService.FromSvg(svg, Palette);
+        Assert.Equal(MermaidRenderOutcome.Rendered, result.Outcome);
+        var picture = Assert.IsType<MermaidPicture>(result.Picture);
+        Assert.True(picture.Size.Width > 0 && picture.Size.Height > 0);
+
+        // Painted on white: something is drawn (not blank) and the drawing is not a black slab (an unresolved colour).
+        var width = (int)Math.Ceiling(picture.Size.Width);
+        var height = (int)Math.Ceiling(picture.Size.Height);
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+        {
+            canvas.Clear(SkiaSharp.SKColors.White);
+            canvas.DrawPicture(picture.Picture);
+        }
+
+        long drawn = 0;
+        long dark = 0;
+        foreach (var pixel in bitmap.Pixels)
+        {
+            if (pixel != SkiaSharp.SKColors.White)
+            {
+                drawn++;
+            }
+
+            if (pixel.Red < 40 && pixel.Green < 40 && pixel.Blue < 40)
+            {
+                dark++;
+            }
+        }
+
+        Assert.True(drawn > 0, "the diagram drew nothing");
+        Assert.True(dark * 2 < (long)width * height, "most of the diagram is black");
+    }
 }

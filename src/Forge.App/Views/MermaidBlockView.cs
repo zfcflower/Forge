@@ -49,10 +49,14 @@ internal sealed class MermaidBlockView : Border, ICopyableText
     private CancellationTokenSource? pending;
     private int generation;
     private string paletteKey = string.Empty;
+    private TimeSpan requestTimeout = MermaidSettings.Timeout();
+    private bool? statusIconFailed;
     private LocText fixStatusText;
     private IDisposable? statusIconData;
     private IDisposable? statusIconBrush;
     private IDisposable? toggleIconData;
+
+    protected override Type StyleKeyOverride => typeof(Border);
 
     private enum State
     {
@@ -164,9 +168,15 @@ internal sealed class MermaidBlockView : Border, ICopyableText
 
         if (!closed)
         {
-            CancelPending();
-            state = State.Streaming;
-            ApplyState();
+            // A streaming block is rebuilt on every frame: the text is already updated above, and nothing else about an
+            // open-fence block changes between frames, so skip the state pass (and its resource re-binds).
+            if (state != State.Streaming)
+            {
+                CancelPending();
+                state = State.Streaming;
+                ApplyState();
+            }
+
             return;
         }
 
@@ -202,6 +212,15 @@ internal sealed class MermaidBlockView : Border, ICopyableText
             return;
         }
 
+        // The theme may have changed while detached (no ActualThemeVariantChanged reached this block): a picture drawn with
+        // the old palette is replaced, keeping it on screen until the new one is ready.
+        if (closed && state is State.Rendered or State.Failed &&
+            !string.Equals(MermaidPalette.FromTheme(this).CacheKey, paletteKey, StringComparison.Ordinal))
+        {
+            StartRender(keepDiagram: true);
+            return;
+        }
+
         ApplyState();
     }
 
@@ -230,7 +249,8 @@ internal sealed class MermaidBlockView : Border, ICopyableText
         }
 
         var enabled = MermaidSettings.EnabledTypes();
-        var request = new MermaidRenderRequest(source, MermaidPalette.FromTheme(this), enabled, MermaidSettings.Timeout());
+        requestTimeout = MermaidSettings.Timeout();
+        var request = new MermaidRenderRequest(source, MermaidPalette.FromTheme(this), enabled, requestTimeout);
         if (MermaidDiagramTypes.Detect(source) is { } kind && (kind & enabled) == 0)
         {
             CancelPending();
@@ -275,6 +295,13 @@ internal sealed class MermaidBlockView : Border, ICopyableText
         }
 
         outcome = result;
+        if (result.Failure == MermaidRenderFailure.Disabled && result.Outcome == MermaidRenderOutcome.Failed)
+        {
+            state = State.Disabled;
+            ApplyState();
+            return;
+        }
+
         if (result.Outcome == MermaidRenderOutcome.Rendered)
         {
             diagramView.SetPicture(result.Picture);
@@ -301,7 +328,12 @@ internal sealed class MermaidBlockView : Border, ICopyableText
     {
         var failed = state == State.Failed;
         statusText.Classes.Set("mermaid-status-error", failed);
-        SetStatusIcon(failed ? "IconClose" : "IconSparkle", failed ? "DangerBrush" : "TextMutedBrush");
+        if (statusIconFailed != failed)
+        {
+            statusIconFailed = failed;
+            SetStatusIcon(failed ? "IconClose" : "IconSparkle", failed ? "DangerBrush" : "TextMutedBrush");
+        }
+
         statusRow.IsVisible = state is State.Rendering or State.Failed;
         switch (state)
         {
@@ -515,7 +547,7 @@ internal sealed class MermaidBlockView : Border, ICopyableText
     {
         MermaidRenderFailure.Timeout => Loc.Instance.Format(
             MermaidStrings.Timeout,
-            TextFormat.Number(MermaidSettings.Timeout().Milliseconds)),
+            TextFormat.Number((long)requestTimeout.TotalMilliseconds)),
         MermaidRenderFailure.TooLarge => Loc.Instance[MermaidStrings.TooLarge],
         MermaidRenderFailure.Parse => Loc.Instance[MermaidStrings.RenderFailed],
         _ => Loc.Instance[MermaidStrings.Internal],
@@ -583,9 +615,11 @@ internal static class MermaidFixHost
             return resolve(element);
         }
 
-        if (element.FindAncestorOfType<SessionView>()?.DataContext is IAgentMessageHost owner && owner.CanHandOff)
+        // A block inside a session's transcript belongs to that session only: when it cannot take the hand-off the block has
+        // no host, it must not fall back to whichever session happens to be active.
+        if (element.FindAncestorOfType<SessionView>() is { } sessionView)
         {
-            return owner;
+            return sessionView.DataContext is IAgentMessageHost { CanHandOff: true } owner ? owner : null;
         }
 
         return TopLevel.GetTopLevel(element)?.DataContext is MainWindowViewModel { ActiveSession: { } active } && active.CanHandOff

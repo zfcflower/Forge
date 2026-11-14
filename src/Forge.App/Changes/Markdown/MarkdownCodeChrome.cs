@@ -20,6 +20,9 @@ internal sealed class MarkdownCodeHeader : Grid
     private readonly TextBlock label;
     private readonly CopyTextButton copy;
 
+    /// <summary>Styles select by the base type; without this a sealed subclass matches none of the Grid styles.</summary>
+    protected override Type StyleKeyOverride => typeof(Grid);
+
     /// <param name="target">What the copy button reads when pressed.</param>
     /// <param name="action">An extra button placed between the label and copy; null for a plain code block.</param>
     internal MarkdownCodeHeader(ICopyableText target, Control? action = null)
@@ -93,6 +96,8 @@ internal sealed class MarkdownCodeHeader : Grid
 internal sealed class MarkdownCodeTextView : ScrollViewer
 {
     private readonly SelectableTextBlock text;
+
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
 
     internal MarkdownCodeTextView(string value = "")
     {
