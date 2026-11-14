@@ -468,6 +468,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.IdleArchive,
             SettingsSectionIds.NotificationPermission,
             SettingsSectionIds.Paths,
+            SettingsSectionIds.Inspector,
         ];
 
         private static Button? NavButton(Window window, string id) =>
