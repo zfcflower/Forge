@@ -72,6 +72,7 @@
 4. **`Forge.Abstractions` 加了一个成员**:`PlanRevision` 与带默认实现的 `ITodoStore.ListPlanRevisionsAsync`。执行口径写“`Forge.Abstractions` 的契约定稿只在 W0 一次”,W0 没有为 W7 预留这个读方法,而修订历史必须有人读。做法取带默认实现的最小增量(全仓唯一实现 `SqliteTodoStore` 之外所有替身零改动),不预埋别的波次要用的东西;列在这里作为偏差记录。
 5. **`check-all` 不做**:缺口文档 #3 的“缺”列表里有它,但本波“已定”口径是**只读 + 交接**:面板不能把步骤标 done(那是 agent 与 `StepCommitter` 的语义),因此“全部勾选”没有不新增写路径的实现方式。等价的用户价值由“下一步 + 交接 + 进度读数(`3/7 已完成`)”承担。
 6. **顺手纠正两处既有文档漂移**:`Forge.Core/SPEC.md` 的时间戳守卫计数(原文“9 张表 11 个列”,实为 12/19);`Forge.Abstractions/SessionLifecycle.cs` 的复制说明补上修订历史。
+7. **基于合并后的 `main`(`0d5e1b3` W0 收尾)重跑**:rebase 无冲突;W0 的收尾只动 `App.axaml`(设置分区模板)、`AppComposition`(通知权限槽位)、`CopyTextButton` 的异常范围与两份文档,与 W7 的路径无重叠。重跑时`PlanPanelShellTests` 的一个真实回合用例在 11 分钟的整套里超时(单独跑 7 秒绿),已把那三处等待的边界从泵默认的 2 秒放宽到 30 秒(仍是硬上限)。
 
 ## 六、验收
 
