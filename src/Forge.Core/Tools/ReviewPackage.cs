@@ -43,16 +43,30 @@ public sealed record ReviewChangeSet
     public string? HeadCommit { get; init; }
 
     /// <summary>
-    /// The revision the diff runs from: the resolved default branch, the reviewed commit's parent (null for a root
-    /// commit, which then diffs against the empty tree), or HEAD when only uncommitted work is under review.
+    /// The commit the diff runs from: the merge-base of the requested base and HEAD (so a base that moved ahead does not
+    /// turn upstream commits into deletions), the reviewed commit's parent (null for a root commit, which diffs against the
+    /// empty tree), or HEAD when only uncommitted work is under review.
     /// </summary>
     public string? Base { get; init; }
+
+    /// <summary>
+    /// The paths the change set was narrowed to; empty means the whole change set. The package restates them, because a
+    /// reviewer cannot tell "nothing else changed" from "only these paths were read" and would report missing call sites
+    /// that were simply filtered out.
+    /// </summary>
+    public IReadOnlyList<string> Paths { get; init; } = [];
 
     /// <summary>The files the change set touches, in git's order.</summary>
     public IReadOnlyList<ReviewChangedFile> Files { get; init; } = [];
 
     /// <summary>The commits the change set contains, newest first; empty when only the working tree changed.</summary>
     public IReadOnlyList<ReviewCommit> Commits { get; init; } = [];
+
+    /// <summary>
+    /// The source stopped listing commits at its own cap, so <see cref="Commits"/> is a prefix rather than the whole range
+    /// and a count taken from it would be a lie.
+    /// </summary>
+    public bool CommitsTruncated { get; init; }
 
     /// <summary>The unified diff itself; empty when nothing changed.</summary>
     public string DiffText { get; init; } = string.Empty;

@@ -513,7 +513,12 @@ public sealed partial class GitCli
         return result.StandardOutput;
     }
 
-    public async Task<IReadOnlyList<FileDiff>> GetDiffAsync(string workingDirectory, GitDiffOptions? options = null, CancellationToken ct = default)
+    /// <summary>
+    /// One diff read: git's own unified text plus the same text parsed into files, from a single invocation, so the text and
+    /// the file list describe the same working tree. With <see cref="GitDiffOptions.IncludeUntracked"/> the file list also
+    /// carries synthetic add-diffs for untracked files, which git's text never prints.
+    /// </summary>
+    public async Task<GitDiffSnapshot> GetDiffSnapshotAsync(string workingDirectory, GitDiffOptions? options = null, CancellationToken ct = default)
     {
         options ??= new GitDiffOptions();
         var text = await GetDiffTextAsync(workingDirectory, options, ct).ConfigureAwait(false);
@@ -523,8 +528,11 @@ public sealed partial class GitCli
             await AppendUntrackedAsync(workingDirectory, options, files, ct).ConfigureAwait(false);
         }
 
-        return files;
+        return new GitDiffSnapshot(text, files);
     }
+
+    public async Task<IReadOnlyList<FileDiff>> GetDiffAsync(string workingDirectory, GitDiffOptions? options = null, CancellationToken ct = default) =>
+        (await GetDiffSnapshotAsync(workingDirectory, options, ct).ConfigureAwait(false)).Files;
 
     /// <summary>
     /// Writes the whole working tree (tracked and untracked files, honouring the repository's ignore rules) as a tree

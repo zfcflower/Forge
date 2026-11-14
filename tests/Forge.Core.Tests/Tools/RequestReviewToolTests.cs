@@ -112,7 +112,11 @@ public sealed class RequestReviewToolTests
     private static RequestReviewTool CreateTool(FakeReviewChangeSetSource source, ITodoStore? todos = null) =>
         new(CreateScheduler(), source, todos);
 
-    private static AgentHost CreateHost(IChatProvider provider, FakeReviewChangeSetSource? source, ITodoStore? todos = null) =>
+    private static AgentHost CreateHost(
+        IChatProvider provider,
+        FakeReviewChangeSetSource? source,
+        ITodoStore? todos = null,
+        AgentOptions? options = null) =>
         new(new AgentHostOptions
         {
             Providers = _ => provider,
@@ -130,6 +134,7 @@ public sealed class RequestReviewToolTests
             Layers = new PromptLayers("test system", null, null),
             Reviews = source,
             Todos = todos,
+            Options = options ?? new AgentOptions(),
         });
 
     /// <summary>A parent turn that asks for one review (<paramref name="arguments"/>), the Reviewer answering
@@ -394,7 +399,7 @@ public sealed class RequestReviewToolTests
 
     private static TodoItem Step(
         string id = "a1",
-        string commitId = "abcdef1234567890",
+        string? commitId = "abcdef1234567890",
         string summary = "wired the tool and its source",
         string verification = "dotnet test --filter Review") =>
         new(id, Session, "Wire request_review", TodoStatus.InProgress, null, 1, DateTimeOffset.UnixEpoch,
@@ -534,6 +539,67 @@ public sealed class RequestReviewToolTests
         Assert.Contains("Checklist step: Wire request_review", package, StringComparison.Ordinal);
         Assert.Contains("What the step changed: wired the tool and its source", package, StringComparison.Ordinal);
         Assert.Contains("How it was verified: dotnet test --filter Review", package, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_review_runs_with_one_agent_slot_because_the_parent_hands_its_permit_back()
+    {
+        // With a single slot the child can only start if the parent detaches its permit for the wait
+        // (AgentScope.Current.Permit.Detach); without it this run never finishes and the assertion below times out.
+        var source = new FakeReviewChangeSetSource();
+        var host = CreateHost(
+            ReviewScript("verdict: approve"),
+            source,
+            options: new AgentOptions { MaxParallelSubAgents = 1 });
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        var run = host.RunToCompletionAsync(root);
+        var finished = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(30)));
+
+        Assert.Same(run, finished);
+        await run;
+        Assert.Equal(1, source.Calls);
+    }
+
+    [Fact]
+    public async Task A_step_without_its_own_commit_reviews_the_branch_and_says_so_in_the_package()
+    {
+        // Step commits can be switched off, and a step with nothing to commit stores no commit id: the review then covers
+        // the branch and the working tree, and the package must not read as if the step's own commit had been reviewed.
+        var source = new FakeReviewChangeSetSource();
+        var provider = ReviewScript("verdict: approve", """{"step_id":"a1"}""");
+        var host = CreateHost(provider, source, new FakeTodoStore(Step(commitId: null)));
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var request = Assert.Single(source.Requests);
+        Assert.Null(request.Commit);
+        Assert.Null(request.Base);
+        var package = Turn.LastUserText(ReviewerRequest(provider));
+        Assert.Contains("Checklist step: Wire request_review", package, StringComparison.Ordinal);
+        Assert.Contains("no commit of its own", package, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_empty_step_review_of_a_commit_that_changed_nothing_says_so_and_starts_no_reviewer()
+    {
+        var source = new FakeReviewChangeSetSource
+        {
+            Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Ok(new ReviewChangeSet
+            {
+                WorkingDirectory = "work/tree",
+                HeadCommit = "abcdef1234567890",
+                Base = "0123456789abcdef",
+            })),
+        };
+        var tool = CreateTool(source, new FakeTodoStore(Step()));
+
+        var result = await InAgentScopeAsync(tool, """{"step_id":"a1"}""");
+
+        Assert.False(result.IsError);
+        Assert.Contains("Nothing to review", result.Content, StringComparison.Ordinal);
+        Assert.Contains("changes nothing against its parent", result.Content, StringComparison.Ordinal);
     }
 
     [Fact]

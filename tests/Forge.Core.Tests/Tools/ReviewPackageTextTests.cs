@@ -17,15 +17,19 @@ public sealed class ReviewPackageTextTests
         string diff = "",
         IReadOnlyList<ReviewChangedFile>? files = null,
         IReadOnlyList<ReviewCommit>? commits = null,
-        bool diffTruncated = false) =>
+        bool diffTruncated = false,
+        bool commitsTruncated = false,
+        IReadOnlyList<string>? paths = null) =>
         new()
         {
             WorkingDirectory = "work/tree",
             Branch = "feature",
             HeadCommit = "1234567890abcdef",
             Base = "0987654321fedcba",
+            Paths = paths ?? [],
             Files = files ?? [],
             Commits = commits ?? [],
+            CommitsTruncated = commitsTruncated,
             DiffText = diff,
             DiffTruncated = diffTruncated,
         };
@@ -118,18 +122,51 @@ public sealed class ReviewPackageTextTests
     }
 
     [Fact]
-    public void Commits_and_files_share_the_same_two_hundred_line_budget()
+    public void A_long_commit_history_keeps_the_file_list_its_own_budget()
     {
+        // The files are what a review is about, so a branch with many commits must not starve the file section.
         var commits = Enumerable.Range(0, 150).Select(Commit).ToArray();
         var files = Enumerable.Range(0, 60).Select(File).ToArray();
 
         var text = Render(Brief(), ChangeSet(files: files, commits: commits));
 
-        Assert.Contains("subject 149", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("more commits", text, StringComparison.Ordinal);
-        Assert.Contains("modified src/f049.cs", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("src/f050.cs", text, StringComparison.Ordinal);
-        Assert.Contains("... and 10 more files", text, StringComparison.Ordinal);
+        Assert.Contains("subject 049", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("subject 050", text, StringComparison.Ordinal);
+        Assert.Contains("... and 100 more commits", text, StringComparison.Ordinal);
+        Assert.Contains("modified src/f000.cs", text, StringComparison.Ordinal);
+        Assert.Contains("modified src/f059.cs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("more files", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_commit_list_the_source_cut_is_reported_as_a_floor_not_as_a_total()
+    {
+        var commits = Enumerable.Range(0, 3).Select(Commit).ToArray();
+
+        var text = Render(Brief(), ChangeSet(commits: commits, commitsTruncated: true));
+
+        Assert.Contains("at least 3 commits", text, StringComparison.Ordinal);
+        Assert.Contains("more commits than these 3", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("... and 0 more commits", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_narrowed_change_set_says_which_paths_were_read()
+    {
+        var text = Render(Brief(), ChangeSet(files: [File(0)], paths: ["src/Forge.Core/Tools", "tests"]));
+
+        Assert.Contains(
+            "narrowed to: src/Forge.Core/Tools, tests (only these paths were read;",
+            text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_unnarrowed_change_set_says_nothing_about_paths()
+    {
+        var text = Render(Brief(), ChangeSet(files: [File(0)]));
+
+        Assert.DoesNotContain("narrowed to:", text, StringComparison.Ordinal);
     }
 
     [Fact]

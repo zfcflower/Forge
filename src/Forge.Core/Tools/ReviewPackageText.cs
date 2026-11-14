@@ -23,7 +23,12 @@ public static class ReviewPackageText
     /// <summary>Cap on the diff inside the child's task message, not a user setting.</summary>
     public const int MaxDiffChars = 48_000;
 
-    /// <summary>Cap on the commit and file lines together; the rest is left to <c>git_diff</c>.</summary>
+    /// <summary>
+    /// Cap on the commit lines and on the file lines, independently: the files are what a review is about, so a long
+    /// commit history must not eat their budget. Both say how many lines they left out.
+    /// </summary>
+    public const int MaxCommitLines = 50;
+
     public const int MaxFileLines = 200;
 
     /// <summary>Cap per intent, summary, verification and focus field.</summary>
@@ -49,7 +54,7 @@ public static class ReviewPackageText
         var diff = changeSet.DiffText;
         var cut = diff.Length > MaxDiffChars;
         var diffCut = cut || changeSet.DiffTruncated;
-        var listedLines = Math.Min(changeSet.Commits.Count, MaxFileLines) + Math.Min(changeSet.Files.Count, MaxFileLines);
+        var listedLines = Math.Min(changeSet.Commits.Count, MaxCommitLines) + Math.Min(changeSet.Files.Count, MaxFileLines);
         var builder = new StringBuilder(
             512
             + listedLines * LineEstimate
@@ -79,6 +84,7 @@ public static class ReviewPackageText
             builder.Append('\n');
             AppendField(builder, "What the step changed: ", brief.StepSummary);
             AppendField(builder, "How it was verified: ", brief.StepVerification);
+            builder.Append('\n');
         }
 
         builder.Append("The change set:\nworktree ").Append(changeSet.WorkingDirectory).Append('\n');
@@ -92,11 +98,29 @@ public static class ReviewPackageText
             builder.Append("base ").Append(ShortSha(changeSet.Base)).Append(" .. ").Append(ShortSha(changeSet.HeadCommit)).Append('\n');
         }
 
-        builder.Append(Count(changeSet.Files.Count, "file")).Append(" changed, ").Append(Count(changeSet.Commits.Count, "commit")).Append('\n');
+        builder.Append(Count(changeSet.Files.Count, "file")).Append(" changed, ")
+            .Append(changeSet.CommitsTruncated ? "at least " : string.Empty)
+            .Append(Count(changeSet.Commits.Count, "commit")).Append('\n');
 
-        var remaining = MaxFileLines;
-        AppendCommits(builder, changeSet.Commits, ref remaining);
-        AppendFiles(builder, changeSet.Files, ref remaining);
+        if (changeSet.Paths.Count > 0)
+        {
+            builder.Append("narrowed to: ");
+            for (var index = 0; index < changeSet.Paths.Count; index++)
+            {
+                if (index > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                builder.Append(changeSet.Paths[index]);
+            }
+
+            builder.Append(" (only these paths were read; changes outside them are not part of this review)\n");
+        }
+
+        builder.Append('\n');
+        AppendCommits(builder, changeSet.Commits, changeSet.CommitsTruncated);
+        AppendFiles(builder, changeSet.Files);
 
         builder.Append("\nDiff:\n");
         if (diff.Length == 0)
@@ -153,8 +177,8 @@ public static class ReviewPackageText
         return trimmed.Length <= ShortShaLength ? trimmed : trimmed[..ShortShaLength];
     }
 
-    /// <summary>One line per commit, newest first, sharing the line budget with the file list.</summary>
-    private static void AppendCommits(StringBuilder builder, IReadOnlyList<ReviewCommit> commits, ref int remaining)
+    /// <summary>One line per commit, newest first, within its own line budget, and honest about what was left out.</summary>
+    private static void AppendCommits(StringBuilder builder, IReadOnlyList<ReviewCommit> commits, bool truncated)
     {
         if (commits.Count == 0)
         {
@@ -162,36 +186,41 @@ public static class ReviewPackageText
             return;
         }
 
-        var written = 0;
-        for (; written < commits.Count && remaining > 0; written++)
+        var written = Math.Min(commits.Count, MaxCommitLines);
+        for (var index = 0; index < written; index++)
         {
-            var commit = commits[written];
+            var commit = commits[index];
             builder.Append(ShortSha(commit.Sha)).Append(' ');
             AppendClamped(builder, commit.Subject, MaxFieldChars);
             builder.Append('\n');
-            remaining--;
         }
 
-        if (written < commits.Count)
+        if (truncated)
+        {
+            builder.Append("... and more commits than these ")
+                .Append(written.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append(" (the list stops at the source's cap)\n");
+        }
+        else if (written < commits.Count)
         {
             builder.Append("... and ").Append(commits.Count - written).Append(" more commits\n");
         }
     }
 
-    /// <summary>One line per file, in git's order, sharing the line budget with the commit list.</summary>
-    private static void AppendFiles(StringBuilder builder, IReadOnlyList<ReviewChangedFile> files, ref int remaining)
+    /// <summary>One line per file, in git's order, within its own line budget.</summary>
+    private static void AppendFiles(StringBuilder builder, IReadOnlyList<ReviewChangedFile> files)
     {
         if (files.Count == 0)
         {
-            builder.Append("Files: none\n");
+            builder.Append("\nFiles: none\n");
             return;
         }
 
-        builder.Append("Files:\n");
-        var written = 0;
-        for (; written < files.Count && remaining > 0; written++)
+        builder.Append("\nFiles:\n");
+        var written = Math.Min(files.Count, MaxFileLines);
+        for (var index = 0; index < written; index++)
         {
-            var file = files[written];
+            var file = files[index];
             builder.Append(file.Status).Append(' ').Append(file.Path);
             if (file.IsBinary)
             {
@@ -199,7 +228,6 @@ public static class ReviewPackageText
             }
 
             builder.Append('\n');
-            remaining--;
         }
 
         if (written < files.Count)

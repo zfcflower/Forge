@@ -241,7 +241,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 1. **没有新建 `Localization/Strings.Review.cs`**。W12 没有用户可见的新表面:工具行显示工具名与结果(与其他工具一样),评审结论是模型可读的英文。计划本身在 W0 已否掉"建空表"的做法,所以不为凑文件名建一张空表;要让评审有本地化界面,应该是结论持久化/计划面板显示那一档(见下面的延后项)。
 2. **动了一个 `Forge.Workspace` 文件**:`GitCli.Review.cs` 的 `EmptyTreeSha` 由 `private` 提升为 `public`。评审"仓库的第一个提交"必须对空树做 diff,而那个常量只能有一份定义。没有新增 API、没有改行为。
 3. **动了三个计划外的 App 文件**(`SessionRuntime.cs` 两行、`AppComposition.cs` 三行、`ToolCatalog.cs` 两行):`request_review` 只有在组合根把 git 实现交出去时才存在,而 `FeatureComposition` 的各模块拿不到 `GitCli`,所以运行期接线只能留在 `Create()`。
-4. **内部常量**(不进设置,六·二表无 W12 项):包内 diff 48000 字符、提交与文件清单合计 200 行、每个文本字段 2000 字符、结论原文 8000 字符。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
+4. **内部常量**(不进设置,六·二表无 W12 项):包内 diff 48000 字符、提交清单 50 行与文件清单 200 行各自独立、每个文本字段 2000 字符、结论原文 8000 字符。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
 5. **评审方式可配置未做**(`goal-and-requirements.md` 的"Reviewer 子 Agent 一次评审,或人工逐行评审"):需要设置项 + 一条"步骤提交后自动评审"的触发路径,属于新的产品面,未在 W12 授权范围内。结论也不持久化。
 
 **验证**(合入前实测):
@@ -260,3 +260,12 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 4. 子 Agent 被深度上限拒绝时的文案只说“不能派生”,不指向评审。前缀改成 `The review could not be started: `。
 
 另外两处一致性修正:分支评审的**提交清单也按 `paths` 收窄**(否则评审包里会列出全部不在范围内的提交);`ReviewChangeSetSource` 把“是否 git 仓库”的检查移进 `try`,git 起不来时也变成可读文本而不是原始异常。
+
+**独立评审会话(deepseek,与实现/测试会话分开)拉出的问题(已改)**:
+
+1. **blocking——基准没解析成提交,比较语义也错。** 原实现把 `base` 原样交给 `git diff <base>`(两点语义),而 `git_diff`/PR 正文/`pr_create` 全是 `base...HEAD`。默认基准 `origin/main` 只要 fetch 过一次就越过分叉点,上游新提交会在包里显示成“本次变更在删除它们”,Reviewer 会据此报假 blocking;同时 `Base` 是 ref 名却被 `ShortSha` 截断,包里印 `base origin/`。现改为先 `RevParse` 成提交、再取与 HEAD 的 merge-base,`Base` 因此恒为 sha;与 HEAD 无共同历史时 `Failed`。
+2. **major——收窄信息没进包。** `Paths` 作用在 diff/文件表/提交表上,但包里不写“只看了这些路径”,Reviewer 分不出“别处没改”与“被过滤掉了”。`ReviewChangeSet` 增 `Paths` 与 `CommitsTruncated`,包内自述 `narrowed to: …`,计数在截断时写 `at least N commits`。
+3. **minor——提交数被当成总数,且长提交历史会把文件表挤掉。** 提交清单上限 200 写死且与文件表共享 200 行预算,`... and N more` 永远不会触发。现拆为各自独立预算(提交 50 行、文件 200 行),源取“上限+1”条以区分“恰好”与“被截断”。
+4. **minor——同一份 diff 跑两个 git 进程,且注释谎称两者同源。** 新增 `GitCli.GetDiffSnapshotAsync`(一次捕获同时给文本与文件,`GetDiffAsync` 改为它的 `.Files`),评审只调它;解析/补未跟踪的逻辑仍只有一份。
+5. **minor——提交对象被抹掉时给模型的是 git 原文。** 先 `rev-parse <sha>^{commit}` 判存在,不存在就返回“这个提交在本仓库里不存在”。
+6. **测试盲区已补**:基准领先 HEAD 的三点语义、默认基准解析成 sha(不再出现 `origin/`)、`GitCli` 提交对象丢失、`MaxParallelSubAgents = 1` 下 `Detach` 必需(实测把 `Detach` 拿掉该用例会 15s 超时)、`step_id` 指向 `CommitId == null` 的步骤、收窄字段与截断计数。

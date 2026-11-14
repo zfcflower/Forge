@@ -6,8 +6,11 @@ namespace Forge.App.Git;
 /// <summary>Builds the git side of a review request: what changed, in which commits, as the raw unified diff.</summary>
 internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
 {
-    /// <summary>Commits listed for a branch review, newest first; the package shows the newest and says how many more there are.</summary>
-    private const int CommitListLimit = 200;
+    /// <summary>
+    /// Commits listed for a branch review, newest first; one more than the cap is fetched so a truncated list is known to be
+    /// truncated instead of being presented as the branch's commit count.
+    /// </summary>
+    private const int CommitListLimit = 1_000;
 
     /// <summary>
     /// Reads one change set: one commit against its first parent, or the branch plus the uncommitted tree against a base
@@ -38,15 +41,20 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
             // Null only in an unborn repository: there is no HEAD to review against yet.
             var head = status.HeadCommit;
 
-            // The revision the diff runs from: the reviewed commit's parent, or the base the branch is compared against.
+            // The revision the diff runs from: the reviewed commit's parent, or the merge-base the branch is compared against.
             string? baseRevision;
             GitDiffOptions options;
             IReadOnlyList<ReviewCommit> commits;
+            bool commitsTruncated;
 
             if (!string.IsNullOrWhiteSpace(request.Commit))
             {
-                var matches = await git.GetCommitsAsync(directory, exclude: string.Empty, head: request.Commit, limit: 1, ct)
-                    .ConfigureAwait(false);
+                // Resolve first: `git log <missing sha>` exits 128 with git's own fatal line, and a step whose commit was
+                // rebased away or collected must come back as something the model can act on.
+                var commitSha = await git.RevParseAsync(directory, request.Commit + "^{commit}", ct).ConfigureAwait(false);
+                var matches = commitSha is null
+                    ? []
+                    : await git.GetCommitsAsync(directory, exclude: string.Empty, head: commitSha, limit: 1, ct).ConfigureAwait(false);
                 if (matches.Count == 0)
                 {
                     return ReviewChangeSetResult.Failed($"Commit '{request.Commit}' does not exist in this repository.");
@@ -64,6 +72,7 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
                 };
                 commits = [new ReviewCommit(commit.Sha, commit.Subject)];
                 head = commit.Sha;
+                commitsTruncated = false;
             }
             else
             {
@@ -78,35 +87,52 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
                         $"Base '{baseName}' cannot be used: a leading '-' would be read as a git option rather than a revision.");
                 }
 
-                if (baseName is not null && await git.RevParseAsync(directory, baseName, ct).ConfigureAwait(false) is null)
+                var baseSha = baseName is null
+                    ? null
+                    : await git.RevParseAsync(directory, baseName, ct).ConfigureAwait(false);
+                if (baseName is not null && baseSha is null)
                 {
                     return ReviewChangeSetResult.Failed(
                         $"Base '{baseName}' does not resolve in this repository; fetch first, or pass base explicitly.");
                 }
 
-                // No base means nothing committed is in the change set, so it is the uncommitted tree against HEAD
-                // (ReviewChangeSet.Base names that case); only an unborn repository has neither, and a plain `git diff`
-                // then reads the index.
-                baseRevision = baseName ?? head;
+                // Compare from the merge-base, not from the base itself: `git diff <base>` is two-dot and would show every
+                // commit the base gained since the fork as a deletion in this change set, while the rest of the app (git_diff,
+                // the pull request, pr_create's gate) reads `base...HEAD`. The merge-base is also a sha, so the package can
+                // shorten it - a ref name shortened to seven characters reads as `origin/`.
+                if (baseSha is not null && head is not null)
+                {
+                    baseSha = await git.GetMergeBaseAsync(directory, baseSha, head, ct).ConfigureAwait(false);
+                    if (baseSha is null)
+                    {
+                        return ReviewChangeSetResult.Failed(
+                            $"Base '{baseName}' shares no history with HEAD, so there is no change set to compare.");
+                    }
+                }
+
+                // No base at all means nothing committed is in the change set, so it is the uncommitted tree against HEAD
+                // (ReviewChangeSet.Base names that case); only an unborn repository has neither.
+                baseRevision = baseSha ?? head;
                 options = new GitDiffOptions
                 {
+                    // From the merge-base to the working tree in one read: that is the branch's commits plus everything
+                    // uncommitted, without a second diff of committed-then-uncommitted.
                     From = baseRevision,
                     Paths = request.Paths,
-                    // git has no diff text for a file it does not track; GetDiffAsync adds the synthetic add-diffs for them.
+                    // git has no diff text for a file it does not track; the file list adds synthetic add-diffs for them.
                     IncludeUntracked = true,
                 };
-                commits = head is null || baseRevision is null
+
+                var history = head is null || baseRevision is null
                     ? []
                     : await ReadCommitsAsync(directory, baseRevision, head, request.Paths, ct).ConfigureAwait(false);
+                commitsTruncated = history.Count > CommitListLimit;
+                commits = commitsTruncated ? [.. history.Take(CommitListLimit)] : history;
             }
 
-            // The text call ignores IncludeUntracked: an untracked file has no diff text of its own, so the file list below is
-            // what names it. Both calls read the same options, so the files and the text always describe the same change set.
-            var text = await git.GetDiffTextAsync(directory, options, ct).ConfigureAwait(false);
-            var files = await git.GetDiffAsync(directory, options, ct).ConfigureAwait(false);
-
-            var changed = new List<ReviewChangedFile>(files.Count);
-            foreach (var file in files)
+            var snapshot = await git.GetDiffSnapshotAsync(directory, options, ct).ConfigureAwait(false);
+            var changed = new List<ReviewChangedFile>(snapshot.Files.Count);
+            foreach (var file in snapshot.Files)
             {
                 changed.Add(new ReviewChangedFile(file.Path, StatusWord(file.Status), file.IsBinary));
             }
@@ -118,9 +144,11 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
                     Branch = status.Branch,
                     HeadCommit = head,
                     Base = baseRevision,
+                    Paths = request.Paths,
                     Files = changed,
                     Commits = commits,
-                    DiffText = text,
+                    CommitsTruncated = commitsTruncated,
+                    DiffText = snapshot.Text,
                     // This source returns git's text whole or fails above; it never cuts the diff itself.
                     DiffTruncated = false,
                 });
@@ -143,7 +171,8 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
     /// <summary>
     /// The commits the package lists: the range's own commits, newest first, narrowed to the requested paths like the file
     /// list and the diff are. A commit whose changes are all outside those paths is not part of this change set, and listing
-    /// it would make the reviewer read a change it was not given.
+    /// it would make the reviewer read a change it was not given. One commit beyond the cap is fetched so the caller can say
+    /// the list is a prefix instead of presenting the cap as a total.
     /// </summary>
     private async Task<IReadOnlyList<ReviewCommit>> ReadCommitsAsync(
         string directory,
@@ -154,10 +183,10 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
     {
         var history = await git.GetLogAsync(
                 directory,
-                new GitLogOptions { Revision = exclude + ".." + head, Paths = paths, Limit = CommitListLimit },
+                new GitLogOptions { Revision = exclude + ".." + head, Paths = paths, Limit = CommitListLimit + 1 },
                 ct)
             .ConfigureAwait(false);
-        var commits = new List<ReviewCommit>(history.Count);
+        var commits = new List<ReviewCommit>(Math.Min(history.Count, CommitListLimit));
         foreach (var commit in history)
         {
             commits.Add(new ReviewCommit(commit.Id, commit.Subject));

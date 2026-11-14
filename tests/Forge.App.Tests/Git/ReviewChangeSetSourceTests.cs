@@ -277,6 +277,113 @@ public sealed class ReviewChangeSetSourceTests
         Assert.DoesNotContain("Reading the change set failed", result.Error!, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task A_base_that_moved_ahead_is_compared_from_the_merge_base_not_from_the_base_tip()
+    {
+        // The two-dot trap: `git diff origin/main` against a base that gained commits would show those upstream commits as
+        // deletions in this change set. The rest of the app reads `base...HEAD`, so a review must too.
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        var fork = HeadOf(work);
+        var other = sandbox.Clone("other");
+        sandbox.CommitAndPush(other, "upstream.txt", "upstream\n", "upstream moved on");
+        GitTestShell.RunChecked(work, "fetch", "-q", "origin");
+        Commit(work, "this branch only", ("feat.txt", "feat\n"));
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Base = "origin/main" },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.Equal(fork, changeSet.Base);
+        var file = Assert.Single(changeSet.Files);
+        Assert.Equal("feat.txt", file.Path);
+        Assert.DoesNotContain("upstream.txt", changeSet.DiffText, StringComparison.Ordinal);
+        var commit = Assert.Single(changeSet.Commits);
+        Assert.Equal("this branch only", commit.Subject);
+    }
+
+    [Fact]
+    public async Task The_default_base_is_resolved_to_a_commit_so_the_package_can_shorten_it()
+    {
+        // GetDefaultBranchAsync answers with a ref name such as origin/main; shortening that to seven characters would print
+        // "base origin/". `remote set-head` because a bare origin created empty has no origin/HEAD to clone yet.
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        var baseline = HeadOf(work);
+        GitTestShell.RunChecked(work, "remote", "set-head", "origin", "-a");
+        Commit(work, "this branch only", ("feat.txt", "feat\n"));
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.Equal(baseline, changeSet.Base);
+        Assert.Equal(40, changeSet.Base!.Length);
+        Assert.DoesNotContain("origin/", changeSet.Base, StringComparison.Ordinal);
+        var commit = Assert.Single(changeSet.Commits);
+        Assert.Equal("this branch only", commit.Subject);
+    }
+
+    [Fact]
+    public async Task A_default_branch_that_is_the_current_branch_reviews_the_uncommitted_tree()
+    {
+        // Same semantic as git_diff: base = the branch you are on is no branch diff at all, so what is left to review is
+        // the working tree. Saying so is better than failing, and Base names exactly what was compared against.
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        GitTestShell.RunChecked(work, "remote", "set-head", "origin", "-a");
+        GitTestShell.RunChecked(work, "push", "-q", "origin", "main");
+        var head = HeadOf(work);
+        Write(work, "file.txt", "v2\n");
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.Equal(head, changeSet.Base);
+        Assert.Empty(changeSet.Commits);
+        Assert.Contains("+v2", changeSet.DiffText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_commit_that_is_gone_fails_with_text_instead_of_gits_own_fatal_line()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Commit = "0123456789abcdef0123456789abcdef01234567" },
+            CancellationToken.None);
+
+        Assert.Null(result.ChangeSet);
+        Assert.Contains("does not exist in this repository", result.Error!, StringComparison.Ordinal);
+        Assert.DoesNotContain("bad object", result.Error!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_change_set_carries_the_paths_it_was_narrowed_to()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        var baseline = HeadOf(work);
+        Commit(work, "two files", ("one.txt", "one\n"), ("two.txt", "two\n"));
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Base = baseline, Paths = ["one.txt"] },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.Equal(["one.txt"], changeSet.Paths);
+        Assert.False(changeSet.CommitsTruncated);
+    }
+
     // ------------------------------------------------------------ cancellation and the result contract
 
     [Fact]

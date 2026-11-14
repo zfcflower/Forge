@@ -14,7 +14,8 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 
 - 所有文件写入(规格、评审)被限制在所属工作区内;创建/更新/删除前解析符号链接与 junction 的真实目标,越界即拒绝。
 - 经 `Forge.Abstractions` 暴露 7 个规格工具:`spec_grep`/`spec_get`/`spec_graph`/`spec_validate`(只读)、`spec_create`/`spec_update`/`spec_delete`(写)。
-- 另有 6 个 git 工具(实现于 `Git/`,由 App 组合根构造、经 `AgentRuntimeServices.Git` 注入,不走 `Forge.Abstractions` 契约):`git_status`/`git_log`/`git_diff`/`git_fetch` 只读,`git_branch`/`git_sync` 写;副作用按工具名固定划分(`git_fetch` 只读、`git_sync` 含写),拉取策略与网络超时仅来自用户设置,不接受工具参数。
+- 另有 6 个 git 工具(实现于 `Git/`,由 App 组合根构造、经 `AgentRuntimeServices.Git` 注入,不走 `Forge.Abstractions` 契约):`git_status`/`git_log`/`git_diff`/`git_fetch` 只读,`git_branch`/`git_sync` 写;副作用按工具名固定划分(`git_fetch` 只读、`git_sync` 含写),拉取策略与网络超时仅来自用户设置,不接受工具参数。`GitCli.GetDiffSnapshotAsync` 返回 `GitDiffSnapshot(Text, Files)`:一次 git 调用同时给出 diff 文本与解析后的文件,给“既要文本又要文件清单”的调用方(评审变更集)用,`GetDiffAsync` 改为它的 `.Files`,所以解析/补未跟踪的逻辑只有一份;`GitCli.EmptyTreeSha` 是 `public`(根提交的评审要与空树对比,常量只能有一份定义)。
+- **评审变更集的 git 侧(`Git/ReviewChangeSetSource.cs`)属于 App,不在这里。** 它只调本模块的公开 API,不把 git 叶子能力拉到 Core(见 forge-app / forge-core)。
 - PR 工具与 git 工具同源(同样实现于 `Git/`、经 `AgentRuntimeServices.PullRequestTools` 注入):`pr_view`/`pr_workflow`/`pr_checks`/`pr_ci_log` 只读,`pr_create`/`pr_sync`/`pr_edit`/`pr_comment_reply`/`pr_comment_resolve`/`review_comment_resolve` 写,`pr_screenshots` 执行(`ToolSideEffect.Execute`)。工具与 UI 只依赖 `IPrPlatform` 接口;`GitHubPlatform`(基于 `GhCli`)是唯一实现,只做 GitHub。**没有工具会合并 PR 或把它标记为可评审**:`MergePullRequestAsync` 与 `MarkPullRequestReadyAsync` 只由 UI 在用户点击后调用,接口给两者的默认实现都直接拒绝,所以平台不支持时调用方拿到的是一句明确答复而不是空实现。
 **评审意见存储。** 评审意见存应用数据目录的 SQLite,不入仓库;`MarkSentAsync` 幂等——对已发送评论重复标记不改写原始 `sent_at`。
 
