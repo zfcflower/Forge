@@ -636,7 +636,7 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>
     /// Providers whose own ceilings differ from the global ones (wave W15), as normalized <c>id|requests|tokens</c> entries
-    /// (empty field = inherit). Only what a provider reports at runtime outranks this; an entry is for a gateway whose operator
+    /// (empty field = inherit). A provider's own reported limit can only tighten it further (the lower number wins); an entry is for a gateway whose operator
     /// knows it is tighter than the defaults. Sorted and de-duplicated; an entry that states nothing is dropped.
     /// </summary>
     public IReadOnlyList<string> RateLimitOverrides
@@ -1057,7 +1057,7 @@ internal sealed class AppPreferences : ObservableObject
         };
 
     /// <summary>
-    /// Keeps the readable override entries, normalized: the id is trimmed and lowercased (provider ids are slugs), the two
+    /// Keeps the readable override entries, normalized: the id is trimmed but its case is kept (provider ids are compared ordinally everywhere else: the limiter, the table), the two
     /// numbers are clamped to the same ranges the fields offer, and an entry that states nothing is dropped. Sorted by id so the
     /// file and the published policy are stable across edits.
     /// </summary>
@@ -1082,7 +1082,7 @@ internal sealed class AppPreferences : ObservableObject
                 continue;
             }
 
-            var providerId = parts[0].Trim().ToLowerInvariant();
+            var providerId = parts[0].Trim();
             var requests = Number(parts[1], MaxRateLimitRequestsPerMinute);
             var tokens = Number(parts[2], MaxRateLimitTokensPerMinute);
             if (providerId.Length == 0 || (requests is null && tokens is null))

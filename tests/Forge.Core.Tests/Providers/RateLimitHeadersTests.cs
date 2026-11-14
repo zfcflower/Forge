@@ -70,6 +70,55 @@ public class RateLimitHeadersTests
         Assert.Null(RateLimitHeaders.Read(headers: null, Now));
     }
 
+    // ------------------------------------------------------------------ what the providers do with it
+
+    private sealed class Recorder : IUsageRecorder
+    {
+        public List<UsageRecord> Records { get; } = [];
+
+        public void Record(UsageRecord record) => Records.Add(record);
+    }
+
+    /// <summary>
+    /// The default of <c>HttpChatProvider.ReadRateLimit</c>: every OpenAI-compatible provider now attaches a throttle-only
+    /// <see cref="ProviderRateLimit"/> to the turn's completion when the response carried the generic headers. Pinned because
+    /// the composer strip then shows a per-minute meter for such providers (<c>HasQuota</c> accepts a throttle alone) and the
+    /// clock for the reset is the injected one, not the system's.
+    /// </summary>
+    [Fact]
+    public async Task An_openai_compatible_answer_carries_the_generic_headers_as_a_throttle_only_reading()
+    {
+        var recorder = new Recorder();
+        var handler = new FakeHttpMessageHandler().Enqueue(() =>
+        {
+            var response = FakeHttpMessageHandler.SseResponse(TestData.Sse(
+                """{"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}""",
+                """{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""",
+                """{"id":"c1","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2}}""",
+                "[DONE]"));
+            response.Headers.TryAddWithoutValidation(LimitRequests, "50");
+            response.Headers.TryAddWithoutValidation(RemainingRequests, "43");
+            response.Headers.TryAddWithoutValidation(ResetRequests, "30s");
+            return response;
+        });
+        var clock = new SteppingTimeProvider(Now);
+        var provider = new OpenAiCompatibleProvider(
+            TestData.OpenAiConfig(),
+            handler.CreateClient(),
+            options: new ProviderOptions { Time = clock, UsageRecorder = recorder });
+
+        var completed = (await provider.CollectAsync(TestData.Request())).Completed();
+
+        var reading = completed.RateLimit;
+        Assert.NotNull(reading);
+        Assert.False(reading.HasWindows);
+        Assert.False(reading.IsRejected);
+        Assert.Equal(new ProviderThrottle(50, 43, Now + TimeSpan.FromSeconds(30), null, null, null), reading.Throttle);
+
+        // The usage log is fed by the Anthropic reader only: a generic reading does not turn into a rateLimit node.
+        Assert.Null(Assert.Single(recorder.Records).RateLimit);
+    }
+
     // ------------------------------------------------------------------ the reset dialects
 
     [Theory]
@@ -86,6 +135,35 @@ public class RateLimitHeadersTests
         Assert.NotNull(throttle);
         Assert.Equal(Now + TimeSpan.FromSeconds(seconds), throttle.RequestResetAt);
         Assert.Equal(Now + TimeSpan.FromSeconds(seconds), throttle.TokenResetAt);
+    }
+
+    [Fact]
+    public void A_bare_number_is_bounded_like_a_duration_so_a_hold_always_has_an_exit()
+    {
+        var year = TimeSpan.FromDays(365).TotalSeconds;
+
+        Assert.Equal(Now + TimeSpan.FromDays(365), RateLimitHeaders.Read(Headers((ResetRequests, year.ToString("0", CultureInfo.InvariantCulture))), Now)!.RequestResetAt);
+
+        // A day over the year, the largest finite number and a number only a unix timestamp in the far future could be.
+        Assert.Null(RateLimitHeaders.Read(Headers((ResetRequests, (year + 86400).ToString("0", CultureInfo.InvariantCulture))), Now));
+        Assert.Null(RateLimitHeaders.Read(Headers((ResetRequests, "1e300")), Now));
+        Assert.Null(RateLimitHeaders.Read(Headers((ResetRequests, "99999999999")), Now));
+    }
+
+    [Fact]
+    public void A_bare_number_above_a_billion_is_a_unix_timestamp_not_a_wait()
+    {
+        var future = Now + TimeSpan.FromSeconds(90);
+        var throttle = RateLimitHeaders.Read(
+            Headers((ResetRequests, future.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture))),
+            Now);
+
+        Assert.NotNull(throttle);
+        Assert.Equal(future, throttle.RequestResetAt);
+
+        // The same shape in the past says nothing usable.
+        var past = (Now - TimeSpan.FromMinutes(5)).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+        Assert.Null(RateLimitHeaders.Read(Headers((ResetRequests, past)), Now));
     }
 
     [Fact]

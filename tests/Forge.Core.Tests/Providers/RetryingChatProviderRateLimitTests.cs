@@ -206,7 +206,7 @@ public class RetryingChatProviderRateLimitTests
             endpoint,
             maxAttempts: 2,
             baseDelay: TimeSpan.FromMilliseconds(100),
-            delayAsync: (delay, _) =>
+            delayAsync: (delay, token) =>
             {
                 delays.Add(delay);
                 cts.Cancel();
@@ -226,6 +226,179 @@ public class RetryingChatProviderRateLimitTests
         // The cancelled request paid nothing: the bucket is still empty, so a one-token request still waits for one.
         Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 1, out var empty));
         Assert.InRange(empty, TimeSpan.FromSeconds(0.5), TimeSpan.FromSeconds(1));
+    }
+
+    // ------------------------------------------------------------------ what a failure's headers do, wherever it ends
+
+    [Fact]
+    public async Task The_last_attempt_still_reports_its_rejected_window_so_the_next_request_is_held()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        var endpoint = new ScriptedEndpoint("p", Fails(RejectedUntil(Start + TimeSpan.FromMinutes(10))));
+
+        // One attempt only: nothing is retried, yet the failure's reading must still reach the budget before it is thrown.
+        await Assert.ThrowsAsync<ProviderException>(
+            () => Wrap(endpoint, limiter, time, [], maxAttempts: 1).CollectAsync(TestData.Request()));
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out var held));
+        Assert.InRange(held, TimeSpan.FromMinutes(9), TimeSpan.FromMinutes(10));
+    }
+
+    [Fact]
+    public async Task A_failure_that_is_not_retryable_still_reports_its_reading()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        var refusal = new ProviderException("no", retryable: false) { RateLimit = RejectedUntil(Start + TimeSpan.FromMinutes(10)) };
+        var endpoint = new ScriptedEndpoint("p", () => throw refusal);
+
+        await Assert.ThrowsAsync<ProviderException>(
+            () => Wrap(endpoint, limiter, time, []).CollectAsync(TestData.Request()));
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public async Task A_spent_quota_still_reports_its_reading_before_it_surfaces()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        var quota = new ProviderException("usage limit reached", retryable: true, statusCode: 429)
+        {
+            RateLimit = RejectedUntil(Start + TimeSpan.FromMinutes(40)),
+        };
+        var endpoint = new ScriptedEndpoint("p", () => throw quota);
+
+        var thrown = await Assert.ThrowsAsync<ProviderException>(
+            () => Wrap(endpoint, limiter, time, []).CollectAsync(TestData.Request()));
+
+        Assert.Same(quota, thrown);
+        Assert.Equal(1, endpoint.Calls);
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public async Task An_accepted_answer_sets_no_hold_even_when_its_headers_say_a_window_is_rejected()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        var endpoint = new ScriptedEndpoint(
+            "p",
+            Completes(rateLimit: RejectedUntil(Start + TimeSpan.FromHours(3), RateLimitStatus.Allowed)));
+
+        await Wrap(endpoint, limiter, time, []).CollectAsync(TestData.Request());
+
+        // The answer is the proof that the request was taken (overage allowance); the next one must not be stalled.
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+    }
+
+    // ------------------------------------------------------------------ the wait that gave up, and what was settled
+
+    [Fact]
+    public async Task A_budget_that_gives_up_reports_what_is_still_missing_not_what_was_already_slept()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 100 });
+        limiter.Observe("p", RejectedUntil(Start + TimeSpan.FromMinutes(4.5)), Start);
+        var delays = new List<TimeSpan>();
+        var endpoint = new ScriptedEndpoint("p", Completes());
+        var provider = new RetryingChatProvider(
+            endpoint,
+            delayAsync: (delay, token) =>
+            {
+                delays.Add(delay);
+                time.Advance(delay);
+
+                // Someone else spends the budget during the first wait, so a second, shorter wait is needed.
+                if (delays.Count == 1)
+                {
+                    limiter.Acquire("p", Estimate, out _);
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            timeProvider: time,
+            rateLimiter: limiter,
+            tokenCounter: new FlatTokenCounter(Estimate));
+
+        var failure = await Assert.ThrowsAsync<ProviderException>(() => provider.CollectAsync(TestData.Request()));
+
+        // 4.5 min were slept, a minute more is missing: the delay a caller reads is that minute, not 5.5 minutes.
+        Assert.Equal(429, failure.StatusCode);
+        Assert.True(ProviderErrors.TryGetRetryAfter(failure, out var retryAfter));
+        Assert.InRange(retryAfter, TimeSpan.FromSeconds(55), TimeSpan.FromSeconds(61));
+        Assert.Equal(0, endpoint.Calls);
+    }
+
+    [Fact]
+    public async Task A_request_that_was_never_metered_is_not_settled_into_free_credit()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 50 });
+
+        // The 100-token estimate is over the whole 50-token budget, so it leaves unmetered (and empties the bucket). Its
+        // answer says 30 tokens: settling that against the 100 it never paid would refund 70 and fill the bucket again.
+        var endpoint = new ScriptedEndpoint("p", Completes(new TokenUsage(30, 1, 0, 0)));
+        await Wrap(endpoint, limiter, time, []).CollectAsync(TestData.Request());
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 1, out _));
+    }
+
+    // ------------------------------------------------------------------ no limiter, no work; the middleware's default
+
+    [Fact]
+    public async Task Without_a_limiter_or_with_the_budget_off_the_prompt_is_not_even_counted()
+    {
+        var counter = new CountingCounter();
+        var off = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+        off.Publish(ProviderRateLimitPolicy.Default with { Enabled = false });
+
+        foreach (var limiter in new ProviderRateLimiter?[] { null, off })
+        {
+            var endpoint = new ScriptedEndpoint("p", Completes());
+            await new RetryingChatProvider(endpoint, rateLimiter: limiter, tokenCounter: counter).CollectAsync(TestData.Request());
+        }
+
+        Assert.Equal(0, counter.Calls);
+    }
+
+    [Fact]
+    public async Task The_retry_middleware_charges_only_the_limiter_it_was_given()
+    {
+        var shared = ProviderRateLimiter.Shared;
+        var none = new Forge.Core.Providers.Internal.RetryMiddleware();
+        var endpoint = new ScriptedEndpoint("middleware-default-id", Completes(), Completes(), Completes());
+        var provider = none.Apply(endpoint);
+        for (var call = 0; call < 3; call++)
+        {
+            await provider.CollectAsync(TestData.Request());
+        }
+
+        // Null means no budget: the process-wide limiter never saw this provider, so all of its default 600 are still there.
+        for (var request = 0; request < 600; request++)
+        {
+            Assert.Equal(RateLimitDecision.Authorized, shared.Acquire("middleware-default-id", 0, out _));
+        }
+
+        var explicitShared = new Forge.Core.Providers.Internal.RetryMiddleware(shared);
+        var endpoint2 = new ScriptedEndpoint("middleware-shared-id", Completes(), Completes(), Completes());
+        var provider2 = explicitShared.Apply(endpoint2);
+        for (var call = 0; call < 3; call++)
+        {
+            await provider2.CollectAsync(TestData.Request());
+        }
+
+        // Given Shared explicitly, it charged those three requests.
+        var room = 0;
+        while (room < 700 && shared.Acquire("middleware-shared-id", 0, out _) == RateLimitDecision.Authorized)
+        {
+            room++;
+        }
+
+        Assert.InRange(room, 595, 598);
     }
 
     // ------------------------------------------------------------------ wiring it up changes nothing else
@@ -275,7 +448,7 @@ public class RetryingChatProviderRateLimitTests
             inner,
             maxAttempts: maxAttempts,
             baseDelay: TimeSpan.FromMilliseconds(100),
-            delayAsync: (delay, _) =>
+            delayAsync: (delay, token) =>
             {
                 // Recording the wait and moving the clock together is what makes "no real sleeping" observable: the
                 // budget that asked for the wait is refilled by exactly that much when the delay is over.
@@ -295,12 +468,18 @@ public class RetryingChatProviderRateLimitTests
     private static Func<ChatStreamEvent[]> Fails(ProviderRateLimit? rateLimit = null) =>
         () => throw new ProviderException("the endpoint refused the request", retryable: true) { RateLimit = rateLimit };
 
-    private static Func<ChatStreamEvent[]> Completes(TokenUsage? usage = null) =>
+    private static Func<ChatStreamEvent[]> Completes(TokenUsage? usage = null, ProviderRateLimit? rateLimit = null) =>
         () =>
         [
             new TextDelta("ok"),
-            new MessageCompleted(ChatMessage.Assistant("ok"), usage ?? TokenUsage.Empty, StopReason.EndTurn),
+            new MessageCompleted(ChatMessage.Assistant("ok"), usage ?? TokenUsage.Empty, StopReason.EndTurn)
+            {
+                RateLimit = rateLimit,
+            },
         ];
+
+    private static ProviderRateLimit RejectedUntil(DateTimeOffset reset, RateLimitStatus overage = RateLimitStatus.Unknown) =>
+        new(null, reset, RateLimitStatus.Rejected, null, null, RateLimitStatus.Unknown, null, overage);
 
     /// <summary>
     /// The waits the middleware meant to wait. The refill is fixed point, so a wait that a rounding residue left one unit
@@ -340,6 +519,23 @@ public class RetryingChatProviderRateLimitTests
             {
                 yield return evt;
             }
+        }
+    }
+
+    private sealed class CountingCounter : ITokenCounter
+    {
+        public int Calls { get; private set; }
+
+        public int Count(IReadOnlyList<ChatMessage> messages)
+        {
+            Calls++;
+            return 1;
+        }
+
+        public int Count(string text)
+        {
+            Calls++;
+            return 1;
         }
     }
 

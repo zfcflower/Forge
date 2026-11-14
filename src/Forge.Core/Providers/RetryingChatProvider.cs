@@ -73,14 +73,16 @@ public sealed class RetryingChatProvider : IChatProvider
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // The estimate is charged before the first attempt and reconciled with the usage the answer reports, so a retry
-        // pays for itself instead of hiding behind a reservation made once.
-        var reserved = EstimateTokens(request);
+        // The estimate is charged before each attempt and reconciled with the usage the answer reports, so a retry pays for
+        // itself instead of hiding behind a reservation made once. With no limiter, or with the budget switched off, nobody
+        // reads the number, so the walk over the messages (an enumerator per message) is not paid at all.
+        var reserved = _rateLimiter is { Policy.Enabled: true } ? EstimateTokens(request) : 0;
+        var charged = 0;
 
         for (var attempt = 1; ; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            await WaitForBudgetAsync(reserved, ct).ConfigureAwait(false);
+            charged = await WaitForBudgetAsync(reserved, ct).ConfigureAwait(false);
 
             var enumerator = _inner.StreamAsync(request, ct).GetAsyncEnumerator(ct);
             var yielded = false;
@@ -113,7 +115,7 @@ public sealed class RetryingChatProvider : IChatProvider
                     yielded = true;
                     if (enumerator.Current is MessageCompleted completed)
                     {
-                        Settle(reserved, completed.Usage, completed.RateLimit);
+                        Settle(charged, completed.Usage, completed.RateLimit);
                     }
 
                     yield return enumerator.Current;
@@ -124,16 +126,18 @@ public sealed class RetryingChatProvider : IChatProvider
                 await enumerator.DisposeAsync().ConfigureAwait(false);
             }
 
-            if (failure is null || yielded || attempt >= _maxAttempts || !IsRetryable(failure, ct) || IsQuota(failure))
-            {
-                throw Rethrow(failure ?? new ProviderException($"{_inner.Id}: stream ended unexpectedly.", retryable: true));
-            }
-
-            // A refused attempt still spent the provider's tokens, and its headers are the only place the real budget shows:
-            // the retry therefore starts from the calibrated numbers rather than from the estimate that was just rejected.
+            // A refused attempt still spent the provider's tokens, and its headers are the only place the real budget shows.
+            // They are read whatever happens next - the last attempt, a failure that is not retried, a spent quota - because
+            // the hold a rejected window implies matters most exactly when this request gives up: the next one (a new turn,
+            // an automation resume) must not walk into the same refusal.
             if (failure is ProviderException { RateLimit: { } reading })
             {
                 _rateLimiter?.Observe(_inner.Id, reading, _time.GetUtcNow());
+            }
+
+            if (failure is null || yielded || attempt >= _maxAttempts || !IsRetryable(failure, ct) || IsQuota(failure))
+            {
+                throw Rethrow(failure ?? new ProviderException($"{_inner.Id}: stream ended unexpectedly.", retryable: true));
             }
 
             await _delay(ComputeDelay(attempt, failure), ct).ConfigureAwait(false);
@@ -160,29 +164,32 @@ public sealed class RetryingChatProvider : IChatProvider
     /// of minutes is a spent window, not jitter). Bounding the total also makes this loop terminate whatever the clock does: a
     /// bucket that keeps reporting a short wait against a clock that never advances would otherwise spin here forever.
     /// </summary>
-    private async ValueTask WaitForBudgetAsync(int reservedTokens, CancellationToken ct)
+    /// <returns>The tokens the budget actually charged for this attempt (what <see cref="Settle"/> reconciles); zero when nothing was.</returns>
+    private async ValueTask<int> WaitForBudgetAsync(int reservedTokens, CancellationToken ct)
     {
         if (_rateLimiter is null)
         {
-            return;
+            return 0;
         }
 
         var waited = TimeSpan.Zero;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var decision = _rateLimiter.Acquire(_inner.Id, reservedTokens, out var retryAfter);
+            var decision = _rateLimiter.Acquire(_inner.Id, reservedTokens, out var retryAfter, out var charged);
             if (decision != RateLimitDecision.Wait)
             {
                 // Authorized (charged), Disabled (nothing charged), ExceedsCapacity and NeverRefills all mean "send it": the
                 // first two are permission, and the last two are shapes in which waiting helps nobody.
-                return;
+                return charged;
             }
 
             var need = retryAfter > TimeSpan.Zero ? retryAfter : TimeSpan.FromMilliseconds(1);
             if (need > _maxRetryAfter || waited + need > _maxRetryAfter)
             {
-                throw BudgetExhausted(waited + need);
+                // What is still missing, not what has already been slept: the delay a caller reads is "how long until a request
+                // can go", and adding the time this loop already spent would push the reset past the moment the budget returns.
+                throw BudgetExhausted(need);
             }
 
             await _delay(need, ct).ConfigureAwait(false);
@@ -193,7 +200,7 @@ public sealed class RetryingChatProvider : IChatProvider
     /// <summary>
     /// Reports what the answer actually cost and what its headers said about the account's budget.
     /// </summary>
-    private void Settle(int reservedTokens, TokenUsage usage, ProviderRateLimit? reading)
+    private void Settle(int chargedTokens, TokenUsage usage, ProviderRateLimit? reading)
     {
         if (_rateLimiter is null)
         {
@@ -208,10 +215,12 @@ public sealed class RetryingChatProvider : IChatProvider
         var actual = usage.InputTokens;
         if (actual > 0)
         {
-            _rateLimiter.Settle(_inner.Id, reservedTokens, actual);
+            _rateLimiter.Settle(_inner.Id, chargedTokens, actual);
         }
 
-        _rateLimiter.Observe(_inner.Id, reading, _time.GetUtcNow());
+        // The answer is the proof that the request was accepted, so a "rejected" window in the same headers (an overage
+        // allowance carrying the account past its spent window) must not hold the next one.
+        _rateLimiter.Observe(_inner.Id, reading, _time.GetUtcNow(), answered: true);
     }
 
     /// <summary>

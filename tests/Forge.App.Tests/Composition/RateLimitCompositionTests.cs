@@ -190,6 +190,25 @@ public sealed class RateLimitCompositionTests
         }
     }
 
+    [Fact]
+    public void A_mixed_case_provider_id_reaches_the_policy_under_the_same_spelling()
+    {
+        try
+        {
+            var preferences = new AppPreferences();
+            preferences.SetRateLimitOverride("MyGateway", 20, null);
+            RateLimitComposition.Publish(preferences);
+
+            var published = ProviderRateLimiter.Shared.Policy;
+            Assert.Equal(20, published.LimitsFor("MyGateway").RequestsPerMinute);
+            Assert.Equal(published.RequestsPerMinute, published.LimitsFor("mygateway").RequestsPerMinute);
+        }
+        finally
+        {
+            Restore();
+        }
+    }
+
     /// <summary>Puts the process-wide limiter back on the policy a test that does not publish expects to find.</summary>
     private static void Restore() => ProviderRateLimiter.Shared.Publish(ProviderRateLimitPolicy.Default);
 }

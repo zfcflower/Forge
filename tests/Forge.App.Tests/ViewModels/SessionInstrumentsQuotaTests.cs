@@ -177,6 +177,40 @@ public sealed class SessionInstrumentsQuotaTests
         });
     }
 
+    /// <summary>
+    /// Every OpenAI-compatible provider now reports the generic <c>x-ratelimit-*</c> headers as a throttle-only reading (the base
+    /// <c>ReadRateLimit</c>), so the strip's quota segment appears for them with a per-minute meter instead of staying empty.
+    /// This is the intended, documented behaviour; the test pins it so it cannot change by accident.
+    /// </summary>
+    [Fact]
+    public async Task A_throttle_only_reading_from_a_plain_provider_shows_the_per_minute_meter()
+    {
+        await SharedUi.RunAsync(async () =>
+        {
+            using var language = new LanguageScope(UiLanguage.Chinese);
+            using var instruments = new SessionInstrumentsViewModel(
+                new SessionInfo("session-1", @"C:\work\forge", "instruments", Now),
+                EmptySessionInstrumentSources.Instance,
+                static () => [],
+                static () => "gpt-5",
+                static () => "openai");
+
+            var generic = new ProviderRateLimit(null, null, RateLimitStatus.Unknown, null, null, RateLimitStatus.Unknown, null, RateLimitStatus.Unknown)
+            {
+                Throttle = new ProviderThrottle(500, 480, Now.AddSeconds(8), 30_000, 21_000, Now.AddSeconds(8)),
+            };
+
+            Assert.False(instruments.HasQuota);
+            instruments.NoteRateLimit("openai", generic);
+
+            Assert.True(instruments.HasQuota);
+            Assert.False(instruments.IsQuotaRejected);
+            Assert.StartsWith("限流 每分钟请求 480/500", instruments.QuotaLabel, StringComparison.Ordinal);
+
+            await Task.CompletedTask;
+        });
+    }
+
     [Fact]
     public async Task The_strip_shows_the_reading_and_hides_it_when_the_picker_moves_away()
     {

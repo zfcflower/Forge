@@ -86,22 +86,22 @@
             Padding="0,12,0,0">
       <StackPanel Spacing="6">
         <TextBlock Classes="title"
-                   Text="{Binding OverridesHeading}" />
+                   Text="{Binding [rateLimit.settings.overrides], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
-                   Text="{Binding OverridesHint}" />
+                   Text="{Binding [rateLimit.settings.overridesHint], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="caption"
                    Margin="0,2,0,4"
-                   Text="{Binding InheritHint}" />
+                   Text="{Binding [rateLimit.settings.inheritHint], Source={x:Static loc:Loc.Instance}}" />
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
                    IsVisible="{Binding !HasProviders}"
-                   Text="{Binding NoProviders}" />
+                   Text="{Binding [rateLimit.settings.noProviders], Source={x:Static loc:Loc.Instance}}" />
         <!-- The escape hatch for entries whose provider is gone: they have no row to clear them from. -->
         <Button HorizontalAlignment="Left"
                 IsVisible="{Binding HasUnusedOverrides}"
                 Command="{Binding ClearUnusedCommand}"
-                Content="{Binding ClearUnusedText}"
+                Content="{Binding [rateLimit.settings.clearUnused], Source={x:Static loc:Loc.Instance}}"
                 AutomationProperties.AutomationId="rate-limit-clear-unused" />
         <ItemsControl ItemsSource="{Binding Rows}"
                       IsVisible="{Binding HasProviders}">

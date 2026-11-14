@@ -148,7 +148,8 @@ internal sealed class RateLimitBucket
         if (cost > ceiling)
         {
             // A single request bigger than the whole budget: no amount of waiting makes room for it, and refusing it would
-            // break long contexts outright. The caller sends it and the provider decides.
+            // break long contexts outright. The caller sends it and the provider decides; the bucket is spent for it.
+            Drain();
             retryAfter = TimeSpan.Zero;
             return RateLimitDecision.ExceedsCapacity;
         }
@@ -160,29 +161,49 @@ internal sealed class RateLimitBucket
             Refill(time.GetTimestamp());
         }
 
-        // Drain first, ask later: one atomic add is the whole success path, and only the rare refusal pays for putting the
-        // cost back. Reading the counter and comparing it out would cost two atomic operations on every request instead.
-        var after = Interlocked.Add(ref tokens, -cost);
-        if (after >= 0)
+        // The balance is never negative, not even for an instant: the cost is subtracted by one compare-exchange that only
+        // succeeds when the whole cost is there. (Draining first and handing the cost back on refusal let another request
+        // see a negative balance and wait for credit that was only borrowed, and let Adjust's clamp turn the refund into
+        // credit that never existed.) The uncontended success path is still one read and one atomic.
+        while (true)
         {
-            retryAfter = TimeSpan.Zero;
-            return RateLimitDecision.Authorized;
-        }
+            var current = Volatile.Read(ref tokens);
+            if (current < cost)
+            {
+                var rate = Volatile.Read(ref perSecond);
+                if (rate <= 0)
+                {
+                    retryAfter = TimeSpan.MaxValue;
+                    return RateLimitDecision.NeverRefills;
+                }
 
-        Interlocked.Add(ref tokens, cost);
-        var rate = Volatile.Read(ref perSecond);
-        if (rate <= 0)
+                // Refill is linear, so the wait for the deficit is exact until the bucket starts being shared again.
+                var seconds = (cost - current) / (double)rate;
+                retryAfter = seconds >= TimeSpan.MaxValue.TotalSeconds
+                    ? TimeSpan.MaxValue
+                    : TimeSpan.FromSeconds(seconds);
+                return RateLimitDecision.Wait;
+            }
+
+            if (cost == 0 || Interlocked.CompareExchange(ref tokens, current - cost, current) == current)
+            {
+                retryAfter = TimeSpan.Zero;
+                return RateLimitDecision.Authorized;
+            }
+        }
+    }
+
+    /// <summary>Empties the bucket (what an over-capacity request spends); the refill stamp is untouched.</summary>
+    private void Drain()
+    {
+        while (true)
         {
-            retryAfter = TimeSpan.MaxValue;
-            return RateLimitDecision.NeverRefills;
+            var current = Volatile.Read(ref tokens);
+            if (current <= 0 || Interlocked.CompareExchange(ref tokens, 0, current) == current)
+            {
+                return;
+            }
         }
-
-        // Refill is linear, so the wait for the deficit is exact until the bucket starts being shared again.
-        var seconds = (cost - (after + cost)) / (double)rate;
-        retryAfter = seconds >= TimeSpan.MaxValue.TotalSeconds
-            ? TimeSpan.MaxValue
-            : TimeSpan.FromSeconds(seconds);
-        return RateLimitDecision.Wait;
     }
 
     /// <summary>Brings <see cref="tokens"/> up to date for a window that ends at <paramref name="now"/>.</summary>
@@ -228,9 +249,7 @@ internal sealed class RateLimitBucket
     }
 
     /// <summary>
-    /// Brings the remaining budget down to the ceiling (after a calibration or a settings change). Only the ceiling is
-    /// enforced: a transient negative balance belongs to a consumer that is about to put its cost back, and flooring it to
-    /// zero here would turn that refund into free credit.
+    /// Brings the remaining budget down to the ceiling (after a calibration or a settings change).
     /// </summary>
     private void Trim()
     {

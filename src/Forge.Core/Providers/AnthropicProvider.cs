@@ -101,7 +101,7 @@ public sealed class AnthropicProvider : HttpChatProvider
         // Anthropic reports its own families; the generic x-ratelimit-* family is the fallback for a gateway in front of it
         // (an OpenAI-shaped proxy speaks the generic headers even when it forwards Anthropic bodies).
         AnthropicRateLimits.Read(response.Headers)
-        ?? RateLimitHeaders.ReadRateLimit(response.Headers, TimeProvider.System.GetUtcNow());
+        ?? RateLimitHeaders.ReadRateLimit(response.Headers, Options.Time.GetUtcNow());
 
     /// <summary>The official client posts to <c>v1/messages?beta=true</c>; the query is part of what its requests look like.</summary>
     protected override string EndpointQuery => Wire is null ? string.Empty : "?beta=true";

@@ -200,6 +200,7 @@ public sealed class RateLimitSettingsSectionTests
             [
                 "  Tight  | 20 |  ",
                 "loose|0|999999999999",
+                "tight|40|",
                 "tight|50|",
                 "nonumbers||",
                 "|||",
@@ -207,8 +208,9 @@ public sealed class RateLimitSettingsSectionTests
             ],
         };
 
-        // Sorted by id, de-duplicated (the last entry for an id wins), clamped, and an entry that states nothing is dropped.
-        Assert.Equal(["loose|0|1000000000", "tight|50|"], preferences.RateLimitOverrides);
+        // Sorted by id (ordinal), de-duplicated (the last entry for an id wins), clamped, and an entry that states nothing is
+        // dropped. The id keeps its case: "Tight" and "tight" are two providers, exactly as they are everywhere downstream.
+        Assert.Equal(["Tight|20|", "loose|0|1000000000", "tight|50|"], preferences.RateLimitOverrides);
 
         var tight = preferences.RateLimitOverrideFor("tight");
         Assert.NotNull(tight);
@@ -221,6 +223,48 @@ public sealed class RateLimitSettingsSectionTests
         Assert.Equal(1_000_000_000, loose.Value.TokensPerMinute);
 
         Assert.Null(preferences.RateLimitOverrideFor("absent"));
+    }
+
+    [Fact]
+    public void A_mixed_case_provider_id_is_one_id_all_the_way_through()
+    {
+        var preferences = new AppPreferences();
+        preferences.SetRateLimitOverride("MyGateway", 20, null);
+
+        // Stored as typed, read back under the same spelling, and not found under another one (ordinal everywhere).
+        Assert.Equal(["MyGateway|20|"], preferences.RateLimitOverrides);
+        Assert.Equal(20, preferences.RateLimitOverrideFor("MyGateway")?.RequestsPerMinute);
+        Assert.Null(preferences.RateLimitOverrideFor("mygateway"));
+
+        // The table's row reads it back, and the connected provider of that exact id is not an orphan.
+        IReadOnlyList<(string Id, string Name)> providers = [("MyGateway", "My gateway")];
+        var section = new RateLimitSettingsSectionViewModel(preferences, () => providers);
+        section.Reload();
+        Assert.Equal(20, section.Rows[0].RequestsPerMinute);
+        Assert.False(section.HasUnusedOverrides);
+
+        // Written again through the row (a different spelling would have been a second entry), it stays one entry.
+        section.Rows[0].TokensPerMinute = 100_000;
+        Assert.Equal(["MyGateway|20|100000"], preferences.RateLimitOverrides);
+    }
+
+    [Fact]
+    public void Nothing_is_called_unused_before_the_catalogue_has_been_read()
+    {
+        var preferences = new AppPreferences();
+        preferences.SetRateLimitOverride("kept", 20, null);
+        preferences.SetRateLimitOverride("other", null, 900_000);
+        IReadOnlyList<(string Id, string Name)> providers = [("kept", "Kept"), ("other", "Other")];
+        var section = new RateLimitSettingsSectionViewModel(preferences, () => providers);
+
+        // No Reload yet: "not connected" would mean "not known yet", so the clear button must not exist, let alone delete both.
+        Assert.False(section.HasUnusedOverrides);
+        Assert.False(section.ClearUnusedCommand.CanExecute(null));
+        section.ClearUnusedCommand.Execute(null);
+        Assert.Equal(["kept|20|", "other||900000"], preferences.RateLimitOverrides);
+
+        section.Reload();
+        Assert.False(section.HasUnusedOverrides);
     }
 
     [Fact]

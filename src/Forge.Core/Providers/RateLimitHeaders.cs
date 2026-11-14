@@ -34,6 +34,14 @@ public static class RateLimitHeaders
     private const string RemainingTokens = "x-ratelimit-remaining-tokens";
     private const string ResetTokens = "x-ratelimit-reset-tokens";
 
+    /// <summary>The farthest a reset may lie in the future; beyond it the value is dropped as unreadable.</summary>
+    private static readonly TimeSpan MaxReset = TimeSpan.FromDays(365);
+
+    /// <summary>Bare numbers above this are unix timestamps, not second counts.</summary>
+    private const double UnixEpochThreshold = 1e9;
+
+    private const double MaxUnixSeconds = 253_402_300_799; // 9999-12-31, the last instant DateTimeOffset holds
+
     /// <summary>The limits <paramref name="headers"/> reported, or null when they carried none of them.</summary>
     /// <param name="headers">Response headers; may be null.</param>
     /// <param name="now">The instant the response was read, used to turn a relative reset into an absolute one.</param>
@@ -93,9 +101,25 @@ public static class RateLimitHeaders
 
         if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
         {
-            return seconds >= 0 && seconds <= TimeSpan.MaxValue.TotalSeconds
-                ? now + TimeSpan.FromSeconds(seconds)
-                : null;
+            // A bare number is seconds from now, bounded like the duration form (a year): a hold must have an exit. A number
+            // above a billion cannot be a wait (it would be 31 years) and is what a gateway sends when it means a unix
+            // timestamp, so it is read as one.
+            if (!double.IsFinite(seconds) || seconds < 0)
+            {
+                return null;
+            }
+
+            if (seconds > UnixEpochThreshold)
+            {
+                return seconds < MaxUnixSeconds
+                    && DateTimeOffset.FromUnixTimeSeconds((long)seconds) is var epoch
+                    && epoch > now
+                    && epoch - now <= MaxReset
+                        ? epoch
+                        : null;
+            }
+
+            return seconds <= MaxReset.TotalSeconds ? now + TimeSpan.FromSeconds(seconds) : null;
         }
 
         if (TryParseDuration(text, out var duration))
@@ -105,6 +129,7 @@ public static class RateLimitHeaders
 
         return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var stamp)
             && stamp > now
+            && stamp - now <= MaxReset
             ? stamp
             : null;
     }
@@ -161,7 +186,7 @@ public static class RateLimitHeaders
             total += part;
         }
 
-        if (total < TimeSpan.Zero || total > TimeSpan.FromDays(365))
+        if (total < TimeSpan.Zero || total > MaxReset)
         {
             return false;
         }

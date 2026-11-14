@@ -11,19 +11,20 @@
 | `RateLimitPolicy.cs` | `ProviderRateLimitPolicy`:一份进程级策略(开关、请求/分钟、令牌/分钟、自动化恢复间隔),不可变,`Normalized()` 把非法值夹回范围内 |
 | `RateLimitBucket.cs` | 一个预算桶:注入 `TimeProvider`、惰性补充、两个 64 位字的发布状态、`Take` 返回四态决定 |
 | `RateLimitHeaders.cs` | 通用 `x-ratelimit-limit\|remaining\|reset-{requests,tokens}` 的读取(OpenAI 与多数兼容服务器每个响应都发),含 `-reset-*` 的时长方言解析 |
-| `ProviderRateLimiter.cs` | 每提供商两个桶 + 一个 hold + 一个自动化槽位;`Acquire` / `Settle` / `Observe` / `ReserveAutomationSlot` / `Publish`,以及进程级的 `Shared` |
+| `ProviderRateLimiter.cs` | 每提供商两个桶 + 一个 hold + 一个自动化槽位 + 两个“已报上限”(`ReportedRequests/ReportedTokens`);`Acquire`(含 `out chargedTokens` 重载)/ `Settle` / `Observe` / `ReserveAutomationSlot` / `Publish`,以及进程级的 `Shared`;生效上限 = 手填/全局与已报两者的较小者 |
+| `RateLimitPolicy.cs` 内的 `ProviderRateLimitLimits` | 每提供商覆盖的值类型(`RequestsPerMinute?`/`TokensPerMinute?`,缺 = 继承,0 = 不限);初版交付面清单漏了它 |
 
 改动:
 
 | 文件 | 改什么 |
 |---|---|
 | `RetryingChatProvider.cs` | 用 `TimeProvider`(退避、额度分类、预算等待);每次尝试前 `Acquire`,应答后 `Settle` + `Observe`,失败后 `Observe`;等待超过 `maxRetryAfter` 转成带 `Retry-After` 的 429 |
-| `Providers/Internal/ChatProviderPipeline.cs` | `RetryMiddleware` 可接收预算,缺省用 `ProviderRateLimiter.Shared`(这是运行期接线点:中间件是唯一看得见每次尝试的地方) |
+| `Providers/Internal/ChatProviderPipeline.cs` | `RetryMiddleware` 可接收预算,**缺省 `null` = 不限速**(评审后改:原先缺省回落 `Shared`,随手 new 的中间件会碰进程级状态);`ProviderCatalog` 显式传 `Shared`(这是运行期接线点:中间件是唯一看得见每次尝试的地方) |
 | `Providers/HttpChatProvider.cs` | `ReadRateLimit` 的缺省实现从"永远 null"改成读通用 `x-ratelimit-*`:OpenAI 兼容提供商不再只能靠被拒绝来学习限额 |
 | `Providers/AnthropicProvider.cs` | 覆盖该钩子时先读 `anthropic-ratelimit-*`,读不到回落通用家族 |
 | `src/Forge.App/Automations/QuotaResume.cs` | 删除 `ResumeStagger`(锁 + 字典),恢复间隔改调 `ProviderRateLimiter.ReserveAutomationSlot` |
 | `src/Forge.App/Automations/AutomationService.cs` | 构造参数 `ProviderRateLimiter? rateLimits = null`(缺省 `Shared`),交给 `QuotaResumeRunner` |
-| `src/Forge.App/Preferences/AppPreferences.cs` | 四项偏好(开关、请求/分钟、令牌/分钟、恢复间隔秒) |
+| `src/Forge.App/Preferences/AppPreferences.cs` | 四项偏好(开关、请求/分钟、令牌/分钟、恢复间隔秒)+ 每提供商覆盖表(`rateLimitOverrides`,id 区分大小写、保持原写法,见六之三);即“四项+覆盖表”,共五项偏好 |
 | `src/Forge.App/Preferences/SettingsSection.cs` | `SettingsSectionIds.RateLimit`(`"rate-limit"`)与 order 115 |
 | `src/Forge.App/Settings/RateLimitSettingsSectionViewModel.cs`、`Views/RateLimitSettingsSectionView.axaml(.cs)`、`Localization/Strings.RateLimit.cs`、`Composition/RateLimitComposition.cs` | 设置分区与文案;`Register` 里把偏好投成策略并 `ProviderRateLimiter.Shared.Publish`(启动一次 + 四项偏好任一变化时一次) |
 | `src/Forge.App/Composition/FeatureComposition.cs` | 一行 `RateLimitComposition.Register(composition, settings);` |
@@ -46,51 +47,46 @@
 
 **QuotaResume。** `ResumeStagger`(一把锁 + 一个字典)删除,`Reserve` 改成 `ReserveAutomationSlot`。注意这里刻意**不是**令牌桶:预留会把这家提供商的下一个空档再推一个 gap(同一瞬间三次预留得到 0、gap、2×gap),否则同一时刻到点的多个等待运行会一起放行,正是原来那个 gap 要避免的。
 
-**设置。** `rate-limit` 分区(order 115,AGENT 组,紧接模型可见性):开关、请求/分钟(1–100000,默认 600)、令牌/分钟(1000–1e9,默认 4,000,000)、自动化恢复间隔(0–600 秒,默认 10)。默认宽松:它不是节流器,而是"防跑飞"——子 Agent 扇出、自动化重试、另一个会话同时恢复,都能在一秒内烧掉一整分钟的额度。某一维为 0 表示该维度不限。
+**设置。** `rate-limit` 分区(order 115,AGENT 组,紧接模型可见性):开关(关掉它同时关掉自动化恢复间隔)、请求/分钟(1–100000,默认 600)、令牌/分钟(1000–1e9,默认 4,000,000)、自动化恢复间隔(0–600 秒,默认 10)。默认宽松:它不是节流器,而是"防跑飞"——子 Agent 扇出、自动化重试、另一个会话同时恢复,都能在一秒内烧掉一整分钟的额度。某一维为 0 表示该维度不限。
 
 ## 三、被否的备选
 
 1. **参照 `Boarlock/TokenRateLimiter` 的原始形状:每次操作发布一个不可变 state 记录再 CAS。** 这是最直白的"不可变状态 + CAS",但每次授权分配一个对象(~32 字节)。基准的验收项是"0 字节/次",而且这段代码跑在正要序列化一大段提示词的线程上。所以只借了它的两件事:惰性补充 + 结果分四态;发布机制换成两个 64 位字。退出条件明确:如果将来有人要一个"可快照、可序列化的完整状态对象",这条仍可回退。
 2. **用 `System.Threading.RateLimiting`(`TokenBucketRateLimiter`)。** 官方包,但:①它为通用场景设计,一次 `AcquireAsync` 返回一个要 `Dispose` 的 lease,零分配说法不成立;②没有 per-provider 键控、没有 `x-ratelimit-*` 校准、没有"单请求超过容量"的独立结论(它只给 `AcquireFailed`),这些都得在外面再包一层;③多一个随框架版本升级的依赖面。写 200 行断言得起的代码,比把三条语义拆到两个包之间更便宜。
-3. **纯锁实现(基准里的基线)。** 无争用时它不慢(见数字),但 8 线程共享一个桶时它把同一行缓存在线程之间传递:实测 `163 ns/op` 对 CAS 版的 `67 ns/op`。而争用恰恰是这个组件存在的场景(并行子 Agent、多个会话同时恢复)。
+3. **纯锁实现(基准里的基线)。** 无争用时它不慢(见数字),但 8 线程共享一个桶时它把同一行缓存在线程之间传递:实测 `171 ns/op` 对 CAS 版的 `66 ns/op`(最终复测)。而争用恰恰是这个组件存在的场景(并行子 Agent、多个会话同时恢复)。
 4. **把请求与令牌两维压成一个"分钟份额"桶(每次取 `max(1/RPM, tokens/TPM)`)。** 只要一次原子操作、实现更短,但对混合负载会**过严**:一个长请求加一批短请求,真实约束都没到,合成桶已经拒绝。它换来的是实现简洁,代价是正确性(会平白多等),所以不做。
 
 ## 四、为什么最优(四条判据)
 
-**性能。** 请求路径上没有锁、没有分配、成功时一次原子操作、(无 hold 时)不读时钟;UI 线程完全不参与(桶是纯数据结构,`Acquire` 在发起请求的线程上同步执行,微秒以下)。策略读是 volatile 读,设置变更不需要重启任何会话。基准见第五节:成功路径 38 ns/次、等待路径 78 ns/次、8 线程争用 67 ns/op(基线 163 ns/op),三行都是 0 字节/次。
+**性能。** 请求路径上没有锁、没有分配、成功时一次原子操作、(无 hold 时)不读时钟;UI 线程完全不参与(桶是纯数据结构,`Acquire` 在发起请求的线程上同步执行,微秒以下)。策略读是 volatile 读,设置变更不需要重启任何会话。基准见第五节(评审修复后的最终复测):成功路径 ~68 ns/次、等待路径 ~86–110 ns/次、8 线程争用 66 ns/op(锁基线 171 ns/op),三行都是 0 字节/次。
 
 **依赖与 AOT。** 零新包(只加了 `tools/Forge.Bench` 对 `Forge.Core` 的项目引用,bench 本来就在仓内)。没有 P/Invoke、没有反射、没有 Roslyn;`dotnet build Forge.slnx` 含 Native AOT 分析器仍 0 警告。
 
-**契约与可测性。** 契约只有三处:`ProviderRateLimitPolicy`(值)、`ProviderRateLimiter`(进程级一个实例 + 可注入 `TimeProvider`)、`RateLimitDecision`(四态 + Disabled)。唯一所有者是 `Forge.Core/Providers`;App 只 `Publish` 策略,不持有桶。可测性来自注入的 `TimeProvider`:桶、校准(上限/剩余/重置→hold)、自动化预留全部可以在不睡眠的情况下钉住;重试层的等待经既有的 `delayAsync` 钩子注入,用例里不真的等。
+**契约与可测性。** 契约只有四处:`ProviderRateLimitPolicy`(值)、`ProviderRateLimitLimits`(每提供商覆盖的值,初版清单漏列)、`ProviderRateLimiter`(进程级一个实例 + 可注入 `TimeProvider`)、`RateLimitDecision`(四态 + Disabled)。唯一所有者是 `Forge.Core/Providers`;App 只 `Publish` 策略,不持有桶。可测性来自注入的 `TimeProvider`:桶、校准(上限/剩余/重置→hold)、自动化预留全部可以在不睡眠的情况下钉住;重试层的等待经既有的 `delayAsync` 钩子注入,用例里不真的等。
 
 **回滚成本。** 这一波单独 revert 是干净的:删除 `Providers/RateLimit*.cs`、把 `RetryingChatProvider` 的两个可选参数与 `RetryMiddleware` 的预算参数去掉、恢复 `ResumeStagger`、删掉设置分区与四行偏好。没有 schema 变更、没有存储格式变更、没有 provider wire 行为变更(校准只影响本地等待)。
 
-## 五、基准(`tools/Forge.Bench -- ratelimit`)
+## 五、基准(`tools/Forge.Bench -- RateLimit --quick`)
 
-实施前(只有"一把锁"的基线实现,同机、同一份场景代码;这是计划要求的"先于实现落基线"):
+**以下是评审修复(`Take` 改 CAS 循环、生效上限取小、hold 封顶等)之后的最终复测,全文唯一的一组数字**(本机,`dotnet run -c Release --project tools/Forge.Bench -- RateLimit --quick`;实现与基线同一循环交替计时)。
 
-| 行 | p50 | 说明 |
-|---|---|---|
-| `ratelimit.acquire.authorized` | 70 ns/acquire | 0 字节/次 |
-| `ratelimit.acquire.wait` | 64 ns/acquire | 0 字节/次 |
-| `ratelimit.acquire.contended.8t` | 197 ns/op、5.1 Mitems/s | spread 1.00 |
+此前并列保留过的“实施前 / 首版实现”数字已被取代:它们来自不同轮次、彼此不一致(曾出现 38/67/163、37.4/58.3/~150 与 38.8/72.3/185.7 三组),读相对值而不是绝对值。实施前只有锁基线(成功 70 ns、等待 64 ns、争用 197 ns/op),仅作历史参照。
 
-实施后(实现 + 基线在同一循环里交替计时,读取相对值;机器安静时的一轮):
-
-| 行 | 实现 | 基线(锁) | 比值 | 分配 |
+| 行 | 最终复测 实现 | 基线(锁) | 比值 | 分配 |
 |---|---|---|---|---|
-| `ratelimit.acquire.authorized` | 37.4 ns/acquire | 61 ns/acquire | 0.62x | 0 字节/次 |
-| `ratelimit.acquire.wait` | 70.1 ns/acquire | 65 ns/acquire | 1.17x | 0 字节/次 |
-| `ratelimit.acquire.contended.8t` | 58.3 ns/op、15 Mitems/s | ~150 ns/op | 0.39x | 每次调用 ~2.4 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
-| `ratelimit.acquire.fairness.8t` | 8000 请求预算花 8001(补充给 1 个) | 锁基线的 spread 本轮 532 | 0.5x | 同上;per-thread 计数见下 |
+| `ratelimit.acquire.authorized` | 67.7 ns/acquire(三次复测 60–68) | 同量级 | 0.99x | 0 字节/次 |
+| `ratelimit.acquire.wait` | 109.8 ns/acquire(三次复测 86–110) | 78 ns | 1.40x | 0 字节/次 |
+| `ratelimit.acquire.contended.8t` | 65.9 ns/op、14.8 Mitems/s | 171 ns/op(2.74 ms/16000) | 0.40x | 每次调用 ~2.4 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
+| `ratelimit.acquire.fairness.8t` | 4.2 ms,8000 请求预算只花一次 | 28.5 ms | 0.15x | 同上 |
+| `ratelimit.request.overhead`(新增:估算 + Acquire + Settle + Observe) | 2.04 ms/1000 请求(约 2.0 µs/请求) | 仅估算 1.86 ms | 1.10x | 680 B/请求,全部来自提示估算(`ApproximateTokenCounter`),限速器自己 0 |
 
-数值按"机器安静时的一轮"记录,同一份代码在不同轮之间会上下浮动 20–50%(这批行只有几十纳秒到几十毫秒),比值(impl/base)比绝对值稳。
+读法:一次请求的限速净开销约 0.22–0.25 µs(新增行与“仅估算”的差),其余是提示估算本身——所以限速关闭(或没有限流器)时 `RetryingChatProvider` 整个跳过估算(评审低-12)。
 
-**等待路径是有意慢一点的那条**(1.17x):拒绝必须读时钟、算补充、算精确 retryTime,而锁版本只做一次减法;它仍在 100 ns 以内,而且只在预算真的用完时才走到。
+**等待路径比修复前慢了一点,且在 100 ns 线上下抖动。** 修复前这行约 67–77 ns;`Take` 从“先减后回补”改成 CAS 循环(消除被拒瞬间的负余额,评审低-10)后,拒绝路径多一次读与比较,三次复测给出 86、101、110 ns,其中 1 次越过 100 ns 验收线(报 `[MISS]`,0 字节不变)。这是有意的取舍:修的是正确性缺陷(瞬时负余额会让并发请求为借来的信用被拒,`Adjust` 的夹取还会多退),代价是只在预算真的用完时才走的路径慢了约 20–40 ns;如实记录,不为过线放宽验收或改回旧实现。
 
-**公平性附注(评审第 5 条的修法)。** 初版那行把"每线程计数在 2x 内"写成验收,但那一行是"全部授权",spread 恒等于 1 —— 断言什么都没约束。现在拆成两行:吞吐行只断言"没有一次被拒";新增的 `fairness.8t` 用一个 8000 请求的紧预算、8 线程各 20000 次尝试,断言**这份预算只花一次**(超发会被它抓住),并把每线程计数与锁基线同一工作量的 spread 一起打印。spread 本身不做断言:这个窗口只有十几毫秒,分散度主要反映 8 个任务怎么落到核上(同一份代码在不同轮里给出 2.07、3.41,极端一轮 0/8000,而锁基线在同一轮是 20–52),把它写成验收等于断言调度器。
+**公平性附注。** 吞吐行只断言“没有一次被拒”;`fairness.8t` 用 8000 请求的紧预算、8 线程各 20000 次尝试,断言**这份预算只花一次**(超发会被抓住),并把每线程计数与锁基线同一工作量的 spread 一起打印。spread 本身不做断言:窗口只有几毫秒到十几毫秒,分散度主要反映任务怎么落到核上(本轮最慢线程 0/8000、锁基线 spread 136.9),把它写成验收等于断言调度器。
 
-四行验收全绿:0 字节/acquire、无争用 p50 < 100 ns、8 线程争用下一次都没被拒、紧预算下 8000 只花一次。
+最终复测验收 5 项里 4 项通过(0 字节/acquire、8 线程争用无一被拒、紧预算 8000 只花一次、总开销行只报告);`acquire.wait` 的 <100 ns 三次里 2 次过、1 次 MISS(见上)。
 
 ## 六、偏差与越界(已记录)
 
@@ -98,7 +94,7 @@
 2. **改了清单外的 `Providers/Internal/ChatProviderPipeline.cs`**(`RetryMiddleware` 多一个可选预算参数)。不改它就得让 `ProviderCatalog` 自己构造限速器并透传,那是三个文件的改动;而"每次尝试都要计费"只有最外层中间件满足。
 3. **改了清单外的 `src/Forge.App/Automations/AutomationService.cs`**(两个只读字段与一行构造实参)。`ResumeStagger` 是它 new 出来的,删除后必须在这里换成限速器。
 4. **改了 W0 冻结的 `Preferences/AppPreferences.cs`、`Preferences/SettingsSection.cs`、`Composition/FeatureComposition.cs`**:W15 的四项设置在 §6.2 里原本没有登记(登记表是 W0 一次性写完的),而"容量/速率进设置"是 W15 自己的要求;三处都是新增行,不动既有内容。§6.2 的补登记见计划文档。
-5. **每提供商数值覆盖没做**(只有全局一份策略 + 每提供商一个桶)。手填单家数值的唯一诚实入口是提供商编辑弹窗(`provider` 分区),不属本波路径;服务端报的真实限额仍会逐家收紧。已写进 `Forge.Core/SPEC.md` 的未决。
+5. **每提供商数值覆盖**:首轮没做,后在六之三补做,**现已完成**(设置分区内的覆盖表,id 区分大小写保持原写法);服务端报的真实限额与手填取较小者。
 6. **自动化间隔不是令牌桶,是预留**(见第二节末)。行为与旧 `ResumeStagger` 逐个数值一致,测试照旧钉 0 / gap / 2×gap。
 7. **`RateLimitDecision` 比计划多一个 `Disabled`**:策略关闭时必须有一个"没扣、直接发"的结论,不能借 `Authorized`(那会让人以为扣过了)。
 
@@ -126,12 +122,14 @@
 | 命令 | 结果 |
 |---|---|
 | `dotnet build Forge.slnx -c Debug` | 0 警告 0 错误(含 Native AOT 分析器) |
-| `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2392 通过 / 0 失败 |
-| `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit"` | 109 通过(新增 51 个:桶 18、限速器 25、响应头 8+28 参数、重试层 8+4 参数;其中 2 个是评审修复的回归用例) |
-| `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 805 通过(新增 App 侧 20 个;另改写 `QuotaResumeTests` 的 4 个预留用例) |
-| `dotnet run -c Release --project tools/Forge.Bench -- ratelimit` | 4/4 验收通过(数字见第五节) |
+| `dotnet test tests/Forge.Core.Tests --no-build`(承载改动的项目全量,L2;评审修复后) | 2415 通过 / 0 失败 / 0 跳过,36 s |
+| `dotnet test tests/Forge.Core.Tests --no-build --filter "FullyQualifiedName~RateLimit"` | 132 通过(评审修复后) |
+| `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 866 通过(评审修复后;含混合大小写 id、未读目录、节流条带、限速组合新用例) |
+| `dotnet test tests/Forge.App.Tests --no-build --filter "~RateLimit\|~QuotaResume\|~SettingsPanel\|~SessionInstruments\|~Usage"` | 133 通过 |
+| 源码扫描门槛(`~Localization\|~MinorRegressionTests\|~KeyRegistry\|~StringTable\|~NoHardcodedChinese`) | 136 通过 |
+| `dotnet run -c Release --project tools/Forge.Bench -- RateLimit --quick` | 5 项验收 4 项通过,`acquire.wait` 的 <100 ns 三次里 1 次 MISS(数字与解释见第五节) |
 
-**一次失败记录**:上述 App 过滤第一次跑时 testhost 在 438 个用例后崩溃(无失败断言、无堆栈),重跑同一过滤 799 全绿;按仓库既有经验属该 headless UI 会话的偶发中断,不是本波的断言。
+**失败记录**:初版 App 过滤第一次跑时 testhost 在 438 个用例后崩溃(无失败断言、无堆栈),重跑同一过滤 799 全绿;评审修复轮同样出现 1 次 testhost 崩溃(26 例后,重跑 133 例全绿 3 次)与 1 次未能定位的单例失败(866 例中 1 例,同过滤重跑 4 次全绿);按仓库既有经验属该 headless UI 会话的偶发中断,不是本波的断言。
 
 **没跑的部分**:`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests`(仓库约定只在 L3 跑,本波不改跨模块协议);`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp`/`Forge.HostClient` 一行未改,未跑其全量。
 
@@ -147,5 +145,10 @@
 ## 八、已知限制
 
 - 令牌估算用 4 字符/token(`ApproximateTokenCounter`),与分批预算同一口径;真实用量在应答返回后校正,偏差只影响一两个请求的提前等待。
-- 响应头校准只对"报告了 `requests`/`tokens` 上限"的提供商生效(目前 Anthropic 家族);其余提供商按设置里的数字与 `429 + Retry-After` 的推断走。
+- 响应头校准对“报告了上限”的提供商生效:Anthropic 家族与**任何发通用 `x-ratelimit-*` 的 OpenAI 兼容端点**(基类 `ReadRateLimit` 的缺省实现;**推翻了初版“目前只有 Anthropic 家族”的说法**)。生效上限 = min(手填/全局, 已报),已报值只收紧、不放宽。其余提供商按设置里的数字与 `429 + Retry-After` 的推断走。
+- 通用头读数只有 `Throttle` 没有窗口,条带的额度小片因此对所有 OpenAI 兼容提供商出现(显示分钟级量表,有测试钉住);用量日志的 `rateLimit` 节点仍只由 Anthropic 读数产生(`UsageAttempt` 只读 `AnthropicRateLimits`),也有测试钉住。
+- `Calibrate` 假定 `x-ratelimit-limit-requests` 是每分钟上限;发日/小时额度的兼容服务会被当成分钟桶(见 Core SPEC 未决)。
+- hold 有出口:单次封顶 1 小时,任何一次 `Publish` 清除;裸数字重置值按时长封顶 365 天,大于 1e9 当 unix 时间戳。
+- 交互回合在预算里最多静默等待 5 分钟而不发事件,是否加 `AgentNotice` 待用户决定(Core SPEC 未决)。
+- 令牌维度只计输入;服务端 TPM 通常含输出,靠响应头剩余值校准追平。
 - 单请求超过整个预算时放行(不等待、也不部分扣),这是有意的:拒绝会让长上下文直接不可用,而提供商会自己给出结论。

@@ -2,15 +2,16 @@ namespace Forge.Core.Providers;
 
 /// <summary>
 /// How much of a provider's request and token budget Forge lets itself spend per minute, and the gap between two automated
-/// resumes. One policy covers every provider: each provider still gets its own budget, because two accounts behind two
-/// providers are throttled separately, but the numbers are one setting rather than a per-provider matrix nobody wants to
-/// fill in. A value of zero means "do not limit that dimension".
+/// resumes. The global numbers cover every provider, and each provider still gets its own budget, because two accounts behind
+/// two providers are throttled separately; a provider the user knows is tighter can carry its own entry in
+/// <see cref="Overrides"/>. A value of zero means "do not limit that dimension".
 /// </summary>
 /// <remarks>
 /// <para>
 /// The defaults are deliberately loose: this layer exists so a runaway loop (a fan-out of sub-agents, an automation that
-/// retries) cannot burn an account's whole minute in one second, not to shape ordinary use. A rejection from the provider
-/// tightens the local budget by itself — see <see cref="ProviderRateLimiter.Observe"/> — so the numbers a vendor publishes
+/// retries) cannot burn an account's whole minute in one second, not to shape ordinary use. A provider that reports its own
+/// limits tightens the local budget by itself — the bucket enforces the lower of this policy's number and the reported one
+/// (see <see cref="ProviderRateLimiter.Observe"/>); a report never loosens what is set here — so the numbers a vendor publishes
 /// only have to be set when someone wants a stricter ceiling than the vendor enforces.
 /// </para>
 /// <para>
