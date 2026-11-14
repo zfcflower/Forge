@@ -186,7 +186,22 @@ internal sealed class TimelineGutter : TemplatedControl
             return;
         }
 
+        hooked = true;
         ResolvePlacement();
+        Subscribe();
+        TreeMotion.Changed += OnMotionChanged;
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
+        Recompute();
+    }
+
+    /// <summary>
+    /// Subscribes the collections that can move this row, plus its turn. Safe to call again after a re-resolve: the current
+    /// subscriptions are dropped first. A block row's ItemsControl already <em>is</em> the turn's block list, so only the
+    /// header and footnote rows need the turn's own collection too.
+    /// </summary>
+    private void Subscribe()
+    {
+        UnsubscribeCollections();
         ownerItems = Observable(owner);
         if (ownerItems is not null)
         {
@@ -201,23 +216,15 @@ internal sealed class TimelineGutter : TemplatedControl
         if (turn is not null)
         {
             turn.PropertyChanged += OnTurnChanged;
-            ((INotifyCollectionChanged)turn.Blocks).CollectionChanged += OnCollectionChanged;
+            if (Role != TimelineRowRole.Block)
+            {
+                ((INotifyCollectionChanged)turn.Blocks).CollectionChanged += OnCollectionChanged;
+            }
         }
-
-        TreeMotion.Changed += OnMotionChanged;
-        Loc.Instance.LanguageChanged += OnLanguageChanged;
-        hooked = true;
-        Recompute();
     }
 
-    private void Unhook()
+    private void UnsubscribeCollections()
     {
-        if (!hooked)
-        {
-            return;
-        }
-
-        hooked = false;
         if (ownerItems is not null)
         {
             ownerItems.CollectionChanged -= OnCollectionChanged;
@@ -234,9 +241,19 @@ internal sealed class TimelineGutter : TemplatedControl
         {
             turn.PropertyChanged -= OnTurnChanged;
             ((INotifyCollectionChanged)turn.Blocks).CollectionChanged -= OnCollectionChanged;
-            turn = null;
+        }
+    }
+
+    private void Unhook()
+    {
+        if (!hooked)
+        {
+            return;
         }
 
+        hooked = false;
+        UnsubscribeCollections();
+        turn = null;
         TreeMotion.Changed -= OnMotionChanged;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         owner = null;
@@ -286,6 +303,14 @@ internal sealed class TimelineGutter : TemplatedControl
         if (!hooked)
         {
             return;
+        }
+
+        if (owner is null || container is null || owner.IndexFromContainer(container) < 0)
+        {
+            // The container can be missing when the row attaches (a recycled panel whose items were replaced, a lazy
+            // container): resolve once more and re-subscribe before falling back to "node with no line".
+            ResolvePlacement();
+            Subscribe();
         }
 
         var layout = ComputeLayout();

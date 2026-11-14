@@ -106,7 +106,8 @@
 `ViewModels/Transcript.Tools.cs`(只读 `IsRunning`)、`ViewModels/TreeIcons.cs`(`TreeMotion.Changed`)、
 `SessionWorkspace.cs`(被拒绝的审批把 `Kind=Approval` 传进提示行)、`Preferences/AppPreferences.cs`(ReduceMotion)、
 `Appearance/AppearanceApplier.cs`(写闸门)、`Appearance/AppearanceSettingsView(+VM).axaml/.cs`(勾选框)、
-`Localization/Strings.Appearance.cs`(一项文案)、`Forge.App/SPEC.md`(聊天时间轴一段 + 未决项更正)、
+`Localization/Strings.Appearance.cs`(一键文案)、`ViewModels/ProjectTree.cs`(闸门变化时给正在运行的树行抬一次
+`IsAgentRunningAnimated` 通知,开关一下立刻停/恢复呼吸)、`Forge.App/SPEC.md`(聊天时间轴一段 + 未决项更正)、
 `docs/research/2026-11-13-thinkrail-gap-plan.md`(W13 交付记录与登记项)。
 
 ## 三、被否的备选

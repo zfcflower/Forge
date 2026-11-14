@@ -183,8 +183,6 @@ internal static class TimelineNodeMap
 
         return name.StartsWith("pr_", StringComparison.Ordinal)
             || name.StartsWith("review_", StringComparison.Ordinal)
-            || name.StartsWith("extension_", StringComparison.Ordinal)
-            || name.StartsWith("spec_", StringComparison.Ordinal)
             ? TimelineNodeKind.Network
             : TimelineNodeKind.Tool;
     }
