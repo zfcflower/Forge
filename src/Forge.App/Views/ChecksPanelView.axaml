@@ -1,7 +1,295 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
              x:Class="Forge.App.Views.ChecksPanelView"
-             x:DataType="vm:ChecksPanelViewModel">
-  <!-- Placeholder: wave W5 owns this file. -->
+             x:DataType="vm:ChecksPanelViewModel"
+             Width="620"
+             HorizontalAlignment="Center"
+             VerticalAlignment="Top"
+             Margin="0,12,0,0"
+             AutomationProperties.AutomationId="checks-panel"
+             AutomationProperties.Name="{Binding [checks.title], Source={x:Static loc:Loc.Instance}}">
+
+  <!-- The pull request checks panel: a floating card at the top of the workbench, over the session. It draws itself only
+       while the window's Checks slot is set, and it is bounded (MaxHeight) so a pull request with many checks scrolls its
+       list instead of pushing the verdict line off screen. Nothing here writes anything: every action is a command on the
+       view model, which owns the poll, its cancellation and the error reporting. -->
+  <UserControl.Styles>
+    <!-- The bucket chip: green when the check passed, red when it failed, neutral while it runs or was skipped. -->
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Border.chip.pass">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+    </Style>
+    <Style Selector="Border.chip.pass > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+    <Style Selector="Border.chip.fail">
+      <Setter Property="Background" Value="{DynamicResource ErrorBubbleBrush}" />
+    </Style>
+    <Style Selector="Border.chip.fail > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="Border.chip.warn > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+    </Style>
+
+    <!-- One check row: the rows are bounded by the platform's own check list (tens, not thousands), so the ItemsControl
+         does not virtualize; the log tail of an expanded row is the only unbounded height and it has its own cap. -->
+    <Style Selector="Border.checks-row">
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.checks-row:hover">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+    </Style>
+    <Style Selector="Button.row-action">
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border Classes="card"
+          MaxHeight="620"
+          Padding="0"
+          Background="{DynamicResource SurfaceElevatedBrush}"
+          BorderBrush="{DynamicResource BorderStrongBrush}"
+          BoxShadow="0 10 30 0 #3A000000"
+          ClipToBounds="True">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+      <!-- Title row: what this panel is, which pull request, and the close button. -->
+      <Border Grid.Row="0"
+              Classes="toolbar"
+              BorderThickness="0,0,0,1"
+              Padding="12,8">
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Classes="h2" Text="{Binding [checks.title], Source={x:Static loc:Loc.Instance}}" />
+            <TextBlock Classes="caption"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       VerticalAlignment="Center"
+                       Text="{Binding NumberText}"
+                       AutomationProperties.AutomationId="checks-number" />
+          </StackPanel>
+          <TextBlock Grid.Column="1"
+                     Classes="caption"
+                     Margin="0,0,10,0"
+                     Foreground="{DynamicResource TextMutedBrush}"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding IsReading}"
+                     Text="{Binding [checks.read.waiting], Source={x:Static loc:Loc.Instance}}" />
+          <Button Grid.Column="2"
+                  Classes="ghost icon"
+                  Width="26"
+                  Height="24"
+                  Command="{Binding CloseCommand}"
+                  ToolTip.Tip="{Binding [checks.button.close], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="checks-close"
+                  AutomationProperties.Name="{Binding [checks.button.close], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- The verdict of the latest reading, the counts behind it, and the merge state the platform reported. -->
+      <StackPanel Grid.Row="1" Margin="12,10,12,6" Spacing="3">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Border Classes="chip"
+                  Classes.pass="{Binding IsReady}"
+                  Classes.fail="{Binding IsFailed}"
+                  Classes.warn="{Binding IsWarning}">
+            <TextBlock AutomationProperties.AutomationId="checks-verdict"
+                       FontWeight="SemiBold"
+                       FontSize="12"
+                       Text="{Binding VerdictText}" />
+          </Border>
+          <TextBlock IsVisible="{Binding HasSummary}"
+                     VerticalAlignment="Center"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     AutomationProperties.AutomationId="checks-summary"
+                     Text="{Binding SummaryText}" />
+        </StackPanel>
+        <TextBlock Classes="caption"
+                   IsVisible="{Binding HasProblem}"
+                   Foreground="{DynamicResource DangerBrush}"
+                   TextWrapping="Wrap"
+                   AutomationProperties.AutomationId="checks-problem"
+                   Text="{Binding ProblemText}" />
+        <TextBlock Classes="caption"
+                   Foreground="{DynamicResource TextMutedBrush}"
+                   TextWrapping="Wrap"
+                   Text="{Binding DetailText}" />
+      </StackPanel>
+
+      <!-- The checks themselves: one row each, failures first. An empty successful read is a state of its own. -->
+      <ScrollViewer Grid.Row="2"
+                    MaxHeight="420"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled"
+                    Padding="8,0">
+        <Grid RowDefinitions="Auto,Auto">
+          <StackPanel IsVisible="{Binding IsEmpty}" Spacing="4" Margin="4,14">
+            <TextBlock FontWeight="SemiBold" Text="{Binding EmptyTitleText}" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       Text="{Binding EmptyBodyText}" />
+          </StackPanel>
+
+          <ItemsControl Grid.Row="1"
+                        ItemsSource="{Binding Checks}"
+                        IsVisible="{Binding HasChecks}"
+                        AutomationProperties.AutomationId="checks-rows">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ChecksRowViewModel">
+                <Border Classes="checks-row" AutomationProperties.AutomationId="checks-row">
+                  <StackPanel Spacing="2">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <Border Grid.Column="0"
+                              Classes="chip"
+                              Classes.pass="{Binding IsPassed}"
+                              Classes.fail="{Binding IsFailing}"
+                              Classes.warn="{Binding IsPending}">
+                        <TextBlock FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding BucketText}"
+                                   AutomationProperties.AutomationId="checks-row-bucket" />
+                      </Border>
+
+                      <StackPanel Grid.Column="1" Margin="8,0" Spacing="1">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Classes="caption"
+                                     IsVisible="{Binding HasWorkflow}"
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     VerticalAlignment="Center"
+                                     Text="{Binding WorkflowText}" />
+                          <TextBlock Classes="caption"
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     VerticalAlignment="Center"
+                                     Text="{Binding StateText}" />
+                        </StackPanel>
+                        <TextBlock Classes="caption"
+                                   IsVisible="{Binding HasDescription}"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   TextWrapping="Wrap"
+                                   MaxLines="2"
+                                   Text="{Binding DescriptionText}" />
+                      </StackPanel>
+
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Classes="caption"
+                                   IsVisible="{Binding HasDuration}"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding DurationText}" />
+                        <Button Classes="ghost row-action"
+                                IsVisible="{Binding HasLink}"
+                                Command="{Binding OpenLinkCommand}"
+                                Content="{Binding [checks.button.details], Source={x:Static loc:Loc.Instance}}" />
+                        <Button Classes="ghost row-action"
+                                IsVisible="{Binding IsFailing}"
+                                Command="{Binding ToggleLogCommand}"
+                                Content="{Binding ToggleLogLabel}"
+                                AutomationProperties.AutomationId="checks-row-log" />
+                      </StackPanel>
+                    </Grid>
+
+                    <!-- The failed job log, read on demand and kept open across polls. -->
+                    <Border IsVisible="{Binding IsLogOpen}"
+                            Margin="0,4,0,0"
+                            Padding="8"
+                            CornerRadius="{StaticResource RadiusSm}"
+                            Background="{DynamicResource SurfaceSunkenBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1">
+                      <StackPanel Spacing="3">
+                        <TextBlock Classes="caption"
+                                   IsVisible="{Binding IsLogLoading}"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   Text="{Binding [checks.log.loading], Source={x:Static loc:Loc.Instance}}" />
+                        <TextBlock Classes="caption"
+                                   IsVisible="{Binding HasLogProblem}"
+                                   Foreground="{DynamicResource DangerBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding LogProblem}" />
+                        <TextBlock Classes="caption"
+                                   IsVisible="{Binding IsLogCut}"
+                                   Foreground="{DynamicResource WarningBrush}"
+                                   Text="{Binding [checks.log.tailKept], Source={x:Static loc:Loc.Instance}}" />
+                        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                          <TextBox Classes="mono"
+                                   IsReadOnly="True"
+                                   TextWrapping="NoWrap"
+                                   MaxHeight="160"
+                                   FontSize="11"
+                                   Background="Transparent"
+                                   BorderThickness="0"
+                                   IsVisible="{Binding HasLogTail}"
+                                   Text="{Binding LogTail}"
+                                   AutomationProperties.AutomationId="checks-log-text" />
+                        </ScrollViewer>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Grid>
+      </ScrollViewer>
+
+      <!-- What can be done from here, and what the last action produced. -->
+      <Border Grid.Row="3"
+              Classes="toolbar"
+              BorderThickness="0,1,0,0"
+              Padding="12,8">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel VerticalAlignment="Center" Spacing="1">
+            <TextBlock Classes="caption"
+                       IsVisible="{Binding HasStatus}"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="checks-status"
+                       Text="{Binding StatusText}" />
+            <TextBlock Classes="caption"
+                       IsVisible="{Binding HasLastRead}"
+                       Foreground="{DynamicResource TextMutedBrush}"
+                       Text="{Binding LastReadText}" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Classes="ghost"
+                    Command="{Binding OpenPullRequestCommand}"
+                    IsVisible="{Binding HasPullRequestUrl}"
+                    Content="{Binding [checks.button.openPullRequest], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="checks-open" />
+            <Button Classes="ghost"
+                    Command="{Binding FixCommand}"
+                    IsVisible="{Binding CanFix}"
+                    Content="{Binding [checks.button.fix], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="checks-fix" />
+            <Button Classes="ghost"
+                    Command="{Binding MarkReadyCommand}"
+                    IsVisible="{Binding IsDraft}"
+                    Content="{Binding [checks.button.markReady], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="checks-mark-ready" />
+            <Button Classes="primary"
+                    Command="{Binding RefreshCommand}"
+                    Content="{Binding [checks.button.refresh], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="checks-refresh" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
 </UserControl>

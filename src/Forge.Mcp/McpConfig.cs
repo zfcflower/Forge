@@ -26,6 +26,12 @@ public sealed record McpServerConfig
 
     public TimeSpan? Timeout { get; init; }
 
+    /// <summary>
+    /// The file that defined this entry — the global or the project <c>mcp.json</c>, or a label when the config was parsed from
+    /// text. Null when the config was built in memory.
+    /// </summary>
+    public string? Source { get; init; }
+
     public bool IsHttp => !string.IsNullOrWhiteSpace(Url);
 
     public bool IsStdio => !string.IsNullOrWhiteSpace(Command);

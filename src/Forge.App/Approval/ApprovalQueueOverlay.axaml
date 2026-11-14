@@ -41,6 +41,46 @@
                        ToolTip.Tip="{Binding WorkingDirectory}" />
           </Grid>
 
+          <StackPanel Spacing="2" Margin="0,4,0,0" IsVisible="{Binding HasMcpServer}">
+            <Grid ColumnDefinitions="70,*">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpServer], Source={x:Static loc:Loc.Instance}}" />
+              <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding McpServerName}" TextWrapping="Wrap" />
+            </Grid>
+            <Grid ColumnDefinitions="70,*">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpTransport], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding McpTransportText}" />
+            </Grid>
+            <Grid ColumnDefinitions="70,*" IsVisible="{Binding HasMcpCommand}">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpCommand], Source={x:Static loc:Loc.Instance}}" />
+              <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding McpCommandLine}" TextWrapping="Wrap" />
+            </Grid>
+            <Grid ColumnDefinitions="70,*" IsVisible="{Binding HasMcpWorkingDirectory}">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpWorkingDirectory], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding McpWorkingDirectory}" TextWrapping="Wrap" />
+            </Grid>
+            <Grid ColumnDefinitions="70,*" IsVisible="{Binding HasMcpUrl}">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpUrl], Source={x:Static loc:Loc.Instance}}" />
+              <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding McpUrl}" TextWrapping="Wrap" />
+            </Grid>
+            <Grid ColumnDefinitions="70,*" IsVisible="{Binding HasMcpEnvKeys}">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpEnvKeys], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding McpEnvKeysText}" TextWrapping="Wrap" />
+            </Grid>
+            <Grid ColumnDefinitions="70,*" IsVisible="{Binding HasMcpHeaderKeys}">
+              <TextBlock Classes="caption" Text="{Binding [Extensions.Tool.McpHeaderKeys], Source={x:Static loc:Loc.Instance}}" />
+              <TextBlock Grid.Column="1" Classes="caption" Text="{Binding McpHeaderKeysText}" TextWrapping="Wrap" />
+            </Grid>
+            <TextBlock Classes="caption"
+                       IsVisible="{Binding McpHidesValues}"
+                       Text="{Binding [Extensions.Tool.McpKeysOnly], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="link"
+                    HorizontalAlignment="Left"
+                    IsVisible="{Binding CanRevokeRemembered}"
+                    Command="{Binding McpRevokeCommand}"
+                    Content="{Binding RememberedRulesText}"
+                    AutomationProperties.AutomationId="approval-mcp-revoke" />
+          </StackPanel>
+
           <Border Classes="notice" IsVisible="{Binding HasNote}" Margin="0,4,0,0">
             <TextBlock Classes="caption" Text="{Binding Note}" TextWrapping="Wrap" />
           </Border>

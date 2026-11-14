@@ -24,6 +24,20 @@ public class AgentCatalogTests
     }
 
     [Fact]
+    public void Reviewer_reads_the_diff_and_holds_no_tool_that_could_change_or_re_review_it()
+    {
+        var reviewer = new AgentCatalog().Get("Reviewer");
+
+        Assert.Equal(["read", "grep", "find", "ls", "git_diff"], reviewer.ToolNames);
+        Assert.Contains("git_diff", reviewer.ToolNames!);
+        Assert.DoesNotContain("edit", reviewer.ToolNames!);
+        Assert.DoesNotContain("write", reviewer.ToolNames!);
+        Assert.DoesNotContain("bash", reviewer.ToolNames!);
+        // A review must not recurse: the reviewer cannot ask for a review of the review.
+        Assert.DoesNotContain("request_review", reviewer.ToolNames!);
+    }
+
+    [Fact]
     public void Loaded_definition_overrides_built_in_with_the_same_name()
     {
         var custom = Agent("worker", "custom prompt");

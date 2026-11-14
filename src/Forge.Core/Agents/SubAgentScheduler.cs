@@ -7,7 +7,15 @@ using Forge.Core.Prompts;
 namespace Forge.Core.Agents;
 
 /// <summary>Result of one spawn: the child's final text, or the reason it could not run.</summary>
-public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError);
+public sealed record SubAgentOutcome(string AgentId, string Text, bool IsError)
+{
+    /// <summary>
+    /// The child was stopped (stop tool or the UI) before it finished: <see cref="Text"/> is the stop notice plus whatever
+    /// it had written so far, not a finished answer. A caller that reads a contract out of the text (a review's verdict
+    /// line) must not trust it.
+    /// </summary>
+    public bool Stopped { get; init; }
+}
 
 /// <summary>
 /// Owns sub-agent instances: id allocation, the run gate per instance, the depth limit and the control surface
@@ -194,7 +202,7 @@ public sealed class SubAgentScheduler : ISubAgentControl
         }
         catch (OperationCanceledException) when (run is not null && run.StopRequested)
         {
-            return new SubAgentOutcome(instance!.Id, StoppedText(instance, run), IsError: false);
+            return new SubAgentOutcome(instance!.Id, StoppedText(instance, run), IsError: false) { Stopped = true };
         }
         catch (OperationCanceledException)
         {

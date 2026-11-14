@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Forge.Abstractions;
 using Forge.App.Localization;
+using Forge.App.ViewModels.Preview;
 
 namespace Forge.App.ViewModels;
 
@@ -113,6 +114,13 @@ internal interface IImageCodec
 
     /// <summary>A small preview of an encoded image, or null when it cannot be decoded. Called off the UI thread.</summary>
     Bitmap? Thumbnail(byte[] data);
+
+    /// <summary>
+    /// A preview whose long edge is at most <paramref name="maxLongEdge"/> pixels, or null when it cannot be decoded.
+    /// The default member falls back to the codec's own default size, so existing implementors and test fakes keep
+    /// compiling and behave as before. Called off the UI thread.
+    /// </summary>
+    Bitmap? Thumbnail(byte[] data, int maxLongEdge) => Thumbnail(data);
 }
 
 /// <summary>The production codec: Avalonia's own bitmap decoding and encoding, no image library.</summary>
@@ -180,6 +188,26 @@ internal sealed class AvaloniaImageCodec : IImageCodec
             return null;
         }
     }
+
+    public Bitmap? Thumbnail(byte[] data, int maxLongEdge)
+    {
+        if (maxLongEdge <= 0)
+        {
+            // Zero means the caller wants the codec's own default size.
+            return Thumbnail(data);
+        }
+
+        try
+        {
+            // The header gives the size, so a large image is decoded straight to the bound (one pass, never a full-size
+            // bitmap) and a small one at its own size rather than blown up to the edge.
+            return ImageHeader.DecodeBounded(data, maxLongEdge, BitmapInterpolationMode.MediumQuality);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>
@@ -188,15 +216,21 @@ internal sealed class AvaloniaImageCodec : IImageCodec
 /// </summary>
 internal abstract class ImageThumbnailViewModel : ObservableObject
 {
+    private readonly int maxLongEdge;
     private Bitmap? thumbnail;
     private bool loading;
 
-    protected ImageThumbnailViewModel(ImageBlock block, long encodedBytes, Bitmap? thumbnail)
+    /// <summary>
+    /// <paramref name="maxLongEdge"/> bounds the long edge of the lazily decoded preview; 0 keeps the codec's own
+    /// default size. Subclasses that do not care pass nothing and keep working.
+    /// </summary>
+    protected ImageThumbnailViewModel(ImageBlock block, long encodedBytes, Bitmap? thumbnail, int maxLongEdge = 0)
     {
         ArgumentNullException.ThrowIfNull(block);
         Block = block;
         EncodedBytes = encodedBytes;
         this.thumbnail = thumbnail;
+        this.maxLongEdge = maxLongEdge;
     }
 
     /// <summary>The decoder behind lazily loaded previews; a test may replace it.</summary>
@@ -232,11 +266,13 @@ internal abstract class ImageThumbnailViewModel : ObservableObject
     {
         var data = Block.Data;
         var codec = Codec;
+        var maxEdge = maxLongEdge;
         var decoded = await Task.Run(() =>
         {
             try
             {
-                return codec.Thumbnail(Convert.FromBase64String(data));
+                var bytes = Convert.FromBase64String(data);
+                return maxEdge > 0 ? codec.Thumbnail(bytes, maxEdge) : codec.Thumbnail(bytes);
             }
             catch (FormatException)
             {

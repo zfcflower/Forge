@@ -20,7 +20,7 @@ public sealed class StringTableTests
     {
         "shell", "window", "workbench", "status", "provider", "providers", "diag", "dialog",
         "project", "session", "turn", "subagent", "files", "changes", "todo",
-        "review", "spec", "problems", "language", "settings", "format", "terminal", "appearance", "Extensions", "git", "editor", "lifecycle", "notifications", "automations", "modelCatalog", "prompts", "questions", "web", "compaction", "network", "modelsVisibility", "agents", "idleArchive",
+        "review", "spec", "problems", "language", "settings", "format", "terminal", "appearance", "Extensions", "git", "editor", "lifecycle", "notifications", "automations", "modelCatalog", "prompts", "questions", "web", "compaction", "network", "modelsVisibility", "agents", "idleArchive", "plan", "chat", "checks", "palette", "resources",
         "onboarding", "projectCreate", "projectFlow",
     };
 

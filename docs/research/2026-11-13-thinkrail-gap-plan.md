@@ -51,6 +51,7 @@
 | PDF / HTML 预览 | **不做内部渲染**:占位页 + 「用本机默认程序打开」(`Launcher`)。理由:能交给 OS 的事不引渲染器,PDF 渲染器都是原生库或大依赖,HTML 渲染等于再塞一个浏览器引擎。 |
 | Plan 面板写权限 | **只读 + 「让 agent 收尾这一步」按钮**。保持「状态只由 agent 改」与 done→`StepCommitter` 自动提交语义不变,不新增存储写路径。 |
 | 富查看器范围 | 图片、CSV/TSV、`.ipynb`、LFS 指针、二进制占位 —— 全部零新依赖。 |
+| PDF / HTML 预览(2026-11-13 修订) | PDF 按上文占位; **HTML 不设占位**:在编辑器里就是可编辑源码,工具条的打开按钮对 `.html/.htm` 显示「在浏览器中打开」并交给系统浏览器。理由:不渲染网页的决定不依赖藏起源码,占位卡只会让每次看/改页面多一次点击。 |
 
 ### 待定(由你在动手前最后定,先不进波次)
 
@@ -142,12 +143,14 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 > **W2 已交付,且它破了下面的零重叠约束(已记录,勿再重复踩)。** `src/Forge.Editor/**`:新增 `Highlighting/TokenCategoryGroup.cs`、`Highlighting/SemanticLineIndex.cs`、`Lsp/SemanticTokenMap.cs`、`Lsp/WorkspaceDiagnostics.cs`(含 `IWorkspaceDiagnosticSource`);`Lsp/LspCapabilities.cs` 的 `ApplyEdits` 重写为两趟单次分配;`Lsp/LanguageSession.cs` 加 `SemanticTokensRefreshRequested` 与 `PositionEncoding`;`Languages/LanguageSessionPool.cs` 加 `SessionStarted`/`SessionClosed`(在启动门释放之后触发,订阅者可在处理函数里再开另一个会话)。App 侧:新增 `Editing/SemanticTokenColorizer.cs`、`ViewModels/ProblemsPanelViewModel.cs`、`ViewModels/ReferenceListViewModel.cs`、`ViewModels/MainWindowViewModel.Problems.cs`、`Views/ProblemsPanelView*`、`Views/ReferenceListView*`;`Workbench/Controls/SyntaxTokenTextBlock.cs` 改为使用新的 `TokenCategoryGroups` 表(原先那套分类重复了两份)。**破了 W0 独占的文件**:`ViewModels/MainWindowViewModel.cs`(多一个 `Problems` 属性、一行构造参数、`OpenFileAsync` 新增 `hasWorkspaceOverride` 参数并改了一行工作区取值、`Dispose` 多两行释放)、`Workbench/WorkbenchLayout.cs`、`Workbench/WorkbenchTypes.cs`、`App.axaml`、`Localization/Strings.Shell.cs` —— 因为本分支上 W0 的 host/模板未落地,而问题面板必须有宿主。`WorkbenchLayout` 的新参数是**可空追加参数**(`object? problems = null`),W5/W7/W8 再加面板时请把它扩成一组「额外 inspector 标签」列表,而不是再加一个参数。其余归各波的路径未动。**已与 W0 合并**(合并提交 `c20834e`):实际只有 4 个文件重叠、仅 `Forge.App/SPEC.md` 一处文本冲突,细节与 W0 落地后需更正的判断见 `2026-11-13-w2-after-w0-merge.md`。
 | **W3** 全局搜索 / 命令面板 | 面板 + 五个来源(文件/内容/会话/命令/符号)+ 预览 + `Ctrl+P`/`Ctrl+Shift+P`/`Ctrl+Shift+F` | `ViewModels/PaletteViewModel*.cs`、`Views/PaletteView*`、`Services/Palette*.cs`、`ViewModels/MainWindowViewModel.Palette.cs`、`Localization/Strings.Palette.cs` | 4–5 天 |
-| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF/HTML 占位 + 系统默认程序打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Views/ToolRowImagesView*`、`Views/Preview/**` | 4 天 |
+| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF 占位 + 系统默认程序打开,HTML 可编辑源码 + 在浏览器中打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Views/ToolRowImagesView*`、`Composition/ViewerSettingsComposition.cs`、`Views/Preview/**` | 4 天 |
 | **W4b** 聊天 Markdown 渲染 | 聊天消息走 Markdown(标题/列表/表格/链接/fenced code,代码块带复制与语言标签);复用 `MarkdownRenderer`,流式增量不整段重排 | `Changes/Markdown/**`、`ViewModels/Transcript.cs`、`Views/ChatMarkdown*`、`Views/TurnTextView.axaml(.cs)`(W0 从 `App.axaml` 抽出,含复制按钮)、`Localization/Strings.ChatMarkdown.cs` | 4 天 |
 | **W5** PR checks 与收尾 | checks 面板(逐项状态/耗时/链接、等待、失败日志尾、让 agent 修)、`gh pr ready`、ship 补「合并后收尾」 | `Forge.Workspace/Git/IPrPlatform.cs`+`GitHubPlatform.cs`+`PrCheck*.cs`+`PrChecksPoller.cs`(**不含** `GitCli.Clone.cs`)、`Views/ChecksPanelView*`、`ViewModels/MainWindowViewModel.Checks.cs` | 3 天 |
 | **W6** MCP 管理面 | 配置写入(原子写 + 同款互斥)、增删改/启停/测试/重连/工具清单/错误与 stderr 尾、从 Claude/Cursor 导入、预设;审批卡补 command/args/cwd/env/headers 键名与即时撤销 | `Forge.Mcp/McpConfig*.cs`、`McpServerManager.cs`、`McpServerState.cs`、`ViewModels/Settings/McpSettingsSectionViewModel.cs`(W0 已从 `InstrumentSettingsSections.cs` 拆出)、`Views/McpSettingsView*`、`Approval/**` | 4–5 天 |
 | **W7** Plan 会话 | 摘要面板 + 步骤与验证状态、修订历史、下一步、导出 Markdown、从计划开 PR | `Core/Storage/SqliteTodoStore.cs`(修订读写)、`Core/Storage/StorageSchema.cs`(v10→v11,W7 独占)、`ViewModels/PlanPanelViewModel*`、`Views/PlanPanelView*`、`ViewModels/MainWindowViewModel.Plan.cs` | 4–6 天 |
 | **W8** 资源检查器 | 运行中工具/命令与子 Agent 统一列表(耗时、日志尾、停止)、消费 `AgentToolProgress` | `ViewModels/SessionWorkspace*.cs`、`ViewModels/Transcript.Tools.cs`、`ViewModels/SessionInstrumentsViewModel.cs`、`Views/ResourceInspectorView*`、`ViewModels/MainWindowViewModel.Inspector.cs` | 3 天 |
+> **W8 已交付。** 实现说明见 `2026-11-13-w8-resource-inspector.md`。入口按用户拍板做在**输入条「资源 ▾」菜单的第五行**（不是标题栏按钮），范围是**活动会话**（换会话即关）。新增：`ViewModels/SessionWorkspace.Tools.cs`、`ViewModels/ResourceInspectorViewModel.cs`（占位替换）、`Settings/ResourceInspectorSettingsViewModel.cs`、`Views/ResourceInspectorSettingsSectionView*`、`Localization/Strings.Resources.cs`、`Services/TextTail.cs`；改动：`ViewModels/SessionWorkspace.cs`（partial + 进度消费接线）、`ViewModels/Transcript.Tools.cs`（`LiveToolViewModel`）、`ViewModels/SessionInstrumentsViewModel.cs`、`ViewModels/MainWindowViewModel.Inspector.cs`、`Views/ResourceInspectorView*`、`Views/ToolRowTailView.axaml`、`Views/ResourceInspectorSettingsSectionView*`、`Composition/InspectorComposition.cs`、`Forge.App/SPEC.md`。**破格改动的共享文件（已记录，勿重复）：** `Views/SessionView.axaml`（一行菜单项，入口必须挂在「资源」按钮上）、`ViewModels/Transcript.cs`（`AddTool` 返回刚建的行，2 行）、`Automations/CiChain.cs`（`Tail` 委托给 `TextTail.Keep`，与 W5 分支同一处改动）、`ViewModels/MainWindowViewModel.cs`（`InitializeInspector()`、会话构造多一个 `openInspector:` 实参、`Dispose` 里一行 `CloseInspector()`）、`Views/SubAgentView.axaml`（停止按钮改绑 `CanStop`,排队中的子 Agent 不再显示一枚点不动的按钮）、测试侧 `StringTableTests`（前缀表加 `resources`）与 `SettingsPanelTests`（`KnownSectionIds` 补齐漏掉的 `SettingsSectionIds.Inspector`）各一行。**跨波提示：** `Services/TextTail.cs` 与 W5 分支为同一文件同一内容（add/add 同文本，合并取任一）。
+
 | **W9** 首启与项目创建 | 首启向导(语言/提供商/通知权限,权限一步只调 `INotificationPermissionGuide`,不碰 `Notifications/**`)、克隆仓库(带进度与取消)、新建项目目录 + `git init` | `Views/Onboarding*`、`ViewModels/Onboarding*`、`ViewModels/MainWindowViewModel.Onboarding.cs`、`Forge.Workspace/Git/GitCli.Clone.cs`(W0 预建)、`Services/ProjectCreation*` | 3 天 |
 
 > **W9 已交付,并在三处碰了清单外的文件(已记录,勿重复踩)。**
@@ -156,6 +159,8 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 > **测试**:`tests/Forge.Workspace.Tests/Git/GitCliCloneTests.cs`(33:进度解析表、真仓库克隆、非空/空目标、`-` 开头与相对目标被拒、失败与取消的清理、坏回调、用一个假可执行文件确定性地钉住 `\r` 与跨 chunk CRLF),`tests/Forge.App.Tests` 的 142 个 W9 用例(`Services/ProjectCreationServiceTests`、`Services/OnboardingStateTests`、`ViewModels/{ProjectCreation,Onboarding}ViewModelTests`、`Settings/ProjectsSettingsSectionTests`、`Views/ProjectsSettingsSectionViewTests`、`Foundation/OnboardingViewTests`、`Workbench/{OnboardingShell,AddProjectFlow}Tests`)。顺带两处既有测试的必要更正:`StringTableTests.KnownPrefixes` 加 `onboarding`/`projectCreate`/`projectFlow`,`Foundation/SettingsPanelTests.KnownSectionIds` 补 `projects`(W0 分配了 id 却没登记进那张表),`FileIndexTests` 的 `Services.FileIndex` 改成全名(新的 `Forge.App.Tests.Services` 命名空间把它遮蔽了)。
 | **W12** 评审包 + `request_review` | 给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话);评审是产品核心目标,放在并行批里 | `Forge.Core/Prompts/BuiltInAgents.cs`、新建 `Forge.Core/Tools/RequestReview*.cs` + `ReviewPackage*.cs`、`Localization/Strings.Review.cs` | 4 天 |
 | **W11** 流程图 / Mermaid(**等拍板,且串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
+
+**W6 已实施**:实现记录、被否备选与验收见 `2026-11-13-w6-implementation.md`。计划外并入一项(已与用户确认):MCP 工具此前从未进入会话(`McpServerManager.Tools` 零消费),本波一并接上,`工具检索上限` 因此才有意义。
 
 **跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 独占自己的 schema 升版(与其他波无交叉);W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
 
@@ -218,6 +223,69 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 ## 七、明确不做
 
-隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF/HTML 预览在拍板前不做(占位页)。
+隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF 预览在拍板前不做(占位页);网页不在面板内渲染,只给可编辑源码与「在浏览器中打开」。
 
 **W0 收尾补充**:新增设置分区的视图不再改 `App.axaml`——`App.axaml` 已挂一个 `Views/SectionViewTemplate`,各波在自己的 `*Composition.Register` 里调 `SectionViewTemplate.Register<TViewModel>(() => new XView())` 即可。`chat` 分区归 W5(Mermaid 与工具图片缩略图两项设置的视图都放进 W5 的 chat 分区视图;W4 只提供数据项,不建分区)。
+
+## 八、W12 交付记录(评审包 + `request_review`)
+
+开工前分支落后 `main` 55 个提交(W0–W5、W7 已合入,`pr_create` 的四道闸门、`GitReviewLedger`、计划面板都在),先快进再动手。开工期间 `main` 又进了两波:W6(MCP 管理与工具暴露)、W8(资源检查器),收尾时分两次 `git merge main`——W6 那次只有一处真冲突(`AppComposition.cs` 里 `runtimeServices.Reviews` 与 `runtimeServices.Mcp` 相邻两行,两条都保留),W8 那次全部自动合并(两个 SPEC 与计划文档的不同段落);每次合并后都重新构建并重跑相关过滤(见下验证)。
+
+**范围**:计划里 W12 的两条——给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话)。三条边界在开工前由用户拍定:
+
+1. **评审目标两种都要**:`step_id`(审一个计划步骤,用它自己的那次提交)与自由范围(`base` + `paths`,默认仓库默认分支,含未提交与未跟踪)。
+2. **一次评审不满足 `pr_create` 的自评闸门**:闸门仍只认本会话在这个 HEAD 上读过完整 `git_diff`;Reviewer 的 `git_diff` 记在它自己的子会话上(`GitReviewLedger` 按 sessionId + worktree 分键)。
+3. **`request changes` 只回会话**:工具结果由归一化结论 + 下一步组成,代码层面不硬阻断任何东西;不落存储、不升 schema、不改计划面板。
+
+**落点**(对照计划给的独占路径):
+
+- `src/Forge.Core/Tools/ReviewPackage.cs`(契约,主 Agent 写,FROZEN)、`ReviewPackageText.cs`(包渲染)、`RequestReviewVerdict.cs`(结论归一化)、`RequestReviewTool.cs`(工具)。
+- `src/Forge.Core/Prompts/BuiltInAgents.cs`:Reviewer 白名单加只读 `git_diff`,提示词加一段"你会收到评审包,diff 被截断时用 `git_diff` 读其余"。
+- `src/Forge.Core/Agents/AgentHost.cs`:`AgentHostOptions.Reviews`(可空)+ 注册 `request_review`(没有实现就没有这个工具)。
+- `src/Forge.App/Git/ReviewChangeSetSource.cs`:实现 `IReviewChangeSetSource`,用 `GitCli` 公开 API;`AgentRuntimeServices.Reviews` 与组合根接线;`ToolCatalog` 把它归到 `agents` 组。
+- 规格:`Forge.Core/SPEC.md`(评审工具一段 + 未决两条)、`Forge.App/SPEC.md`(会话工具面一段)、`Forge.IO/SPEC.md`(白名单那句不再笼统地说"Scout/Plan/Reviewer 用前面四个")。
+
+**偏差(已记录)**:
+
+1. **没有新建 `Localization/Strings.Review.cs`**。W12 没有用户可见的新表面:工具行显示工具名与结果(与其他工具一样),评审结论是模型可读的英文。计划本身在 W0 已否掉"建空表"的做法,所以不为凑文件名建一张空表;要让评审有本地化界面,应该是结论持久化/计划面板显示那一档(见下面的延后项)。
+2. **动了一个 `Forge.Workspace` 文件**:`GitCli.Review.cs` 的 `EmptyTreeSha` 由 `private` 提升为 `public`。评审"仓库的第一个提交"必须对空树做 diff,而那个常量只能有一份定义。没有新增 API、没有改行为。
+3. **动了三个计划外的 App 文件**(`SessionRuntime.cs` 两行、`AppComposition.cs` 三行、`ToolCatalog.cs` 两行):`request_review` 只有在组合根把 git 实现交出去时才存在,而 `FeatureComposition` 的各模块拿不到 `GitCli`,所以运行期接线只能留在 `Create()`。
+4. **内部常量**(不进设置,六·二表无 W12 项):包内 diff 48000 字符、提交清单 50 行与文件清单 200 行各自独立、每个文本字段 2000 字符、结论原文 8000 字符。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
+5. **评审方式可配置未做**(`goal-and-requirements.md` 的"Reviewer 子 Agent 一次评审,或人工逐行评审"):需要设置项 + 一条"步骤提交后自动评审"的触发路径,属于新的产品面,未在 W12 授权范围内。结论也不持久化。
+
+**验证**(合入前与两次 `git merge main`(W6、W8)之后各跑一遍,数字一致):
+
+- `dotnet build Forge.slnx` → 0 警告 0 错误(含 Native AOT 分析器)。
+- `Forge.Core.Tests --filter "Tools|Agents"` → 825 通过;`--filter "Review|AgentCatalog"` → 90 通过。
+- `Forge.App.Tests --filter "Forge.App.Tests.Git"` → 413 通过;`--filter "Localization|MinorRegression|ReviewChangeSetSource|Settings"` → 340 通过(前三项是仓库硬门槛,`Settings` 是因为 W6/W8 都改过设置与 `SessionRuntime`/`ToolCatalog`/`AppComposition` 一带)。
+- `Forge.Workspace.Tests --filter "Git"` → 1006 通过(`EmptyTreeSha` 提高可见性 + 新增 `GetDiffSnapshotAsync`);这一条在合并 W6/W8 前跑,`Forge.Workspace` 没被那两波改过。
+- 未跑全量 `dotnet test`(按仓库约定,全量混着与本次无关的偶发失败);只跑与改动落点相关的过滤。渲染样例人工核对过一次(评审包的段落与空行可读,收窄与截断信息自述)。
+
+**测试 Agent 拉出来的四个真问题(已改)**——它们不是测试补丁,而是实现缺陷:
+
+1. 结论行只往下扫 40 行:把结论写在前面、补充说明写在后面的 Reviewer 会被判成 `unstructured`,代价是多跑一轮评审。改成扫全文。
+2. `AppendClamped` 无换行时取“第一个空格前”,一个 2500 字符的 URL 前面写着 `Fix ` 时,意图到达 Reviewer 只剩 `Fix…`。改成只在词边界能保留 ≥3/4 字段时才采用,否则硬截。
+3. 用户改写 Reviewer 模板把 `request_review` 加进白名单后,评审可以要求再评审(靠深度上限兜住,但会白烧 token)。按 agent 名拦下。
+4. 子 Agent 被深度上限拒绝时的文案只说“不能派生”,不指向评审。前缀改成 `The review could not be started: `。
+
+另外两处一致性修正:分支评审的**提交清单也按 `paths` 收窄**(否则评审包里会列出全部不在范围内的提交);`ReviewChangeSetSource` 把“是否 git 仓库”的检查移进 `try`,git 起不来时也变成可读文本而不是原始异常。
+
+**独立评审会话(deepseek,与实现/测试会话分开)拉出的问题(已改)**:
+
+1. **blocking——基准没解析成提交,比较语义也错。** 原实现把 `base` 原样交给 `git diff <base>`(两点语义),而 `git_diff`/PR 正文/`pr_create` 全是 `base...HEAD`。默认基准 `origin/main` 只要 fetch 过一次就越过分叉点,上游新提交会在包里显示成“本次变更在删除它们”,Reviewer 会据此报假 blocking;同时 `Base` 是 ref 名却被 `ShortSha` 截断,包里印 `base origin/`。现改为先 `RevParse` 成提交、再取与 HEAD 的 merge-base,`Base` 因此恒为 sha;与 HEAD 无共同历史时 `Failed`。
+2. **major——收窄信息没进包。** `Paths` 作用在 diff/文件表/提交表上,但包里不写“只看了这些路径”,Reviewer 分不出“别处没改”与“被过滤掉了”。`ReviewChangeSet` 增 `Paths` 与 `CommitsTruncated`,包内自述 `narrowed to: …`,计数在截断时写 `at least N commits`。
+3. **minor——提交数被当成总数,且长提交历史会把文件表挤掉。** 提交清单上限 200 写死且与文件表共享 200 行预算,`... and N more` 永远不会触发。现拆为各自独立预算(提交 50 行、文件 200 行),源取“上限+1”条以区分“恰好”与“被截断”。
+4. **minor——同一份 diff 跑两个 git 进程,且注释谎称两者同源。** 新增 `GitCli.GetDiffSnapshotAsync`(一次捕获同时给文本与文件,`GetDiffAsync` 改为它的 `.Files`),评审只调它;解析/补未跟踪的逻辑仍只有一份。
+5. **minor——提交对象被抹掉时给模型的是 git 原文。** 先 `rev-parse <sha>^{commit}` 判存在,不存在就返回“这个提交在本仓库里不存在”。
+6. **测试盲区已补**:基准领先 HEAD 的三点语义、默认基准解析成 sha(不再出现 `origin/`)、`GitCli` 提交对象丢失、`MaxParallelSubAgents = 1` 下 `Detach` 必需(实测把 `Detach` 拿掉该用例会 15s 超时)、`step_id` 指向 `CommitId == null` 的步骤、收窄字段与截断计数。
+
+**合入前复核(第二轮评审)拉出的问题(已改,各有测试)**:
+
+1. **被停止的 Reviewer 的部分文本会被当成结论。** `sub_agent_stop` 停掉的 Reviewer 若已写过 `verdict: approve`,工具会报通过。`SubAgentOutcome` 增 `Stopped`,`RequestReviewTool` 见到它直接返回错误“没有结论”,不解析原文。
+2. **子 Agent 开关关掉后 `request_review` 仍可派生 Reviewer。** `SessionRuntime.ApplyDisabledTools` 改为撤下 `SpawningTools = [spawn_agent, request_review]`。
+3. **截断退路指向裸 `git_diff`。** 裸调用比较默认分支,与自定义 `base`、单提交评审不是同一变更集;现在提示带 `{"base": "<sha>"}`,单提交时声明该范围还含之后的提交,根提交指向 `read`。`ReviewChangeSet` 增 `SingleCommit`。
+4. **每个未跟踪文件读满 1MB 只为列出它。** 改为只探 8000 字节(与 git 二进制判定窗口一致);内容本就不进包。
+5. **`narrowed to:` 路径列表无上限**,改按 2000 字符字段上限截断;**无换行 diff 的截断可能劈开代理对**,已避开。
+6. 测试补齐:停止/父取消/同回合两个评审并发/超长原文的结论读取/截断时给出可复现基准;源侧删除、重命名、二进制、未跟踪二进制窗口、超出捕获上限、提交清单截断(上限经构造参数注入)、空变更集;子 Agent 开关与 `request_review` 联动。
+
+**仍未改(记录原因)**:包内各上限(48000/50/200/2000/8000)仍是内部常量——进设置需要在六·二表登记、改 W0 冻结的 `AppPreferences.cs`、加设置界面与文案,属计划变更,须用户拍板;没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。

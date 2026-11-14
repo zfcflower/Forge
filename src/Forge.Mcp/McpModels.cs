@@ -46,8 +46,14 @@ public sealed record McpServerCapabilities(
     }
 }
 
-/// <summary>A flattened view of one MCP content block; <see cref="Text"/> is the display form.</summary>
-public sealed record McpContent(string Type, string Text, string? MimeType = null, string? Uri = null, long? SizeBytes = null);
+/// <summary>
+/// A flattened view of one MCP content block; <see cref="Text"/> is the display form. <see cref="Data"/> is the
+/// block's raw base64 payload: set only for an <c>image</c> block whose <see cref="MimeType"/> is one the app can
+/// display (<c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c>, <c>image/webp</c>) and whose estimated decoded size
+/// fits the keep cap; null for every other block (text, audio, resources, links), for a displayable image the cap
+/// dropped, and for a media type the app cannot show.
+/// </summary>
+public sealed record McpContent(string Type, string Text, string? MimeType = null, string? Uri = null, long? SizeBytes = null, string? Data = null);
 
 public sealed record McpToolInfo(string Name, string? Description, string InputSchemaJson, string? Title = null);
 

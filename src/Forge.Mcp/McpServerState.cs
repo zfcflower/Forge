@@ -20,6 +20,22 @@ public sealed record McpServerState(
     public bool IsReady => Status == McpServerStatus.Ready;
 }
 
+/// <summary>
+/// What the settings page's test found: how long a connect plus tool listing took, what the server exposes and what went
+/// wrong. Always returned — a test button has something to say even when the server refuses to start.
+/// </summary>
+public sealed record McpServerProbe(
+    string Name,
+    McpServerStatus Status,
+    TimeSpan Elapsed,
+    IReadOnlyList<McpToolAdapter> Tools,
+    McpServerCapabilities Capabilities,
+    string? Error = null,
+    string? StderrTail = null)
+{
+    public bool IsReady => Status == McpServerStatus.Ready;
+}
+
 public sealed class McpServerManagerOptions
 {
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(60);
@@ -32,6 +48,16 @@ public sealed class McpServerManagerOptions
     public int MaxReconnectAttempts { get; init; } = 5;
 
     public int MaxResultChars { get; init; } = 64 * 1024;
+
+    /// <summary>
+    /// A tool whose <c>inputSchema</c> is longer than this (compact JSON characters) is not offered to the model: every request
+    /// carries every offered schema, so one pathological server could otherwise fill the context window on its own. The skip is
+    /// recorded on the server's <see cref="McpServerState.LastError"/>. Zero or negative disables the check.
+    /// </summary>
+    public int MaxToolSchemaChars { get; init; } = 64 * 1024;
+
+    /// <summary>A tool description longer than this is cut (with an ellipsis) before it reaches the model; zero or negative keeps it whole.</summary>
+    public int MaxToolDescriptionChars { get; init; } = 4 * 1024;
 
     public IReadOnlyList<McpRoot> Roots { get; init; } = [];
 

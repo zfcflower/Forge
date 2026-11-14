@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:preview="using:Forge.App.ViewModels.Preview"
+             x:Class="Forge.App.Views.Preview.NotebookPreviewView"
+             x:DataType="preview:NotebookFilePreviewViewModel">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+    <TextBlock Classes="caption" Margin="12,6" Text="{Binding Caption}" />
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <ItemsControl Margin="12,0" ItemsSource="{Binding Cells}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <VirtualizingStackPanel />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="preview:NotebookCellViewModel">
+            <Border Padding="10,6" Margin="0,4" CornerRadius="6"
+                    BorderThickness="1" BorderBrush="{DynamicResource BorderStrongBrush}"
+                    Background="{DynamicResource SurfaceElevatedBrush}">
+              <StackPanel Spacing="4">
+                <TextBlock Classes="caption" Text="{Binding KindLabel}" />
+                <SelectableTextBlock Text="{Binding Source}" TextWrapping="Wrap"
+                                     IsVisible="{Binding IsMarkdown}" />
+                <SelectableTextBlock Text="{Binding Source}" TextWrapping="Wrap"
+                                     FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+                                     IsVisible="{Binding IsCode}" />
+                <SelectableTextBlock Text="{Binding Source}" TextWrapping="Wrap"
+                                     FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     IsVisible="{Binding IsRaw}" />
+                <ItemsControl ItemsSource="{Binding Outputs}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="preview:NotebookOutputViewModel">
+                      <StackPanel Spacing="2" Margin="0,4,0,0">
+                        <TextBlock Classes="caption" Text="{Binding KindLabel}" />
+                        <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                             FontFamily="{DynamicResource FontMono}"
+                                             FontSize="{DynamicResource FontSizeCode}"
+                                             IsVisible="{Binding HasText}" />
+                        <Image Source="{Binding Image}" Stretch="Uniform" MaxWidth="640" MaxHeight="480"
+                               HorizontalAlignment="Left"
+                               IsVisible="{Binding HasImage}"
+                               AutomationProperties.AutomationId="notebook-output-image" />
+                        <StackPanel Spacing="2" IsVisible="{Binding HasError}">
+                          <TextBlock Classes="caption" TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"
+                                     Text="{Binding ErrorSummary}" />
+                          <SelectableTextBlock Text="{Binding Traceback}" TextWrapping="Wrap"
+                                               FontFamily="{DynamicResource FontMono}"
+                                               FontSize="{DynamicResource FontSizeCode}"
+                                               Foreground="{DynamicResource DangerBrush}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+    <TextBlock Grid.Row="2" Classes="caption" Margin="12,6" TextWrapping="Wrap"
+               Foreground="{DynamicResource DangerBrush}"
+               IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
+               AutomationProperties.AutomationId="file-preview-notice" />
+  </Grid>
+</UserControl>

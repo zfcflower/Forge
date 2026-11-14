@@ -199,6 +199,7 @@ public static class McpConfigLoader
                 Disabled = disabled,
                 ReadOnlyTools = readOnly,
                 Timeout = ReadTimeout(element, source, name, diagnostics),
+                Source = source,
             };
         }
         catch (Exception ex) when (ex is JsonException or FormatException or OverflowException or ArgumentException)

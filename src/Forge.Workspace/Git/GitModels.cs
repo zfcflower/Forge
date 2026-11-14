@@ -69,6 +69,14 @@ public sealed record GitLogOptions
 }
 
 /// <summary>
+/// One diff read: the text git printed and the same text parsed into files. Both come from a single git invocation, so a
+/// caller that needs the text and the file list of the same moment cannot get two different working trees.
+/// <see cref="Files"/> additionally holds synthetic add-diffs for untracked files when
+/// <see cref="GitDiffOptions.IncludeUntracked"/> was set; git prints nothing for those, so they are not in <see cref="Text"/>.
+/// </summary>
+public sealed record GitDiffSnapshot(string Text, IReadOnlyList<FileDiff> Files);
+
+/// <summary>
 /// Which tree pair a diff compares. Defaults match <c>git diff</c>: index versus working tree.
 /// <see cref="From"/>/<see cref="To"/> name commits (or a commit and the working tree when
 /// <see cref="To"/> is null), <see cref="Staged"/> compares <see cref="From"/> against the index.

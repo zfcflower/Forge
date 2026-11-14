@@ -167,7 +167,11 @@ internal static class ComposerSuggestions
         return IsSubsequence(path, query) ? 3 : -1;
     }
 
-    private static bool IsSubsequence(string path, string query)
+    /// <summary>
+    /// Whether the query's characters appear in the path in order (case-insensitive), the weakest match the pickers accept.
+    /// Shared with the palette's own ranking so "fuzzy" means the same thing in both places.
+    /// </summary>
+    internal static bool IsSubsequence(string path, string query)
     {
         var at = 0;
         foreach (var ch in path)

@@ -41,6 +41,14 @@ public sealed record ChatRequest(
     /// (OpenCode's <c>x-opencode-session</c>, for one). Null outside a session: a header that needs it is then not sent.
     /// </summary>
     public string? SessionId { get; init; }
+
+    /// <summary>
+    /// Whether tool results may send their images to the model. False — the user turned it off, or the model's catalogue
+    /// entry says it takes no image input — makes every adapter write the result's text instead, placeholders included. The
+    /// stored message keeps its images either way, so the transcript still shows what the tool produced and turning the
+    /// setting back on changes only what the model sees next.
+    /// </summary>
+    public bool IncludeToolImages { get; init; } = true;
 }
 
 public enum StopReason { EndTurn, ToolUse, MaxTokens, Other }

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.Core.Agents;
+using Forge.Core.Tools;
 using Xunit;
 
 namespace Forge.App.Tests.Agents;
@@ -335,6 +336,40 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
 
         await rig.TurnAsync();
         AssertSpawnAgentOffered(rig, expected: true);
+    }
+
+    /// <summary>
+    /// <c>request_review</c> spawns a Reviewer child, so it is a spawning tool too: with spawning switched off it must leave
+    /// the tool set together with <c>spawn_agent</c>, or the switch would be a promise the model can walk around.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Request_review_follows_the_spawning_switch(bool enabled)
+    {
+        limits = new SubAgentLimits(2, Enabled: enabled);
+        await using var rig = new SessionRuntimeRig(
+            root,
+            services =>
+            {
+                services.SubAgents = () => limits;
+                services.DisabledTools = static () => [];
+                services.Reviews = new NoChangesReviewSource();
+            });
+
+        await rig.TurnAsync();
+
+        Assert.Equal(enabled, ToolNames(rig.Provider.Requests[^1]).Contains(RequestReviewTool.Name));
+        var published = rig.Runtime.PublishedTools;
+        Assert.NotNull(published);
+        Assert.Equal(enabled, published.Definitions.Any(static definition => definition.Name == RequestReviewTool.Name));
+        AssertSpawnAgentOffered(rig, enabled);
+    }
+
+    private sealed class NoChangesReviewSource : IReviewChangeSetSource
+    {
+        public Task<ReviewChangeSetResult> BuildAsync(ReviewChangeSetRequest request, CancellationToken ct) =>
+            Task.FromResult(ReviewChangeSetResult.Failed("no changes in this test"));
     }
 
     [Fact]

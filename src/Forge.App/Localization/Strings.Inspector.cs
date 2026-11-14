@@ -39,7 +39,6 @@ internal static class InspectorStrings
     public const string FilesStatusWorkingTree = "files.status.workingTree";
     public const string FilesStatusStaged = "files.status.staged";
     public const string FilesStatusStagedAndUnstaged = "files.status.stagedAndUnstaged";
-    public const string FilesBinary = "files.binary";
     public const string FilesUnsaved = "files.unsaved";
     public const string FilesSaveFailed = "files.saveFailed";
     public const string FilesLspUnavailable = "files.lsp.unavailable";
@@ -189,7 +188,6 @@ internal static class InspectorStrings
         Loc.Register(FilesStatusWorkingTree, "工作区", "Working tree");
         Loc.Register(FilesStatusStaged, "已暂存", "Staged");
         Loc.Register(FilesStatusStagedAndUnstaged, "已暂存并有未暂存改动", "Staged and unstaged");
-        Loc.Register(FilesBinary, "不是文本文件：{0}", "Not a text file: {0}");
         Loc.Register(FilesUnsaved, "有未保存的修改，已取消重新加载。", "Unsaved edits; reload cancelled.");
         Loc.Register(FilesSaveFailed, "保存失败：{0}", "Save failed: {0}");
         Loc.Register(FilesLspUnavailable, "语言服务不可用：{0}", "Language server unavailable: {0}");
@@ -404,7 +402,6 @@ internal static class InspectorStrings
 
     /// <summary>"文件监视不可用：<c>message</c>" — the OS message is inserted as is.</summary>
     public static LocText WatchUnavailable(string message) => new(FilesWatchUnavailable, LocText.Literal(message));
-    public static LocText FileBinary(string path) => new(FilesBinary, LocText.Literal(path));
     public static string FileDiscardMessage(string name) => Loc.Instance.Format(FilesDiscardMessage, name);
     public static string FileArchiveMessage(string name) => Loc.Instance.Format(FilesArchiveMessage, name);
     public static LocText FileCopyFailed(string message) => new(FilesCopyFailed, LocText.Literal(message));

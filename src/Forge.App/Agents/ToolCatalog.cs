@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using Forge.Abstractions;
 using Forge.Core.Agents;
+using Forge.Core.Tools;
 
 namespace Forge.App.Agents;
 
@@ -38,6 +39,7 @@ internal static class ToolCatalog
         [SubAgentSteerTool.Name] = ToolGroups.Agents,
         [SubAgentFollowUpTool.Name] = ToolGroups.Agents,
         [SubAgentStopTool.Name] = ToolGroups.Agents,
+        [RequestReviewTool.Name] = ToolGroups.Agents,
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>A Core built-in tool's catalog entry; an unknown Core name lands in the session group.</summary>

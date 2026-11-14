@@ -7,6 +7,7 @@ using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
 using Forge.Core.Tools;
 using Forge.HostClient;
+using Forge.Mcp;
 using Forge.Workspace;
 using Forge.App.Logging;
 using ZLogger;
@@ -53,6 +54,9 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public IStepCommitter? StepCommitter { get; set; }
 
+    /// <summary>The git side of <c>request_review</c> (handed to <c>AgentHostOptions.Reviews</c>, which registers the tool). Null in a unit test: the session then has no review tool.</summary>
+    public IReviewChangeSetSource? Reviews { get; set; }
+
     /// <summary>
     /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
     /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
@@ -90,6 +94,12 @@ internal sealed record AgentRuntimeServices(
     // --- end web tools ---
 
     /// <summary>
+    /// The MCP servers of the app; null when the runtime was assembled without the composition root (a unit test), which then
+    /// has no MCP tools at all. The catalog, the per-turn limit and the search tool all come from here.
+    /// </summary>
+    public Composition.McpServices? Mcp { get; set; }
+
+    /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
     /// tool set and approval handler here when its host is built. Null in a unit test: nothing is registered.
     /// </summary>
@@ -106,7 +116,8 @@ internal sealed record AgentRuntimeServices(
     /// The <c>agents</c> section's two dials: how many agents of a session tree may run at once, and whether a session may
     /// spawn sub-agents at all. Read when a host is built and again before every turn, so a change reaches a running session
     /// from its next turn: a raised cap lets agents that are already queued start at once, a lower one only stops new ones
-    /// from starting, and switching spawning off takes <c>spawn_agent</c> out of the model's tool set while the control tools
+    /// from starting, and switching spawning off takes <c>spawn_agent</c> and <c>request_review</c> (it runs a Reviewer
+    /// sub-agent) out of the model's tool set while the control tools
     /// a parent already needs (steer, follow-up, stop) stay. Null = <see cref="SubAgentLimits.Default"/> (a unit test, or
     /// a runtime assembled without the settings store).
     /// </summary>
@@ -125,6 +136,20 @@ internal sealed record AgentRuntimeServices(
 
     /// <summary>Largest output of a model when its settings do not pin one; null = unknown (the reserve is then 20% of the window).</summary>
     public Func<ModelSettings, int?>? MaxOutputTokens { get; set; }
+
+    /// <summary>
+    /// What a model accepts from the catalog, handed to <see cref="AgentOptions.ModelInputs"/>: a model known to take no
+    /// image input receives a tool result's text instead of its pictures. A lookup rather than a value because the session
+    /// can be pointed at another provider between hosts.
+    /// </summary>
+    public Func<ModelSettings, ModelInputs?>? ModelInputs { get; set; }
+
+    /// <summary>
+    /// Whether tool results may send their images to the model (the <c>chat</c> settings switch), handed to
+    /// <see cref="AgentOptions.SendToolImagesToModel"/> as the live lookup it is — the loop asks it before every request, so
+    /// a flip applies from the next turn. Null (a unit test) means on.
+    /// </summary>
+    public Func<bool>? SendToolImages { get; set; }
 
     /// <summary>
     /// The <c>compaction</c> settings, read when a session's host is built, again before every turn and whenever
@@ -172,6 +197,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
     private CompactionSettings? appliedCompaction;
+    // Built eagerly / published once: the turn thread (RefreshMcpTools) and a tool thread (the search callback) both reach them,
+    // and a second exposure instance created by a race would silently drop the pins the other one holds.
+    private readonly McpToolExposure mcpExposure = new();
+    private McpToolSearchTool? mcpSearchTool;
+    private string mcpFocus = string.Empty;
 
     /// <summary>The sub-agent cap last handed to the host; an unchanged value never touches it. Guarded by <see cref="gate"/>.</summary>
     private int appliedMaxParallel = SubAgentLimits.DefaultParallel;
@@ -233,6 +263,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
         ArgumentNullException.ThrowIfNull(sink);
         var message = UserMessage(userText, attachments);
+
+        // What this request is about decides which MCP tools are offered (see RefreshMcpTools); it is read when the tool
+        // surface is refreshed at the start of the turn and never stored.
+        Volatile.Write(ref mcpFocus, userText);
 
         var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
         lock (gate)
@@ -514,6 +548,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 ApplyDisabledTools(host);
                 ApplySubAgentLimits(host);
                 RefreshWebTools(host);
+                RefreshMcpTools(host);
                 ApplyCompaction(host);
                 return (host, root);
             }
@@ -532,6 +567,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             ApplyDisabledTools(host);
             ApplySubAgentLimits(host);
             RefreshWebTools(host);
+            RefreshMcpTools(host);
             ApplyCompaction(host);
             rootStale = !SameDefinition(rootDefinition, definition);
 
@@ -548,9 +584,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
-    /// Re-applies the user's tool switches, plus <c>spawn_agent</c> while sub-agents are switched off: the model then has no
-    /// way to start a child, while the control tools a parent already needs stay available, so the children a session started
-    /// before the switch can still be steered and stopped. Publishes a new tool set only when a switch moved.
+    /// The tools that start a child agent, taken out while sub-agents are switched off. <c>request_review</c> is one of them:
+    /// it runs a Reviewer sub-agent, so leaving it in would let the model start a child the user just switched off.
+    /// </summary>
+    private static readonly string[] SpawningTools = [SpawnAgentTool.Name, RequestReviewTool.Name];
+
+    /// <summary>
+    /// Re-applies the user's tool switches, plus the spawning tools (<see cref="SpawningTools"/>) while sub-agents are
+    /// switched off: the model then has no way to start a child, while the control tools a parent already needs stay
+    /// available, so the children a session started before the switch can still be steered and stopped. Publishes a new tool
+    /// set only when a switch moved.
     /// </summary>
     private void ApplyDisabledTools(AgentHost target)
     {
@@ -558,12 +601,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         if (services.DisabledTools is not { } disabled)
         {
             // A runtime without the tools store (a unit test) still honours the sub-agent switch, in both directions.
-            target.SetDisabledTools(subAgents.Enabled ? [] : [SpawnAgentTool.Name]);
+            target.SetDisabledTools(subAgents.Enabled ? [] : SpawningTools);
             return;
         }
 
         var stored = ToolCatalog.EffectiveDisabled(disabled());
-        target.SetDisabledTools(subAgents.Enabled ? stored : stored.Append(SpawnAgentTool.Name));
+        target.SetDisabledTools(subAgents.Enabled ? stored : stored.Concat(SpawningTools));
     }
 
     /// <summary>
@@ -670,6 +713,179 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
+    /// Brings the MCP tools <paramref name="target"/> offers in line with the request this turn is about, the way
+    /// <see cref="RefreshWebTools"/> does for the web tools: when the selected names differ from the held ones the external set
+    /// is published afresh, otherwise nothing is published and the prompt cache survives. Called at the start of every turn with
+    /// the gate held; a turn already running keeps its set until it ends.
+    /// </summary>
+    private void RefreshMcpTools(AgentHost target)
+    {
+        if (services.Mcp is not { } mcp)
+        {
+            return;
+        }
+
+        try
+        {
+            var selected = mcpExposure.Select(
+                mcp.Manager.Tools,
+                mcp.ToolSearchLimit,
+                Volatile.Read(ref mcpFocus),
+                out var truncated);
+            var (builtIns, external) = target.AllTools;
+            if (!SameMcpTools(selected, truncated, builtIns, external))
+            {
+                target.ReplaceExternalTools(CollectExternalTools());
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"the MCP tools could not be refreshed: {exception.Message}");
+        }
+    }
+
+    /// <summary>The MCP tools this session offers right now; a test reads it instead of the host.</summary>
+    internal IReadOnlyList<ITool> McpToolsForTest()
+    {
+        if (services.Mcp is not { } mcp)
+        {
+            return [];
+        }
+
+        var tools = new List<ITool>(4);
+        AppendMcpTools(tools, mcp);
+        return tools;
+    }
+
+    /// <summary>
+    /// Appends the selected MCP tools and, while the limit hides some, the search tool that reaches them. A name already in
+    /// <paramref name="into"/> (a plugin or web tool) wins over an MCP tool of the same name: the registry keys by name, so
+    /// appending the second one would silently replace a tool the user installed with one a server happens to advertise.
+    /// </summary>
+    private void AppendMcpTools(List<ITool> into, Composition.McpServices mcp)
+    {
+        var selected = mcpExposure.Select(
+            mcp.Manager.Tools,
+            mcp.ToolSearchLimit,
+            Volatile.Read(ref mcpFocus),
+            out var truncated);
+        if (selected.Count == 0 && !truncated)
+        {
+            return;
+        }
+
+        var taken = new HashSet<string>(into.Count + selected.Count + 1, StringComparer.Ordinal);
+        foreach (var tool in into)
+        {
+            taken.Add(tool.Definition.Name);
+        }
+
+        foreach (var adapter in selected)
+        {
+            if (taken.Add(adapter.ExposedName))
+            {
+                into.Add(adapter);
+            }
+        }
+
+        if (truncated && taken.Add(McpToolSearchTool.Name))
+        {
+            into.Add(LazyInitializer.EnsureInitialized(ref mcpSearchTool, () => new McpToolSearchTool(SearchMcpTools)));
+        }
+    }
+
+    /// <summary>
+    /// The search tool's callback: pin the matches, then republish so the next request really offers them. The model is told the
+    /// matches are callable, so publishing before returning is what makes the answer true.
+    /// </summary>
+    private IReadOnlyList<McpToolAdapter> SearchMcpTools(string query, int limit)
+    {
+        if (services.Mcp is not { } mcp)
+        {
+            return [];
+        }
+
+        // Never pin more than one request may offer: the answer tells the model every match is callable now, and a match past
+        // the limit would be pinned but cut from the very next surface.
+        var cap = mcp.ToolSearchLimit;
+        var matches = mcpExposure.Search(mcp.Manager.Tools, query, cap > 0 ? Math.Min(limit, cap) : limit);
+        if (matches.Count > 0)
+        {
+            OnToolsChanged();
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="held"/> already carries exactly the MCP tools the selection names; no allocation. A held adapter
+    /// counts only when its definition and side effect are still the selected one's: a server whose <c>readOnlyTools</c> or
+    /// schema changed republishes adapters under the same names, and keeping the old one would offer a stale schema or — worse —
+    /// skip the approval a tool that stopped being read-only now needs. A selected name a built-in or a plugin/web tool already
+    /// holds is shadowed (see <see cref="AppendMcpTools"/>) and is expected to be absent.
+    /// </summary>
+    internal static bool SameMcpTools(
+        IReadOnlyList<McpToolAdapter> selected,
+        bool truncated,
+        IReadOnlyList<ITool> builtIns,
+        IReadOnlyList<ITool> held)
+    {
+        var heldCount = 0;
+        var heldSearch = false;
+        foreach (var tool in held)
+        {
+            if (tool is McpToolAdapter)
+            {
+                heldCount++;
+            }
+            else if (string.Equals(tool.Definition.Name, McpToolSearchTool.Name, StringComparison.Ordinal))
+            {
+                heldSearch = true;
+            }
+        }
+
+        if (heldSearch != truncated)
+        {
+            return false;
+        }
+
+        var expected = 0;
+        foreach (var adapter in selected)
+        {
+            var match = Find(held, adapter.ExposedName);
+            if (match is McpToolAdapter current)
+            {
+                if (!ReferenceEquals(current, adapter) &&
+                    (current.SideEffect != adapter.SideEffect || !current.Definition.Equals(adapter.Definition)))
+                {
+                    return false;
+                }
+
+                expected++;
+            }
+            else if (match is null && Find(builtIns, adapter.ExposedName) is null)
+            {
+                return false;
+            }
+        }
+
+        return heldCount == expected;
+    }
+
+    private static ITool? Find(IReadOnlyList<ITool> tools, string name)
+    {
+        foreach (var tool in tools)
+        {
+            if (string.Equals(tool.Definition.Name, name, StringComparison.Ordinal))
+            {
+                return tool;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Hands the current <c>compaction</c> settings to the host when they differ from what it last got; the window and
     /// max-output resolvers stay the catalog's. Caller holds <see cref="gate"/>.
     /// </summary>
@@ -747,6 +963,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Store = services.Store,
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
+                Reviews = services.Reviews,
                 Artifacts = services.Artifacts,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
@@ -759,6 +976,8 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                     // compaction (feature B): thresholds relative to each model's effective window. Later saves reach
                     // this host through ApplyCompaction.
                     Compaction = compaction.ToPolicy(services.ContextWindow, services.MaxOutputTokens),
+                    SendToolImagesToModel = services.SendToolImages ?? (static () => true),
+                    ModelInputs = services.ModelInputs,
                 },
             });
         appliedCompaction = compaction;
@@ -908,6 +1127,21 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
             into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.PullRequests));
         }
+
+        // Every ready MCP tool, not only the ones this turn offers: the Tools section is where a user looks to see what a server
+        // provides, and a trimmed list there would read as a missing tool.
+        if (services.Mcp is { } mcp)
+        {
+            foreach (var adapter in mcp.Manager.Tools)
+            {
+                into.Add(new ToolDescriptor(
+                    adapter.ExposedName,
+                    ToolOrigin.Mcp,
+                    adapter.ServerName,
+                    adapter.ServerName,
+                    CanDisable: false));
+            }
+        }
     }
 
     // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
@@ -969,6 +1203,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         if (services.WebTools is { } webTools)
         {
             tools.AddRange(webTools());
+        }
+
+        // Last, so every tool above keeps its name when an MCP server advertises the same one (AppendMcpTools drops the MCP
+        // copy), and because the selection is the only part of this list that changes on its own.
+        if (services.Mcp is { } mcp)
+        {
+            AppendMcpTools(tools, mcp);
         }
 
         return tools;
