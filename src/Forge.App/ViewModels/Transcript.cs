@@ -80,12 +80,16 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableT
 }
 
 /// <summary>A one-line system note inside a transcript (compaction, denied call, stopped turn).</summary>
-internal sealed class NoticeViewModel(LocText text, bool isError = false) : TranscriptItemViewModel
+internal sealed class NoticeViewModel(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice)
+    : TranscriptItemViewModel
 {
     /// <summary>The note in the current language, resolved when the note is rendered.</summary>
     public string Text => text.Resolve();
 
     public bool IsError { get; } = isError;
+
+    /// <summary>Which timeline node the note wears; a denied approval is <see cref="TimelineNodeKind.Approval"/>.</summary>
+    public TimelineNodeKind Kind { get; } = kind;
 
     public override void RefreshText() => OnPropertyChanged(nameof(Text));
 }
@@ -167,12 +171,16 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
 }
 
 /// <summary>A note inside a turn card, such as a redirected or stopped sub-agent.</summary>
-internal sealed class TurnNoticeViewModel(LocText text, bool isError) : TurnBlockViewModel
+internal sealed class TurnNoticeViewModel(LocText text, bool isError, TimelineNodeKind kind = TimelineNodeKind.Notice)
+    : TurnBlockViewModel
 {
     /// <summary>The note in the current language, resolved when the note is rendered.</summary>
     public string Text => text.Resolve();
 
     public bool IsError { get; } = isError;
+
+    /// <summary>Which timeline node the note wears; a denied approval is <see cref="TimelineNodeKind.Approval"/>.</summary>
+    public TimelineNodeKind Kind { get; } = kind;
 
     public override void RefreshText() => OnPropertyChanged(nameof(Text));
 }
@@ -279,10 +287,10 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         blocks.Add(late);
     }
 
-    public void AddNotice(LocText text, bool isError = false)
+    public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice)
     {
         SealText();
-        blocks.Add(new TurnNoticeViewModel(text, isError));
+        blocks.Add(new TurnNoticeViewModel(text, isError, kind));
     }
 
     /// <summary>
@@ -380,8 +388,8 @@ internal sealed class TranscriptViewModel : ObservableObject
     public void AddUserMessage(string text, DateTimeOffset at, IReadOnlyList<ContentBlock>? attachments = null) =>
         Add(new UserMessageViewModel(text, at, attachments));
 
-    public void AddNotice(LocText text, bool isError = false) =>
-        Add(new NoticeViewModel(text, isError));
+    public void AddNotice(LocText text, bool isError = false, TimelineNodeKind kind = TimelineNodeKind.Notice) =>
+        Add(new NoticeViewModel(text, isError, kind));
 
     /// <summary>
     /// Starts the next turn card and collapses the previous one when this transcript only expands the newest. A stored

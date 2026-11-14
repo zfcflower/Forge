@@ -80,8 +80,9 @@ internal sealed record AgentRuntimeServices(
     /// <c>bash</c>) from <c>Forge.IO</c>. Stateless across sessions: every call takes the session's worktree from its
     /// <see cref="ToolContext"/>. Empty in a unit test, where an agent therefore cannot touch files at all. The read-only
     /// ones pass through <see cref="DefaultApprovalPolicy.AutoAllowReadOnly"/>; <c>write</c>/<c>edit</c> ask and
-    /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. None of them is offered to <c>run_code</c> scripts, whose
-    /// calls never pass the per-call approval card.
+    /// <c>bash</c> asks with <see cref="ToolSideEffect.Execute"/>. The read-only four are also the file half of a
+    /// <c>run_code</c> script's tool surface (wave W14: read-only is the rule, so nothing a script reaches ever needed a
+    /// card the model's own call would have raised); <c>write</c>, <c>edit</c> and <c>bash</c> stay out of it entirely.
     /// </summary>
     public IReadOnlyList<ITool> FileTools { get; set; } = [];
 
@@ -91,7 +92,7 @@ internal sealed record AgentRuntimeServices(
     /// while a backend is configured with its key or URL. Called again at the start of every turn: when the names it
     /// returns differ from what the session's host holds, the external set is republished (otherwise nothing changes,
     /// so the prompt cache stays). Should be cheap and return shared instances. Null in a unit test: no web tools. Both
-    /// always ask for approval (see <c>CreatePolicy</c>): network egress can carry data out.
+    /// always ask for approval (see <c>CreateRules</c>): network egress can carry data out.
     /// </summary>
     public Func<IReadOnlyList<ITool>>? WebTools { get; set; }
     // --- end web tools ---
@@ -101,6 +102,14 @@ internal sealed record AgentRuntimeServices(
     /// has no MCP tools at all. The catalog, the per-turn limit and the search tool all come from here.
     /// </summary>
     public Composition.McpServices? Mcp { get; set; }
+
+    /// <summary>
+    /// The <c>tools</c> section's four <c>run_code</c> dials (wave W14): the inner-call concurrency, the two result sizes and
+    /// the visible-tool list. A lookup rather than a value because all four are settings, and every consumer reads them on
+    /// use: the description states the numbers and the registry filters by the list, so a change reaches the next turn
+    /// without rebuilding a session host. Null = <see cref="CodeModeSettings.Default"/> (a unit test).
+    /// </summary>
+    public Func<CodeModeSettings>? CodeMode { get; set; }
 
     /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
@@ -1116,7 +1125,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.Extension, ToolGroups.Extensions, CanDisable: false));
             }
 
-            if (client.Tools.Count > 0)
+            // The same decision CollectExternalTools made when it published the tools: run_code exists exactly while a
+            // script has something to call, which is not the same as "a plugin registered tools".
+            if (Volatile.Read(ref scriptSurface) is not null)
             {
                 into.Add(new ToolDescriptor(ToolCatalog.RunCode, ToolOrigin.BuiltIn, ToolGroups.Extensions));
             }
@@ -1193,20 +1204,24 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// The tools that come from outside Core: the extension host's plugin tools, the <c>run_code</c> proxy and, once the
     /// approval wiring exists, the five extension tools, then the git tools. Recomputed on every registration change so a hot reload reaches
     /// the loop before its next model request.
+    /// <para>
+    /// The <c>run_code</c> proxy gets its own registry, collected in the same pass (wave W14): the extension host's plugin
+    /// tools (whole, write and execute ones included, minus names the session already owns) plus every <b>read-only</b> tool
+    /// of the workspace, web and MCP families (see <see cref="CodeModeTools"/>). <c>write</c>, <c>edit</c>, <c>bash</c>, the
+    /// git and PR tools and the extension authoring tools stay out of that registry entirely, so the script cannot even name
+    /// them; an inner call still goes through the session's approval path. The MCP half is the per-server read-only allowlist
+    /// (<c>readOnlyTools</c>) restricted to the adapters this turn offers; the MCP search tool is not an adapter and is left
+    /// out (a script has no prompt budget to save). The registry also honours the user's tool switches live.
+    /// </para>
     /// </summary>
     private List<ITool> CollectExternalTools()
     {
         var tools = new List<ITool>();
-        if (services.HostClient is { } client)
+        var plugins = services.HostClient?.Tools ?? [];
+        IReadOnlyList<ITool> web = [];
+        if (services.HostClient is not null)
         {
-            tools.AddRange(client.Tools);
-            if (tools.Count > 0)
-            {
-                // Scripts only see extension-host tools: a call from inside run_code never goes through the per-call
-                // approval presentation, so the git and PR write tools must stay out of its registry.
-                tools.Add(client.CreateRunCodeTool(new SnapshotToolRegistry(client.Tools)));
-            }
-
+            tools.AddRange(plugins);
             if (services.Approvals?.Extensions is { } extensions)
             {
                 tools.AddRange(ExtensionTools.Create(extensions));
@@ -1222,17 +1237,94 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         tools.AddRange(services.PullRequestTools);
         if (services.WebTools is { } webTools)
         {
-            tools.AddRange(webTools());
+            web = webTools();
+            tools.AddRange(web);
         }
 
         // Last, so every tool above keeps its name when an MCP server advertises the same one (AppendMcpTools drops the MCP
         // copy), and because the selection is the only part of this list that changes on its own.
+        var mcpTools = new List<ITool>();
         if (services.Mcp is { } mcp)
         {
             AppendMcpTools(tools, mcp);
+            foreach (var tool in tools)
+            {
+                if (tool is McpToolAdapter { SideEffect: ToolSideEffect.ReadOnly })
+                {
+                    mcpTools.Add(tool);
+                }
+            }
         }
 
+        // The script surface is decided in one place, from the same sources this list is built from (see CodeModeTools).
+        var scriptTools = CodeModeTools.Collect(plugins, services.FileTools, web, mcpTools, ReservedScriptNames(web));
+
+        // A script needs something to call: with nothing to fan out over, run_code would be a prompt line that can only
+        // compute. Its own surface is not part of the loop's tools, so this list is also the only writer of it. The
+        // outcome is kept (scriptSurface) so the Tools settings page lists run_code by this same decision.
+        CodeModeToolRegistry? surface = null;
+        if (services.HostClient is { } hostClient && scriptTools.Count > 0)
+        {
+            surface = new CodeModeToolRegistry(scriptTools, CurrentCodeMode, services.DisabledTools);
+            tools.Add(hostClient.CreateRunCodeTool(surface, RunCodeOptions()));
+        }
+
+        Volatile.Write(ref scriptSurface, surface);
         return tools;
+    }
+
+    /// <summary>The script registry of the last collection, or null when that collection produced no <c>run_code</c>.</summary>
+    private CodeModeToolRegistry? scriptSurface;
+
+    /// <summary>The registry the live <c>run_code</c> resolves inner calls against; null while there is no <c>run_code</c>.</summary>
+    internal IToolRegistry? ScriptSurface => Volatile.Read(ref scriptSurface);
+
+    /// <summary>
+    /// The names a plugin tool may not take on the script surface: every name the session resolves to something other than
+    /// a plugin tool (Core built-ins, the approval policy's rules, the file, git, PR, web and extension authoring tools).
+    /// In the session's registry such a name belongs to the built-in; on the script surface the plugin's tool would be
+    /// executed under the built-in's approval rule, so the plugin copy is left out there.
+    /// </summary>
+    private HashSet<string> ReservedScriptNames(IReadOnlyList<ITool> web)
+    {
+        var reserved = new HashSet<string>(SessionRules.Keys, StringComparer.Ordinal);
+        reserved.UnionWith(ToolCatalog.CoreNames);
+        reserved.UnionWith([ExtensionToolNames.List, ExtensionToolNames.Create, ExtensionToolNames.Update, ExtensionToolNames.Disable, ExtensionToolNames.Delete]);
+        AddNames(reserved, services.FileTools);
+        AddNames(reserved, services.PullRequestTools);
+        AddNames(reserved, web);
+        if (services.Git is { } git)
+        {
+            AddNames(reserved, git.All);
+        }
+
+        return reserved;
+
+        static void AddNames(HashSet<string> into, IReadOnlyList<ITool> tools)
+        {
+            foreach (var tool in tools)
+            {
+                into.Add(tool.Definition.Name);
+            }
+        }
+    }
+
+    /// <summary>The four script dials of the <c>tools</c> section right now; the defaults when the runtime has no store.</summary>
+    private CodeModeSettings CurrentCodeMode() => services.CodeMode?.Invoke() ?? CodeModeSettings.Default;
+
+    /// <summary>
+    /// The <c>run_code</c> options: the script budgets read live from the <c>tools</c> section, so a settings change reaches
+    /// the next turn's description (it states the numbers) and every later script without a new session host. The two
+    /// timeouts keep the proxy's own defaults; they are not user-facing dials.
+    /// </summary>
+    private RunCodeProxyOptions RunCodeOptions()
+    {
+        if (services.CodeMode is null)
+        {
+            return new RunCodeProxyOptions();
+        }
+
+        return new RunCodeProxyOptions { ExecutionProvider = () => CurrentCodeMode().ToExecution() };
     }
 
     /// <summary>
@@ -1338,9 +1430,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// <c>pr_screenshots</c>: its side effect is <see cref="ToolSideEffect.Execute"/>, because it runs a command the repository
     /// declares, and the push and description edit that follow are the write half of the same card.</para>
     /// </summary>
-    private static readonly IApprovalPolicy SessionPolicy = CreatePolicy();
+    private static readonly Dictionary<string, ApprovalMode> SessionRules = CreateRules();
 
-    private static IApprovalPolicy CreatePolicy()
+    private static readonly IApprovalPolicy SessionPolicy = new DefaultApprovalPolicy { ToolRules = SessionRules };
+
+    private static Dictionary<string, ApprovalMode> CreateRules()
     {
         var rules = new Dictionary<string, ApprovalMode>(StringComparer.Ordinal)
         {
@@ -1356,28 +1450,9 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             rules[name] = ApprovalMode.Allow;
         }
 
-        return new DefaultApprovalPolicy { ToolRules = rules };
+        return rules;
     }
 
-    /// <summary>The immutable tool surface a script may call; a snapshot, so a later registration cannot mutate it.</summary>
-    private sealed class SnapshotToolRegistry : IToolRegistry
-    {
-        private readonly Dictionary<string, ITool> byName = new(StringComparer.Ordinal);
-
-        public SnapshotToolRegistry(IReadOnlyList<ITool> tools)
-        {
-            foreach (var tool in tools)
-            {
-                byName[tool.Definition.Name] = tool;
-            }
-
-            Tools = [.. byName.Values];
-        }
-
-        public IReadOnlyList<ITool> Tools { get; }
-
-        public bool TryGet(string name, out ITool tool) => byName.TryGetValue(name, out tool!);
-    }
 }
 
 /// <summary>Stands in for a provider when none is configured, so a turn fails with one clear sentence instead of a null.</summary>

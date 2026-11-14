@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using Forge.App.Changes;
 using Forge.App.Changes.Markdown;
 using Forge.App.Localization;
+using Forge.App.Views;
 using Forge.Workspace;
 using Xunit;
 
@@ -214,6 +215,22 @@ public sealed class MarkdownDiffViewTests
         Assert.False(MarkdownRenderer.IsOpenable("javascript:alert(1)"));
         Assert.False(MarkdownRenderer.IsOpenable("mailto:a@b.c"));
         Assert.False(MarkdownRenderer.IsOpenable("relative/path.md"));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task A_mermaid_fence_in_the_preview_renders_a_diagram_block() => Ui(() =>
+    {
+        // The new side of the file is one added Markdown fence; the preview renders it through the same MarkdownRenderer
+        // the chat uses, so the diagram must arrive as a Mermaid block and not as a code block.
+        var file = new FakeFile(Full(
+            FileDiffStatus.Modified, " ", "+```mermaid", "+flowchart TD", "+  A-->B", "+```"));
+
+        var view = new MarkdownDiffView(file);
+
+        var mermaid = Assert.Single(
+            Children(view).OfType<Border>().Select(static border => border.Child).OfType<MermaidBlockView>());
+        Assert.Equal("flowchart TD\n  A-->B", mermaid.CopyText);
         return Task.CompletedTask;
     });
 

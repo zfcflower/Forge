@@ -1,5 +1,6 @@
 using Forge.App.Localization;
 using Forge.App.Preferences;
+using Forge.App.Services;
 using Forge.App.Settings;
 using Forge.App.ViewModels;
 using Forge.App.ViewModels.Preview;
@@ -27,6 +28,11 @@ internal static class ViewerSettingsComposition
         // Bound here, before the first window opens; a host without preferences keeps the built-in defaults.
         FilePreviewSettings.Current = new FilePreviewSettings(preferences);
         ToolImageSettings.ThumbnailEdge = () => preferences.ChatToolImageThumbnailPixels;
+
+        // Wave W11: a Mermaid block is built by the Markdown renderer and cannot be handed the preferences, so the two values it
+        // reads are projections of the live preferences, like the thumbnail edge above.
+        MermaidSettings.DiagramTypes = () => preferences.ChatMermaidDiagramTypes;
+        MermaidSettings.TimeoutMilliseconds = () => preferences.ChatMermaidTimeoutMilliseconds;
 
         // The section bodies come from this module's own views: SectionViewTemplate is the one data template App.axaml keeps
         // for the waves' settings sections, so registering the factory here is what replaced editing that frozen file.

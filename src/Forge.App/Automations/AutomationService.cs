@@ -25,6 +25,7 @@ internal sealed class AutomationService : IAsyncDisposable
     private readonly TimeProvider time;
     private readonly SqliteAutomationRunStore runs;
     private readonly INotifications? notifications;
+    private readonly ProviderRateLimiter rateLimits;
     private readonly CancellationTokenSource stopping = new();
     private readonly QuotaResumeRunner quotaRunner;
     private readonly SessionWatch watch;
@@ -47,11 +48,13 @@ internal sealed class AutomationService : IAsyncDisposable
         IUiThread? ui = null,
         TimeProvider? time = null,
         Prompts.PromptTemplateService? promptTemplates = null,
-        Func<IdleArchiveSettings>? idleArchive = null)
+        Func<IdleArchiveSettings>? idleArchive = null,
+        ProviderRateLimiter? rateLimits = null)
     {
         this.ui = ui ?? DispatcherUiThread.Instance;
         this.time = time ?? TimeProvider.System;
         this.notifications = notifications;
+        this.rateLimits = rateLimits ?? ProviderRateLimiter.Shared;
         runs = new SqliteAutomationRunStore(dataDirectory);
         Definitions = new AutomationDefinitionStore(definitionsPath);
         Mailbox = new SessionMailbox(host, this.ui, this.time);
@@ -69,7 +72,7 @@ internal sealed class AutomationService : IAsyncDisposable
             runs,
             probe,
             schedule,
-            new ResumeStagger(this.time),
+            this.rateLimits,
             notifications,
             this.time,
             shuttingDown: () => stopping.IsCancellationRequested,

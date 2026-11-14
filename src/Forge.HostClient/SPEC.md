@@ -136,11 +136,21 @@ depends-on: [forge-ipc]
   不设兜底 `catch`;调用方自己的 `OperationCanceledException` 原样传播——取消是调用方的决定,不是“插件没有文本”。
 - **run_code 是显式代理。** `CreateRunCodeTool(IToolRegistry, RunCodeProxyOptions?)` 返回 AOT 安全的 `ITool`
   (不要静默塞进插件工具列表)。描述与 schema 由主程序工具注册表稳定生成(按名称排序,registry 变化才重建),
-  解析 `code`/`timeout_seconds` 并在本地校验:脚本必填、非空、不超过 `MaxScriptChars`;`timeout_seconds` 必须是正的
+  **描述只列可调用的名字,不再逐工具列描述与 JSON schema**(W14):模型要细节时让脚本调 `Tools.List()`/
+  `Tools.Describe(name)`,每回合因此只付一份 `run_code` 定义而不是“工具数 × (描述 + schema)”。脚本侧的查询面在
+  `forge-script-runtime`。解析 `code`/`timeout_seconds` 并在本地校验:脚本必填、非空、不超过 `MaxScriptChars`;`timeout_seconds` 必须是正的
   有限数(NaN、∞、非正一律拒绝),默认 60 秒、上限 600 秒。数值先与上限比较夹取、再转 `TimeSpan`,所以 `1e300`
   这类超大有限预算夹到上限,而不是在校验之前抛 `OverflowException`。加密随机 `runId` 与上下文放进 SDK `CodeExecutionRequest` 的
   `code.execute`;编译、语义检查与脚本进程一概留在 Host,本模块不含反射或 Roslyn。每个子调用单独审批,
   并发由每运行门限制,结果在主程序侧截断;超时/结束后该 run 立即作废,迟到回调被拒。
+- **预算可以活读。** `RunCodeProxyOptions.ExecutionProvider`(W14)存在时,每次读 `Definition` 与每次执行都重新取一份
+  `CodeExecutionOptions`,因此“内部调用并发上限 / 单次内部结果上限 / 返回结果上限”这三个用户设置改完即对下一回合的
+  描述和下一个脚本生效,不必重建代理或会话宿主;`Execution` 是提供者为 null 时的固定值。读取点只有两处(描述构建、
+  调用入口),不在热路径上循环读文件。
+  提供者只在创建代理时由 `Validated` 严格校验(非法值抛 `ArgumentOutOfRangeException`);之后每次读取都再过一遍轻量钳制
+  (`RunCodeProxyOptionsExtensions.Clamped`:非正的上限抬到 1,缓存容量到 0,全部合法时返回原实例不分配),所以提供者事后
+  答出 0 的并发上限也不会让每运行的信号量(`SemaphoreSlim(0)`)把内层调用挂到超时。返回 null 仍是配置错误并抛出。
+  `Definition` 的缓存把(指纹,定义)放进一个不可变对象,一次 `Volatile.Write` 原子发布,并发读者不会拿到一个线程的指纹配另一个线程的定义。
 - **run_code 的可调用面只有一个推导点。** `RunCodeToolSurface.Snapshot` 一次读出每个工具的定义字段(名称/描述/
   schema/副作用),描述文本、变更指纹与 `code.execute` 的 `tools` 声明全部来自同一份快照,因此三者不会对“哪些工具
   可调用”或“读到的定义内容”产生分歧。所有 `RunCodeProxyTool` 实例在**读 `Definition` 之前**按类型剔除:代理的
@@ -148,7 +158,9 @@ depends-on: [forge-ipc]
   `Definition` 会无基线递归,导致不可捕获的栈溢出——`catch`/`finally` 都救不回进程,所以排除必须发生在解引用之前,
   不能靠“读出来再按名字过滤”。剔除代理之后,再按名称排除其它恰好叫 `run_code` 的普通工具。指纹是内容哈希而不是
   对象身份:内容相同的新对象不重建描述,代理的增删也不重建(它对可调用面没有贡献);只有可调用面真的变化才重建,
-  描述顺序按 ordinal 排序保持稳定。代价是每次读 `Definition` 都分配一份快照列表(条目数=工具数),换来策略单点与
+  描述顺序按 ordinal 排序保持稳定。描述里印出的预算数字也参与指纹(W14):并发上限、内部结果上限、返回结果上限、
+  日志上限与两个超时任一变化都会重建描述,所以提示里的数字不会与实际执行的边界脱节。`MaxScriptChars` **不**进指纹
+  ——描述不印它,只在本地的参数校验里用。代价是每次读 `Definition` 都分配一份快照列表(条目数=工具数),换来策略单点与
   自包含安全;工具数在主程序规模下是几十量级。
 - **插件状态只读 IPC,失败不伪装成“没有插件”。** `GetPluginStatusesAsync` 发 `plugins.status`,不回落到本地数据库,
   也没有“失败→空列表”的成功路径:未运行与调用中途断连会**抛出**(`InvalidOperationException`/

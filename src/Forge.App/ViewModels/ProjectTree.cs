@@ -425,6 +425,9 @@ internal sealed partial class TreeNodeViewModel : NotifyingObject, IFlatTreeNode
     /// <summary>True when the running agent's breathing animation may play (the reduced-motion gate is off).</summary>
     public bool IsAgentRunningAnimated => IsAgentRunning && !TreeMotion.ReducedMotion;
 
+    /// <summary>Re-raises <see cref="IsAgentRunningAnimated"/> after the global motion gate flipped.</summary>
+    internal void RefreshMotion() => OnPropertyChanged(nameof(IsAgentRunningAnimated));
+
     public string SessionId { get; init; } = string.Empty;
 
     public string SessionStatus { get; init; } = string.Empty;
@@ -836,6 +839,7 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
         // The tree is a long-lived owner: it is the one that hears a language switch and pushes the rows to re-render.
         // Rows stay unsubscribed (RefreshText is called on them), so closing a window does not leave rows in the table.
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        TreeMotion.Changed += OnMotionChanged;
     }
 
     public ObservableCollection<TreeNodeViewModel> Sections { get; } = [];
@@ -943,7 +947,23 @@ internal sealed partial class ProjectTreeViewModel : ObservableObject, IDisposab
     /// Releases the language subscription. The tree is the owner the rows are refreshed from, so nothing else has to be
     /// unsubscribed; the call is idempotent.
     /// </summary>
-    public void Dispose() => Loc.Instance.LanguageChanged -= OnLanguageChanged;
+    public void Dispose()
+    {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        TreeMotion.Changed -= OnMotionChanged;
+    }
+
+    /// <summary>The reduced-motion switch flipped: every row that may be animating re-reads the gate.</summary>
+    private void OnMotionChanged(object? sender, EventArgs e)
+    {
+        foreach (var row in Rows)
+        {
+            if (row.IsAgentRunning)
+            {
+                row.RefreshMotion();
+            }
+        }
+    }
 
     /// <summary>Registers the general workspace project and rebuilds the tree.</summary>
     public async Task InitializeAsync(string generalPath, CancellationToken ct)

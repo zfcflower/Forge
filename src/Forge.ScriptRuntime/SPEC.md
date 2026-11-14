@@ -13,7 +13,7 @@ depends-on: [forge-plugin-sdk]
 
 ## 责任
 
-- **脚本可见表面。** `ScriptGlobals`(`Tools`/`Log`/`Cancellation`)、`ToolsFacade`(`Call`/`Call<T>`/`CallJson`/`CallJson<T>`/`Json`/`Json<T>`)、`ToolCallException`。类型仍在 `Forge.Scripting` 命名空间,脚本源码因此与旧引擎完全兼容;`ScriptGlobals` 不再 `sealed`,编译出的脚本类型从它派生,`Log`/`Tools`/`Cancellation` 就是脚本自己的成员(与旧 Roslyn 提交类同一形态)。
+- **脚本可见表面。** `ScriptGlobals`(`Tools`/`Log`/`Cancellation`)、`ToolsFacade`(`Call`/`Call<T>`/`CallJson`/`CallJson<T>`/`Json`/`Json<T>`,以及 W14 的 `List()`/`Describe(name)`)、`ToolCallException`。类型仍在 `Forge.Scripting` 命名空间,脚本源码因此与旧引擎完全兼容;`ScriptGlobals` 不再 `sealed`,编译出的脚本类型从它派生,`Log`/`Tools`/`Cancellation` 就是脚本自己的成员(与旧 Roslyn 提交类同一形态)。`List`/`Describe` 只读本次运行的 `ToolDeclaration`(不发 IPC),它们是主程序提示里不再逐工具列 schema 的另一半。
 - **运行回路。** `ScriptHarness.RunAsync(entry, host, settings, ct)`:每次运行新建 facade/log/令牌,在 `Task.Run` 上启动入口委托,`WaitAsync(runToken)` 收口预算,1 s 宽限后仍未停下即判为“被放弃”并返回 `RequiresTermination=true`;脚本返回 `Task` 时在同一预算下等待并解包其 `Result`;结果按 `MaxResultChars` 截断、日志按 `MaxLogChars` 有界后附在结果之后。
 - **产物校验。** `ScriptArtifact`:格式版本、`MaxAssemblyBytes`(8 MiB)、`MaxLoadFrameBytes`(映像 + 描述 + 帧开销上界,用于证明仍低于 Ipc 16 MiB 帧)、`EnsureImageWithinBounds`、`ValidateDescriptor`/`Validate`(长度、SHA-256、globals 程序集 MVID、运行时 major.minor、契约版本(必须与运行中的 `ScriptArtifact.ContractVersion` 逐字相等)、入口名形状任一不符即抛 `ScriptArtifactException`,不装载)、`GlobalsMvid`/`RuntimeVersion`/`Sha256`。
 - **执行器协议形状。** `ScriptExecutorProtocol`(`executor.load`/`executor.run`/`executor.stop`)、`ScriptArtifactLoadRequest`(原始 PE 字节 + 描述)、`ScriptRunRequest`,均为 MessagePack 类型;内层工具调用复用 SDK 的 `ExtensionProtocol.HostToolCall` → `HostToolResult`(宿主侧再映射到自己的 `HostToolCallRequest` 线类型,那属 `Forge.Ipc.Protocol`,不是本模块依赖)。

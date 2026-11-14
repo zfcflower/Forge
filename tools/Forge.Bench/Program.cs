@@ -109,7 +109,10 @@ internal static class Program
         return failures.Count == 0 && verdicts.All(entry => entry.Verdict.Passed) ? 0 : 1;
     }
 
-    /// <summary>Every scenario, in the order the report shows them: read, write, copy, walk, grep, process, output, concurrency.</summary>
+    /// <summary>
+    /// Every scenario, in the order the report shows them: read, write, copy, walk, grep, process, output, concurrency,
+    /// ratelimit.
+    /// </summary>
     private static IEnumerable<BenchScenario> Registry(Fixtures fixtures)
     {
         foreach (var scenario in ReadScenarios.Create(fixtures))
@@ -148,6 +151,11 @@ internal static class Program
         }
 
         foreach (var scenario in ConcurrencyScenarios.Create(fixtures))
+        {
+            yield return scenario;
+        }
+
+        foreach (var scenario in RateLimitScenarios.Create(fixtures))
         {
             yield return scenario;
         }

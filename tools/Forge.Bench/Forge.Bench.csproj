@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Forge.IO/Forge.IO.csproj" />
+    <ProjectReference Include="../../src/Forge.Core/Forge.Core.csproj" />
   </ItemGroup>
 </Project>

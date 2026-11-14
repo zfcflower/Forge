@@ -29,7 +29,8 @@ public sealed class AppearanceStringsTests : IDisposable
     [Fact]
     public void The_table_exposes_the_expected_number_of_keys()
     {
-        Assert.Equal(9, typeof(AppearanceStrings)
+        // 9 font keys + the motion group's three (W13).
+        Assert.Equal(12, typeof(AppearanceStrings)
             .GetFields(BindingFlags.Public | BindingFlags.Static)
             .Count(static field => field.IsLiteral));
     }

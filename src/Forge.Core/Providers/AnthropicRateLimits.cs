@@ -94,7 +94,7 @@ public static class AnthropicRateLimits
     }
 
     private static int? ReadCount(HttpResponseHeaders headers, string name) =>
-        Read(headers, name) is { } text
+        ProviderHeaders.ReadFirst(headers, name) is { } text
         && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
         && value >= 0
             ? value
@@ -103,7 +103,7 @@ public static class AnthropicRateLimits
     /// <summary>Either an RFC 3339 timestamp or unix seconds: the two header families disagree and neither is worth guessing at.</summary>
     private static DateTimeOffset? ReadTimestamp(HttpResponseHeaders headers, string name)
     {
-        if (Read(headers, name) is not { } text)
+        if (ProviderHeaders.ReadFirst(headers, name) is not { } text)
         {
             return null;
         }
@@ -128,7 +128,7 @@ public static class AnthropicRateLimits
 
     /// <summary>A 0-1 share; the server sends a fraction (0.41), not a percentage. A negative value is not a share at all.</summary>
     private static double? ReadFraction(HttpResponseHeaders headers, string name) =>
-        Read(headers, name) is { } text
+        ProviderHeaders.ReadFirst(headers, name) is { } text
         && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
         && double.IsFinite(value)
         && value >= 0
@@ -136,7 +136,7 @@ public static class AnthropicRateLimits
             : null;
 
     private static DateTimeOffset? ReadReset(HttpResponseHeaders headers, string name) =>
-        Read(headers, name) is { } text
+        ProviderHeaders.ReadFirst(headers, name) is { } text
         && long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
         && seconds > 0
         && seconds <= DateTimeOffset.MaxValue.ToUnixTimeSeconds()
@@ -144,7 +144,7 @@ public static class AnthropicRateLimits
             : null;
 
     private static RateLimitStatus ReadStatus(HttpResponseHeaders headers, string name) =>
-        Read(headers, name)?.ToLowerInvariant() switch
+        ProviderHeaders.ReadFirst(headers, name)?.ToLowerInvariant() switch
         {
             "allowed" => RateLimitStatus.Allowed,
             "allowed_warning" => RateLimitStatus.AllowedWarning,
@@ -153,29 +153,11 @@ public static class AnthropicRateLimits
         };
 
     private static RateLimitWindow? ReadClaim(HttpResponseHeaders headers) =>
-        Read(headers, RepresentativeClaim)?.ToLowerInvariant() switch
+        ProviderHeaders.ReadFirst(headers, RepresentativeClaim)?.ToLowerInvariant() switch
         {
             "five_hour" => RateLimitWindow.FiveHour,
             "seven_day" => RateLimitWindow.Weekly,
             _ => null,
         };
 
-    /// <summary>The first non-blank value of one header, trimmed; headers may repeat but these never do.</summary>
-    private static string? Read(HttpResponseHeaders headers, string name)
-    {
-        if (!headers.TryGetValues(name, out var values))
-        {
-            return null;
-        }
-
-        foreach (var value in values)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-        }
-
-        return null;
-    }
 }

@@ -36,6 +36,19 @@
   <Thickness x:Key="PaddingCard">12</Thickness>
   <Thickness x:Key="PaddingControl">12,6</Thickness>
 
+  <!-- 聊天时间轴(W13)。这四个尺寸是轴线几何的唯一来源:轴列宽、节点边长、节点离行顶的距离、轴线粗细。
+       视图只引用它们,不再各自写数字。 -->
+  <sys:Double x:Key="TimelineGutterWidth">26</sys:Double>
+  <sys:Double x:Key="TimelineNodeSize">14</sys:Double>
+  <sys:Double x:Key="TimelineNodeTopGap">6</sys:Double>
+  <sys:Double x:Key="TimelineAxisWidth">1</sys:Double>
+
+  <!-- 聊天区与窗口边缘的同一档内边距(左右都取 16 = PaddingPage):转录列表、输入卡、自动化横幅三处从这里取。
+       上下两个方向同样对齐:列表底部 8 + 输入卡顶部 8 = 16,与窗口左右边距同档。 -->
+  <Thickness x:Key="ChatTranscriptPadding">16,16,16,8</Thickness>
+  <Thickness x:Key="ChatComposerMargin">16,8,16,16</Thickness>
+  <Thickness x:Key="ChatBannerMargin">16,8,16,0</Thickness>
+
   <CornerRadius x:Key="RadiusSm">4</CornerRadius>
   <CornerRadius x:Key="RadiusMd">8</CornerRadius>
   <CornerRadius x:Key="RadiusLg">12</CornerRadius>

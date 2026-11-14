@@ -1,0 +1,142 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.RateLimitSettingsSectionView"
+             x:DataType="settings:RateLimitSettingsSectionViewModel">
+  <!-- The `rate-limit` section body: the local per-provider budget (requests and tokens per minute), whether it is enforced
+       at all, and the spacing of automated resumes. Every value is a live preference republished to the limiter on change,
+       so the fields need no apply step. -->
+  <StackPanel Spacing="6">
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [rateLimit.settings.hint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [rateLimit.settings.enabled], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding Enabled, Mode=TwoWay}"
+                AutomationProperties.AutomationId="rate-limit-enabled"
+                AutomationProperties.Name="{Binding [rateLimit.settings.enabled], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [rateLimit.settings.enabledHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [rateLimit.settings.requests], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinRequestsPerMinute}"
+                     Maximum="{Binding MaxRequestsPerMinute}"
+                     Increment="10"
+                     FormatString="0"
+                     Value="{Binding RequestsPerMinute, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="rate-limit-requests"
+                     AutomationProperties.Name="{Binding [rateLimit.settings.requests], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [rateLimit.settings.requestsHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [rateLimit.settings.tokens], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinTokensPerMinute}"
+                     Maximum="{Binding MaxTokensPerMinute}"
+                     Increment="100000"
+                     FormatString="0"
+                     Value="{Binding TokensPerMinute, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="rate-limit-tokens"
+                     AutomationProperties.Name="{Binding [rateLimit.settings.tokens], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [rateLimit.settings.tokensHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [rateLimit.settings.automationGap], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinAutomationGapSeconds}"
+                     Maximum="{Binding MaxAutomationGapSeconds}"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding AutomationGapSeconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="rate-limit-automation-gap"
+                     AutomationProperties.Name="{Binding [rateLimit.settings.automationGap], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [rateLimit.settings.automationGapHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <!-- The per-provider table: one row per connected provider, each field blank to inherit the global number above. It is
+         rebuilt when the section is selected (Reload), so a provider added in the `provider` section shows up here. -->
+    <Border Margin="0,18,0,0"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource BorderBrush}"
+            Padding="0,12,0,0">
+      <StackPanel Spacing="6">
+        <TextBlock Classes="title"
+                   Text="{Binding [rateLimit.settings.overrides], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [rateLimit.settings.overridesHint], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   Margin="0,2,0,4"
+                   Text="{Binding [rateLimit.settings.inheritHint], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   IsVisible="{Binding !HasProviders}"
+                   Text="{Binding [rateLimit.settings.noProviders], Source={x:Static loc:Loc.Instance}}" />
+        <!-- The escape hatch for entries whose provider is gone: they have no row to clear them from. -->
+        <Button HorizontalAlignment="Left"
+                IsVisible="{Binding HasUnusedOverrides}"
+                Command="{Binding ClearUnusedCommand}"
+                Content="{Binding [rateLimit.settings.clearUnused], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="rate-limit-clear-unused" />
+        <ItemsControl ItemsSource="{Binding Rows}"
+                      IsVisible="{Binding HasProviders}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="settings:RateLimitOverrideRowViewModel">
+              <Grid ColumnDefinitions="180,120,120" Margin="0,0,0,6">
+                <TextBlock Classes="label"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding ProviderId}"
+                           Text="{Binding ProviderName}" />
+                <NumericUpDown Grid.Column="1"
+                               MinWidth="100"
+                               Margin="0,0,12,0"
+                               Minimum="{Binding MinRequestsPerMinute}"
+                               Maximum="{Binding MaxRequestsPerMinute}"
+                               Increment="10"
+                               FormatString="0"
+                               Value="{Binding RequestsPerMinute, Mode=TwoWay}"
+                               AutomationProperties.AutomationId="{Binding ProviderId, StringFormat='rate-limit-requests-{0}'}"
+                               AutomationProperties.Name="{Binding [rateLimit.settings.requestsColumn], Source={x:Static loc:Loc.Instance}}" />
+                <NumericUpDown Grid.Column="2"
+                               MinWidth="120"
+                               Minimum="{Binding MinTokensPerMinute}"
+                               Maximum="{Binding MaxTokensPerMinute}"
+                               Increment="100000"
+                               FormatString="0"
+                               Value="{Binding TokensPerMinute, Mode=TwoWay}"
+                               AutomationProperties.AutomationId="{Binding ProviderId, StringFormat='rate-limit-tokens-{0}'}"
+                               AutomationProperties.Name="{Binding [rateLimit.settings.tokensColumn], Source={x:Static loc:Loc.Instance}}" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

@@ -56,6 +56,16 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
 
     public FontGroupViewModel Code { get; }
 
+    /// <summary>
+    /// Whether looping animations are off. Bound straight to the preference: the <see cref="AppearanceApplier"/> that already
+    /// listens to it pushes it into the global motion gate, so the switch needs no apply step of its own.
+    /// </summary>
+    public bool ReduceMotion
+    {
+        get => preferences.ReduceMotion;
+        set => preferences.ReduceMotion = value;
+    }
+
     /// <summary>Completes when the font list has been loaded into both groups (for tests).</summary>
     internal Task FamiliesLoaded => familiesLoaded.Task;
 
@@ -150,6 +160,9 @@ internal sealed class AppearanceSettingsViewModel : ObservableObject, IDisposabl
                 break;
             case nameof(AppPreferences.CodeFontSize):
                 Code.SyncSize();
+                break;
+            case nameof(AppPreferences.ReduceMotion):
+                OnPropertyChanged(nameof(ReduceMotion));
                 break;
         }
     }

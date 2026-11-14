@@ -1,25 +1,20 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Layout;
-using Forge.App.Localization;
 using Forge.App.ViewModels;
-using Forge.App.Views;
-using Forge.App.Workbench.Controls;
 
 namespace Forge.App.Changes.Markdown;
 
 /// <summary>
 /// One rendered fenced code block: a language label, a copy button and the horizontally scrolling code text. The chat
 /// transcript, the diff preview and the plan panel all render through <see cref="MarkdownRenderer"/>, so they get the
-/// header together.
+/// header together. The Chrome (header and text view) lives in <see cref="MarkdownCodeHeader"/> and
+/// <see cref="MarkdownCodeTextView"/>, shared with the Mermaid block, which shows the same source view as its fallback.
 /// </summary>
 internal sealed class MarkdownCodeBlock : Border, ICopyableText
 {
-    private readonly SelectableTextBlock codeText;
-    private readonly TextBlock lang;
-    private readonly CopyTextButton copy;
+    private readonly MarkdownCodeHeader header;
+    private readonly MarkdownCodeTextView body;
     private string code;
 
     /// <summary>
@@ -33,45 +28,13 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
         Classes.Add("md-code");
         this.code = code;
 
-        codeText = new SelectableTextBlock { Text = code };
-        codeText.Classes.Add("md-code-text");
-
-        var scroller = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = codeText,
-        };
-
-        lang = new TextBlock { Text = info, VerticalAlignment = VerticalAlignment.Center };
-        lang.Classes.Add("md-code-lang");
-        lang.IsVisible = info.Length > 0;
-
-        copy = new CopyTextButton
-        {
-            DataContext = this,
-            Width = 26,
-            Height = 22,
-        };
-        copy.Classes.Add("ghost");
-        copy.Classes.Add("icon");
-        AutomationProperties.SetAutomationId(copy, "md-code-copy");
-        LocalizeCopy();
-
-        var icon = new FluentIcon { Width = 12, Height = 12 };
-        icon.Bind(PathIcon.DataProperty, this.GetResourceObservable("IconCopy"));
-        copy.Content = icon;
-
-        var head = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        head.Classes.Add("md-code-head");
-        Grid.SetColumn(lang, 0);
-        Grid.SetColumn(copy, 1);
-        head.Children.Add(lang);
-        head.Children.Add(copy);
+        header = new MarkdownCodeHeader(this);
+        header.SetLabel(info);
+        body = new MarkdownCodeTextView(code);
 
         var stack = new StackPanel { Spacing = 4 };
-        stack.Children.Add(head);
-        stack.Children.Add(scroller);
+        stack.Children.Add(header);
+        stack.Children.Add(body);
         Child = stack;
 
         ApplyName(info);
@@ -84,36 +47,9 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
     public void Update(string code, string info)
     {
         this.code = code;
-        codeText.Text = code;
-        lang.Text = info;
-        lang.IsVisible = info.Length > 0;
+        body.Text = code;
+        header.SetLabel(info);
         ApplyName(info);
-    }
-
-    /// <summary>
-    /// Follows the UI language while the block is shown: a reply rendered before a language switch stays on screen. The
-    /// subscription lives only while attached, so a block that left the tree is not kept alive by the static event.
-    /// </summary>
-    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
-        Loc.Instance.LanguageChanged += OnLanguageChanged;
-        LocalizeCopy();
-    }
-
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        Loc.Instance.LanguageChanged -= OnLanguageChanged;
-        base.OnDetachedFromVisualTree(e);
-    }
-
-    private void OnLanguageChanged(object? sender, EventArgs e) => LocalizeCopy();
-
-    private void LocalizeCopy()
-    {
-        var label = Loc.Instance[MarkdownStrings.CopyCode];
-        ToolTip.SetTip(copy, label);
-        AutomationProperties.SetName(copy, label);
     }
 
     /// <summary>The block's accessible name is its fence info string; without one the label and the text speak for themselves.</summary>

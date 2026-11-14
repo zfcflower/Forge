@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -39,6 +40,12 @@ internal sealed class AppPreferences : ObservableObject
     public const string DefaultCodeFontFamily = "Consolas, Cascadia Mono, Menlo, monospace";
     public const double DefaultUiFontSize = 13;
     public const double DefaultCodeFontSize = 13;
+
+    /// <summary>
+    /// Whether looping animations (a running agent's breathing in the tree, a running timeline node in the chat) are off.
+    /// Default off-the-animations, i.e. motion is allowed; the switch exists for users who need the app to stand still.
+    /// </summary>
+    public const bool DefaultReduceMotion = false;
 
     /// <summary>Lower bound of the terminal scrollback; below it the ring is too short to scroll a build log.</summary>
     public const int MinScrollbackLines = 1000;
@@ -154,6 +161,27 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinProjectsCloneTimeoutSeconds = 0;
     public const int MaxProjectsCloneTimeoutSeconds = 3600;
     public const int DefaultProjectsCloneTimeoutSeconds = 0;
+    // The per-provider budget (wave W15). The defaults are the limiter's own (<c>ProviderRateLimitPolicy</c>): a fresh
+    // profile starts on the loose numbers the core ships, not on a second set that only looks the same.
+    public const bool DefaultRateLimitEnabled = true;
+    public const int MinRateLimitRequestsPerMinute = 1;
+    public const int MaxRateLimitRequestsPerMinute = 100000;
+    public const int DefaultRateLimitRequestsPerMinute = 600;
+    public const int MinRateLimitTokensPerMinute = 1000;
+    public const int MaxRateLimitTokensPerMinute = 1000000000;
+    public const int DefaultRateLimitTokensPerMinute = 4000000;
+    public const int MinRateLimitAutomationGapSeconds = 0;
+    public const int MaxRateLimitAutomationGapSeconds = 600;
+    public const int DefaultRateLimitAutomationGapSeconds = 10;
+
+    /// <summary>
+    /// One provider override as <c>id|requests|tokens</c>, an empty field meaning "inherit the global number" (wave W15). A
+    /// provider id is a lowercase slug (letters, digits, hyphen), so the pipe cannot appear in the key.
+    /// </summary>
+    public const char RateLimitOverrideSeparator = '|';
+
+    /// <summary>How many fields a stored override entry has.</summary>
+    private const int RateLimitOverrideFields = 3;
     public const string DefaultIdleArchiveScope = "automation";
     private static readonly string[] IdleArchiveScopeTokens = ["automation", "all"];
     public const string DefaultUpdatesCheckFrequency = "daily";
@@ -164,10 +192,25 @@ internal sealed class AppPreferences : ObservableObject
     public const string DefaultChatMermaidDiagramTypes = "flowchart,sequence,state,class,er";
     public const string DefaultProjectsCloneDirectory = "";
 
+    // Wave W14 registers the `run_code` script surface: how many inner tool calls one script keeps in flight, the character
+    // limit of the result the model gets back, the character limit of one Tools.Call result inside the script, and the
+    // tools a script may name (blank means every read-only candidate).
+    public const int MinCodeScriptMaxConcurrentCalls = 1;
+    public const int MaxCodeScriptMaxConcurrentCalls = 32;
+    public const int DefaultCodeScriptMaxConcurrentCalls = 8;
+    public const int MinCodeScriptResultChars = 1000;
+    public const int MaxCodeScriptResultChars = 400000;
+    public const int DefaultCodeScriptResultChars = 40000;
+    public const int MinCodeScriptInnerResultChars = 500;
+    public const int MaxCodeScriptInnerResultChars = 400000;
+    public const int DefaultCodeScriptInnerResultChars = 20000;
+    public const string DefaultCodeScriptTools = "";
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
     private double codeFontSize = DefaultCodeFontSize;
+    private bool reduceMotion = DefaultReduceMotion;
     private UiLanguage language = UiLanguage.System;
     private string terminalShell = string.Empty;
     private string terminalArguments = string.Empty;
@@ -222,12 +265,21 @@ internal sealed class AppPreferences : ObservableObject
     private int inspectorRefreshMilliseconds = DefaultInspectorRefreshMilliseconds;
     private int chatMermaidTimeoutMilliseconds = DefaultChatMermaidTimeoutMilliseconds;
     private int projectsCloneTimeoutSeconds = DefaultProjectsCloneTimeoutSeconds;
+    private bool rateLimitEnabled = DefaultRateLimitEnabled;
+    private int rateLimitRequestsPerMinute = DefaultRateLimitRequestsPerMinute;
+    private int rateLimitTokensPerMinute = DefaultRateLimitTokensPerMinute;
+    private int rateLimitAutomationGapSeconds = DefaultRateLimitAutomationGapSeconds;
+    private IReadOnlyList<string> rateLimitOverrides = [];
     private string idleArchiveScope = DefaultIdleArchiveScope;
     private string updatesCheckFrequency = DefaultUpdatesCheckFrequency;
     private string updatesChannel = DefaultUpdatesChannel;
     private string paletteExcludeDirectories = DefaultPaletteExcludeDirectories;
     private string chatMermaidDiagramTypes = DefaultChatMermaidDiagramTypes;
     private string projectsCloneDirectory = DefaultProjectsCloneDirectory;
+    private int codeScriptMaxConcurrentCalls = DefaultCodeScriptMaxConcurrentCalls;
+    private int codeScriptResultChars = DefaultCodeScriptResultChars;
+    private int codeScriptInnerResultChars = DefaultCodeScriptInnerResultChars;
+    private string codeScriptTools = DefaultCodeScriptTools;
     private IReadOnlyList<string> modelsHidden = [];
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
@@ -237,6 +289,9 @@ internal sealed class AppPreferences : ObservableObject
     public string CodeFontFamily { get => codeFontFamily; set => Set(ref codeFontFamily, Family(value, DefaultCodeFontFamily)); }
 
     public double CodeFontSize { get => codeFontSize; set => Set(ref codeFontSize, Size(value, DefaultCodeFontSize)); }
+
+    /// <summary>Whether looping animations are off; see <see cref="DefaultReduceMotion"/>.</summary>
+    public bool ReduceMotion { get => reduceMotion; set => Set(ref reduceMotion, value); }
 
     public UiLanguage Language { get => language; set => Set(ref language, value); }
 
@@ -555,6 +610,85 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref projectsCloneTimeoutSeconds, Math.Clamp(value, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds));
     }
 
+    /// <summary>Whether the local per-provider budget is enforced at all (wave W15). Read on the next request, so switching it takes effect without a restart.</summary>
+    public bool RateLimitEnabled { get => rateLimitEnabled; set => Set(ref rateLimitEnabled, value); }
+
+    /// <summary>Requests per minute one provider may receive (wave W15); the next request already obeys it. Clamped to [<see cref="MinRateLimitRequestsPerMinute"/>, <see cref="MaxRateLimitRequestsPerMinute"/>].</summary>
+    public int RateLimitRequestsPerMinute
+    {
+        get => rateLimitRequestsPerMinute;
+        set => Set(ref rateLimitRequestsPerMinute, Math.Clamp(value, MinRateLimitRequestsPerMinute, MaxRateLimitRequestsPerMinute));
+    }
+
+    /// <summary>Tokens per minute one provider may receive (wave W15); the next request already obeys it. Clamped to [<see cref="MinRateLimitTokensPerMinute"/>, <see cref="MaxRateLimitTokensPerMinute"/>].</summary>
+    public int RateLimitTokensPerMinute
+    {
+        get => rateLimitTokensPerMinute;
+        set => Set(ref rateLimitTokensPerMinute, Math.Clamp(value, MinRateLimitTokensPerMinute, MaxRateLimitTokensPerMinute));
+    }
+
+    /// <summary>Seconds between two automated resumes of the same provider (wave W15); 0 spaces nothing. Read on the next resume, so it takes effect without a restart. Clamped to [<see cref="MinRateLimitAutomationGapSeconds"/>, <see cref="MaxRateLimitAutomationGapSeconds"/>].</summary>
+    public int RateLimitAutomationGapSeconds
+    {
+        get => rateLimitAutomationGapSeconds;
+        set => Set(ref rateLimitAutomationGapSeconds, Math.Clamp(value, MinRateLimitAutomationGapSeconds, MaxRateLimitAutomationGapSeconds));
+    }
+
+    /// <summary>
+    /// Providers whose own ceilings differ from the global ones (wave W15), as normalized <c>id|requests|tokens</c> entries
+    /// (empty field = inherit). A provider's own reported limit can only tighten it further (the lower number wins); an entry is for a gateway whose operator
+    /// knows it is tighter than the defaults. Sorted and de-duplicated; an entry that states nothing is dropped.
+    /// </summary>
+    public IReadOnlyList<string> RateLimitOverrides
+    {
+        get => rateLimitOverrides;
+        set
+        {
+            var normalized = NormalizeRateLimitOverrides(value);
+            if (!rateLimitOverrides.SequenceEqual(normalized, StringComparer.Ordinal))
+            {
+                rateLimitOverrides = normalized;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>This provider's own ceilings, or null when it inherits both global numbers (see <see cref="RateLimitOverrides"/>).</summary>
+    public (int? RequestsPerMinute, int? TokensPerMinute)? RateLimitOverrideFor(string providerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        var prefix = providerId + RateLimitOverrideSeparator;
+        foreach (var entry in rateLimitOverrides)
+        {
+            if (!entry.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var parts = entry.Split(RateLimitOverrideSeparator);
+            return (Number(parts[1], MaxRateLimitRequestsPerMinute), Number(parts[2], MaxRateLimitTokensPerMinute));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sets or clears one provider's ceilings (null on both clears the entry). Raises PropertyChanged for
+    /// <see cref="RateLimitOverrides"/> only when the entry moved, so a field left as it was costs nothing.
+    /// </summary>
+    public void SetRateLimitOverride(string providerId, int? requestsPerMinute, int? tokensPerMinute)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        var entries = new List<string>(rateLimitOverrides);
+        entries.RemoveAll(entry => entry.StartsWith(providerId + RateLimitOverrideSeparator, StringComparison.Ordinal));
+        if (requestsPerMinute is not null || tokensPerMinute is not null)
+        {
+            entries.Add(FormatRateLimitOverride(providerId, requestsPerMinute, tokensPerMinute));
+        }
+
+        RateLimitOverrides = entries;
+    }
+
     /// <summary>Which workspaces idle archiving covers: <c>automation</c> (sessions an automation created) or <c>all</c> root sessions (wave W1). An unknown token means the default.</summary>
     public string IdleArchiveScope { get => idleArchiveScope; set => Set(ref idleArchiveScope, Token(value, IdleArchiveScopeTokens, DefaultIdleArchiveScope)); }
 
@@ -572,6 +706,33 @@ internal sealed class AppPreferences : ObservableObject
 
     /// <summary>Folder new clones go into; empty means beside the project (wave W9).</summary>
     public string ProjectsCloneDirectory { get => projectsCloneDirectory; set => Set(ref projectsCloneDirectory, Text(value, DefaultProjectsCloneDirectory)); }
+
+    /// <summary>Most inner tool calls one <c>run_code</c> script keeps in flight at once (wave W14). Clamped to [<see cref="MinCodeScriptMaxConcurrentCalls"/>, <see cref="MaxCodeScriptMaxConcurrentCalls"/>].</summary>
+    public int CodeScriptMaxConcurrentCalls
+    {
+        get => codeScriptMaxConcurrentCalls;
+        set => Set(ref codeScriptMaxConcurrentCalls, Math.Clamp(value, MinCodeScriptMaxConcurrentCalls, MaxCodeScriptMaxConcurrentCalls));
+    }
+
+    /// <summary>Characters of the result <c>run_code</c> hands back to the model (wave W14). Clamped to [<see cref="MinCodeScriptResultChars"/>, <see cref="MaxCodeScriptResultChars"/>].</summary>
+    public int CodeScriptResultChars
+    {
+        get => codeScriptResultChars;
+        set => Set(ref codeScriptResultChars, Math.Clamp(value, MinCodeScriptResultChars, MaxCodeScriptResultChars));
+    }
+
+    /// <summary>Characters of one <c>Tools.Call</c> result inside a script (wave W14). Clamped to [<see cref="MinCodeScriptInnerResultChars"/>, <see cref="MaxCodeScriptInnerResultChars"/>].</summary>
+    public int CodeScriptInnerResultChars
+    {
+        get => codeScriptInnerResultChars;
+        set => Set(ref codeScriptInnerResultChars, Math.Clamp(value, MinCodeScriptInnerResultChars, MaxCodeScriptInnerResultChars));
+    }
+
+    /// <summary>
+    /// Tools a <c>run_code</c> script may call (wave W14): names separated by commas, semicolons or newlines, an optional
+    /// trailing <c>*</c> as a wildcard; blank means every read-only candidate.
+    /// </summary>
+    public string CodeScriptTools { get => codeScriptTools; set => Set(ref codeScriptTools, Text(value, DefaultCodeScriptTools)); }
 
     /// <summary>
     /// Model ids every model picker hides (sorted, deduplicated; wave W1). Read through <see cref="IsModelHidden"/> so the
@@ -612,6 +773,7 @@ internal sealed class AppPreferences : ObservableObject
         uiFontSize = Size(section.UiFontSize, DefaultUiFontSize);
         codeFontFamily = Family(section.CodeFontFamily, DefaultCodeFontFamily);
         codeFontSize = Size(section.CodeFontSize, DefaultCodeFontSize);
+        reduceMotion = section.ReduceMotion ?? DefaultReduceMotion;
         language = loadedLanguage;
         terminalShell = (section.TerminalShell ?? string.Empty).Trim();
         terminalArguments = section.TerminalArguments ?? string.Empty;
@@ -720,12 +882,33 @@ internal sealed class AppPreferences : ObservableObject
         projectsCloneTimeoutSeconds = section.ProjectsCloneTimeoutSeconds is { } projectsCloneTimeoutSecondsLoaded
             ? Math.Clamp(projectsCloneTimeoutSecondsLoaded, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds)
             : DefaultProjectsCloneTimeoutSeconds;
+        rateLimitEnabled = section.RateLimitEnabled ?? DefaultRateLimitEnabled;
+        rateLimitRequestsPerMinute = section.RateLimitRequestsPerMinute is { } rateLimitRequestsPerMinuteLoaded
+            ? Math.Clamp(rateLimitRequestsPerMinuteLoaded, MinRateLimitRequestsPerMinute, MaxRateLimitRequestsPerMinute)
+            : DefaultRateLimitRequestsPerMinute;
+        rateLimitTokensPerMinute = section.RateLimitTokensPerMinute is { } rateLimitTokensPerMinuteLoaded
+            ? Math.Clamp(rateLimitTokensPerMinuteLoaded, MinRateLimitTokensPerMinute, MaxRateLimitTokensPerMinute)
+            : DefaultRateLimitTokensPerMinute;
+        rateLimitAutomationGapSeconds = section.RateLimitAutomationGapSeconds is { } rateLimitAutomationGapSecondsLoaded
+            ? Math.Clamp(rateLimitAutomationGapSecondsLoaded, MinRateLimitAutomationGapSeconds, MaxRateLimitAutomationGapSeconds)
+            : DefaultRateLimitAutomationGapSeconds;
+        rateLimitOverrides = NormalizeRateLimitOverrides(section.RateLimitOverrides);
         idleArchiveScope = Token(section.IdleArchiveScope, IdleArchiveScopeTokens, DefaultIdleArchiveScope);
         updatesCheckFrequency = Token(section.UpdatesCheckFrequency, UpdatesCheckFrequencyTokens, DefaultUpdatesCheckFrequency);
         updatesChannel = Token(section.UpdatesChannel, UpdatesChannelTokens, DefaultUpdatesChannel);
         paletteExcludeDirectories = Text(section.PaletteExcludeDirectories, DefaultPaletteExcludeDirectories);
         chatMermaidDiagramTypes = Text(section.ChatMermaidDiagramTypes, DefaultChatMermaidDiagramTypes);
         projectsCloneDirectory = Text(section.ProjectsCloneDirectory, DefaultProjectsCloneDirectory);
+        codeScriptMaxConcurrentCalls = section.CodeScriptMaxConcurrentCalls is { } codeScriptMaxConcurrentCallsLoaded
+            ? Math.Clamp(codeScriptMaxConcurrentCallsLoaded, MinCodeScriptMaxConcurrentCalls, MaxCodeScriptMaxConcurrentCalls)
+            : DefaultCodeScriptMaxConcurrentCalls;
+        codeScriptResultChars = section.CodeScriptResultChars is { } codeScriptResultCharsLoaded
+            ? Math.Clamp(codeScriptResultCharsLoaded, MinCodeScriptResultChars, MaxCodeScriptResultChars)
+            : DefaultCodeScriptResultChars;
+        codeScriptInnerResultChars = section.CodeScriptInnerResultChars is { } codeScriptInnerResultCharsLoaded
+            ? Math.Clamp(codeScriptInnerResultCharsLoaded, MinCodeScriptInnerResultChars, MaxCodeScriptInnerResultChars)
+            : DefaultCodeScriptInnerResultChars;
+        codeScriptTools = Text(section.CodeScriptTools, DefaultCodeScriptTools);
         modelsHidden = NormalizeNames(section.ModelsHidden);
     }
 
@@ -737,6 +920,7 @@ internal sealed class AppPreferences : ObservableObject
             UiFontSize = uiFontSize,
             CodeFontFamily = codeFontFamily,
             CodeFontSize = codeFontSize,
+            ReduceMotion = reduceMotion,
             Language = LanguageToken(language),
             TerminalShell = terminalShell,
             TerminalArguments = terminalArguments,
@@ -791,12 +975,21 @@ internal sealed class AppPreferences : ObservableObject
             InspectorRefreshMilliseconds = inspectorRefreshMilliseconds,
             ChatMermaidTimeoutMilliseconds = chatMermaidTimeoutMilliseconds,
             ProjectsCloneTimeoutSeconds = projectsCloneTimeoutSeconds,
+            RateLimitEnabled = rateLimitEnabled,
+            RateLimitRequestsPerMinute = rateLimitRequestsPerMinute,
+            RateLimitTokensPerMinute = rateLimitTokensPerMinute,
+            RateLimitAutomationGapSeconds = rateLimitAutomationGapSeconds,
+            RateLimitOverrides = rateLimitOverrides.Count == 0 ? null : [.. rateLimitOverrides],
             IdleArchiveScope = idleArchiveScope,
             UpdatesCheckFrequency = updatesCheckFrequency,
             UpdatesChannel = updatesChannel,
             PaletteExcludeDirectories = paletteExcludeDirectories,
             ChatMermaidDiagramTypes = chatMermaidDiagramTypes,
             ProjectsCloneDirectory = projectsCloneDirectory,
+            CodeScriptMaxConcurrentCalls = codeScriptMaxConcurrentCalls,
+            CodeScriptResultChars = codeScriptResultChars,
+            CodeScriptInnerResultChars = codeScriptInnerResultChars,
+            CodeScriptTools = codeScriptTools,
             ModelsHidden = modelsHidden.Count == 0 ? null : [.. modelsHidden],
         };
 
@@ -863,6 +1056,72 @@ internal sealed class AppPreferences : ObservableObject
             _ => EditorThemeAuto,
         };
 
+    /// <summary>
+    /// Keeps the readable override entries, normalized: the id is trimmed but its case is kept (provider ids are compared ordinally everywhere else: the limiter, the table), the two
+    /// numbers are clamped to the same ranges the fields offer, and an entry that states nothing is dropped. Sorted by id so the
+    /// file and the published policy are stable across edits.
+    /// </summary>
+    private static string[] NormalizeRateLimitOverrides(IEnumerable<string>? entries)
+    {
+        if (entries is null)
+        {
+            return [];
+        }
+
+        var byProvider = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            var parts = entry.Split(RateLimitOverrideSeparator);
+            if (parts.Length < RateLimitOverrideFields)
+            {
+                continue;
+            }
+
+            var providerId = parts[0].Trim();
+            var requests = Number(parts[1], MaxRateLimitRequestsPerMinute);
+            var tokens = Number(parts[2], MaxRateLimitTokensPerMinute);
+            if (providerId.Length == 0 || (requests is null && tokens is null))
+            {
+                continue;
+            }
+
+            byProvider[providerId] = FormatRateLimitOverride(providerId, requests, tokens);
+        }
+
+        return [.. byProvider.Values.Order(StringComparer.Ordinal)];
+    }
+
+    private static string FormatRateLimitOverride(string providerId, int? requestsPerMinute, int? tokensPerMinute) =>
+        providerId + RateLimitOverrideSeparator
+        + (requestsPerMinute?.ToString(CultureInfo.InvariantCulture) ?? string.Empty) + RateLimitOverrideSeparator
+        + (tokensPerMinute?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+
+    /// <summary>
+    /// One stored number, clamped to <paramref name="maximum"/>; an empty field inherits and therefore reads as null. A number
+    /// too large for an int is clamped rather than dropped: a hand-edited file that says "one billion" asked for a ceiling, not
+    /// for the default, and silently reading it as "inherit" would loosen a limit the user meant to tighten.
+    /// </summary>
+    private static int? Number(string text, int maximum)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wide))
+        {
+            return (int)Math.Clamp(wide, 0, maximum);
+        }
+
+        return null;
+    }
+
     private static string[] NormalizeNames(IEnumerable<string>? names) =>
         names is null
             ? []
@@ -923,6 +1182,9 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("codeFontSize")]
     public double? CodeFontSize { get; set; }
+
+    [JsonPropertyName("reduceMotion")]
+    public bool? ReduceMotion { get; set; }
 
     [JsonPropertyName("language")]
     public string? Language { get; set; }
@@ -1095,6 +1357,23 @@ internal sealed class PreferencesSection
     [JsonPropertyName("projectsCloneTimeoutSeconds")]
     public int? ProjectsCloneTimeoutSeconds { get; set; }
 
+    [JsonPropertyName("rateLimitEnabled")]
+    public bool? RateLimitEnabled { get; set; }
+
+    [JsonPropertyName("rateLimitRequestsPerMinute")]
+    public int? RateLimitRequestsPerMinute { get; set; }
+
+    [JsonPropertyName("rateLimitTokensPerMinute")]
+    public int? RateLimitTokensPerMinute { get; set; }
+
+    [JsonPropertyName("rateLimitAutomationGapSeconds")]
+    public int? RateLimitAutomationGapSeconds { get; set; }
+
+    /// <summary>Per-provider ceilings as <c>id|requests|tokens</c>; absent when every provider uses the global numbers.</summary>
+    [JsonPropertyName("rateLimitOverrides")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? RateLimitOverrides { get; set; }
+
     [JsonPropertyName("idleArchiveScope")]
     public string? IdleArchiveScope { get; set; }
 
@@ -1112,6 +1391,18 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("projectsCloneDirectory")]
     public string? ProjectsCloneDirectory { get; set; }
+
+    [JsonPropertyName("codeScriptMaxConcurrentCalls")]
+    public int? CodeScriptMaxConcurrentCalls { get; set; }
+
+    [JsonPropertyName("codeScriptResultChars")]
+    public int? CodeScriptResultChars { get; set; }
+
+    [JsonPropertyName("codeScriptInnerResultChars")]
+    public int? CodeScriptInnerResultChars { get; set; }
+
+    [JsonPropertyName("codeScriptTools")]
+    public string? CodeScriptTools { get; set; }
 
     [JsonPropertyName("modelsHidden")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

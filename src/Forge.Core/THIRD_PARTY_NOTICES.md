@@ -20,6 +20,19 @@ copied material is `src/Forge.App/THIRD_PARTY_NOTICES.md` (Fluent System Icons g
   protocols directly (`OpenAiCompatibleProvider`, `AnthropicProvider`), so the SDK layer has nothing Forge needs and would
   add a dependency outside the approved package list.
 
+## Per-provider request budget — TokenRateLimiter
+
+- Project: `Boarlock/TokenRateLimiter` (<https://github.com/Boarlock/TokenRateLimiter>). The repository carries **no license file**,
+  so nothing was copied from it: only the shape of the design reached this project.
+- What was adapted, in `src/Forge.Core/Providers/RateLimitBucket.cs`: the idea of a token bucket whose state is advanced
+  lazily from an injected `TimeProvider` instead of on a timer, and of reporting *why* a request was refused
+  (`Authorized` / `Wait` with a retry time / `ExceedsCapacity` / `NeverRefills`) instead of a bare boolean, which is what
+  lets the caller tell "wait a moment" apart from "waiting will never help".
+- What was **not** taken: its implementation. Upstream publishes an immutable state record per operation; that allocates on
+  every authorized request, which the acceptance row of the `ratelimit.*` measurements forbids (0 bytes per acquire), so
+  Forge's bucket publishes two 64-bit words by compare-exchange instead (see
+  `docs/research/2026-11-13-w15-implementation.md`). The provenance here is an influence, not a license obligation.
+
 ## Provider endpoints and authentication
 
 The URLs, header names, OAuth client id, device-flow endpoints and the "first system block must be the Claude Code

@@ -7,6 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Forge.App.Logging;
+using Forge.App.Views;
 using ZLogger;
 
 namespace Forge.App.Changes.Markdown;
@@ -193,7 +194,7 @@ internal static class MarkdownRenderer
         MdBlockKind.Paragraph => Text(block.Inlines, "md-p"),
         MdBlockKind.List => RenderList(block),
         MdBlockKind.Quote => RenderQuote(block),
-        MdBlockKind.Code or MdBlockKind.Html => RenderCode(block.Text, CodeInfo(block)),
+        MdBlockKind.Code or MdBlockKind.Html => RenderCode(block),
         MdBlockKind.Table => RenderTable(block),
         MdBlockKind.Rule => new Border { Classes = { "md-rule" } },
         _ => new Control(),
@@ -208,7 +209,26 @@ internal static class MarkdownRenderer
         return tb;
     }
 
-    private static MarkdownCodeBlock RenderCode(string text, string info) => new(text, info);
+    /// <summary>
+    /// A fenced block: a Mermaid diagram when the fence says so, an ordinary code block otherwise. Whether a Mermaid type is
+    /// enabled is decided by the block itself, so a disabled type keeps exactly the code-block chrome without a rebuild when the
+    /// setting changes.
+    /// </summary>
+    private static Control RenderCode(MdBlock block)
+    {
+        var info = CodeInfo(block);
+        return block.Kind == MdBlockKind.Code && IsMermaid(info)
+            ? new MermaidBlockView(block.Text, info, block.FenceClosed)
+            : new MarkdownCodeBlock(block.Text, info);
+    }
+
+    /// <summary>Whether a fence's info string declares Mermaid - its first word, case-insensitive ("mermaid title=…" too).</summary>
+    internal static bool IsMermaid(string info)
+    {
+        var span = info.AsSpan().TrimStart();
+        var end = span.IndexOfAny(' ', '\t');
+        return (end < 0 ? span : span[..end]).Equals("mermaid", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// The language label of a code block: its fence info string, or "html" for a block the parser read as raw HTML. One owner,

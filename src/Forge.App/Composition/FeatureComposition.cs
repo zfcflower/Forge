@@ -15,5 +15,6 @@ internal static class FeatureComposition
         ViewerSettingsComposition.Register(composition, settings);
         InspectorComposition.Register(composition, settings);
         ProjectsComposition.Register(composition, settings);
+        RateLimitComposition.Register(composition, settings);
     }
 }

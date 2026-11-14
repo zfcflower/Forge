@@ -87,56 +87,57 @@ public sealed class QuotaResumeTests
         Assert.Equal("msg", parsed.Message);
     }
 
-    // ------------------------------------------------------------------ ResumeStagger
+    // ------------------------------------------- automation slots (ProviderRateLimiter)
 
     [Fact]
-    public void Stagger_spaces_one_provider_by_the_gap()
+    public void Automation_slots_space_one_provider_by_the_gap()
     {
-        var time = new CiFakeTime();
-        var stagger = new ResumeStagger(time);
+        var limiter = new ProviderRateLimiter(new SharedClock(new CiFakeTime()));
 
-        Assert.Equal(TimeSpan.Zero, stagger.Reserve("a"));
-        Assert.Equal(ResumeStagger.Gap, stagger.Reserve("a"));
-        Assert.Equal(ResumeStagger.Gap * 2, stagger.Reserve("a"));
-        Assert.Equal(TimeSpan.FromSeconds(10), ResumeStagger.Gap);
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("a"));
+        Assert.Equal(ProviderRateLimitPolicy.Default.AutomationGap, limiter.ReserveAutomationSlot("a"));
+        Assert.Equal(ProviderRateLimitPolicy.Default.AutomationGap * 2, limiter.ReserveAutomationSlot("a"));
+
+        // The gap the settings section shows by default is ten seconds.
+        Assert.Equal(TimeSpan.FromSeconds(10), ProviderRateLimitPolicy.Default.AutomationGap);
     }
 
     [Fact]
-    public void Stagger_keys_are_independent_and_case_sensitive()
+    public void Automation_slots_are_independent_per_provider_and_case_sensitive()
     {
-        var stagger = new ResumeStagger(new CiFakeTime());
+        var limiter = new ProviderRateLimiter(new SharedClock(new CiFakeTime()));
 
-        Assert.Equal(TimeSpan.Zero, stagger.Reserve("a"));
-        Assert.Equal(TimeSpan.Zero, stagger.Reserve("b"));
-        Assert.Equal(TimeSpan.Zero, stagger.Reserve("A"));
-        Assert.Equal(ResumeStagger.Gap, stagger.Reserve("b"));
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("a"));
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("b"));
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("A"));
+        Assert.Equal(ProviderRateLimitPolicy.Default.AutomationGap, limiter.ReserveAutomationSlot("b"));
     }
 
     [Fact]
-    public void Stagger_wait_shrinks_with_time_and_resets_after_the_slots_pass()
+    public void An_automation_slot_shrinks_with_time_and_resets_after_the_slots_pass()
     {
         var time = new CiFakeTime();
-        var stagger = new ResumeStagger(time);
-        stagger.Reserve("a");
-        stagger.Reserve("a");
-        stagger.Reserve("a");
+        var limiter = new ProviderRateLimiter(new SharedClock(time));
+        limiter.ReserveAutomationSlot("a");
+        limiter.ReserveAutomationSlot("a");
+        limiter.ReserveAutomationSlot("a");
 
         time.Advance(TimeSpan.FromSeconds(25));
-        Assert.Equal(TimeSpan.FromSeconds(5), stagger.Reserve("a"));
+        Assert.Equal(TimeSpan.FromSeconds(5), limiter.ReserveAutomationSlot("a"));
 
         time.Advance(TimeSpan.FromMinutes(5));
-        Assert.Equal(TimeSpan.Zero, stagger.Reserve("a"));
+        Assert.Equal(TimeSpan.Zero, limiter.ReserveAutomationSlot("a"));
     }
 
     [Fact]
-    public async Task Stagger_hands_out_distinct_slots_under_concurrency()
+    public async Task Automation_slots_are_distinct_under_concurrency()
     {
-        var stagger = new ResumeStagger(new CiFakeTime());
+        var limiter = new ProviderRateLimiter(new SharedClock(new CiFakeTime()));
 
-        var waits = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() => stagger.Reserve("a"))));
+        var waits = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() => limiter.ReserveAutomationSlot("a"))));
 
-        var expected = Enumerable.Range(0, 32).Select(i => ResumeStagger.Gap * i);
-        Assert.Equal(expected, waits.OrderBy(static w => w));
+        var expected = Enumerable.Range(0, 32).Select(index => ProviderRateLimitPolicy.Default.AutomationGap * index);
+        Assert.Equal(expected, waits.OrderBy(static wait => wait));
     }
 
     // ------------------------------------------------------------------ ResumeAtFor
@@ -166,7 +167,7 @@ public sealed class QuotaResumeTests
     {
         var reset = new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
         var production = new QuotaResumeRunner(
-            new ScriptedMailbox(), new RunnerRunStore(), new RunnerProbe(), new QuotaProbeSchedule(), new ResumeStagger(TimeProvider.System), null, TimeProvider.System);
+            new ScriptedMailbox(), new RunnerRunStore(), new RunnerProbe(), new QuotaProbeSchedule(), new ProviderRateLimiter(), null, TimeProvider.System);
 
         for (var i = 0; i < 50; i++)
         {
@@ -278,14 +279,14 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness();
         h.Note(provider: "prov");
-        h.Stagger.Reserve(QuotaProbeSchedule.KeyFor("prov"));
+        h.RateLimits.ReserveAutomationSlot(QuotaProbeSchedule.KeyFor("prov"));
         var context = h.Context(resumeAt: h.Time.GetUtcNow());
 
         var task = h.Runner.RunAsync(context, CancellationToken.None);
         await h.Time.WaitForTimerAsync();
         Assert.Empty(h.Mailbox.Messages);
 
-        h.Time.Advance(ResumeStagger.Gap);
+        h.Time.Advance(ProviderRateLimitPolicy.Default.AutomationGap);
         var outcome = await task.Within();
 
         Assert.Equal(AutomationRunStatus.Completed, outcome.Status);
@@ -297,7 +298,7 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness();
         h.Note(provider: "prov");
-        h.Stagger.Reserve(QuotaProbeSchedule.KeyFor("other"));
+        h.RateLimits.ReserveAutomationSlot(QuotaProbeSchedule.KeyFor("other"));
 
         var outcome = await h.Runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None).Within();
 
@@ -364,7 +365,7 @@ public sealed class QuotaResumeTests
 
         var task = h.Runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None);
         await h.Time.WaitForTimerAsync(); // the stagger gap of the second send
-        h.Time.Advance(ResumeStagger.Gap);
+        h.Time.Advance(ProviderRateLimitPolicy.Default.AutomationGap);
 
         Assert.Equal(AutomationRunStatus.Completed, (await task.Within()).Status);
         Assert.Equal(2, h.Mailbox.Messages.Count);
@@ -382,7 +383,7 @@ public sealed class QuotaResumeTests
         for (var round = 1; round < QuotaResumeRunner.MaxRounds; round++)
         {
             await h.Time.WaitForTimerAsync(); // each later round meets the stagger gap of the previous send
-            h.Time.Advance(ResumeStagger.Gap);
+            h.Time.Advance(ProviderRateLimitPolicy.Default.AutomationGap);
         }
 
         var outcome = await task.Within();
@@ -460,7 +461,7 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness();
         h.Note();
-        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.Stagger, h.Notes, h.Time, () => 0, shuttingDown: () => false);
+        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.RateLimits, h.Notes, h.Time, () => 0, shuttingDown: () => false);
         using var cts = new CancellationTokenSource();
 
         var task = runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow() + TimeSpan.FromHours(1)), cts.Token);
@@ -477,7 +478,7 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness();
         h.Note();
-        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.Stagger, h.Notes, h.Time, () => 0, shuttingDown: () => true);
+        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.RateLimits, h.Notes, h.Time, () => 0, shuttingDown: () => true);
         using var cts = new CancellationTokenSource();
 
         var task = runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow() + TimeSpan.FromHours(1)), cts.Token);
@@ -493,7 +494,7 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness();
         h.Note();
-        h.Stagger.Reserve(QuotaProbeSchedule.KeyFor("prov"));
+        h.RateLimits.ReserveAutomationSlot(QuotaProbeSchedule.KeyFor("prov"));
         using var cts = new CancellationTokenSource();
 
         var task = h.Runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), cts.Token);
@@ -515,7 +516,7 @@ public sealed class QuotaResumeTests
     {
         var h = new Harness();
         h.Note();
-        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.Stagger, null, h.Time, () => 0);
+        var runner = new QuotaResumeRunner(h.Mailbox, h.State, h.Probe, h.Schedule, h.RateLimits, null, h.Time, () => 0);
 
         var outcome = await runner.RunAsync(h.Context(resumeAt: h.Time.GetUtcNow()), CancellationToken.None).Within();
 
@@ -539,7 +540,7 @@ public sealed class QuotaResumeTests
                 h.State,
                 h.Probe,
                 h.Schedule,
-                h.Stagger,
+                h.RateLimits,
                 h.Notes,
                 h.Time,
                 () => 0,
@@ -563,8 +564,10 @@ public sealed class QuotaResumeTests
         {
             Time = new CiFakeTime();
             Schedule = new QuotaProbeSchedule(() => 0.5, Time);
-            Stagger = new ResumeStagger(Time);
-            Runner = new QuotaResumeRunner(Mailbox, State, Probe, Schedule, Stagger, Notes, Time, random ?? (() => 0));
+            // The limiter reads windows in the timestamp domain, so it has to share the fake clock the tests advance:
+            // otherwise every wait it computes would be measured against the real stopwatch.
+            RateLimits = new ProviderRateLimiter(new SharedClock(Time));
+            Runner = new QuotaResumeRunner(Mailbox, State, Probe, Schedule, RateLimits, Notes, Time, random ?? (() => 0));
         }
 
         public CiFakeTime Time { get; }
@@ -577,7 +580,7 @@ public sealed class QuotaResumeTests
 
         public QuotaProbeSchedule Schedule { get; }
 
-        public ResumeStagger Stagger { get; }
+        public ProviderRateLimiter RateLimits { get; }
 
         public CiFakeNotes Notes { get; } = new();
 
@@ -603,4 +606,22 @@ public sealed class QuotaResumeTests
             return new RunnerContext(run, new AutomationDefinition(BuiltInAutomations.QuotaResume, "x"));
         }
     }
+}
+
+/// <summary>
+/// The limiter's view of the harness clock. The readings and timers are the <see cref="CiFakeTime"/> the tests advance by
+/// hand, and the timestamp is that same reading: a reservation is a timestamp compare-exchange, so a clock that only moved
+/// its UTC value would leave every slot measured against the real stopwatch.
+/// </summary>
+internal sealed class SharedClock(TimeProvider clock) : TimeProvider
+{
+    /// <summary>One timestamp unit is one tick, so a duration converts exactly.</summary>
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => clock.GetUtcNow().UtcTicks;
+
+    public override DateTimeOffset GetUtcNow() => clock.GetUtcNow();
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        clock.CreateTimer(callback, state, dueTime, period);
 }

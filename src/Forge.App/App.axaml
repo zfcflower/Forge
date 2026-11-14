@@ -187,50 +187,9 @@
       <views:McpSettingsView />
     </DataTemplate>
     <DataTemplate DataType="set:ToolsSettingsSectionViewModel" x:DataType="set:ToolsSettingsSectionViewModel">
-      <!-- Grouped by origin: built-in groups carry a switch per tool, extension and MCP tools are read-only here. -->
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Spacing="10">
-          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
-          <TextBlock Classes="caption"
-                     TextWrapping="Wrap"
-                     Text="{Binding InventoryText}"
-                     IsVisible="{Binding HasInventory}"
-                     AutomationProperties.AutomationId="settings-tools-inventory" />
-          <ItemsControl ItemsSource="{Binding Groups}" AutomationProperties.AutomationId="settings-tools-groups">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="set:ToolGroupViewModel">
-                <StackPanel Spacing="2" Margin="0,4,0,6">
-                  <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding Title}" />
-                  <ItemsControl ItemsSource="{Binding Tools}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="set:ToolRowViewModel">
-                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                          <StackPanel Spacing="1" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Name}"
-                                       FontFamily="{DynamicResource FontMono}"
-                                       TextTrimming="CharacterEllipsis" />
-                            <TextBlock Classes="caption" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" />
-                          </StackPanel>
-                          <CheckBox Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding CanToggle}"
-                                    IsChecked="{Binding IsEnabled, Mode=TwoWay}"
-                                    AutomationProperties.Name="{Binding Name}"
-                                    AutomationProperties.AutomationId="settings-tools-switch" />
-                        </Grid>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <TextBlock Classes="caption"
-                     TextWrapping="Wrap"
-                     Text="{Binding EmptyText}"
-                     IsVisible="{Binding !HasGroups}" />
-        </StackPanel>
-      </ScrollViewer>
+      <!-- The script block (wave W14), then the catalog grouped by origin: built-in groups carry a switch per tool,
+           extension and MCP tools are read-only here. -->
+      <views:ToolsSettingsSectionView />
     </DataTemplate>
 
     <!-- The notification section: the one switch that decides whether anything is shown at all, in the window or on the desktop. -->
@@ -667,9 +626,11 @@
       </StackPanel>
     </DataTemplate>
 
-    <!-- User message: IM-style bubble aligned right. -->
+    <!-- User message: a timeline node with an IM-style bubble aligned right. -->
     <DataTemplate DataType="vm:UserMessageViewModel" x:DataType="vm:UserMessageViewModel">
-      <StackPanel Margin="0,10,0,4" HorizontalAlignment="Right" Spacing="2">
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Kind="User" />
+        <StackPanel Grid.Column="1" Margin="0,4,0,10" HorizontalAlignment="Right" Spacing="2">
         <!-- Attached images: small thumbnails above the bubble, right-aligned like it. -->
         <ItemsControl ItemsSource="{Binding Images}"
                       IsVisible="{Binding HasImages}"
@@ -742,59 +703,54 @@
           <TextBlock Classes="caption" Text="{Binding Time}" VerticalAlignment="Center" />
         </StackPanel>
       </StackPanel>
+      </Grid>
     </DataTemplate>
 
     <DataTemplate DataType="vm:NoticeViewModel" x:DataType="vm:NoticeViewModel">
-      <Border Classes="notice" Classes.error="{Binding IsError}" Margin="0,4">
-        <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
-      </Border>
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Kind="{Binding Kind}" IsFailing="{Binding IsError}" />
+        <Border Grid.Column="1" Classes="notice" Classes.error="{Binding IsError}" Margin="0,4,0,6">
+          <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
+        </Border>
+      </Grid>
     </DataTemplate>
 
-    <!-- One agent turn: header line plus the tree of reply text and tool rows. -->
+    <!-- One agent turn: its metadata row, the blocks of the reply, and the closing footnote, all on the same axis. -->
     <DataTemplate DataType="vm:TurnCardViewModel" x:DataType="vm:TurnCardViewModel">
-      <Border Classes="turn-card" Margin="0,6">
-        <StackPanel Spacing="0">
-          <Border Classes="turn-header">
-            <Button Classes="link"
-                    Command="{Binding ToggleCommand}"
-                    HorizontalAlignment="Left"
-                    HorizontalContentAlignment="Left"
-                    AutomationProperties.AutomationId="turn-toggle"
-                    AutomationProperties.Name="{Binding [turn.collapse], Source={x:Static loc:Loc.Instance}}">
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
-                <TextBlock Classes="caption" Text="{Binding Header}" />
-              </StackPanel>
-            </Button>
-          </Border>
-          <Border Classes="turn-body" IsVisible="{Binding IsExpanded}">
-            <ItemsControl ItemsSource="{Binding Blocks}" />
-          </Border>
-          <TextBlock Classes="caption"
-                     Margin="4,4,0,0"
-                     IsVisible="{Binding HasFootnote}"
-                     Text="{Binding Footnote}" />
-        </StackPanel>
-      </Border>
+      <views:TimelineTurnView />
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnTextViewModel" x:DataType="vm:TurnTextViewModel">
-      <views:TurnTextView />
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Role="Block" Kind="Assistant" IsRunning="{Binding IsStreaming}" />
+        <views:TurnTextView Grid.Column="1" Margin="0,2,0,2" />
+      </Grid>
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnNoticeViewModel" x:DataType="vm:TurnNoticeViewModel">
-      <Border Classes="notice" Classes.error="{Binding IsError}">
-        <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
-      </Border>
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Role="Block" Kind="{Binding Kind}" IsFailing="{Binding IsError}" />
+        <Border Grid.Column="1" Classes="notice" Classes.error="{Binding IsError}" Margin="0,2,0,4">
+          <TextBlock Classes="caption" Text="{Binding Text}" TextWrapping="Wrap" />
+        </Border>
+      </Grid>
     </DataTemplate>
 
     <DataTemplate DataType="vm:ToolRowViewModel" x:DataType="vm:ToolRowViewModel">
-      <views:ToolRowView />
+      <Grid ColumnDefinitions="Auto,*">
+        <views:TimelineGutter Role="Block"
+                              Kind="Tool"
+                              ToolName="{Binding Name}"
+                              IsRunning="{Binding IsRunning}"
+                              IsFailing="{Binding IsError}" />
+        <views:ToolRowView Grid.Column="1" Margin="0,1,0,1" />
+      </Grid>
     </DataTemplate>
   </Application.DataTemplates>
 
   <Application.Styles>
     <FluentTheme />
+    <StyleInclude Source="avares://Forge.App/Views/TimelineStyles.axaml" />
     <Style Selector=":is(Window)">
       <Setter Property="Icon" Value="avares://Forge.App/Assets/forge.ico" />
     </Style>

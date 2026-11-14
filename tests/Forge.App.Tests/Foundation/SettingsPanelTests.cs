@@ -73,6 +73,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     [InlineData(SettingsSectionIds.Agents, "agents-max-parallel")]
     [InlineData(SettingsSectionIds.IdleArchive, "idle-archive-days")]
     [InlineData(SettingsSectionIds.NotificationPermission, "notification-permission-state")]
+    [InlineData(SettingsSectionIds.Tools, "settings-code-concurrency")]
     public async Task A_wave_section_renders_its_own_body(string sectionId, string marker)
     {
         // The registry knows the four sections, but only a view registered through SectionViewTemplate gives them a body: without
@@ -509,6 +510,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Notifications,
             SettingsSectionIds.Network,
             SettingsSectionIds.ModelsVisibility,
+            SettingsSectionIds.RateLimit,
             SettingsSectionIds.Agents,
             SettingsSectionIds.IdleArchive,
             SettingsSectionIds.Palette,

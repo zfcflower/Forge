@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Views.TimelineTurnView"
+             x:DataType="vm:TurnCardViewModel">
+  <!-- One agent turn on the timeline (wave W13): its metadata is a node-less row the axis passes through, each block of the
+       reply is its own node, and the turn's footnote closes with an error node. The rows share one full-width stack with no
+       card around it, so every gutter lands on the same x as the rows of every other transcript item. -->
+  <StackPanel>
+    <Grid ColumnDefinitions="Auto,*">
+      <views:TimelineGutter Role="TurnHeader" Kind="Turn" IsRunning="{Binding IsRunning}" />
+      <Button Grid.Column="1"
+              Classes="link"
+              Margin="0,3,8,2"
+              HorizontalAlignment="Left"
+              HorizontalContentAlignment="Left"
+              Command="{Binding ToggleCommand}"
+              AutomationProperties.AutomationId="turn-toggle"
+              AutomationProperties.Name="{Binding [turn.collapse], Source={x:Static loc:Loc.Instance}}">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
+          <TextBlock Classes="caption" Text="{Binding Header}" />
+        </StackPanel>
+      </Button>
+    </Grid>
+    <ItemsControl ItemsSource="{Binding Blocks}" IsVisible="{Binding IsExpanded}" />
+    <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFootnote}">
+      <views:TimelineGutter Role="Footnote" Kind="Error" IsFailing="True" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 Margin="0,4,8,6"
+                 TextWrapping="Wrap"
+                 Text="{Binding Footnote}" />
+    </Grid>
+  </StackPanel>
+</UserControl>

@@ -21,6 +21,7 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
     private bool hasResult;
     private bool isError;
     private bool isExpanded;
+    private bool isRunning = true;
     private LiveToolViewModel? live;
 
     public string Name { get; } = name;
@@ -45,6 +46,9 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         get => isError;
         private set => Set(ref isError, value);
     }
+
+    /// <summary>True until the call returns; the timeline draws a running node (accent, filled, pulsing) while it is.</summary>
+    public bool IsRunning => isRunning;
 
     public bool IsExpanded
     {
@@ -141,6 +145,8 @@ internal sealed partial class ToolRowViewModel(string name, string argumentsJson
         hasResult = !string.IsNullOrEmpty(content.Resolve());
         IsError = isError;
         Status = isError ? "✗" : "✓";
+        isRunning = false;
+        OnPropertyChanged(nameof(IsRunning));
         OnPropertyChanged(nameof(Result));
         OnPropertyChanged(nameof(HasResult));
     }

@@ -46,7 +46,7 @@ internal enum TurnRejection
 /// <see cref="Loc.LanguageChanged"/>: the cards, tool rows, notices and sub-agent labels re-derive their texts when the
 /// language changes and are told to re-raise them from here, and the subscription ends with <see cref="Dispose"/>.</para>
 /// </summary>
-internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisposable, IAutomationSession
+internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisposable, IAutomationSession, IAgentMessageHost
 {
     /// <summary>How much text of a child agent is parked while its start event is still in flight.</summary>
     private const int EarlyDeltaLimit = 8192;
@@ -1084,6 +1084,52 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
     /// <summary>The session can no longer take automation turns here: the tab closed, or it was taken over / archived / removed.</summary>
     public bool IsAutomationClosed => disposed || isReadOnlyView || runtime is null;
 
+    /// <summary>False once nothing may be delivered here any more; the same condition as <see cref="IsAutomationClosed"/>.</summary>
+    public bool CanHandOff => !IsAutomationClosed;
+
+    /// <summary>
+    /// Delivers a prepared message (the checks panel's fix request, a Mermaid block's failed diagram): a turn when the session
+    /// is idle, otherwise the composer's draft, which is what a busy session can accept without a second turn starting behind
+    /// the user's back. Returns true when a turn ran.
+    /// </summary>
+    public async Task<bool> HandMessageAsync(string message, LocText origin)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        if (!CanHandOff)
+        {
+            return false;
+        }
+
+        if (!IsAutomationIdle)
+        {
+            QueueHandOff(message);
+            return false;
+        }
+
+        try
+        {
+            var result = await RunAutomationTurnAsync(message, origin, agent: null).ConfigureAwait(true);
+            if (result.Status is MailboxStatus.Completed or MailboxStatus.TurnFailed)
+            {
+                return true;
+            }
+
+            // Withdrawn between the idle check and the turn (the tab was taken over, archived or removed): the message was
+            // not delivered and must not be lost, so it goes where a draft would.
+            QueueHandOff(message);
+            return false;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"hand-off failed: {exception.Message}");
+            QueueHandOff(message);
+            return false;
+        }
+    }
+
+    /// <summary>Queues a handed-over message after the user's draft instead of replacing it.</summary>
+    private void QueueHandOff(string message) => Draft = ComposerDraft.Append(Draft, message);
+
     /// <summary>
     /// Runs <paramref name="text"/> as a turn on behalf of an automation; the caller checked <see cref="IsAutomationIdle"/>.
     /// A rejected turn never lands in the user's draft or queue: it is reported as withdrawn instead.
@@ -1718,7 +1764,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 Instruments.NoteRateLimit(Composer.ProviderId, limit.RateLimit);
                 break;
             case AgentApprovalDenied denied:
-                Card(denied.AgentId)?.AddNotice(SessionStrings.Denied(denied.Call.Name), isError: true);
+                Card(denied.AgentId)?.AddNotice(
+                    SessionStrings.Denied(denied.Call.Name), isError: true, kind: TimelineNodeKind.Approval);
                 break;
             case AgentCompacted compacted:
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));

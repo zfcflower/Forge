@@ -584,6 +584,9 @@ internal sealed class AppComposition : IAsyncDisposable
         // The two sub-agent dials of the `agents` section: the cap is applied to every host as it is built and again before
         // each turn (a raised cap wakes agents already queued), and switching spawning off takes spawn_agent out of the tools.
         runtimeServices.SubAgents = () => SubAgentLimits.From(preferences.Current);
+        // The `tools` section's four run_code dials (wave W14): read on use, so a change reaches the next turn's
+        // description and every later script without rebuilding a session host.
+        runtimeServices.CodeMode = () => CodeModeSettings.From(preferences.Current);
         runtimeServices.WebTools = webServices.CreateTools; // web tools
         var stepCommitter = new StepCommitter(
             git,
@@ -797,6 +800,9 @@ internal sealed class AppComposition : IAsyncDisposable
         await preferences.LoadAsync(CancellationToken.None).ConfigureAwait(true);
         ApplyLanguage(preferences.Current.Language);
         appearance.ApplyLoaded();
+        // The loaded values reach the limiter here, for the same reason the appearance feature re-applies: ApplyLoaded raises no
+        // change notification, so the ones wired in Register only see edits the user makes after this point.
+        RateLimitComposition.Publish(preferences.Current);
 
         var general = await worktrees.EnsureGeneralWorkspaceAsync(paths.GeneralWorkspaceDirectory, CancellationToken.None)
             .ConfigureAwait(false);

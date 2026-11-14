@@ -165,7 +165,14 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | **W11** 流程图 / Mermaid(**已批准(有条件,见「已定」),串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 | **W13** 聊天时间轴版式(**串在 W4b 之后;与 W11 可并行,W13 不改 `Changes/Markdown/**`**) | 把聊天记录排成时间轴:轴线 + 图标节点 + 右侧内容,铺满窗口、窗口内边距一致;图标映射表与节点状态见「已定」;键盘/读屏:节点图标不抢焦点、有可读的名称;随主题与语言切换;长会话仍走虚拟化,不因轴线/节点增加每条消息的分配 | `Views/Timeline*`(新建:轴线、节点、行容器)、`ViewModels/TimelineNodeViewModel*.cs`(节点类型与图标键的映射,从现有 `TranscriptItemViewModel` 派生,不改其业务数据)、`Views/SessionView.axaml` 的转录区、`App.axaml` 里转录条目的模板、`Resources/Icons.axaml`(只增不改)、`Localization/Strings.Timeline.cs`。**越界声明**:W13 期间独占上述 `App.axaml`/`SessionView.axaml` 的转录部分;`TurnTextView*`/`ToolRow*View*` 只改最外层容器与内边距,不改其内部渲染(归 W4b/W4/W8) | 4 天 |
 
+> **W13 已交付。** 实现说明与判据见 `2026-11-14-w13-implementation.md`。新增 `ViewModels/TimelineNodeViewModel.cs`(节点类型、工具名映射、图标键、读屏名称键)、`ViewModels/TimelineLayout.cs`(轴线几何纯函数)、`Views/TimelineGutter.cs`(轴列控件)、`Views/TimelineStyles.axaml`(控件主题 + 状态样式)、`Views/TimelineTurnView.axaml(.cs)`(轮次的抬头/块/脚注三段行)、`Localization/Strings.Timeline.cs`。修改:`App.axaml`(6 个转录条目模板改为「轴列 + 原内容」,新增一条 `StyleInclude`,模板内容没改)、`Views/SessionView.axaml`(转录区/输入卡/横幅的内边距改取 token)、`Resources/Tokens.axaml`(4 个时间轴尺寸 + 3 个聊天内边距)、`Resources/Controls.axaml`(用户气泡去掉 `MaxWidth=640`;删除只属于旧轮次卡的 `turn-header`/`turn-body` 样式,`turn-card` 保留给审批浮层与 MCP 设置)、`Resources/Icons.axaml`(27 个 FIS 键,只追加)、`THIRD_PARTY_NOTICES.md`(新增图标的清单)。
+> **破了清单的文件(均为不可避免的接线,已记录).** `ViewModels/Transcript.cs`(提示行读不写 `Kind` 提示位,审批被拒才不是 `Notice`)、`ViewModels/Transcript.Tools.cs`(工具行只读 `IsRunning`)、`ViewModels/SessionWorkspace.cs`(被拒绝的审批传 `Kind=Approval`,一行)、`ViewModels/TreeIcons.cs`(`TreeMotion.ReducedMotion` 加 `Changed` 事件)、`Preferences/AppPreferences.cs`(登记外的**新可配置项** `ReduceMotion`,默认关:关闭动画是用户合理会调的开关,不做成硬编码,已在六·二补登记)、`Appearance/AppearanceApplier.cs`(写闸门)、`Appearance/AppearanceSettingsView(.axaml/.cs)` 与 `AppearanceSettingsViewModel`(动效勾选框)、`ViewModels/ProjectTree.cs`(闸门变化时给运行中的树行抬一次通知,否则用户勾选后树里的呼吸要等到下一次窗口属性变化才停)、`Localization/Strings.Appearance.cs`(三条文案)、`Forge.App/SPEC.md`。测试侧另有两处必要更正:`StringTableTests.KnownPrefixes` 加 `timeline`、`AppearanceStringsTests` 的键数 9→12。
+> **未做(与实现说明第六节一致).** 思考节点只有映射与图标,会话仍丢弃 `AgentThinkingDelta`;待审审批卡不在转录里(窗口级浮层);MCP 工具按 `server__tool` 分隔符识别(行上没有来源)。子 Agent 视图自动复用同一套模板(未改其文件)。
+> **测试与评审.** 两个独立测试会话共 10 个文件(180 例纯逻辑/状态 + 19 个 headless 视图方法),另修正两处既有测试(`StringTableTests` 前缀、`AppearanceStringsTests` 键数);视图会话拉出并修复一个真缺陷:`TimelineGutter` 在虚拟化面板滚动回收容器后不再重算,轴线会丢到下一次追加/展开——改为未定位时经 `Dispatcher` 最多 3 次后台重试,并留回归用例。独立评审会话(glm-5.3 high)的 1 blocking + 2 minor 全部已修(`TreeMotion.Changed` 订阅、块行双订阅、前缀映射),详见 `2026-11-14-w13-implementation.md` 第七节。
+
 | **W14** CodeMode 工具面扩展(与 W13/W11 并行,不碰其文件) | `run_code`(Roslyn、并行、只回一次结果)已存在,但脚本目前只看得到扩展宿主的插件工具,`read/ls/find/grep/web_fetch` 与 MCP 工具都进不去——并行扇出最有用的恰恰是这些。本波:把**只读且免审批**的内置工具(`read/ls/find/grep`)与 `web_fetch`、以及已启用的 MCP 只读工具暴露给脚本;写入/执行类仍排除(脚本内调用不经逐次审批卡);脚本并发上限、单次结果字符上限、可见工具名单全部进设置;工具声明改为脚本内按名查询(`tools.list/describe`),主提示只保留 `run_code` 一条描述,验证声明 token 的实际下降并记入实现说明 | `Forge.HostClient/RunCode*`、`Forge.ScriptRuntime/ScriptToolsFacade.cs`、`Forge.App/Agents/SessionRuntime.cs` 的 `CollectExternalTools` 一处、`Localization/Strings.CodeMode.cs` | 3 天 |
+> **W14 已交付。** 实现记录、被否备选、实测 token 下降与验收见 `2026-11-15-w14-codemode-tools.md`。实际落点比表里的四行大一些(均由代码所在位置决定,已逐条记录):新增 `Forge.App/Agents/CodeModeSettings.cs`(四项设置快照 + 名单匹配)与 `CodeModeToolRegistry.cs`(候选之上的活过滤注册表);`Forge.App/Agents/SessionRuntime.cs` 除 `CollectExternalTools` 外还有 `AgentRuntimeServices.CodeMode` 与新文档注释;`Preferences/AppPreferences.cs`(W0 冻结文件,获批追加四项)、`ViewModels/Settings/ToolsSettingsSectionViewModel.cs`、把 `tools` 分区的内联模板抽成 `Views/ToolsSettingsSectionView.axaml`(于是 `App.axaml` 动了一处)、`Composition/AppComposition.cs` 一行运行期接线、`Localization/Strings.CodeMode.cs`、`Forge.HostClient/IExtensionContributionClient.cs`(`RunCodeProxyOptions.ExecutionProvider`)、四份模块 SPEC 与 `tests/Forge.App.Tests/Localization/StringTableTests.cs`(前缀表加 `codeMode`)。三处有意偏离:①`web_search` 与 `web_fetch` 一起暴露(两者都是 `ReadOnly` 且都仍逐次询问审批,并行查多组关键词是同一类扇出);②设置开三个数字而不是两个——“单次结果字符上限”在计划里既可读作“一次 `run_code` 返回的结果”也可读作“脚本内一次调用的结果”,两个都是合理会想调的值,于是都进设置(额外多一个 `CodeScriptInnerResultChars`);③`run_code` 的存在条件从“有插件工具”改为“脚本候选非空”,所以没装插件的会话也有它——候选里的 `read`/`grep` 本来就不来自插件,而这是本波的意义所在。已知窗口:扩展宿主机还在启动(或三次启动重试皆败)时,`run_code` 已经在工具列表里,此时调用会以可读的 `IsError` 失败(“client is not running”),回合继续、下次再试——与 `extension_*` 工具在宿主不可用时的既有表现一致。
+
 | **W15** 按提供商限速桶(借鉴 TokenRateLimiter 的 Bucket.cs,开源可用) | 不可变状态 + CAS 无锁、惰性补充、注入 `TimeProvider`;结果区分 授权/需等待(带 retryTime)/超出容量/永不补充;按提供商(请求/分钟、令牌/分钟)在发请求前获取,用 `x-ratelimit-*` 响应头校准;`RetryingChatProvider` 改用 `TimeProvider`;`QuotaResume` 的 `Gap` 并入同一限速组件。容量/速率进设置,默认宽松。**基准用现有 `tools/Forge.Bench` 加 `RateLimitScenarios.cs`(给它加对 `Forge.Core` 的引用),先于实现落基线**:热路径分配须为 0,无争用时 <100ns,多线程争用下的吞吐与公平性也要有行 | `Forge.Core/Providers/RateLimit*`(新建)、`RetryingChatProvider.cs`、`Automations/QuotaResume.cs`、`Strings.RateLimit.cs`、设置分区 | 3 天 |
 
 **W4b 已实施**:聊天助手回复按 Markdown 增量渲染(标题/段落/列表/引用/表格/链接/围栏代码块),代码块带语言标签与复制按钮;新增纯状态机 `Changes/Markdown/StreamingMarkdown.cs` 与 `Views/ChatMarkdownView*`,删除 `TextSegmentViewModel`。方案、被否备选、四条判据、与上表独占路径的三处偏差(`Resources/MarkdownStyles.axaml` 的追加式两条样式、不建 `Strings.ChatMarkdown.cs`、用户消息仍按纯文本)见 `2026-11-13-w4b-implementation.md`。
@@ -227,7 +234,10 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | 资源检查器日志尾行数、列表刷新间隔 | W8 | 200 行、1 s | inspector |
 | Mermaid 启用的图类型白名单、渲染超时 | W11 | 5 种(flowchart/sequence/state/class/er)、2 s | chat |
 | 克隆超时、默认克隆目录 | W9 | 无超时、项目父目录 | projects |
+| 本地限速开关、每提供商的请求/分钟与令牌/分钟(全局默认 + 按 provider id 的覆盖)、自动化恢复间隔 | W15 | 开、600、4,000,000、10 s(无覆盖) | rate-limit |
 | 更新检查频率、更新通道 | W10 | 每日、稳定 | updates |
+| 减少动画(全局动效闸门,树与时间轴共用) | W13 | 关(动画开) | appearance |
+| 脚本内部调用并发上限、返回结果字符上限、单次内部结果字符上限、脚本可见工具名单 | W14 | 8、40000、20000、空白(=全部候选) | tools |
 
 规则:新增项**先登记再写代码**;值只在 `AppPreferences` 读取,工具/服务通过构造参数或 options 注入,不在热路径里反复读文件;改动热加载(沿用 `IReloadableSettingsSection`)。登记表之外的新增可配置项,在该波的实现说明里补一行并说明为什么不是内部细节。
 
@@ -301,3 +311,57 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 **上限进设置(已实施,分支 `review-limits-settings`)**:包内 diff 字符、提交清单行数、文件清单行数、文本字段字符数四项进了 `AppPreferences`(`GitReviewDiffMaxChars` 1000–500000 默认 48000;`GitReviewMaxCommits` 5–500 默认 50;`GitReviewMaxFiles` 20–2000 默认 200;`GitReviewFieldMaxChars` 200–20000 默认 2000),界面在 `git` 设置分区;Core 以 `ReviewPackageLimits`(默认即旧常量)经 `AgentHostOptions.ReviewLimits` 每次评审现读。未跟踪文件的 8000 字节探测与 git 的二进制判定窗口一致,保持内部常量。
 
 **仍未改(记录原因)**:没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。
+
+## 九、W15 交付记录(按提供商限速桶)
+
+完整方案、被否的备选、四条判据与基准数字见 `2026-11-13-w15-implementation.md`;这里只记与计划文本的对照。
+
+**交付面。** 新增 `Forge.Core/Providers/RateLimitPolicy.cs`(策略值对象)、`RateLimitBucket.cs`(零分配预算桶)、`ProviderRateLimiter.cs`(每提供商桶 + hold + 自动化预留 + 进程级 `Shared`)、`RateLimitHeaders.cs`(通用 `x-ratelimit-*` 读取);改 `RetryingChatProvider.cs`(注入 `TimeProvider`;每次尝试前计费,应答后 `Settle` + `Observe`;等待超过 `maxRetryAfter` 转成带 `Retry-After` 的 429)、`Providers/Internal/ChatProviderPipeline.cs`(`RetryMiddleware` 缺省用 `Shared`)、`Providers/HttpChatProvider.cs`+`Providers/AnthropicProvider.cs`(`ReadRateLimit` 缺省读通用家族,Anthropic 先读自己的再回落)、`src/Forge.App/Automations/QuotaResume.cs`(删除 `ResumeStagger`,改调 `ReserveAutomationSlot`)、`Automations/AutomationService.cs`(多一个可选限速器参数)、设置面(`AppPreferences` 四项、`SettingsSectionIds.RateLimit`/order 115、`Settings/RateLimitSettingsSectionViewModel.cs`、`Views/RateLimitSettingsSectionView.axaml(.cs)`、`Localization/Strings.RateLimit.cs`、`Composition/RateLimitComposition.cs`、`FeatureComposition` 一行、`AppComposition.InitializeWorkbenchAsync` 一行:加载偏好后补发布一次)、`tools/Forge.Bench`(`RateLimitScenarios.cs` 三行 + 对 `Forge.Core` 的项目引用 + `Program.cs` 注册)。
+
+**与计划文本的差异(均已记录,见实现说明第六节)。**
+1. 计划写"用 `x-ratelimit-*` 响应头校准",但代码里只有 `anthropic-ratelimit-*` 的消费者;本波补了通用家族(`RateLimitHeaders` + `HttpChatProvider` 的缺省钩子),否则 OpenAI 兼容提供商的校准等于不存在。
+2. ~~每提供商**数值覆盖**没做~~ **已按用户确认补做**:`ProviderRateLimitPolicy.Overrides` + `ProviderRateLimitLimits` 按 provider id 覆盖(每一维可留空继承全局、填 0 表示这家不限),设置分区里是一张按活目录重建的提供商表,条目存 `preferences.rateLimitOverrides`(归一化 `id|requests|tokens`),`Publish` 就地重配已存在的桶。首轮没做是因为把入口错判成只能在提供商编辑弹窗——`rate-limit` 分区自己就能列提供商,本波归属路径内即可完成。
+3. `ReserveAutomationSlot` 不是令牌桶而是**预留**(同一瞬间三次得到 0、gap、2×gap),否则同一时刻到点的多个等待运行会一起放行——正是原 `ResumeStagger` 的 gap 要避免的。数值行为与旧实现逐个一致。
+4. `RateLimitDecision` 比计划多一个 `Disabled`(策略关闭时必须与"扣过了"区分开)。
+
+**基准(计划要求先于实现落基线)。** 实施前只有锁基线(成功 70 ns、等待 64 ns、8 线程争用 197 ns/op,均 0 字节/次);评审修复后的最终复测(`Forge.Bench -- RateLimit --quick`,实现与基线同一循环交替):成功 67.7 ns(0.99x)、等待 109.8 ns 对 78 ns(1.40x;三次复测 86–110 ns,偶尔越过 100 ns 线,原因是 `Take` 改 CAS 循环以消除瞬时负余额)、8 线程争用 65.9 ns/op、14.8 Mitems/s 对 171 ns/op(0.40x),紧预算共享 4.2 ms 对 28.5 ms(0.15x),新增“一次请求总开销”行里限速器净开销约 0.22–0.25 µs。验收:0 字节/acquire、争用无一被拒、紧预算 8000 只花一次均过,等待行 <100 ns 三次里一次 MISS。全部数字与解释以 `docs/research/2026-11-13-w15-implementation.md` §五 为准。
+
+**验证。** `dotnet build Forge.slnx -c Debug` 0 警告 0 错误(含 AOT 分析器);评审修复后 `Forge.Core.Tests` 全量 2415 通过(L2),其中 `~RateLimit` 132 通过;`Forge.App.Tests` 的 `~RateLimit|~QuotaResume|~Localization|~MinorRegression|~Settings|~Views` 866 通过,`~RateLimit|~QuotaResume|~SettingsPanel|~SessionInstruments|~Usage` 133 通过,源码扫描门槛 136 通过;`Forge.Bench -- RateLimit --quick` 5 项验收 4 项通过(见上)。testhost 偶发崩溃与单例失败各 1 次,重跑全绿(详见实现说明 §七)。独立评审的修复清单与测试会话发现(`Adjust` 负 delta 缺陷等)见实现说明 §七。未跑 `Forge.Integration.Tests`/`Forge.App.LiveSwitch.Tests`(L3),`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp` 未改未跑。
+
+## 十、W11 交付记录(流程图 / Mermaid)
+
+**范围**:计划里 W11 的四条——聊天与 diff 预览里的 ```mermaid 本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随;**按 2026-11-14 的有条件批准引入 `Mermaider` 0.15.1 + `Svg.Skia` 4.9.1**(纯 .NET、无 JS 运行时、不联网)。实现说明见 `2026-11-13-w11-implementation.md`。
+
+**落点**:
+- 新增 `src/Forge.App/Services/MermaidDiagramTypes.cs`(白名单 token 解析 + header 嗅探)、`MermaidSvgColors.cs`(color-mix/var 解析)、`MermaidPalette.cs`(主题调色板)、`MermaidRenderService.cs`(后台渲染 + 缓存 + 并发/超时 + 失败分类)、`MermaidSettings.cs`(偏好的 ambient 投影)、`ComposerDraft.cs`(会话交接的草稿拼接,checks 与 Mermaid 共用)。
+- 新增 `src/Forge.App/Views/MermaidBlockView.cs`(块状态机 + 失败回路 + 修正交接 + `MermaidFixHost`)、`MermaidDiagramView.cs`(SKPicture 矢量回放控制)、`MermaidFixMessage.cs`(修正请求)、`src/Forge.App/ViewModels/IAgentMessageHost.cs`(会话交接契约)。
+- 新增 `src/Forge.App/Changes/Markdown/MarkdownCodeChrome.cs`:把 W4b 的代码块头部与正文抽成 `MarkdownCodeHeader`/`MarkdownCodeTextView`,Mermaid 块与普通代码块共用;`MarkdownCodeBlock` 改为组合它们(对外的 `CopyText`/`Update`/自动化 id 不变,现有 W4b 用例全绿)。
+- 改:`MarkdownBlockParser`(`MdBlock.FenceClosed`)、`MarkdownRenderer`(mermaid 分支 + `IsMermaid`)、`ChatMarkdownView`(闭合/未闭合就地更新;围栏 info 串分段到达时升级为 Mermaid 块)、`ChatSettingsSectionViewModel`/`ChatSettingsSectionView`(白名单 + 超时两行)、`ViewerSettingsComposition`(两行投影)、`SessionWorkspace`(实现 `IAgentMessageHost`)、`MainWindowViewModel.Checks`(改为调用会话的交接契约,删掉 checks 自己那份 run/queue 逻辑与日志)、`Strings.Chat`/`Strings.Mermaid`、`MarkdownStyles.axaml`(mermaid-* 样式)、`Forge.App.csproj`(Mermaider/Svg.Skia/SkiaSharp 三行)、`architecture.md`(两个包钉版本 + 条件已满足的说明)、`Forge.App/SPEC.md`(Mermaid 一段 + 未决更新)。
+
+**关键技术决定**:
+1. **`Svg.Skia` 取 4.9.1,不取 5.x**:5.x 依赖 SkiaSharp 4.148,与 Avalonia 12.1.6 编成的 SkiaSharp 3.119.4 是 major 冲突;4.9.1 与 Avalonia 同版(SkiaSharp ≥3.119.2、HarfBuzzSharp 8.3.1.3),NuGet 统一到 3.119.4,不新增原生资产。Windows AOT 发布 0 警告;IL/trim 分析是平台无关的,三平台的最终门仍是 PR CI 的 `publish` 矩阵。
+2. **`color-mix()` 预处理**:Svg.Skia 4.9.1 不认 CSS Color 5 的 `color-mix()`,未解析的填充画成黑色(菱形决策框整块变黑、标签压在上面);`MermaidSvgColors` 按 CSS 的百分比规则(省略一个 = 100−另一个、两个都省略 = 50/50、和 >100 归一、和 <100 时 alpha 乘该和)把 mermaider 实际产生的形态算成具体 `#rrggbb`,解析不了就判失败——绝不把黑图当成功。
+3. **矢量回放而不是栅格化**:`ICustomDrawOperation` + `ISkiaSharpApiLeaseFeature` 在渲染线程回放 `SKPicture`;2x/3x DPI 与窗口缩放零成本、单图约 2 KB、没有 PNG 编码与纹理上传。
+4. **流式不渲染**:`MdBlock.FenceClosed` 由块解析器记录;围栏没闭合时只显示源码,闭合(或定稿重建)时才渲染一次;同一条回复只在 `Complete()` 重建一次。
+5. **缓存与并发**:以 (源码, 调色板, 白名单) 为键缓存 24 条(同一张图的并发请求共享一次渲染),失败不缓存;渲染限 2 并发;超时 = 设置(默认 2000 ms,钳 [500, 30000])由 mermaider 的 `RenderDeadline` + 外层墙钟兜底。
+6. **失败回路**:源码 + 渲染器原文(异常文本带行号时写"第 N 行";mermaider 0.15 不提供行列号,头部错误固定第 1 行)+ 重试 + "让模型修正";修正消息交给最近祖先 `SessionView` 的会话(后台标签页不会发错会话),diff 预览回落到窗口的活动会话,会话忙则进输入框草稿。
+7. **可配置项**:只读 W0 已登记的两项(`chat` 分区的白名单与超时),不新增登记项;内部常量只有源码上限 64 KiB、修正消息源码上限 16 KiB、缓存 24 条、渲染并发 2。
+
+**偏差(已记录)**:
+1. **ASCII 退路未启用**:计划写"先上 ASCII 输出、再接 SVG 栅格化",但 `Mermaider.RenderAscii` 只支持 flowchart/state/xychart——默认白名单里的 sequence/class/er 一张都渲染不出来。SVG 回放通过了 AOT 冒烟,故直接落地 SVG;ASCII 只保留为"包不可用时"的退路(未写代码)。
+2. **跨出清单的文件(已记录,勿重复踩)**:`ViewModels/SessionWorkspace.cs`(实现 `IAgentMessageHost` + 交接方法)、`ViewModels/MainWindowViewModel.Checks.cs`(改为调用会话的交接契约,删掉重复的 run/queue 逻辑)、`Views/ChatMarkdownView.axaml.cs`(Mermaid 分支)、`Views/Settings/ChatSettingsSection*`(两项设置;W0 原计划把 chat 分区归 W5,但本树没有 W5 的改动)、`Changes/Markdown/MarkdownCodeBlock.cs`(改用抽出的 chrome,行为不变)、`Resources/MarkdownStyles.axaml`(只追加 mermaid-* 样式)、`Localization/Strings.Chat.cs`(三项 `chat.settings.*`)、`tests/Forge.App.Tests/Localization/StringTableTests.cs`(前缀表加 `mermaid`,一行)、`architecture.md`/`Forge.App/SPEC.md`。
+3. **`Services/` 下的具体文件名**:计划写 `Services/MermaidRender*`,实际按单一职责拆成 `MermaidRenderService`/`MermaidSvgColors`/`MermaidPalette`/`MermaidDiagramTypes`/`MermaidSettings`;都是 W11 新建,没有跨波冲突。
+4. **测试缝**:`MermaidFixHost.ResolveOverride` 是 static Func,只为单测在无会话的树里注入假 host;生产路径不设置它,真正的解析仍走"最近 SessionView → 窗口活动会话"。
+
+**验证**(最终树上实测):
+- `dotnet build Forge.slnx -c Debug` → 0 警告 0 错误。
+- `Forge.App.Tests --filter "FullyQualifiedName~Mermaid"` → 148 通过(服务/颜色/类型白名单/设置/修正消息/块状态机/主题切换/缓存淘汰/Markdown 与 diff 集成);`--filter "Views|Changes|Services|Settings"` → 727 通过;源码门槛(`Localization|MinorRegressionTests|KeyRegistry|StringTable|NoHardcodedChinese`)→ 131 通过;`ChecksHandOffTests` 15 通过。
+- `Forge.App.Tests` 全量(L2):见下"收尾验证"。
+- `dotnet publish src/Forge.App -c Release -r win-x64 -p:PublishAot=true -p:SelfContained=true -p:TreatWarningsAsErrors=true` → 成功(原生 exe 73.8 MB),仅 Avalonia.Win32 既有的两条 ILC 信息行;`dotnet list package --include-transitive` 确认 SkiaSharp 3.119.4 / HarfBuzzSharp 8.3.1.3 与 Avalonia 同版,未引入 SkiaSharp 4.x。
+- 视觉核对:浅色中文 flowchart、深色中文 flowchart、失败面板各一张(headless Skia 帧;临时冒烟文件已删除,不进仓库)。
+
+**独立测试会话**(与实现会话分开):新增 136 个用例(10 个文件),全部在 `tests/Forge.App.Tests`,未改产品代码;拉出 1 个真实缺陷并已修——`MermaidSvgColors.Mix` 在百分比和 <100% 时把通道除以已缩放的 alpha,颜色偏亮(`#9F009F` → 应为 `#800080`),现在是 `#800080CC` 的断言。测试会话报告的未覆盖面由主 Agent 补了 12 个用例:默认白名单里 sequence/state/class/er 各渲一张、`MaxLines` 超限 → TooLarge、200 节点图 + 1 ms 超时 → Timeout、明暗切换后 picture 引用变化、缓存 24 条淘汰、调色板明暗不同、`color-mix` 只改属性值不改 `<text>` 标签文本、`<style>` 正文仍解析。最终 Mermaid 过滤 148 个用例。
+
+**独立评审**(glm-5.3,只读):结论 `approve`,5 条 minor 已全部处理——(1) `Forget` 在 `order` 里留陈旧位 → 改 `LinkedList` + 位置字典;(2) `color-mix` 扫描会改写 `<text>` 标签文本 → 只解析标签属性与 `<style>` 正文,补两条用例;(3) 状态图标每次迁移重复 `Bind` 不释放 → 保存并 Dispose 旧绑定;(4) 默认类型的端到端用例与 Timeout/TooLarge 未构造 → 已补;(5) 实现说明的收尾小节为空 → 已填。评审同时核对了 ASCII 偏差、清单外文件、64 KiB 边界、测试缝、color-mix 数学、checks 语义迁移与 `MermaidPicture` 不显式 Dispose 的决定,确认与记录一致。
+
+**收尾验证**:`Forge.App.Tests` 全量在最终树上 **4830 通过 / 0 失败**(13 m 29 s)。过程中的两次 `testhost` 原生崩溃(2852 个用例后、以及第 116 个 `Git.StepCommitterTests` 用例处)判定为与本波无关的环境问题:崩溃前没有任何 Mermaid 用例执行过,Mermaid 过滤连跑 3 次全绿,`StepCommitterTests` 单独连跑 3 次全绿,同机另有一个工作区在跑测试;更早的一次全量还出现 1 个 `Terminal.TerminalLifecycleTests.Osc_title_becomes_the_tab_title` 偶发失败,单独连跑 3 次全绿(`Terminal/**` 本波未改)。
