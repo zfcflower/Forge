@@ -51,6 +51,18 @@ internal sealed class StreamingMarkdown
     /// <summary>Nothing has been appended yet.</summary>
     public bool IsEmpty => source.Length == 0;
 
+    /// <summary>
+    /// How many lines have ended (with a newline, or by <see cref="Complete"/>). A line numbered at most this never changes
+    /// again, so a renderer may keep what it built from such lines - a table row, or a list item another item follows.
+    /// </summary>
+    public int CompleteLines => lines.Count;
+
+    /// <summary>
+    /// Bumped whenever <see cref="Stable"/> stops being an extension of what it was - the one time that happens is a
+    /// <see cref="Complete"/> that replaced the incremental parse - so a renderer compares one number instead of every block.
+    /// </summary>
+    public int Revision { get; private set; }
+
     /// <summary>Whether two blocks from this source are the same block, so a renderer may keep the control it already built.</summary>
     /// <remarks>
     /// The content of a block is a pure function of its kind and its source lines, so equal ranges and kind mean equal content.
@@ -68,18 +80,20 @@ internal sealed class StreamingMarkdown
         }
 
         text = null;
-        foreach (var c in chunk)
+        source.Append(chunk);
+        var rest = chunk.AsSpan();
+        while (true)
         {
-            source.Append(c);
-            if (c == '\n')
+            var end = rest.IndexOf('\n');
+            AppendLineText(end < 0 ? rest : rest[..end]);
+            if (end < 0)
             {
-                lines.Add(line.ToString());
-                line.Clear();
+                break;
             }
-            else if (c != '\r')
-            {
-                line.Append(c);
-            }
+
+            lines.Add(line.ToString());
+            line.Clear();
+            rest = rest[(end + 1)..];
         }
 
         Scan();
@@ -111,6 +125,24 @@ internal sealed class StreamingMarkdown
         stable.AddRange(whole);
         live.Clear();
         stableLine = lines.Count;
+        Revision++;
+    }
+
+    /// <summary>Adds one stretch of a line (no newline in it) to the line being written, dropping carriage returns.</summary>
+    private void AppendLineText(ReadOnlySpan<char> part)
+    {
+        while (true)
+        {
+            var cr = part.IndexOf('\r');
+            if (cr < 0)
+            {
+                line.Append(part);
+                return;
+            }
+
+            line.Append(part[..cr]);
+            part = part[(cr + 1)..];
+        }
     }
 
     /// <summary>Scans the lines that ended since the last call for fences and for the latest block boundary.</summary>
@@ -197,9 +229,12 @@ internal sealed class StreamingMarkdown
             slice.Add(lines[index]);
         }
 
-        if (line.Length > 0)
+        // A high surrogate at the very end is half a character whose other half is still in the next chunk: leave it out until
+        // it is whole, so the live tail never renders a broken glyph.
+        var pending = line.Length > 0 && char.IsHighSurrogate(line[^1]) ? line.Length - 1 : line.Length;
+        if (pending > 0)
         {
-            slice.Add(line.ToString());
+            slice.Add(line.ToString(0, pending));
         }
 
         if (slice.Count > 0)

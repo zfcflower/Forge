@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -18,7 +19,14 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
 {
     private readonly SelectableTextBlock codeText;
     private readonly TextBlock lang;
+    private readonly CopyTextButton copy;
     private string code;
+
+    /// <summary>
+    /// Styled as the <c>Border.md-code</c> it replaces: Avalonia matches a type selector against the style key, so without this
+    /// the shared code-block surface (background, padding, corner radius) would not apply to the subclass.
+    /// </summary>
+    protected override Type StyleKeyOverride => typeof(Border);
 
     public MarkdownCodeBlock(string code, string info)
     {
@@ -39,7 +47,7 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
         lang.Classes.Add("md-code-lang");
         lang.IsVisible = info.Length > 0;
 
-        var copy = new CopyTextButton
+        copy = new CopyTextButton
         {
             DataContext = this,
             Width = 26,
@@ -48,8 +56,7 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
         copy.Classes.Add("ghost");
         copy.Classes.Add("icon");
         AutomationProperties.SetAutomationId(copy, "md-code-copy");
-        ToolTip.SetTip(copy, Loc.Instance[MarkdownStrings.CopyCode]);
-        AutomationProperties.SetName(copy, Loc.Instance[MarkdownStrings.CopyCode]);
+        LocalizeCopy();
 
         var icon = new FluentIcon { Width = 12, Height = 12 };
         icon.Bind(PathIcon.DataProperty, this.GetResourceObservable("IconCopy"));
@@ -81,6 +88,32 @@ internal sealed class MarkdownCodeBlock : Border, ICopyableText
         lang.Text = info;
         lang.IsVisible = info.Length > 0;
         ApplyName(info);
+    }
+
+    /// <summary>
+    /// Follows the UI language while the block is shown: a reply rendered before a language switch stays on screen. The
+    /// subscription lives only while attached, so a block that left the tree is not kept alive by the static event.
+    /// </summary>
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Loc.Instance.LanguageChanged += OnLanguageChanged;
+        LocalizeCopy();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e) => LocalizeCopy();
+
+    private void LocalizeCopy()
+    {
+        var label = Loc.Instance[MarkdownStrings.CopyCode];
+        ToolTip.SetTip(copy, label);
+        AutomationProperties.SetName(copy, label);
     }
 
     /// <summary>The block's accessible name is its fence info string; without one the label and the text speak for themselves.</summary>

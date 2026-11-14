@@ -1,7 +1,10 @@
 using System.Text;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.LogicalTree;
+using Avalonia.Media;
+using Avalonia.Styling;
 using Forge.App.Changes.Markdown;
 using Forge.App.ViewModels;
 using Forge.App.Views;
@@ -60,7 +63,7 @@ public sealed class ChatMarkdownViewTests
     }
 
     [Fact]
-    public async Task A_streaming_markdown_table_replaces_its_control_instead_of_growing_it()
+    public async Task A_streaming_table_grows_in_place_and_keeps_the_rows_of_ended_lines()
     {
         await SharedUi.RunAsync(
             async () =>
@@ -68,15 +71,289 @@ public sealed class ChatMarkdownViewTests
                 var model = new TurnTextViewModel();
                 var body = await ShowAsync(model);
 
-                model.Append("| a | b |\n|---|---|\n| 1 | 2 |");
-                var first = Assert.Single(body.Children);
-                Assert.Contains("md-table", first.Classes);
-
-                model.Append("\n| 3 | 4 |");
-
+                model.Append("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 |");
                 var table = Assert.Single(body.Children);
-                Assert.NotSame(first, table);
                 Assert.Contains("md-table", table.Classes);
+                var grid = Assert.IsType<Grid>(Assert.IsType<Border>(table).Child);
+                var header = grid.Children[0];
+                var endedRow = grid.Children[2];
+                var partialRow = grid.Children[4];
+
+                model.Append(" 4 |\n| 5 | 6 |");
+
+                Assert.Same(table, Assert.Single(body.Children));
+                Assert.Equal(4, grid.RowDefinitions.Count);
+                Assert.Equal(8, grid.Children.Count);
+                Assert.Same(header, grid.Children[0]);
+                Assert.Same(endedRow, grid.Children[2]);
+                Assert.NotSame(partialRow, grid.Children[4]);
+                Assert.Equal(["a", "b", "1", "2", "3", "4", "5", "6"], [.. CellTexts(grid)]);
+                Assert.Equal(Enumerable.Range(0, 8).Select(static i => i / 2), grid.Children.Select(Grid.GetRow));
+            });
+    }
+
+    [Fact]
+    public async Task A_table_whose_delimiter_row_is_still_being_written_is_rendered_afresh()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+
+                // The delimiter row is still being written: its alignment can change, so nothing of the table is kept.
+                model.Append("| a | b |\n|---|--");
+                var first = Assert.Single(body.Children);
+
+                model.Append("-:|\n| 1 | 2 |\n");
+
+                Assert.NotSame(first, Assert.Single(body.Children));
+                AssertSameTree(MarkdownBlockParser.Parse(["| a | b |", "|---|---:|", "| 1 | 2 |"]), body);
+            });
+    }
+
+    [Fact]
+    public async Task A_streaming_list_keeps_the_items_that_another_item_follows()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+
+                model.Append("1. one\n2. two\n3. thr");
+                var list = Assert.IsType<StackPanel>(Assert.Single(body.Children));
+                var one = list.Children[0];
+                var two = list.Children[1];
+                var three = list.Children[2];
+
+                model.Append("ee\n4. four");
+
+                // "one" is followed by an item on an ended line, so it is final; "two" was followed only by the line still
+                // being written ("3. thr" could have turned into text), so it is rebuilt with the rest.
+                Assert.Same(list, Assert.Single(body.Children));
+                Assert.Same(one, list.Children[0]);
+                Assert.NotSame(two, list.Children[1]);
+                Assert.NotSame(three, list.Children[2]);
+                Assert.Equal(["1.", "2.", "3.", "4."], [.. Markers(list)]);
+                var secondTwo = list.Children[1];
+                var secondThree = list.Children[2];
+
+                model.Append("\n5. five\n");
+
+                Assert.Same(list, Assert.Single(body.Children));
+                Assert.Same(one, list.Children[0]);
+                Assert.Same(secondTwo, list.Children[1]);
+                Assert.NotSame(secondThree, list.Children[2]);
+                Assert.Equal(["1.", "2.", "3.", "4.", "5."], [.. Markers(list)]);
+                model.Complete();
+                AssertSameTree(MarkdownBlockParser.Parse(["1. one", "2. two", "3. three", "4. four", "5. five"]), body);
+            });
+    }
+
+    [Fact]
+    public async Task A_half_written_marker_that_turns_into_text_does_not_keep_the_item_before_it()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+
+                // "-" on the line being written is an empty item; "-x" is not an item but a continuation of "b".
+                model.Append("- a\n- b\n-");
+                model.Append("x\n");
+                model.Complete();
+
+                AssertSameTree(MarkdownBlockParser.Parse(["- a", "- b", "-x"]), body);
+            });
+    }
+
+    private const string Reply = """
+        # Title
+
+        Intro with **bold** and `code`.
+
+        1. one
+        2. two
+           - nested
+        3. three
+        - [x] done
+        - [ ] open
+
+        | name | value |
+        |:-----|------:|
+        | a    | 1     |
+        | b    | 2     |
+
+        ```csharp
+        var a = 1;
+
+        var b = 2;
+        ```
+
+        > quoted
+        > text
+
+        <!-- a comment
+
+        that spans -->
+
+        Closing paragraph without a trailing newline
+        """;
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(17)]
+    [InlineData(4096)]
+    public async Task Any_chunking_renders_the_same_tree_as_one_render_of_the_whole_reply(int size)
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+                for (var offset = 0; offset < Reply.Length; offset += size)
+                {
+                    model.Append(Reply.Substring(offset, Math.Min(size, Reply.Length - offset)));
+                }
+
+                model.Complete();
+
+                AssertSameTree(MarkdownBlockParser.Parse(Reply.Split('\n')), body);
+            });
+    }
+
+    [Fact]
+    public async Task Fragments_of_an_over_long_paragraph_render_without_the_block_gap_and_merge_on_completion()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+                var line = new string('x', 120) + "\n";
+                for (var index = 0; index < 50; index++)
+                {
+                    model.Append(line);
+                }
+
+                Assert.True(body.Children.Count >= 2);
+                Assert.Equal(0, body.Children[0].Margin.Top);
+                Assert.Equal(-body.Spacing, body.Children[1].Margin.Top);
+
+                model.Complete();
+
+                var paragraph = Assert.Single(body.Children);
+                Assert.Equal(0, paragraph.Margin.Top);
+            });
+    }
+
+    [Fact]
+    public async Task A_selection_in_a_committed_block_survives_later_flushes()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var body = await ShowAsync(model);
+                model.Append("select me please\n\n");
+                var committed = Assert.IsType<MarkdownTextBlock>(Assert.Single(body.Children));
+                committed.SelectionStart = 7;
+                committed.SelectionEnd = 9;
+
+                model.Append("more text");
+                model.Append(" streaming\n\nand more");
+                model.Complete();
+
+                Assert.Same(committed, body.Children[0]);
+                Assert.Equal("me", committed.SelectedText);
+            });
+    }
+
+    [Fact]
+    public async Task A_detached_view_stops_listening_until_it_is_attached_again()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var view = new ChatMarkdownView { DataContext = model };
+                var window = SharedUi.Show(view, 620, 800);
+                SharedUi.Settle(window);
+                var body = Assert.IsType<StackPanel>(view.FindControl<StackPanel>("Body"));
+                model.Append("para\n\n");
+                Assert.Single(body.Children);
+
+                window.Content = null;
+                SharedUi.Settle(window);
+                model.Append("second\n\nthird\n");
+
+                // Unsubscribed: nothing is rendered into a tree nobody shows.
+                Assert.Single(body.Children);
+
+                window.Content = view;
+                SharedUi.Settle(window);
+                Assert.Equal(3, body.Children.Count);
+            });
+    }
+
+    [Fact]
+    public async Task Code_block_colors_follow_a_theme_switch_without_a_rebuild()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                var view = new ChatMarkdownView { DataContext = model };
+                var window = SharedUi.Show(view, 620, 800);
+                window.RequestedThemeVariant = ThemeVariant.Light;
+                SharedUi.Settle(window);
+                var body = Assert.IsType<StackPanel>(view.FindControl<StackPanel>("Body"));
+                model.Append("```\ncode\n```\n");
+                var code = Assert.IsType<MarkdownCodeBlock>(Assert.Single(body.Children));
+                SharedUi.Settle(window);
+                // The subclass is styled as Border.md-code: the shared surface, padding and radius reach it.
+                Assert.NotEqual(default, code.Padding);
+                Assert.NotEqual(default, code.CornerRadius);
+                var light = Assert.IsAssignableFrom<ISolidColorBrush>(code.Background).Color;
+
+                window.RequestedThemeVariant = ThemeVariant.Dark;
+                SharedUi.Settle(window);
+
+                var dark = Assert.IsAssignableFrom<ISolidColorBrush>(code.Background).Color;
+                Assert.NotEqual(light, dark);
+                Assert.Same(code, Assert.Single(body.Children));
+            });
+    }
+
+    [Fact]
+    public async Task Paragraphs_code_blocks_and_tables_of_one_message_share_one_inset_and_fill_the_width()
+    {
+        // Chat layout decision (2026-11-14): full window width, one inset for every block - the Markdown blocks add none of
+        // their own and carry no maximum width, so their outer edges coincide with the message's.
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var model = new TurnTextViewModel();
+                model.Append("A paragraph of text.\n\n```js\nconst x = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
+                model.Complete();
+                var host = new TurnTextView { DataContext = model };
+                var window = SharedUi.Show(host, 900, 800);
+                SharedUi.Settle(window);
+
+                var view = Assert.Single(host.GetLogicalDescendants().OfType<ChatMarkdownView>());
+                var body = Assert.IsType<StackPanel>(view.FindControl<StackPanel>("Body"));
+                Assert.Equal(3, body.Children.Count);
+                foreach (var block in body.Children)
+                {
+                    var left = block.TranslatePoint(default, host);
+                    Assert.NotNull(left);
+                    Assert.Equal(0, left.Value.X, 3);
+                    Assert.Equal(host.Bounds.Width, block.Bounds.Width, 3);
+                    Assert.True(double.IsPositiveInfinity(block.MaxWidth));
+                }
             });
     }
 
@@ -310,6 +587,53 @@ public sealed class ChatMarkdownViewTests
         }
 
         return text.ToString();
+    }
+
+    /// <summary>The texts of a table's cells in grid order.</summary>
+    private static IEnumerable<string> CellTexts(Grid grid) =>
+        grid.Children.Select(static cell => Flatten(Assert.IsType<MarkdownTextBlock>(Assert.IsType<Border>(cell).Child).Inlines));
+
+    /// <summary>
+    /// Asserts that the streamed panel shows exactly what one render of <paramref name="whole"/> shows: the same control types,
+    /// classes, texts and grid positions, block for block.
+    /// </summary>
+    private static void AssertSameTree(IReadOnlyList<MdBlock> whole, StackPanel body)
+    {
+        var expected = Assert.IsType<StackPanel>(MarkdownRenderer.RenderBlocks(whole));
+        Assert.Equal(expected.Children.Select(Dump), body.Children.Select(Dump));
+    }
+
+    private static string Dump(Control control)
+    {
+        var text = new StringBuilder();
+        Dump(control, text);
+        return text.ToString();
+    }
+
+    private static void Dump(Control control, StringBuilder text)
+    {
+        text.Append(control.GetType().Name).Append('[').AppendJoin(',', control.Classes).Append(']');
+        text.Append('@').Append(Grid.GetRow(control)).Append(',').Append(Grid.GetColumn(control));
+        switch (control)
+        {
+            case MarkdownTextBlock block:
+                text.Append('"').Append(Flatten(block.Inlines)).Append('"');
+                break;
+            case MarkdownCodeBlock code:
+                text.Append('"').Append(code.CopyText).Append('"');
+                break;
+            case TextBlock block:
+                text.Append('"').Append(block.Text).Append('"');
+                break;
+        }
+
+        text.Append('{');
+        foreach (var child in control.GetLogicalChildren().OfType<Control>())
+        {
+            Dump(child, text);
+        }
+
+        text.Append('}');
     }
 
     /// <summary>The marker labels of a rendered list item row, in order.</summary>

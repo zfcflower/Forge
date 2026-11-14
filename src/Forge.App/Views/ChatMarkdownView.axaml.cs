@@ -9,17 +9,19 @@ namespace Forge.App.Views;
 /// Renders a streaming reply as Markdown. The view model hands over a <see cref="StreamingMarkdown"/> document: a committed
 /// block prefix that is published once, and a live tail that is re-parsed on every append. This view keeps one control per
 /// block, appends a control when a block is committed, and refreshes only the last live block - in place for the two kinds it
-/// can be (a paragraph or heading gets new inlines, a code block gets new text), rebuilt only when the block's shape changed
-/// (a list or a table that grew). A whole reply is therefore never re-laid out: the cost of a flush is the size of the tail.
+/// can be (a paragraph or heading gets new inlines, a code block gets new text, a list or table keeps the rows that came from
+/// ended lines and rebuilds only the last one), rebuilt only when the block's kind changed. A whole reply is therefore never
+/// re-laid out: the cost of a flush is the size of the tail.
 /// <para>The rendered tree is kept while the view is detached (a session in a background tab keeps streaming): the
 /// subscription pauses, and the next attach catches up through <see cref="Sync"/>. That also keeps the view out of the view
 /// model's lifetime once the tab is gone.</para>
 /// </summary>
 public partial class ChatMarkdownView : UserControl
 {
-    private readonly List<(MdBlock Block, Control Control)> blocks = [];
+    private readonly List<(MdBlock Block, Control Control, int CompleteLines)> blocks = [];
     private TurnTextViewModel? model;
     private int committed;
+    private int revision;
     private bool listening;
 
     public ChatMarkdownView() => InitializeComponent();
@@ -90,6 +92,7 @@ public partial class ChatMarkdownView : UserControl
         Body.Children.Clear();
         blocks.Clear();
         committed = 0;
+        revision = model?.Document.Revision ?? 0;
         Sync();
     }
 
@@ -100,8 +103,9 @@ public partial class ChatMarkdownView : UserControl
             return;
         }
 
+        // The committed prefix only ever grows, except when completion replaced it; the revision says which, without walking it.
         var stable = model.Document.Stable;
-        if (stable.Count < committed || !PrefixMatches(stable))
+        if (model.Document.Revision != revision || stable.Count < committed)
         {
             Rebuild();
             return;
@@ -120,19 +124,6 @@ public partial class ChatMarkdownView : UserControl
         }
 
         SyncLive(model.Document.Live);
-    }
-
-    private bool PrefixMatches(IReadOnlyList<MdBlock> stable)
-    {
-        for (var index = 0; index < committed; index++)
-        {
-            if (!StreamingMarkdown.SameBlock(blocks[index].Block, stable[index]))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>Refreshes the tail, rebuilding only from the first live block that is no longer the block it was.</summary>
@@ -173,23 +164,31 @@ public partial class ChatMarkdownView : UserControl
             : StreamingMarkdown.SameBlock(rendered, next);
 
     /// <summary>
-    /// Re-renders the last live block: a growing paragraph or heading only needs new inlines and a code block only new text,
-    /// so the control survives the flush; anything else is replaced.
+    /// Re-renders the last live block: a growing paragraph or heading only needs new inlines, a code block only new text, and
+    /// a list or table keeps the rows that came from ended lines and rebuilds only the rest, so the control survives the flush;
+    /// anything else is replaced.
     /// </summary>
     private void Refresh(int position, MdBlock block)
     {
-        var control = blocks[position].Control;
+        var (rendered, control, completeLines) = blocks[position];
+        var now = model?.Document.CompleteLines ?? 0;
         if (block.Kind is MdBlockKind.Paragraph or MdBlockKind.Heading && control is MarkdownTextBlock text)
         {
             text.SetInlines(block.Inlines);
-            blocks[position] = (block, control);
+            blocks[position] = (block, control, now);
             return;
         }
 
         if (block.Kind is MdBlockKind.Code or MdBlockKind.Html && control is MarkdownCodeBlock code)
         {
             code.Update(block.Text, MarkdownRenderer.CodeInfo(block));
-            blocks[position] = (block, control);
+            blocks[position] = (block, control, now);
+            return;
+        }
+
+        if (MarkdownRenderer.TryGrow(control, rendered, block, completeLines))
+        {
+            blocks[position] = (block, control, now);
             return;
         }
 
@@ -200,9 +199,20 @@ public partial class ChatMarkdownView : UserControl
     private void Add(MdBlock block)
     {
         var control = MarkdownRenderer.Render(block);
-        blocks.Add((block, control));
+        if (blocks.Count > 0 && IsFragment(blocks[^1].Block, block))
+        {
+            // A paragraph committed in fragments (an over-long one, see StreamingMarkdown) reads as one paragraph while it
+            // streams: the panel's block spacing would otherwise open a gap at every fragment line.
+            control.Margin = new Thickness(0, -Body.Spacing, 0, 0);
+        }
+
+        blocks.Add((block, control, model?.Document.CompleteLines ?? 0));
         Body.Children.Add(control);
     }
+
+    /// <summary>Two paragraphs on adjacent lines are fragments of one: a single parse never produces them.</summary>
+    private static bool IsFragment(MdBlock previous, MdBlock block) =>
+        previous.Kind == MdBlockKind.Paragraph && block.Kind == MdBlockKind.Paragraph && block.StartLine == previous.EndLine + 1;
 
     private void Truncate(int count)
     {

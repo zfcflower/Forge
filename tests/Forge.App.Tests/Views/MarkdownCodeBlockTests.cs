@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.LogicalTree;
 using Forge.App.Changes.Markdown;
 using Forge.App.Localization;
+using Forge.App.Preferences;
 using Forge.App.Views;
 using Xunit;
 
@@ -60,6 +61,46 @@ public sealed class MarkdownCodeBlockTests
                 var copy = Assert.Single(code.GetLogicalDescendants().OfType<CopyTextButton>());
                 Assert.Equal("md-code-copy", AutomationProperties.GetAutomationId(copy));
                 Assert.Equal(Loc.Instance[MarkdownStrings.CopyCode], ToolTip.GetTip(copy));
+            });
+    }
+
+    [Fact]
+    public async Task The_copy_button_follows_a_language_switch_while_shown_and_stops_listening_once_detached()
+    {
+        await SharedUi.RunAsync(
+            async () =>
+            {
+                var previous = Loc.Instance.Language;
+                try
+                {
+                    Loc.Instance.Language = UiLanguage.English;
+                    var code = new MarkdownCodeBlock("body", "go");
+                    var window = SharedUi.Show(code, 620, 200);
+                    SharedUi.Settle(window);
+                    var copy = Assert.Single(code.GetLogicalDescendants().OfType<CopyTextButton>());
+                    var english = Loc.Instance[MarkdownStrings.CopyCode];
+                    Assert.Equal(english, ToolTip.GetTip(copy));
+
+                    Loc.Instance.Language = UiLanguage.Chinese;
+                    var chinese = Loc.Instance[MarkdownStrings.CopyCode];
+                    Assert.NotEqual(english, chinese);
+                    Assert.Equal(chinese, ToolTip.GetTip(copy));
+                    Assert.Equal(chinese, AutomationProperties.GetName(copy));
+
+                    window.Content = null;
+                    SharedUi.Settle(window);
+                    Loc.Instance.Language = UiLanguage.English;
+
+                    // Detached: the static event no longer reaches it (no leak), and it catches up when it is shown again.
+                    Assert.Equal(chinese, ToolTip.GetTip(copy));
+                    window.Content = code;
+                    SharedUi.Settle(window);
+                    Assert.Equal(english, ToolTip.GetTip(copy));
+                }
+                finally
+                {
+                    Loc.Instance.Language = previous;
+                }
             });
     }
 

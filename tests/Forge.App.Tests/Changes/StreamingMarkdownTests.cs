@@ -458,6 +458,125 @@ public sealed class StreamingMarkdownTests
         Assert.Equal(MdBlockKind.Paragraph, rendered[1].Kind);
     }
 
+    [Fact]
+    public void A_surrogate_pair_split_across_chunks_never_shows_half_a_character()
+    {
+        var document = new StreamingMarkdown();
+        document.Append("smile \uD83D");
+
+        Assert.Equal("smile", Assert.Single(document.Live).PlainText);
+
+        document.Append("\uDE00 done");
+
+        Assert.Equal("smile 😀 done", Assert.Single(document.Live).PlainText);
+        document.Complete();
+        Assert.Equal("smile 😀 done", document.Source);
+        AssertAnyChunking("# 😀 title\n\n- 👍 item\n\n`🎉` code 😀\n");
+    }
+
+    [Fact]
+    public void A_crlf_split_between_chunks_parses_like_a_plain_newline()
+    {
+        var document = new StreamingMarkdown();
+        document.Append("para one\r");
+        document.Append("\n\r");
+        document.Append("\npara two\r\n");
+
+        Assert.Equal("para one", Assert.Single(document.Stable).PlainText);
+        Assert.Equal(3, document.CompleteLines);
+        document.Complete();
+        Assert.Equal("para one\r\n\r\npara two\r\n", document.Source);
+        AssertAnyChunking("# Title\r\n\r\n- a\r\n- b\r\n\r\n| x | y |\r\n|---|---|\r\n| 1 | 2 |\r\n\r\n```\r\ncode\r\n\r\nmore\r\n```\r\n");
+    }
+
+    [Theory]
+    [InlineData("intro\n\n```python\nprint(1)\n\nprint(2)")]
+    [InlineData("intro\n\n| a | b |\n|---|---|\n| 1 | 2")]
+    [InlineData("intro\n\n<!-- never closed\n\nstill inside")]
+    [InlineData("intro\n\n- one\n- two\n  - nested, unfinished")]
+    [InlineData("intro\n\n> quote that\n> stops mid")]
+    public void An_unterminated_block_at_the_end_of_the_reply_completes_like_one_parse(string text) => AssertAnyChunking(text);
+
+    [Fact]
+    public void A_very_long_single_line_streams_as_one_live_paragraph_and_completes_like_one_parse()
+    {
+        var line = string.Concat(Enumerable.Repeat("word **bold** `code` [l](https://x.dev) ", 600));
+        var document = new StreamingMarkdown();
+        for (var offset = 0; offset < line.Length; offset += 97)
+        {
+            document.Append(line.Substring(offset, Math.Min(97, line.Length - offset)));
+        }
+
+        Assert.Empty(document.Stable);
+        Assert.Equal(MdBlockKind.Paragraph, Assert.Single(document.Live).Kind);
+        Assert.Equal(0, document.CompleteLines);
+
+        document.Complete();
+
+        Assert.Equal(Canonical(MarkdownBlockParser.Parse([line])), Canonical(Rendered(document)));
+        Assert.Equal(1, document.CompleteLines);
+    }
+
+    [Fact]
+    public void A_huge_reply_commits_its_blocks_once_and_completes_like_one_parse()
+    {
+        var text = new System.Text.StringBuilder();
+        for (var index = 0; index < 400; index++)
+        {
+            text.Append("## Section ").Append(index).Append("\n\nParagraph ").Append(index).Append(" with **bold**.\n\n");
+            text.Append("- a\n- b\n\n| k | v |\n|---|---|\n| ").Append(index).Append(" | x |\n\n```\ncode ").Append(index).Append("\n```\n\n");
+        }
+
+        var reply = text.ToString();
+        var document = new StreamingMarkdown();
+        MdBlock? first = null;
+        var rng = new Random(7);
+        for (var offset = 0; offset < reply.Length;)
+        {
+            var size = Math.Min(rng.Next(1, 200), reply.Length - offset);
+            document.Append(reply.Substring(offset, size));
+            offset += size;
+            first ??= document.Stable.Count > 0 ? document.Stable[0] : null;
+        }
+
+        Assert.NotNull(first);
+        Assert.Same(first, document.Stable[0]);
+        Assert.True(document.Live.Count <= 2);
+        var revision = document.Revision;
+
+        document.Complete();
+
+        Assert.Equal(revision, document.Revision);
+        Assert.Same(first, document.Stable[0]);
+        Assert.Equal(Canonical(MarkdownBlockParser.Parse(Split(reply))), Canonical(Rendered(document)));
+    }
+
+    [Fact]
+    public void Revision_changes_only_when_completion_replaces_the_incremental_parse()
+    {
+        var matching = new StreamingMarkdown();
+        matching.Append("para\n\nmore\n");
+        matching.Complete();
+        Assert.Equal(0, matching.Revision);
+
+        var corrected = new StreamingMarkdown();
+        // An over-long paragraph is committed in fragments while it streams; completion merges them back into one.
+        for (var index = 0; index < 50; index++)
+        {
+            corrected.Append(new string('x', 120) + "\n");
+        }
+
+        Assert.NotEmpty(corrected.Stable);
+        var before = corrected.Revision;
+        corrected.Complete();
+        var after = corrected.Revision;
+        corrected.Complete();
+
+        Assert.Equal(0, before);
+        Assert.Equal(1, after);
+        Assert.Equal(after, corrected.Revision);
+    }
+
     /// <summary>What the chat view renders: the committed prefix followed by the live tail.</summary>
     private static List<MdBlock> Rendered(StreamingMarkdown document) => [.. document.Stable, .. document.Live];
 
