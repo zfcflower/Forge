@@ -106,8 +106,9 @@
 `ViewModels/Transcript.Tools.cs`(只读 `IsRunning`)、`ViewModels/TreeIcons.cs`(`TreeMotion.Changed`)、
 `SessionWorkspace.cs`(被拒绝的审批把 `Kind=Approval` 传进提示行)、`Preferences/AppPreferences.cs`(ReduceMotion)、
 `Appearance/AppearanceApplier.cs`(写闸门)、`Appearance/AppearanceSettingsView(+VM).axaml/.cs`(勾选框)、
-`Localization/Strings.Appearance.cs`(一键文案)、`ViewModels/ProjectTree.cs`(闸门变化时给正在运行的树行抬一次
-`IsAgentRunningAnimated` 通知,开关一下立刻停/恢复呼吸)、`Forge.App/SPEC.md`(聊天时间轴一段 + 未决项更正)、
+`Localization/Strings.Appearance.cs`(三条文案)、`ViewModels/ProjectTree.cs`(闸门变化时给正在运行的树行抬一次
+`IsAgentRunningAnimated` 通知,开关一下立刻停/恢复呼吸)、`THIRD_PARTY_NOTICES.md`(新增图标的清单)、
+`Forge.App/SPEC.md`(聊天时间轴一段 + 未决项更正)、
 `docs/research/2026-11-13-thinkrail-gap-plan.md`(W13 交付记录与登记项)。
 
 ## 三、被否的备选
@@ -157,3 +158,79 @@
   (`Approval/ApprovalQueueOverlay`),不在转录里,因此不画在轴上。
 - **MCP 节点**的分类依据只有工具名(行上没有来源信息):按 `McpToolNaming` 的 `server__tool` 分隔符判定,
   误判只会换一个图标;把来源塞进工具行属于转录业务数据,不在本波。
+## 七、交付记录
+
+### 7.1 交付面
+
+新增:`ViewModels/TimelineNodeViewModel.cs`(节点类型、工具名→类型、状态、图标键、读屏名称键)、
+`ViewModels/TimelineLayout.cs`(轴线几何纯函数)、`Views/TimelineGutter.cs`(轴列控件)、
+`Views/TimelineStyles.axaml`(控件主题 + 线段/图标/状态样式)、`Views/TimelineTurnView.axaml(.cs)`(抬头/块/脚注
+三段行)、`Localization/Strings.Timeline.cs`。
+
+修改:`App.axaml`(6 个转录条目模板改为"轴列 + 原内容",新增一条 `StyleInclude`)、
+`Views/SessionView.axaml`(转录区/输入卡/横幅内边距取 token)、`Resources/Tokens.axaml`(4 个时间轴尺寸 +
+3 个聊天内边距)、`Resources/Icons.axaml`(27 个 FIS 键,只追加)、`Resources/Controls.axaml`(用户气泡去掉
+`MaxWidth`;删掉只属于旧轮次卡的 `turn-header`/`turn-body`,保留 `turn-card`)、`ViewModels/Transcript.cs`
+(提示行只读 `Kind`)、`ViewModels/Transcript.Tools.cs`(工具行只读 `IsRunning`)、`ViewModels/SessionWorkspace.cs`
+(被拒绝的审批传 `Kind=Approval`)、`ViewModels/TreeIcons.cs`(`TreeMotion.Changed`)、`ViewModels/ProjectTree.cs`
+(闸门变化时给正在运行的树行抬一次通知)、`Preferences/AppPreferences.cs`(`ReduceMotion`,默认关)、
+`Appearance/AppearanceApplier.cs`(写闸门)、`Appearance/AppearanceSettingsView.axaml` 与
+`AppearanceSettingsViewModel.cs`(动效勾选框)、`Localization/Strings.Appearance.cs`(三条文案)、
+`THIRD_PARTY_NOTICES.md`(新增图标清单)、`Forge.App/SPEC.md`(聊天时间轴一段 + 外观分区的动效一条 +
+字符串表清单)。
+
+### 7.2 实施偏差
+
+1. "行容器"落成 `TimelineGutter`(TemplatedControl)+ `TimelineTurnView`,不是另造一套行视图模型;原模板内容
+   只被外层 Grid 包住,`Transcript.Items` 的语义未变、没有逐消息对象(见四·性能)。
+2. 计划清单之外的文件已逐条写进计划文档的 W13 交付记录;其中 **`ReduceMotion` 是登记表外新增的可配置项**,
+   已在计划 §6.2 补一行并说明理由(关闭动画是用户合理会调的开关;Avalonia 12 的 `IPlatformSettings` 没有系统
+   级"减少动画",只能做偏好)。
+3. 计划写的"提示行只读 Kind"实际落成 `NoticeViewModel.Kind`/`TurnNoticeViewModel.Kind` + `AddNotice` 的可选
+   参数;`ToolRowViewModel.IsRunning` 同样只是派生呈现位,不写业务数据。
+4. 节点归类的边界:MCP 只能按 `McpToolNaming.Separator`(`server__tool`)识别;`extension_*`/未知 `spec_*`
+   归"通用工具"(只有 `pr_*`/`review_*` 前缀归网络,其余全部走逐名表/回退);审批节点只覆盖被拒绝的审批提示。
+5. 不可达组合的已知限制:"折叠且是最后一个转录项"的轮次会让上一个节点的下段线延伸到行底(折叠只会发生在子
+   Agent 转录的非末轮),未为它加跨项判定,避免为不可达状态引入全局扫描。
+
+### 7.3 测试(两个独立测试会话)
+
+- 纯逻辑/状态(5 个文件,180 例):`KindForTool` 55 行逐名表、`StateOf`/`EffectiveKind` 全组合、`IconKey`/
+  `NameKey`/`StateKey` 具体键与双语注册、`TimelineLayout` 的 Item/TurnHeader/TurnBlock/TurnFootnote 全组合表 +
+  **一条连续轴不变式**(建模转录的轴必须从第一个节点起、在最后一个节点下止、中间无缺口)、`ToolRow.IsRunning`
+  的状态与通知、提示行的 `Kind`、`TimelineStrings.Describe` 的语言切换、`ReduceMotion` 的持久化往返。
+- headless 视图(5 个文件,19 个方法):真实 `ListBox` 里 9 个 gutter 的 `(Kind, Role, ShowNode, 两段线)` 排列、
+  三态类与填充图标、读屏名称(运行/失败拼状态词、抬头为空、语言切换即时)、减少动画的脉冲开关、追加后末行
+  下段线打开、折叠/展开的抬头穿线、轴线对齐(同一 X/宽度)、虚拟化(300 项只实现 15 行)、滚动后的重算、
+  `TimelineTurnView` 的抬头/块/脚注角色、32 个图标键在 24 网格内可解析、真实 `SessionView` 的三处内边距相等与
+  用户气泡无固定最大宽度、`AppearanceApplier` → `TreeMotion.Changed` → gutter 与真实树行的端到端响应。
+- **测试会话拉出的真缺陷(已修)**:滚动回收容器后 `TimelineGutter` 不再重算——容器映射在虚拟化面板的
+  measure 阶段尚不可读,`Recompute` 的"节点无线段"回退值就此变成永久,长转录一滚动轴线段全丢,直到下一次
+  追加/展开。修法:未定位时经 `Dispatcher` 做最多 3 次后台重试(定位成功即停止),并留回归用例
+  `TimelineGutterTests.Scrolling_to_the_end_keeps_the_axis_flags_of_the_realized_rows`。
+
+### 7.4 验证
+
+- `dotnet build Forge.slnx -c Debug` → 0 警告 0 错误。
+- `Forge.App.Tests --no-build --filter "Timeline|ReduceMotion|Transcript|ToolRow|SessionView|ChatMarkdown|Appearance|IconGeometry|Settings|Foundation|Localization|MinorRegression|KeyRegistry|StringTable|NoHardcodedChinese|SessionEventRouting|SessionLiveTools|SessionTurnFailure"`
+  → 1043 通过,0 失败,34 s。
+- 新测试单独跑:99 通过,0 失败。
+- `Forge.App.Tests` 全量**未作为判据**(仓库约定):首次 4685 个中 3 个与本波无关的偶发失败(审批卡、
+  用户问题队列,单独跑全绿);之后两次 testhost 在 ~700/~1900 个时崩溃(`GitSyncWorktreeRaceTests` 单跑两次
+  全绿,且与本波无交集)。
+- 渲染核对:headless 截图(轴连续、末节点截止、运行节点实心强调色脉冲、失败节点红色、抬头无节点、
+  用户气泡右对齐铺满)。
+
+### 7.5 评审与修复
+
+- 独立评审会话来(glm-5.3,high,与实现/测试会话分开):blocking——`TreeMotion.Changed` 当时没有订阅者,
+  开关不会立刻停树里的呼吸;minor——块行同时订阅 `turn.Blocks` 两次;minor——说明里的 `extension_*`/`spec_*`
+  前缀与代码不一致。三条均已修(`ProjectTree` 订阅 + 抬通知、块行只留一个集合订阅、前缀规则收窄为
+  `pr_*`/`review_*`),并各有用例/代码注释锁定。
+- 主持评审(host request_review):无专属测试 + 缺交付记录 → 本文件与两个测试会话补齐后重提。
+
+### 7.6 已知限制
+
+- "减少动画"的视觉停止只用类断言证明(class 移除即动画停止),没有帧级像素断言。
+- 轴线跨越 `ListBoxItem` 边界的像素级连续由截图核对覆盖,没有自动化像素断言。
+- 隐藏行(折叠轮次里的块、不可见的脚注行)不应用模板,因此不会重算;它们不渲染,不影响可见轴线。
