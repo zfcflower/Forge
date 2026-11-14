@@ -154,6 +154,18 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinProjectsCloneTimeoutSeconds = 0;
     public const int MaxProjectsCloneTimeoutSeconds = 3600;
     public const int DefaultProjectsCloneTimeoutSeconds = 0;
+    // The per-provider budget (wave W15). The defaults are the limiter's own (<c>ProviderRateLimitPolicy</c>): a fresh
+    // profile starts on the loose numbers the core ships, not on a second set that only looks the same.
+    public const bool DefaultRateLimitEnabled = true;
+    public const int MinRateLimitRequestsPerMinute = 1;
+    public const int MaxRateLimitRequestsPerMinute = 100000;
+    public const int DefaultRateLimitRequestsPerMinute = 600;
+    public const int MinRateLimitTokensPerMinute = 1000;
+    public const int MaxRateLimitTokensPerMinute = 1000000000;
+    public const int DefaultRateLimitTokensPerMinute = 4000000;
+    public const int MinRateLimitAutomationGapSeconds = 0;
+    public const int MaxRateLimitAutomationGapSeconds = 600;
+    public const int DefaultRateLimitAutomationGapSeconds = 10;
     public const string DefaultIdleArchiveScope = "automation";
     private static readonly string[] IdleArchiveScopeTokens = ["automation", "all"];
     public const string DefaultUpdatesCheckFrequency = "daily";
@@ -222,6 +234,10 @@ internal sealed class AppPreferences : ObservableObject
     private int inspectorRefreshMilliseconds = DefaultInspectorRefreshMilliseconds;
     private int chatMermaidTimeoutMilliseconds = DefaultChatMermaidTimeoutMilliseconds;
     private int projectsCloneTimeoutSeconds = DefaultProjectsCloneTimeoutSeconds;
+    private bool rateLimitEnabled = DefaultRateLimitEnabled;
+    private int rateLimitRequestsPerMinute = DefaultRateLimitRequestsPerMinute;
+    private int rateLimitTokensPerMinute = DefaultRateLimitTokensPerMinute;
+    private int rateLimitAutomationGapSeconds = DefaultRateLimitAutomationGapSeconds;
     private string idleArchiveScope = DefaultIdleArchiveScope;
     private string updatesCheckFrequency = DefaultUpdatesCheckFrequency;
     private string updatesChannel = DefaultUpdatesChannel;
@@ -555,6 +571,30 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref projectsCloneTimeoutSeconds, Math.Clamp(value, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds));
     }
 
+    /// <summary>Whether the local per-provider budget is enforced at all (wave W15). Read on the next request, so switching it takes effect without a restart.</summary>
+    public bool RateLimitEnabled { get => rateLimitEnabled; set => Set(ref rateLimitEnabled, value); }
+
+    /// <summary>Requests per minute one provider may receive (wave W15); the next request already obeys it. Clamped to [<see cref="MinRateLimitRequestsPerMinute"/>, <see cref="MaxRateLimitRequestsPerMinute"/>].</summary>
+    public int RateLimitRequestsPerMinute
+    {
+        get => rateLimitRequestsPerMinute;
+        set => Set(ref rateLimitRequestsPerMinute, Math.Clamp(value, MinRateLimitRequestsPerMinute, MaxRateLimitRequestsPerMinute));
+    }
+
+    /// <summary>Tokens per minute one provider may receive (wave W15); the next request already obeys it. Clamped to [<see cref="MinRateLimitTokensPerMinute"/>, <see cref="MaxRateLimitTokensPerMinute"/>].</summary>
+    public int RateLimitTokensPerMinute
+    {
+        get => rateLimitTokensPerMinute;
+        set => Set(ref rateLimitTokensPerMinute, Math.Clamp(value, MinRateLimitTokensPerMinute, MaxRateLimitTokensPerMinute));
+    }
+
+    /// <summary>Seconds between two automated resumes of the same provider (wave W15); 0 spaces nothing. Read on the next resume, so it takes effect without a restart. Clamped to [<see cref="MinRateLimitAutomationGapSeconds"/>, <see cref="MaxRateLimitAutomationGapSeconds"/>].</summary>
+    public int RateLimitAutomationGapSeconds
+    {
+        get => rateLimitAutomationGapSeconds;
+        set => Set(ref rateLimitAutomationGapSeconds, Math.Clamp(value, MinRateLimitAutomationGapSeconds, MaxRateLimitAutomationGapSeconds));
+    }
+
     /// <summary>Which workspaces idle archiving covers: <c>automation</c> (sessions an automation created) or <c>all</c> root sessions (wave W1). An unknown token means the default.</summary>
     public string IdleArchiveScope { get => idleArchiveScope; set => Set(ref idleArchiveScope, Token(value, IdleArchiveScopeTokens, DefaultIdleArchiveScope)); }
 
@@ -720,6 +760,16 @@ internal sealed class AppPreferences : ObservableObject
         projectsCloneTimeoutSeconds = section.ProjectsCloneTimeoutSeconds is { } projectsCloneTimeoutSecondsLoaded
             ? Math.Clamp(projectsCloneTimeoutSecondsLoaded, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds)
             : DefaultProjectsCloneTimeoutSeconds;
+        rateLimitEnabled = section.RateLimitEnabled ?? DefaultRateLimitEnabled;
+        rateLimitRequestsPerMinute = section.RateLimitRequestsPerMinute is { } rateLimitRequestsPerMinuteLoaded
+            ? Math.Clamp(rateLimitRequestsPerMinuteLoaded, MinRateLimitRequestsPerMinute, MaxRateLimitRequestsPerMinute)
+            : DefaultRateLimitRequestsPerMinute;
+        rateLimitTokensPerMinute = section.RateLimitTokensPerMinute is { } rateLimitTokensPerMinuteLoaded
+            ? Math.Clamp(rateLimitTokensPerMinuteLoaded, MinRateLimitTokensPerMinute, MaxRateLimitTokensPerMinute)
+            : DefaultRateLimitTokensPerMinute;
+        rateLimitAutomationGapSeconds = section.RateLimitAutomationGapSeconds is { } rateLimitAutomationGapSecondsLoaded
+            ? Math.Clamp(rateLimitAutomationGapSecondsLoaded, MinRateLimitAutomationGapSeconds, MaxRateLimitAutomationGapSeconds)
+            : DefaultRateLimitAutomationGapSeconds;
         idleArchiveScope = Token(section.IdleArchiveScope, IdleArchiveScopeTokens, DefaultIdleArchiveScope);
         updatesCheckFrequency = Token(section.UpdatesCheckFrequency, UpdatesCheckFrequencyTokens, DefaultUpdatesCheckFrequency);
         updatesChannel = Token(section.UpdatesChannel, UpdatesChannelTokens, DefaultUpdatesChannel);
@@ -791,6 +841,10 @@ internal sealed class AppPreferences : ObservableObject
             InspectorRefreshMilliseconds = inspectorRefreshMilliseconds,
             ChatMermaidTimeoutMilliseconds = chatMermaidTimeoutMilliseconds,
             ProjectsCloneTimeoutSeconds = projectsCloneTimeoutSeconds,
+            RateLimitEnabled = rateLimitEnabled,
+            RateLimitRequestsPerMinute = rateLimitRequestsPerMinute,
+            RateLimitTokensPerMinute = rateLimitTokensPerMinute,
+            RateLimitAutomationGapSeconds = rateLimitAutomationGapSeconds,
             IdleArchiveScope = idleArchiveScope,
             UpdatesCheckFrequency = updatesCheckFrequency,
             UpdatesChannel = updatesChannel,
@@ -1094,6 +1148,18 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("projectsCloneTimeoutSeconds")]
     public int? ProjectsCloneTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("rateLimitEnabled")]
+    public bool? RateLimitEnabled { get; set; }
+
+    [JsonPropertyName("rateLimitRequestsPerMinute")]
+    public int? RateLimitRequestsPerMinute { get; set; }
+
+    [JsonPropertyName("rateLimitTokensPerMinute")]
+    public int? RateLimitTokensPerMinute { get; set; }
+
+    [JsonPropertyName("rateLimitAutomationGapSeconds")]
+    public int? RateLimitAutomationGapSeconds { get; set; }
 
     [JsonPropertyName("idleArchiveScope")]
     public string? IdleArchiveScope { get; set; }

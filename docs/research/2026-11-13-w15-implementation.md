@@ -1,0 +1,114 @@
+# W15 按提供商限速桶:实现说明与交付记录
+
+对应 `2026-11-13-thinkrail-gap-plan.md` 的 W15 行。本文按该文档第五节的四个交付项写:方案、被否的备选、为什么最优(四条判据)、验收口径;末尾是偏差与验证记录。
+
+## 一、交付面
+
+新增(全部在 `src/Forge.Core/Providers/`):
+
+| 文件 | 内容 |
+|---|---|
+| `RateLimitPolicy.cs` | `ProviderRateLimitPolicy`:一份进程级策略(开关、请求/分钟、令牌/分钟、自动化恢复间隔),不可变,`Normalized()` 把非法值夹回范围内 |
+| `RateLimitBucket.cs` | 一个预算桶:注入 `TimeProvider`、惰性补充、两个 64 位字的发布状态、`Take` 返回四态决定 |
+| `RateLimitHeaders.cs` | 通用 `x-ratelimit-limit\|remaining\|reset-{requests,tokens}` 的读取(OpenAI 与多数兼容服务器每个响应都发),含 `-reset-*` 的时长方言解析 |
+| `ProviderRateLimiter.cs` | 每提供商两个桶 + 一个 hold + 一个自动化槽位;`Acquire` / `Settle` / `Observe` / `ReserveAutomationSlot` / `Publish`,以及进程级的 `Shared` |
+
+改动:
+
+| 文件 | 改什么 |
+|---|---|
+| `RetryingChatProvider.cs` | 用 `TimeProvider`(退避、额度分类、预算等待);每次尝试前 `Acquire`,应答后 `Settle` + `Observe`,失败后 `Observe`;等待超过 `maxRetryAfter` 转成带 `Retry-After` 的 429 |
+| `Providers/Internal/ChatProviderPipeline.cs` | `RetryMiddleware` 可接收预算,缺省用 `ProviderRateLimiter.Shared`(这是运行期接线点:中间件是唯一看得见每次尝试的地方) |
+| `Providers/HttpChatProvider.cs` | `ReadRateLimit` 的缺省实现从"永远 null"改成读通用 `x-ratelimit-*`:OpenAI 兼容提供商不再只能靠被拒绝来学习限额 |
+| `Providers/AnthropicProvider.cs` | 覆盖该钩子时先读 `anthropic-ratelimit-*`,读不到回落通用家族 |
+| `src/Forge.App/Automations/QuotaResume.cs` | 删除 `ResumeStagger`(锁 + 字典),恢复间隔改调 `ProviderRateLimiter.ReserveAutomationSlot` |
+| `src/Forge.App/Automations/AutomationService.cs` | 构造参数 `ProviderRateLimiter? rateLimits = null`(缺省 `Shared`),交给 `QuotaResumeRunner` |
+| `src/Forge.App/Preferences/AppPreferences.cs` | 四项偏好(开关、请求/分钟、令牌/分钟、恢复间隔秒) |
+| `src/Forge.App/Preferences/SettingsSection.cs` | `SettingsSectionIds.RateLimit`(`"rate-limit"`)与 order 115 |
+| `src/Forge.App/Settings/RateLimitSettingsSectionViewModel.cs`、`Views/RateLimitSettingsSectionView.axaml(.cs)`、`Localization/Strings.RateLimit.cs`、`Composition/RateLimitComposition.cs` | 设置分区与文案;`Register` 里把偏好投成策略并 `ProviderRateLimiter.Shared.Publish`(启动一次 + 四项偏好任一变化时一次) |
+| `src/Forge.App/Composition/FeatureComposition.cs` | 一行 `RateLimitComposition.Register(composition, settings);` |
+| `tools/Forge.Bench/RateLimitScenarios.cs`、`tools/Forge.Bench.csproj`、`Program.cs` | 三行基准(成功路径、等待路径、8 线程争用)+ 对 `Forge.Core` 的引用 |
+| `src/Forge.Core/SPEC.md`、`src/Forge.App/SPEC.md`、`src/Forge.Core/THIRD_PARTY_NOTICES.md` | 契约说明、设置分区说明、设计出处 |
+
+## 二、方案
+
+**桶(`RateLimitBucket`)。** 状态是两个 64 位字:固定点余额(1/1024 token)与上次补充的时间戳(注入的 `TimeProvider` 的时间戳域),只经原子操作发布。
+
+- *补充协议*:补充者先 CAS 时间戳,赢下 `[上次, 现在]` 这个窗口,再按 `窗口 × 每秒补充率` 加信用(夹到容量上限);输者读到新时间戳后重试,把自己更晚的窗口叠上去。没有丢信用,也没有重复计。
+- *不读时钟的快路径*:余额在低水位(容量 1/8)以上时,信用只与窗口和余额有关,推迟补充不会算错——于是成功路径只有一次 `Interlocked.Add`,一次时钟调用都不做。低水位以下才读时钟补信用。
+- *结果四态*:`Authorized`(已扣)、`Wait`(带精确 retryTime;`TimeSpan.MaxValue` 表示永不补充)、`ExceedsCapacity`(单请求超过整个预算)、`NeverRefills`(空了且没有补充率),外加策略关闭时的 `Disabled`。后三者都放行——等不来的东西不该等,`ExceedsCapacity` 典型就是长上下文。
+
+**限速器(`ProviderRateLimiter`)。** 桶按 `IChatProvider.Id` 分开(两家提供商是两个账号、两个窗口);策略是全局一份、以引用发布(`Publish`),因此读一次是一个 volatile 读,没有锁。每个提供商旁边还有一个 hold(来自"被拒的用量窗"或"剩余为 0 且有重置时间")与一个自动化槽位(每个 provider 一个 CAS 时间戳的预留)。
+
+**校准来源。** 两条:Anthropic 自己的 `anthropic-ratelimit-*`(既有 `AnthropicRateLimits`)与通用 `x-ratelimit-*`(新 `RateLimitHeaders`,`HttpChatProvider` 的缺省钩子)。后者是这波补的实际覆盖面:用户主要跑 OpenAI 兼容端点,而它们每个响应都报 `limit/remaining/reset`,以前这些头没有任何代码读。`-reset-*` 在 OpenAI 方言里是时长(`1s`、`6m0s`、`1h2m3s`、`250ms`),也有网关发裸秒数,两种都收;解析失败就当没有,绝不当成 0。
+
+**重试层(`RetryingChatProvider`)。** 它是最外层中间件,看得见每一次尝试,所以预算在它里面扣:重试也计费。估算 `ITokenCounter`(系统提示 + 消息 + 工具定义),应答回来后 `Settle` 用 `InputTokens + CacheReadTokens + CacheWriteTokens` 校正;`Observe` 用 `ProviderRateLimit.Throttle` 与 `IsRejected` 校准上限、剩余、重置。等待超过 `_maxRetryAfter` 不睡过去,而是抛带 `Retry-After` 的 429——`ProviderQuota` 于是判成额度、`QuotaResume` 按既有语义等重置,限速层与服务端走同一条结论路径。
+
+**QuotaResume。** `ResumeStagger`(一把锁 + 一个字典)删除,`Reserve` 改成 `ReserveAutomationSlot`。注意这里刻意**不是**令牌桶:预留会把这家提供商的下一个空档再推一个 gap(同一瞬间三次预留得到 0、gap、2×gap),否则同一时刻到点的多个等待运行会一起放行,正是原来那个 gap 要避免的。
+
+**设置。** `rate-limit` 分区(order 115,AGENT 组,紧接模型可见性):开关、请求/分钟(1–100000,默认 600)、令牌/分钟(1000–1e9,默认 4,000,000)、自动化恢复间隔(0–600 秒,默认 10)。默认宽松:它不是节流器,而是"防跑飞"——子 Agent 扇出、自动化重试、另一个会话同时恢复,都能在一秒内烧掉一整分钟的额度。某一维为 0 表示该维度不限。
+
+## 三、被否的备选
+
+1. **参照 `Boarlock/TokenRateLimiter` 的原始形状:每次操作发布一个不可变 state 记录再 CAS。** 这是最直白的"不可变状态 + CAS",但每次授权分配一个对象(~32 字节)。基准的验收项是"0 字节/次",而且这段代码跑在正要序列化一大段提示词的线程上。所以只借了它的两件事:惰性补充 + 结果分四态;发布机制换成两个 64 位字。退出条件明确:如果将来有人要一个"可快照、可序列化的完整状态对象",这条仍可回退。
+2. **用 `System.Threading.RateLimiting`(`TokenBucketRateLimiter`)。** 官方包,但:①它为通用场景设计,一次 `AcquireAsync` 返回一个要 `Dispose` 的 lease,零分配说法不成立;②没有 per-provider 键控、没有 `x-ratelimit-*` 校准、没有"单请求超过容量"的独立结论(它只给 `AcquireFailed`),这些都得在外面再包一层;③多一个随框架版本升级的依赖面。写 200 行断言得起的代码,比把三条语义拆到两个包之间更便宜。
+3. **纯锁实现(基准里的基线)。** 无争用时它不慢(见数字),但 8 线程共享一个桶时它把同一行缓存在线程之间传递:实测 `163 ns/op` 对 CAS 版的 `67 ns/op`。而争用恰恰是这个组件存在的场景(并行子 Agent、多个会话同时恢复)。
+4. **把请求与令牌两维压成一个"分钟份额"桶(每次取 `max(1/RPM, tokens/TPM)`)。** 只要一次原子操作、实现更短,但对混合负载会**过严**:一个长请求加一批短请求,真实约束都没到,合成桶已经拒绝。它换来的是实现简洁,代价是正确性(会平白多等),所以不做。
+
+## 四、为什么最优(四条判据)
+
+**性能。** 请求路径上没有锁、没有分配、成功时一次原子操作、(无 hold 时)不读时钟;UI 线程完全不参与(桶是纯数据结构,`Acquire` 在发起请求的线程上同步执行,微秒以下)。策略读是 volatile 读,设置变更不需要重启任何会话。基准见第五节:成功路径 38 ns/次、等待路径 78 ns/次、8 线程争用 67 ns/op(基线 163 ns/op),三行都是 0 字节/次。
+
+**依赖与 AOT。** 零新包(只加了 `tools/Forge.Bench` 对 `Forge.Core` 的项目引用,bench 本来就在仓内)。没有 P/Invoke、没有反射、没有 Roslyn;`dotnet build Forge.slnx` 含 Native AOT 分析器仍 0 警告。
+
+**契约与可测性。** 契约只有三处:`ProviderRateLimitPolicy`(值)、`ProviderRateLimiter`(进程级一个实例 + 可注入 `TimeProvider`)、`RateLimitDecision`(四态 + Disabled)。唯一所有者是 `Forge.Core/Providers`;App 只 `Publish` 策略,不持有桶。可测性来自注入的 `TimeProvider`:桶、校准(上限/剩余/重置→hold)、自动化预留全部可以在不睡眠的情况下钉住;重试层的等待经既有的 `delayAsync` 钩子注入,用例里不真的等。
+
+**回滚成本。** 这一波单独 revert 是干净的:删除 `Providers/RateLimit*.cs`、把 `RetryingChatProvider` 的两个可选参数与 `RetryMiddleware` 的预算参数去掉、恢复 `ResumeStagger`、删掉设置分区与四行偏好。没有 schema 变更、没有存储格式变更、没有 provider wire 行为变更(校准只影响本地等待)。
+
+## 五、基准(`tools/Forge.Bench -- ratelimit`)
+
+实施前(只有"一把锁"的基线实现,同机、同一份场景代码;这是计划要求的"先于实现落基线"):
+
+| 行 | p50 | 说明 |
+|---|---|---|
+| `ratelimit.acquire.authorized` | 70 ns/acquire | 0 字节/次 |
+| `ratelimit.acquire.wait` | 64 ns/acquire | 0 字节/次 |
+| `ratelimit.acquire.contended.8t` | 197 ns/op、5.1 Mitems/s | spread 1.00 |
+
+实施后(实现 + 基线在同一循环里交替计时,读取相对值):
+
+| 行 | 实现 | 基线(锁) | 比值 | 分配 |
+|---|---|---|---|---|
+| `ratelimit.acquire.authorized` | 38.3 ns/acquire | 63.0 ns/acquire | 0.61x | 0 字节/次 |
+| `ratelimit.acquire.wait` | 77.7 ns/acquire | 67.4 ns/acquire | 1.15x | 0 字节/次 |
+| `ratelimit.acquire.contended.8t` | 66.7 ns/op、14.4 Mitems/s | 157.8 ns/op | 0.42x | 每次调用 2.6 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
+
+三条验收全绿:0 字节/acquire、无争用 p50 < 100 ns、8 线程每次授权且每线程计数在 2x 内。**等待路径是有意慢一点的那条**(1.15x):拒绝必须读时钟、算补充、算精确 retryTime,而锁版本只做一次减法;它仍在 100 ns 以内,而它只在预算真的用完时才走到。
+
+## 六、偏差与越界(已记录)
+
+1. **改了清单外的 `Providers/HttpChatProvider.cs`、`Providers/AnthropicProvider.cs` 与 `Providers/ProviderHeaders.cs`**:计划的 W15 行写的是"用 `x-ratelimit-*` 响应头校准",但代码里只有 `anthropic-ratelimit-*` 的读取,通用家族没有任何消费者;不补这两处,校准对 OpenAI 兼容提供商完全不存在。`ProviderHeaders` 里新增 `ReadFirst`(读一个响应头的第一个非空值)并把 `AnthropicRateLimits` 与新 `RateLimitHeaders` 各自的那一份私有副本改为共用——Deslop 报这两处是 `identical` 克隆,而"移动重复代码时选所有调用者都能依赖的最通用模块"要求把它放到两边都已在用的模块。这一处会改到已交付的 `AnthropicRateLimits.cs`,但只是删掉 15 行重复实现、行为不变(既有 523 个 Providers 用例全绿)。
+2. **改了清单外的 `Providers/Internal/ChatProviderPipeline.cs`**(`RetryMiddleware` 多一个可选预算参数)。不改它就得让 `ProviderCatalog` 自己构造限速器并透传,那是三个文件的改动;而"每次尝试都要计费"只有最外层中间件满足。
+3. **改了清单外的 `src/Forge.App/Automations/AutomationService.cs`**(两个只读字段与一行构造实参)。`ResumeStagger` 是它 new 出来的,删除后必须在这里换成限速器。
+4. **改了 W0 冻结的 `Preferences/AppPreferences.cs`、`Preferences/SettingsSection.cs`、`Composition/FeatureComposition.cs`**:W15 的四项设置在 §6.2 里原本没有登记(登记表是 W0 一次性写完的),而"容量/速率进设置"是 W15 自己的要求;三处都是新增行,不动既有内容。§6.2 的补登记见计划文档。
+5. **每提供商数值覆盖没做**(只有全局一份策略 + 每提供商一个桶)。手填单家数值的唯一诚实入口是提供商编辑弹窗(`provider` 分区),不属本波路径;服务端报的真实限额仍会逐家收紧。已写进 `Forge.Core/SPEC.md` 的未决。
+6. **自动化间隔不是令牌桶,是预留**(见第二节末)。行为与旧 `ResumeStagger` 逐个数值一致,测试照旧钉 0 / gap / 2×gap。
+7. **`RateLimitDecision` 比计划多一个 `Disabled`**:策略关闭时必须有一个"没扣、直接发"的结论,不能借 `Authorized`(那会让人以为扣过了)。
+
+## 六之二、Deslop 复检(新增代码是否又造了克隆)
+
+写代码前跑过一次全仓报告,确认仓库里没有可复用的桶/补充实现;交付前对同一份报告复核,新增文件命中的簇只有以下三类:
+
+1. **`identical`:`RateLimitHeaders` 与 `AnthropicRateLimits` 的"读取头里第一个非空值"** —— 已抽取到 `ProviderHeaders.ReadFirst`,两边共用(见第六节第 1 条)。
+2. **`nearly_identical`:设置分区视图模型的样板** (`RateLimitSettingsSectionViewModel` 与 `ResourceInspectorSettingsViewModel`/`FilesSettingsSectionViewModel`/`ChatSettingsSectionViewModel`,mass 78–195)。这是仓库里每个设置分区都在用的形状(直接读写偏好 + 暴露 Min/Max + 一行 XML 注释),`agents`/`files`/`inspector`/`chat` 之间本来就互为克隆。要消掉得抽一个 `SettingsSectionViewModel` 基类,那是跨多个已交付分区的重构,不在本波范围;**故意保留**。
+3. **`loosely_similar`/`structural_only`**:`ProviderRateLimiter` 与仓库里其它无锁/`Volatile`+CAS 代码(`PrReplyLedger`、`PluginLoadContext` 等)同形——是语言习语,不是克隆;`RateLimitPolicy` 与 `ReviewPackageLimits`/`ToolOptions`(带默认值的 `record` 配置);`RateLimitComposition` 与其它 `*Composition` 模块(组合根的样板,`FeatureComposition` 就是按这个形状设计的);`RateLimitScenarios` 与其它 bench 场景文件(场景骨架)。
+
+## 七、验证
+
+(命令与结果见本文件末尾的验证记录,由实现与测试两个独立会话分别给出。)
+
+## 八、已知限制
+
+- 令牌估算用 4 字符/token(`ApproximateTokenCounter`),与分批预算同一口径;真实用量在应答返回后校正,偏差只影响一两个请求的提前等待。
+- 响应头校准只对"报告了 `requests`/`tokens` 上限"的提供商生效(目前 Anthropic 家族);其余提供商按设置里的数字与 `429 + Retry-After` 的推断走。
+- 单请求超过整个预算时放行(不等待、也不部分扣),这是有意的:拒绝会让长上下文直接不可用,而提供商会自己给出结论。

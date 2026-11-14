@@ -130,6 +130,9 @@ internal static class SettingsSectionIds
     /// <summary>Which models the picker lists (wave W1).</summary>
     public const string ModelsVisibility = "models-visibility";
 
+    /// <summary>The per-provider request/token budget and the automation gap (wave W15).</summary>
+    public const string RateLimit = "rate-limit";
+
     /// <summary>Sub-agent limits (wave W1).</summary>
     public const string Agents = "agents";
 
@@ -189,6 +192,13 @@ internal static class SettingsSectionIds
     public const int PromptsOrder = 130;
 
     public const int ModelsVisibilityOrder = 110;
+
+    /// <summary>
+    /// Right after the model list and before the sub-agent caps: the budget is a property of the provider connection, so it
+    /// belongs with what the providers offer rather than with the interface below it.
+    /// </summary>
+    public const int RateLimitOrder = 115;
+
     public const int AgentsOrder = 120;
     public const int ChatOrder = 320;
     public const int FilesOrder = 360;

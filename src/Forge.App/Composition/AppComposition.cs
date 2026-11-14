@@ -797,6 +797,9 @@ internal sealed class AppComposition : IAsyncDisposable
         await preferences.LoadAsync(CancellationToken.None).ConfigureAwait(true);
         ApplyLanguage(preferences.Current.Language);
         appearance.ApplyLoaded();
+        // The loaded values reach the limiter here, for the same reason the appearance feature re-applies: ApplyLoaded raises no
+        // change notification, so the ones wired in Register only see edits the user makes after this point.
+        RateLimitComposition.Publish(preferences.Current);
 
         var general = await worktrees.EnsureGeneralWorkspaceAsync(paths.GeneralWorkspaceDirectory, CancellationToken.None)
             .ConfigureAwait(false);

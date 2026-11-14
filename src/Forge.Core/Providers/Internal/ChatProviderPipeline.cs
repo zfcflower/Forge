@@ -37,12 +37,23 @@ public static class ChatProviderPipeline
 /// Retries a stream that fails before its first event. The first event is the commit point: once the model has produced
 /// anything, replaying the request would duplicate output and re-run tools, so a later failure is surfaced instead. The
 /// retry loop itself lives in <see cref="RetryingChatProvider"/>; this only places it in the pipeline.
+/// <para>
+/// It also charges the provider's local budget, through the process-wide <see cref="ProviderRateLimiter.Shared"/> that the
+/// shell publishes the user's numbers into. Retry is the outermost middleware and therefore the only place that sees every
+/// attempt (including the retries it decides on), which is exactly where a per-request budget belongs; putting it inside the
+/// endpoint would charge once for a request that was sent three times.
+/// </para>
 /// </summary>
 public sealed class RetryMiddleware : IChatProviderMiddleware
 {
+    private readonly ProviderRateLimiter? rateLimiter;
+
+    /// <param name="rateLimiter">The budget to charge, or null for none (a test that builds a provider without a shell).</param>
+    public RetryMiddleware(ProviderRateLimiter? rateLimiter = null) => this.rateLimiter = rateLimiter;
+
     public IChatProvider Apply(IChatProvider next)
     {
         ArgumentNullException.ThrowIfNull(next);
-        return new RetryingChatProvider(next);
+        return new RetryingChatProvider(next, rateLimiter: rateLimiter ?? ProviderRateLimiter.Shared);
     }
 }

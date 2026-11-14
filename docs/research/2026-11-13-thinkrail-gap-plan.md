@@ -227,6 +227,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | 资源检查器日志尾行数、列表刷新间隔 | W8 | 200 行、1 s | inspector |
 | Mermaid 启用的图类型白名单、渲染超时 | W11 | 5 种(flowchart/sequence/state/class/er)、2 s | chat |
 | 克隆超时、默认克隆目录 | W9 | 无超时、项目父目录 | projects |
+| 本地限速开关、每提供商请求/分钟与令牌/分钟、自动化恢复间隔 | W15 | 开、600、4,000,000、10 s | rate-limit |
 | 更新检查频率、更新通道 | W10 | 每日、稳定 | updates |
 
 规则:新增项**先登记再写代码**;值只在 `AppPreferences` 读取,工具/服务通过构造参数或 options 注入,不在热路径里反复读文件;改动热加载(沿用 `IReloadableSettingsSection`)。登记表之外的新增可配置项,在该波的实现说明里补一行并说明为什么不是内部细节。
@@ -301,3 +302,19 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 **上限进设置(已实施,分支 `review-limits-settings`)**:包内 diff 字符、提交清单行数、文件清单行数、文本字段字符数四项进了 `AppPreferences`(`GitReviewDiffMaxChars` 1000–500000 默认 48000;`GitReviewMaxCommits` 5–500 默认 50;`GitReviewMaxFiles` 20–2000 默认 200;`GitReviewFieldMaxChars` 200–20000 默认 2000),界面在 `git` 设置分区;Core 以 `ReviewPackageLimits`(默认即旧常量)经 `AgentHostOptions.ReviewLimits` 每次评审现读。未跟踪文件的 8000 字节探测与 git 的二进制判定窗口一致,保持内部常量。
 
 **仍未改(记录原因)**:没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。
+
+## 九、W15 交付记录(按提供商限速桶)
+
+完整方案、被否的备选、四条判据与基准数字见 `2026-11-13-w15-implementation.md`;这里只记与计划文本的对照。
+
+**交付面。** 新增 `Forge.Core/Providers/RateLimitPolicy.cs`(策略值对象)、`RateLimitBucket.cs`(零分配预算桶)、`ProviderRateLimiter.cs`(每提供商桶 + hold + 自动化预留 + 进程级 `Shared`)、`RateLimitHeaders.cs`(通用 `x-ratelimit-*` 读取);改 `RetryingChatProvider.cs`(注入 `TimeProvider`;每次尝试前计费,应答后 `Settle` + `Observe`;等待超过 `maxRetryAfter` 转成带 `Retry-After` 的 429)、`Providers/Internal/ChatProviderPipeline.cs`(`RetryMiddleware` 缺省用 `Shared`)、`Providers/HttpChatProvider.cs`+`Providers/AnthropicProvider.cs`(`ReadRateLimit` 缺省读通用家族,Anthropic 先读自己的再回落)、`src/Forge.App/Automations/QuotaResume.cs`(删除 `ResumeStagger`,改调 `ReserveAutomationSlot`)、`Automations/AutomationService.cs`(多一个可选限速器参数)、设置面(`AppPreferences` 四项、`SettingsSectionIds.RateLimit`/order 115、`Settings/RateLimitSettingsSectionViewModel.cs`、`Views/RateLimitSettingsSectionView.axaml(.cs)`、`Localization/Strings.RateLimit.cs`、`Composition/RateLimitComposition.cs`、`FeatureComposition` 一行、`AppComposition.InitializeWorkbenchAsync` 一行:加载偏好后补发布一次)、`tools/Forge.Bench`(`RateLimitScenarios.cs` 三行 + 对 `Forge.Core` 的项目引用 + `Program.cs` 注册)。
+
+**与计划文本的差异(均已记录,见实现说明第六节)。**
+1. 计划写"用 `x-ratelimit-*` 响应头校准",但代码里只有 `anthropic-ratelimit-*` 的消费者;本波补了通用家族(`RateLimitHeaders` + `HttpChatProvider` 的缺省钩子),否则 OpenAI 兼容提供商的校准等于不存在。
+2. 每提供商**数值覆盖**没做:配置面是全局一份策略(设置分区四项),按提供商区分的只有桶。手填单家的唯一诚实入口是提供商编辑弹窗(`provider` 分区),不属本波路径;服务端报的真实限额仍逐家收紧。已写进 `Forge.Core/SPEC.md` 未决。
+3. `ReserveAutomationSlot` 不是令牌桶而是**预留**(同一瞬间三次得到 0、gap、2×gap),否则同一时刻到点的多个等待运行会一起放行——正是原 `ResumeStagger` 的 gap 要避免的。数值行为与旧实现逐个一致。
+4. `RateLimitDecision` 比计划多一个 `Disabled`(策略关闭时必须与"扣过了"区分开)。
+
+**基准(计划要求先于实现落基线)。** 实施前只有锁基线:成功路径 70 ns/acquire、等待路径 64 ns/acquire、8 线程争用 197 ns/op(5.1 Mitems/s),均 0 字节/次。实施后同一份场景对照(实现与基线在同一循环里交替):成功 38.3 ns 对 63.0 ns(0.61x)、等待 77.7 ns 对 67.4 ns(1.15x,拒绝必须读时钟算精确 retryTime,仍在 100 ns 内)、争用 66.7 ns/op/14.4 Mitems/s 对 157.8 ns/op(0.42x),spread 1.00。三条验收(0 字节/acquire、无争用 <100 ns、8 线程全授权且每线程计数 2x 内)全绿。
+
+**验证。**(由实现与测试两个独立会话给出,见下。)
