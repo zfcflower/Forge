@@ -45,7 +45,11 @@
 
 ## NuGet 白名单
 
-只用 `architecture.md`「NuGet 引用规则」表里的三方库,按表中范围与约束使用;新增任何包须先问用户。
+官方 .NET 库(dotnet 组织发布的 `Microsoft.*`/`System.*` 包)一律在白名单内(2026-11-14 用户确认),无需逐个问,但仍要钉版本并满足 Native AOT。`architecture.md`「NuGet 引用规则」表里的三方库按表中范围与约束使用;新增任何**三方**包须先问用户。
+
+## 性能测试
+
+性能基准参照 [aspnet/Benchmarks](https://github.com/aspnet/Benchmarks)(crank 场景、指标口径:吞吐、延迟分位、分配、GC)的方法;微基准用官方 `BenchmarkDotNet`(属 dotnet 基金会,归入官方库)。基准放独立项目,不进常规测试集,不在 L1/L2 跑;热路径改动须给出改前改后的分配与耗时数字。
 
 ## 并行与串行
 
