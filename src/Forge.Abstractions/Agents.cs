@@ -13,6 +13,13 @@ public sealed record AgentTextDelta(string AgentId, string Text) : AgentEvent(Ag
 public sealed record AgentThinkingDelta(string AgentId, string Text) : AgentEvent(AgentId);
 public sealed record AgentToolStarted(string AgentId, ToolCall Call) : AgentEvent(AgentId);
 public sealed record AgentToolFinished(string AgentId, ToolCall Call, ToolResult Result) : AgentEvent(AgentId);
+
+/// <summary>
+/// A running tool's live output, as the latest bounded tail (a snapshot, not a delta). Emitted between
+/// <see cref="AgentToolStarted"/> and <see cref="AgentToolFinished"/> for the call, at most a few times per second, by tools
+/// that stream (the shell tool). Not persisted: the finished result carries the full output.
+/// </summary>
+public sealed record AgentToolProgress(string AgentId, ToolCall Call, string Tail) : AgentEvent(AgentId);
 public sealed record AgentApprovalDenied(string AgentId, ToolCall Call) : AgentEvent(AgentId);
 public sealed record AgentCompacted(string AgentId, int TokensBefore, int TokensAfter) : AgentEvent(AgentId);
 /// <summary>Emitted by the parent when it spawns or resumes a child, before the child waits for a run slot.</summary>

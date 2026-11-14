@@ -63,11 +63,6 @@ internal sealed class AppPreferences : ObservableObject
     public const int MaxGitChecksMaxWaitMinutes = 180;
     public const int DefaultGitChecksMaxWaitMinutes = 30;
 
-    /// <summary>Rows one palette source may list; clamped to [<see cref="MinPaletteResultLimit"/>, <see cref="MaxPaletteResultLimit"/>].</summary>
-    public const int MinPaletteResultLimit = 5;
-    public const int MaxPaletteResultLimit = 200;
-    public const int DefaultPaletteResultLimit = 50;
-
     /// <summary>Whether any notification is shown at all (toast in the window, desktop notification in the background).</summary>
     public const bool DefaultNotifications = true;
 
@@ -90,6 +85,73 @@ internal sealed class AppPreferences : ObservableObject
     public const string EditorThemeDark = "dark";
     public const string DefaultEditorTheme = EditorThemeAuto;
 
+    // Settings the thinkrail-gap waves read (registered in docs/research/2026-11-13-thinkrail-gap-plan.md, section 6.2).
+    // They all live here so no wave edits this file again; each wave only reads them and adds its settings page.
+    public const int MinAgentsMaxParallelSubAgents = 1;
+    public const int MaxAgentsMaxParallelSubAgents = 16;
+    public const int DefaultAgentsMaxParallelSubAgents = 4;
+    public const bool DefaultAgentsSubAgentsEnabled = true;
+    public const bool DefaultIdleArchiveEnabled = true;
+    public const int MinIdleArchiveDays = 1;
+    public const int MaxIdleArchiveDays = 365;
+    public const int DefaultIdleArchiveDays = 7;
+    public const bool DefaultNotificationPermissionReprompt = true;
+    public const int MinPalettePerSourceLimit = 10;
+    public const int MaxPalettePerSourceLimit = 500;
+    public const int DefaultPalettePerSourceLimit = 50;
+    public const int MinChatToolImageThumbnailPixels = 64;
+    public const int MaxChatToolImageThumbnailPixels = 1024;
+    public const int DefaultChatToolImageThumbnailPixels = 256;
+    public const bool DefaultChatToolImagesToModel = true;
+    public const int MinFilesCsvMaxRows = 100;
+    public const int MaxFilesCsvMaxRows = 100000;
+    public const int DefaultFilesCsvMaxRows = 1000;
+    public const int MinFilesNotebookOutputKilobytes = 1;
+    public const int MaxFilesNotebookOutputKilobytes = 1024;
+    public const int DefaultFilesNotebookOutputKilobytes = 20;
+    public const int MinFilesImagePreviewMaxMegabytes = 1;
+    public const int MaxFilesImagePreviewMaxMegabytes = 256;
+    public const int DefaultFilesImagePreviewMaxMegabytes = 20;
+    public const int MinGitChecksNoChecksConfirmations = 1;
+    public const int MaxGitChecksNoChecksConfirmations = 10;
+    public const int DefaultGitChecksNoChecksConfirmations = 3;
+    public const int MinGitChecksFailureLogTailLines = 20;
+    public const int MaxGitChecksFailureLogTailLines = 2000;
+    public const int DefaultGitChecksFailureLogTailLines = 200;
+    public const int MinMcpRequestTimeoutSeconds = 5;
+    public const int MaxMcpRequestTimeoutSeconds = 600;
+    public const int DefaultMcpRequestTimeoutSeconds = 60;
+    public const int MinMcpReconnectInitialDelaySeconds = 1;
+    public const int MaxMcpReconnectInitialDelaySeconds = 60;
+    public const int DefaultMcpReconnectInitialDelaySeconds = 1;
+    public const int MinMcpToolSearchLimit = 0;
+    public const int MaxMcpToolSearchLimit = 1000;
+    public const int DefaultMcpToolSearchLimit = 0;
+    public const int MinMcpStderrTailLines = 20;
+    public const int MaxMcpStderrTailLines = 2000;
+    public const int DefaultMcpStderrTailLines = 200;
+    public const int MinInspectorLogTailLines = 20;
+    public const int MaxInspectorLogTailLines = 1000;
+    public const int DefaultInspectorLogTailLines = 200;
+    public const int MinInspectorRefreshMilliseconds = 250;
+    public const int MaxInspectorRefreshMilliseconds = 10000;
+    public const int DefaultInspectorRefreshMilliseconds = 1000;
+    public const int MinChatMermaidTimeoutMilliseconds = 500;
+    public const int MaxChatMermaidTimeoutMilliseconds = 30000;
+    public const int DefaultChatMermaidTimeoutMilliseconds = 2000;
+    public const int MinProjectsCloneTimeoutSeconds = 0;
+    public const int MaxProjectsCloneTimeoutSeconds = 3600;
+    public const int DefaultProjectsCloneTimeoutSeconds = 0;
+    public const string DefaultIdleArchiveScope = "automation";
+    private static readonly string[] IdleArchiveScopeTokens = ["automation", "all"];
+    public const string DefaultUpdatesCheckFrequency = "daily";
+    private static readonly string[] UpdatesCheckFrequencyTokens = ["daily", "weekly", "never"];
+    public const string DefaultUpdatesChannel = "stable";
+    private static readonly string[] UpdatesChannelTokens = ["stable", "beta"];
+    public const string DefaultPaletteExcludeDirectories = "";
+    public const string DefaultChatMermaidDiagramTypes = "flowchart,sequence,state,class,er";
+    public const string DefaultProjectsCloneDirectory = "";
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
@@ -103,8 +165,6 @@ internal sealed class AppPreferences : ObservableObject
     private bool gitStepCommits = DefaultGitStepCommits;
     private int gitChecksPollSeconds = DefaultGitChecksPollSeconds;
     private int gitChecksMaxWaitMinutes = DefaultGitChecksMaxWaitMinutes;
-    private int paletteResultLimit = DefaultPaletteResultLimit;
-    private string paletteExcludeDirectories = string.Empty;
     private bool notifications = DefaultNotifications;
     private string gitGhPath = string.Empty;
     private string toolsShellPath = string.Empty;
@@ -125,6 +185,34 @@ internal sealed class AppPreferences : ObservableObject
     private bool editorTabsToSpaces = true;
     private string editorColumnRulers = string.Empty;
     private string editorTheme = DefaultEditorTheme;
+    private int agentsMaxParallelSubAgents = DefaultAgentsMaxParallelSubAgents;
+    private bool agentsSubAgentsEnabled = DefaultAgentsSubAgentsEnabled;
+    private bool idleArchiveEnabled = DefaultIdleArchiveEnabled;
+    private int idleArchiveDays = DefaultIdleArchiveDays;
+    private bool notificationPermissionReprompt = DefaultNotificationPermissionReprompt;
+    private int palettePerSourceLimit = DefaultPalettePerSourceLimit;
+    private int chatToolImageThumbnailPixels = DefaultChatToolImageThumbnailPixels;
+    private bool chatToolImagesToModel = DefaultChatToolImagesToModel;
+    private int filesCsvMaxRows = DefaultFilesCsvMaxRows;
+    private int filesNotebookOutputKilobytes = DefaultFilesNotebookOutputKilobytes;
+    private int filesImagePreviewMaxMegabytes = DefaultFilesImagePreviewMaxMegabytes;
+    private int gitChecksNoChecksConfirmations = DefaultGitChecksNoChecksConfirmations;
+    private int gitChecksFailureLogTailLines = DefaultGitChecksFailureLogTailLines;
+    private int mcpRequestTimeoutSeconds = DefaultMcpRequestTimeoutSeconds;
+    private int mcpReconnectInitialDelaySeconds = DefaultMcpReconnectInitialDelaySeconds;
+    private int mcpToolSearchLimit = DefaultMcpToolSearchLimit;
+    private int mcpStderrTailLines = DefaultMcpStderrTailLines;
+    private int inspectorLogTailLines = DefaultInspectorLogTailLines;
+    private int inspectorRefreshMilliseconds = DefaultInspectorRefreshMilliseconds;
+    private int chatMermaidTimeoutMilliseconds = DefaultChatMermaidTimeoutMilliseconds;
+    private int projectsCloneTimeoutSeconds = DefaultProjectsCloneTimeoutSeconds;
+    private string idleArchiveScope = DefaultIdleArchiveScope;
+    private string updatesCheckFrequency = DefaultUpdatesCheckFrequency;
+    private string updatesChannel = DefaultUpdatesChannel;
+    private string paletteExcludeDirectories = DefaultPaletteExcludeDirectories;
+    private string chatMermaidDiagramTypes = DefaultChatMermaidDiagramTypes;
+    private string projectsCloneDirectory = DefaultProjectsCloneDirectory;
+    private IReadOnlyList<string> modelsHidden = [];
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
 
@@ -187,27 +275,6 @@ internal sealed class AppPreferences : ObservableObject
     /// notification. Read at the start of every notification, so a change applies without a restart.
     /// </summary>
     public bool Notifications { get => notifications; set => Set(ref notifications, value); }
-
-    /// <summary>
-    /// How many rows one palette source may list; clamped to [<see cref="MinPaletteResultLimit"/>, <see cref="MaxPaletteResultLimit"/>].
-    /// Read when the palette builds a list, so a change applies to the next keystroke without a restart.
-    /// </summary>
-    public int PaletteResultLimit
-    {
-        get => paletteResultLimit;
-        set => Set(ref paletteResultLimit, Math.Clamp(value, MinPaletteResultLimit, MaxPaletteResultLimit));
-    }
-
-    /// <summary>
-    /// Comma-separated directory names the palette's content search leaves out, matched at any depth; empty (the default)
-    /// means the search only follows <c>.gitignore</c>. Stored as typed (only trimmed), like the editor's ruler list, and
-    /// parsed by <see cref="ParseDirectoryNames"/> where the search is built.
-    /// </summary>
-    public string PaletteExcludeDirectories
-    {
-        get => paletteExcludeDirectories;
-        set => Set(ref paletteExcludeDirectories, (value ?? string.Empty).Trim());
-    }
 
     /// <summary>
     /// The GitHub CLI executable; empty (default) means <c>gh</c> from PATH. Trimmed. Read at the start of every <c>gh</c>
@@ -312,6 +379,170 @@ internal sealed class AppPreferences : ObservableObject
         ToolsDisabled = enabled ? [.. toolsDisabled.Where(n => !string.Equals(n, name, StringComparison.Ordinal))] : [.. toolsDisabled, name];
     }
 
+    /// <summary>How many sub-agents one turn may run at the same time (wave W1; replaces the fixed 4 of <c>AgentOptions</c>). Clamped to [<see cref="MinAgentsMaxParallelSubAgents"/>, <see cref="MaxAgentsMaxParallelSubAgents"/>].</summary>
+    public int AgentsMaxParallelSubAgents
+    {
+        get => agentsMaxParallelSubAgents;
+        set => Set(ref agentsMaxParallelSubAgents, Math.Clamp(value, MinAgentsMaxParallelSubAgents, MaxAgentsMaxParallelSubAgents));
+    }
+
+    /// <summary>Whether the <c>spawn_agent</c> tool is offered at all (wave W1).</summary>
+    public bool AgentsSubAgentsEnabled { get => agentsSubAgentsEnabled; set => Set(ref agentsSubAgentsEnabled, value); }
+
+    /// <summary>Whether idle workspaces are archived automatically (wave W1).</summary>
+    public bool IdleArchiveEnabled { get => idleArchiveEnabled; set => Set(ref idleArchiveEnabled, value); }
+
+    /// <summary>Days without activity before an idle workspace is archived (wave W1; replaces the fixed 7 of <c>Housekeeping</c>). Clamped to [<see cref="MinIdleArchiveDays"/>, <see cref="MaxIdleArchiveDays"/>].</summary>
+    public int IdleArchiveDays
+    {
+        get => idleArchiveDays;
+        set => Set(ref idleArchiveDays, Math.Clamp(value, MinIdleArchiveDays, MaxIdleArchiveDays));
+    }
+
+    /// <summary>Whether the app keeps offering to fix a blocked notification permission (wave W1).</summary>
+    public bool NotificationPermissionReprompt { get => notificationPermissionReprompt; set => Set(ref notificationPermissionReprompt, value); }
+
+    /// <summary>Most results one palette source returns (wave W3). Clamped to [<see cref="MinPalettePerSourceLimit"/>, <see cref="MaxPalettePerSourceLimit"/>].</summary>
+    public int PalettePerSourceLimit
+    {
+        get => palettePerSourceLimit;
+        set => Set(ref palettePerSourceLimit, Math.Clamp(value, MinPalettePerSourceLimit, MaxPalettePerSourceLimit));
+    }
+
+    /// <summary>Longest edge of a tool-result image thumbnail, in pixels (wave W4). Clamped to [<see cref="MinChatToolImageThumbnailPixels"/>, <see cref="MaxChatToolImageThumbnailPixels"/>].</summary>
+    public int ChatToolImageThumbnailPixels
+    {
+        get => chatToolImageThumbnailPixels;
+        set => Set(ref chatToolImageThumbnailPixels, Math.Clamp(value, MinChatToolImageThumbnailPixels, MaxChatToolImageThumbnailPixels));
+    }
+
+    /// <summary>Whether images a tool returned are sent back to the model (wave W4).</summary>
+    public bool ChatToolImagesToModel { get => chatToolImagesToModel; set => Set(ref chatToolImagesToModel, value); }
+
+    /// <summary>Most rows the CSV/TSV preview shows (wave W4). Clamped to [<see cref="MinFilesCsvMaxRows"/>, <see cref="MaxFilesCsvMaxRows"/>].</summary>
+    public int FilesCsvMaxRows
+    {
+        get => filesCsvMaxRows;
+        set => Set(ref filesCsvMaxRows, Math.Clamp(value, MinFilesCsvMaxRows, MaxFilesCsvMaxRows));
+    }
+
+    /// <summary>Most kilobytes of one notebook cell output the preview shows (wave W4). Clamped to [<see cref="MinFilesNotebookOutputKilobytes"/>, <see cref="MaxFilesNotebookOutputKilobytes"/>].</summary>
+    public int FilesNotebookOutputKilobytes
+    {
+        get => filesNotebookOutputKilobytes;
+        set => Set(ref filesNotebookOutputKilobytes, Math.Clamp(value, MinFilesNotebookOutputKilobytes, MaxFilesNotebookOutputKilobytes));
+    }
+
+    /// <summary>Largest image the file preview loads, in megabytes (wave W4). Clamped to [<see cref="MinFilesImagePreviewMaxMegabytes"/>, <see cref="MaxFilesImagePreviewMaxMegabytes"/>].</summary>
+    public int FilesImagePreviewMaxMegabytes
+    {
+        get => filesImagePreviewMaxMegabytes;
+        set => Set(ref filesImagePreviewMaxMegabytes, Math.Clamp(value, MinFilesImagePreviewMaxMegabytes, MaxFilesImagePreviewMaxMegabytes));
+    }
+
+    /// <summary>Polls in a row that must find no checks before wait mode concludes there are none (wave W5). Clamped to [<see cref="MinGitChecksNoChecksConfirmations"/>, <see cref="MaxGitChecksNoChecksConfirmations"/>].</summary>
+    public int GitChecksNoChecksConfirmations
+    {
+        get => gitChecksNoChecksConfirmations;
+        set => Set(ref gitChecksNoChecksConfirmations, Math.Clamp(value, MinGitChecksNoChecksConfirmations, MaxGitChecksNoChecksConfirmations));
+    }
+
+    /// <summary>Lines of a failed check log handed to the agent (wave W5). Clamped to [<see cref="MinGitChecksFailureLogTailLines"/>, <see cref="MaxGitChecksFailureLogTailLines"/>].</summary>
+    public int GitChecksFailureLogTailLines
+    {
+        get => gitChecksFailureLogTailLines;
+        set => Set(ref gitChecksFailureLogTailLines, Math.Clamp(value, MinGitChecksFailureLogTailLines, MaxGitChecksFailureLogTailLines));
+    }
+
+    /// <summary>Default MCP request timeout; a server's own <c>timeout</c> still overrides it (wave W6). Clamped to [<see cref="MinMcpRequestTimeoutSeconds"/>, <see cref="MaxMcpRequestTimeoutSeconds"/>].</summary>
+    public int McpRequestTimeoutSeconds
+    {
+        get => mcpRequestTimeoutSeconds;
+        set => Set(ref mcpRequestTimeoutSeconds, Math.Clamp(value, MinMcpRequestTimeoutSeconds, MaxMcpRequestTimeoutSeconds));
+    }
+
+    /// <summary>First delay before an MCP server is reconnected (wave W6). Clamped to [<see cref="MinMcpReconnectInitialDelaySeconds"/>, <see cref="MaxMcpReconnectInitialDelaySeconds"/>].</summary>
+    public int McpReconnectInitialDelaySeconds
+    {
+        get => mcpReconnectInitialDelaySeconds;
+        set => Set(ref mcpReconnectInitialDelaySeconds, Math.Clamp(value, MinMcpReconnectInitialDelaySeconds, MaxMcpReconnectInitialDelaySeconds));
+    }
+
+    /// <summary>Most MCP tools offered to the model per turn; 0 means no limit (wave W6). Clamped to [<see cref="MinMcpToolSearchLimit"/>, <see cref="MaxMcpToolSearchLimit"/>].</summary>
+    public int McpToolSearchLimit
+    {
+        get => mcpToolSearchLimit;
+        set => Set(ref mcpToolSearchLimit, Math.Clamp(value, MinMcpToolSearchLimit, MaxMcpToolSearchLimit));
+    }
+
+    /// <summary>Lines of an MCP server's stderr the settings page shows (wave W6). Clamped to [<see cref="MinMcpStderrTailLines"/>, <see cref="MaxMcpStderrTailLines"/>].</summary>
+    public int McpStderrTailLines
+    {
+        get => mcpStderrTailLines;
+        set => Set(ref mcpStderrTailLines, Math.Clamp(value, MinMcpStderrTailLines, MaxMcpStderrTailLines));
+    }
+
+    /// <summary>Lines of a running command's output tail the resource inspector shows (wave W8). Clamped to [<see cref="MinInspectorLogTailLines"/>, <see cref="MaxInspectorLogTailLines"/>].</summary>
+    public int InspectorLogTailLines
+    {
+        get => inspectorLogTailLines;
+        set => Set(ref inspectorLogTailLines, Math.Clamp(value, MinInspectorLogTailLines, MaxInspectorLogTailLines));
+    }
+
+    /// <summary>How often the resource inspector refreshes its elapsed times (wave W8). Clamped to [<see cref="MinInspectorRefreshMilliseconds"/>, <see cref="MaxInspectorRefreshMilliseconds"/>].</summary>
+    public int InspectorRefreshMilliseconds
+    {
+        get => inspectorRefreshMilliseconds;
+        set => Set(ref inspectorRefreshMilliseconds, Math.Clamp(value, MinInspectorRefreshMilliseconds, MaxInspectorRefreshMilliseconds));
+    }
+
+    /// <summary>Longest one Mermaid diagram may take to render (wave W11). Clamped to [<see cref="MinChatMermaidTimeoutMilliseconds"/>, <see cref="MaxChatMermaidTimeoutMilliseconds"/>].</summary>
+    public int ChatMermaidTimeoutMilliseconds
+    {
+        get => chatMermaidTimeoutMilliseconds;
+        set => Set(ref chatMermaidTimeoutMilliseconds, Math.Clamp(value, MinChatMermaidTimeoutMilliseconds, MaxChatMermaidTimeoutMilliseconds));
+    }
+
+    /// <summary>Longest a clone may run; 0 means no timeout (wave W9). Clamped to [<see cref="MinProjectsCloneTimeoutSeconds"/>, <see cref="MaxProjectsCloneTimeoutSeconds"/>].</summary>
+    public int ProjectsCloneTimeoutSeconds
+    {
+        get => projectsCloneTimeoutSeconds;
+        set => Set(ref projectsCloneTimeoutSeconds, Math.Clamp(value, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds));
+    }
+
+    /// <summary>Which workspaces idle archiving covers: <c>automation</c> (sessions an automation created) or <c>all</c> root sessions (wave W1). An unknown token means the default.</summary>
+    public string IdleArchiveScope { get => idleArchiveScope; set => Set(ref idleArchiveScope, Token(value, IdleArchiveScopeTokens, DefaultIdleArchiveScope)); }
+
+    /// <summary>How often the app checks for an update (wave W10). An unknown token means the default.</summary>
+    public string UpdatesCheckFrequency { get => updatesCheckFrequency; set => Set(ref updatesCheckFrequency, Token(value, UpdatesCheckFrequencyTokens, DefaultUpdatesCheckFrequency)); }
+
+    /// <summary>Which release channel updates come from (wave W10). An unknown token means the default.</summary>
+    public string UpdatesChannel { get => updatesChannel; set => Set(ref updatesChannel, Token(value, UpdatesChannelTokens, DefaultUpdatesChannel)); }
+
+    /// <summary>Directories (comma or newline separated) the palette content search skips besides what <c>.gitignore</c> excludes (wave W3).</summary>
+    public string PaletteExcludeDirectories { get => paletteExcludeDirectories; set => Set(ref paletteExcludeDirectories, Text(value, DefaultPaletteExcludeDirectories)); }
+
+    /// <summary>Mermaid diagram types that are rendered, comma separated; others stay source text (wave W11).</summary>
+    public string ChatMermaidDiagramTypes { get => chatMermaidDiagramTypes; set => Set(ref chatMermaidDiagramTypes, Text(value, DefaultChatMermaidDiagramTypes)); }
+
+    /// <summary>Folder new clones go into; empty means beside the project (wave W9).</summary>
+    public string ProjectsCloneDirectory { get => projectsCloneDirectory; set => Set(ref projectsCloneDirectory, Text(value, DefaultProjectsCloneDirectory)); }
+
+    /// <summary>Model ids the model picker hides (sorted, deduplicated; wave W1).</summary>
+    public IReadOnlyList<string> ModelsHidden
+    {
+        get => modelsHidden;
+        set
+        {
+            var normalized = NormalizeNames(value);
+            if (!modelsHidden.SequenceEqual(normalized, StringComparer.Ordinal))
+            {
+                modelsHidden = normalized;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     /// <summary>
     /// Applies the section read from <c>settings.json</c>. Never raises PropertyChanged: the load runs on a pool thread
     /// before the first window is bound, and the composition root pushes <see cref="Language"/> into <c>Loc</c> itself.
@@ -340,10 +571,6 @@ internal sealed class AppPreferences : ObservableObject
         gitChecksMaxWaitMinutes = section.GitChecksMaxWaitMinutes is { } waitMinutes
             ? Math.Clamp(waitMinutes, MinGitChecksMaxWaitMinutes, MaxGitChecksMaxWaitMinutes)
             : DefaultGitChecksMaxWaitMinutes;
-        paletteResultLimit = section.PaletteResultLimit is { } paletteLimit
-            ? Math.Clamp(paletteLimit, MinPaletteResultLimit, MaxPaletteResultLimit)
-            : DefaultPaletteResultLimit;
-        paletteExcludeDirectories = (section.PaletteExcludeDirectories ?? string.Empty).Trim();
         notifications = section.Notifications ?? section.LegacyGitNotifications ?? DefaultNotifications;
         gitGhPath = (section.GitGhPath ?? string.Empty).Trim();
         toolsShellPath = (section.ToolsShellPath ?? string.Empty).Trim();
@@ -368,6 +595,68 @@ internal sealed class AppPreferences : ObservableObject
         editorTabsToSpaces = section.EditorTabsToSpaces ?? true;
         editorColumnRulers = (section.EditorColumnRulers ?? string.Empty).Trim();
         editorTheme = ThemeToken(section.EditorTheme);
+        agentsMaxParallelSubAgents = section.AgentsMaxParallelSubAgents is { } agentsMaxParallelSubAgentsLoaded
+            ? Math.Clamp(agentsMaxParallelSubAgentsLoaded, MinAgentsMaxParallelSubAgents, MaxAgentsMaxParallelSubAgents)
+            : DefaultAgentsMaxParallelSubAgents;
+        agentsSubAgentsEnabled = section.AgentsSubAgentsEnabled ?? DefaultAgentsSubAgentsEnabled;
+        idleArchiveEnabled = section.IdleArchiveEnabled ?? DefaultIdleArchiveEnabled;
+        idleArchiveDays = section.IdleArchiveDays is { } idleArchiveDaysLoaded
+            ? Math.Clamp(idleArchiveDaysLoaded, MinIdleArchiveDays, MaxIdleArchiveDays)
+            : DefaultIdleArchiveDays;
+        notificationPermissionReprompt = section.NotificationPermissionReprompt ?? DefaultNotificationPermissionReprompt;
+        palettePerSourceLimit = section.PalettePerSourceLimit is { } palettePerSourceLimitLoaded
+            ? Math.Clamp(palettePerSourceLimitLoaded, MinPalettePerSourceLimit, MaxPalettePerSourceLimit)
+            : DefaultPalettePerSourceLimit;
+        chatToolImageThumbnailPixels = section.ChatToolImageThumbnailPixels is { } chatToolImageThumbnailPixelsLoaded
+            ? Math.Clamp(chatToolImageThumbnailPixelsLoaded, MinChatToolImageThumbnailPixels, MaxChatToolImageThumbnailPixels)
+            : DefaultChatToolImageThumbnailPixels;
+        chatToolImagesToModel = section.ChatToolImagesToModel ?? DefaultChatToolImagesToModel;
+        filesCsvMaxRows = section.FilesCsvMaxRows is { } filesCsvMaxRowsLoaded
+            ? Math.Clamp(filesCsvMaxRowsLoaded, MinFilesCsvMaxRows, MaxFilesCsvMaxRows)
+            : DefaultFilesCsvMaxRows;
+        filesNotebookOutputKilobytes = section.FilesNotebookOutputKilobytes is { } filesNotebookOutputKilobytesLoaded
+            ? Math.Clamp(filesNotebookOutputKilobytesLoaded, MinFilesNotebookOutputKilobytes, MaxFilesNotebookOutputKilobytes)
+            : DefaultFilesNotebookOutputKilobytes;
+        filesImagePreviewMaxMegabytes = section.FilesImagePreviewMaxMegabytes is { } filesImagePreviewMaxMegabytesLoaded
+            ? Math.Clamp(filesImagePreviewMaxMegabytesLoaded, MinFilesImagePreviewMaxMegabytes, MaxFilesImagePreviewMaxMegabytes)
+            : DefaultFilesImagePreviewMaxMegabytes;
+        gitChecksNoChecksConfirmations = section.GitChecksNoChecksConfirmations is { } gitChecksNoChecksConfirmationsLoaded
+            ? Math.Clamp(gitChecksNoChecksConfirmationsLoaded, MinGitChecksNoChecksConfirmations, MaxGitChecksNoChecksConfirmations)
+            : DefaultGitChecksNoChecksConfirmations;
+        gitChecksFailureLogTailLines = section.GitChecksFailureLogTailLines is { } gitChecksFailureLogTailLinesLoaded
+            ? Math.Clamp(gitChecksFailureLogTailLinesLoaded, MinGitChecksFailureLogTailLines, MaxGitChecksFailureLogTailLines)
+            : DefaultGitChecksFailureLogTailLines;
+        mcpRequestTimeoutSeconds = section.McpRequestTimeoutSeconds is { } mcpRequestTimeoutSecondsLoaded
+            ? Math.Clamp(mcpRequestTimeoutSecondsLoaded, MinMcpRequestTimeoutSeconds, MaxMcpRequestTimeoutSeconds)
+            : DefaultMcpRequestTimeoutSeconds;
+        mcpReconnectInitialDelaySeconds = section.McpReconnectInitialDelaySeconds is { } mcpReconnectInitialDelaySecondsLoaded
+            ? Math.Clamp(mcpReconnectInitialDelaySecondsLoaded, MinMcpReconnectInitialDelaySeconds, MaxMcpReconnectInitialDelaySeconds)
+            : DefaultMcpReconnectInitialDelaySeconds;
+        mcpToolSearchLimit = section.McpToolSearchLimit is { } mcpToolSearchLimitLoaded
+            ? Math.Clamp(mcpToolSearchLimitLoaded, MinMcpToolSearchLimit, MaxMcpToolSearchLimit)
+            : DefaultMcpToolSearchLimit;
+        mcpStderrTailLines = section.McpStderrTailLines is { } mcpStderrTailLinesLoaded
+            ? Math.Clamp(mcpStderrTailLinesLoaded, MinMcpStderrTailLines, MaxMcpStderrTailLines)
+            : DefaultMcpStderrTailLines;
+        inspectorLogTailLines = section.InspectorLogTailLines is { } inspectorLogTailLinesLoaded
+            ? Math.Clamp(inspectorLogTailLinesLoaded, MinInspectorLogTailLines, MaxInspectorLogTailLines)
+            : DefaultInspectorLogTailLines;
+        inspectorRefreshMilliseconds = section.InspectorRefreshMilliseconds is { } inspectorRefreshMillisecondsLoaded
+            ? Math.Clamp(inspectorRefreshMillisecondsLoaded, MinInspectorRefreshMilliseconds, MaxInspectorRefreshMilliseconds)
+            : DefaultInspectorRefreshMilliseconds;
+        chatMermaidTimeoutMilliseconds = section.ChatMermaidTimeoutMilliseconds is { } chatMermaidTimeoutMillisecondsLoaded
+            ? Math.Clamp(chatMermaidTimeoutMillisecondsLoaded, MinChatMermaidTimeoutMilliseconds, MaxChatMermaidTimeoutMilliseconds)
+            : DefaultChatMermaidTimeoutMilliseconds;
+        projectsCloneTimeoutSeconds = section.ProjectsCloneTimeoutSeconds is { } projectsCloneTimeoutSecondsLoaded
+            ? Math.Clamp(projectsCloneTimeoutSecondsLoaded, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds)
+            : DefaultProjectsCloneTimeoutSeconds;
+        idleArchiveScope = Token(section.IdleArchiveScope, IdleArchiveScopeTokens, DefaultIdleArchiveScope);
+        updatesCheckFrequency = Token(section.UpdatesCheckFrequency, UpdatesCheckFrequencyTokens, DefaultUpdatesCheckFrequency);
+        updatesChannel = Token(section.UpdatesChannel, UpdatesChannelTokens, DefaultUpdatesChannel);
+        paletteExcludeDirectories = Text(section.PaletteExcludeDirectories, DefaultPaletteExcludeDirectories);
+        chatMermaidDiagramTypes = Text(section.ChatMermaidDiagramTypes, DefaultChatMermaidDiagramTypes);
+        projectsCloneDirectory = Text(section.ProjectsCloneDirectory, DefaultProjectsCloneDirectory);
+        modelsHidden = NormalizeNames(section.ModelsHidden);
     }
 
     /// <summary>The section written back to <c>settings.json</c>; the stored text is the live, validated value.</summary>
@@ -387,8 +676,6 @@ internal sealed class AppPreferences : ObservableObject
             GitStepCommits = gitStepCommits,
             GitChecksPollSeconds = gitChecksPollSeconds,
             GitChecksMaxWaitMinutes = gitChecksMaxWaitMinutes,
-            PaletteResultLimit = paletteResultLimit,
-            PaletteExcludeDirectories = paletteExcludeDirectories,
             Notifications = notifications,
             GitGhPath = gitGhPath,
             ToolsShellPath = toolsShellPath,
@@ -409,6 +696,34 @@ internal sealed class AppPreferences : ObservableObject
             EditorTabsToSpaces = editorTabsToSpaces,
             EditorColumnRulers = editorColumnRulers,
             EditorTheme = editorTheme,
+            AgentsMaxParallelSubAgents = agentsMaxParallelSubAgents,
+            AgentsSubAgentsEnabled = agentsSubAgentsEnabled,
+            IdleArchiveEnabled = idleArchiveEnabled,
+            IdleArchiveDays = idleArchiveDays,
+            NotificationPermissionReprompt = notificationPermissionReprompt,
+            PalettePerSourceLimit = palettePerSourceLimit,
+            ChatToolImageThumbnailPixels = chatToolImageThumbnailPixels,
+            ChatToolImagesToModel = chatToolImagesToModel,
+            FilesCsvMaxRows = filesCsvMaxRows,
+            FilesNotebookOutputKilobytes = filesNotebookOutputKilobytes,
+            FilesImagePreviewMaxMegabytes = filesImagePreviewMaxMegabytes,
+            GitChecksNoChecksConfirmations = gitChecksNoChecksConfirmations,
+            GitChecksFailureLogTailLines = gitChecksFailureLogTailLines,
+            McpRequestTimeoutSeconds = mcpRequestTimeoutSeconds,
+            McpReconnectInitialDelaySeconds = mcpReconnectInitialDelaySeconds,
+            McpToolSearchLimit = mcpToolSearchLimit,
+            McpStderrTailLines = mcpStderrTailLines,
+            InspectorLogTailLines = inspectorLogTailLines,
+            InspectorRefreshMilliseconds = inspectorRefreshMilliseconds,
+            ChatMermaidTimeoutMilliseconds = chatMermaidTimeoutMilliseconds,
+            ProjectsCloneTimeoutSeconds = projectsCloneTimeoutSeconds,
+            IdleArchiveScope = idleArchiveScope,
+            UpdatesCheckFrequency = updatesCheckFrequency,
+            UpdatesChannel = updatesChannel,
+            PaletteExcludeDirectories = paletteExcludeDirectories,
+            ChatMermaidDiagramTypes = chatMermaidDiagramTypes,
+            ProjectsCloneDirectory = projectsCloneDirectory,
+            ModelsHidden = modelsHidden.Count == 0 ? null : [.. modelsHidden],
         };
 
     /// <summary>Reads a <c>language</c> token; an empty value means <see cref="UiLanguage.System"/>.</summary>
@@ -508,6 +823,22 @@ internal sealed class AppPreferences : ObservableObject
                 .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)];
 
+    private static string Token(string? value, string[] allowed, string fallback)
+    {
+        var trimmed = value?.Trim();
+        foreach (var token in allowed)
+        {
+            if (string.Equals(token, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return token;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static string Text(string? value, string fallback) => value?.Trim() ?? fallback;
+
     private static string Family(string? value, string fallback)
     {
         var trimmed = value?.Trim();
@@ -570,13 +901,6 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("gitChecksMaxWaitMinutes")]
     public int? GitChecksMaxWaitMinutes { get; set; }
-
-    [JsonPropertyName("paletteResultLimit")]
-    public int? PaletteResultLimit { get; set; }
-
-    /// <summary>Comma-separated directory names the palette's content search skips; absent when the default applies.</summary>
-    [JsonPropertyName("paletteExcludeDirectories")]
-    public string? PaletteExcludeDirectories { get; set; }
 
     [JsonPropertyName("notifications")]
     public bool? Notifications { get; set; }
@@ -647,6 +971,91 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("editorTheme")]
     public string? EditorTheme { get; set; }
+
+    [JsonPropertyName("agentsMaxParallelSubAgents")]
+    public int? AgentsMaxParallelSubAgents { get; set; }
+
+    [JsonPropertyName("agentsSubAgentsEnabled")]
+    public bool? AgentsSubAgentsEnabled { get; set; }
+
+    [JsonPropertyName("idleArchiveEnabled")]
+    public bool? IdleArchiveEnabled { get; set; }
+
+    [JsonPropertyName("idleArchiveDays")]
+    public int? IdleArchiveDays { get; set; }
+
+    [JsonPropertyName("notificationPermissionReprompt")]
+    public bool? NotificationPermissionReprompt { get; set; }
+
+    [JsonPropertyName("palettePerSourceLimit")]
+    public int? PalettePerSourceLimit { get; set; }
+
+    [JsonPropertyName("chatToolImageThumbnailPixels")]
+    public int? ChatToolImageThumbnailPixels { get; set; }
+
+    [JsonPropertyName("chatToolImagesToModel")]
+    public bool? ChatToolImagesToModel { get; set; }
+
+    [JsonPropertyName("filesCsvMaxRows")]
+    public int? FilesCsvMaxRows { get; set; }
+
+    [JsonPropertyName("filesNotebookOutputKilobytes")]
+    public int? FilesNotebookOutputKilobytes { get; set; }
+
+    [JsonPropertyName("filesImagePreviewMaxMegabytes")]
+    public int? FilesImagePreviewMaxMegabytes { get; set; }
+
+    [JsonPropertyName("gitChecksNoChecksConfirmations")]
+    public int? GitChecksNoChecksConfirmations { get; set; }
+
+    [JsonPropertyName("gitChecksFailureLogTailLines")]
+    public int? GitChecksFailureLogTailLines { get; set; }
+
+    [JsonPropertyName("mcpRequestTimeoutSeconds")]
+    public int? McpRequestTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("mcpReconnectInitialDelaySeconds")]
+    public int? McpReconnectInitialDelaySeconds { get; set; }
+
+    [JsonPropertyName("mcpToolSearchLimit")]
+    public int? McpToolSearchLimit { get; set; }
+
+    [JsonPropertyName("mcpStderrTailLines")]
+    public int? McpStderrTailLines { get; set; }
+
+    [JsonPropertyName("inspectorLogTailLines")]
+    public int? InspectorLogTailLines { get; set; }
+
+    [JsonPropertyName("inspectorRefreshMilliseconds")]
+    public int? InspectorRefreshMilliseconds { get; set; }
+
+    [JsonPropertyName("chatMermaidTimeoutMilliseconds")]
+    public int? ChatMermaidTimeoutMilliseconds { get; set; }
+
+    [JsonPropertyName("projectsCloneTimeoutSeconds")]
+    public int? ProjectsCloneTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("idleArchiveScope")]
+    public string? IdleArchiveScope { get; set; }
+
+    [JsonPropertyName("updatesCheckFrequency")]
+    public string? UpdatesCheckFrequency { get; set; }
+
+    [JsonPropertyName("updatesChannel")]
+    public string? UpdatesChannel { get; set; }
+
+    [JsonPropertyName("paletteExcludeDirectories")]
+    public string? PaletteExcludeDirectories { get; set; }
+
+    [JsonPropertyName("chatMermaidDiagramTypes")]
+    public string? ChatMermaidDiagramTypes { get; set; }
+
+    [JsonPropertyName("projectsCloneDirectory")]
+    public string? ProjectsCloneDirectory { get; set; }
+
+    [JsonPropertyName("modelsHidden")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? ModelsHidden { get; set; }
 }
 
 /// <summary>The <c>preferences</c> section, serialized through this source-generated context (no reflection, AOT safe).</summary>

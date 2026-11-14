@@ -82,43 +82,46 @@
 
 ## 三、W0:拆交叉点(串行,主 Agent 独占,必须先合入)
 
-**W0 拆成两步,各自单独提交、单独构建全绿**:**W0a**(W0-1 契约 + W0-2 schema + 流水线接线,约 2 天)与 **W0b**(W0-3 搬运/接线/预建 + W0-4 小件,约 3 天)。W0b 只在 W0a 合入后开始。
+**W0 拆成两步,各自单独提交、单独构建全绿**:**W0a**(W0-1 契约 + 流水线接线 + W0-2 进度生产侧,约 2 天)与 **W0b**(W0-3 搬运/接线/预建 + W0-4 小件,约 3 天)。W0b 只在 W0a 合入后开始。
 
 **目标:把"多个波次会碰同一个文件"这件事在 W0 里消灭。** W0 交付后仓库照常编译、**行为不变**(除了消息复制这类无交叉的小件),之后每一波只在自己那一组文件里写。
 
-### W0-1 契约定稿(全部在 `Forge.Abstractions`,一次改完)
+### W0-1 契约定稿(`Forge.Abstractions`,已按此实施)
 
-- `ToolResult` 从单串改为块列表(复用 `ContentBlock`;文本仍是默认形态),`ToolResultBlock` 同步;`ToolResult` 保留 `string Content` 的便捷构造,避免调用点全炸。
-- 新增 `AgentToolProgress`(工具流式输出/进度);`AgentToolStarted/Finished` 不动。
-- 这些改动的**所有调用点接线都在 W0 做完**:`Core/Agents/AgentLoop.cs`、`Core/Providers/*`、会话存储序列化与回放、`McpToolAdapter`、`ViewModels/SessionWorkspace.cs` 的工具事件分支、`ViewModels/Transcript.cs` 的工具行(先按原样只取文本 → 行为不变)。W0 结束时多块能力"已在流水线上通了,只是没人渲染"。
+- `ToolResult`/`ToolResultBlock` 改为块列表,只允许 `TextBlock` 与 `ImageBlock`(其余类型构造时抛 `ArgumentException`);保留 `(string, IsError)` 便捷构造,`Content` 是拉平文本(单个文本块即原串零拷贝,多块按行拼接,图片用占位文案);相等按元素比较(否则两个相等的结果因列表引用不同而不等)。
+- 占位文案与 `DecodedLength` 从 `MessageJson` 搬到 `Forge.Abstractions/ContentPlaceholders.cs`,Storage 与 Compaction 改引新位置,不留旧副本。
+- **存储不升版**:消息表是 `content_json` 文本列,`tool_result` 恒写拉平后的 `content`(旧读者与全文检索只读它),仅当块不是"恰好一个文本块"时多写一个 `blocks` 数组。旧行照常读,旧版本读新行也只丢图。原计划的"工具结果多块需要升 schema"不成立;计划修订表只有 W7 一家要,**W7 独占 schema 升版**,不构成交叉。
+- W0 触及的调用点:`AgentLoop`(带块转发;溢出归档只处理文本、图片原样保留)、`MessageJson`(读写 `blocks`)、`TokenCounter`(工具结果里每张图按附件图同一口径计)、`TranscriptReplay`(回放带块)。**`McpToolAdapter`/`McpContentFlattener`/`Core/Providers/*` 不在 W0**,归 W4(它们仍读拉平后的 `Content`,行为不变)。
 
-### W0-2 存储阶梯一次升版
+### W0-2 进度生产侧(已按此实施)
 
-- `Core/Storage/StorageSchema.cs` 一次升到下一版:加计划修订表 + 工具结果多块的表示所需的列/标记(两者同一版,避免 W4、W7 各自再升一次)。
-- 迁移民档 + 升级/降级测试骨架在 W0;W4 与 W7 只写各自的读写代码,不再碰 schema。
+- `ToolContext.Progress`(`Action<string>?`):每次调用传**最新输出尾部的快照**(不是增量,监听者可丢事件而不丢状态);事件 `AgentToolProgress(AgentId, Call, Tail)`,夹在 `AgentToolStarted`/`Finished` 之间,不落库。
+- 生产者节流在 `Forge.IO`:`ProcessRequest.OnOutput/OutputInterval(默认 250 ms)/OutputTailChars(默认 16 KiB)`,`ProcessOutputTail` 合并 stdout/stderr、每路一个 UTF-8 `Decoder`、间隔内到达的块武装一次性定时器保证"静默前最后几行"也能报出;`OnOutput` 为空时零开销;监听者抛异常不影响 pump。
+- `BashTool` 把 `context.Progress` 接到 `OnOutput`;`AgentLoop` 为每个调用派生独立 context(并行调用互不串)。`SessionWorkspace` 暂时显式忽略该事件,**W8 接手消费**。
+- 注:16 KiB 是生产者的上限,W8 的"日志尾行数"设置只能在此之内取。
 
 ### W0-3 UI 接线与占位(交叉文件的唯一写入者)
 
 | 文件 | W0 做什么 | 之后归属 |
 |---|---|---|
-| `App.axaml` | 为 palette / checks 面板 / 计划面板 / 资源检查器 / MCP 分区 / 向导 各注册一个 `DataTemplate`,指向 W0 建的 stub 视图;消息复制按钮就位并接上实现 | 冻结(各波不再改) |
-| `MainWindow.axaml(.cs)` | palette 覆盖层、checks、资源检查器三处 host;搜索图标换成真的按钮 | 冻结 |
-| `ViewModels/MainWindowViewModel.cs` | 预建 partial:`MainWindowViewModel.{Palette,Checks,Plan,Inspector,Onboarding}.cs`(空实现)并在构造里接线 | 主文件**冻结**(含已改后台的 `DescribePullRequest`),partial 各归对应波 |
-| `ViewModels/SessionWorkspace.cs`(2360 行) | **按职责拆 partial**:`SessionWorkspace.cs`(壳/生命周期)+ `SessionWorkspace.Tools.cs`(工具事件与行更新)+ `SessionWorkspace.Activity.cs`(运行态/取消)。纯搬运,不改行为 | `.Tools.cs`+主文件归 W8;`.Activity.cs` 归 W8 |
-| `ViewModels/Transcript.cs` | 拆三份:`Transcript.cs`(消息/文本/代码块)、`Transcript.Tools.cs`(工具行 VM 的运行态/日志尾)、`Transcript.ToolImages.cs`(`ToolRowViewModel` 的 partial,只放结果图块与缩略图) | 依次归 W4b、W8、W4 |
-| `Localization/Loc.cs` + `KeyRegistryTests` | `KeyRegistryTests` 反射扫 `Forge.App.Localization` 命名空间并要求 `Loc.EnsureRegistered()` 登记,所以**新表的注册行是共享点**:W0 一次性为本轮所有新表(Palette/Checks/Plan/Inspector/Mcp/Onboarding/ChatMarkdown/Review)建空表并登记 | `Loc.cs` 冻结,各波只改自己的表 |
-| 通知权限引导接口 | W0 在 `Notifications/` 声明 `INotificationPermissionGuide`(状态查询 + 触发引导),W1 实现,W9 首启向导只调接口 | 接口冻结,实现归 W1 |
-| `ViewModels/Panels.cs`(2518 行) | 拆出 `FileDocumentViewModel` 到独立文件 `ViewModels/FileDocumentViewModel.cs`(`.Editing/.Lsp/.Review` 三片已有) | 新文件 + `.Editing` 归 W4,`.Lsp` 归 W2,`.Review` 冻结 |
-| `Composition/AppComposition.cs` | 抽出 `Composition/<Feature>Composition.cs` 模块(照已有 `Automations/AutomationComposition.cs` 的样子),`Create()` 里一次性调用 | 各模块归对应波 |
-| `Preferences/SettingsSection.cs` | 一次性分配全部新分区 id 与 order(models-visibility、idle-archive、notification-permission、mcp 扩写沿用旧 id) | 冻结 |
-| `Preferences/AppPreferences.cs` + `PreferencesJsonContext` | 预加**第六·二节登记的全部属性**(默认值 + 范围校验 + 迁移默认),各波只读取、不再增删字段 | 冻结 |
+| `App.axaml` | **已实施**:为 Palette/Checks/Plan/ResourceInspector/Onboarding 五个占位 VM 各注册 `DataTemplate`(指向 `Views/*View` 占位);`ToolRowViewModel`、`TurnTextViewModel` 的模板改成指向 `Views/ToolRowView`、`Views/TurnTextView`(两个 UserControl),此后波次只改自己的子视图,不再动 `App.axaml`。MCP 分区沿用旧模板;消息复制按钮已接上(`CopyTextButton`) | 冻结(各波不再改) |
+| `MainWindow.axaml(.cs)` | **已实施**(用户已定:全部做成窗口内覆盖层):五个 `ContentControl` 覆盖层绑 `MainWindowViewModel.{Palette,Checks,Plan,Inspector,Onboarding}`(`object?`,null 不显示);标题栏搜索图标换成按钮 `OpenPaletteCommand`(W3 之前禁用)。Checks/Plan/Inspector 因此是浮层,不是可停靠面板 | 冻结 |
+| `ViewModels/MainWindowViewModel.cs` | **已实施**:五个 partial 已建,各带 `object?` 槽属性(私有 setter,由各波的 partial 赋值);主文件无需再接线。`DescribePullRequest` 已改 `DescribePullRequestAsync`(三次读库不再同步阻塞 UI 线程) | 主文件**冻结**,partial 各归对应波 |
+| `ViewModels/SessionWorkspace.cs`(2360 行) | **按职责拆 partial**:`SessionWorkspace.cs`(壳/生命周期)+ `SessionWorkspace.Tools.cs`(工具事件与行更新)+ `SessionWorkspace.Activity.cs`(运行态/取消)。纯搬运,不改行为 **【实施时不做,偏差】** 只有 W8 改这个文件(W8 的独占路径是 `SessionWorkspace*.cs`),没有跨波重叠,拆分是纯搬运风险而无收益;W8 若觉得 2360 行难改,自行拆。 | `.Tools.cs`+主文件归 W8;`.Activity.cs` 归 W8 |
+| `ViewModels/Transcript.cs` | 拆三份:`Transcript.cs`(消息/文本/代码块)、`Transcript.Tools.cs`(工具行 VM 的运行态/日志尾)、`Transcript.ToolImages.cs`(`ToolRowViewModel` 的 partial,只放结果图块与缩略图) **已实施**:`ToolRowViewModel` 整体移入 `Transcript.Tools.cs`(partial),`Transcript.ToolImages.cs` 为空 partial;`Complete(ToolResult)` 调用 `partial void CaptureImages(blocks)`,W4 在 ToolImages 里实现即可,不碰 Tools。 | 依次归 W4b、W8、W4 |
+| `Localization/Loc.cs` + `KeyRegistryTests` | **更正(实施时核实)**:每张 Strings 表用 `[ModuleInitializer]` 自注册,`Loc.EnsureRegistered()` 只触碰核心表,`KeyRegistryTests` 反射扫的是各表自己的常量——**没有共享注册点**,新表不碰 `Loc.cs`。W0 因此不建空表;各波新建自己的 `Strings.<X>.cs` 即可。共享键 `turn.copyMessage` 已进 `Strings.Session.cs` | 无冻结需求 |
+| 通知权限引导接口 | W0 在 `Notifications/` 声明 `INotificationPermissionGuide`(状态查询 + 触发引导),W1 实现,W9 首启向导只调接口 **已实施**:`Notifications/INotificationPermissionGuide.cs`(`GetStateAsync`、`OpenSettingsAsync`、`NotificationPermissionState`)。 | 接口冻结,实现归 W1;`AppComposition.NotificationPermissionGuide` 槽位已建,W1 赋值、W9 读取 |
+| `ViewModels/Panels.cs`(2518 行) | 拆出 `FileDocumentViewModel` 到独立文件 `ViewModels/FileDocumentViewModel.cs`(`.Editing/.Lsp/.Review` 三片已有) **已实施**:`FileDocumentViewModel` 已移到 `ViewModels/FileDocumentViewModel.cs`。 | 新文件 + `.Editing` 归 W4,`.Lsp` 归 W2,`.Review` 冻结 |
+| `Composition/AppComposition.cs` | 抽出 `Composition/<Feature>Composition.cs` 模块(照已有 `Automations/AutomationComposition.cs` 的样子),`Create()` 里一次性调用 **已实施(形态调整)**:`Create()` 末尾一次调用 `FeatureComposition.RegisterAll`,下挂 `RuntimeSettings`(W1)/`Palette`(W3)/`ViewerSettings`(W4)/`Inspector`(W8)/`Projects`(W9) 五个空 `*Composition.Register(composition, settings)` 模块,各波只改自己的文件;`FeatureComposition.cs` 冻结。W6 的 MCP 分区原本就在 `Create()` 里且只读 `composition`,不用搬。 | 各模块归对应波 |
+| `Preferences/SettingsSection.cs` | 一次性分配全部新分区 id 与 order(models-visibility、idle-archive、notification-permission、mcp 扩写沿用旧 id) **已实施**:`SettingsSectionIds` 里新增 10 个 id 与 order。 | 冻结 |
+| `Preferences/AppPreferences.cs` + `PreferencesJsonContext` | 预加**第六·二节登记的全部属性**(默认值 + 范围校验 + 迁移默认),各波只读取、不再增删字段 **已实施**:六·二登记的全部项已进 `AppPreferences`/`PreferencesSection`(常量 Min/Max/Default、钳制或令牌校验、旧文件缺键回默认),测试由独立测试 Agent 编写。 | 冻结 |
 | `Forge.Abstractions` 的进度回调 | 补 `AgentToolProgress` 的**生产侧**接口(工具执行上下文里的进度回调),并给 bash/终端类工具接上产出;否则 W8 只能显示开始/结束 | 冻结 |
-| `ViewModels/Settings/InstrumentSettingsSections.cs`(注意路径) | 该文件含 Approvals/Skills/Mcp 三个分区类;W0 先把 Mcp 分区拆到 `McpSettingsSectionViewModel.cs`,W6 只改那个文件 | 拆分后 Mcp 归 W6 |
-| `App.axaml` 的 `ToolRowViewModel` 模板(`:673`) | 抽成独立资源字典 `Resources/ToolRow.axaml`,W4(缩略图)与 W8(日志尾)共用同一文件的两个区段前,先由 W0 分好区段 | 归 W4,W8 只在 `Transcript.Tools.cs` 加数据 |
-| `GitCli.Clone.cs` | 预建空 partial | 归 W9(W5 不碰) |
-| `Resources/Icons.axaml` | 预加这轮需要的图标 | 冻结 |
+| `ViewModels/Settings/InstrumentSettingsSections.cs`(注意路径) | 该文件含 Approvals/Skills/Mcp 三个分区类;W0 先把 Mcp 分区拆到 `McpSettingsSectionViewModel.cs`,W6 只改那个文件 **已实施**。 | 拆分后 Mcp 归 W6 |
+| `App.axaml` 的 `ToolRowViewModel` 模板(`:673`) | **已实施,与原方案不同**:抽成 `Views/ToolRowView.axaml`(UserControl,冻结),内含两个子视图占位 `Views/ToolRowImagesView`(W4)与 `Views/ToolRowTailView`(W8),各波只改自己的子视图,无共享文件。`Resources/ToolRow.axaml` 不再存在(模板放进资源字典不会被 DataType 自动匹配,UserControl 更直接) | 归 W4,W8 只在 `Transcript.Tools.cs` 加数据 |
+| `GitCli.Clone.cs` | 预建空 partial **已实施**(空 partial)。 | 归 W9(W5 不碰) |
+| `Resources/Icons.axaml` | **未预加**:SPEC 规定图标只能把 Fluent System Icons 的 `<path d>` 抄进此文件,仓库里没有 FIS 源,凭空写路径就是猜测。已有 `IconCopy/IconCheck/IconSearch/IconRefresh/IconStop/IconBell/IconEye/IconFolder/IconProjectNew/IconBook` 可复用;确实缺的由对应波按 SPEC 规则**追加**(只追加、各加各的键,合并无冲突) | 追加式 |
 | `Localization/` | 每波一张新表(palette/checks/plan/inspector/mcp/onboarding)+ 空注册;共享表(`Strings.Session`/`Inspector`/`Core`)本轮新增键也在 W0 加完 | 各波只改自己的表 |
-| `src/Forge.Editor/` | 确认 W2(语义 token 快照)、W3(文档符号)所需 API 已暴露;缺的补上 | 归 W2 |
+| `src/Forge.Editor/` | 确认 W2(语义 token 快照)、W3(文档符号)所需 API 已暴露;缺的补上 **已核实,无需补**:`LanguageSession.RequestSemanticTokensAsync`、`RequestDocumentSymbolsAsync`、`RequestReferencesAsync` 与 `SemanticTokenMapper`/`HighlightMerger` 均已公开;W2 在此之上做可见行缓存。 | 归 W2 |
 
 ### W0-4 顺手做掉、无交叉的小件
 
@@ -134,20 +137,20 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 | 波 | 内容 | 独占路径(其他人不许改) | 规模 |
 |---|---|---|---|
-| **W1** 设置与运行参数 | 模型可见性过滤(14a)、子 Agent 并发上限与开关(14b)、闲置归档天数与范围可配(14e)、通知权限引导(14f) | `Preferences/AppPreferences.cs` 的消费点、`Agents/**`(SessionRuntime、注入 `AgentOptions`)、`Core/Agents/AgentOptions.cs`、`Automations/Housekeeping.cs`、`Notifications/**`、`Settings/ModelsVisibility*`、`ViewModels/ComposerViewModel.cs`、`INotificationPermissionGuide` 的实现 | 2 天 |
+| **W1** 设置与运行参数 | 模型可见性过滤(14a)、子 Agent 并发上限与开关(14b)、闲置归档天数与范围可配(14e)、通知权限引导(14f) | `Preferences/AppPreferences.cs` 的消费点、`Agents/**`(SessionRuntime、注入 `AgentOptions`)、`Core/Agents/AgentOptions.cs`、`Automations/Housekeeping.cs`、`Notifications/**`、`Settings/ModelsVisibility*`、`ViewModels/ComposerViewModel.cs`、`INotificationPermissionGuide` 的实现(赋给 `AppComposition.NotificationPermissionGuide`,由 W9 读取) | 2 天 |
 | **W2** 编辑器 | 语义 token 叠加(可见行 + 版本号缓存,delta 只失效受影响行)、查找引用列表、问题面板 | `src/Forge.Editor/**`、`Editing/**`、`ViewModels/FileDocumentViewModel.Lsp.cs`、`Views/FileDocumentView.Lsp.cs`、`Views/ProblemsPanelView*` | 3 天 |
 | **W3** 全局搜索 / 命令面板 | 面板 + 五个来源(文件/内容/会话/命令/符号)+ 预览 + `Ctrl+P`/`Ctrl+Shift+P`/`Ctrl+Shift+F` | `ViewModels/PaletteViewModel*.cs`、`Views/PaletteView*`、`Services/Palette*.cs`、`ViewModels/MainWindowViewModel.Palette.cs`、`Localization/Strings.Palette.cs` | 4–5 天 |
-| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF/HTML 占位 + 系统默认程序打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、会话存储读写(不碰 schema)、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Resources/ToolRow.axaml`、`Views/Preview/**` | 4 天 |
-| **W4b** 聊天 Markdown 渲染 | 聊天消息走 Markdown(标题/列表/表格/链接/fenced code,代码块带复制与语言标签);复用 `MarkdownRenderer`,流式增量不整段重排 | `Changes/Markdown/**`、`ViewModels/Transcript.cs`、`Views/ChatMarkdown*`、`Localization/Strings.ChatMarkdown.cs` | 4 天 |
+| **W4** 工具图片 + 富查看器 | 工具行缩略图、MCP 结构化透传、provider 降级(tool 角色不能带图 → 随后的 user 消息);图片/CSV/IPYNB/LFS/二进制占位查看器;PDF/HTML 占位 + 系统默认程序打开 | `Forge.Mcp/McpToolAdapter.cs`+`McpContentFlattener.cs`、`Core/Providers/*`、`ViewModels/Transcript.ToolImages.cs`、`ViewModels/FileDocumentViewModel.cs`+`.Editing.cs`+`Views/FileDocumentView.axaml(.cs)`(**不含** `.Lsp.cs`/`.Review.cs`;W2 若需改 axaml,在 W0 预留 overlay 插槽)、`Views/ToolRowImagesView*`、`Views/Preview/**` | 4 天 |
+| **W4b** 聊天 Markdown 渲染 | 聊天消息走 Markdown(标题/列表/表格/链接/fenced code,代码块带复制与语言标签);复用 `MarkdownRenderer`,流式增量不整段重排 | `Changes/Markdown/**`、`ViewModels/Transcript.cs`、`Views/ChatMarkdown*`、`Views/TurnTextView.axaml(.cs)`(W0 从 `App.axaml` 抽出,含复制按钮)、`Localization/Strings.ChatMarkdown.cs` | 4 天 |
 | **W5** PR checks 与收尾 | checks 面板(逐项状态/耗时/链接、等待、失败日志尾、让 agent 修)、`gh pr ready`、ship 补「合并后收尾」 | `Forge.Workspace/Git/IPrPlatform.cs`+`GitHubPlatform.cs`+`PrCheck*.cs`+`PrChecksPoller.cs`(**不含** `GitCli.Clone.cs`)、`Views/ChecksPanelView*`、`ViewModels/MainWindowViewModel.Checks.cs` | 3 天 |
-| **W6** MCP 管理面 | 配置写入(原子写 + 同款互斥)、增删改/启停/测试/重连/工具清单/错误与 stderr 尾、从 Claude/Cursor 导入、预设;审批卡补 command/args/cwd/env/headers 键名与即时撤销 | `Forge.Mcp/McpConfig*.cs`、`McpServerManager.cs`、`McpServerState.cs`、`ViewModels/Settings/McpSettingsSectionViewModel.cs`(W0 从 `InstrumentSettingsSections.cs` 拆出)、`Views/McpSettingsView*`、`Approval/**` | 4–5 天 |
-| **W7** Plan 会话 | 摘要面板 + 步骤与验证状态、修订历史、下一步、导出 Markdown、从计划开 PR | `Core/Storage/SqliteTodoStore.cs`(修订读写)、`ViewModels/PlanPanelViewModel*`、`Views/PlanPanelView*`、`ViewModels/MainWindowViewModel.Plan.cs` | 4–6 天 |
+| **W6** MCP 管理面 | 配置写入(原子写 + 同款互斥)、增删改/启停/测试/重连/工具清单/错误与 stderr 尾、从 Claude/Cursor 导入、预设;审批卡补 command/args/cwd/env/headers 键名与即时撤销 | `Forge.Mcp/McpConfig*.cs`、`McpServerManager.cs`、`McpServerState.cs`、`ViewModels/Settings/McpSettingsSectionViewModel.cs`(W0 已从 `InstrumentSettingsSections.cs` 拆出)、`Views/McpSettingsView*`、`Approval/**` | 4–5 天 |
+| **W7** Plan 会话 | 摘要面板 + 步骤与验证状态、修订历史、下一步、导出 Markdown、从计划开 PR | `Core/Storage/SqliteTodoStore.cs`(修订读写)、`Core/Storage/StorageSchema.cs`(v10→v11,W7 独占)、`ViewModels/PlanPanelViewModel*`、`Views/PlanPanelView*`、`ViewModels/MainWindowViewModel.Plan.cs` | 4–6 天 |
 | **W8** 资源检查器 | 运行中工具/命令与子 Agent 统一列表(耗时、日志尾、停止)、消费 `AgentToolProgress` | `ViewModels/SessionWorkspace*.cs`、`ViewModels/Transcript.Tools.cs`、`ViewModels/SessionInstrumentsViewModel.cs`、`Views/ResourceInspectorView*`、`ViewModels/MainWindowViewModel.Inspector.cs` | 3 天 |
 | **W9** 首启与项目创建 | 首启向导(语言/提供商/通知权限,权限一步只调 `INotificationPermissionGuide`,不碰 `Notifications/**`)、克隆仓库(带进度与取消)、新建项目目录 + `git init` | `Views/Onboarding*`、`ViewModels/Onboarding*`、`ViewModels/MainWindowViewModel.Onboarding.cs`、`Forge.Workspace/Git/GitCli.Clone.cs`(W0 预建)、`Services/ProjectCreation*` | 3 天 |
 | **W12** 评审包 + `request_review` | 给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话);评审是产品核心目标,放在并行批里 | `Forge.Core/Prompts/BuiltInAgents.cs`、新建 `Forge.Core/Tools/RequestReview*.cs` + `ReviewPackage*.cs`、`Localization/Strings.Review.cs` | 4 天 |
 | **W11** 流程图 / Mermaid(**等拍板,且串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 
-**跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 依赖 W0 的 schema 升版;W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
+**跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 独占自己的 schema 升版(与其他波无交叉);W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
 
 **唯一的串行边**:W11(Mermaid)在 W4b 之后、且要你先批准两个包——它要往 W4b 刚建的聊天代码块渲染器里插一层,同一批文件,所以不并行。
 
@@ -209,3 +212,5 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 ## 七、明确不做
 
 隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF/HTML 预览在拍板前不做(占位页)。
+
+**W0 收尾补充**:新增设置分区的视图不再改 `App.axaml`——`App.axaml` 已挂一个 `Views/SectionViewTemplate`,各波在自己的 `*Composition.Register` 里调 `SectionViewTemplate.Register<TViewModel>(() => new XView())` 即可。`chat` 分区归 W5(Mermaid 与工具图片缩略图两项设置的视图都放进 W5 的 chat 分区视图;W4 只提供数据项,不建分区)。

@@ -237,6 +237,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public NotificationCenter Notifications { get; private set; } = null!;
 
     /// <summary>
+    /// The notification-permission guide: the runtime-settings module sets it, the first-run wizard only calls it. Null until
+    /// registered, and on a platform with nothing to guide.
+    /// </summary>
+    public INotificationPermissionGuide? NotificationPermissionGuide { get; set; }
+
+    /// <summary>
     /// Commits a finished TODO step into the session's worktree. The agent's <c>todo</c> tool reaches it through the
     /// runtime services; the TODO panel calls it when the user ticks an item or retries a failed commit.
     /// </summary>
@@ -332,16 +338,6 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             SettingsGroups.Interface,
             "IconBranch"));
-
-        // 0b2. Palette: how many rows a source lists and which directories its content search skips. It edits the live
-        //      preferences, so the next palette keystroke already applies the change.
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.Palette,
-            PaletteSettingsSectionViewModel.SectionTitle,
-            SettingsSectionIds.PaletteOrder,
-            new PaletteSettingsSectionViewModel(preferences.Current),
-            SettingsGroups.Interface,
-            "IconSearch"));
 
         // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
         //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
@@ -712,6 +708,7 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsGroups.Agent,
             "IconWrench"));
 
+        FeatureComposition.RegisterAll(composition, settings);
         return composition;
     }
 

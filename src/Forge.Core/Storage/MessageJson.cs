@@ -126,52 +126,15 @@ public static class MessageJson
                     Append(builder, result.Content);
                     break;
                 case ImageBlock image:
-                    Append(builder, ImagePlaceholder(image));
+                    Append(builder, ContentPlaceholders.ImagePlaceholder(image));
                     break;
                 case FileBlock file:
-                    Append(builder, FilePlaceholder(file));
+                    Append(builder, ContentPlaceholders.FilePlaceholder(file));
                     break;
             }
         }
 
         return builder.ToString();
-    }
-
-    /// <summary>
-    /// The text that stands in for an image anywhere text is wanted (search, summaries, retrieval):
-    /// <c>[image: image/png, 123 KB]</c>. Never the base64 itself.
-    /// </summary>
-    public static string ImagePlaceholder(ImageBlock image)
-    {
-        ArgumentNullException.ThrowIfNull(image);
-        var kilobytes = Math.Max(1, (DecodedLength(image.Data) + 1023) / 1024);
-        return string.Concat("[image: ", image.MediaType, ", ", kilobytes.ToString(System.Globalization.CultureInfo.InvariantCulture), " KB]");
-    }
-
-    /// <summary>
-    /// The text that stands in for an attached file anywhere text is wanted (search, summaries, retrieval):
-    /// <c>[file: report.pdf, 123 KB]</c>, or the media type when the file has no name. Never the base64 itself.
-    /// </summary>
-    public static string FilePlaceholder(FileBlock file)
-    {
-        ArgumentNullException.ThrowIfNull(file);
-        var kilobytes = Math.Max(1, (DecodedLength(file.Data) + 1023) / 1024);
-        var label = string.IsNullOrWhiteSpace(file.Name) ? file.MediaType : file.Name;
-        return string.Concat("[file: ", label, ", ", kilobytes.ToString(System.Globalization.CultureInfo.InvariantCulture), " KB]");
-    }
-
-    /// <summary>Decoded byte count of a base64 string, from its length and padding alone (nothing is decoded).</summary>
-    public static long DecodedLength(string base64)
-    {
-        ArgumentNullException.ThrowIfNull(base64);
-        var length = base64.Length;
-        if (length == 0)
-        {
-            return 0;
-        }
-
-        var padding = base64[length - 1] == '=' ? (length > 1 && base64[length - 2] == '=' ? 2 : 1) : 0;
-        return Math.Max(0, (long)length / 4 * 3 + (length % 4 * 3 / 4) - padding);
     }
 
     /// <summary>Everything a model would see for this message; used for token accounting.</summary>
@@ -200,10 +163,10 @@ public static class MessageJson
                     Append(builder, artifact.Description);
                     break;
                 case ImageBlock image:
-                    Append(builder, ImagePlaceholder(image));
+                    Append(builder, ContentPlaceholders.ImagePlaceholder(image));
                     break;
                 case FileBlock file:
-                    Append(builder, FilePlaceholder(file));
+                    Append(builder, ContentPlaceholders.FilePlaceholder(file));
                     break;
             }
         }
@@ -271,7 +234,20 @@ public static class MessageJson
             case ToolResultBlock result:
                 writer.WriteString(TypeKey, "tool_result");
                 writer.WriteString("call_id", result.CallId);
+                // "content" is always the flattened text: a reader that predates images, and the search index, read only that.
+                // "blocks" is written only when the result is more than one plain text block.
                 writer.WriteString("content", result.Content);
+                if (result.Blocks is not [TextBlock])
+                {
+                    writer.WriteStartArray("blocks");
+                    foreach (var inner in result.Blocks)
+                    {
+                        WriteBlock(writer, inner);
+                    }
+
+                    writer.WriteEndArray();
+                }
+
                 if (result.IsError)
                 {
                     writer.WriteBoolean("is_error", true);
@@ -320,10 +296,7 @@ public static class MessageJson
                 RequiredString(block, "id"),
                 RequiredString(block, "name"),
                 RequiredString(block, "arguments")),
-            "tool_result" => new ToolResultBlock(
-                RequiredString(block, "call_id"),
-                RequiredString(block, "content"),
-                OptionalBool(block, "is_error")),
+            "tool_result" => ReadToolResult(block),
             "artifact" => new ArtifactRefBlock(
                 RequiredString(block, "artifact_id"),
                 RequiredString(block, "description"),
@@ -335,6 +308,35 @@ public static class MessageJson
                 OptionalString(block, "name")),
             _ => throw new JsonException($"Unknown content block type '{type}'."),
         };
+    }
+
+    private static ToolResultBlock ReadToolResult(JsonElement block)
+    {
+        var callId = RequiredString(block, "call_id");
+        var isError = OptionalBool(block, "is_error");
+        if (!block.TryGetProperty("blocks", out var blocks))
+        {
+            return new ToolResultBlock(callId, RequiredString(block, "content"), isError);
+        }
+
+        if (blocks.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("Property 'blocks' is not an array.");
+        }
+
+        var content = new List<ContentBlock>(blocks.GetArrayLength());
+        foreach (var inner in blocks.EnumerateArray())
+        {
+            var read = ReadBlock(inner);
+            if (read is not (TextBlock or ImageBlock))
+            {
+                throw new JsonException("A tool result holds text and image blocks only.");
+            }
+
+            content.Add(read);
+        }
+
+        return new ToolResultBlock(callId, content, isError);
     }
 
     private static string RequiredString(JsonElement element, string name)

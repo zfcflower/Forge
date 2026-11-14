@@ -15,6 +15,7 @@ parent: forge-architecture
 - **路径**(`Paths/`):`WorkspacePath` 是工作区路径身份与包含检查的唯一实现,`Forge.Workspace` 的 `WorkspacePaths` 委托到这里;`PathGate` 串行同一路径的读-改-写。
 - **文件**(`Files/`):`FileWalker` 惰性 DFS 遍历;`TextFileReader` 有界窗口读;`TextFileWriter` 原子整写与追加。
 - **进程**(`Process/`):`ProcessRunner` 有界字节捕获的进程执行;`ShellResolver` 平台 shell 解析;`CommandLine` 引用感知切分与 direct/script 判定。
+  - **实时输出尾部**:`ProcessRequest.OnOutput`(空则零开销)收到 stdout/stderr 按到达顺序合并后的最新尾部快照(≤ `OutputTailChars`,默认 16 KiB),至多每 `OutputInterval`(默认 250 ms)一次,间隔内到达的输出由一次性定时器补报;每路一个 UTF-8 `Decoder`;`ProcessOutputTail` 在持锁时调用监听者,所以快照严格有序、不并发,监听者必须不阻塞、抛异常被吞;进程退出时未报的尾部丢弃(结果含全部输出)。
 - **搜索**(`Search/`):`GlobMatcher`、`GitIgnore`(完整 gitignore 语义)、`GrepEngine`(托管)、`RipgrepBackend`(可选加速)。
 - **工具**(`Tools/`):`read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 七个 `ITool`、`FileTools` 聚合、`ToolOptions`、`ToolBase`。
 - `AtomicFile`:无锁、可用于用户工作区文件。写临时文件、落盘、改名覆盖;读取带 `FileShare.ReadWrite | Delete`。对外两组入口:整份写入 `WriteAllBytes`/`WriteAllBytesAsync`,以及只做“发布”的 `ReplaceFile`/`ReplaceFileAsync`(给已经流式写好并落盘的临时文件用)。

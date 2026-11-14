@@ -300,7 +300,7 @@ public sealed class PaletteViewModelTests
 
         Assert.True(await TestPump.UntilAsync(
             () => viewModel.StatusText == Loc.Instance.Format(
-                PaletteStrings.StatusTruncated, TextFormat.Number(preferences.PaletteResultLimit)),
+                PaletteStrings.StatusTruncated, TextFormat.Number(preferences.PalettePerSourceLimit)),
             Bound));
         Assert.Single(viewModel.Items);
     }
@@ -401,7 +401,7 @@ public sealed class PaletteViewModelTests
     {
         // The source enum is internal, so the theory hands over its value instead of the type.
         var source = (PaletteSource)sourceKind;
-        var preferences = new AppPreferences { PaletteResultLimit = AppPreferences.MinPaletteResultLimit };
+        var preferences = new AppPreferences { PalettePerSourceLimit = AppPreferences.MinPalettePerSourceLimit };
         var host = ArrangeTwelve(source);
         using var viewModel = new PaletteViewModel(host, preferences);
 
@@ -412,7 +412,7 @@ public sealed class PaletteViewModelTests
         }
 
         Assert.True(await TestPump.UntilAsync(() => viewModel.Items.Count > 0, Bound));
-        Assert.Equal(AppPreferences.MinPaletteResultLimit, viewModel.Items.Count);
+        Assert.Equal(AppPreferences.MinPalettePerSourceLimit, viewModel.Items.Count);
         Assert.True(viewModel.HasItems);
         Assert.False(viewModel.IsEmpty);
     }

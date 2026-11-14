@@ -114,9 +114,12 @@ public sealed class ProcessRunner : IProcessRunner
                 linked.CancelAfter(request.Timeout > TimeSpan.Zero ? request.Timeout : TimeSpan.Zero);
             }
 
+            using var tail = request.OnOutput is { } onOutput
+                ? new ProcessOutputTail(onOutput, request.OutputTailChars, request.OutputInterval)
+                : null;
             var pumps = Task.WhenAll(
-                PumpAsync(process.StandardOutput.BaseStream, stdout, pumpStop.Token),
-                PumpAsync(process.StandardError.BaseStream, stderr, pumpStop.Token));
+                PumpAsync(process.StandardOutput.BaseStream, stdout, tail, pumpStop.Token),
+                PumpAsync(process.StandardError.BaseStream, stderr, tail, pumpStop.Token));
             // The registration kills the tree as soon as the timeout or the caller fires, which also unblocks a wait that
             // is already in progress; the wait below then reports the cancellation.
             using var killOnCancel = linked.Token.Register(static state => TryKill((Process)state!), process);
@@ -248,8 +251,9 @@ public sealed class ProcessRunner : IProcessRunner
 
     /// <summary>Reads a stream to its end into <paramref name="capture"/>; never throws, because a killed process makes the
     /// pipe fail in platform specific ways and a failed pump must not turn into a failed tool call.</summary>
-    private static async Task PumpAsync(Stream stream, ProcessOutputCollector capture, CancellationToken cancellationToken)
+    private static async Task PumpAsync(Stream stream, ProcessOutputCollector capture, ProcessOutputTail? tail, CancellationToken cancellationToken)
     {
+        var decoder = tail is null ? null : Encoding.UTF8.GetDecoder();
         var buffer = ArrayPool<byte>.Shared.Rent(ReadChunkBytes);
         try
         {
@@ -272,6 +276,7 @@ public sealed class ProcessRunner : IProcessRunner
                 }
 
                 capture.Append(buffer.AsSpan(0, read));
+                tail?.Append(decoder!, buffer.AsSpan(0, read));
             }
         }
         finally

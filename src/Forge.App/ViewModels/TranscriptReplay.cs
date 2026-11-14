@@ -92,7 +92,7 @@ internal static class TranscriptReplay
                     {
                         target.CompleteTool(
                             new ToolCall(result.CallId, string.Empty, string.Empty),
-                            new ToolResult(result.Content, result.IsError));
+                            new ToolResult(result.Blocks, result.IsError));
                     }
                 }
 

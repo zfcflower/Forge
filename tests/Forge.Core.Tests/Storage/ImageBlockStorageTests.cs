@@ -53,13 +53,13 @@ public sealed class ImageBlockStorageTests
     [InlineData("AAAA", 3)]
     [InlineData("AAAAAAAA", 6)]
     public void Decoded_length_is_read_from_length_and_padding(string base64, long expected) =>
-        Assert.Equal(expected, MessageJson.DecodedLength(base64));
+        Assert.Equal(expected, ContentPlaceholders.DecodedLength(base64));
 
     [Fact]
     public void A_tiny_image_still_shows_one_kilobyte()
     {
-        Assert.Equal("[image: image/gif, 1 KB]", MessageJson.ImagePlaceholder(new ImageBlock("image/gif", "R0lG")));
-        Assert.Equal("[image: image/jpeg, 1 KB]", MessageJson.ImagePlaceholder(new ImageBlock("image/jpeg", string.Empty)));
+        Assert.Equal("[image: image/gif, 1 KB]", ContentPlaceholders.ImagePlaceholder(new ImageBlock("image/gif", "R0lG")));
+        Assert.Equal("[image: image/jpeg, 1 KB]", ContentPlaceholders.ImagePlaceholder(new ImageBlock("image/jpeg", string.Empty)));
     }
 
     [Fact]

@@ -190,7 +190,7 @@ internal sealed partial class PaletteViewModel : NotifyingObject, IDisposable
             {
                 return Loc.Instance.Format(
                     PaletteStrings.StatusTruncated,
-                    TextFormat.Number(PaletteQuery.ClampLimit(preferences.PaletteResultLimit)));
+                    TextFormat.Number(PaletteQuery.ClampLimit(preferences.PalettePerSourceLimit)));
             }
 
             return source == PaletteSource.Symbols && symbols.Document.Length > 0

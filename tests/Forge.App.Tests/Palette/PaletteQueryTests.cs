@@ -151,14 +151,14 @@ public sealed class PaletteQueryTests
     }
 
     [Theory]
-    [InlineData(int.MinValue, AppPreferences.MinPaletteResultLimit)]
-    [InlineData(0, AppPreferences.MinPaletteResultLimit)]
-    [InlineData(AppPreferences.MinPaletteResultLimit, AppPreferences.MinPaletteResultLimit)]
-    [InlineData(AppPreferences.MinPaletteResultLimit + 1, AppPreferences.MinPaletteResultLimit + 1)]
-    [InlineData(AppPreferences.MaxPaletteResultLimit, AppPreferences.MaxPaletteResultLimit)]
-    [InlineData(AppPreferences.MaxPaletteResultLimit - 1, AppPreferences.MaxPaletteResultLimit - 1)]
-    [InlineData(AppPreferences.MaxPaletteResultLimit + 1, AppPreferences.MaxPaletteResultLimit)]
-    [InlineData(int.MaxValue, AppPreferences.MaxPaletteResultLimit)]
+    [InlineData(int.MinValue, AppPreferences.MinPalettePerSourceLimit)]
+    [InlineData(0, AppPreferences.MinPalettePerSourceLimit)]
+    [InlineData(AppPreferences.MinPalettePerSourceLimit, AppPreferences.MinPalettePerSourceLimit)]
+    [InlineData(AppPreferences.MinPalettePerSourceLimit + 1, AppPreferences.MinPalettePerSourceLimit + 1)]
+    [InlineData(AppPreferences.MaxPalettePerSourceLimit, AppPreferences.MaxPalettePerSourceLimit)]
+    [InlineData(AppPreferences.MaxPalettePerSourceLimit - 1, AppPreferences.MaxPalettePerSourceLimit - 1)]
+    [InlineData(AppPreferences.MaxPalettePerSourceLimit + 1, AppPreferences.MaxPalettePerSourceLimit)]
+    [InlineData(int.MaxValue, AppPreferences.MaxPalettePerSourceLimit)]
     public void ClampLimit_holds_the_limit_inside_the_settings_range(int limit, int expected) =>
         Assert.Equal(expected, PaletteQuery.ClampLimit(limit));
 }

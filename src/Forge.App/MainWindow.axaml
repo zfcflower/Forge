@@ -84,8 +84,8 @@
           </Button>
         </StackPanel>
 
-        <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: search is not a
-        feature yet, so the magnifier is a plain icon, and the extension host's state is the one live readout the
+        <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: the search button opens the palette
+        (disabled until wave W3), and the extension host's state is the one live readout the
         header carries — the same state the status bar spells out in words. -->
         <StackPanel Grid.Column="1"
                     Orientation="Horizontal"
@@ -94,18 +94,16 @@
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center">
           <Button Classes="ghost icon"
-                  Width="28"
-                  Height="24"
-                  Command="{Binding OpenFilePaletteCommand}"
-                  ToolTip.Tip="{Binding [palette.shortcut], Source={x:Static loc:Loc.Instance}}"
-                  AutomationProperties.AutomationId="palette-open">
+                  Width="30"
+                  Height="26"
+                  Command="{Binding OpenPaletteCommand}"
+                  ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="shell-search">
             <wc:FluentIcon Data="{StaticResource IconSearch}"
                            Width="16"
                            Height="16"
-                           Foreground="{DynamicResource TextMutedBrush}"
-                           ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
-                           AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
-                           AutomationProperties.AutomationId="shell-search" />
+                           Foreground="{DynamicResource TextMutedBrush}" />
           </Button>
           <StackPanel Orientation="Horizontal"
                       Spacing="6"
@@ -173,6 +171,12 @@
 
     <!-- Approval queue: the non-modal panel in the bottom-right corner. It resolves the shell's approval services from
     its own constructor, so the root view model does not have to carry it. -->
+    <!-- Window overlays: each draws the template of its view model (App.axaml) and is empty while the property is null. -->
+    <ContentControl Grid.Row="1" Content="{Binding Checks}" />
+    <ContentControl Grid.Row="1" Content="{Binding Plan}" />
+    <ContentControl Grid.Row="1" Content="{Binding Inspector}" />
+    <ContentControl Grid.Row="1" Content="{Binding Onboarding}" />
+
     <ap:ApprovalQueueOverlay Grid.Row="1" />
 
     <!-- The app status bar is gone: the extension host's state lives in the title row (dot plus tooltip), ahead/behind and
@@ -184,11 +188,8 @@
     its own constructor, and it takes no pointer: the cards are display only. -->
     <views:NotificationOverlay Grid.Row="1" />
 
-    <!-- The global palette: the last child, so its scrim dims the workbench, the approvals and the toasts alike, and it
-         shows nothing at all while closed. The inner view takes the palette's own view model, so its bindings never reach
-         the window's. -->
-    <Panel Grid.Row="1" IsVisible="{Binding Palette.IsOpen}">
-      <views:PaletteView DataContext="{Binding Palette}" />
-    </Panel>
+    <!-- The palette's overlay is the last child of the grid, so its scrim dims the workbench, the approvals and the toasts
+         alike: opening it puts the whole window behind one card. The other four overlays keep their order above. -->
+    <ContentControl Grid.Row="1" Content="{Binding Palette}" />
   </Grid>
 </Window>

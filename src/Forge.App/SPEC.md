@@ -364,7 +364,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
 Cmd/Ctrl+P 三个入口之外没有第四种面板:一个覆盖层、五个来源、一份结果列表和一个预览栏。`PaletteView.axaml` 只做键盘路由(隧道期吃掉 Esc/↑/↓/Enter,焦点在查询行)与聚焦,状态全在 `PaletteViewModel`(三个分部:状态机、快照、预览),I/O 全在 `IPaletteHost` 后面——由 `MainWindowViewModel.Palette.cs` 实现,所以视图模型可以在没有窗口的测试里被驱动。
 
-**入口。** `Ctrl+P` 文件、`Ctrl+Shift+P` 命令、`Ctrl+Shift+F` 工作区文本;同一个手势再按一次关闭(手势属于来源,不属于"打开"这个动作,重复按不会清掉已输入的查询)。标题栏的放大镜是同一个命令的按钮。来源内还接受首字符前缀 `>` 命令、`#` 内容、`:` 会话、`@` 符号,与点击来源条等价;前缀只在第一位生效,所以 `a>b` 仍是文件查询。切换前台会话即关闭面板(否则它列的是刚离开的那个工作区的文件)。
+**入口。** `Ctrl+P` 文件、`Ctrl+Shift+P` 命令、`Ctrl+Shift+F` 工作区文本;同一个手势再按一次关闭(手势属于来源,不属于"打开"这个动作,重复按不会清掉已输入的查询)。标题栏的放大镜是同一个动作的按钮(`OpenPaletteCommand`,`AutomationId` 仍是 `shell-search`)。覆盖层的宿主是 `MainWindow.axaml` 里最后那个 `ContentControl Content="{Binding Palette}"`:关闭时属性为 null,视图不存在;打开时 `App.axaml` 按视图模型类型模板出 `PaletteView`,所以它画在审批卡与 toast 之上。来源内还接受首字符前缀 `>` 命令、`#` 内容、`:` 会话、`@` 符号,与点击来源条等价;前缀只在第一位生效,所以 `a>b` 仍是文件查询。切换前台会话即关闭面板(否则它列的是刚离开的那个工作区的文件)。
 
 **五个来源。** 文件来自 `FileIndex`(仓库内 `git ls-files`,否则有界遍历,`.gitignore` 与构建目录一样遵守),匹配复用输入框 `@` 弹层的 `ComposerSuggestions.FilterFiles`,两处排序一致;内容来自 `GrepEngine`(字面量、大小写不敏感、`Limit` = 每来源上限),结果按路径与行号排序后取前 N;会话来自 `ISessionCatalog.QueryAsync` 的内存快照,标题为主、`项目 + 分支` 为次,子 Agent 会话不入列,归档会话带徽标(打开为只读);命令是 `PaletteCommandCatalog` 的静态表,id 与 `MainWindowViewModel.RunPaletteCommand` 的 switch 一一对应,行里带手势;符号来自当前编辑器文档的语言服务器(`FileDocumentViewModel.Symbols.cs` 复用编辑器的请求闸门),位置取 `SelectionRange` 起点,上限 2000 个后再排序。
 
@@ -374,11 +374,12 @@ Cmd/Ctrl+P 三个入口之外没有第四种面板:一个覆盖层、五个来�
 
 **空与失败。** 列表为空时说清原因:没有会话、没有打开的编辑器文件、没有语言服务器、搜索失败(带原因)、或首份快照还在读;这些都以一条不可打开的 notice 行呈现,Enter 对它无效。
 
-**可配置项。** `preferences.paletteResultLimit`(默认 50,钳在 [5, 200])与 `preferences.paletteExcludeDirectories`(逗号/分号/换行分隔的目录名,任意层级整段匹配、大小写不敏感;留空表示只遵循 `.gitignore`)。两者都在设置页 `palette` 分区(界面组,order 360)里编辑,写穿到活偏好,下一次按键即生效。排除目录在结果侧过滤:`GrepEngine` 不接受排除钩子,扫描成本仍由 `.gitignore` 与引擎的字节/行数上限压住。
+**可配置项。** `preferences.palettePerSourceLimit`(默认 50,钳在 [10, 500])与 `preferences.paletteExcludeDirectories`(逗号/分号/换行分隔的目录名,任意层级整段匹配、大小写不敏感;留空表示只遵循 `.gitignore`)。两者都在设置页 `palette` 分区(界面组,`SettingsSectionIds.PaletteOrder`)里编辑,写穿到活偏好,下一次按键即生效;分区由 `Composition/PaletteComposition.cs` 注册视图模型与视图(`SectionViewTemplate`),不改 `App.axaml`。排除目录在结果侧过滤:`GrepEngine` 不接受排除钩子,扫描成本仍由 `.gitignore` 与引擎的字节/行数上限压住。
 
 ## 未决
 
-- 文件预览已支持编辑保存、TextMate 预览着色及 LSP 文档同步;编辑模式尚为无着色 TextBox,LSP 诊断、语义 token 叠加与补全尚未接到 UI。声明式插件面板渲染未做。
+- 文件预览已支持编辑保存、TextMate 着色及 LSP 文档同步(AvaloniaEdit 编辑视图);LSP 诊断、悬停、补全与跳转定义已接到 UI。未做:语义 token 叠加(`HighlightMerger`/`SemanticTokenMapper` 在 App 零调用)、查找引用 UI、问题列表面板、code action / rename。声明式插件面板渲染未做。
+- 聊天消息:助手回复与用户消息下各有一枚复制按钮(`CopyTextButton`,点击时读 `ICopyableText.CopyText`,整条纯文本);流式回复结束前不显示。聊天尚不过 Markdown 渲染。
 - git 写工具(`git_branch`/`git_sync`)按工具名划为写操作,经会话的审批队列逐次询问;读工具自动放行,且 git 工具不暴露给 `run_code` 脚本(脚本内调用不经逐次审批呈现)。
 - 会话交接的未决项:完整继承且继承前缀本身已超过触发线时,Core 的迟滞把重复压缩限制在两次无效尝试后停住(见 Core SPEC),根因(持久化压缩后的表示或历史边界)需要新的存储契约,归 T0,本阶段不引入。交接摘要不沿继承链取父会话消息;历史检索工具也不跟继承链。对话框的模型/推理档位初值、缓存剩余时间、接近压缩阈值、前缀指纹不符等提示未做。
 - 分叉与合并的未决项:降级路径只给推送,不给“开 PR”(PR 服务已随 Git 面板移除)。worktree 行的分叉项按刷新时读到的 HEAD 种类禁用(读数可能落后至多一个刷新周期,点击后流程仍读实时 HEAD)。无活动会话的工作区只能空白分叉。

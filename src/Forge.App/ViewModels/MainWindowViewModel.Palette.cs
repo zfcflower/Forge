@@ -10,7 +10,7 @@ using Forge.IO;
 namespace Forge.App.ViewModels;
 
 /// <summary>
-/// The palette's place in the shell: it creates the view model, owns the three gestures that open it, and implements
+/// The palette's place in the shell: it creates the view model, owns the four gestures that open it, and implements
 /// <see cref="IPaletteHost"/> - the snapshots the palette filters (files, sessions, symbols), the one search it runs on the
 /// workspace, and the three navigations a row can trigger. Everything that touches a window, a session or the language
 /// server lives here, so <see cref="PaletteViewModel"/> stays a state machine a test can drive without a window.
@@ -18,11 +18,20 @@ namespace Forge.App.ViewModels;
 internal sealed partial class MainWindowViewModel : IPaletteHost
 {
     private readonly PaletteFileCache paletteFiles = new();
+    private PaletteViewModel paletteViewModel = null!;
     private IReadOnlyList<PaletteSessionSnapshot> paletteSessions = [];
     private PaletteSymbolSnapshot paletteSymbols = PaletteSymbolSnapshot.Empty;
+    private object? palette;
 
-    /// <summary>The palette overlay's view model; bound by the window and driven by its own gestures.</summary>
-    public PaletteViewModel Palette { get; private set; } = null!;
+    /// <summary>
+    /// The overlay the window shows: null while the palette is closed, otherwise the view model <c>App.axaml</c> templates
+    /// into its view. Publishing and clearing it is what puts the palette on screen and takes it off again.
+    /// </summary>
+    public object? Palette
+    {
+        get => palette;
+        private set => Set(ref palette, value);
+    }
 
     /// <summary><c>Ctrl+P</c>: the file source.</summary>
     public RelayCommand OpenFilePaletteCommand { get; private set; } = null!;
@@ -36,22 +45,39 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
     /// <summary>Called once from the constructor, before the window exists (the overlay binds the view model).</summary>
     private void InitializePalette()
     {
-        Palette = new PaletteViewModel(this, composition.Preferences);
+        // The palette's view model lives as long as the window; the overlay comes and goes with its IsOpen flag.
+        paletteViewModel = new PaletteViewModel(this, composition.Preferences);
+        paletteViewModel.PropertyChanged += OnPaletteOpenChanged;
         OpenFilePaletteCommand = new RelayCommand(() => TogglePalette(PaletteSource.Files));
         OpenCommandPaletteCommand = new RelayCommand(() => TogglePalette(PaletteSource.Commands));
         OpenSearchPaletteCommand = new RelayCommand(() => TogglePalette(PaletteSource.Content));
+        OpenPaletteCommand = new RelayCommand(() => TogglePalette(PaletteSource.Files));
 
         // Switching session switches the workspace the palette searches; a palette left open would list the files and
         // symbols of the session the user just left, so it closes instead.
         PropertyChanged += OnPaletteActiveSessionChanged;
     }
 
+    /// <summary>The title-bar search button: the same gesture as <c>Ctrl+P</c>, on the same file source.</summary>
+    public RelayCommand OpenPaletteCommand { get; private set; } = null!;
+
     private void OnPaletteActiveSessionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ActiveSession) && Palette.IsOpen)
+        if (e.PropertyName == nameof(ActiveSession) && paletteViewModel.IsOpen)
         {
-            Palette.Close();
+            paletteViewModel.Close();
         }
+    }
+
+    /// <summary>Puts the palette on screen while it is open and clears the slot as soon as it closes.</summary>
+    private void OnPaletteOpenChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PaletteViewModel.IsOpen))
+        {
+            return;
+        }
+
+        Palette = paletteViewModel.IsOpen ? paletteViewModel : null;
     }
 
     /// <summary>
@@ -60,13 +86,13 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
     /// </summary>
     private void TogglePalette(PaletteSource target)
     {
-        if (Palette.IsOpen && Palette.Source == target)
+        if (paletteViewModel.IsOpen && paletteViewModel.Source == target)
         {
-            Palette.Close();
+            paletteViewModel.Close();
             return;
         }
 
-        Palette.Open(target);
+        paletteViewModel.Open(target);
     }
 
     // ---------------------------------------------------------------- IPaletteHost
@@ -140,7 +166,7 @@ internal sealed partial class MainWindowViewModel : IPaletteHost
             Pattern = query,
             Regex = false,
             CaseSensitive = false,
-            Limit = PaletteQuery.ClampLimit(composition.Preferences.PaletteResultLimit),
+            Limit = PaletteQuery.ClampLimit(composition.Preferences.PalettePerSourceLimit),
         };
         return await Task.Run(() => GrepEngine.SearchAsync(request, ct), ct).ConfigureAwait(true);
     }
