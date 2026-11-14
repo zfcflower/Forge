@@ -18,13 +18,14 @@ internal static class GitToolPreferences
         };
 
     /// <summary>
-    /// The wait-mode timing, read per wait from the live preferences (the settings section's poll interval and longest
-    /// wait); the confirmation count is the poller's own default. Used by the <c>pr_checks</c> tool and the Git panel.
+    /// The wait-mode timing, read per wait from the live preferences (the settings section's poll interval, longest wait
+    /// and no-checks confirmation count). Used by the <c>pr_checks</c> tool and the Git panel.
     /// </summary>
     public static PrChecksPollerOptions ChecksOptions(AppPreferences preferences) =>
         new()
         {
             Interval = TimeSpan.FromSeconds(preferences.GitChecksPollSeconds),
             MaxWait = TimeSpan.FromMinutes(preferences.GitChecksMaxWaitMinutes),
+            NoChecksConfirmations = preferences.GitChecksNoChecksConfirmations,
         };
 }

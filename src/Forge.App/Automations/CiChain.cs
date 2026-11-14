@@ -591,26 +591,9 @@ internal sealed class CiChainRunner : IAutomationRunner
     }
 
     /// <summary>Keeps the last <paramref name="maxChars"/> characters, then the last <paramref name="maxLines"/> lines.</summary>
-    internal static string Tail(string text, int maxLines, int maxChars)
-    {
-        var s = text.Length > maxChars ? text[^maxChars..] : text;
-        var pos = s.Length;
-        if (pos > 0 && s[pos - 1] == '\n')
-        {
-            pos--;
-        }
-
-        for (var n = 0; n < maxLines; n++)
-        {
-            pos = pos > 0 ? s.LastIndexOf('\n', pos - 1) : -1;
-            if (pos < 0)
-            {
-                return s;
-            }
-        }
-
-        return s[(pos + 1)..];
-    }
+    /// <remarks>The same trim the checks panel uses (<see cref="Services.TextTail"/>): a job log is cut the same way
+    /// whether an automation or a user asked for it.</remarks>
+    internal static string Tail(string text, int maxLines, int maxChars) => Services.TextTail.Keep(text, maxLines, maxChars);
 
     private void Stopped(string runId, string text) =>
         notifications.Notify(

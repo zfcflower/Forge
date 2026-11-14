@@ -553,6 +553,36 @@
                          AutomationProperties.AutomationId="git-checks-max-wait"
                          AutomationProperties.Name="{Binding [git.settings.checksMaxWait], Source={x:Static loc:Loc.Instance}}" />
         </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.checksNoChecks], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="1"
+                         Maximum="10"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding ChecksNoChecksConfirmations, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-checks-no-checks"
+                         AutomationProperties.Name="{Binding [git.settings.checksNoChecks], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.checksLogTail], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="20"
+                         Maximum="2000"
+                         Increment="10"
+                         FormatString="0"
+                         Value="{Binding ChecksFailureLogTailLines, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-checks-log-tail"
+                         AutomationProperties.Name="{Binding [git.settings.checksLogTail], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
                    Text="{Binding [git.settings.checksHint], Source={x:Static loc:Loc.Instance}}" />

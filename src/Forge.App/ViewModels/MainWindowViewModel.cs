@@ -256,7 +256,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ComposePullRequestAsync,
             ComposePullRequestMergeAsync,
             ConfirmGitRowActionAsync,
-            DescribePullRequestAsync);
+            DescribePullRequestAsync,
+            OpenChecksForPullRequest);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -418,6 +419,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             if (Set(ref activeSession, value))
             {
                 previous?.Instruments.SetGit(null);
+                CloseChecks();
                 SetTreesActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
@@ -3146,6 +3148,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         clock.Stop();
         layoutSaveTimer.Stop();
+        CloseChecks();
 
         // Terminals are ended before the final layout capture, so no terminal tab can end up in a snapshot, and before the
         // composition root tears the extension host down.
