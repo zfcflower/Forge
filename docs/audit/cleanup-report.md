@@ -140,4 +140,8 @@
 
 **原则**:实现缺陷一律保留规格要求并记录代码缺口(见 audit-report §5/§6),未通过改规格掩盖问题;业务含义不明者标待确认(audit-report §7);有效信息(测量证据、契约细节)保留。
 
-**未全量完成(记录待后续)**:App↔Core 跨规格大面积重复的去重(需以 Core 为唯一权威重写 App 提供商/认证/缓存/MCP/模板节);App instrument 节(:60)与调色板(:L171)需精确重写;App B Q1-Q4/Q8-Q13 剩余过时数值。这些需逐处核对代码重写,本轮因体量(236KB App SPEC)与配额约束仅修已证漂移点,详见各 findings 规格质量问题节。
+**业务决策落实**(用户拍板,见 business-decisions.md):决策 2 EH revoke 取消在途工作流 run+提示、决策 4 Core 历史附件可丢但保语义占位不影响轮次、决策 5 App 缺失 key Warning、决策 6 App MCP 重连=停→启 已改规格;决策 3(一律 Warning)/7(skills 徽标)规格本就正确/已承诺,实现缺口记录在案。
+
+**跨规格去重(决策 8,已做高漂移目标)**:App 提供商节加权威注记(线级机制以 forge-core 为权威)、claudeWire 探针搜索顺序与提示词切换改引用 Core「官方身份」、模型元数据三源合并改引用 Core「模型元数据与用量换算」(保留 App 的 ProviderModelCache/Memo 接线)、Core ClaimsOfficialIdentity 补双条件(claudeWire 生效+连着 claude-subscription)修为正确权威、MCP 节加 forge-mcp 权威注记。设备码登录流(kimi/xai/meta/chatgpt)为 App 独有,保留。
+
+**未全量完成(记录待后续)**:App 压缩/Web/模板节与 Core 的剩余重复去重;App instrument 节(:60)与调色板(:L171)精确重写;App B Q1-Q4/Q8-Q13 剩余过时数值。这些需逐处核对代码重写,本轮因体量(236KB App SPEC)与配额约束聚焦最高漂移目标,详见各 findings 规格质量问题节。
