@@ -281,7 +281,8 @@ internal sealed class StreamingMarkdown
     {
         if (block.Kind == MdBlockKind.Html)
         {
-            return block.Text.StartsWith("<!--", StringComparison.Ordinal) &&
+            // Same test as the parser's: an indented comment is a comment too, and only an unterminated one runs past a blank line.
+            return block.Text.AsSpan().TrimStart().StartsWith("<!--", StringComparison.Ordinal) &&
                 !block.Text.Contains("-->", StringComparison.Ordinal);
         }
 

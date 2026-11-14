@@ -242,6 +242,20 @@ public sealed class StreamingMarkdownTests
     }
 
     [Fact]
+    public void An_indented_html_comment_across_a_blank_line_stays_live_like_the_parser_reads_it()
+    {
+        var document = new StreamingMarkdown();
+        document.Append("  <!-- note\n\n");
+        Assert.Empty(document.Stable);
+
+        document.Append("more -->\n");
+
+        var html = Assert.Single(Rendered(document));
+        Assert.Equal(MdBlockKind.Html, html.Kind);
+        Assert.Equal("  <!-- note\n\nmore -->", html.Text);
+    }
+
+    [Fact]
     public void A_tilde_fence_with_blank_lines_and_a_following_table_complete_correctly()
     {
         var document = new StreamingMarkdown();
