@@ -222,7 +222,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 ## 八、W12 交付记录(评审包 + `request_review`)
 
-开工前分支落后 `main` 55 个提交(W0–W5、W7 已合入,`pr_create` 的四道闸门、`GitReviewLedger`、计划面板都在),先快进再动手,所以下面每条都是按合入后的现状估的代价。
+开工前分支落后 `main` 55 个提交(W0–W5、W7 已合入,`pr_create` 的四道闸门、`GitReviewLedger`、计划面板都在),先快进再动手。开工期间 `main` 又进了 W6(MCP 管理与工具暴露,24 个提交),收尾时执行 `git merge main` 并解冲突:只有 `AppComposition.cs` 一处真冲突(`runtimeServices.Reviews` 与 `runtimeServices.Mcp` 相邻两行,两条都保留),其余自动合并;合并后重新构建与跑测试(见下验证)。
 
 **范围**:计划里 W12 的两条——给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话)。三条边界在开工前由用户拍定:
 
@@ -246,13 +246,13 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 4. **内部常量**(不进设置,六·二表无 W12 项):包内 diff 48000 字符、提交清单 50 行与文件清单 200 行各自独立、每个文本字段 2000 字符、结论原文 8000 字符。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
 5. **评审方式可配置未做**(`goal-and-requirements.md` 的"Reviewer 子 Agent 一次评审,或人工逐行评审"):需要设置项 + 一条"步骤提交后自动评审"的触发路径,属于新的产品面,未在 W12 授权范围内。结论也不持久化。
 
-**验证**(合入前实测):
+**验证**(合入前与 `git merge main`(W6)之后各跑一遍,数字相同):
 
 - `dotnet build Forge.slnx` → 0 警告 0 错误(含 Native AOT 分析器)。
-- `Forge.Core.Tests --filter "Review|AgentCatalog"` → 84 通过;`--filter "Tools|Agents"` → 819 通过。
-- `Forge.App.Tests --filter "ReviewChangeSetSource"` → 12 通过;`--filter "Forge.App.Tests.Git"` → 408 通过;`--filter "Localization|MinorRegression"` → 131 通过。
-- `Forge.Workspace.Tests --filter "Git"` → 1006 通过(`EmptyTreeSha` 提高可见性那一行)。
-- 未跑全量 `dotnet test`(按仓库约定,全量混着与本次无关的偶发失败);只跑与改动落点相关的过滤。
+- `Forge.Core.Tests --filter "Tools|Agents"` → 825 通过;`--filter "Review|AgentCatalog"` → 90 通过。
+- `Forge.App.Tests --filter "Forge.App.Tests.Git"` → 413 通过;`--filter "Localization|MinorRegression|ReviewChangeSetSource|Settings"` → 340 通过(前三项是仓库硬门槛,`Settings` 是因为 W6 刚改过 `SessionRuntime`/`ToolCatalog`/`AppComposition`)。
+- `Forge.Workspace.Tests --filter "Git"` → 1006 通过(`EmptyTreeSha` 提高可见性 + 新增 `GetDiffSnapshotAsync`);这一条在合并 W6 前跑,`Forge.Workspace` 没有被 W6 改过。
+- 未跑全量 `dotnet test`(按仓库约定,全量混着与本次无关的偶发失败);只跑与改动落点相关的过滤。渲染样例人工核对过一次(评审包的段落与空行可读,收窄与截断信息自述)。
 
 **测试 Agent 拉出来的四个真问题(已改)**——它们不是测试补丁,而是实现缺陷:
 
