@@ -551,6 +551,10 @@ public sealed class McpServerManager : IAsyncDisposable
             ToolsChanged?.Invoke();
             await DisposeClientAsync(client).ConfigureAwait(false);
 
+            // The transport is about to be recycled, and a failed start is exactly when its stderr explains why.
+            CaptureStderr(server);
+            RaiseState(server);
+
             await RecycleTransportAsync(server).ConfigureAwait(false);
 
             if (!server.IntentionalStop)
@@ -617,12 +621,37 @@ public sealed class McpServerManager : IAsyncDisposable
             }
         }
 
+        CaptureStderr(server);
+
         if (server.Transport is { IsConnected: true })
         {
             await StopTransportAsync(server).ConfigureAwait(false);
         }
 
         ToolsChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Keeps the tail of a stdio server's stderr on the managed server, so it outlives the transport that produced it: the state
+    /// of a server that failed to start would otherwise lose the one line explaining why before the page could read it.
+    /// </summary>
+    private void CaptureStderr(ManagedServer server)
+    {
+        if (server.Transport is not StdioTransport stdio)
+        {
+            return;
+        }
+
+        var tail = stdio.StderrTail;
+        if (string.IsNullOrEmpty(tail))
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            server.LastStderr = tail;
+        }
     }
 
     /// <summary>Stops the transport so a stdio child cannot outlive the detach; it stays reusable for the next connect.</summary>
@@ -934,7 +963,7 @@ public sealed class McpServerManager : IAsyncDisposable
 
     private McpServerState StateOf(ManagedServer server)
     {
-        var stderr = (server.Transport as StdioTransport)?.StderrTail;
+        var stderr = (server.Transport as StdioTransport)?.StderrTail ?? server.LastStderr;
         return new McpServerState(
             server.Config.Name,
             server.Status,
@@ -984,5 +1013,8 @@ public sealed class McpServerManager : IAsyncDisposable
         public IMcpTransport? Transport;
         public McpToolAdapter[] Tools = [];
         public CancellationTokenSource? Reconnect;
+
+        /// <summary>The last stdio stderr tail seen, kept after the transport is gone (see <see cref="CaptureStderr"/>).</summary>
+        public string? LastStderr;
     }
 }
