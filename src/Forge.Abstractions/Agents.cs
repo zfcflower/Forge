@@ -44,6 +44,13 @@ public sealed record AgentNotice(string AgentId, string Text) : AgentEvent(Agent
 /// provider's own meter, which is what tells the user a window is filling <em>before</em> a request is refused.
 /// </summary>
 public sealed record AgentRateLimitUpdated(string AgentId, ProviderRateLimit RateLimit) : AgentEvent(AgentId);
+
+/// <summary>
+/// The turn's next request is waiting on the provider's local rate-limit budget before it can be sent. Informational: shown
+/// as a quiet line on the running turn, never an error; not persisted, and unlike <see cref="AgentRateLimitUpdated"/> it
+/// describes the local budget, not the account's spending windows.
+/// </summary>
+public sealed record AgentBudgetWait(string AgentId, string ProviderId, TimeSpan Wait) : AgentEvent(AgentId);
 public sealed record AgentFailed(string AgentId, string Error) : AgentEvent(AgentId);
 
 /// <summary>Lifecycle of one sub-agent run as shown to the user; terminal values never change again for that run.</summary>

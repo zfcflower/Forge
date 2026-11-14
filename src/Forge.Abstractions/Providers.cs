@@ -60,6 +60,13 @@ public sealed record ToolCallStarted(string Id, string Name) : ChatStreamEvent;
 public sealed record ToolCallArgumentsDelta(string Id, string Json) : ChatStreamEvent;
 
 /// <summary>
+/// The provider is about to sleep out a local rate-limit wait before an attempt can be sent. Yielded before the sleep, so a
+/// consumer can tell the user why the turn is quiet; not an error, and never emitted for the server-driven backoff between
+/// failed attempts (a retry is another request, not a wait the user can act on).
+/// </summary>
+public sealed record BudgetWait(TimeSpan Wait) : ChatStreamEvent;
+
+/// <summary>
 /// The turn's last stream event. <see cref="RateLimit"/> is the provider's own account-usage reading, when the protocol
 /// returned one with this response (Anthropic's <c>anthropic-ratelimit-unified-*</c> headers); null means the provider has
 /// no such meter, not that the account is unlimited.
