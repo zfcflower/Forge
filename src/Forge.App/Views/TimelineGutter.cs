@@ -5,6 +5,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Localization;
 using Forge.App.ViewModels;
@@ -81,6 +82,8 @@ internal sealed class TimelineGutter : TemplatedControl
     private TurnCardViewModel? turn;
     private bool attached;
     private bool hooked;
+    private bool retryScheduled;
+    private int placementRetries;
 
     public TimelineNodeKind Kind
     {
@@ -252,6 +255,8 @@ internal sealed class TimelineGutter : TemplatedControl
         }
 
         hooked = false;
+        retryScheduled = false;
+        placementRetries = 0;
         UnsubscribeCollections();
         turn = null;
         TreeMotion.Changed -= OnMotionChanged;
@@ -285,6 +290,28 @@ internal sealed class TimelineGutter : TemplatedControl
 
     private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => Recompute();
 
+    /// <summary>Queues one retry for a row whose container was not readable yet; at most <see cref="MaxPlacementRetries"/> per attach.</summary>
+    private void SchedulePlacementRetry()
+    {
+        if (retryScheduled || placementRetries >= MaxPlacementRetries)
+        {
+            return;
+        }
+
+        retryScheduled = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                retryScheduled = false;
+                placementRetries++;
+                Recompute();
+            },
+            DispatcherPriority.Background);
+    }
+
+    /// <summary>How often one attach waits for its container before giving up; the fallback is only a last resort.</summary>
+    private const int MaxPlacementRetries = 3;
+
     private void OnTurnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(TurnCardViewModel.IsExpanded) or nameof(TurnCardViewModel.HasFootnote))
@@ -311,6 +338,17 @@ internal sealed class TimelineGutter : TemplatedControl
             // container): resolve once more and re-subscribe before falling back to "node with no line".
             ResolvePlacement();
             Subscribe();
+            if (owner is null || container is null || owner.IndexFromContainer(container) < 0)
+            {
+                // A virtualizing panel realizes the container during its own layout pass, after this control attached; the
+                // generator mapping may only be readable once that pass is over. Retry on the dispatcher a bounded number of
+                // times so a recycled row never keeps the fallback flags until some unrelated change happens.
+                SchedulePlacementRetry();
+            }
+        }
+        else
+        {
+            placementRetries = 0;
         }
 
         var layout = ComputeLayout();
