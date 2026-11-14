@@ -1,9 +1,9 @@
-using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Forge.Abstractions;
 using Sdk = Forge.Plugin.Sdk;
+using CodeExecutionOptions = Forge.Plugin.Sdk.CodeExecutionOptions;
 
 namespace Forge.HostClient;
 
@@ -38,11 +38,13 @@ internal sealed class RunCodeProxyTool : ITool
         get
         {
             var surface = RunCodeToolSurface.Snapshot(registry.Tools);
-            var fingerprint = RunCodeToolSurface.Fingerprint(surface);
+            var execution = CurrentExecution;
+            var fingerprint = RunCodeToolSurface.Fingerprint(
+                surface, options.DefaultTimeout, options.MaxTimeout, execution);
             var current = Volatile.Read(ref definition);
             if (current is null || fingerprint != definitionFingerprint)
             {
-                current = new ToolDefinition(Name, RunCodeDescription.Build(surface, options), SchemaJson);
+                current = new ToolDefinition(Name, RunCodeDescription.Build(surface, options, execution), SchemaJson);
                 definitionFingerprint = fingerprint;
                 Volatile.Write(ref definition, current);
             }
@@ -53,24 +55,36 @@ internal sealed class RunCodeProxyTool : ITool
 
     public ToolSideEffect SideEffect => ToolSideEffect.Execute;
 
+    /// <summary>The bounds in force right now: the live provider when one is configured, else the fixed options.
+    /// Read once per description build and once per invocation, so a settings change reaches the next turn's prompt
+    /// and every later script without rebuilding the tool.</summary>
+    private CodeExecutionOptions CurrentExecution =>
+        options.ExecutionProvider?.Invoke() ?? options.Execution;
+
     public async ValueTask<ToolResult> InvokeAsync(ToolCall call, ToolContext context, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(context);
         ct.ThrowIfCancellationRequested();
 
-        if (!TryParseArguments(call.ArgumentsJson, out var code, out var timeout, out var argumentError))
+        var execution = CurrentExecution;
+        if (!TryParseArguments(call.ArgumentsJson, execution, out var code, out var timeout, out var argumentError))
         {
             return new ToolResult(argumentError, IsError: true);
         }
 
         var declarations = RunCodeToolSurface.Declarations(RunCodeToolSurface.Snapshot(registry.Tools));
         return await client
-            .InvokeCodeAsync(registry, options.Execution, code, declarations, timeout, context, ct)
+            .InvokeCodeAsync(registry, execution, code, declarations, timeout, context, ct)
             .ConfigureAwait(false);
     }
 
-    private bool TryParseArguments(string argumentsJson, out string code, out TimeSpan timeout, out string error)
+    private bool TryParseArguments(
+        string argumentsJson,
+        CodeExecutionOptions execution,
+        out string code,
+        out TimeSpan timeout,
+        out string error)
     {
         code = string.Empty;
         timeout = options.DefaultTimeout;
@@ -115,9 +129,9 @@ internal sealed class RunCodeProxyTool : ITool
                 return false;
             }
 
-            if (code.Length > options.Execution.MaxScriptChars)
+            if (code.Length > execution.MaxScriptChars)
             {
-                error = $"The script is {code.Length} chars; the limit is {options.Execution.MaxScriptChars}.";
+                error = $"The script is {code.Length} chars; the limit is {execution.MaxScriptChars}.";
                 return false;
             }
 
@@ -194,11 +208,13 @@ internal static class RunCodeToolSurface
         return entries;
     }
 
-    /// <summary>Content hash of a snapshot. It covers every field the description depends on and nothing else, so a
-    /// description is rebuilt exactly when the callable surface actually changes - not when a tool object is replaced
-    /// by an equal one, and not when a proxy is added to or removed from the registry.</summary>
-    internal static int Fingerprint(List<RunCodeToolEntry> surface)
+    /// <summary>Content hash of a snapshot plus the budgets the description states. It covers every field the description
+    /// depends on and nothing else, so a description is rebuilt exactly when the callable surface or one of the stated
+    /// numbers actually changes - not when a tool object is replaced by an equal one, and not when a proxy is added to or
+    /// removed from the registry.</summary>
+    internal static int Fingerprint(List<RunCodeToolEntry> surface, TimeSpan defaultTimeout, TimeSpan maxTimeout, CodeExecutionOptions execution)
     {
+        ArgumentNullException.ThrowIfNull(execution);
         var hash = new HashCode();
         foreach (var entry in surface)
         {
@@ -208,6 +224,13 @@ internal static class RunCodeToolSurface
             hash.Add((int)entry.SideEffect);
         }
 
+        hash.Add(defaultTimeout);
+        hash.Add(maxTimeout);
+        hash.Add(execution.MaxConcurrentToolCalls);
+        hash.Add(execution.MaxResultChars);
+        hash.Add(execution.MaxInnerResultChars);
+        hash.Add(execution.MaxLogChars);
+        hash.Add(execution.MaxScriptChars);
         return hash.ToHashCode();
     }
 
@@ -233,17 +256,23 @@ internal static class RunCodeToolSurface
     }
 }
 
-/// <summary>Builds <c>run_code</c>'s description: the script surface, the enforced budgets, and every callable tool
-/// with its side effect and input schema. Output is ordinal-sorted and depends only on the registry and options.</summary>
+/// <summary>Builds <c>run_code</c>'s description: the script surface, the enforced budgets and the names of the callable
+/// tools. A tool's description and argument schema are deliberately <b>not</b> inlined: the model asks the script for them
+/// through <c>Tools.Describe</c>, so a turn pays for one tool definition instead of one line plus one JSON schema per
+/// callable tool. Output is ordinal-sorted and depends only on the registry and the budgets.</summary>
 internal static class RunCodeDescription
 {
-    private const int OneLineChars = 220;
+    /// <summary>Width the tool-name line wraps at; the description is one line per turn of the prompt either way, and a
+    /// wrapped list stays scannable in a client that renders it flat.</summary>
+    private const int NamesLineWidth = 96;
 
     private static readonly (string Form, string Meaning)[] Surface =
     [
         ("""await Tools.Call("tool_name", new { arg = 1 })""", "tool result text; throws ToolCallException when the call fails or is denied"),
         ("""await Tools.Call<T>("tool_name", new { arg = 1 })""", "result deserialized from JSON into T"),
         ("""await Tools.CallJson("tool_name", "{\"arg\":1}")""", "same as Call, for hand-written JSON"),
+        ("Tools.List()", "names of the tools this script may call"),
+        ("""Tools.Describe("tool_name")""", "one tool's side effect, description and argument schema"),
         ("Tools.Json<T>(jsonText)", "parse JSON text into T"),
         ("Log(value)", "captured and appended to the result"),
         ("Cancellation", "token cancelled when the run times out; call ThrowIfCancellationRequested() in long loops"),
@@ -251,9 +280,10 @@ internal static class RunCodeDescription
 
     private static readonly int SurfaceWidth = WidestForm() + 2;
 
-    public static string Build(List<RunCodeToolEntry> callable, RunCodeProxyOptions options)
+    public static string Build(List<RunCodeToolEntry> callable, RunCodeProxyOptions options, CodeExecutionOptions execution)
     {
-        var text = new StringBuilder(2048 + (callable.Count * 320));
+        ArgumentNullException.ThrowIfNull(execution);
+        var text = new StringBuilder(1024 + (callable.Count * 24));
         text.Append("Runs one C# script in the Extension Host's script worker and returns its value once, so a chain of tool calls costs a single round trip instead of one per call.\n\n");
         text.Append("Script surface:\n");
         foreach (var (form, meaning) in Surface)
@@ -270,38 +300,57 @@ internal static class RunCodeDescription
             .Append(" s, maximum ")
             .Append(Seconds(options.MaxTimeout))
             .Append(" s (send timeout_seconds); at most ")
-            .Append(options.Execution.MaxConcurrentToolCalls.ToString(CultureInfo.InvariantCulture))
+            .Append(execution.MaxConcurrentToolCalls.ToString(CultureInfo.InvariantCulture))
             .Append(" inner calls in flight; inner results are cut at ")
-            .Append(options.Execution.MaxInnerResultChars.ToString(CultureInfo.InvariantCulture))
+            .Append(execution.MaxInnerResultChars.ToString(CultureInfo.InvariantCulture))
             .Append(" chars and the returned result at ")
-            .Append(options.Execution.MaxResultChars.ToString(CultureInfo.InvariantCulture))
+            .Append(execution.MaxResultChars.ToString(CultureInfo.InvariantCulture))
             .Append(" chars (logs at ")
-            .Append(options.Execution.MaxLogChars.ToString(CultureInfo.InvariantCulture))
+            .Append(execution.MaxLogChars.ToString(CultureInfo.InvariantCulture))
             .Append(").\n");
         text.Append("Each script runs in its own worker process with an exclusive slot: a run that exceeds its budget is terminated with that process, and the main program never runs script code itself. That is process separation, not an OS sandbox - same-account file and network access stays possible through the tools you call. run_code cannot be invoked from inside another extension invocation - a script or a plugin callback - and a plugin may not be called back into while it is already on the call chain. Every inner tool call is approval-checked on its own, exactly like a direct call.\n\n");
 
         text.Append("Tools (")
             .Append(callable.Count.ToString(CultureInfo.InvariantCulture))
-            .Append("), sorted by name:\n");
-        foreach (var tool in callable)
+            .Append("), sorted by name; Tools.Describe(\"name\") returns one tool's description and argument schema:\n");
+        AppendNames(text, callable);
+        return text.ToString();
+    }
+
+    /// <summary>The callable names, comma-separated in one wrapped block. Names only: the side effect, description and
+    /// schema of each are one <c>Tools.Describe</c> call away, which is the whole point of the shorter description.</summary>
+    private static void AppendNames(StringBuilder text, List<RunCodeToolEntry> callable)
+    {
+        if (callable.Count == 0)
         {
-            text.Append("  ")
-                .Append(tool.Name)
-                .Append(" [")
-                .Append(tool.SideEffect switch
-                {
-                    ToolSideEffect.ReadOnly => "read-only",
-                    ToolSideEffect.Write => "write",
-                    _ => "execute",
-                })
-                .Append("]: ")
-                .Append(OneLine(tool.Description))
-                .Append(" args=")
-                .Append(Compact(tool.SchemaJson))
-                .Append('\n');
+            text.Append("  (none)\n");
+            return;
         }
 
-        return text.ToString();
+        text.Append("  ");
+        var column = 2;
+        for (var index = 0; index < callable.Count; index++)
+        {
+            var name = callable[index].Name;
+            if (index > 0)
+            {
+                if (column + 2 + name.Length > NamesLineWidth)
+                {
+                    text.Append(",\n  ");
+                    column = 2;
+                }
+                else
+                {
+                    text.Append(", ");
+                    column += 2;
+                }
+            }
+
+            text.Append(name);
+            column += name.Length;
+        }
+
+        text.Append('\n');
     }
 
     private static int WidestForm()
@@ -317,43 +366,6 @@ internal static class RunCodeDescription
 
     private static string Seconds(TimeSpan value) =>
         value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
-
-    private static string OneLine(string description)
-    {
-        if (string.IsNullOrWhiteSpace(description))
-        {
-            return "(no description)";
-        }
-
-        var trimmed = description.AsSpan().TrimStart();
-        var end = trimmed.IndexOf('\n');
-        var line = (end < 0 ? trimmed : trimmed[..end]).Trim();
-        return line.Length <= OneLineChars ? line.ToString() : string.Concat(line[..OneLineChars], "...");
-    }
-
-    private static string Compact(string schemaJson)
-    {
-        if (string.IsNullOrWhiteSpace(schemaJson))
-        {
-            return "{}";
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(schemaJson);
-            var buffer = new ArrayBufferWriter<byte>(schemaJson.Length);
-            using (var writer = new Utf8JsonWriter(buffer))
-            {
-                document.RootElement.WriteTo(writer);
-            }
-
-            return Encoding.UTF8.GetString(buffer.WrittenSpan);
-        }
-        catch (JsonException)
-        {
-            return schemaJson.Trim();
-        }
-    }
 }
 
 /// <summary>Validation of the trusted <c>run_code</c> configuration. Invalid values are rejected when the tool is
@@ -381,7 +393,8 @@ internal static class RunCodeProxyOptionsExtensions
                 nameof(options), options.MaxTimeout, "MaxTimeout must not be shorter than DefaultTimeout.");
         }
 
-        var execution = options.Execution ?? throw new ArgumentNullException(nameof(options), "Execution is required.");
+        var execution = (options.ExecutionProvider?.Invoke() ?? options.Execution)
+            ?? throw new ArgumentNullException(nameof(options), "Execution must not be null.");
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(execution.MaxConcurrentToolCalls, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(execution.MaxScriptChars, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(execution.MaxResultChars, 0);

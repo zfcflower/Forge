@@ -11,6 +11,12 @@ namespace Forge.Scripting;
 /// module resolves no tool in-process and never decides approval. The names a script may call come from this run's
 /// <see cref="ToolDeclaration"/> metadata only, and calls are bounded by a per-run concurrency limit and truncated to
 /// the configured size.
+/// <para>
+/// The same metadata is what a script may read about itself: <see cref="List"/> and <see cref="Describe"/> report the
+/// callable names and one tool's side effect, description and argument schema from this run's declarations. That is why
+/// the <c>run_code</c> tool definition in the model prompt carries no per-tool schema list: a script looks a tool up by
+/// name when it needs it, at no cost to every turn's prompt.
+/// </para>
 /// </summary>
 public sealed class ToolsFacade
 {
@@ -26,7 +32,7 @@ public sealed class ToolsFacade
     };
 
     private readonly IHostFacade host;
-    private readonly HashSet<string> callable;
+    private readonly Dictionary<string, ToolDeclaration> callable;
     private readonly SemaphoreSlim slots;
     private readonly int maxResultChars;
     private readonly CancellationToken ct;
@@ -43,15 +49,64 @@ public sealed class ToolsFacade
         this.ct = ct;
         slots = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
-        callable = new HashSet<string>(tools.Count, StringComparer.Ordinal);
+        callable = new Dictionary<string, ToolDeclaration>(tools.Count, StringComparer.Ordinal);
         foreach (var tool in tools)
         {
             if (!string.Equals(tool.Name, ReservedToolName, StringComparison.Ordinal))
             {
-                callable.Add(tool.Name);
+                callable[tool.Name] = tool;
             }
         }
     }
+
+    /// <summary>The names this script may call, ordinal-sorted. Read-only: it reports this run's declarations and calls nothing.</summary>
+    public IReadOnlyList<string> List()
+    {
+        var names = new string[callable.Count];
+        var index = 0;
+        foreach (var name in callable.Keys)
+        {
+            names[index++] = name;
+        }
+
+        Array.Sort(names, StringComparer.Ordinal);
+        return names;
+    }
+
+    /// <summary>
+    /// One callable tool as text: its name, side effect, full description and argument schema. Calls nothing — the answer
+    /// comes from this run's declaration, so it is stable for the whole run and costs no main-program round trip.
+    /// </summary>
+    /// <exception cref="ToolCallException">The name is not callable in this run.</exception>
+    public string Describe(string toolName)
+    {
+        ArgumentNullException.ThrowIfNull(toolName);
+        if (!callable.TryGetValue(toolName, out var tool))
+        {
+            throw new ToolCallException(
+                toolName,
+                $"Unknown tool '{toolName}'. Available tools: {AvailableNames()}.");
+        }
+
+        var schema = string.IsNullOrWhiteSpace(tool.InputSchemaJson) ? "{}" : tool.InputSchemaJson.Trim();
+        var description = string.IsNullOrWhiteSpace(tool.Description) ? "(no description)" : tool.Description.Trim();
+        return new StringBuilder(description.Length + schema.Length + 64)
+            .Append(tool.Name)
+            .Append(" [")
+            .Append(SideEffectToken(tool.SideEffect))
+            .Append("] ")
+            .Append(description)
+            .Append("\nargs=")
+            .Append(schema)
+            .ToString();
+    }
+
+    private static string SideEffectToken(ToolSideEffect sideEffect) => sideEffect switch
+    {
+        ToolSideEffect.ReadOnly => "read-only",
+        ToolSideEffect.Write => "write",
+        _ => "execute",
+    };
 
     public Task<string> Call(string toolName) => CallJson(toolName, "{}");
 
@@ -82,7 +137,7 @@ public sealed class ToolsFacade
                 denied: true);
         }
 
-        if (!callable.Contains(toolName))
+        if (!callable.ContainsKey(toolName))
         {
             throw new ToolCallException(
                 toolName,
@@ -185,8 +240,7 @@ public sealed class ToolsFacade
     private string AvailableNames()
     {
         var names = new StringBuilder(128);
-        var sorted = new List<string>(callable);
-        sorted.Sort(StringComparer.Ordinal);
+        var sorted = List();
         var shown = 0;
         foreach (var name in sorted)
         {

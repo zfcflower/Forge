@@ -42,6 +42,8 @@ Extension Host 的动态 C# 插件编译/缓存/加载层,以及 `run_code` 的�
 
 **内层调用。** `Tools.Call`/`Call<T>`/`CallJson`/`CallJson<T>`/`Json<T>` 只把 JSON 参数交给 `IHostFacade.CallToolAsync`;按 `request.Tools` 拒绝未知工具并列出可用名(排除 `run_code`),`run_code` 自身永久拒绝(`Denied=true`,不递归)。主程序的拒绝以 `IsError` 结果文本返回并转成可捕获的 `ToolCallException`;host 调用失败(非取消)同样包装。每次运行一个 `SemaphoreSlim` 限并发,内层结果按 `MaxInnerResultChars` 截断。泛型反射解码只在此 JIT 进程内,不进 HostClient。
 
+**脚本自述面(W14)。** `Tools.List()` 返回本次运行可调用的名字(序数排序);`Tools.Describe(name)` 返回该名字的副作用、完整描述与参数 schema,未知名字抛 `ToolCallException`。两者都只读本次运行的 `ToolDeclaration` 元数据:不发 IPC、不解析工具、不改变可调用集合。**这也是模型提示里不再逐工具列描述与 schema 的前提**——脚本要细节时自己问一句,而每回合的提示只付一份 `run_code` 定义。
+
 **运行期校验。** 每个 `CodeExecutionOptions`、超时(>0)、`request.Tools`(列表不能为 null,允许空列表供纯计算脚本使用;名字非空、副作用枚举已定义)在入口校验,非法即抛(宿主/调用方配置错误);空脚本与超长脚本以错误结果返回而不抛。模型可见的 run_code 描述由主程序代理维护,见 `forge-host-client`;脚本引擎不维护另一份对外描述。
 
 ## 验证约定
