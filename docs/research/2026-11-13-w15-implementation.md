@@ -116,7 +116,8 @@
 
 - **Core**:`ProviderRateLimitLimits(int? RequestsPerMinute, int? TokensPerMinute)` 与 `ProviderRateLimitPolicy.Overrides`;`LimitsFor(providerId)` 给出该提供商的生效值(缺的维度继承全局,0 = 不限),`Normalized()` 把负数夹成 0 并去掉"什么都没写"的条目。`ProviderRateLimiter` 建桶与 `Publish` 重配都走 `LimitsFor`,所以覆盖出现、改变、清除都在下一次请求生效;跳过某一维度的判断也用它,覆盖里的 0 才真的读作"这家不限"。
 - **App**:`preferences.rateLimitOverrides`(归一化条目 `id|requests|tokens`,空字段 = 继承,按 id 排序,超范围夹取而不是丢弃——手写的"十亿"是想要一个上限,不是想要默认值)、`RateLimitOverrideFor`/`SetRateLimitOverride`;分区里一张按 `composition.Providers.Catalog` 重建的提供商表(`RateLimitOverrideRowViewModel`,两个可空 `NumericUpDown`,留空 = 继承,清空两格 = 删掉条目);`RateLimitComposition.Publish` 把条目投成策略里的覆盖。
-- **测试**:Core 5 个(只影响该 provider、0 = 不限、单维覆盖另一维继承、清除后回到全局、归一化丢空条目),App 6 个(归一化与读回、增删只动该 provider、持久化往返、表按活目录重建且行写穿、headless 渲染含空状态、策略携带覆盖)。
+- **测试**:Core 6 个(只影响该 provider、0 = 不限、单维覆盖另一维继承、清除后回到全局、归一化丢空条目、**响应头优先于手填覆盖**),App 7 个(归一化与读回、增删只动该 provider、持久化往返、表按活目录重建且行写穿、headless 渲染含空状态、策略携带覆盖、**已移除提供商的残留条目可清除**)。
+- **增量评审**(同一位 `glm-5.3` high,`Approve`)提的两条非阻塞项已处理:补“响应头优先于覆盖”的用例;删掉分区 VM 里没人调用的 `ClearOverrides()`。评审也指出残留条目“不可见、不可编辑、同 id 重连会静默继承”,于是补了 `ClearUnusedCommand` + “清除已移除提供商的限度”按钮(与 `models-visibility` 的“显示全部”同一理由:不可见的偏好也要有出口),并钉了用例。
 
 ## 七、验证
 

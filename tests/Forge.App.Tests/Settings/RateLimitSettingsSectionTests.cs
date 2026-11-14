@@ -290,6 +290,34 @@ public sealed class RateLimitSettingsSectionTests
         Assert.Single(section.Rows);
     }
 
+    [Fact]
+    public void The_entries_of_removed_providers_are_removable_even_though_they_have_no_row()
+    {
+        var preferences = new AppPreferences();
+        preferences.SetRateLimitOverride("kept", 20, null);
+        preferences.SetRateLimitOverride("gone", null, 900_000);
+        IReadOnlyList<(string Id, string Name)> providers = [("kept", "Kept")];
+        var section = new RateLimitSettingsSectionViewModel(preferences, () => providers);
+        section.Reload();
+
+        // Only the connected provider has a row, so the entry of the removed one cannot be edited from the table - it is invisible,
+        // and it would silently come back if a provider was added under that id again.
+        Assert.Single(section.Rows);
+        Assert.True(section.HasUnusedOverrides);
+        Assert.True(section.ClearUnusedCommand.CanExecute(null));
+
+        section.ClearUnusedCommand.Execute(null);
+
+        Assert.Equal(["kept|20|"], preferences.RateLimitOverrides);
+        Assert.False(section.HasUnusedOverrides);
+        Assert.False(section.ClearUnusedCommand.CanExecute(null));
+
+        // A catalogue that still lists the provider says there is nothing unused: the button is for orphans only.
+        var all = new RateLimitSettingsSectionViewModel(new AppPreferences(), () => providers);
+        all.Reload();
+        Assert.False(all.HasUnusedOverrides);
+    }
+
     private static AppPreferences RoundTrip(AppPreferences source)
     {
         var json = JsonSerializer.Serialize(source.ToSection(), PreferencesJsonContext.Default.PreferencesSection);

@@ -30,6 +30,7 @@ internal static class RateLimitStrings
     public const string SettingsTokensColumnKey = "rateLimit.settings.tokensColumn";
     public const string SettingsInheritHintKey = "rateLimit.settings.inheritHint";
     public const string SettingsNoProvidersKey = "rateLimit.settings.noProviders";
+    public const string SettingsClearUnusedKey = "rateLimit.settings.clearUnused";
 
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
@@ -66,6 +67,8 @@ internal static class RateLimitStrings
     public static string SettingsInheritHint => Loc.Instance[SettingsInheritHintKey];
 
     public static string SettingsNoProviders => Loc.Instance[SettingsNoProvidersKey];
+
+    public static string SettingsClearUnused => Loc.Instance[SettingsClearUnusedKey];
 
     internal static void Register()
     {
@@ -110,5 +113,9 @@ internal static class RateLimitStrings
             SettingsNoProvidersKey,
             "还没有连接提供商，所以没有可以单独设限度的对象。",
             "No provider is connected yet, so there is nothing to give its own ceilings to.");
+        Loc.Register(
+            SettingsClearUnusedKey,
+            "清除已移除提供商的限度",
+            "Clear ceilings of removed providers");
     }
 }

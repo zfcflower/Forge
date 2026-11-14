@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
@@ -101,6 +102,9 @@ internal sealed class RateLimitSettingsSectionViewModel : ObservableObject, IRel
     private readonly AppPreferences preferences;
     private readonly Func<IReadOnlyList<(string Id, string Name)>>? providers;
 
+    /// <summary>The provider ids in the last <see cref="Reload()"/>; the table's universe when deciding what is unused.</summary>
+    private readonly HashSet<string> connected = new(StringComparer.Ordinal);
+
     public RateLimitSettingsSectionViewModel(
         AppPreferences preferences,
         Func<IReadOnlyList<(string Id, string Name)>>? providers = null)
@@ -108,7 +112,11 @@ internal sealed class RateLimitSettingsSectionViewModel : ObservableObject, IRel
         ArgumentNullException.ThrowIfNull(preferences);
         this.preferences = preferences;
         this.providers = providers;
+        ClearUnusedCommand = new RelayCommand(ClearUnused, () => HasUnusedOverrides);
+        preferences.PropertyChanged += OnPreferencesChanged;
     }
+
+    /// <summary>Bumps when a value the section publishes changes, so the page can republish without listening itself.</summary>
 
     /// <summary>Whether the local budget is enforced; off makes the limiter authorize every request without arithmetic, from the next one.</summary>
     public bool Enabled
@@ -172,6 +180,36 @@ internal sealed class RateLimitSettingsSectionViewModel : ObservableObject, IRel
         }
     }
 
+    /// <summary>
+    /// Removes the entries of providers that are no longer connected. They have no row to clear them from (the table lists the
+    /// live catalogue), so this is the one way to take them out - the same escape hatch the model list offers for a model that
+    /// left the catalogue. Kept in the file otherwise: a provider re-added under the same id gets its ceilings back.
+    /// </summary>
+    public RelayCommand ClearUnusedCommand { get; }
+
+    /// <summary>Label of <see cref="ClearUnusedCommand"/>; the button only exists when there is something to remove.</summary>
+    public string ClearUnusedText => RateLimitStrings.SettingsClearUnused;
+
+    /// <summary>
+    /// True when the stored entries name providers that are no longer connected. An unused entry is not harmless: it is invisible
+    /// here, it cannot be edited, and a provider later added under the same id would silently inherit it.
+    /// </summary>
+    public bool HasUnusedOverrides
+    {
+        get
+        {
+            foreach (var entry in preferences.RateLimitOverrides)
+            {
+                if (!connected.Contains(ProviderIdOf(entry)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     /// <summary>One row per connected provider, in catalogue order; empty when no provider is connected.</summary>
     public ObservableCollection<RateLimitOverrideRowViewModel> Rows { get; } = [];
 
@@ -182,15 +220,48 @@ internal sealed class RateLimitSettingsSectionViewModel : ObservableObject, IRel
     public void Reload()
     {
         Rows.Clear();
+        connected.Clear();
         if (providers is not null)
         {
             foreach (var (id, name) in providers())
             {
+                connected.Add(id);
                 Rows.Add(new RateLimitOverrideRowViewModel(id, name, preferences));
             }
         }
 
         OnPropertyChanged(nameof(HasProviders));
+        RaiseUnused();
+    }
+
+    /// <summary>The provider id of a stored entry (<c>id|requests|tokens</c>); the first field, which the preference layer normalized.</summary>
+    private static string ProviderIdOf(string entry)
+    {
+        var separator = entry.IndexOf(AppPreferences.RateLimitOverrideSeparator, StringComparison.Ordinal);
+        return separator < 0 ? entry : entry[..separator];
+    }
+
+    /// <summary>Drops the entries of providers the catalogue no longer has; rows and live entries are untouched.</summary>
+    private void ClearUnused()
+    {
+        preferences.RateLimitOverrides =
+        [
+            .. preferences.RateLimitOverrides.Where(entry => connected.Contains(ProviderIdOf(entry))),
+        ];
+    }
+
+    private void OnPreferencesChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.Equals(e.PropertyName, nameof(AppPreferences.RateLimitOverrides), StringComparison.Ordinal))
+        {
+            RaiseUnused();
+        }
+    }
+
+    private void RaiseUnused()
+    {
+        OnPropertyChanged(nameof(HasUnusedOverrides));
+        ClearUnusedCommand.NotifyCanExecuteChanged();
     }
 
     public string OverridesHeading => RateLimitStrings.SettingsOverrides;

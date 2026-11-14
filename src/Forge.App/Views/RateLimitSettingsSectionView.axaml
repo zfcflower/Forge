@@ -97,6 +97,12 @@
                    TextWrapping="Wrap"
                    IsVisible="{Binding !HasProviders}"
                    Text="{Binding NoProviders}" />
+        <!-- The escape hatch for entries whose provider is gone: they have no row to clear them from. -->
+        <Button HorizontalAlignment="Left"
+                IsVisible="{Binding HasUnusedOverrides}"
+                Command="{Binding ClearUnusedCommand}"
+                Content="{Binding ClearUnusedText}"
+                AutomationProperties.AutomationId="rate-limit-clear-unused" />
         <ItemsControl ItemsSource="{Binding Rows}"
                       IsVisible="{Binding HasProviders}">
           <ItemsControl.ItemTemplate>
