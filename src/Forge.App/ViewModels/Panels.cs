@@ -1742,25 +1742,8 @@ internal sealed class TodoGroupViewModel : NotifyingObject
     public RelayCommand ToggleCommand { get; }
 
     /// <summary>All done, else one in progress, else one paused, else pending; an empty group is pending.</summary>
-    internal static TodoStatus DeriveStatus(IReadOnlyList<TodoRowViewModel> steps)
-    {
-        if (steps.Count == 0)
-        {
-            return TodoStatus.Pending;
-        }
-
-        if (steps.All(static step => step.IsDone))
-        {
-            return TodoStatus.Done;
-        }
-
-        if (steps.Any(static step => step.IsInProgress))
-        {
-            return TodoStatus.InProgress;
-        }
-
-        return steps.Any(static step => step.IsPaused) ? TodoStatus.Paused : TodoStatus.Pending;
-    }
+    internal static TodoStatus DeriveStatus(IReadOnlyList<TodoRowViewModel> steps) =>
+        TodoStatusRule.Derive(steps, static step => step.Status);
 
     /// <summary>Re-reads the texts that follow the interface language (the panel calls this on a language switch).</summary>
     internal void RefreshTexts()

@@ -12,7 +12,7 @@ namespace Forge.Core.Storage;
 internal static class StorageSchema
 {
     /// <summary>Schema version this build writes and reads.</summary>
-    public const int Version = 10;
+    public const int Version = 11;
 
     public const string StatusActive = "Active";
     public const string StatusArchived = "Archived";
@@ -168,6 +168,7 @@ internal static class StorageSchema
         ("ui_state", ["key"], ["updated_at"]),
         ("turn_checkpoints", ["session_id", "turn"], ["started_at", "ended_at"]),
         ("plan_summaries", ["session_id"], ["updated_at"]),
+        ("plan_summary_revisions", ["id"], ["replaced_at"]),
         ("todo_groups", ["id"], ["updated_at"]),
         ("storage_notices", ["id"], ["created_at", "acknowledged_at"]),
         ("automation_runs", ["id"], ["started_at", "ended_at", "resume_at"]),
@@ -291,6 +292,9 @@ internal static class StorageSchema
                 break;
             case 9:
                 await MigrateToV10Async(connection, transaction, ct).ConfigureAwait(false);
+                break;
+            case 10:
+                await MigrateToV11Async(connection, transaction, ct).ConfigureAwait(false);
                 break;
             default:
                 throw new InvalidOperationException($"No migration from schema {current.ToString(CultureInfo.InvariantCulture)}.");
@@ -553,6 +557,21 @@ internal static class StorageSchema
         await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The v11 step, plan history: the <c>plan_summary_revisions</c> table - one row per replaced plan summary text - and
+    /// the index that lists a session's revisions newest first. Nothing is backfilled: a plan summary written before this
+    /// version has no history, so its current text stays the only version. The timestamp guards are installed once more so
+    /// the new table's <c>replaced_at</c> is covered.
+    /// </summary>
+    private static async Task MigrateToV11Async(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        await ExecuteAsync(connection, transaction, V11SchemaSql, ct).ConfigureAwait(false);
+        await InstallTimestampGuardsAsync(connection, transaction, ct).ConfigureAwait(false);
+    }
+
     private const string V10SchemaSql = """
         CREATE TABLE IF NOT EXISTS automation_runs (
             id                 TEXT PRIMARY KEY,
@@ -585,6 +604,16 @@ internal static class StorageSchema
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        """;
+
+    private const string V11SchemaSql = """
+        CREATE TABLE IF NOT EXISTS plan_summary_revisions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT NOT NULL,
+            text        TEXT NOT NULL,
+            replaced_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_plan_summary_revisions_session ON plan_summary_revisions (session_id, id DESC);
         """;
 
     /// <summary>The key of a stored row; a path <see cref="Path.GetFullPath(string)"/> refuses keeps its raw text so the step never fails on it.</summary>
