@@ -89,6 +89,21 @@ public sealed class TimelineStringsTests
         AssertRegistered(TimelineStrings.StateWarning);
     }
 
+    // The only way to reach the warning state is a denied approval, so the word must say that, not "needs attention".
+    [Fact]
+    public void A_denied_approval_reads_as_denied_in_both_languages()
+    {
+        using (new LanguageScope(UiLanguage.English))
+        {
+            Assert.Equal("Approval, denied", TimelineStrings.Describe(TimelineNodeKind.Approval, TimelineNodeState.Warning));
+        }
+
+        using (new LanguageScope(UiLanguage.Chinese))
+        {
+            Assert.Contains("已拒绝", TimelineStrings.Describe(TimelineNodeKind.Approval, TimelineNodeState.Warning));
+        }
+    }
+
     /// <summary>A registered key resolves in both languages, is never the missing-key bracket form, and differs per language.</summary>
     private static void AssertRegistered(string key)
     {

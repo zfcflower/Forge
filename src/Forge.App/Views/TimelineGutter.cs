@@ -59,7 +59,10 @@ internal sealed class TimelineGutter : TemplatedControl
     public static readonly StyledProperty<bool> IsFailingProperty =
         AvaloniaProperty.Register<TimelineGutter, bool>(nameof(IsFailing));
 
-    /// <summary>Whether this row draws its node; the turn header does not, and neither does a row whose node is off-screen by position.</summary>
+    /// <summary>
+    /// Whether this row draws its node. The turn header does not, except when it is the end node of a turn that has nothing
+    /// visible of its own (see <see cref="TimelineLayout.TurnHeader"/>); every other row always does.
+    /// </summary>
     public static readonly StyledProperty<bool> ShowNodeProperty =
         AvaloniaProperty.Register<TimelineGutter, bool>(nameof(ShowNode), true);
 
@@ -84,6 +87,9 @@ internal sealed class TimelineGutter : TemplatedControl
     private bool hooked;
     private bool retryScheduled;
     private int placementRetries;
+    private int placementGeneration;
+    private (TimelineNodeKind Kind, TimelineNodeState State, bool ShowNode)? appliedNode;
+    private (TimelineNodeKind Kind, TimelineNodeState State, bool ShowNode)? appliedName;
 
     public TimelineNodeKind Kind
     {
@@ -133,7 +139,10 @@ internal sealed class TimelineGutter : TemplatedControl
         private set => SetValue(ShowBottomLineProperty, value);
     }
 
-    /// <summary>The node's readable name for the current language; empty for the node-less turn header.</summary>
+    /// <summary>How many placement retries the current attach has used (bounded by <c>MaxPlacementRetries</c>); a test hook.</summary>
+    internal int PlacementRetriesUsed => placementRetries;
+
+    /// <summary>The node's readable name for the current language; empty while the row draws no node.</summary>
     internal string NodeName => AutomationProperties.GetName(this) ?? string.Empty;
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
@@ -141,6 +150,8 @@ internal sealed class TimelineGutter : TemplatedControl
         base.OnApplyTemplate(e);
         icon = e.NameScope.Find<FluentIcon>("PART_Icon");
         middleLine = e.NameScope.Find<Border>("PART_MidLine");
+        appliedNode = null;
+        appliedName = null;
         Recompute();
     }
 
@@ -190,6 +201,11 @@ internal sealed class TimelineGutter : TemplatedControl
         }
 
         hooked = true;
+
+        // The motion gate and the language may have changed while this control was detached (and so unsubscribed), so the
+        // first apply after an attach is never skipped.
+        appliedNode = null;
+        appliedName = null;
         ResolvePlacement();
         Subscribe();
         TreeMotion.Changed += OnMotionChanged;
@@ -255,6 +271,7 @@ internal sealed class TimelineGutter : TemplatedControl
         }
 
         hooked = false;
+        placementGeneration++;
         retryScheduled = false;
         placementRetries = 0;
         UnsubscribeCollections();
@@ -288,7 +305,51 @@ internal sealed class TimelineGutter : TemplatedControl
         }
     }
 
-    private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => Recompute();
+    /// <summary>
+    /// A collection this row watches changed. The common case, an append at the end, only moves the collection's previous
+    /// last row (its bottom line starts to continue); every other row would recompute to the same flags, so it skips.
+    /// For the turn's block list (watched by the header and footnote rows) only the first block matters, because those rows
+    /// ask just "is there any visible block". Every other change (insert, remove, replace, move, reset) recomputes.
+    /// </summary>
+    private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Add
+            && e.NewItems is { Count: > 0 } added
+            && sender is System.Collections.ICollection collection
+            && e.NewStartingIndex >= 0
+            && e.NewStartingIndex + added.Count == collection.Count
+            && !AppendAffectsThisRow(sender, e.NewStartingIndex))
+        {
+            return;
+        }
+
+        Recompute();
+    }
+
+    private bool AppendAffectsThisRow(object? sender, int firstNewIndex)
+    {
+        int position;
+        if (ReferenceEquals(sender, ownerItems) && owner is not null && container is not null)
+        {
+            position = owner.IndexFromContainer(container);
+        }
+        else if (ReferenceEquals(sender, outerItems) && outer is not null && outerContainer is not null)
+        {
+            position = outer.IndexFromContainer(outerContainer);
+        }
+        else if (turn is not null && ReferenceEquals(sender, turn.Blocks))
+        {
+            // The header and footnote rows read only whether any block is visible: the first block flips it.
+            return firstNewIndex == 0;
+        }
+        else
+        {
+            return true;
+        }
+
+        // An unresolved row (position < 0) must recompute so it can resolve and retry; the old last row moves by one.
+        return position < 0 || position == firstNewIndex - 1;
+    }
 
     /// <summary>Queues one retry for a row whose container was not readable yet; at most <see cref="MaxPlacementRetries"/> per attach.</summary>
     private void SchedulePlacementRetry()
@@ -299,9 +360,16 @@ internal sealed class TimelineGutter : TemplatedControl
         }
 
         retryScheduled = true;
+        var generation = placementGeneration;
         Dispatcher.UIThread.Post(
             () =>
             {
+                // Unhook cannot cancel a posted callback: a callback queued by an earlier attach must not touch this one.
+                if (generation != placementGeneration)
+                {
+                    return;
+                }
+
                 retryScheduled = false;
                 placementRetries++;
                 Recompute();
@@ -320,25 +388,31 @@ internal sealed class TimelineGutter : TemplatedControl
         }
     }
 
-    private void OnMotionChanged(object? sender, EventArgs e) => ApplyNode();
+    private void OnMotionChanged(object? sender, EventArgs e) => ApplyNode(force: true);
 
-    private void OnLanguageChanged(object? sender, EventArgs e) => ApplyName();
+    private void OnLanguageChanged(object? sender, EventArgs e) => ApplyName(force: true);
+
+    /// <summary>How many times any gutter recomputed its place (all instances, UI thread only); a test hook for the append cost.</summary>
+    internal static long RecomputeCount { get; private set; }
 
     /// <summary>Recomputes the row's place and repaints only the parts that changed.</summary>
     private void Recompute()
     {
+        RecomputeCount++;
         if (!hooked)
         {
             return;
         }
 
-        if (owner is null || container is null || owner.IndexFromContainer(container) < 0)
+        if (!PlacementResolved())
         {
             // The container can be missing when the row attaches (a recycled panel whose items were replaced, a lazy
-            // container): resolve once more and re-subscribe before falling back to "node with no line".
+            // container): resolve once more and re-subscribe before falling back to "node with no line". The old
+            // subscriptions go first, while the old turn is still known, so none of them outlives the re-resolve.
+            UnsubscribeCollections();
             ResolvePlacement();
             Subscribe();
-            if (owner is null || container is null || owner.IndexFromContainer(container) < 0)
+            if (!PlacementResolved())
             {
                 // A virtualizing panel realizes the container during its own layout pass, after this control attached; the
                 // generator mapping may only be readable once that pass is over. Retry on the dispatcher a bounded number of
@@ -355,23 +429,34 @@ internal sealed class TimelineGutter : TemplatedControl
         ShowNode = layout.ShowNode;
         ShowTopLine = layout.ShowTopLine;
         ShowBottomLine = layout.ShowBottomLine;
-        ApplyNode();
-        ApplyName();
+        ApplyNode(force: false);
+        ApplyName(force: false);
+    }
+
+    /// <summary>
+    /// Whether every container this row's position depends on is realized and mapped: its own, and for a block row also its
+    /// turn's container in the transcript (a block's first/last-in-transcript flags come from there, not from its own list).
+    /// </summary>
+    private bool PlacementResolved()
+    {
+        if (owner is null || container is null || owner.IndexFromContainer(container) < 0)
+        {
+            return false;
+        }
+
+        return Role != TimelineRowRole.Block
+            || (outer is not null && outerContainer is not null && outer.IndexFromContainer(outerContainer) >= 0);
     }
 
     private TimelineRowLayout ComputeLayout()
     {
-        if (owner is null || container is null)
+        if (owner is null || container is null || !PlacementResolved())
         {
             // The row is not in a realized container: draw the node and no line rather than guess a direction.
             return new TimelineRowLayout(true, false, false);
         }
 
         var index = owner.IndexFromContainer(container);
-        if (index < 0)
-        {
-            return new TimelineRowLayout(true, false, false);
-        }
 
         var count = owner.ItemCount;
         var isFirst = index == 0;
@@ -394,17 +479,8 @@ internal sealed class TimelineGutter : TemplatedControl
 
     private (bool First, bool Last) TurnPosition()
     {
-        if (outer is null || outerContainer is null)
-        {
-            return (false, false);
-        }
-
-        var index = outer.IndexFromContainer(outerContainer);
-        if (index < 0)
-        {
-            return (false, false);
-        }
-
+        // PlacementResolved has already vouched for both containers: a block row never gets here with an unmapped turn.
+        var index = outer!.IndexFromContainer(outerContainer!);
         return (index == 0, index == outer.ItemCount - 1);
     }
 
@@ -417,7 +493,12 @@ internal sealed class TimelineGutter : TemplatedControl
         return (TimelineNodeMap.EffectiveKind(kind, state), state);
     }
 
-    private void ApplyNode()
+    /// <summary>
+    /// Repaints the icon. Skipped when neither the effective kind, the state nor the node's visibility changed since the last
+    /// paint: a collection change or a turn property that left the node alone costs no resource lookup and no class churn.
+    /// Only the motion gate (which is not part of that key) forces a repaint.
+    /// </summary>
+    private void ApplyNode(bool force)
     {
         if (icon is null)
         {
@@ -425,6 +506,16 @@ internal sealed class TimelineGutter : TemplatedControl
         }
 
         var (kind, state) = Effective();
+
+        // The header's connector segment follows the line flags, which can change without the node changing.
+        // The header has no node: its icon slot becomes one more segment, so the axis never opens a gap there.
+        middleLine?.SetCurrentValue(IsVisibleProperty, !ShowNode && ShowTopLine && ShowBottomLine);
+        if (!force && appliedNode == (kind, state, ShowNode))
+        {
+            return;
+        }
+
+        appliedNode = (kind, state, ShowNode);
         var key = TimelineNodeMap.IconKey(kind, state is TimelineNodeState.Running or TimelineNodeState.Failed or TimelineNodeState.Warning);
         icon.Data = this.TryFindResource(key, out var value) && value is Geometry geometry ? geometry : null;
         icon.IsVisible = ShowNode;
@@ -432,14 +523,18 @@ internal sealed class TimelineGutter : TemplatedControl
         icon.Classes.Set("failed", state == TimelineNodeState.Failed);
         icon.Classes.Set("warning", state == TimelineNodeState.Warning);
         icon.Classes.Set("pulsing", state == TimelineNodeState.Running && !TreeMotion.ReducedMotion);
-
-        // The turn header has no node: its icon slot becomes one more segment, so the axis never opens a gap there.
-        middleLine?.SetCurrentValue(IsVisibleProperty, !ShowNode && ShowTopLine && ShowBottomLine);
     }
 
-    private void ApplyName()
+    /// <summary>Renames the node; skipped while the name's inputs are unchanged, forced by a language switch.</summary>
+    private void ApplyName(bool force)
     {
         var (kind, state) = Effective();
+        if (!force && appliedName == (kind, state, ShowNode))
+        {
+            return;
+        }
+
+        appliedName = (kind, state, ShowNode);
         AutomationProperties.SetName(this, ShowNode ? TimelineStrings.Describe(kind, state) : string.Empty);
     }
 }

@@ -288,13 +288,14 @@ public sealed class TimelineGutterTests
             Assert.False(header.ShowBottomLine);
             Assert.Equal(2, rig.VisibleGutters().Count(gutter => gutter.Role == TimelineRowRole.Block && EffectivelyVisible(gutter)));
 
-            // Collapsing the first turn changes nothing about its connector: it never had a line to draw.
+            // Collapsing the first turn hides its blocks, so the header itself becomes the axis start (a node with a line
+            // down to the notice after it) instead of leaving that notice's line hanging.
             turn.IsExpanded = false;
             SharedUi.Settle(rig.Window);
             header = rig.VisibleGutters().Single(gutter => gutter.Role == TimelineRowRole.TurnHeader);
-            Assert.False(header.ShowNode);
+            Assert.True(header.ShowNode);
             Assert.False(header.ShowTopLine);
-            Assert.False(header.ShowBottomLine);
+            Assert.True(header.ShowBottomLine);
             return Task.CompletedTask;
         });
     }
@@ -340,11 +341,9 @@ public sealed class TimelineGutterTests
     }
 
     /// <summary>
-    /// EXPOSES A PRODUCT DEFECT (fails until <c>TimelineGutter</c> recomputes after a scroll-driven recycle). After
-    /// <see cref="ListBox.ScrollIntoView"/> and settling, the recycled rows keep the "not in a realized container"
-    /// fallback (node, no lines) although the containers are realized and resolvable: poking any gutter property makes a
-    /// recompute produce the correct flags at once. Expected for the noticed rows 285..299: <c>ShowTopLine</c> true on all
-    /// and <c>ShowBottomLine</c> true on all but the last; actual: false on all (verified via a forced recompute).
+    /// Regression for the scroll-driven recycle: a row recycled by <see cref="ListBox.ScrollIntoView"/> attaches before its
+    /// container is mapped, so it must re-resolve (bounded retry) instead of keeping the "node, no lines" fallback. Expected
+    /// for the noticed rows 285..299: <c>ShowTopLine</c> true on all and <c>ShowBottomLine</c> true on all but the last.
     /// </summary>
     [Fact]
     public async Task Scrolling_to_the_end_keeps_the_axis_flags_of_the_realized_rows()
@@ -378,6 +377,446 @@ public sealed class TimelineGutterTests
             Assert.All(
                 scrolled.Where(g => !ReferenceEquals(g, lowest)),
                 g => Assert.True(g.ShowTopLine && g.ShowBottomLine, "a middle row connects the axis above and below"));
+            return Task.CompletedTask;
+        });
+    }
+
+    // ------------------------------------------------------------------ ask_user, tool completion, reduced motion
+
+    [Fact]
+    public async Task A_running_ask_user_row_stays_a_note_and_is_not_read_as_an_error()
+    {
+        using var language = new LanguageScope(UiLanguage.English);
+        await SharedUi.RunAsync(() =>
+        {
+            var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+            var turn = transcript.BeginTurn(At);
+            var ask = turn.AddTool(new ToolCall("c1", "ask_user", "{}"));
+            Assert.True(ask.IsRunning);
+            using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+            var gutter = rig.VisibleGutters().Single(g => g.Role == TimelineRowRole.Block);
+            Assert.Equal(TimelineNodeKind.Notice, TimelineNodeMap.KindForTool(gutter.ToolName!));
+            var icon = Icon(gutter);
+            Assert.Contains("running", icon.Classes);
+            Assert.DoesNotContain("failed", icon.Classes);
+            Assert.Same(
+                rig.Window.FindResource(TimelineNodeMap.IconKey(TimelineNodeKind.Notice, filled: true)),
+                icon.Data);
+            Assert.Equal(TimelineStrings.Describe(TimelineNodeKind.Notice, TimelineNodeState.Running), gutter.NodeName);
+            Assert.NotEqual(TimelineStrings.Describe(TimelineNodeKind.Error, TimelineNodeState.Running), gutter.NodeName);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task A_tool_row_that_completes_loses_its_running_state_through_the_gutter()
+    {
+        var previousMotion = TreeMotion.ReducedMotion;
+        TreeMotion.ReducedMotion = false;
+        try
+        {
+            await SharedUi.RunAsync(() =>
+            {
+                var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+                var turn = transcript.BeginTurn(At);
+                var row = turn.AddTool(new ToolCall("c1", "bash", "{}"));
+                using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+                var gutter = rig.VisibleGutters().Single(g => g.Role == TimelineRowRole.Block);
+                var icon = Icon(gutter);
+                Assert.Contains("running", icon.Classes);
+                Assert.Contains("pulsing", icon.Classes);
+
+                row.Complete(new ToolResult("ok"));
+                SharedUi.Settle(rig.Window);
+
+                Assert.False(gutter.IsRunning);
+                Assert.DoesNotContain("running", icon.Classes);
+                Assert.DoesNotContain("pulsing", icon.Classes);
+                Assert.DoesNotContain("failed", icon.Classes);
+                Assert.Same(
+                    rig.Window.FindResource(TimelineNodeMap.IconKey(TimelineNodeKind.Command, filled: false)),
+                    icon.Data);
+                return Task.CompletedTask;
+            });
+        }
+        finally
+        {
+            TreeMotion.ReducedMotion = previousMotion;
+        }
+    }
+
+    [Fact]
+    public async Task A_row_that_attaches_while_motion_is_reduced_never_pulses()
+    {
+        var previousMotion = TreeMotion.ReducedMotion;
+        TreeMotion.ReducedMotion = true;
+        try
+        {
+            await SharedUi.RunAsync(() =>
+            {
+                var transcript = FullTranscript();
+                using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+                var icon = Icon(rig.VisibleGutters().Single(g => g.IsRunning));
+                Assert.Contains("running", icon.Classes);
+                Assert.DoesNotContain("pulsing", icon.Classes);
+                return Task.CompletedTask;
+            });
+        }
+        finally
+        {
+            TreeMotion.ReducedMotion = previousMotion;
+        }
+    }
+
+    // ------------------------------------------------------------------ turn ends of the axis
+
+    [Fact]
+    public async Task A_running_turn_with_no_output_yet_is_the_end_node_under_the_user_message()
+    {
+        var previousMotion = TreeMotion.ReducedMotion;
+        TreeMotion.ReducedMotion = false;
+        try
+        {
+            await SharedUi.RunAsync(() =>
+            {
+                var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+                transcript.AddUserMessage("hello", At);
+                var turn = transcript.BeginTurn(At);
+                using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+                var gutters = rig.VisibleGutters().ToList();
+                Assert.Equal(2, gutters.Count);
+                Assert.True(gutters[0].ShowBottomLine);
+                var header = gutters[1];
+                Assert.Equal(TimelineRowRole.TurnHeader, header.Role);
+                Assert.True(header.ShowNode, "the user line must end on a node, not hang");
+                Assert.True(header.ShowTopLine);
+                Assert.False(header.ShowBottomLine);
+                var icon = Icon(header);
+                Assert.True(icon.IsVisible);
+                Assert.Contains("running", icon.Classes);
+                Assert.Contains("pulsing", icon.Classes);
+                Assert.Equal(TimelineStrings.Describe(TimelineNodeKind.Turn, TimelineNodeState.Running), header.NodeName);
+
+                // The first output arrives: the header goes back to being a connector and the block is the end node.
+                turn.AppendText("reply");
+                SharedUi.Settle(rig.Window);
+
+                gutters = rig.VisibleGutters().ToList();
+                Assert.Equal(3, gutters.Count);
+                Assert.False(gutters[1].ShowNode);
+                Assert.True(gutters[1].ShowTopLine && gutters[1].ShowBottomLine);
+                Assert.True(gutters[2].ShowNode);
+                Assert.True(gutters[2].ShowTopLine);
+                Assert.False(gutters[2].ShowBottomLine);
+                Assert.False(Icon(gutters[1]).IsVisible);
+                return Task.CompletedTask;
+            });
+        }
+        finally
+        {
+            TreeMotion.ReducedMotion = previousMotion;
+        }
+    }
+
+    [Fact]
+    public async Task A_stopped_empty_turn_closes_the_axis_on_its_footnote()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+            transcript.AddUserMessage("hello", At);
+            var turn = transcript.BeginTurn(At);
+            // The session passes SessionStrings.Stopped as the error of a cancelled turn, so it always has a footnote.
+            turn.Finish(TimeSpan.FromSeconds(1), SessionStrings.Stopped);
+            using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+            var gutters = rig.VisibleGutters().ToList();
+            Assert.Equal(3, gutters.Count);
+            Assert.True(gutters[0].ShowBottomLine);
+            Assert.False(gutters[1].ShowNode);
+            Assert.True(gutters[1].ShowTopLine && gutters[1].ShowBottomLine);
+            Assert.Equal(TimelineRowRole.Footnote, gutters[2].Role);
+            Assert.True(gutters[2].ShowNode && gutters[2].ShowTopLine);
+            Assert.False(gutters[2].ShowBottomLine);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task A_finished_empty_last_turn_without_a_footnote_still_ends_the_axis_on_a_node()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+            transcript.AddUserMessage("hello", At);
+            transcript.BeginTurn(At).Finish(null, null);
+            using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+            var gutters = rig.VisibleGutters().ToList();
+            Assert.Equal(2, gutters.Count);
+            Assert.True(gutters[0].ShowBottomLine);
+            Assert.True(gutters[1].ShowNode && gutters[1].ShowTopLine);
+            Assert.False(gutters[1].ShowBottomLine);
+            Assert.DoesNotContain("running", Icon(gutters[1]).Classes);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task A_sub_agents_collapsed_first_turn_starts_the_axis_for_the_second_turn()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            var transcript = new TranscriptViewModel(collapseOlderTurns: true);
+            var first = transcript.BeginTurn(At);
+            first.AppendText("one");
+            first.Finish(TimeSpan.FromSeconds(1), null);
+            var second = transcript.BeginTurn(At);
+            second.AppendText("two");
+            Assert.False(first.IsExpanded);
+            using var rig = TranscriptRig.Show(transcript, 1200, 800);
+
+            var gutters = rig.VisibleGutters().ToList();
+            Assert.Equal(3, gutters.Count);
+            Assert.Equal(TimelineRowRole.TurnHeader, gutters[0].Role);
+            Assert.True(gutters[0].ShowNode, "the collapsed first turn is the axis start");
+            Assert.False(gutters[0].ShowTopLine);
+            Assert.True(gutters[0].ShowBottomLine);
+            Assert.False(gutters[1].ShowNode);
+            Assert.True(gutters[1].ShowTopLine && gutters[1].ShowBottomLine);
+            Assert.True(gutters[2].ShowNode);
+            Assert.True(gutters[2].ShowTopLine);
+            Assert.False(gutters[2].ShowBottomLine);
+
+            // Expanding the first turn hands the start back to its first block.
+            first.IsExpanded = true;
+            SharedUi.Settle(rig.Window);
+            var expanded = rig.VisibleGutters().ToList();
+            Assert.False(expanded[0].ShowNode);
+            Assert.False(expanded[0].ShowTopLine);
+            Assert.True(expanded[1].ShowNode);
+            Assert.False(expanded[1].ShowTopLine);
+            return Task.CompletedTask;
+        });
+    }
+
+    // ------------------------------------------------------------------ block rows depend on the outer container
+
+    [Fact]
+    public async Task The_last_turns_last_block_ends_the_axis_after_scrolling_away_and_back()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+            for (var i = 0; i < 200; i++)
+            {
+                transcript.AddNotice(LocText.Literal("note " + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            var turn = transcript.BeginTurn(At);
+            turn.AppendText("one");
+            turn.AddNotice(LocText.Literal("two"));
+            turn.AddNotice(LocText.Literal("three"));
+            turn.Finish(TimeSpan.FromSeconds(1), null);
+            using var rig = TranscriptRig.Show(transcript, 400, 400);
+
+            for (var round = 0; round < 2; round++)
+            {
+                rig.List.ScrollIntoView(transcript.Items[0]);
+                SharedUi.Settle(rig.Window, 4);
+                rig.List.ScrollIntoView(transcript.Items[^1]);
+                SharedUi.Settle(rig.Window, 4);
+
+                var blocks = rig.VisibleGutters().Where(g => g.Role == TimelineRowRole.Block).ToList();
+                Assert.Equal(3, blocks.Count);
+                var last = blocks.Aggregate((a, b) => InWindow(rig.Window, a) >= InWindow(rig.Window, b) ? a : b);
+                Assert.False(last.ShowBottomLine, "the last block of the last turn ends the axis (round " + round + ")");
+                Assert.True(last.ShowTopLine, "and has the block above it (the fallback would hide this)");
+                Assert.All(blocks.Where(g => !ReferenceEquals(g, last)), g => Assert.True(g.ShowBottomLine));
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task The_first_turns_first_block_starts_the_axis_after_scrolling_away_and_back()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+            var turn = transcript.BeginTurn(At);
+            turn.AppendText("one");
+            turn.AddNotice(LocText.Literal("two"));
+            turn.Finish(TimeSpan.FromSeconds(1), null);
+            for (var i = 0; i < 200; i++)
+            {
+                transcript.AddNotice(LocText.Literal("note " + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            using var rig = TranscriptRig.Show(transcript, 400, 400);
+            for (var round = 0; round < 2; round++)
+            {
+                rig.List.ScrollIntoView(transcript.Items[^1]);
+                SharedUi.Settle(rig.Window, 4);
+                rig.List.ScrollIntoView(transcript.Items[0]);
+                SharedUi.Settle(rig.Window, 4);
+
+                var blocks = rig.VisibleGutters().Where(g => g.Role == TimelineRowRole.Block).ToList();
+                Assert.Equal(2, blocks.Count);
+                Assert.False(blocks[0].ShowTopLine, "the first block of the first turn starts the axis (round " + round + ")");
+                // The fallback is (node, no lines): a correctly placed first block also draws towards the next one.
+                Assert.True(blocks[0].ShowBottomLine, "the placement must be the real one, not the fallback");
+                Assert.True(blocks[1].ShowTopLine);
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    // ------------------------------------------------------------------ placement retry and detach
+
+    [Fact]
+    public async Task A_row_whose_container_never_resolves_gives_up_after_three_retries_and_keeps_the_fallback()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            TimelineGutter? ghost = null;
+            var host = new ItemsControl
+            {
+                ItemsSource = new[] { "a", "b" },
+                ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<string>((item, _) =>
+                {
+                    var gutter = new TimelineGutter { Role = TimelineRowRole.Item, Kind = TimelineNodeKind.User };
+                    if (item == "a")
+                    {
+                        // A data context that is not an item of the owner: ContainerFromItem can never find it.
+                        gutter.DataContext = "ghost";
+                        ghost = gutter;
+                    }
+
+                    return gutter;
+                }),
+            };
+            var window = SharedUi.Show(host, 300, 300);
+            try
+            {
+                SharedUi.Settle(window, 10);
+
+                Assert.NotNull(ghost);
+                Assert.Equal(3, ghost!.PlacementRetriesUsed);
+                Assert.True(ghost.ShowNode);
+                Assert.False(ghost.ShowTopLine);
+                Assert.False(ghost.ShowBottomLine);
+
+                // The fallback is only until the next change: handing the row its real item re-attaches it correctly.
+                ghost.DataContext = "a";
+                SharedUi.Settle(window);
+                Assert.False(ghost.ShowTopLine);
+                Assert.True(ghost.ShowBottomLine);
+                Assert.Equal(0, ghost.PlacementRetriesUsed);
+            }
+            finally
+            {
+                window.Close();
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task A_detached_gutter_no_longer_reacts_to_motion_language_or_collection_changes()
+    {
+        var previousMotion = TreeMotion.ReducedMotion;
+        TreeMotion.ReducedMotion = false;
+        using var language = new LanguageScope(UiLanguage.Chinese);
+        try
+        {
+            await SharedUi.RunAsync(() =>
+            {
+                var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+                transcript.AddUserMessage("hello", At);
+                var turn = transcript.BeginTurn(At);
+                turn.AddTool(new ToolCall("c1", "bash", "{}"));
+                var rig = TranscriptRig.Show(transcript, 1200, 800);
+                var gutters = rig.VisibleGutters().ToList();
+                var user = gutters[0];
+                var running = gutters.Single(g => g.IsRunning && g.Role == TimelineRowRole.Block);
+                var icon = Icon(running);
+                var chineseName = running.NodeName;
+                Assert.Contains("pulsing", icon.Classes);
+                Assert.True(user.ShowBottomLine);
+
+                rig.Dispose();
+                SharedUi.Settle();
+                Assert.False(running.IsAttachedToVisualTree());
+
+                // None of these may reach the detached rows: a live subscription would repaint (and root) them.
+                TreeMotion.ReducedMotion = true;
+                Loc.Instance.Language = UiLanguage.English;
+                transcript.AddNotice(LocText.Literal("late"));
+                turn.AppendText("late");
+
+                Assert.Contains("pulsing", icon.Classes);
+                Assert.Equal(chineseName, running.NodeName);
+                return Task.CompletedTask;
+            });
+        }
+        finally
+        {
+            TreeMotion.ReducedMotion = previousMotion;
+        }
+    }
+
+    // ------------------------------------------------------------------ cost of appending
+
+    /// <summary>
+    /// Appends blocks to a live turn in a shown transcript and reports the bytes the append loop allocates on the UI
+    /// thread (the synchronous <c>CollectionChanged</c> fan-out of every realized gutter; layout is deferred and not part
+    /// of the loop). The assertion is a generous ceiling so noise cannot fail it; the numbers go to the test output and
+    /// into the W13 implementation note.
+    /// </summary>
+    [Fact]
+    public async Task Appending_blocks_to_a_live_turn_stays_cheap_for_the_realized_gutters()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            const int Warmup = 20;
+            const int Measured = 200;
+            var transcript = new TranscriptViewModel(collapseOlderTurns: false);
+            transcript.AddUserMessage("hello", At);
+            var turn = transcript.BeginTurn(At);
+            using var rig = TranscriptRig.Show(transcript, 1200, 4000);
+
+            for (var i = 0; i < Warmup; i++)
+            {
+                turn.AddNotice(LocText.Literal("w" + i.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            SharedUi.Settle(rig.Window);
+            var realized = rig.VisibleGutters().Count();
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var recomputesBefore = TimelineGutter.RecomputeCount;
+            for (var i = 0; i < Measured; i++)
+            {
+                turn.AddNotice(LocText.Literal("n"));
+            }
+
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            var perAppend = allocated / Measured;
+            var recomputes = TimelineGutter.RecomputeCount - recomputesBefore;
+            Console.WriteLine(
+                $"W13 append cost: {realized} realized gutters, {Measured} appends, {allocated} bytes ({perAppend} B/append), "
+                + $"{recomputes} gutter recomputes ({recomputes / (double)Measured:F1}/append)");
+            // Only the previous last block moves on an append (plus the new row's own attach at layout time, which is
+            // outside this loop): the fan-out must not grow with the number of realized rows.
+            Assert.True(recomputes <= Measured * 4, $"{recomputes} recomputes for {Measured} appends: every realized row recomputed");
+            Assert.True(perAppend < 64 * 1024, $"{perAppend} B per appended block is far above the expected cost");
             return Task.CompletedTask;
         });
     }

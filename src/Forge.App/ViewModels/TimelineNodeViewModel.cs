@@ -76,7 +76,7 @@ internal enum TimelineNodeState
     /// <summary>The call failed: a filled icon in the danger colour.</summary>
     Failed,
 
-    /// <summary>Something was refused or needs attention: a filled icon in the warning colour.</summary>
+    /// <summary>An approval was refused: a filled icon in the warning colour.</summary>
     Warning,
 }
 
@@ -196,9 +196,12 @@ internal static class TimelineNodeMap
         : running ? TimelineNodeState.Running
         : TimelineNodeState.Idle;
 
-    /// <summary>The kind whose icon a row shows: a failed notice wears the error triangle, every other kind keeps its own icon.</summary>
+    /// <summary>
+    /// The kind whose icon a row shows: a notice that failed wears the error triangle, every other kind keeps its own icon.
+    /// Only a failure swaps the icon: a notice that is merely running (a pending <c>ask_user</c> question) stays a note.
+    /// </summary>
     public static TimelineNodeKind EffectiveKind(TimelineNodeKind kind, TimelineNodeState state) =>
-        kind == TimelineNodeKind.Notice && state != TimelineNodeState.Idle ? TimelineNodeKind.Error : kind;
+        kind == TimelineNodeKind.Notice && state == TimelineNodeState.Failed ? TimelineNodeKind.Error : kind;
 
     /// <summary>The resource key of this node's icon; the filled variant is its own key in <c>Icons.axaml</c>.</summary>
     public static string IconKey(TimelineNodeKind kind, bool filled) => filled ? FilledIcon(kind) : OutlineIcon(kind);
