@@ -60,6 +60,14 @@
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     </Style>
 
+    <!-- A session's group header: a tinted band above that session's rows. -->
+    <Style Selector="Border.inspector-group">
+      <Setter Property="Padding" Value="14,6" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+
     <!-- The streamed output: sunken, monospaced, scrollable on its own so a chatty command cannot stretch the panel. -->
     <Style Selector="Border.inspector-tail">
       <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
@@ -97,13 +105,6 @@
                     AutomationProperties.AutomationId="inspector-count">
               <TextBlock Text="{Binding CountText}" />
             </Border>
-            <TextBlock Grid.Column="2"
-                       Classes="caption"
-                       Margin="10,0,0,0"
-                       VerticalAlignment="Center"
-                       TextTrimming="CharacterEllipsis"
-                       IsVisible="{Binding HasSessionTitle}"
-                       Text="{Binding SessionTitle}" />
             <Button Grid.Column="3"
                     x:Name="CloseButton"
                     Classes="ghost icon"
@@ -125,7 +126,33 @@
                    SelectionMode="Single"
                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.DataTemplates>
-              <!-- A running tool call: who runs it, for how long, a stop for the whole turn, and the live output tail. -->
+              <!-- A session's group header: its title, its own count, and a tag on the session the window shows. -->
+              <DataTemplate x:DataType="vm:ResourceInspectorGroupViewModel">
+                <Border Classes="inspector-group">
+                  <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Classes="label"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Text="{Binding Title}"
+                               ToolTip.Tip="{Binding Title}" />
+                    <Border Grid.Column="1"
+                            Classes="inspector-count"
+                            Margin="8,0,0,0"
+                            IsVisible="{Binding IsActive}"
+                            AutomationProperties.AutomationId="inspector-group-active">
+                      <TextBlock Text="{Binding ActiveText}" />
+                    </Border>
+                    <TextBlock Grid.Column="2"
+                               Classes="caption"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               Text="{Binding CountText}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+
+              <!-- A running tool call: who runs it, for how long, a stop for just this call, and the live output tail. -->
               <DataTemplate x:DataType="vm:LiveToolViewModel">
                 <Border Classes="inspector-row">
                   <StackPanel Spacing="3">
@@ -150,11 +177,16 @@
                                  VerticalAlignment="Center"
                                  Margin="0,0,10,0"
                                  Text="{Binding ElapsedText}" />
+                      <TextBlock Grid.Column="3"
+                                 Classes="caption"
+                                 VerticalAlignment="Center"
+                                 IsVisible="{Binding IsStopRequested}"
+                                 Text="{Binding [resources.stopping], Source={x:Static loc:Loc.Instance}}" />
                       <Button Grid.Column="3"
                               Classes="ghost"
                               Content="{Binding [resources.stop], Source={x:Static loc:Loc.Instance}}"
                               Command="{Binding StopCommand}"
-                              IsVisible="{Binding IsRunning}"
+                              IsVisible="{Binding CanStop}"
                               ToolTip.Tip="{Binding [resources.stop.tooltip], Source={x:Static loc:Loc.Instance}}"
                               AutomationProperties.AutomationId="inspector-stop-tool"
                               AutomationProperties.Name="{Binding [resources.stop.name], Source={x:Static loc:Loc.Instance}}" />
@@ -242,7 +274,7 @@
                        Text="{Binding EmptyHint}" />
           </StackPanel>
 
-          <!-- A window without an open session (the shell closes the panel on a session switch, so this is the race only). -->
+          <!-- A window without an open session (the last tab closed while the panel was open). -->
           <TextBlock Classes="caption"
                      IsVisible="{Binding !HasSession}"
                      VerticalAlignment="Center"

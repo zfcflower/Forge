@@ -3,10 +3,11 @@ namespace Forge.App.ViewModels;
 /// <summary>
 /// The window's resource inspector slot (wave W8 owns this file). <see cref="Inspector"/> is the overlay the window shows:
 /// null hides it, an instance is drawn by the template registered for its type in <c>App.axaml</c>.
-/// <para>The panel is created when it is opened from the active session's resources menu and disposed when it closes, so a
-/// closed panel holds no timer and no language subscription. It belongs to one session: a session switch closes it, because
-/// it lists that session's running calls and sub-agents and leaving another session's live rows on screen would report the
-/// wrong work (the same rule the checks and plan panels follow).</para>
+/// <para>The panel is created when it is opened from a session's resources menu and disposed when it closes, so a closed
+/// panel holds no timer, no language subscription and no listener on any session. It lists the live work of <em>every</em>
+/// open session, grouped by session with the active one first: a session switch only re-orders the groups (one coalesced
+/// refresh), a session that closes drops its rows on the refresh its own close triggers, and a newly opened one is listed
+/// from the next pull.</para>
 /// </summary>
 internal sealed partial class MainWindowViewModel
 {
@@ -21,7 +22,7 @@ internal sealed partial class MainWindowViewModel
 
     /// <summary>
     /// Opens the resource inspector. The strip's resources menu carries the row for it; a window that already shows it keeps
-    /// the panel it has, so a second click never stacks a second timer on the same session.
+    /// the panel it has, so a second click never stacks a second timer.
     /// </summary>
     public RelayCommand OpenInspectorCommand { get; private set; } = null!;
 
@@ -30,15 +31,12 @@ internal sealed partial class MainWindowViewModel
     {
         // The window-level opener is not bound to a control (the strip's resources menu row reaches
         // <see cref="OpenInspector"/> through the session), but it is the one gesture a test or a future host can drive
-        // without a session view, and it follows the active session exactly like the strip does.
-        OpenInspectorCommand = new RelayCommand(OpenInspector, () => activeSession is not null);
+        // without a session view.
+        OpenInspectorCommand = new RelayCommand(OpenInspector, () => sessions.Count > 0);
         PropertyChanged += OnInspectorActiveSessionChanged;
     }
 
-    /// <summary>
-    /// A session switch closes the panel: it lists one session's live work, and the window shows one session at a time. The
-    /// command follows the same fact - without an active session there is nothing to list.
-    /// </summary>
+    /// <summary>A session switch (or a tab opening, which switches to it) re-orders the groups: the active session goes first.</summary>
     private void OnInspectorActiveSessionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(ActiveSession))
@@ -47,21 +45,25 @@ internal sealed partial class MainWindowViewModel
         }
 
         OpenInspectorCommand.NotifyCanExecuteChanged();
-        CloseInspector();
+        inspector?.RequestRefresh();
     }
 
     /// <summary>
-    /// Builds the panel for the active session and starts its pull. Called by the session's resources menu row through
+    /// Builds the panel over the open sessions and starts its pull. Called by a session's resources menu row through
     /// <see cref="SessionWorkspaceViewModel"/>'s <c>openInspector</c> callback, and by the window-level command.
     /// </summary>
     private void OpenInspector()
     {
-        if (inspector is not null || activeSession is null)
+        if (inspector is not null || sessions.Count == 0)
         {
             return;
         }
 
-        var panel = new ResourceInspectorViewModel(DescribeInspectorSession, composition.Preferences, CloseInspector);
+        var panel = new ResourceInspectorViewModel(
+            CollectInspectorSessions,
+            () => activeSession,
+            composition.Preferences,
+            CloseInspector);
         Inspector = panel;
         panel.Start();
     }
@@ -77,9 +79,15 @@ internal sealed partial class MainWindowViewModel
         closing.Dispose();
     }
 
-    /// <summary>The active session as the panel reads it. Asked once per pull, so a switched or closed session is felt there.</summary>
-    private ResourceInspectorSession? DescribeInspectorSession() =>
-        activeSession is { } session
-            ? new ResourceInspectorSession(session.Title, session.RunningTools, session.SubAgents)
-            : null;
+    /// <summary>
+    /// Every open session, live and read-only alike, in the window's own order. A session leaves this dictionary before it is
+    /// disposed, so the refresh its close triggers no longer lists it.
+    /// </summary>
+    private void CollectInspectorSessions(List<IResourceInspectorSource> into)
+    {
+        foreach (var session in sessions.Values)
+        {
+            into.Add(session);
+        }
+    }
 }

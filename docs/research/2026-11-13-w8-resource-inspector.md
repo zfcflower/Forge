@@ -26,27 +26,27 @@
 | `ViewModels/Transcript.Tools.cs` | 新增 `LiveToolViewModel`(工具调用的运行态:agent 归属、名字、参数摘要、开始时间、尾部、停止命令);`ToolRowViewModel` 增 `AttachLive`、`HasLiveOutput`、`LiveOutputText`、`LiveElapsedText`,`Tick` 时把实时状态转给绑定。 |
 | `ViewModels/SessionWorkspace.Tools.cs`(**新**) | 实时登记表、`AgentToolProgress` 消费、`ClearLiveTools`、给工具行挂实时态。`SessionWorkspace.cs` 加 `partial`、`Tick` 里 tick 条目、`IsRunning=false`/`Dispose` 清表、把 `openInspector` 回调转给 `Instruments`。 |
 | `ViewModels/SessionInstrumentsViewModel.cs` | 「资源」菜单第 5 行:`OpenInspectorCommand`(无宿主回调时 `CanOpenInspector=false`,`MenuItem.IsVisible` 跟随,不留死条目)、`OpenInspectorMenuText`(带数量,口径 = 检查器会列出的行数:运行中的调用 + 每个活动子 Agent,含排队中的)、`NoteRunningResources(int)`。 |
-| `ViewModels/ResourceInspectorViewModel.cs`(占位替换) | 覆盖层视图模型:统一列表(`ObservableCollection<object>`,元素是 `SubAgentViewModel` 或 `LiveToolViewModel`,**按开始时间插入**(排队中的子 Agent 读作 `MinValue`,排最前)、标题旁带会话名与运行中计数、空状态/无会话状态、关闭命令、按偏好配置的定时刷新(`schedule` 注入点让测试不用消息循环)、行只在增删时变化、`Dispose` 停表并退订 `Loc.LanguageChanged`/`AppPreferences.PropertyChanged`。`ResourceInspectorSession` 只带标题与两列活对象,面板从不持有会话视图模型。 |
+| `ViewModels/ResourceInspectorViewModel.cs`(占位替换) | 覆盖层视图模型:统一列表(`ObservableCollection<object>`,元素是 `SubAgentViewModel` 或 `LiveToolViewModel`,**按开始时间插入**(排队中的子 Agent 读作 `MinValue`,排最前)、~~标题旁带会话名~~(follow-up 改为按会话分组,见第七节)与运行中计数、空状态/无会话状态、关闭命令、按偏好配置的定时刷新(`schedule` 注入点让测试不用消息循环)、行只在增删时变化、`Dispose` 停表并退订 `Loc.LanguageChanged`/`AppPreferences.PropertyChanged`。~~`ResourceInspectorSession` 只带标题与两列活对象~~(follow-up 改为 `IResourceInspectorSource`,见第七节),面板从不写会话。 |
 | `Views/ResourceInspectorView.axaml(.cs)` | 遮罩 + 居中卡片(与 W7 计划面板同构:Escape / 点遮罩 / 关闭按钮都关)、两种行的模板、尾部的只读等宽区(带自身滚动、上限高度)、停止按钮。 |
 | `Views/ToolRowTailView.axaml` | 折叠展开后的工具行里的实时尾部(`运行中 · 12.3s` + 尾部文本),只在有实时输出时出现;调用结束后条目解除该行的订阅并在 `Finish` 里释放快照(结果里已有完整输出)。 |
 | `Views/SessionView.axaml` | 「资源 ▾」菜单末尾一行「运行中的资源({n})…」,绑 `Instruments.OpenInspectorCommand`,没有宿主回调时整行隐藏。 |
-| `ViewModels/MainWindowViewModel.Inspector.cs` | `Inspector` 槽的开关:`OpenInspectorCommand`、`OpenInspector()`(建 VM、打开)、`CloseInspector()`、切会话即关(W5/W7 同款)。`MainWindowViewModel.cs` 只在会话构造处多一个 `openInspector: OpenInspector` 与 `Dispose` 里一行 `CloseInspector()`。 |
+| `ViewModels/MainWindowViewModel.Inspector.cs` | `Inspector` 槽的开关:`OpenInspectorCommand`、`OpenInspector()`(建 VM、打开)、`CloseInspector()`、~~切会话即关(W5/W7 同款)~~(follow-up:切会话只重排分组)。`MainWindowViewModel.cs` 只在会话构造处多一个 `openInspector: OpenInspector` 与 `Dispose` 里一行 `CloseInspector()`。 |
 | `Settings/ResourceInspectorSettingsViewModel.cs` + `Views/ResourceInspectorSettingsSectionView*` + `Composition/InspectorComposition.cs` | `inspector` 设置分区(行数、刷新间隔),由 W8 的组合模块注册,不改 `AppComposition.cs` / `App.axaml`。 |
 | `Localization/Strings.Resources.cs`(**新**) | 本波唯一的文案表(`resources.*`)。 |
 
 ### 3. 失败与取消路径
 
 - 工具进度只用来显示:任何异常都不发生在它里面(只赋值)。
-- 停止:**子 Agent** 用自己的 `StopCommand`(既有 `SubAgentControl.Stop`);**工具调用**只能停整个回合 —— `ITool.InvokeAsync` 收的是回合的 `CancellationTokenSource`,抽象层没有逐调用取消。所以工具行的停止按钮叫「停止回合」,悬停写明「该回合的所有工具调用都会被取消」,不假装能只杀一条命令。
+- 停止:**子 Agent** 用自己的 `StopCommand`(既有 `SubAgentControl.Stop`);**工具调用**起初只能停整个回合(回合令牌直接交给工具)。**follow-up 已改为只停该调用**:Core 给每次调用一个链到回合令牌的 CTS,见第七节。
 - **排队中的子 Agent 不显示停止按钮**:`SubAgentControl.Stop` 只认已获得运行槽的实例,对排队中的返回 `NotFound`,原先是「按钮在、点不动」。`SubAgentViewModel`(W8 拥有的文件)因此新增 `CanStop = Status == Running && !isStopRequested`,检查器行与既有的子 Agent 标签页都改绑它 —— 前者是本波新增,后者顺手修掉同一枚死按钮。
 - 检查器打开时没有活动会话(竞态):显示「没有打开的会话」空状态,不抛。
-- 只读视图(归档/接管):照样列出正在跑的东西(切会话即关,基本遇不到);停止按钮的可用性由条目自己的命令判断。
+- 只读视图(归档/接管):照样列出正在跑的东西;它没有运行时,所以工具行不给停止按钮(`stopCall` 为 null → `CanStop` 为假)。
 
 ## 二、被否的备选
 
 1. **把 `AgentToolProgress` 派发到 UI 线程(每个事件一次 `Dispatcher.Post`)** —— 否。每秒最多 4 次 × 运行中的调用数,UI 线程要在尾部分片之间来回合并;而尾部是**快照**,丢掉中间片什么也不损失。拉模型让 UI 的代价与事件频率脱钩。
 2. **工具行 = 检查器行(共享同一个 `ToolRowViewModel`)** —— 否。工具行活在某个回合卡片里,卡片结束就清空引用(`TurnCardViewModel.Finish` 会清 `toolRows`),而检查器要的是「现在正在跑的」独立生命周期;而且工具行没有停止语义、没有 agent 归属。反过来让 `TurnCardViewModel.AddTool` 返回行(两行改动)可以让两者共用运行态条目 —— 采用了这个,但**行**仍是两个(卡片行 vs 检查器行),共用的是 `LiveToolViewModel`。
-3. **检查器跨所有打开会话聚合** —— 否(用户已选「仅当前会话」)。与 W5(checks)、W7(plan)一致:面板读活动会话,切会话即关。后台自动化会话的运行仍需另开波次(见 deferred)。
+3. **检查器跨所有打开会话聚合** —— 初版否(用户当时选「仅当前会话」);**follow-up 按用户新要求已实现**(第七节)。未打开的后台自动化会话仍不在列。
 4. **标题栏按钮入口** —— 否(用户已选「资源菜单加一行」)。语义最贴切,且标题栏不再加图标。
 
 ## 三、为什么这是最优(按四条判据)
@@ -69,7 +69,7 @@
 
 - 构建:`dotnet build Forge.slnx`(全绿),AOT 分析器 0 警告。
 - 测试(与本波改动相关):`Forge.App.Tests`(ViewModel + `Foundation` + `Localization` + `MinorRegressionTests` + `Workbench` 相关过滤),`Forge.IO.Tests` 的 `ProcessOutputTailTests`(生产侧未改,作回归)。
-- 手测:会话里跑一条长命令 → 工具行出现实时尾部;「资源」菜单出现计数与入口 → 打开后看到 bash 行(耗时滚动、尾部滚动、停止按钮停整个回合);子 Agent 行 → 停止只杀该子 Agent;切会话 → 检查器关闭;设置页 `inspector` 分区改行数/间隔 → 下一次 tick 生效。
+- 手测:会话里跑一条长命令 → 工具行出现实时尾部;「资源」菜单出现计数与入口 → 打开后看到 bash 行(耗时滚动、尾部滚动、停止按钮只停该调用,回合继续);子 Agent 行 → 停止只杀该子 Agent;切会话 → 分组重排,检查器不关;另开一个会话跑东西 → 出现第二组;设置页 `inspector` 分区改行数/间隔 → 下一次 tick 生效。
 
 ## 六、边界记录
 
@@ -79,3 +79,33 @@
 - `Services/TextTail.cs` 与 W5 分支新增的同名文件内容一致(add/add 同文本,合并取任一)。
 - 测试侧两处一行改动:`Localization/StringTableTests.cs` 的已知前缀表加 `resources`;`Foundation/SettingsPanelTests.cs` 的 `KnownSectionIds` 补 `SettingsSectionIds.Inspector`(该数组自称「每个预留 id 都在这里」,实际漏了它,不补则 W8 注册分区后该测试把 inspector 从导航里过滤掉而失败)。
 - `Views/SubAgentView.axaml` 一行(停止按钮的 `IsVisible` 从 `IsLive` 改 `CanStop`):`SubAgentViewModel` 在 W8 的文件里,`CanStop` 是同一处状态的真实读法;只改绑定,不动布局。
+
+## 七、follow-up:单调用停止 + 跨会话聚合 + 评审修正
+
+### 1. 只停一条工具调用(Core 改动)
+
+- `Forge.Core/Agents/ToolCallCancellations.cs`(**新**,internal):`ConcurrentDictionary<(AgentId, CallId), CancellationTokenSource>`。`Begin` 建一个链到回合令牌的 CTS 并 `TryAdd`(重复 id 仍拿到自己的源,只是不能单独停);`End` 用 `TryRemove(KeyValuePair)` 只摘自己那一项再 `Dispose`;`Cancel` 对未知/已取消返回 `false`,否则 `_ = CancelAsync()`(回调上线程池,UI 线程不等进程树终止),与 `End` 竞争时吞 `ObjectDisposedException` 返回 `false`。
+- `AgentLoop.RunOneAsync`:在 `AgentToolStarted` **之前** `Begin`(行一出现就能停),工具拿 `callSource.Token`;`OperationCanceledException` 在回合令牌已取消时照旧抛,仅调用令牌取消时转成 `ToolResult(CancelledByUserResult, IsError: true)`;`finally` 里 `End`。转存与 `AgentToolFinished` 不变。根与所有子 Agent 共用同一个 `AgentLoop`,所以一份登记表覆盖整棵树。
+- `AgentHost.CancelToolCall(agentId, callId)`(public,空 id 返回 `false`)、`RunningToolCallCount`(internal,测试查泄漏)。
+- 命令工具:`ProcessRunner` 已在令牌触发时 `Kill(entireProcessTree: true)`,无需改动;`spawn_agent`:`SubAgentScheduler` 的 run 链到调用令牌,取消即子 Agent Stopped "parent cancelled"。
+- 已写入 `Forge.Core/SPEC.md`「单个工具调用的取消」。
+
+### 2. 跨所有打开会话聚合
+
+- `IResourceInspectorSource`(`Title`、`CollectRunning(List<object>)`、UI 线程事件 `RunningResourcesChanged`)由 `SessionWorkspaceViewModel` 实现(`SessionWorkspace.Tools.cs`);`RaiseRunningResources` 顺带触发事件,`Dispose` 触发一次后把事件置空。
+- `ResourceInspectorViewModel` 构造改为 `(collectSessions, activeSession, preferences, close, schedule, post)`:每次拉取按代号同步监听(新会话订阅、消失的退订并删组),平铺列表 = 每组一行 `ResourceInspectorGroupViewModel` 表头 + 该会话按开始时间排序的行,活动会话组在前;`Reconcile` 只做必要的 Remove/Move/Insert,行实例不重建;会话事件经 `Interlocked` 标志合并为一次 `Background` 派发;缓冲复用,稳态零自有分配。
+- `MainWindowViewModel.Inspector.cs`:不再在换会话时关闭,改为 `RequestRefresh()`;`OpenInspectorCommand` 在没有任何会话时不可用。
+- 视图:组表头模板(标题、「当前会话」标签、数量),工具行停止按钮绑 `CanStop`,请求后显示「正在停止…」。
+
+### 3. 评审修正
+
+- `LiveToolViewModel.ToggleCommand` 原为每次读取都 `new RelayCommand`(每次绑定读取一个新实例、一次分配),改为构造时建一次。
+- 工具行停止原先调 `SessionWorkspace.Cancel`(停整个回合**并暂停排队消息**),与文案以外的行为都不符合单调用语义;改为单调用取消,`Core` 拒绝时不标「正在停止」。
+- `CollectRunning` 读子 Agent 改为按下标(`Collection<T>` 的枚举器是装箱接口,每次拉取一个分配)。
+- `TextTail` 注释补上检查器这个调用方;`SessionView.axaml` 菜单项注释改为「所有打开会话」。
+
+### 4. 边界记录(follow-up)
+
+- **Core**:`AgentLoop.cs`、`AgentHost.cs` 改动 + 新文件 `ToolCallCancellations.cs`(任务明确允许,已记 Core SPEC)。
+- **`Forge.App/Agents/SessionRuntime.cs`(W1 的文件)**:加一个 `CancelToolCall(agentId, callId)` 转发方法(锁内取 host 后调用),没有它 App 无法够到 Core 的单调用取消。只加不改。
+- 未改:W0 冻结文件(`App.axaml`、`MainWindow.axaml`、`MainWindowViewModel.cs`、`FeatureComposition.cs`、`AppPreferences.cs`、`SettingsSection.cs`)。其中两处注释已过时、按冻结规则未动:`MainWindowViewModel.cs` `Dispose` 里「The overlay reads one session's live work」、`AppPreferences.InspectorRefreshMilliseconds` 文档「refreshes its elapsed times」(实际只刷新输出尾部与行)。

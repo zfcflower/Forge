@@ -201,6 +201,18 @@ public sealed class AgentHost
     public ToolRegistry Tools => toolSurface.Tools;
 
     /// <summary>
+    /// Stops one running tool call of this host's tree - the root's or any sub-agent's, keyed by the agent id and call id of
+    /// its <see cref="AgentToolStarted"/> - without stopping the turn: a shell command's process tree is killed, a spawned
+    /// child is cancelled, and the model receives an error result saying the user cancelled the call, then continues.
+    /// Thread-safe and non-blocking (the cancellation callbacks run on the thread pool). False when no such call is running.
+    /// </summary>
+    public bool CancelToolCall(string agentId, string callId) =>
+        !string.IsNullOrEmpty(agentId) && !string.IsNullOrEmpty(callId) && loop.CancelToolCall(agentId, callId);
+
+    /// <summary>Tool calls of this tree that can be stopped right now; zero between calls. For tests and diagnostics.</summary>
+    internal int RunningToolCallCount => loop.RunningToolCallCount;
+
+    /// <summary>
     /// Host side of <c>spawn_agent</c>: starts a <paramref name="kind"/> sub-agent under <paramref name="root"/> outside a
     /// model turn (automations). The child takes a run slot from the same per-tree pool, gets its own sub-agent session
     /// and reports through <paramref name="sink"/> exactly like a tool-spawned child (<see cref="AgentSubAgentStarted"/>

@@ -3,8 +3,9 @@ using System.Runtime.CompilerServices;
 namespace Forge.App.Localization;
 
 /// <summary>
-/// The resource inspector's table (wave W8,缺口 #13): the overlay that lists what the active session is running right now —
-/// its live tool calls and sub-agents, with elapsed time, the tail of a streamed output and a stop button — plus the row of
+/// The resource inspector's table (wave W8,缺口 #13): the overlay that lists what the open sessions are running right now —
+/// their live tool calls and sub-agents, grouped by session, with elapsed time, the tail of a streamed output and a stop
+/// button per row — plus the row of
 /// the composer's resources menu that opens it and the <c>inspector</c> settings section. Keys: <c>resources.*</c>.
 /// <para>Only names and wording live here; the numbers (elapsed seconds, counts) are formatted by the callers through
 /// <see cref="TextFormat"/> and arrive as arguments, so a language switch re-renders a row without re-reading anything.</para>
@@ -22,6 +23,7 @@ internal static class ResourceInspectorStrings
     public const string EmptyKey = "resources.empty";
     public const string EmptyHintKey = "resources.emptyHint";
     public const string NoSessionKey = "resources.noSession";
+    public const string ActiveSessionKey = "resources.session.active";
 
     // ---------------------------------------------------------------- one running tool call
     public const string TailKey = "resources.tail";
@@ -29,6 +31,7 @@ internal static class ResourceInspectorStrings
     public const string StopToolKey = "resources.stop";
     public const string StopToolNameKey = "resources.stop.name";
     public const string StopToolTooltipKey = "resources.stop.tooltip";
+    public const string StoppingKey = "resources.stopping";
     public const string RootAgentKey = "resources.agent.root";
     public const string ChildAgentKey = "resources.agent.child";
 
@@ -68,11 +71,17 @@ internal static class ResourceInspectorStrings
 
     public static string NoSession => Loc.Instance[NoSessionKey];
 
+    /// <summary>"当前会话": the tag on the group of the session the window shows.</summary>
+    public static string ActiveSession => Loc.Instance[ActiveSessionKey];
+
     public static string StopTool => Loc.Instance[StopToolKey];
 
     public static string StopToolName => Loc.Instance[StopToolNameKey];
 
     public static string StopToolTooltip => Loc.Instance[StopToolTooltipKey];
+
+    /// <summary>"正在停止…": a stopped call that is still winding down (killing its process tree, cancelling its child).</summary>
+    public static string Stopping => Loc.Instance[StoppingKey];
 
     /// <summary>"主 Agent": the agent a tool call belongs to when it is the session's own agent.</summary>
     public static string RootAgent => Loc.Instance[RootAgentKey];
@@ -98,35 +107,37 @@ internal static class ResourceInspectorStrings
         Loc.Register(MenuCountPatternKey, "运行中的资源({0})…", "Running resources ({0})…");
         Loc.Register(
             MenuTooltipKey,
-            "本会话正在运行的工具调用与子 Agent",
-            "The tool calls and sub-agents this session is running");
+            "所有打开会话正在运行的工具调用与子 Agent;括号里的数字是本会话的",
+            "The tool calls and sub-agents every open session is running; the number in brackets is this session's");
         Loc.Register(TitleKey, "运行中的资源", "Running resources");
         Loc.Register(CloseKey, "关闭", "Close");
         Loc.Register(CloseTooltipKey, "关闭资源检查器", "Close the resource inspector");
         Loc.Register(CountPatternKey, "{0} 项进行中", "{0} active");
-        Loc.Register(EmptyKey, "本会话没有正在运行的工具或子 Agent", "Nothing is running in this session");
+        Loc.Register(EmptyKey, "打开的会话都没有正在运行的工具或子 Agent", "Nothing is running in the open sessions");
         Loc.Register(
             EmptyHintKey,
-            "工具调用与子 Agent 会在这里列出,带实时耗时、输出尾部与停止按钮。",
-            "Tool calls and sub-agents appear here with their live elapsed time, output tail and a stop button.");
+            "所有打开会话的工具调用与子 Agent 会按会话分组列在这里,带实时耗时、输出尾部与停止按钮。",
+            "The tool calls and sub-agents of every open session appear here, grouped by session, with their live elapsed time, output tail and a stop button.");
         Loc.Register(NoSessionKey, "没有打开的会话", "No session is open");
+        Loc.Register(ActiveSessionKey, "当前会话", "Current session");
 
         Loc.Register(TailKey, "输出尾部", "Output tail");
         Loc.Register(TailEmptyKey, "还没有输出", "No output yet");
         Loc.Register(StopToolKey, "停止", "Stop");
-        Loc.Register(StopToolNameKey, "停止回合并取消它的工具调用", "Stop the turn and cancel its tool calls");
+        Loc.Register(StopToolNameKey, "停止这个工具调用", "Stop this tool call");
         Loc.Register(
             StopToolTooltipKey,
-            "停止这一回合;该回合的所有工具调用都会被取消(工具调用无法单独取消)",
-            "Stops this turn; every tool call in it is cancelled (a single call cannot be cancelled on its own)");
+            "只取消这一个工具调用(命令连同它启动的子进程一起结束,子 Agent 被取消);回合继续,模型会收到“已被用户取消”的结果",
+            "Cancels only this tool call (a command is ended with the processes it started, a sub-agent is cancelled); the turn goes on and the model is told the user cancelled the call");
+        Loc.Register(StoppingKey, "正在停止…", "Stopping…");
         Loc.Register(RootAgentKey, "主 Agent", "Main agent");
         Loc.Register(ChildAgentKey, "子 Agent", "Sub-agent");
 
         Loc.Register(SettingsTitleKey, "资源检查器", "Resource inspector");
         Loc.Register(
             SettingsHintKey,
-            "“运行中的资源”列出本会话正在运行的工具调用与子 Agent,并给出耗时、输出尾部与停止按钮。",
-            "\"Running resources\" lists the tool calls and sub-agents of this session with their elapsed time, output tail and a stop button.");
+            "“运行中的资源”按会话列出所有打开会话正在运行的工具调用与子 Agent,并给出耗时、输出尾部与停止按钮。",
+            "\"Running resources\" lists the running tool calls and sub-agents of every open session, grouped by session, with their elapsed time, output tail and a stop button.");
         Loc.Register(SettingsTailLinesKey, "输出尾部行数", "Output tail lines");
         Loc.Register(
             SettingsTailLinesHintKey,

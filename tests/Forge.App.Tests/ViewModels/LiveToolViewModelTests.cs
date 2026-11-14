@@ -110,19 +110,76 @@ public sealed class LiveToolViewModelTests
     }
 
     [Fact]
-    public void The_stop_command_runs_the_injected_action_once_while_the_call_runs()
+    public void The_stop_command_asks_for_exactly_this_call_once_and_then_reads_stopping()
     {
-        var stopped = 0;
-        var tool = Create(stop: () => stopped++);
+        var stops = new List<(string Agent, string Call)>();
+        var tool = Create("child-1", stop: (agent, call) =>
+        {
+            stops.Add((agent, call));
+            return true;
+        });
+        var raised = new List<string?>();
+        tool.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        Assert.True(tool.CanStop);
         Assert.True(tool.StopCommand.CanExecute(null));
 
         tool.StopCommand.Execute(null);
-        Assert.Equal(1, stopped);
+        Assert.Equal([("child-1", "call-1")], stops);
+        Assert.True(tool.IsStopRequested);
+        Assert.False(tool.CanStop);
+        Assert.False(tool.StopCommand.CanExecute(null));
+        Assert.Contains(nameof(LiveToolViewModel.CanStop), raised);
+        Assert.Contains(nameof(LiveToolViewModel.IsStopRequested), raised);
 
+        // A second press while the call winds down does not ask again.
+        tool.StopCommand.Execute(null);
+        Assert.Single(stops);
+    }
+
+    [Fact]
+    public void A_stop_the_session_refused_leaves_the_row_stoppable()
+    {
+        // False: the call already finished (the race lost) or the session is gone; the row does not claim it is stopping.
+        var asked = 0;
+        var tool = Create(stop: (_, _) =>
+        {
+            asked++;
+            return false;
+        });
+
+        tool.StopCommand.Execute(null);
+
+        Assert.Equal(1, asked);
+        Assert.False(tool.IsStopRequested);
+        Assert.True(tool.CanStop);
+    }
+
+    [Fact]
+    public void A_finished_call_or_a_row_without_a_stop_cannot_be_stopped()
+    {
+        var asked = 0;
+        var tool = Create(stop: (_, _) =>
+        {
+            asked++;
+            return true;
+        });
         tool.Finish();
+        Assert.False(tool.CanStop);
         Assert.False(tool.StopCommand.CanExecute(null));
         tool.StopCommand.Execute(null);
-        Assert.Equal(1, stopped);
+        Assert.Equal(0, asked);
+
+        // A read-only session has no runtime, so its rows get no stop at all.
+        var readOnly = new LiveToolViewModel("root", static () => null, new ToolCall("call-1", "Bash", "{}"), At, stopCall: null);
+        Assert.False(readOnly.CanStop);
+        Assert.False(readOnly.StopCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void The_toggle_command_is_one_instance()
+    {
+        var tool = Create();
+        Assert.Same(tool.ToggleCommand, tool.ToggleCommand);
     }
 
     [Fact]
@@ -175,11 +232,11 @@ public sealed class LiveToolViewModelTests
     private static int TailNotifications(List<string?> raised) =>
         raised.Count(static name => string.Equals(name, nameof(LiveToolViewModel.TailText), StringComparison.Ordinal));
 
-    private static LiveToolViewModel Create(string agentId = "root", Func<string?>? agentKind = null, Action? stop = null) =>
+    private static LiveToolViewModel Create(string agentId = "root", Func<string?>? agentKind = null, Func<string, string, bool>? stop = null) =>
         new(
             agentId,
             agentKind ?? (static () => null),
             new ToolCall("call-1", "Bash", """{"command":"npm test"}"""),
             At,
-            stop ?? (static () => { }));
+            stop ?? (static (_, _) => true));
 }

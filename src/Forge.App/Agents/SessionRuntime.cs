@@ -232,6 +232,22 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
     }
 
+    /// <summary>
+    /// Stops one running tool call (the root's or a sub-agent's) without stopping the turn; see
+    /// <see cref="AgentHost.CancelToolCall"/>. Non-blocking, safe from the UI thread. False when the host is not built yet or the
+    /// call is no longer running.
+    /// </summary>
+    public bool CancelToolCall(string agentId, string callId)
+    {
+        AgentHost? built;
+        lock (gate)
+        {
+            built = host;
+        }
+
+        return built?.CancelToolCall(agentId, callId) ?? false;
+    }
+
     /// <summary>Sub-agent sessions this session spawned, ordered by last activity.</summary>
     public Task<IReadOnlyList<SessionInfo>> QueryChildrenAsync(CancellationToken ct) =>
         QueryChildrenAsync(SessionId, ct);

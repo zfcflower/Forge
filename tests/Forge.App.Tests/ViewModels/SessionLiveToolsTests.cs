@@ -436,6 +436,98 @@ public sealed class SessionLiveToolsTests
         Assert.Equal(state.Snapshot, state.Wide);
     }
 
+    // ---------------------------------------------------------------- the inspector's view of the session
+
+    [Fact]
+    public async Task A_rows_stop_never_cancels_the_turn_and_a_call_core_does_not_run_is_not_marked_stopping()
+    {
+        var session = SharedUi.Session;
+        var state = await session.Dispatch(
+            async () =>
+            {
+                var turn = LiveTurn.Start();
+                try
+                {
+                    var workspace = turn.Workspace;
+                    // An injected start: Core never registered this call, so its single-call cancel has nothing to stop. The
+                    // old stop cancelled the whole turn here; the new one asks Core for exactly this call and nothing else.
+                    Emit(workspace, new AgentToolStarted("root", Call("call-1")));
+                    Assert.True(await PumpUntilAsync(() => workspace.RunningToolCount == 1), "the started call was never tracked");
+                    var live = Assert.Single(workspace.RunningTools);
+                    var canStop = live.CanStop;
+
+                    live.StopCommand.Execute(null);
+                    await TestPump.UntilAsync(static () => false, iterations: 20);
+                    var after = (workspace.IsRunning, live.IsStopRequested, live.CanStop, workspace.RunningToolCount);
+                    var result = await turn.EndAsync();
+                    return (CanStop: canStop, after, Result: result);
+                }
+                finally
+                {
+                    await turn.CloseAsync();
+                }
+            },
+            CancellationToken.None);
+
+        Assert.True(state.CanStop);
+        Assert.True(state.after.IsRunning, "a row's stop cancelled the whole turn");
+        Assert.False(state.after.IsStopRequested);
+        Assert.True(state.after.CanStop);
+        Assert.Equal(1, state.after.RunningToolCount);
+        Assert.NotNull(state.Result);
+    }
+
+    [Fact]
+    public async Task The_session_tells_the_inspector_when_its_rows_change_and_once_more_when_it_closes()
+    {
+        var session = SharedUi.Session;
+        var state = await session.Dispatch(
+            async () =>
+            {
+                var turn = LiveTurn.Start();
+                try
+                {
+                    var workspace = turn.Workspace;
+                    IResourceInspectorSource source = workspace;
+                    var raised = 0;
+                    source.RunningResourcesChanged += (_, _) => raised++;
+
+                    Emit(workspace, new AgentToolStarted("root", Call("call-1")));
+                    Assert.True(await PumpUntilAsync(() => workspace.RunningToolCount == 1), "the started call was never tracked");
+                    var afterStart = raised;
+                    var rows = new List<object>();
+                    source.CollectRunning(rows);
+                    var listed = rows.Count;
+
+                    Emit(workspace, new AgentToolFinished("root", Call("call-1"), new ToolResult("done")));
+                    Assert.True(await PumpUntilAsync(() => workspace.RunningToolCount == 0), "the finished call was never removed");
+                    var afterFinish = raised;
+
+                    workspace.Dispose();
+                    var afterDispose = raised;
+                    rows.Clear();
+                    source.CollectRunning(rows);
+
+                    // The session forgot its listeners on close: a late event reaches nobody.
+                    Emit(workspace, new AgentToolStarted("root", Call("call-2")));
+                    return (afterStart, listed, afterFinish, afterDispose, AfterClose: rows.Count, Final: raised, source.Title);
+                }
+                finally
+                {
+                    await turn.CloseAsync();
+                }
+            },
+            CancellationToken.None);
+
+        Assert.True(state.afterStart >= 1);
+        Assert.Equal(1, state.listed);
+        Assert.True(state.afterFinish > state.afterStart);
+        Assert.Equal(state.afterFinish + 1, state.afterDispose);
+        Assert.Equal(0, state.AfterClose);
+        Assert.Equal(state.afterDispose, state.Final);
+        Assert.Equal("demo session", state.Title);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static void Emit(SessionWorkspaceViewModel workspace, AgentEvent value) => Sink.Invoke(workspace, [value]);
