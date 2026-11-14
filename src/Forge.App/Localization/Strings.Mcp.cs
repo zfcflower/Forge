@@ -107,6 +107,8 @@ internal static class McpSettingsStrings
     public const string EditorSaveKey = "settings.mcp.editor.save";
     public const string EditorCancelKey = "settings.mcp.editor.cancel";
     public const string EditorIssueKey = "settings.mcp.editor.issue";
+    public const string EditorShadowedByProjectKey = "settings.mcp.editor.shadowedByProject";
+    public const string EditorShadowedByGlobalKey = "settings.mcp.editor.shadowedByGlobal";
     public const string EditorInvalidKey = "settings.mcp.editor.invalid";
 
     // ------------------------------------------------------------------ validation
@@ -288,6 +290,12 @@ internal static class McpSettingsStrings
 
     public static string EditorInvalid => Loc.Instance[EditorInvalidKey];
 
+    /// <summary>Saved into the project file under a name the global file already has: the project entry wins.</summary>
+    public static string EditorShadowedByProject => Loc.Instance[EditorShadowedByProjectKey];
+
+    /// <summary>Saved into the global file under a name the project file already has: the project entry keeps winning.</summary>
+    public static string EditorShadowedByGlobal => Loc.Instance[EditorShadowedByGlobalKey];
+
     public static string ValidationTimeoutNumber => Loc.Instance[ValidationTimeoutNumberKey];
 
     // ------------------------------------------------------------------ validation
@@ -456,6 +464,14 @@ internal static class McpSettingsStrings
         Loc.Register(EditorSaveKey, "保存", "Save");
         Loc.Register(EditorCancelKey, "取消", "Cancel");
         Loc.Register(EditorIssueKey, "校验问题", "Validation issues");
+        Loc.Register(
+            EditorShadowedByProjectKey,
+            "全局文件里已有同名条目；这条会覆盖它（项目条目按名覆盖全局）。",
+            "The global file already lists this name; this entry shadows it (a project entry wins by name).");
+        Loc.Register(
+            EditorShadowedByGlobalKey,
+            "项目文件里已有同名条目，它会覆盖这一条。",
+            "The project file already lists this name and shadows this entry.");
         Loc.Register(EditorInvalidKey, "请先修正校验问题再保存", "Fix the validation issues before saving");
 
         Loc.Register(ValidationFieldNameKey, "名称", "Name");

@@ -401,6 +401,12 @@
             </StackPanel>
           </Grid>
 
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     IsVisible="{Binding Editor.HasShadowWarning}"
+                     AutomationProperties.AutomationId="mcp-editor-shadow-warning"
+                     Text="{Binding Editor.ShadowWarningText}" />
+
           <StackPanel Spacing="2" IsVisible="{Binding Editor.HasIssues}">
             <TextBlock Classes="caption mcp-error" Text="{Binding [settings.mcp.editor.issue], Source={x:Static loc:Loc.Instance}}" />
             <ItemsControl ItemsSource="{Binding Editor.Issues}">

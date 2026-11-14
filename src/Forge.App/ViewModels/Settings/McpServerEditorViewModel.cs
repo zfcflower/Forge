@@ -59,6 +59,9 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
 {
     private readonly McpServerEntry? original;
 
+    /// <summary>The names the other file lists, so a shadowing save can say so.</summary>
+    private readonly IReadOnlyCollection<string> shadowed;
+
     /// <summary>The name the entry had before this edit; a save renames it in the same write (null for a new entry).</summary>
     public string? OriginalName => original?.Name;
 
@@ -82,11 +85,21 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
     private bool timeoutInvalid;
     private bool saveToProject;
 
-    public McpServerEditorViewModel(McpServerEntry entry, string globalPath, string? projectPath, bool isNew)
+    /// <param name="otherFileNames">
+    /// The names the other file already lists. Saving a name that the other file also has is legitimate — the project entry
+    /// shadows the global one — but it must say so, or the edit looks applied while the other file keeps winning.
+    /// </param>
+    public McpServerEditorViewModel(
+        McpServerEntry entry,
+        string globalPath,
+        string? projectPath,
+        bool isNew,
+        IReadOnlyCollection<string>? otherFileNames = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentException.ThrowIfNullOrWhiteSpace(globalPath);
         original = isNew ? null : entry;
+        shadowed = otherFileNames ?? [];
         this.globalPath = globalPath;
         this.projectPath = projectPath;
         this.isNew = isNew;
@@ -117,6 +130,26 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
 
     public string Title => isNew ? McpSettingsStrings.EditorTitleAdd : McpSettingsStrings.EditorTitleEdit(nameText);
 
+    /// <summary>True while the name being saved is one the other file already lists: the entry would shadow it (or be shadowed).</summary>
+    public bool HasShadowWarning
+    {
+        get
+        {
+            var name = nameText.Trim();
+            return name.Length > 0 &&
+                   !string.Equals(name, original?.Name, StringComparison.Ordinal) &&
+                   shadowed.Contains(name);
+        }
+    }
+
+    /// <summary>Which file wins, in the current language.</summary>
+    public string ShadowWarningText => HasShadowWarning
+        ? Loc.Instance[
+            saveToProject
+                ? McpSettingsStrings.EditorShadowedByProjectKey
+                : McpSettingsStrings.EditorShadowedByGlobalKey]
+        : string.Empty;
+
     public string Name
     {
         get => nameText;
@@ -126,6 +159,8 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
             {
                 RefreshIssues();
                 OnPropertyChanged(nameof(Title));
+                OnPropertyChanged(nameof(HasShadowWarning));
+                OnPropertyChanged(nameof(ShadowWarningText));
             }
         }
     }
@@ -371,6 +406,8 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
         {
             OnPropertyChanged(nameof(SaveToGlobal));
             OnPropertyChanged(nameof(TargetPath));
+            OnPropertyChanged(nameof(HasShadowWarning));
+            OnPropertyChanged(nameof(ShadowWarningText));
         }
     }
 

@@ -63,6 +63,10 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     private string importSummary = string.Empty;
     private IReadOnlyList<McpPresetOptionViewModel> presets;
 
+    /// <summary>The names each file listed at the last refresh, so opening an editor needs no file read of its own.</summary>
+    private HashSet<string> globalNames = new(StringComparer.Ordinal);
+    private HashSet<string> projectNames = new(StringComparer.Ordinal);
+
     public McpSettingsSectionViewModel(AppComposition composition)
     {
         ArgumentNullException.ThrowIfNull(composition);
@@ -547,6 +551,20 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             diagnostics.Add(McpSettingsStrings.DiagnosticKeptServer(name, source));
         }
 
+        var globals = new HashSet<string>(StringComparer.Ordinal);
+        var projects = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in snapshot.Files)
+        {
+            var into = file.IsProject ? projects : globals;
+            foreach (var entry in file.Entries)
+            {
+                into.Add(entry.Name);
+            }
+        }
+
+        globalNames = globals;
+        projectNames = projects;
+
         var existing = new Dictionary<string, McpServerRowViewModel>(Servers.Count, StringComparer.Ordinal);
         foreach (var row in Servers)
         {
@@ -612,11 +630,25 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        editor = new McpServerEditorViewModel(entry, services.Store.GlobalPath, services.Store.ProjectPath, isNew);
+        editor = new McpServerEditorViewModel(
+            entry,
+            services.Store.GlobalPath,
+            services.Store.ProjectPath,
+            isNew,
+            NamesOfTheOtherFile(entry));
         OnPropertyChanged(nameof(Editor));
         OnPropertyChanged(nameof(IsEditing));
         ClearStatus();
     }
+
+    /// <summary>
+    /// The names listed by the file the entry does not live in — what a save can collide with. Taken from the last refresh
+    /// rather than the disk: opening an editor must not read a file on the UI thread.
+    /// </summary>
+    private IReadOnlyCollection<string> NamesOfTheOtherFile(McpServerEntry entry) =>
+        string.Equals(entry.SourcePath, composition.Mcp?.Store.ProjectPath, StringComparison.Ordinal)
+            ? globalNames
+            : projectNames;
 
     private void CloseEditor()
     {
