@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -160,6 +161,27 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinProjectsCloneTimeoutSeconds = 0;
     public const int MaxProjectsCloneTimeoutSeconds = 3600;
     public const int DefaultProjectsCloneTimeoutSeconds = 0;
+    // The per-provider budget (wave W15). The defaults are the limiter's own (<c>ProviderRateLimitPolicy</c>): a fresh
+    // profile starts on the loose numbers the core ships, not on a second set that only looks the same.
+    public const bool DefaultRateLimitEnabled = true;
+    public const int MinRateLimitRequestsPerMinute = 1;
+    public const int MaxRateLimitRequestsPerMinute = 100000;
+    public const int DefaultRateLimitRequestsPerMinute = 600;
+    public const int MinRateLimitTokensPerMinute = 1000;
+    public const int MaxRateLimitTokensPerMinute = 1000000000;
+    public const int DefaultRateLimitTokensPerMinute = 4000000;
+    public const int MinRateLimitAutomationGapSeconds = 0;
+    public const int MaxRateLimitAutomationGapSeconds = 600;
+    public const int DefaultRateLimitAutomationGapSeconds = 10;
+
+    /// <summary>
+    /// One provider override as <c>id|requests|tokens</c>, an empty field meaning "inherit the global number" (wave W15). A
+    /// provider id is a lowercase slug (letters, digits, hyphen), so the pipe cannot appear in the key.
+    /// </summary>
+    public const char RateLimitOverrideSeparator = '|';
+
+    /// <summary>How many fields a stored override entry has.</summary>
+    private const int RateLimitOverrideFields = 3;
     public const string DefaultIdleArchiveScope = "automation";
     private static readonly string[] IdleArchiveScopeTokens = ["automation", "all"];
     public const string DefaultUpdatesCheckFrequency = "daily";
@@ -243,6 +265,11 @@ internal sealed class AppPreferences : ObservableObject
     private int inspectorRefreshMilliseconds = DefaultInspectorRefreshMilliseconds;
     private int chatMermaidTimeoutMilliseconds = DefaultChatMermaidTimeoutMilliseconds;
     private int projectsCloneTimeoutSeconds = DefaultProjectsCloneTimeoutSeconds;
+    private bool rateLimitEnabled = DefaultRateLimitEnabled;
+    private int rateLimitRequestsPerMinute = DefaultRateLimitRequestsPerMinute;
+    private int rateLimitTokensPerMinute = DefaultRateLimitTokensPerMinute;
+    private int rateLimitAutomationGapSeconds = DefaultRateLimitAutomationGapSeconds;
+    private IReadOnlyList<string> rateLimitOverrides = [];
     private string idleArchiveScope = DefaultIdleArchiveScope;
     private string updatesCheckFrequency = DefaultUpdatesCheckFrequency;
     private string updatesChannel = DefaultUpdatesChannel;
@@ -583,6 +610,85 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref projectsCloneTimeoutSeconds, Math.Clamp(value, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds));
     }
 
+    /// <summary>Whether the local per-provider budget is enforced at all (wave W15). Read on the next request, so switching it takes effect without a restart.</summary>
+    public bool RateLimitEnabled { get => rateLimitEnabled; set => Set(ref rateLimitEnabled, value); }
+
+    /// <summary>Requests per minute one provider may receive (wave W15); the next request already obeys it. Clamped to [<see cref="MinRateLimitRequestsPerMinute"/>, <see cref="MaxRateLimitRequestsPerMinute"/>].</summary>
+    public int RateLimitRequestsPerMinute
+    {
+        get => rateLimitRequestsPerMinute;
+        set => Set(ref rateLimitRequestsPerMinute, Math.Clamp(value, MinRateLimitRequestsPerMinute, MaxRateLimitRequestsPerMinute));
+    }
+
+    /// <summary>Tokens per minute one provider may receive (wave W15); the next request already obeys it. Clamped to [<see cref="MinRateLimitTokensPerMinute"/>, <see cref="MaxRateLimitTokensPerMinute"/>].</summary>
+    public int RateLimitTokensPerMinute
+    {
+        get => rateLimitTokensPerMinute;
+        set => Set(ref rateLimitTokensPerMinute, Math.Clamp(value, MinRateLimitTokensPerMinute, MaxRateLimitTokensPerMinute));
+    }
+
+    /// <summary>Seconds between two automated resumes of the same provider (wave W15); 0 spaces nothing. Read on the next resume, so it takes effect without a restart. Clamped to [<see cref="MinRateLimitAutomationGapSeconds"/>, <see cref="MaxRateLimitAutomationGapSeconds"/>].</summary>
+    public int RateLimitAutomationGapSeconds
+    {
+        get => rateLimitAutomationGapSeconds;
+        set => Set(ref rateLimitAutomationGapSeconds, Math.Clamp(value, MinRateLimitAutomationGapSeconds, MaxRateLimitAutomationGapSeconds));
+    }
+
+    /// <summary>
+    /// Providers whose own ceilings differ from the global ones (wave W15), as normalized <c>id|requests|tokens</c> entries
+    /// (empty field = inherit). Only what a provider reports at runtime outranks this; an entry is for a gateway whose operator
+    /// knows it is tighter than the defaults. Sorted and de-duplicated; an entry that states nothing is dropped.
+    /// </summary>
+    public IReadOnlyList<string> RateLimitOverrides
+    {
+        get => rateLimitOverrides;
+        set
+        {
+            var normalized = NormalizeRateLimitOverrides(value);
+            if (!rateLimitOverrides.SequenceEqual(normalized, StringComparer.Ordinal))
+            {
+                rateLimitOverrides = normalized;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>This provider's own ceilings, or null when it inherits both global numbers (see <see cref="RateLimitOverrides"/>).</summary>
+    public (int? RequestsPerMinute, int? TokensPerMinute)? RateLimitOverrideFor(string providerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        var prefix = providerId + RateLimitOverrideSeparator;
+        foreach (var entry in rateLimitOverrides)
+        {
+            if (!entry.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var parts = entry.Split(RateLimitOverrideSeparator);
+            return (Number(parts[1], MaxRateLimitRequestsPerMinute), Number(parts[2], MaxRateLimitTokensPerMinute));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sets or clears one provider's ceilings (null on both clears the entry). Raises PropertyChanged for
+    /// <see cref="RateLimitOverrides"/> only when the entry moved, so a field left as it was costs nothing.
+    /// </summary>
+    public void SetRateLimitOverride(string providerId, int? requestsPerMinute, int? tokensPerMinute)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        var entries = new List<string>(rateLimitOverrides);
+        entries.RemoveAll(entry => entry.StartsWith(providerId + RateLimitOverrideSeparator, StringComparison.Ordinal));
+        if (requestsPerMinute is not null || tokensPerMinute is not null)
+        {
+            entries.Add(FormatRateLimitOverride(providerId, requestsPerMinute, tokensPerMinute));
+        }
+
+        RateLimitOverrides = entries;
+    }
+
     /// <summary>Which workspaces idle archiving covers: <c>automation</c> (sessions an automation created) or <c>all</c> root sessions (wave W1). An unknown token means the default.</summary>
     public string IdleArchiveScope { get => idleArchiveScope; set => Set(ref idleArchiveScope, Token(value, IdleArchiveScopeTokens, DefaultIdleArchiveScope)); }
 
@@ -776,6 +882,17 @@ internal sealed class AppPreferences : ObservableObject
         projectsCloneTimeoutSeconds = section.ProjectsCloneTimeoutSeconds is { } projectsCloneTimeoutSecondsLoaded
             ? Math.Clamp(projectsCloneTimeoutSecondsLoaded, MinProjectsCloneTimeoutSeconds, MaxProjectsCloneTimeoutSeconds)
             : DefaultProjectsCloneTimeoutSeconds;
+        rateLimitEnabled = section.RateLimitEnabled ?? DefaultRateLimitEnabled;
+        rateLimitRequestsPerMinute = section.RateLimitRequestsPerMinute is { } rateLimitRequestsPerMinuteLoaded
+            ? Math.Clamp(rateLimitRequestsPerMinuteLoaded, MinRateLimitRequestsPerMinute, MaxRateLimitRequestsPerMinute)
+            : DefaultRateLimitRequestsPerMinute;
+        rateLimitTokensPerMinute = section.RateLimitTokensPerMinute is { } rateLimitTokensPerMinuteLoaded
+            ? Math.Clamp(rateLimitTokensPerMinuteLoaded, MinRateLimitTokensPerMinute, MaxRateLimitTokensPerMinute)
+            : DefaultRateLimitTokensPerMinute;
+        rateLimitAutomationGapSeconds = section.RateLimitAutomationGapSeconds is { } rateLimitAutomationGapSecondsLoaded
+            ? Math.Clamp(rateLimitAutomationGapSecondsLoaded, MinRateLimitAutomationGapSeconds, MaxRateLimitAutomationGapSeconds)
+            : DefaultRateLimitAutomationGapSeconds;
+        rateLimitOverrides = NormalizeRateLimitOverrides(section.RateLimitOverrides);
         idleArchiveScope = Token(section.IdleArchiveScope, IdleArchiveScopeTokens, DefaultIdleArchiveScope);
         updatesCheckFrequency = Token(section.UpdatesCheckFrequency, UpdatesCheckFrequencyTokens, DefaultUpdatesCheckFrequency);
         updatesChannel = Token(section.UpdatesChannel, UpdatesChannelTokens, DefaultUpdatesChannel);
@@ -858,6 +975,11 @@ internal sealed class AppPreferences : ObservableObject
             InspectorRefreshMilliseconds = inspectorRefreshMilliseconds,
             ChatMermaidTimeoutMilliseconds = chatMermaidTimeoutMilliseconds,
             ProjectsCloneTimeoutSeconds = projectsCloneTimeoutSeconds,
+            RateLimitEnabled = rateLimitEnabled,
+            RateLimitRequestsPerMinute = rateLimitRequestsPerMinute,
+            RateLimitTokensPerMinute = rateLimitTokensPerMinute,
+            RateLimitAutomationGapSeconds = rateLimitAutomationGapSeconds,
+            RateLimitOverrides = rateLimitOverrides.Count == 0 ? null : [.. rateLimitOverrides],
             IdleArchiveScope = idleArchiveScope,
             UpdatesCheckFrequency = updatesCheckFrequency,
             UpdatesChannel = updatesChannel,
@@ -933,6 +1055,72 @@ internal sealed class AppPreferences : ObservableObject
             EditorThemeDark => EditorThemeDark,
             _ => EditorThemeAuto,
         };
+
+    /// <summary>
+    /// Keeps the readable override entries, normalized: the id is trimmed and lowercased (provider ids are slugs), the two
+    /// numbers are clamped to the same ranges the fields offer, and an entry that states nothing is dropped. Sorted by id so the
+    /// file and the published policy are stable across edits.
+    /// </summary>
+    private static string[] NormalizeRateLimitOverrides(IEnumerable<string>? entries)
+    {
+        if (entries is null)
+        {
+            return [];
+        }
+
+        var byProvider = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            var parts = entry.Split(RateLimitOverrideSeparator);
+            if (parts.Length < RateLimitOverrideFields)
+            {
+                continue;
+            }
+
+            var providerId = parts[0].Trim().ToLowerInvariant();
+            var requests = Number(parts[1], MaxRateLimitRequestsPerMinute);
+            var tokens = Number(parts[2], MaxRateLimitTokensPerMinute);
+            if (providerId.Length == 0 || (requests is null && tokens is null))
+            {
+                continue;
+            }
+
+            byProvider[providerId] = FormatRateLimitOverride(providerId, requests, tokens);
+        }
+
+        return [.. byProvider.Values.Order(StringComparer.Ordinal)];
+    }
+
+    private static string FormatRateLimitOverride(string providerId, int? requestsPerMinute, int? tokensPerMinute) =>
+        providerId + RateLimitOverrideSeparator
+        + (requestsPerMinute?.ToString(CultureInfo.InvariantCulture) ?? string.Empty) + RateLimitOverrideSeparator
+        + (tokensPerMinute?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+
+    /// <summary>
+    /// One stored number, clamped to <paramref name="maximum"/>; an empty field inherits and therefore reads as null. A number
+    /// too large for an int is clamped rather than dropped: a hand-edited file that says "one billion" asked for a ceiling, not
+    /// for the default, and silently reading it as "inherit" would loosen a limit the user meant to tighten.
+    /// </summary>
+    private static int? Number(string text, int maximum)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wide))
+        {
+            return (int)Math.Clamp(wide, 0, maximum);
+        }
+
+        return null;
+    }
 
     private static string[] NormalizeNames(IEnumerable<string>? names) =>
         names is null
@@ -1168,6 +1356,23 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("projectsCloneTimeoutSeconds")]
     public int? ProjectsCloneTimeoutSeconds { get; set; }
+
+    [JsonPropertyName("rateLimitEnabled")]
+    public bool? RateLimitEnabled { get; set; }
+
+    [JsonPropertyName("rateLimitRequestsPerMinute")]
+    public int? RateLimitRequestsPerMinute { get; set; }
+
+    [JsonPropertyName("rateLimitTokensPerMinute")]
+    public int? RateLimitTokensPerMinute { get; set; }
+
+    [JsonPropertyName("rateLimitAutomationGapSeconds")]
+    public int? RateLimitAutomationGapSeconds { get; set; }
+
+    /// <summary>Per-provider ceilings as <c>id|requests|tokens</c>; absent when every provider uses the global numbers.</summary>
+    [JsonPropertyName("rateLimitOverrides")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? RateLimitOverrides { get; set; }
 
     [JsonPropertyName("idleArchiveScope")]
     public string? IdleArchiveScope { get; set; }

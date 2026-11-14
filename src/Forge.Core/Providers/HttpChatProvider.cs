@@ -62,10 +62,12 @@ public abstract class HttpChatProvider : IChatProvider
     /// <summary>
     /// The account usage windows this response reported, if its protocol has such a meter. Read once per response, before the
     /// body, and attached to the turn's <see cref="MessageCompleted"/> and — when the request was rejected — to the
-    /// <see cref="ProviderException"/>. Base returns null: a protocol without the meter reports nothing, which is not the same
-    /// as an account with an empty window.
+    /// <see cref="ProviderException"/>. The base reads the generic <c>x-ratelimit-*</c> family (OpenAI and most compatible
+    /// servers send it on every response), which the local budget calibrates from; a protocol with its own meter overrides
+    /// this. Null means the response reported no meter at all, which is not the same as an account with an empty window.
     /// </summary>
-    protected virtual ProviderRateLimit? ReadRateLimit(HttpResponseMessage response) => null;
+    protected virtual ProviderRateLimit? ReadRateLimit(HttpResponseMessage response) =>
+        RateLimitHeaders.ReadRateLimit(response.Headers, TimeProvider.System.GetUtcNow());
 
     /// <summary>
     /// Headers that need the request rather than the provider (a session id, for one). Applied after the credential and

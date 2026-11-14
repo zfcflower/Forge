@@ -56,37 +56,22 @@ internal sealed record QuotaNote(string? ProviderId, string Model, DateTimeOffse
     private static string Flatten(string text) => text.Replace('\n', ' ').Replace('\r', ' ');
 }
 
-/// <summary>Spaces resumes of one provider at least <see cref="Gap"/> apart, so a reset does not meet a burst of turns.</summary>
-internal sealed class ResumeStagger(TimeProvider time)
-{
-    public static readonly TimeSpan Gap = TimeSpan.FromSeconds(10);
-
-    private readonly Dictionary<string, DateTimeOffset> next = new(StringComparer.Ordinal);
-
-    /// <summary>Reserves the provider's next slot and returns how long to wait for it.</summary>
-    public TimeSpan Reserve(string providerKey)
-    {
-        var now = time.GetUtcNow();
-        lock (next)
-        {
-            var slot = next.TryGetValue(providerKey, out var reserved) && reserved > now ? reserved : now;
-            next[providerKey] = slot + Gap;
-            return slot - now;
-        }
-    }
-}
-
 /// <summary>
 /// <see cref="BuiltInAutomations.QuotaResume"/>: waits for the exhausted quota to come back (the provider's reset time plus
 /// jitter, or periodic probes when it gave none), then sends "continue" to the session through the mailbox. A turn that hits
 /// the quota again puts the run back to waiting, up to <see cref="MaxRounds"/> rounds.
+/// <para>
+/// The spacing of two resumes of one provider is not kept here any more: it is
+/// <see cref="ProviderRateLimiter.ReserveAutomationSlot"/>, so an automatic turn and a user turn of the same provider draw on
+/// one budget instead of two unrelated ones (wave W15).
+/// </para>
 /// </summary>
 internal sealed class QuotaResumeRunner(
     ISessionMailbox mailbox,
     IAutomationRunStore state,
     IProviderQuotaProbe probe,
     QuotaProbeSchedule schedule,
-    ResumeStagger stagger,
+    ProviderRateLimiter rateLimits,
     INotifications? notifications,
     TimeProvider time,
     Func<double>? random = null,
@@ -123,7 +108,7 @@ internal sealed class QuotaResumeRunner(
             for (var round = 1; ; round++)
             {
                 await WaitForQuotaAsync(context.Run.ResumeAt, note, ct).ConfigureAwait(false);
-                var gap = stagger.Reserve(QuotaProbeSchedule.KeyFor(note.ProviderId));
+                var gap = rateLimits.ReserveAutomationSlot(QuotaProbeSchedule.KeyFor(note.ProviderId));
                 if (gap > TimeSpan.Zero)
                 {
                     await Task.Delay(gap, time, ct).ConfigureAwait(false);

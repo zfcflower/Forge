@@ -21,7 +21,7 @@ public sealed class StringTableTests
         "shell", "window", "workbench", "status", "provider", "providers", "diag", "dialog",
         "project", "session", "turn", "subagent", "files", "changes", "todo",
         "review", "spec", "problems", "language", "settings", "format", "terminal", "appearance", "Extensions", "git", "editor", "lifecycle", "notifications", "automations", "modelCatalog", "prompts", "questions", "web", "compaction", "network", "modelsVisibility", "agents", "idleArchive", "plan", "chat", "checks", "palette", "resources", "timeline",
-        "onboarding", "projectCreate", "projectFlow", "codeMode",
+        "onboarding", "projectCreate", "projectFlow", "codeMode", "rateLimit",
     };
 
     private static readonly Regex Cjk = new("[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]", RegexOptions.Compiled);

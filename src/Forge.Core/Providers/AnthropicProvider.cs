@@ -98,7 +98,10 @@ public sealed class AnthropicProvider : HttpChatProvider
     /// reports how much of it is gone — including on the 429 that refuses it.
     /// </summary>
     protected override ProviderRateLimit? ReadRateLimit(HttpResponseMessage response) =>
-        AnthropicRateLimits.Read(response.Headers);
+        // Anthropic reports its own families; the generic x-ratelimit-* family is the fallback for a gateway in front of it
+        // (an OpenAI-shaped proxy speaks the generic headers even when it forwards Anthropic bodies).
+        AnthropicRateLimits.Read(response.Headers)
+        ?? RateLimitHeaders.ReadRateLimit(response.Headers, TimeProvider.System.GetUtcNow());
 
     /// <summary>The official client posts to <c>v1/messages?beta=true</c>; the query is part of what its requests look like.</summary>
     protected override string EndpointQuery => Wire is null ? string.Empty : "?beta=true";
