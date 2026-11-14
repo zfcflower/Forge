@@ -105,7 +105,21 @@
 
 ## 七、验证
 
-(命令与结果见本文件末尾的验证记录,由实现与测试两个独立会话分别给出。)
+实现会话(合入前,本机):
+
+| 命令 | 结果 |
+|---|---|
+| `dotnet build Forge.slnx -c Debug` | 0 警告 0 错误(含 Native AOT 分析器) |
+| `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2296 通过 / 0 失败 |
+| `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~Forge.Core.Tests.Providers"` | 612 通过(新增 49 个:桶 18、限速器 23、响应头 8+28 参数、重试层 8+4 参数) |
+| `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 799 通过(新增 App 侧 14 个;另改写 `QuotaResumeTests` 的 4 个预留用例) |
+| `dotnet run -c Release --project tools/Forge.Bench -- ratelimit` | 3/3 验收通过(数字见第五节) |
+
+**一次失败记录**:上述 App 过滤第一次跑时 testhost 在 438 个用例后崩溃(无失败断言、无堆栈),重跑同一过滤 799 全绿;按仓库既有经验属该 headless UI 会话的偶发中断,不是本波的断言。
+
+**没跑的部分**:`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests`(仓库约定只在 L3 跑,本波不改跨模块协议);`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp`/`Forge.HostClient` 一行未改,未跑其全量。
+
+**测试会话(独立,同模型)的报告要点**:新增 10 个文件;发现并报出 1 个真实缺陷(`RateLimitBucket.Adjust` 的负 delta 被非负的 `ToUnits` 压成 0,`Settle` 的补扣半边恒不生效 —— 已修:`ToDelta` 有符号转换,两个红灯转绿),未改产品、未 Skip;另指出 `Forge.Core/SPEC.md` 中"基类返回 null"是 W15 之前的旧句(已改为"基类读通用家族")。
 
 ## 八、已知限制
 

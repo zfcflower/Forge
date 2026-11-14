@@ -317,4 +317,4 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 **基准(计划要求先于实现落基线)。** 实施前只有锁基线:成功路径 70 ns/acquire、等待路径 64 ns/acquire、8 线程争用 197 ns/op(5.1 Mitems/s),均 0 字节/次。实施后同一份场景对照(实现与基线在同一循环里交替):成功 38.3 ns 对 63.0 ns(0.61x)、等待 77.7 ns 对 67.4 ns(1.15x,拒绝必须读时钟算精确 retryTime,仍在 100 ns 内)、争用 66.7 ns/op/14.4 Mitems/s 对 157.8 ns/op(0.42x),spread 1.00。三条验收(0 字节/acquire、无争用 <100 ns、8 线程全授权且每线程计数 2x 内)全绿。
 
-**验证。**(由实现与测试两个独立会话给出,见下。)
+**验证。** `dotnet build Forge.slnx -c Debug` 0 警告 0 错误(含 AOT 分析器);`Forge.Core.Tests` 全量 2296 通过(L2),其中 `~RateLimit|~Providers` 612 通过(新增 49 个);`Forge.App.Tests` 的 `~RateLimit|~QuotaResume|~Localization|~MinorRegression|~Settings|~Views` 799 通过(新增 14 个 + 改写 `QuotaResumeTests` 的 4 个预留用例);`Forge.Bench -- ratelimit` 3/3 验收通过。一次 testhost 在 438 个用例后崩溃(无失败断言),重跑全绿。测试会话(独立、同模型)报出 1 个真实缺陷并在本波内修好:`RateLimitBucket.Adjust` 的负 delta 原本被非负的 `ToUnits` 压成 0,导致 `Settle` 的“实际用量更大则补扣”半边恒不生效(低估会单向累积);改成有符号的 `ToDelta` 后两个红灯转绿。未跑 `Forge.Integration.Tests`/`Forge.App.LiveSwitch.Tests`(按仓库约定只在 L3 跑,本波无跨模块协议改动),`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp` 未改未跑。
