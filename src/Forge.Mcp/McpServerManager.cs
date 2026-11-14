@@ -177,12 +177,16 @@ public sealed class McpServerManager : IAsyncDisposable
         for (var i = 0; i < replaced.Count; i++)
         {
             var managed = replaced[i];
-            var wasEnabled = managed.Enabled;
             await StopServerAsync(managed, ct).ConfigureAwait(false);
+
+            // The transport captured the entry's command, arguments, environment and working directory (or its endpoint and
+            // headers) when it was created: keeping it would restart the old process under the new entry's name. The entry in the
+            // file is also what decides whether the server is enabled — a hand edit removing `disabled` has to take effect.
+            await RecycleTransportAsync(managed).ConfigureAwait(false);
             lock (gate)
             {
                 managed.Config = restarted[i];
-                managed.Enabled = !restarted[i].Disabled && wasEnabled;
+                managed.Enabled = !restarted[i].Disabled;
                 managed.ConsecutiveFailures = 0;
                 managed.LastError = null;
                 managed.ReadyAt = null;

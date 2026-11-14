@@ -341,6 +341,31 @@ public class McpConfigFileTests
     }
 
     [Fact]
+    public void Upsert_removes_the_old_key_when_the_entry_was_renamed()
+    {
+        const string json = """{"mcpServers":{"old":{"command":"cmd"},"other":{"command":"other"}}}""";
+
+        var text = McpConfigFile.Upsert(json, new McpServerEntry { Name = "renamed", Command = "cmd" }, replacedName: "old");
+
+        using var document = JsonDocument.Parse(text);
+        var servers = document.RootElement.GetProperty("mcpServers");
+        Assert.Equal(["other", "renamed"], servers.EnumerateObject().Select(property => property.Name));
+    }
+
+    [Fact]
+    public void Upsert_keeps_the_old_key_when_only_the_entry_changed()
+    {
+        const string json = """{"mcpServers":{"same":{"command":"old"}}}""";
+
+        var text = McpConfigFile.Upsert(json, new McpServerEntry { Name = "same", Command = "new" }, replacedName: "same");
+
+        using var document = JsonDocument.Parse(text);
+        var servers = document.RootElement.GetProperty("mcpServers");
+        Assert.Equal(["same"], servers.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("new", servers.GetProperty("same").GetProperty("command").GetString());
+    }
+
+    [Fact]
     public void Upsert_replaces_only_the_target_entry_and_leaves_other_roots_and_entries_alone()
     {
         const string json = """

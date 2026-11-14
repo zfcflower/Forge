@@ -91,7 +91,7 @@ internal sealed class McpServices : IAsyncDisposable
         // The manager reads these options whenever it needs one, so a changed timeout or reconnect delay applies to the next
         // connection without restarting a server or rebuilding the manager.
         var manager = new McpServerManager(
-            LoadConfig(store),
+            LoadInitial(store),
             () => ServerOptions(preferences.Current, http, transportFactory));
         return new McpServices(manager, store, preferences, notifications, http);
     }
@@ -122,16 +122,35 @@ internal sealed class McpServices : IAsyncDisposable
     /// both files and applies them to the running manager. Failures from the file (a root that is not an object, a locked file)
     /// surface as exceptions for the page to show; nothing is half-applied, because the manager is only touched after the write.
     /// </summary>
-    public Task SaveAsync(string path, McpServerEntry entry, CancellationToken ct) =>
-        WriteThenApplyAsync(() => store.Upsert(path, entry), ct);
+    public Task SaveAsync(string path, McpServerEntry entry, CancellationToken ct, string? replacedName = null) =>
+        WriteThenApplyAsync(
+            () =>
+            {
+                store.Upsert(path, entry, replacedName);
+                return true;
+            },
+            ct);
 
     public Task ImportAsync(string path, IReadOnlyList<McpServerEntry> entries, CancellationToken ct) =>
-        WriteThenApplyAsync(() => store.Import(path, entries), ct);
+        WriteThenApplyAsync(
+            () =>
+            {
+                store.Import(path, entries);
+                return true;
+            },
+            ct);
 
     public Task RemoveAsync(string path, string name, CancellationToken ct) =>
-        WriteThenApplyAsync(() => store.Remove(path, name), ct);
+        WriteThenApplyAsync(
+            () =>
+            {
+                store.Remove(path, name);
+                return true;
+            },
+            ct);
 
     public Task SetDisabledAsync(string path, string name, bool disabled, CancellationToken ct) =>
+        // A flag that is already what the caller asked for changes nothing, so there is nothing to apply either.
         WriteThenApplyAsync(() => store.SetDisabled(path, name, disabled), ct);
 
     /// <summary>Picks the file up after a hand edit (the page's "re-read" action).</summary>
@@ -241,6 +260,19 @@ internal sealed class McpServices : IAsyncDisposable
         http?.Dispose();
     }
 
+    /// <summary>The config the manager starts from; a file it cannot parse simply contributes no server at startup.</summary>
+    private static McpConfig LoadInitial(McpConfigStore store)
+    {
+        try
+        {
+            return store.Load();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return McpConfig.Empty;
+        }
+    }
+
     /// <summary>The manager's options from the live preferences; everything else keeps the library defaults.</summary>
     private static McpServerManagerOptions ServerOptions(
         AppPreferences preferences,
@@ -253,13 +285,10 @@ internal sealed class McpServices : IAsyncDisposable
         InitialReconnectDelay = TimeSpan.FromSeconds(preferences.McpReconnectInitialDelaySeconds),
     };
 
-    private Task WriteThenApplyAsync(Action write, CancellationToken ct) =>
+    /// <param name="write">Writes the file; false means the file did not change, so there is nothing to apply.</param>
+    private Task WriteThenApplyAsync(Func<bool> write, CancellationToken ct) =>
         BackgroundRead.RunAsync(
-            _ =>
-            {
-                write();
-                return ApplyCoreAsync(ct);
-            },
+            _ => write() ? ApplyCoreAsync(ct) : Task.CompletedTask,
             ct);
 
     /// <summary>Re-reads both files and diffs the result into the running manager; one apply at a time.</summary>
@@ -275,7 +304,13 @@ internal sealed class McpServices : IAsyncDisposable
                 return;
             }
 
-            await manager.ApplyConfigAsync(LoadConfig(store), ct).ConfigureAwait(false);
+            if (IncomingConfig(store) is not { } config)
+            {
+                // Nothing could be read at all (an IO failure): leave the running servers exactly as they are.
+                return;
+            }
+
+            await manager.ApplyConfigAsync(config, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -283,16 +318,51 @@ internal sealed class McpServices : IAsyncDisposable
         }
     }
 
-    private static McpConfig LoadConfig(McpConfigStore store)
+    /// <summary>
+    /// What the running manager should be told the files say. A file whose root is unreadable (invalid JSON, not an object, no
+    /// <c>mcpServers</c>) contributes no servers to the read, and reading that as "the user deleted them" would stop every server
+    /// of that file over one typo — so the servers that came from such a file are carried over unchanged. Everything else applies
+    /// as usual, including a file whose entries are all gone (an intentional deletion reports no document-level problem).
+    /// Null when nothing could be read at all: the running servers then stay exactly as they are.
+    /// </summary>
+    private McpConfig? IncomingConfig(McpConfigStore store)
     {
+        McpConfig loaded;
         try
         {
-            return store.Load();
+            loaded = store.Load();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return McpConfig.Empty;
+            return null;
         }
+
+        HashSet<string>? broken = null;
+        foreach (var diagnostic in loaded.Diagnostics)
+        {
+            if (diagnostic.ServerName is null)
+            {
+                (broken ??= new HashSet<string>(StringComparer.Ordinal)).Add(diagnostic.Source);
+            }
+        }
+
+        if (broken is null)
+        {
+            return loaded;
+        }
+
+        var kept = new List<McpServerConfig>(loaded.Servers.Count + 2);
+        kept.AddRange(loaded.Servers);
+        foreach (var name in manager.ServerNames)
+        {
+            var current = manager.GetServer(name);
+            if (current.Source is { Length: > 0 } source && broken.Contains(source))
+            {
+                kept.Add(current);
+            }
+        }
+
+        return new McpConfig(kept, loaded.Diagnostics);
     }
 
     private static string[] Keys(IReadOnlyDictionary<string, string> pairs)

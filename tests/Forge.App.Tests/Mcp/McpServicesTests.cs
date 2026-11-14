@@ -64,6 +64,36 @@ public sealed class McpServicesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_file_that_cannot_be_parsed_does_not_read_as_deleting_every_server()
+    {
+        WriteGlobal("""{"mcpServers":{"srv":{"command":"never-spawned"}}}""");
+        await using var preferences = Preferences();
+        await using var services = McpServices.Create(Store(), preferences, null, null);
+        Assert.Equal(["srv"], services.Manager.ServerNames);
+
+        // A hand edit broke the root of the global file. Saving into the project file re-reads both, and that read cannot say
+        // what the global file contributes — so it must leave the running set alone instead of retiring "srv".
+        TestTempFiles.WriteFile(root, "global/mcp.json", "[]");
+        var projectPath = Assert.IsType<string>(services.Store.ProjectPath);
+        await services.SaveAsync(projectPath, Entry("added"), CancellationToken.None);
+
+        Assert.Contains("srv", services.Manager.ServerNames);
+        Assert.Contains("added", services.Manager.ServerNames);
+    }
+
+    [Fact]
+    public async Task Deleting_the_last_server_still_stops_it()
+    {
+        WriteGlobal("""{"mcpServers":{"srv":{"command":"never-spawned"}}}""");
+        await using var preferences = Preferences();
+        await using var services = McpServices.Create(Store(), preferences, null, null);
+
+        await services.RemoveAsync(services.Store.GlobalPath, "srv", CancellationToken.None);
+
+        Assert.Empty(services.Manager.ServerNames);
+    }
+
+    [Fact]
     public async Task SaveAsync_adds_the_server_to_the_manager_still_stopped()
     {
         await using var preferences = Preferences();

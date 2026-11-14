@@ -56,8 +56,11 @@ internal sealed class McpServerRowViewModel : NotifyingObject, IDisposable
     /// <summary>The entry as the file spells it; the editor starts from it so unknown fields survive an edit.</summary>
     public McpServerEntry Entry { get; private set; }
 
-    /// <summary>The file that defines this row's entry; the toggle and the delete write there.</summary>
-    public string SourcePath { get; }
+    /// <summary>
+    /// The file that defines this row's entry; the toggle and the delete write there. Follows the entry when an edit moved it to
+    /// the other file, so a delete never looks for the name in the file the entry left.
+    /// </summary>
+    public string SourcePath { get; private set; }
 
     public string Name { get; private set; }
 
@@ -131,7 +134,7 @@ internal sealed class McpServerRowViewModel : NotifyingObject, IDisposable
 
     public bool HasTestResult => TestResultText.Length > 0;
 
-    public string ScopeText { get; }
+    public string ScopeText { get; private set; }
 
     // ------------------------------------------------------------------ commands
 
@@ -161,10 +164,13 @@ internal sealed class McpServerRowViewModel : NotifyingObject, IDisposable
     // ------------------------------------------------------------------ state
 
     /// <summary>Applies the fresh entry and manager state; every localized text is recomputed so a language switch re-renders.</summary>
-    public void Apply(McpServerEntry entry, McpServerState? state)
+    public void Apply(McpServerEntry entry, McpServerState? state, string sourcePath, bool isProject)
     {
         Entry = entry;
         Name = entry.Name;
+        var moved = !string.Equals(SourcePath, sourcePath, StringComparison.Ordinal);
+        SourcePath = sourcePath;
+        ScopeText = isProject ? McpSettingsStrings.ScopeProject : McpSettingsStrings.ScopeGlobal;
         TransportText = entry.IsHttp ? McpSettingsStrings.TransportHttp : McpSettingsStrings.TransportStdio;
         var current = state ?? new McpServerState(entry.Name, McpServerStatus.Stopped, !entry.Disabled);
         IsReady = current.IsReady;
@@ -186,6 +192,10 @@ internal sealed class McpServerRowViewModel : NotifyingObject, IDisposable
         OnPropertyChanged(nameof(StderrTailText));
         OnPropertyChanged(nameof(HasStderr));
         OnPropertyChanged(nameof(ScopeText));
+        if (moved)
+        {
+            OnPropertyChanged(nameof(SourcePath));
+        }
     }
 
     private void RunningToggleTextValue() => OnPropertyChanged(nameof(RunningToggleText));

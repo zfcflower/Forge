@@ -45,10 +45,16 @@ internal sealed class ManagerFixture : IAsyncDisposable
 
     public int TransportCount(string name) => Transports.Count(transport => transport.Name == name);
 
-    public static McpServerConfig Stdio(string name, bool disabled = false, IReadOnlyList<string>? readOnlyTools = null, TimeSpan? timeout = null) => new()
+    public static McpServerConfig Stdio(
+        string name,
+        bool disabled = false,
+        IReadOnlyList<string>? readOnlyTools = null,
+        TimeSpan? timeout = null,
+        IReadOnlyList<string>? args = null) => new()
     {
         Name = name,
         Command = "fake-" + name,
+        Args = args ?? [],
         Disabled = disabled,
         ReadOnlyTools = readOnlyTools ?? [],
         Timeout = timeout,

@@ -102,11 +102,14 @@ internal sealed class McpConfigStore
         return new McpConfig(servers, diagnostics);
     }
 
-    /// <summary>Adds or replaces one entry in one file; the other file and every other entry stay as they are.</summary>
-    public void Upsert(string path, McpServerEntry entry)
+    /// <summary>
+    /// Adds or replaces one entry in one file; the other file and every other entry stay as they are. A rename (the entry's
+    /// name differs from <paramref name="replacedName"/>) removes the old key from that same file in the same write.
+    /// </summary>
+    public void Upsert(string path, McpServerEntry entry, string? replacedName = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        Write(path, text => McpConfigFile.Upsert(text, entry));
+        Write(path, text => McpConfigFile.Upsert(text, entry, replacedName));
     }
 
     /// <summary>Writes entries read from another application's file, placeholders and unknown fields included.</summary>

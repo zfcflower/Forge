@@ -426,12 +426,20 @@ public static class McpConfigFile
         }
     }
 
-    /// <summary>Adds or replaces one entry. Throws <see cref="ArgumentException"/> when the entry does not validate.</summary>
-    public static string Upsert(string? json, McpServerEntry entry)
+    /// <summary>
+    /// Adds or replaces one entry. <paramref name="replacedName"/> is the name the entry had before a rename: when it differs,
+    /// that key is removed in the same write, so renaming a server never leaves the old one behind as a live second entry.
+    /// Throws <see cref="ArgumentException"/> when the entry does not validate.
+    /// </summary>
+    public static string Upsert(string? json, McpServerEntry entry, string? replacedName = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         RequireValid(entry);
-        return Apply(json, [entry], null);
+        var remove = replacedName is { Length: > 0 } previous &&
+                     !string.Equals(previous, entry.Name.Trim(), StringComparison.Ordinal)
+            ? new[] { previous }
+            : null;
+        return Apply(json, [entry], remove);
     }
 
     /// <summary>

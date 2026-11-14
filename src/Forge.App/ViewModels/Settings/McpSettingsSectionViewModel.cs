@@ -78,7 +78,7 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         ApplyImportCommand = new AsyncRelayCommand(ApplyImportAsync, onError: ReportUnexpected);
         CancelImportCommand = new RelayCommand(CloseImport);
         ApplyPresetCommand = new ItemCommand<McpPresetOptionViewModel>(ApplyPreset);
-        ReloadCommand = new AsyncRelayCommand(ReloadAndReportAsync, onError: ReportUnexpected);
+        ReloadCommand = new AsyncRelayCommand(ReloadAndApplyAsync, onError: ReportUnexpected);
 
         if (composition.Mcp is { } services)
         {
@@ -234,6 +234,45 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     {
         OnPropertyChanged(nameof(Hint));
         OnPropertyChanged(nameof(EmptyText));
+        QueueRefresh();
+    }
+
+    /// <summary>
+    /// The reload action: re-read both files into the running manager (the page's own refresh only redraws), then redraw. A
+    /// hand edit therefore reaches the servers on the click, and a file that cannot be read leaves the servers alone.
+    /// </summary>
+    private async Task ReloadAndApplyAsync(CancellationToken ct)
+    {
+        if (disposed || !CanApply || composition.Mcp is not { } services)
+        {
+            ShowError(McpSettingsStrings.StatusUnavailable);
+            return;
+        }
+
+        try
+        {
+            await BackgroundRead.RunAsync(token => services.ReloadAsync(token), ct).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (Expected(exception))
+        {
+            if (CanApply)
+            {
+                ShowError(exception.Message);
+            }
+
+            return;
+        }
+
+        if (!CanApply)
+        {
+            return;
+        }
+
+        ShowStatus(McpSettingsStrings.StatusReloaded, isError: false);
         QueueRefresh();
     }
 
@@ -479,13 +518,13 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         var rebuilt = new List<McpServerRowViewModel>(entries.Count);
         foreach (var (name, entry) in entries)
         {
+            var (path, isProject) = sources[name];
             if (!existing.Remove(name, out var row))
             {
-                var (path, isProject) = sources[name];
                 row = new McpServerRowViewModel(this, entry, path, isProject);
             }
 
-            row.Apply(entry, byName.GetValueOrDefault(name));
+            row.Apply(entry, byName.GetValueOrDefault(name), path, isProject);
             rebuilt.Add(row);
             foreach (var issue in entry.Validate())
             {
@@ -578,7 +617,10 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         var ct = ActionToken();
         try
         {
-            await BackgroundRead.RunAsync(token => services.SaveAsync(path, entry, token), ct).ConfigureAwait(true);
+            var replacedName = current.OriginalName;
+            await BackgroundRead.RunAsync(
+                token => services.SaveAsync(path, entry, token, replacedName),
+                ct).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -991,32 +1033,6 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
     }
 
     // ------------------------------------------------------------------ last resort
-
-    private async Task ReloadAndReportAsync(CancellationToken _)
-    {
-        if (disposed || !CanApply)
-        {
-            return;
-        }
-
-        QueueRefresh();
-        var pending = pendingRefresh;
-        if (pending is not null)
-        {
-            try
-            {
-                await pending.ConfigureAwait(true);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        if (CanApply && refreshOk)
-        {
-            ShowStatus(McpSettingsStrings.StatusReloaded, isError: false);
-        }
-    }
 
     /// <summary>The framework boundary for async actions: an unexpected exception is logged and shown, never thrown into the dispatcher.</summary>
     internal void ReportUnexpected(Exception exception)

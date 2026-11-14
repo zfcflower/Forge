@@ -62,7 +62,39 @@ public class McpServerManagerApplyTests
         Assert.Equal(McpServerStatus.Ready, manager.GetState("srv").Status);
         var tool = Assert.Single(manager.Tools);
         Assert.Equal(ToolSideEffect.ReadOnly, tool.SideEffect);
-        Assert.Equal(2, fixture.Transports[0].StartCount);
+
+        // A changed entry gets a transport of its own: the old one captured the old command, arguments and environment when it
+        // was created, so reusing it would restart the process the file no longer describes.
+        Assert.Equal(2, fixture.Transports.Count);
+        Assert.Equal(1, fixture.Transports[0].StartCount);
+        Assert.Equal(1, fixture.Transports[1].StartCount);
+        Assert.Equal(1, fixture.Transports[0].DisposeCount);
+    }
+
+    [Fact]
+    public async Task ApplyConfig_restarts_a_changed_entry_on_a_transport_built_from_the_new_entry()
+    {
+        var built = new List<McpServerConfig>();
+        var server = new ScriptedServer();
+        await using var fixture = new ManagerFixture(
+            Of(Stdio("srv", args: ["--one"])),
+            transportFor: config =>
+            {
+                lock (built)
+                {
+                    built.Add(config);
+                }
+
+                return new LoopbackTransport(config.Name) { Responder = server.Respond };
+            });
+        var manager = fixture.Manager;
+        await manager.StartAsync("srv", CancellationToken.None);
+        Assert.Equal(["--one"], built[0].Args);
+
+        await manager.ApplyConfigAsync(Of(Stdio("srv", args: ["--two"])), CancellationToken.None);
+
+        Assert.Equal(2, built.Count);
+        Assert.Equal(["--two"], built[1].Args);
     }
 
     [Fact]
@@ -80,6 +112,21 @@ public class McpServerManagerApplyTests
         Assert.False(state.Enabled);
         Assert.Empty(manager.Tools);
         Assert.Equal(1, fixture.Transports[0].StartCount);
+    }
+
+    [Fact]
+    public async Task ApplyConfig_enables_a_server_whose_entry_stopped_being_disabled()
+    {
+        await using var fixture = new ManagerFixture(Of(Stdio("srv", disabled: true)));
+        var manager = fixture.Manager;
+        Assert.False(manager.IsEnabled("srv"));
+
+        // A hand edit dropped `disabled`: the file is what decides, so the server comes back up.
+        await manager.ApplyConfigAsync(Of(Stdio("srv")), CancellationToken.None);
+
+        var state = manager.GetState("srv");
+        Assert.True(state.Enabled);
+        Assert.Equal(McpServerStatus.Ready, state.Status);
     }
 
     [Fact]

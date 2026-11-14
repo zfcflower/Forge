@@ -58,6 +58,9 @@ internal sealed class McpKeyValueRowViewModel : NotifyingObject
 internal sealed class McpServerEditorViewModel : NotifyingObject
 {
     private readonly McpServerEntry? original;
+
+    /// <summary>The name the entry had before this edit; a save renames it in the same write (null for a new entry).</summary>
+    public string? OriginalName => original?.Name;
     private readonly string globalPath;
     private readonly string? projectPath;
     private readonly bool isNew;

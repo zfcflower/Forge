@@ -139,6 +139,19 @@ public sealed class McpConfigStoreTests : IDisposable
     }
 
     [Fact]
+    public void Upsert_renames_an_entry_inside_one_file()
+    {
+        var global = Path.Combine(root, "global.json");
+        var store = new McpConfigStore(global, null);
+        store.Upsert(global, new McpServerEntry { Name = "old", Command = "cmd" });
+
+        store.Upsert(global, new McpServerEntry { Name = "renamed", Command = "cmd" }, replacedName: "old");
+
+        var names = Assert.Single(store.Read().Files).Entries.Select(entry => entry.Name);
+        Assert.Equal(["renamed"], names);
+    }
+
+    [Fact]
     public void Remove_deletes_only_the_named_entry_from_the_target_file()
     {
         WriteGlobal("""{"mcpServers":{"a":{"command":"a"},"b":{"command":"b"}}}""");
