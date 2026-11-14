@@ -51,15 +51,16 @@
 | PDF / HTML 预览 | **不做内部渲染**:占位页 + 「用本机默认程序打开」(`Launcher`)。理由:能交给 OS 的事不引渲染器,PDF 渲染器都是原生库或大依赖,HTML 渲染等于再塞一个浏览器引擎。 |
 | Plan 面板写权限 | **只读 + 「让 agent 收尾这一步」按钮**。保持「状态只由 agent 改」与 done→`StepCommitter` 自动提交语义不变,不新增存储写路径。 |
 | 富查看器范围 | 图片、CSV/TSV、`.ipynb`、LFS 指针、二进制占位 —— 全部零新依赖。 |
+| 流程图 / Mermaid(2026-11-14 批准) | **有条件批准新增 `Mermaider` + `Svg.Skia`**,已写入 `architecture.md` NuGet 白名单(仅 `Forge.App` 渲染层) | W11 先上 ASCII 输出(`Mermaider` 的 `RenderAscii`),再接 SVG 栅格化。条件:`Svg.Skia` 的三平台 Native AOT 发布冒烟通过才引入,否则只保留 ASCII、不引 `Svg.Skia`。图类型白名单默认 flowchart/sequence/state/class/er,做成设置。失败回路不变(源码 + 错误行 + 回给模型修)。版本在 W11 落地时钉在引用处。 |
+| 自动更新(2026-11-14 批准) | **自写,不引 Velopack,分两阶段** | 阶段 A:检查更新 → 对照版本 → 下载并校验 SHA-256 → 展示更新说明 → 用户手动安装;更新源 manifest URL、检查间隔、渠道(stable/preview)、是否自动检查(默认关)全部做成设置,零新依赖、零签名要求。阶段 B(单独立项):替换并重启(含 Windows 替换运行中文件的方案)、签名策略,与 W10 扩展包的包格式契约(zip + manifest + hash)合并设计。 |
+| 聊天版式(2026-11-14 批准) | **铺满窗口** | 聊天区默认铺满窗口宽度,不做窄栏居中;不增设「最大行宽」选项。**窗口内边距一致**:聊天区(消息、代码块、表格、输入框、工具行)与窗口边缘的左右内边距使用同一个值,来自同一个资源/样式(不在各视图里各写一份数字),上下同理。W4b 已落地的聊天渲染不得再引入固定最大宽度;若有,按铺满修正;若某个块与其它块的内边距不一致,按统一值修正。 |
 | PDF / HTML 预览(2026-11-13 修订) | PDF 按上文占位; **HTML 不设占位**:在编辑器里就是可编辑源码,工具条的打开按钮对 `.html/.htm` 显示「在浏览器中打开」并交给系统浏览器。理由:不渲染网页的决定不依赖藏起源码,占位卡只会让每次看/改页面多一次点击。 |
 
 ### 待定(由你在动手前最后定,先不进波次)
 
 | 项 | 状态 | 定它需要什么 |
 |---|---|---|
-| 流程图 / Mermaid 渲染选型 | 调研已完成(见下节),**等你批准是否新增两个包** | 批准 `Mermaider` + `Svg.Skia`,或先只上 ASCII 退路 |
-| 自动更新形态 | 等拍板 | 自写 zip 更新器 vs 引 Velopack(要签名与托管) |
-| 排版类:聊天显示选项(消息宽度/行宽、消息顺序、输入框高度)、布局设置对话框、间距/字号层级微调 | 等口径 | 目标版式(窄栏还是铺满)、要不要预设与重置 |
+| 布局设置对话框、间距/字号层级微调、消息顺序 | 待定 | 用过一阵再定;聊天宽度口径已定(见上表),不在此列 |
 
 ### 流程图 / Mermaid:调研结论
 
@@ -160,7 +161,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 > **评审发现并已修的(均在本波范围内,故未遗留)。** ①`ProjectCreationDialog` 在成功那一次关不掉自己(`Completed` 在 `isRunning` 落回 false 之前发,而 `OnClosing` 只看 `IsRunning`),后果是 `ShowDialog` 永不完成、建好的仓库从不被登记——改成“运行状态落定后才发完成” + `OnClosing` 只否决用户主动关窗(`!e.IsProgrammatic`),并补了真空窗用例(把两半都拆掉时它 60 s 超时失败,证明确实能抓到这个缺陷)。②“克隆超时 0 = 不限”被实现成传 `null` 给 `GitCloneOptions.Timeout`,而 null 的含义是“用 git 层默认的 2 分钟”,默认配置下大仓库会在用户被告知“不限”的情况下被杀——改成 `Timeout.InfiniteTimeSpan`,用例同步改为断言它。③超时失败的对话框只显示 stderr(本波之后全是进度重绘行),丢掉唯一说清原因的一句——超时(`ExitCode < 0`)改用 `GitException.Message`。④`ShowOnboarding` 替换模型前不 `Dispose`、窗口销毁时也不向导的旧订阅——两处补上。
 > **合并 main 后的第二轮评审(安全与清理)又修了六条。** ⑤克隆地址没有 scheme 白名单:`ext::sh -c …` 这类 `transport::address` 能过 `IsUsableUrl`,只靠用户的 git 配置挡——现在应用层只收 https/http/ssh/git+ssh/ssh+git/git/file、scp 形式与本地路径,git 层再给克隆进程设 `GIT_ALLOW_PROTOCOL`(压过任何 `protocol.*.allow`)。⑥凭据泄露:`GitException` 的消息与 `Arguments` 里是原样 URL,超时一路又直接把消息显示在对话框里——现在消息/参数/stderr 一律经 `GitCli.RedactCredentials` 脱敏;带密码的地址(会进 git 的 argv)在对话框里单独提示并拒绝,只带用户名的照常放行。⑦调用方准备的空目标目录在克隆或 `git init` 失败/取消后留着 git 写的半截 `.git`,重试被判“已存在”——现在保留目录但清空(`GitCli.DeleteTreeQuietlyAsync(keepRoot)`,`ProjectCreationService` 原先复制的一份删除逻辑也改为调用它)。⑧相对父目录会解析到进程工作目录——改为提示并拒绝,目标路径栏不再显示那个位置。⑨`OnboardingState` 在 UI 线程直接读写 `ui_state`,改走 `BackgroundRead`(与 `LayoutStateLoader` 一致)。⑩`ProjectCreationViewModel` 每次运行的 `CancellationTokenSource` 不释放——运行结束即释放。**未做**:向导没有“再次运行”入口(删掉 `ui_state` 的 `onboarding` 行即可重新触发;入口要落在调色板/菜单,不归本波);只带用户名的令牌式地址(`https://<token>@github.com/…`)仍会进 argv,消息里已脱敏。
 | **W12** 评审包 + `request_review` | 给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话);评审是产品核心目标,放在并行批里 | `Forge.Core/Prompts/BuiltInAgents.cs`、新建 `Forge.Core/Tools/RequestReview*.cs` + `ReviewPackage*.cs`、`Localization/Strings.Review.cs` | 4 天 |
-| **W11** 流程图 / Mermaid(**等拍板,且串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
+| **W11** 流程图 / Mermaid(**已批准(有条件,见「已定」),串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 
 **W4b 已实施**:聊天助手回复按 Markdown 增量渲染(标题/段落/列表/引用/表格/链接/围栏代码块),代码块带语言标签与复制按钮;新增纯状态机 `Changes/Markdown/StreamingMarkdown.cs` 与 `Views/ChatMarkdownView*`,删除 `TextSegmentViewModel`。方案、被否备选、四条判据、与上表独占路径的三处偏差(`Resources/MarkdownStyles.axaml` 的追加式两条样式、不建 `Strings.ChatMarkdown.cs`、用户消息仍按纯文本)见 `2026-11-13-w4b-implementation.md`。
 
@@ -168,20 +169,20 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 **跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 独占自己的 schema 升版(与其他波无交叉);W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
 
-**唯一的串行边**:W11(Mermaid)在 W4b 之后、且要你先批准两个包——它要往 W4b 刚建的聊天代码块渲染器里插一层,同一批文件,所以不并行。
+**唯一的串行边**:W11(Mermaid)在 W4b 之后(两个包已于 2026-11-14 有条件批准)——它要往 W4b 刚建的聊天代码块渲染器里插一层,同一批文件,所以不并行。
 
 ### W10:需要先定契约或要拍板的大件(串行)
 
 | 项 | 前置 |
 |---|---|
 | 扩展包仓库(10) | 先定包格式(zip + manifest + hash)、安装/更新/卸载契约,`PluginRecord` 加"内置/捆绑/已装"维度 |
-| 自动更新(11) | 需要你拍板:`自写 下载→校验→替换→重启` 还是引 Velopack(白名单外,要签名与托管) |
+| 自动更新(11) | 已拍板(2026-11-14):自写、分两阶段,见「已定」。阶段 A 可直接开波次;阶段 B 前置:包格式契约、Windows 替换方案、签名策略 |
 | MCP OAuth / `resources/subscribe` / progress(9) | 先改 `Mcp/SPEC.md` 未决;OAuth 要动态注册 + PKCE,token 进加密库 |
 | 快捷键页(14d) | 先把分散的 XAML `KeyBinding` 收敛成 keymap 表 |
 | 评审包 + `request_review`(L7) | 已升为并行波次 W12(见上) |
 | L2/L3/L4/L6 | 按需(PR 评论线程 UI、breadcrumbs、用量统计、终端搜索与重启) |
-| L5 Mermaid / 流程图 | 已升为独立波次 W11(见上,等拍板) |
-| L8 布局设置对话框 | 待定(排版类) |
+| L5 Mermaid / 流程图 | 已升为独立波次 W11(见上,已批准) |
+| L8 布局设置对话框 | 待定(聊天版式已定为铺满窗口,见「已定」) |
 
 ## 五、每一波的"实现说明"交付规范
 

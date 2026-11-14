@@ -90,6 +90,8 @@ agent-framework、MCP、编辑器/Git 及其他成熟三方包,均只取有用�
 | ZLinq | 1.6.1 | `Forge.App` | 只用在实测有分配的热路径,不启用 DropInGenerator |
 | MessagePack | 4.0.0-rc.1 | `Forge.Ipc`、`Forge.Ipc.Protocol`、`Forge.Plugin.Sdk`、`Forge.ScriptRuntime` | IPC 线格式,只用源生成格式化器,见 `forge-ipc` |
 | xunit、xunit.runner.visualstudio、Microsoft.NET.Test.Sdk | 2.* / 3.* / 18.* | 测试项目 | 仅测试 |
+| Mermaider | W11 落地时钉版本(稳定版,发布满两周) | `Forge.App` 渲染层 | 2026-11-14 有条件批准:仅用于把聊天/diff 里的 ```mermaid 块本地解析、布局并输出 SVG 或 ASCII;不引 JS、不联网;图类型白名单可配 |
+| Svg.Skia | W11 落地时钉版本(稳定版,发布满两周) | `Forge.App` 渲染层 | 2026-11-14 有条件批准,条件:三平台 Native AOT 发布冒烟通过才引入;否则只保留 Mermaider 的 ASCII 输出。仅用于 Mermaider 输出的 SVG 光栅化 |
 
 **插件的 NuGet 依赖不受上述白名单限制,由使用者控制(已确认)。** 默认只用 BCL 与 Plugin SDK;新增依赖须经用户审批并计入 DependencyHash;支持离线 NuGet 缓存;编译缓存键包含 SDK、Contracts、依赖与编译配置版本。
 
