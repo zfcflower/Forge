@@ -21,20 +21,6 @@ public sealed record ReviewPackageBuild(string Text, bool DiffCut);
 /// </summary>
 public static class ReviewPackageText
 {
-    /// <summary>Cap on the diff inside the child's task message, not a user setting.</summary>
-    public const int MaxDiffChars = 48_000;
-
-    /// <summary>
-    /// Cap on the commit lines and on the file lines, independently: the files are what a review is about, so a long
-    /// commit history must not eat their budget. Both say how many lines they left out.
-    /// </summary>
-    public const int MaxCommitLines = 50;
-
-    public const int MaxFileLines = 200;
-
-    /// <summary>Cap per intent, summary, verification and focus field.</summary>
-    public const int MaxFieldChars = 2_000;
-
     private const int ShortShaLength = 7;
     private const int LineEstimate = 72;
 
@@ -43,21 +29,22 @@ public static class ReviewPackageText
 
     private const string ClosingLine = "Report findings as your instructions describe and end with the verdict line.";
 
-    /// <summary>Renders the package text the reviewer receives as its task, and whether the diff inside it is incomplete.</summary>
-    public static ReviewPackageBuild Render(ReviewBrief brief, ReviewChangeSet changeSet)
+    /// <summary>Renders the package text the reviewer receives as its task within <paramref name="limits"/> (the package defaults when null), and whether the diff inside it is incomplete.</summary>
+    public static ReviewPackageBuild Render(ReviewBrief brief, ReviewChangeSet changeSet, ReviewPackageLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(brief);
         ArgumentNullException.ThrowIfNull(changeSet);
+        var cap = (limits ?? ReviewPackageLimits.Default).Sanitized();
 
         var diff = changeSet.DiffText;
-        var cut = diff.Length > MaxDiffChars;
+        var cut = diff.Length > cap.DiffChars;
         var diffCut = cut || changeSet.DiffTruncated;
-        var listedLines = Math.Min(changeSet.Commits.Count, MaxCommitLines) + Math.Min(changeSet.Files.Count, MaxFileLines);
+        var listedLines = Math.Min(changeSet.Commits.Count, cap.CommitLines) + Math.Min(changeSet.Files.Count, cap.FileLines);
         var builder = new StringBuilder(
             512
             + listedLines * LineEstimate
-            + Math.Min(diff.Length, MaxDiffChars)
-            + Math.Min(brief.Intent?.Length ?? 0, MaxFieldChars));
+            + Math.Min(diff.Length, cap.DiffChars)
+            + Math.Min(brief.Intent?.Length ?? 0, cap.FieldChars));
 
         builder.Append("This is a review request: read the change set and the diff below before you judge anything.\n\n");
         builder.Append("What this change is supposed to do:\n");
@@ -67,7 +54,7 @@ public static class ReviewPackageText
         }
         else
         {
-            AppendClamped(builder, brief.Intent, MaxFieldChars);
+            AppendClamped(builder, brief.Intent, cap.FieldChars);
         }
 
         builder.Append("\n\n");
@@ -78,10 +65,10 @@ public static class ReviewPackageText
         else
         {
             builder.Append("Checklist step: ");
-            AppendClamped(builder, brief.StepTitle, MaxFieldChars);
+            AppendClamped(builder, brief.StepTitle, cap.FieldChars);
             builder.Append('\n');
-            AppendField(builder, "What the step changed: ", brief.StepSummary);
-            AppendField(builder, "How it was verified: ", brief.StepVerification);
+            AppendField(builder, "What the step changed: ", brief.StepSummary, cap.FieldChars);
+            AppendField(builder, "How it was verified: ", brief.StepVerification, cap.FieldChars);
             builder.Append('\n');
         }
 
@@ -105,13 +92,13 @@ public static class ReviewPackageText
             // The caller chooses the list, so it is held to the same field cap as the other caller-written text: thousands
             // of paths must not push the diff out of the reviewer's context.
             builder.Append("narrowed to: ");
-            AppendClamped(builder, string.Join(", ", changeSet.Paths), MaxFieldChars);
+            AppendClamped(builder, string.Join(", ", changeSet.Paths), cap.FieldChars);
             builder.Append(" (only these paths were read; changes outside them are not part of this review)\n");
         }
 
         builder.Append('\n');
-        AppendCommits(builder, changeSet.Commits, changeSet.CommitsTruncated);
-        AppendFiles(builder, changeSet);
+        AppendCommits(builder, changeSet.Commits, changeSet.CommitsTruncated, cap);
+        AppendFiles(builder, changeSet, cap);
 
         builder.Append("\nDiff:\n");
         if (diff.Length == 0)
@@ -120,7 +107,7 @@ public static class ReviewPackageText
         }
         else
         {
-            var shown = cut ? DiffCutLength(diff) : diff.Length;
+            var shown = cut ? DiffCutLength(diff, cap.DiffChars) : diff.Length;
             builder.Append(diff, 0, shown);
             if (diff[shown - 1] != '\n')
             {
@@ -147,7 +134,7 @@ public static class ReviewPackageText
         if (!string.IsNullOrWhiteSpace(brief.Focus))
         {
             builder.Append("\nWhat to concentrate on:\n");
-            AppendClamped(builder, brief.Focus, MaxFieldChars);
+            AppendClamped(builder, brief.Focus, cap.FieldChars);
             builder.Append('\n');
         }
 
@@ -172,7 +159,7 @@ public static class ReviewPackageText
     }
 
     /// <summary>One line per commit, newest first, within its own line budget, and honest about what was left out.</summary>
-    private static void AppendCommits(StringBuilder builder, IReadOnlyList<ReviewCommit> commits, bool truncated)
+    private static void AppendCommits(StringBuilder builder, IReadOnlyList<ReviewCommit> commits, bool truncated, ReviewPackageLimits cap)
     {
         if (commits.Count == 0)
         {
@@ -180,12 +167,12 @@ public static class ReviewPackageText
             return;
         }
 
-        var written = Math.Min(commits.Count, MaxCommitLines);
+        var written = Math.Min(commits.Count, cap.CommitLines);
         for (var index = 0; index < written; index++)
         {
             var commit = commits[index];
             builder.Append(ShortSha(commit.Sha)).Append(' ');
-            AppendClamped(builder, commit.Subject, MaxFieldChars);
+            AppendClamped(builder, commit.Subject, cap.FieldChars);
             builder.Append('\n');
         }
 
@@ -202,7 +189,7 @@ public static class ReviewPackageText
     }
 
     /// <summary>One line per file, in git's order, within its own line budget.</summary>
-    private static void AppendFiles(StringBuilder builder, ReviewChangeSet changeSet)
+    private static void AppendFiles(StringBuilder builder, ReviewChangeSet changeSet, ReviewPackageLimits cap)
     {
         var files = changeSet.Files;
         if (files.Count == 0)
@@ -212,7 +199,7 @@ public static class ReviewPackageText
         }
 
         builder.Append("\nFiles:\n");
-        var written = Math.Min(files.Count, MaxFileLines);
+        var written = Math.Min(files.Count, cap.FileLines);
         for (var index = 0; index < written; index++)
         {
             var file = files[index];
@@ -281,7 +268,7 @@ public static class ReviewPackageText
         }
     }
 
-    private static void AppendField(StringBuilder builder, string label, string? value)
+    private static void AppendField(StringBuilder builder, string label, string? value, int limit)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -289,7 +276,7 @@ public static class ReviewPackageText
         }
 
         builder.Append(label);
-        AppendClamped(builder, value, MaxFieldChars);
+        AppendClamped(builder, value, limit);
         builder.Append('\n');
     }
 
@@ -332,14 +319,14 @@ public static class ReviewPackageText
     /// Where the diff stops: the last line boundary at or before the cap, or the cap itself when there is none - moved back
     /// one character when that would split a surrogate pair, so the package never carries half a character.
     /// </summary>
-    private static int DiffCutLength(string diff)
+    private static int DiffCutLength(string diff, int maxChars)
     {
-        var cut = diff.LastIndexOf('\n', MaxDiffChars - 1, MaxDiffChars);
+        var cut = diff.LastIndexOf('\n', maxChars - 1, maxChars);
         if (cut > 0)
         {
             return cut;
         }
 
-        return char.IsHighSurrogate(diff[MaxDiffChars - 1]) ? MaxDiffChars - 1 : MaxDiffChars;
+        return char.IsHighSurrogate(diff[maxChars - 1]) ? maxChars - 1 : maxChars;
     }
 }

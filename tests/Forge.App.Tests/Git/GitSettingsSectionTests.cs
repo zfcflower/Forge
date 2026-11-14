@@ -162,6 +162,8 @@ public sealed class GitSettingsSectionTests
             Assert.True(rendered.English.Top < rendered.English.PathsTop, "the git section renders above the paths section");
             Assert.True(rendered.English.HasStrategyPicker);
             Assert.True(rendered.English.HasTimeoutInput);
+            Assert.True(rendered.English.HasReviewLimitInputs, "the four review package limits render as number boxes");
+            Assert.Contains("评审包 diff 字符上限", rendered.English.Texts, StringComparer.Ordinal);
             Assert.Contains("拉取方式", rendered.English.Texts, StringComparer.Ordinal);
             Assert.Equal(["仅快进", "变基", "合并"], rendered.Labels);
         }
@@ -224,7 +226,7 @@ public sealed class GitSettingsSectionTests
             return tops.All(static top => !double.IsNaN(top)) && tops.Distinct().Count() == tops.Count;
         }
 
-        public (string? Id, string? Title, double Top, double ProviderTop, double PathsTop, bool HasStrategyPicker, bool HasTimeoutInput, IReadOnlyList<string> Texts) ReadGitSection()
+        public (string? Id, string? Title, double Top, double ProviderTop, double PathsTop, bool HasStrategyPicker, bool HasTimeoutInput, IReadOnlyList<string> Texts, bool HasReviewLimitInputs) ReadGitSection()
         {
             var heading = Heading("git");
             var provider = Heading(SettingsSectionIds.Provider);
@@ -240,7 +242,9 @@ public sealed class GitSettingsSectionTests
                 TopOf(paths),
                 ControlOf<ComboBox>("git-pull-strategy") is not null,
                 ControlOf<NumericUpDown>("git-network-timeout") is not null,
-                texts);
+                texts,
+                new[] { "git-review-diff-chars", "git-review-commits", "git-review-files", "git-review-field-chars" }
+                    .All(id => ControlOf<NumericUpDown>(id) is not null));
         }
 
         public IReadOnlyList<string> RenderedSectionIds() =>

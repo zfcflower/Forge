@@ -117,7 +117,8 @@ public sealed class RequestReviewToolTests
         FakeReviewChangeSetSource? source,
         ITodoStore? todos = null,
         AgentOptions? options = null,
-        ITool? read = null) =>
+        ITool? read = null,
+        Func<ReviewPackageLimits>? limits = null) =>
         new(new AgentHostOptions
         {
             Providers = _ => provider,
@@ -134,6 +135,7 @@ public sealed class RequestReviewToolTests
             ],
             Layers = new PromptLayers("test system", null, null),
             Reviews = source,
+            ReviewLimits = limits,
             Todos = todos,
             Options = options ?? new AgentOptions(),
         });
@@ -802,7 +804,7 @@ public sealed class RequestReviewToolTests
     public async Task A_cut_diff_is_flagged_in_the_result_and_the_reviewer_is_given_the_base_that_reproduces_it()
     {
         var diff = "diff --git a/src/f0.cs b/src/f0.cs\n" + string.Concat(Enumerable.Repeat("+a changed line\n", 4_000));
-        Assert.True(diff.Length > ReviewPackageText.MaxDiffChars);
+        Assert.True(diff.Length > ReviewPackageLimits.DefaultDiffChars);
         var source = new FakeReviewChangeSetSource
         {
             Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Ok(ChangeSet(1, diff))),
@@ -817,5 +819,35 @@ public sealed class RequestReviewToolTests
         Assert.Contains("note: the diff was cut", result.Content, StringComparison.Ordinal);
         var package = Turn.LastUserText(ReviewerRequest(provider));
         Assert.Contains("git_diff {\"base\": \"0987654321fedcba\"}", package, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_limits_the_host_hands_in_are_read_for_each_review_and_cap_the_package()
+    {
+        var diff = "diff --git a/src/f0.cs b/src/f0.cs\n" + string.Concat(Enumerable.Repeat("+a changed line\n", 400));
+        var source = new FakeReviewChangeSetSource
+        {
+            Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Ok(ChangeSet(30, diff))),
+        };
+        var current = new ReviewPackageLimits { DiffChars = 500, FileLines = 5 };
+        var provider = ReviewScript("verdict: approve");
+        var host = CreateHost(provider, source, limits: () => current);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var package = Turn.LastUserText(ReviewerRequest(provider));
+        Assert.Contains("[the diff was cut at ", package, StringComparison.Ordinal);
+        Assert.Contains("... and 25 more files", package, StringComparison.Ordinal);
+
+        // A later review in the same host sees the changed limits: nothing is captured at construction.
+        current = new ReviewPackageLimits();
+        var provider2 = ReviewScript("verdict: approve");
+        var host2 = CreateHost(provider2, source, limits: () => current);
+        await host2.RunToCompletionAsync(host2.CreateRoot(Session, Path.GetTempPath()));
+
+        var wide = Turn.LastUserText(ReviewerRequest(provider2));
+        Assert.DoesNotContain("[the diff was cut at ", wide, StringComparison.Ordinal);
+        Assert.DoesNotContain("more files", wide, StringComparison.Ordinal);
     }
 }

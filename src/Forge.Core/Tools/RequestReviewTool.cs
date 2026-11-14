@@ -32,14 +32,16 @@ public sealed class RequestReviewTool : ITool
     private readonly SubAgentScheduler scheduler;
     private readonly IReviewChangeSetSource changeSets;
     private readonly ITodoStore? todos;
+    private readonly Func<ReviewPackageLimits>? limits;
 
-    public RequestReviewTool(SubAgentScheduler scheduler, IReviewChangeSetSource changeSets, ITodoStore? todos = null)
+    public RequestReviewTool(SubAgentScheduler scheduler, IReviewChangeSetSource changeSets, ITodoStore? todos = null, Func<ReviewPackageLimits>? limits = null)
     {
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(changeSets);
         this.scheduler = scheduler;
         this.changeSets = changeSets;
         this.todos = todos;
+        this.limits = limits;
         Definition = new ToolDefinition(Name, Description, SchemaJson);
     }
 
@@ -142,7 +144,7 @@ public sealed class RequestReviewTool : ITool
             return new ToolResult($"Nothing to review: {DescribeEmpty(changeSet, request.Commit is not null)}. No reviewer was started.");
         }
 
-        var package = ReviewPackageText.Render(brief, changeSet);
+        var package = ReviewPackageText.Render(brief, changeSet, limits?.Invoke());
         SubAgentOutcome outcome;
         await using (scope.Permit.Detach(ct))
         {

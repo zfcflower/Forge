@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Forge.App.Preferences;
+using Forge.Core.Tools;
 using Xunit;
 
 namespace Forge.App.Tests.Settings;
@@ -22,6 +23,10 @@ public sealed class GapPlanPreferencesTests
         { nameof(AppPreferences.FilesImagePreviewMaxMegabytes), AppPreferences.MinFilesImagePreviewMaxMegabytes, AppPreferences.MaxFilesImagePreviewMaxMegabytes, AppPreferences.DefaultFilesImagePreviewMaxMegabytes },
         { nameof(AppPreferences.GitChecksNoChecksConfirmations), AppPreferences.MinGitChecksNoChecksConfirmations, AppPreferences.MaxGitChecksNoChecksConfirmations, AppPreferences.DefaultGitChecksNoChecksConfirmations },
         { nameof(AppPreferences.GitChecksFailureLogTailLines), AppPreferences.MinGitChecksFailureLogTailLines, AppPreferences.MaxGitChecksFailureLogTailLines, AppPreferences.DefaultGitChecksFailureLogTailLines },
+        { nameof(AppPreferences.GitReviewDiffMaxChars), AppPreferences.MinGitReviewDiffMaxChars, AppPreferences.MaxGitReviewDiffMaxChars, AppPreferences.DefaultGitReviewDiffMaxChars },
+        { nameof(AppPreferences.GitReviewMaxCommits), AppPreferences.MinGitReviewMaxCommits, AppPreferences.MaxGitReviewMaxCommits, AppPreferences.DefaultGitReviewMaxCommits },
+        { nameof(AppPreferences.GitReviewMaxFiles), AppPreferences.MinGitReviewMaxFiles, AppPreferences.MaxGitReviewMaxFiles, AppPreferences.DefaultGitReviewMaxFiles },
+        { nameof(AppPreferences.GitReviewFieldMaxChars), AppPreferences.MinGitReviewFieldMaxChars, AppPreferences.MaxGitReviewFieldMaxChars, AppPreferences.DefaultGitReviewFieldMaxChars },
         { nameof(AppPreferences.McpRequestTimeoutSeconds), AppPreferences.MinMcpRequestTimeoutSeconds, AppPreferences.MaxMcpRequestTimeoutSeconds, AppPreferences.DefaultMcpRequestTimeoutSeconds },
         { nameof(AppPreferences.McpReconnectInitialDelaySeconds), AppPreferences.MinMcpReconnectInitialDelaySeconds, AppPreferences.MaxMcpReconnectInitialDelaySeconds, AppPreferences.DefaultMcpReconnectInitialDelaySeconds },
         { nameof(AppPreferences.McpToolSearchLimit), AppPreferences.MinMcpToolSearchLimit, AppPreferences.MaxMcpToolSearchLimit, AppPreferences.DefaultMcpToolSearchLimit },
@@ -43,6 +48,10 @@ public sealed class GapPlanPreferencesTests
         nameof(AppPreferences.FilesImagePreviewMaxMegabytes) => p.FilesImagePreviewMaxMegabytes,
         nameof(AppPreferences.GitChecksNoChecksConfirmations) => p.GitChecksNoChecksConfirmations,
         nameof(AppPreferences.GitChecksFailureLogTailLines) => p.GitChecksFailureLogTailLines,
+        nameof(AppPreferences.GitReviewDiffMaxChars) => p.GitReviewDiffMaxChars,
+        nameof(AppPreferences.GitReviewMaxCommits) => p.GitReviewMaxCommits,
+        nameof(AppPreferences.GitReviewMaxFiles) => p.GitReviewMaxFiles,
+        nameof(AppPreferences.GitReviewFieldMaxChars) => p.GitReviewFieldMaxChars,
         nameof(AppPreferences.McpRequestTimeoutSeconds) => p.McpRequestTimeoutSeconds,
         nameof(AppPreferences.McpReconnectInitialDelaySeconds) => p.McpReconnectInitialDelaySeconds,
         nameof(AppPreferences.McpToolSearchLimit) => p.McpToolSearchLimit,
@@ -67,6 +76,10 @@ public sealed class GapPlanPreferencesTests
             case nameof(AppPreferences.FilesImagePreviewMaxMegabytes): p.FilesImagePreviewMaxMegabytes = value; break;
             case nameof(AppPreferences.GitChecksNoChecksConfirmations): p.GitChecksNoChecksConfirmations = value; break;
             case nameof(AppPreferences.GitChecksFailureLogTailLines): p.GitChecksFailureLogTailLines = value; break;
+            case nameof(AppPreferences.GitReviewDiffMaxChars): p.GitReviewDiffMaxChars = value; break;
+            case nameof(AppPreferences.GitReviewMaxCommits): p.GitReviewMaxCommits = value; break;
+            case nameof(AppPreferences.GitReviewMaxFiles): p.GitReviewMaxFiles = value; break;
+            case nameof(AppPreferences.GitReviewFieldMaxChars): p.GitReviewFieldMaxChars = value; break;
             case nameof(AppPreferences.McpRequestTimeoutSeconds): p.McpRequestTimeoutSeconds = value; break;
             case nameof(AppPreferences.McpReconnectInitialDelaySeconds): p.McpReconnectInitialDelaySeconds = value; break;
             case nameof(AppPreferences.McpToolSearchLimit): p.McpToolSearchLimit = value; break;
@@ -93,6 +106,10 @@ public sealed class GapPlanPreferencesTests
             case nameof(AppPreferences.FilesImagePreviewMaxMegabytes): section.FilesImagePreviewMaxMegabytes = value; break;
             case nameof(AppPreferences.GitChecksNoChecksConfirmations): section.GitChecksNoChecksConfirmations = value; break;
             case nameof(AppPreferences.GitChecksFailureLogTailLines): section.GitChecksFailureLogTailLines = value; break;
+            case nameof(AppPreferences.GitReviewDiffMaxChars): section.GitReviewDiffMaxChars = value; break;
+            case nameof(AppPreferences.GitReviewMaxCommits): section.GitReviewMaxCommits = value; break;
+            case nameof(AppPreferences.GitReviewMaxFiles): section.GitReviewMaxFiles = value; break;
+            case nameof(AppPreferences.GitReviewFieldMaxChars): section.GitReviewFieldMaxChars = value; break;
             case nameof(AppPreferences.McpRequestTimeoutSeconds): section.McpRequestTimeoutSeconds = value; break;
             case nameof(AppPreferences.McpReconnectInitialDelaySeconds): section.McpReconnectInitialDelaySeconds = value; break;
             case nameof(AppPreferences.McpToolSearchLimit): section.McpToolSearchLimit = value; break;
@@ -414,6 +431,10 @@ public sealed class GapPlanPreferencesTests
             FilesImagePreviewMaxMegabytes = 33,
             GitChecksNoChecksConfirmations = 5,
             GitChecksFailureLogTailLines = 333,
+            GitReviewDiffMaxChars = 12345,
+            GitReviewMaxCommits = 11,
+            GitReviewMaxFiles = 77,
+            GitReviewFieldMaxChars = 555,
             McpRequestTimeoutSeconds = 90,
             McpReconnectInitialDelaySeconds = 12,
             McpToolSearchLimit = 42,
@@ -450,6 +471,10 @@ public sealed class GapPlanPreferencesTests
         Assert.Equal(33, loaded.FilesImagePreviewMaxMegabytes);
         Assert.Equal(5, loaded.GitChecksNoChecksConfirmations);
         Assert.Equal(333, loaded.GitChecksFailureLogTailLines);
+        Assert.Equal(12345, loaded.GitReviewDiffMaxChars);
+        Assert.Equal(11, loaded.GitReviewMaxCommits);
+        Assert.Equal(77, loaded.GitReviewMaxFiles);
+        Assert.Equal(555, loaded.GitReviewFieldMaxChars);
         Assert.Equal(90, loaded.McpRequestTimeoutSeconds);
         Assert.Equal(12, loaded.McpReconnectInitialDelaySeconds);
         Assert.Equal(42, loaded.McpToolSearchLimit);
@@ -526,6 +551,10 @@ public sealed class GapPlanPreferencesTests
         Assert.Equal(AppPreferences.DefaultFilesImagePreviewMaxMegabytes, p.FilesImagePreviewMaxMegabytes);
         Assert.Equal(AppPreferences.DefaultGitChecksNoChecksConfirmations, p.GitChecksNoChecksConfirmations);
         Assert.Equal(AppPreferences.DefaultGitChecksFailureLogTailLines, p.GitChecksFailureLogTailLines);
+        Assert.Equal(ReviewPackageLimits.DefaultDiffChars, p.GitReviewDiffMaxChars);
+        Assert.Equal(ReviewPackageLimits.DefaultCommitLines, p.GitReviewMaxCommits);
+        Assert.Equal(ReviewPackageLimits.DefaultFileLines, p.GitReviewMaxFiles);
+        Assert.Equal(ReviewPackageLimits.DefaultFieldChars, p.GitReviewFieldMaxChars);
         Assert.Equal(AppPreferences.DefaultMcpRequestTimeoutSeconds, p.McpRequestTimeoutSeconds);
         Assert.Equal(AppPreferences.DefaultMcpReconnectInitialDelaySeconds, p.McpReconnectInitialDelaySeconds);
         Assert.Equal(AppPreferences.DefaultMcpToolSearchLimit, p.McpToolSearchLimit);

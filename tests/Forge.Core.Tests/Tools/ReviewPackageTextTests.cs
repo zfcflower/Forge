@@ -58,7 +58,7 @@ public sealed class ReviewPackageTextTests
 
         var package = ReviewPackageText.Render(Brief(), changeSet);
 
-        Assert.Equal(ReviewPackageText.MaxDiffChars, diff.Length);
+        Assert.Equal(ReviewPackageLimits.DefaultDiffChars, diff.Length);
         Assert.False(package.DiffCut);
         Assert.Contains(diff, package.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(CutNote, package.Text, StringComparison.Ordinal);
@@ -169,11 +169,11 @@ public sealed class ReviewPackageTextTests
     public void A_diff_without_line_breaks_is_never_cut_inside_a_surrogate_pair()
     {
         // The cap falls on the high half of the pair at its last position, so a naive cut would keep half a character.
-        var diff = new string('a', ReviewPackageText.MaxDiffChars - 1) + "\U0001F600" + "tail";
+        var diff = new string('a', ReviewPackageLimits.DefaultDiffChars - 1) + "\U0001F600" + "tail";
 
         var text = Render(Brief(), ChangeSet(diff, [File(0)]));
 
-        Assert.Contains("cut at " + (ReviewPackageText.MaxDiffChars - 1), text, StringComparison.Ordinal);
+        Assert.Contains("cut at " + (ReviewPackageLimits.DefaultDiffChars - 1), text, StringComparison.Ordinal);
         Assert.DoesNotContain("\uD83D", text, StringComparison.Ordinal);
     }
 
@@ -186,7 +186,7 @@ public sealed class ReviewPackageTextTests
 
         var start = text.IndexOf("narrowed to: ", StringComparison.Ordinal);
         var end = text.IndexOf(" (only these paths were read;", start, StringComparison.Ordinal);
-        Assert.InRange(end - start, 1, ReviewPackageText.MaxFieldChars + "narrowed to: ".Length + 1);
+        Assert.InRange(end - start, 1, ReviewPackageLimits.DefaultFieldChars + "narrowed to: ".Length + 1);
         Assert.Equal('…', text[end - 1]);
     }
 
@@ -310,7 +310,7 @@ public sealed class ReviewPackageTextTests
 
         var text = Render(Brief(intent), ChangeSet(files: [File(0)]));
 
-        Assert.Contains(new string('x', ReviewPackageText.MaxFieldChars) + "…", text, StringComparison.Ordinal);
+        Assert.Contains(new string('x', ReviewPackageLimits.DefaultFieldChars) + "…", text, StringComparison.Ordinal);
         Assert.DoesNotContain("INTENTTAIL", text, StringComparison.Ordinal);
     }
 
@@ -323,7 +323,79 @@ public sealed class ReviewPackageTextTests
 
         var text = Render(Brief(intent), ChangeSet(files: [File(0)]));
 
-        Assert.Contains("Fix " + new string('x', ReviewPackageText.MaxFieldChars - 4) + "…", text, StringComparison.Ordinal);
+        Assert.Contains("Fix " + new string('x', ReviewPackageLimits.DefaultFieldChars - 4) + "…", text, StringComparison.Ordinal);
         Assert.DoesNotContain("INTENTTAIL", text, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------ caller-supplied limits
+
+    [Fact]
+    public void Limits_default_to_the_values_the_package_always_used()
+    {
+        var limits = ReviewPackageLimits.Default;
+
+        Assert.Equal(48_000, limits.DiffChars);
+        Assert.Equal(50, limits.CommitLines);
+        Assert.Equal(200, limits.FileLines);
+        Assert.Equal(2_000, limits.FieldChars);
+    }
+
+    [Fact]
+    public void A_smaller_diff_limit_cuts_the_diff_there_and_says_so()
+    {
+        var changeSet = ChangeSet(HundredCharLines(20), [File(0)]);
+
+        var package = ReviewPackageText.Render(Brief(), changeSet, new ReviewPackageLimits { DiffChars = 1_000 });
+
+        Assert.True(package.DiffCut);
+        Assert.Contains("[the diff was cut at 999 of 2000 characters", package.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_larger_diff_limit_keeps_a_diff_the_default_would_cut()
+    {
+        var changeSet = ChangeSet(HundredCharLines(600), [File(0)]);
+
+        Assert.True(ReviewPackageText.Render(Brief(), changeSet).DiffCut);
+        Assert.False(ReviewPackageText.Render(Brief(), changeSet, new ReviewPackageLimits { DiffChars = 100_000 }).DiffCut);
+    }
+
+    [Fact]
+    public void The_commit_and_file_limits_apply_independently_and_report_what_they_left_out()
+    {
+        var changeSet = ChangeSet(
+            "d\n",
+            [.. Enumerable.Range(0, 12).Select(File)],
+            [.. Enumerable.Range(0, 9).Select(Commit)]);
+
+        var text = ReviewPackageText.Render(Brief(), changeSet, new ReviewPackageLimits { CommitLines = 3, FileLines = 4 }).Text;
+
+        Assert.Contains("... and 6 more commits", text, StringComparison.Ordinal);
+        Assert.Contains("... and 8 more files", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_field_limit_clamps_the_intent_and_the_path_list()
+    {
+        var changeSet = ChangeSet("d\n", [File(0)], paths: [new string('p', 400)]);
+
+        var text = ReviewPackageText.Render(Brief(new string('i', 400)), changeSet, new ReviewPackageLimits { FieldChars = 100 }).Text;
+
+        Assert.Contains(new string('i', 100) + "…", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('i', 101), text, StringComparison.Ordinal);
+        Assert.Contains("narrowed to: " + new string('p', 100) + "…", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Nonsense_limits_from_a_host_do_not_break_the_render()
+    {
+        var changeSet = ChangeSet(HundredCharLines(3), [File(0)], [Commit(0)]);
+
+        var text = ReviewPackageText.Render(
+            Brief(),
+            changeSet,
+            new ReviewPackageLimits { DiffChars = 0, CommitLines = -4, FileLines = -1, FieldChars = 0 }).Text;
+
+        Assert.Contains("[the diff was cut at ", text, StringComparison.Ordinal);
     }
 }

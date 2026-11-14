@@ -118,6 +118,18 @@ internal sealed class AppPreferences : ObservableObject
     public const int MinGitChecksFailureLogTailLines = 20;
     public const int MaxGitChecksFailureLogTailLines = 2000;
     public const int DefaultGitChecksFailureLogTailLines = 200;
+    public const int MinGitReviewDiffMaxChars = 1000;
+    public const int MaxGitReviewDiffMaxChars = 500000;
+    public const int DefaultGitReviewDiffMaxChars = 48000;
+    public const int MinGitReviewMaxCommits = 5;
+    public const int MaxGitReviewMaxCommits = 500;
+    public const int DefaultGitReviewMaxCommits = 50;
+    public const int MinGitReviewMaxFiles = 20;
+    public const int MaxGitReviewMaxFiles = 2000;
+    public const int DefaultGitReviewMaxFiles = 200;
+    public const int MinGitReviewFieldMaxChars = 200;
+    public const int MaxGitReviewFieldMaxChars = 20000;
+    public const int DefaultGitReviewFieldMaxChars = 2000;
     public const int MinMcpRequestTimeoutSeconds = 5;
     public const int MaxMcpRequestTimeoutSeconds = 600;
     public const int DefaultMcpRequestTimeoutSeconds = 60;
@@ -198,6 +210,10 @@ internal sealed class AppPreferences : ObservableObject
     private int filesImagePreviewMaxMegabytes = DefaultFilesImagePreviewMaxMegabytes;
     private int gitChecksNoChecksConfirmations = DefaultGitChecksNoChecksConfirmations;
     private int gitChecksFailureLogTailLines = DefaultGitChecksFailureLogTailLines;
+    private int gitReviewDiffMaxChars = DefaultGitReviewDiffMaxChars;
+    private int gitReviewMaxCommits = DefaultGitReviewMaxCommits;
+    private int gitReviewMaxFiles = DefaultGitReviewMaxFiles;
+    private int gitReviewFieldMaxChars = DefaultGitReviewFieldMaxChars;
     private int mcpRequestTimeoutSeconds = DefaultMcpRequestTimeoutSeconds;
     private int mcpReconnectInitialDelaySeconds = DefaultMcpReconnectInitialDelaySeconds;
     private int mcpToolSearchLimit = DefaultMcpToolSearchLimit;
@@ -455,6 +471,34 @@ internal sealed class AppPreferences : ObservableObject
         set => Set(ref gitChecksFailureLogTailLines, Math.Clamp(value, MinGitChecksFailureLogTailLines, MaxGitChecksFailureLogTailLines));
     }
 
+    /// <summary>Characters of diff a review package carries before it cuts and says so (request_review; read for each review). Clamped to [<see cref="MinGitReviewDiffMaxChars"/>, <see cref="MaxGitReviewDiffMaxChars"/>].</summary>
+    public int GitReviewDiffMaxChars
+    {
+        get => gitReviewDiffMaxChars;
+        set => Set(ref gitReviewDiffMaxChars, Math.Clamp(value, MinGitReviewDiffMaxChars, MaxGitReviewDiffMaxChars));
+    }
+
+    /// <summary>Commit lines a review package lists (request_review; read for each review). Clamped to [<see cref="MinGitReviewMaxCommits"/>, <see cref="MaxGitReviewMaxCommits"/>].</summary>
+    public int GitReviewMaxCommits
+    {
+        get => gitReviewMaxCommits;
+        set => Set(ref gitReviewMaxCommits, Math.Clamp(value, MinGitReviewMaxCommits, MaxGitReviewMaxCommits));
+    }
+
+    /// <summary>File lines a review package lists (request_review; read for each review). Clamped to [<see cref="MinGitReviewMaxFiles"/>, <see cref="MaxGitReviewMaxFiles"/>].</summary>
+    public int GitReviewMaxFiles
+    {
+        get => gitReviewMaxFiles;
+        set => Set(ref gitReviewMaxFiles, Math.Clamp(value, MinGitReviewMaxFiles, MaxGitReviewMaxFiles));
+    }
+
+    /// <summary>Characters kept of each intent, step text, focus, commit subject and the narrowed-to path list in a review package (request_review; read for each review). Clamped to [<see cref="MinGitReviewFieldMaxChars"/>, <see cref="MaxGitReviewFieldMaxChars"/>].</summary>
+    public int GitReviewFieldMaxChars
+    {
+        get => gitReviewFieldMaxChars;
+        set => Set(ref gitReviewFieldMaxChars, Math.Clamp(value, MinGitReviewFieldMaxChars, MaxGitReviewFieldMaxChars));
+    }
+
     /// <summary>Default MCP request timeout; a server's own <c>timeout</c> still overrides it (wave W6). Clamped to [<see cref="MinMcpRequestTimeoutSeconds"/>, <see cref="MaxMcpRequestTimeoutSeconds"/>].</summary>
     public int McpRequestTimeoutSeconds
     {
@@ -640,6 +684,18 @@ internal sealed class AppPreferences : ObservableObject
         gitChecksFailureLogTailLines = section.GitChecksFailureLogTailLines is { } gitChecksFailureLogTailLinesLoaded
             ? Math.Clamp(gitChecksFailureLogTailLinesLoaded, MinGitChecksFailureLogTailLines, MaxGitChecksFailureLogTailLines)
             : DefaultGitChecksFailureLogTailLines;
+        gitReviewDiffMaxChars = section.GitReviewDiffMaxChars is { } gitReviewDiffMaxCharsLoaded
+            ? Math.Clamp(gitReviewDiffMaxCharsLoaded, MinGitReviewDiffMaxChars, MaxGitReviewDiffMaxChars)
+            : DefaultGitReviewDiffMaxChars;
+        gitReviewMaxCommits = section.GitReviewMaxCommits is { } gitReviewMaxCommitsLoaded
+            ? Math.Clamp(gitReviewMaxCommitsLoaded, MinGitReviewMaxCommits, MaxGitReviewMaxCommits)
+            : DefaultGitReviewMaxCommits;
+        gitReviewMaxFiles = section.GitReviewMaxFiles is { } gitReviewMaxFilesLoaded
+            ? Math.Clamp(gitReviewMaxFilesLoaded, MinGitReviewMaxFiles, MaxGitReviewMaxFiles)
+            : DefaultGitReviewMaxFiles;
+        gitReviewFieldMaxChars = section.GitReviewFieldMaxChars is { } gitReviewFieldMaxCharsLoaded
+            ? Math.Clamp(gitReviewFieldMaxCharsLoaded, MinGitReviewFieldMaxChars, MaxGitReviewFieldMaxChars)
+            : DefaultGitReviewFieldMaxChars;
         mcpRequestTimeoutSeconds = section.McpRequestTimeoutSeconds is { } mcpRequestTimeoutSecondsLoaded
             ? Math.Clamp(mcpRequestTimeoutSecondsLoaded, MinMcpRequestTimeoutSeconds, MaxMcpRequestTimeoutSeconds)
             : DefaultMcpRequestTimeoutSeconds;
@@ -723,6 +779,10 @@ internal sealed class AppPreferences : ObservableObject
             FilesImagePreviewMaxMegabytes = filesImagePreviewMaxMegabytes,
             GitChecksNoChecksConfirmations = gitChecksNoChecksConfirmations,
             GitChecksFailureLogTailLines = gitChecksFailureLogTailLines,
+            GitReviewDiffMaxChars = gitReviewDiffMaxChars,
+            GitReviewMaxCommits = gitReviewMaxCommits,
+            GitReviewMaxFiles = gitReviewMaxFiles,
+            GitReviewFieldMaxChars = gitReviewFieldMaxChars,
             McpRequestTimeoutSeconds = mcpRequestTimeoutSeconds,
             McpReconnectInitialDelaySeconds = mcpReconnectInitialDelaySeconds,
             McpToolSearchLimit = mcpToolSearchLimit,
@@ -998,6 +1058,18 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("gitChecksFailureLogTailLines")]
     public int? GitChecksFailureLogTailLines { get; set; }
+
+    [JsonPropertyName("gitReviewDiffMaxChars")]
+    public int? GitReviewDiffMaxChars { get; set; }
+
+    [JsonPropertyName("gitReviewMaxCommits")]
+    public int? GitReviewMaxCommits { get; set; }
+
+    [JsonPropertyName("gitReviewMaxFiles")]
+    public int? GitReviewMaxFiles { get; set; }
+
+    [JsonPropertyName("gitReviewFieldMaxChars")]
+    public int? GitReviewFieldMaxChars { get; set; }
 
     [JsonPropertyName("mcpRequestTimeoutSeconds")]
     public int? McpRequestTimeoutSeconds { get; set; }
