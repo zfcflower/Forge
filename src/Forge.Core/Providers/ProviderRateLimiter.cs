@@ -178,17 +178,30 @@ public sealed class ProviderRateLimiter
         }
 
         var entry = Entry(providerId, Policy);
+        var hold = default(DateTimeOffset?);
+        var sawRemaining = false;
         if (reading.Throttle is { } throttle)
         {
-            Calibrate(entry, entry.Requests, throttle.RequestLimit, throttle.RequestRemaining, throttle.RequestResetAt, now);
-            Calibrate(entry, entry.Tokens, throttle.TokenLimit, throttle.TokenRemaining, throttle.TokenResetAt, now);
+            Calibrate(entry.Requests, throttle.RequestLimit, throttle.RequestRemaining, throttle.RequestResetAt, now, ref hold, ref sawRemaining);
+            Calibrate(entry.Tokens, throttle.TokenLimit, throttle.TokenRemaining, throttle.TokenResetAt, now, ref hold, ref sawRemaining);
         }
 
         // A rejected spending window is not this layer's to wait out, but its reset is a floor: nothing this account sends
         // can succeed before it, so the hold keeps the retry loop from burning its attempts on refusals.
         if (reading.IsRejected && reading.ResetAt is { } reset)
         {
-            entry.Hold.Set(reset, now);
+            hold = hold is { } current && current > reset ? current : reset;
+        }
+
+        // Decided once for the whole reading: a dimension with room must not lift the hold a dimension without room just set,
+        // which is what an unconditional release inside Calibrate would do (requests are read before tokens).
+        if (hold is { } until)
+        {
+            entry.Hold.Set(until, now);
+        }
+        else if (sawRemaining)
+        {
+            entry.Hold.Release();
         }
     }
 
@@ -230,14 +243,15 @@ public sealed class ProviderRateLimiter
 
     private AutomationSlot CreateSlot(string _) => new(time);
 
-    /// <summary>Adopts one reported limit, its remaining count and its reset.</summary>
+    /// <summary>Adopts one reported limit, its remaining count and its reset; reports any hold the reading implies.</summary>
     private void Calibrate(
-        ProviderBuckets entry,
         RateLimitBucket bucket,
         int? limit,
         int? remaining,
         DateTimeOffset? resetAt,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        ref DateTimeOffset? hold,
+        ref bool sawRemaining)
     {
         if (limit is null && remaining is null)
         {
@@ -254,22 +268,14 @@ public sealed class ProviderRateLimiter
         if (remaining is { } left)
         {
             bucket.SetRemaining(left);
+            sawRemaining = true;
         }
 
-        if (resetAt is not { } reset || reset <= now)
-        {
-            return;
-        }
-
-        if (remaining is 0)
+        if (remaining is 0 && resetAt is { } reset && reset > now)
         {
             // Nothing is left and the provider named the moment it comes back: waiting until then is exact, while trickling
             // one request per refill would just be refused again.
-            entry.Hold.Set(reset, now);
-        }
-        else if (remaining is not null)
-        {
-            entry.Hold.Release();
+            hold = hold is { } current && current > reset ? current : reset;
         }
     }
 
@@ -290,7 +296,15 @@ public sealed class ProviderRateLimiter
             }
 
             var now = time.GetTimestamp();
-            return stamp <= now ? TimeSpan.Zero : TimeSpan.FromSeconds((stamp - now) / (double)time.TimestampFrequency);
+            if (stamp <= now)
+            {
+                // The hold is over: clear the stamp once instead of leaving a positive value behind that makes every later
+                // request read the clock again ("no hold, no clock read" is a promise the fast path is measured on).
+                Interlocked.CompareExchange(ref until, 0, stamp);
+                return TimeSpan.Zero;
+            }
+
+            return TimeSpan.FromSeconds((stamp - now) / (double)time.TimestampFrequency);
         }
 
         public void Set(DateTimeOffset reset, DateTimeOffset now)

@@ -141,8 +141,10 @@ public class RetryingChatProviderRateLimitTests
     // ------------------------------------------------------------------ settling against the real usage
 
     [Theory]
-    // Input + cache read + cache write: a provider meters all of it, so the refund is the whole difference.
-    [InlineData(30, 10, 5, 955)]
+    // Cache reads and writes are already inside InputTokens (every adapter reports the complete metered input, and the cost
+    // math subtracts the cached parts to get the billed remainder), so the refund is estimate - InputTokens whatever the
+    // cache split: the two rows land on the same room, and a double count would make the first one 15 short.
+    [InlineData(30, 10, 5, 970)]
     [InlineData(30, 0, 0, 970)]
     [InlineData(100, 0, 0, 900)]
     // No usage at all is not a free request: the estimate stands.

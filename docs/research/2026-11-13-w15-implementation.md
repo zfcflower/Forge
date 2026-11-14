@@ -42,7 +42,7 @@
 
 **校准来源。** 两条:Anthropic 自己的 `anthropic-ratelimit-*`(既有 `AnthropicRateLimits`)与通用 `x-ratelimit-*`(新 `RateLimitHeaders`,`HttpChatProvider` 的缺省钩子)。后者是这波补的实际覆盖面:用户主要跑 OpenAI 兼容端点,而它们每个响应都报 `limit/remaining/reset`,以前这些头没有任何代码读。`-reset-*` 在 OpenAI 方言里是时长(`1s`、`6m0s`、`1h2m3s`、`250ms`),也有网关发裸秒数,两种都收;解析失败就当没有,绝不当成 0。
 
-**重试层(`RetryingChatProvider`)。** 它是最外层中间件,看得见每一次尝试,所以预算在它里面扣:重试也计费。估算 `ITokenCounter`(系统提示 + 消息 + 工具定义),应答回来后 `Settle` 用 `InputTokens + CacheReadTokens + CacheWriteTokens` 校正;`Observe` 用 `ProviderRateLimit.Throttle` 与 `IsRejected` 校准上限、剩余、重置。等待超过 `_maxRetryAfter` 不睡过去,而是抛带 `Retry-After` 的 429——`ProviderQuota` 于是判成额度、`QuotaResume` 按既有语义等重置,限速层与服务端走同一条结论路径。
+**重试层(`RetryingChatProvider`)。** 它是最外层中间件,看得见每一次尝试,所以预算在它里面扣:重试也计费。估算 `ITokenCounter`(系统提示 + 消息 + 工具定义),应答回来后 `Settle` 用 `InputTokens` 校正(它是完整计量输入,缓存读写已含在内;评审发现原先加了两项缓存,会让长缓存会话按两倍速吃预算,已修);`Observe` 用 `ProviderRateLimit.Throttle` 与 `IsRejected` 校准上限、剩余、重置。等待超过 `_maxRetryAfter` 不睡过去,而是抛带 `Retry-After` 的 429——`ProviderQuota` 于是判成额度、`QuotaResume` 按既有语义等重置,限速层与服务端走同一条结论路径。
 
 **QuotaResume。** `ResumeStagger`(一把锁 + 一个字典)删除,`Reserve` 改成 `ReserveAutomationSlot`。注意这里刻意**不是**令牌桶:预留会把这家提供商的下一个空档再推一个 gap(同一瞬间三次预留得到 0、gap、2×gap),否则同一时刻到点的多个等待运行会一起放行,正是原来那个 gap 要避免的。
 
@@ -75,15 +75,20 @@
 | `ratelimit.acquire.wait` | 64 ns/acquire | 0 字节/次 |
 | `ratelimit.acquire.contended.8t` | 197 ns/op、5.1 Mitems/s | spread 1.00 |
 
-实施后(实现 + 基线在同一循环里交替计时,读取相对值):
+实施后(实现 + 基线在同一循环里交替计时,读取相对值;机器安静时的一轮):
 
 | 行 | 实现 | 基线(锁) | 比值 | 分配 |
 |---|---|---|---|---|
-| `ratelimit.acquire.authorized` | 38.3 ns/acquire | 63.0 ns/acquire | 0.61x | 0 字节/次 |
-| `ratelimit.acquire.wait` | 77.7 ns/acquire | 67.4 ns/acquire | 1.15x | 0 字节/次 |
-| `ratelimit.acquire.contended.8t` | 66.7 ns/op、14.4 Mitems/s | 157.8 ns/op | 0.42x | 每次调用 2.6 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
+| `ratelimit.acquire.authorized` | 38.8 ns/acquire | 62.8 ns/acquire | 0.62x | 0 字节/次 |
+| `ratelimit.acquire.wait` | 77.1 ns/acquire | 65.9 ns/acquire | 1.17x | 0 字节/次 |
+| `ratelimit.acquire.contended.8t` | 72.3 ns/op、15.0 Mitems/s | 185.7 ns/op | 0.39x | 每次调用 ~2.9 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
+| `ratelimit.acquire.fairness.8t` | 16.8 ms / 8000 授权 | 33.1 ms | 0.51x | 同上;per-thread 计数见下 |
 
-三条验收全绿:0 字节/acquire、无争用 p50 < 100 ns、8 线程每次授权且每线程计数在 2x 内。**等待路径是有意慢一点的那条**(1.15x):拒绝必须读时钟、算补充、算精确 retryTime,而锁版本只做一次减法;它仍在 100 ns 以内,而它只在预算真的用完时才走到。
+**等待路径是有意慢一点的那条**(1.17x):拒绝必须读时钟、算补充、算精确 retryTime,而锁版本只做一次减法;它仍在 100 ns 以内,而且只在预算真的用完时才走到。
+
+**公平性附注(评审第 5 条的修法)。** 初版那行把"每线程计数在 2x 内"写成验收,但那一行是"全部授权",spread 恒等于 1 —— 断言什么都没约束。现在拆成两行:吞吐行只断言"没有一次被拒";新增的 `fairness.8t` 用一个 8000 请求的紧预算、8 线程各 20000 次尝试,断言**这份预算只花一次**(超发会被它抓住),并把每线程计数与锁基线同一工作量的 spread 一起打印。spread 本身不做断言:这个窗口只有十几毫秒,分散度主要反映 8 个任务怎么落到核上(同一份代码在不同轮里给出 2.07、3.41,极端一轮 0/8000,而锁基线在同一轮是 20–52),把它写成验收等于断言调度器。
+
+四行验收全绿:0 字节/acquire、无争用 p50 < 100 ns、8 线程争用下一次都没被拒、紧预算下 8000 只花一次。
 
 ## 六、偏差与越界(已记录)
 
@@ -118,6 +123,13 @@
 **一次失败记录**:上述 App 过滤第一次跑时 testhost 在 438 个用例后崩溃(无失败断言、无堆栈),重跑同一过滤 799 全绿;按仓库既有经验属该 headless UI 会话的偶发中断,不是本波的断言。
 
 **没跑的部分**:`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests`(仓库约定只在 L3 跑,本波不改跨模块协议);`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp`/`Forge.HostClient` 一行未改,未跑其全量。
+
+**独立评审(`custom-baidu-6f4a99/glm-5.3`,high)发现并已修的五个问题:**
+1. **blocking:`Settle` 把缓存计了两次。** 原来的 `actual = InputTokens + CacheRead + CacheWrite`,而 `InputTokens` 早已包含缓存读写(Anthropic 适配器求和、OpenAI 形状传 `prompt_tokens`/`input_tokens`,`SessionUsageMath.BilledInputTokens` 正是减缓存得计费部分)——长缓存会话会按约两倍速吃本地预算,最后抛一个本不该有的 429。改成 `actual = usage.InputTokens`,并同步改了 SPEC 那句与那条 InlineData(955 → 970,两行现在给出同一个余额,双计会被它抓住)。
+2. **major:`SetRemaining` 不动 `updatedAt`,校准被陈旧窗口抹掉。** 服务端的 `remaining` 已含它自己到应答时刻的补充;不推进时间戳的话,随后一次低水位补充会把安静窗口里的整段信用再叠一遍并夹到容量,桶直接回到满。现在 `SetRemaining` 先单调推进时间戳、再写余额(补充为此让位的信用由服务端数字取代)。新增用例 `Calibration_is_not_erased_by_the_refill_window_it_replaced`。
+3. **minor:一个维度有余额就取消了另一维度的 hold。** `Calibrate` 原来各自 `Release`,requests(剩余 0 + reset)刚设的 hold 会被 tokens(有余额)立刻取消。现在一次读数内先算出 hold、最后统一应用,只有"看到余额且没有任何维度需要 hold"才释放。新增用例 `A_dimension_with_room_does_not_lift_the_hold_another_dimension_needs`。
+4. **minor:hold 过期后仍每请求读一次时钟。** 过期时顺带把印记 CAS 归零,恢复"无 hold 不读时钟"。
+5. **minor:公平性验收是同义反复。** 见第五节"公平性附注":吞吐行只断言没被拒,新增紧预算 `fairness.8t` 断言"预算只花一次"并把 spread 只作报告。
 
 **测试会话(独立,同模型)的报告要点**:新增 10 个文件;发现并报出 1 个真实缺陷(`RateLimitBucket.Adjust` 的负 delta 被非负的 `ToUnits` 压成 0,`Settle` 的补扣半边恒不生效 —— 已修:`ToDelta` 有符号转换,两个红灯转绿),未改产品、未 Skip;另指出 `Forge.Core/SPEC.md` 中"基类返回 null"是 W15 之前的旧句(已改为"基类读通用家族")。
 

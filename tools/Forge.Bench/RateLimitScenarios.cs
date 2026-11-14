@@ -12,10 +12,10 @@ namespace Forge.Bench;
 /// the design rejected — one mutable bucket under a lock — implemented here rather than taken from a package, so the two
 /// sides differ only in the concurrency mechanism; both are keyed by provider the same way, so the dictionary lookup is
 /// measured on both sides and the difference is the bucket itself.</para>
-/// <para>Rows: a warm bucket that always authorizes (the success path), an exhausted bucket (the wait path, which must
-/// still not allocate), and eight threads hammering one bucket (throughput on a contended cache line, plus a fairness
-/// spread: a mechanism that lets one thread run away with the budget would show as a lopsided per-thread count even at a
-/// good throughput).</para>
+/// <para>Rows: a warm bucket that always authorizes (the success path), an exhausted bucket (the wait path, which must still
+/// not allocate), eight threads hammering a bucket with room (throughput on a contended cache line), and eight threads
+/// competing for a budget that is smaller than their demand (sharing: the 8000-request allowance must never be handed out
+/// twice, and the per-thread counts plus the same numbers for the lock baseline say how evenly it went).</para>
 /// </summary>
 internal static class RateLimitScenarios
 {
@@ -25,6 +25,15 @@ internal static class RateLimitScenarios
     private const int ContendedThreads = 8;
     private const int ContendedBatch = 2000;
 
+    /// <summary>The tight allowance the fairness row hands out: one request per token, most of the demand is refused.</summary>
+    private const int FairnessBudget = 8000;
+
+    /// <summary>
+    /// Attempts per thread in the fairness row. Long enough (tens of milliseconds) that pool warm-up skew is small against the
+    /// measured window: a short batch would report who started first, not who got the budget.
+    /// </summary>
+    private const int FairnessBatch = 20000;
+
     private const string Provider = "bench-provider";
 
     public static IEnumerable<BenchScenario> Create(Fixtures fixtures)
@@ -32,6 +41,7 @@ internal static class RateLimitScenarios
         yield return Authorized();
         yield return Miss();
         yield return Contended();
+        yield return Fairness();
     }
 
     /// <summary>A limiter whose budget is far above anything the batch can spend, so the row measures the acquire itself.</summary>
@@ -174,25 +184,29 @@ internal static class RateLimitScenarios
                     Run = cancellationToken => Hammer(
                         () => limiter.Acquire(Provider, requestTokens: 1, out var wait) == RateLimitDecision.Authorized,
                         perThread,
+                        ContendedBatch,
                         cancellationToken),
                     Baseline = cancellationToken => Hammer(
                         () => locked.Acquire(Provider, tokens: 1),
                         perThread,
+                        ContendedBatch,
                         cancellationToken),
                     BaselineName = "one mutable bucket under a lock",
                     ProcessWideAllocation = true,
                     Iterations = 20,
                     Note = $"{ContendedThreads} threads x {ContendedBatch} acquires of one provider",
-                    Check = Contention("eight threads share one bucket: every acquire authorized, per-thread counts within 2x"),
+                    Check = Contention("eight threads share one bucket with room: every acquire authorized, nothing refused"),
                 });
             });
     }
 
     /// <summary>Runs <see cref="ContendedThreads"/> threads of <see cref="ContendedBatch"/> acquires and reports the spread.</summary>
-    private static async Task<OpResult> Hammer(Func<bool> acquire, int[] perThread, CancellationToken cancellationToken)
+    private static async Task<OpResult> Hammer(Func<bool> acquire, int[] perThread, int batch, CancellationToken cancellationToken)
     {
         Array.Clear(perThread);
-        var started = Stopwatch.GetTimestamp();
+        // A start gate: without it the thread pool's warm-up skew decides who reaches the bucket first, and a row about sharing a
+        // budget would be reporting scheduling noise.
+        using var gate = new ManualResetEventSlim(false);
         var tasks = new Task[ContendedThreads];
         for (var thread = 0; thread < ContendedThreads; thread++)
         {
@@ -200,7 +214,8 @@ internal static class RateLimitScenarios
             tasks[thread] = Task.Run(
                 () =>
                 {
-                    for (var index = 0; index < ContendedBatch; index++)
+                    gate.Wait(cancellationToken);
+                    for (var index = 0; index < batch; index++)
                     {
                         if (acquire())
                         {
@@ -211,6 +226,8 @@ internal static class RateLimitScenarios
                 cancellationToken);
         }
 
+        var started = Stopwatch.GetTimestamp();
+        gate.Set();
         await Task.WhenAll(tasks).ConfigureAwait(false);
         var elapsed = Stopwatch.GetElapsedTime(started);
         var total = 0;
@@ -266,21 +283,85 @@ internal static class RateLimitScenarios
         };
     }
 
-    /// <summary>The accept check the contended row uses: nothing refused, and no thread starved.</summary>
+    /// <summary>The throughput row's check: every acquire of a bucket with room is authorized, so the row times the hot path.</summary>
     private static Func<Comparison, Verdict?> Contention(string target)
     {
         return comparison =>
         {
             var observation = comparison.Implementation.Observation ?? string.Empty;
             var authorized = (long)ContendedThreads * ContendedBatch;
-            var spread = Spread(observation);
             return new Verdict(
                 target,
                 observation + string.Create(
                     CultureInfo.InvariantCulture,
                     $" alloc={comparison.Implementation.AllocatedBytesPerOp} B/call (the call itself, not the bucket)"),
-                comparison.Implementation.Signature == authorized && spread > 0 && spread <= 2.0);
+                comparison.Implementation.Signature == authorized);
         };
+    }
+
+    /// <summary>
+    /// Eight threads, one provider, a budget smaller than their demand: exactly the allowance leaves, and no thread is starved.
+    /// The per-thread counts are what make this a fairness row rather than a second throughput row — with every acquire
+    /// authorized the spread is 1 by construction and would assert nothing.
+    /// </summary>
+    private static BenchScenario Fairness()
+    {
+        return new BenchScenario(
+            "ratelimit.acquire.fairness.8t",
+            "ratelimit",
+            Heavy: false,
+            PrepareAsync: _ =>
+            {
+                var perThread = new int[ContendedThreads];
+                return Task.FromResult(new BenchCase
+                {
+                    // The bucket is rebuilt per call: the harness times the same operation repeatedly, and a bucket left empty by
+                    // the previous iteration would measure the refusal path instead of the share-out.
+                    Run = cancellationToken =>
+                    {
+                        var limiter = Limiter(requestsPerMinute: FairnessBudget, tokensPerMinute: 0);
+                        return Hammer(
+                            () => limiter.Acquire(Provider, requestTokens: 0, out var wait) == RateLimitDecision.Authorized,
+                            perThread,
+                            FairnessBatch,
+                            cancellationToken);
+                    },
+                    Baseline = cancellationToken =>
+                    {
+                        var locked = new LockedLimiter(requestsPerMinute: FairnessBudget, tokensPerMinute: 0);
+                        return Hammer(
+                            () => locked.Acquire(Provider, tokens: 0),
+                            perThread,
+                            FairnessBatch,
+                            cancellationToken);
+                    },
+                    BaselineName = "one mutable bucket under a lock",
+                    ProcessWideAllocation = true,
+                    Iterations = 20,
+                    Note = $"{ContendedThreads} threads x {FairnessBatch} acquires of an {FairnessBudget}-request budget",
+                    Check = comparison =>
+                    {
+                        var observation = comparison.Implementation.Observation ?? string.Empty;
+                        var baseSpread = comparison.Baseline?.Observation is { } baseObservation ? Spread(baseObservation) : double.NaN;
+                        var authorized = comparison.Implementation.Signature;
+
+                        // The allowance is 8000 tokens at one per request, plus whatever the refill clock added during the window
+                        // (a few, at this length). Anything above that is over-admission: the budget was handed out twice.
+                        var allowance = authorized >= FairnessBudget && authorized <= FairnessBudget + ContendedThreads;
+
+                        // The spread is reported, not asserted: with a budget this small the whole share-out lasts a few hundred
+                        // microseconds, so it measures how the eight tasks wake up as much as who wins the counter (one run gave
+                        // 0/8000, the next 456/1411). Asserting a bound here would be asserting the scheduler. What is stable, and
+                        // is what a broken compare-exchange would break, is that the allowance is never handed out twice.
+                        return new Verdict(
+                            $"a budget of {FairnessBudget} is spent once under eight threads (no over-admission)",
+                            observation + string.Create(
+                                CultureInfo.InvariantCulture,
+                                $" authorized={authorized} base_spread={baseSpread:0.00}"),
+                            allowance);
+                    },
+                });
+            });
     }
 
     /// <summary>

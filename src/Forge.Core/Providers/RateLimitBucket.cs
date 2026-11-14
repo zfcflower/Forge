@@ -105,7 +105,18 @@ internal sealed class RateLimitBucket
     /// Sets the remaining budget to what the provider said it has (a response header's <c>remaining</c>). Not additive: the
     /// server's number is the truth, and being generous about it is exactly how a client walks into a rejection.
     /// </summary>
-    public void SetRemaining(double remainingTokens) => SetTokens(ToUnits(remainingTokens));
+    /// <remarks>
+    /// The refill stamp moves with it. The server's count already includes whatever its own window added up to the moment it
+    /// answered, so a later low-water refill must not re-credit that window — and it would: the lazy refill folds in everything
+    /// since the last stamp, which after a quiet period is the whole window. The stamp is advanced before the count is written,
+    /// so a refill racing this call can only see the new stamp (a lost credit here is the point; the server's number replaces
+    /// it) and never the new count under the old window.
+    /// </remarks>
+    public void SetRemaining(double remainingTokens)
+    {
+        AdvanceStamp(time.GetTimestamp());
+        SetTokens(ToUnits(remainingTokens));
+    }
 
     /// <summary>Adds credit, or with a negative delta takes it back (clamped to the ceiling and to zero).</summary>
     public void Adjust(double deltaTokens)
@@ -233,6 +244,19 @@ internal sealed class RateLimitBucket
             }
 
             if (Interlocked.CompareExchange(ref tokens, ceiling, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Moves the refill stamp forward to <paramref name="now"/> if it is behind; never backwards.</summary>
+    private void AdvanceStamp(long now)
+    {
+        while (true)
+        {
+            var at = Volatile.Read(ref updatedAt);
+            if (at >= now || Interlocked.CompareExchange(ref updatedAt, now, at) == at)
             {
                 return;
             }

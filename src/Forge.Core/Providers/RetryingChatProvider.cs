@@ -200,11 +200,12 @@ public sealed class RetryingChatProvider : IChatProvider
             return;
         }
 
-        // Cache reads and writes are input the provider had to process, and the providers that meter tokens per minute count
-        // them as such; charging only the uncached remainder would leave the budget blind exactly when a long cached
-        // conversation is the thing spending it. A provider that reports no usage at all leaves the estimate standing instead
-        // of refunding it: a missing number is not a free request.
-        var actual = usage.InputTokens + usage.CacheReadTokens + usage.CacheWriteTokens;
+        // InputTokens is the complete metered input: every adapter reports cache reads and writes inside it (Anthropic sums the
+        // three, the OpenAI shapes pass prompt_tokens/input_tokens through), which is also why SessionUsageMath subtracts the
+        // cached parts again to get the *billed* remainder. Adding them here would charge a cached conversation twice - the one
+        // workload an agent runs all day. A provider that reports no usage at all leaves the estimate standing instead of
+        // refunding it: a missing number is not a free request.
+        var actual = usage.InputTokens;
         if (actual > 0)
         {
             _rateLimiter.Settle(_inner.Id, reservedTokens, actual);

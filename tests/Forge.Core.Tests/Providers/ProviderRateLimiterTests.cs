@@ -293,6 +293,39 @@ public class ProviderRateLimiterTests
         Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
     }
 
+    [Fact]
+    public void Calibration_is_not_erased_by_the_refill_window_it_replaced()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 60_000 });
+
+        // A quiet minute above the low-water mark: no refill runs, so the bucket still carries its creation stamp while the
+        // whole minute of credit is unclaimed. The server then reports that only 100 tokens are left - its number already
+        // includes whatever its own window added up to that answer, so the unclaimed minute must not be handed out on top.
+        time.Advance(TimeSpan.FromSeconds(60));
+        limiter.Observe("p", Throttle(new ProviderThrottle(null, null, null, 60_000, 100, Start + TimeSpan.FromSeconds(60))), Start + TimeSpan.FromSeconds(60));
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 50_000, out _));
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 100, out _));
+    }
+
+    [Fact]
+    public void A_dimension_with_room_does_not_lift_the_hold_another_dimension_needs()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 10, TokensPerMinute = 60_000 });
+        var reset = Start + TimeSpan.FromSeconds(60);
+
+        // Requests are spent until the reset while tokens still have room: requests are calibrated first, so an unconditional
+        // release in the token branch would lift the hold a moment after it was set.
+        limiter.Observe("p", Throttle(new ProviderThrottle(10, 0, reset, 1000, 500, reset)), Start);
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 10, out var held));
+        Assert.InRange(held, TimeSpan.FromSeconds(59), TimeSpan.FromSeconds(60));
+    }
+
     // ------------------------------------------------------------------ Settle
 
     [Fact]
