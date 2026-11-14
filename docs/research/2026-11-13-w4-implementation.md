@@ -67,14 +67,14 @@ dotnet test tests/Forge.Core.Tests                        → 2136 通过 / 0 �
 dotnet test tests/Forge.Mcp.Tests                         → 190 通过 / 1 失败(既有环境问题,见下)
 dotnet test tests/Forge.Workspace.Tests                   → 1312 通过 / 0 失败
 dotnet test tests/Forge.Integration.Tests                 → 265 通过 / 0 失败
-dotnet test tests/Forge.App.Tests(全量)                    → 3663 通过 / 0 失败
+dotnet test tests/Forge.App.Tests(全量)                    → 3706 项里 3705–3706 通过(残余 0–1 条为上述既有高负载抖动)
 dotnet test tests/Forge.App.Tests --filter Workbench      → 575 通过 / 0 失败
 dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localization|MinorRegression → 590 通过 / 0 失败
 ```
 
 `Forge.Mcp.Tests` 的那一条失败是 `StdioTransportTests.Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines`(`initialize did not complete within 3s`);在干净的 `main` 检出(`D:/FORGE/forge`)上跑同一条测试同样失败,所以是既有环境问题,与本波无关。
 
-`Workbench/MenuShellTests` 里涉及「起始目录列表」的两条在整棵树上高负载时偶发失败(同一条测试在 `main` 与合并后的分支上单独跑都 38/38 通过,本波也没有改到菜单/项目代码),是负载敏感的时序测试,不作为缺陷。
+`Workbench/MenuShellTests`(项目起始目录列举,计时敏感)在全量跑的高负载下每次失败的成员都不同(同一次 2 条、下一次 1 条、再下一次 2 条且名称各异),而在 `main` 与合并后的分支上单独跑都 38/38 通过,本波也没有任何文件落在这条路径上。这与仓库既有的记录一致(`docs/merge-notes/2026-11-06-agent-extensions-open-issues.md` §5:全量并行跑时每次会有不同的 1–4 个计时敏感用例失败,单跑连续 3 次全过),按既有抖动处理,不作为本波缺陷。
 
 手测项(需真人看):工具行缩略图的观感与悬停提示;宽 CSV 的横向滚动与列对齐;大图(>4096 长边)预览的缩放质量;PDF 卡片的「用默认程序打开」、以及 `.html` 文件上同一个按钮换成「在浏览器中打开」后在 Windows 上是否真的唤出浏览器。
 
