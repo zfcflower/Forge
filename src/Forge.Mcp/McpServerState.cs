@@ -20,6 +20,22 @@ public sealed record McpServerState(
     public bool IsReady => Status == McpServerStatus.Ready;
 }
 
+/// <summary>
+/// What the settings page's test found: how long a connect plus tool listing took, what the server exposes and what went
+/// wrong. Always returned — a test button has something to say even when the server refuses to start.
+/// </summary>
+public sealed record McpServerProbe(
+    string Name,
+    McpServerStatus Status,
+    TimeSpan Elapsed,
+    IReadOnlyList<McpToolAdapter> Tools,
+    McpServerCapabilities Capabilities,
+    string? Error = null,
+    string? StderrTail = null)
+{
+    public bool IsReady => Status == McpServerStatus.Ready;
+}
+
 public sealed class McpServerManagerOptions
 {
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(60);
