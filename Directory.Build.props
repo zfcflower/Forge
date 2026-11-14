@@ -12,4 +12,11 @@
   <PropertyGroup Condition="'$(FORGE_RUN)' == '1' And '$(MSBuildProjectName)' == 'Forge.App'">
     <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts/run/</BaseOutputPath>
   </PropertyGroup>
+  <!-- 构建期进程卫生(仅本地 Windows、CI 跳过):孤儿 testhost/ExtensionHost 自动结束、活锁报 PID;细则见 scripts/build-hygiene.ps1。 -->
+  <Target Name="ForgeBuildHygiene"
+          BeforeTargets="Build"
+          Condition="'$(CI)' != 'true' And '$(OS)' == 'Windows_NT' And '$(MSBuildProjectName)' == 'Forge.Abstractions'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\build-hygiene.ps1&quot;"
+          IgnoreStandardErrorWarningFormat="true" />
+  </Target>
 </Project>

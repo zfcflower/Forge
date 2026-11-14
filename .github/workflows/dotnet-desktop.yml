@@ -364,3 +364,22 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+  docs-guard:
+    # 入口接线守卫:CLAUDE.md 必须只是 @AGENTS.md 导入桩,AGENTS.md/testing.md/overlay 必须接到 forge-test.ps1。
+    name: Entry-point guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Verify agent entry wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^@AGENTS\.md' CLAUDE.md
+          grep -q 'forge-test\.ps1' AGENTS.md
+          grep -q 'forge-test\.ps1' testing.md
+          grep -q 'forge-test\.ps1' .agents/skill-overlays/dotnet-test/run-tests.md

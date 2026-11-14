@@ -120,21 +120,23 @@ done
 
 | 改动位置 | L1 过滤器 |
 |---|---|
-| `src/Forge.App/Workbench/`、`Resources/`、`*.axaml` 视图 | `FullyQualifiedName~Forge.App.Tests.Workbench` |
+| `src/Forge.App/Workbench/`、`Resources/` | `FullyQualifiedName~Forge.App.Tests.Workbench` |
+| `src/Forge.App/Views/`(`*.axaml` 视图;对应测试在 `Views` 命名空间,另并 Workbench) | `FullyQualifiedName~Forge.App.Tests.Views|FullyQualifiedName~Forge.App.Tests.Workbench` |
 | `src/Forge.App/Providers/` | `FullyQualifiedName~Forge.App.Tests.Providers` |
 | `src/Forge.App/Git/` | `FullyQualifiedName~Forge.App.Tests.Git` |
 | `src/Forge.App/Terminal/` | `FullyQualifiedName~Forge.App.Tests.Terminal` |
 | `src/Forge.App/Settings/` | `FullyQualifiedName~Forge.App.Tests.Settings` |
-| `src/Forge.App/{Changes,Editor,Palette,PlanPanel*}` | 对应命名空间(`Changes`/`Editor`/`Palette`/`ViewModels`) |
+| `src/Forge.App/{Changes,Editing,ViewModels,PlanPanel*}`(Palette 源码散在 `ViewModels`/`Views`,由对应规则覆盖) | 对应命名空间(`Changes`/`Editor`/`ViewModels`) |
 | `src/Forge.App/Localization/`、`Resources/` 文案 | `Localization` + `KeyRegistry` + `StringTable` + `NoHardcodedChinese` |
 | `src/Forge.App/` 其他 | `dotnet test tests/Forge.App.Tests`(L2) |
+| 根级构建/CI 配置(`Directory.Build.props`、`Directory.Build.rsp`、`global.json`、`Forge.slnx`、`.github/workflows/`) | L3 |
 | `src/Forge.Core/` | `dotnet test tests/Forge.Core.Tests`(L2) |
 | `src/Forge.Workspace/` | `dotnet test tests/Forge.Workspace.Tests`(L2) |
 | `src/Forge.{IO,Editor,Mcp,Approval,Workflows,Scripting,HostClient,Ipc}/` | 同名 `tests/Forge.<M>.Tests`(L2) |
 | `src/Forge.Abstractions/`、`Plugin.Sdk/`、`Ipc*/`、存储 schema、AOT 配置 | L3 |
 | 文档、spec、`.md`、`AGENTS.md` | 不跑测试 |
 
-L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `Workbench` 与 `Git`),把过滤器用 `|` 串起来,而不是退化成 L2。落点表的数据副本在 `scripts/test-map.json`(脚本按最长前缀匹配,`Ipc*` 依 L3 行优先于同名-tests 行);改表须两处同步。
+L1 只跑一个命名空间时,若改动跨了两个落点(例如同时改了 `Workbench` 与 `Git`),把过滤器用 `|` 串起来,而不是退化成 L2。落点表的数据副本在 `scripts/test-map.json`(脚本按最长前缀匹配,`Ipc*` 依 L3 行优先于同名-tests 行;l1 的 `ns` 可为数组,一落点多命名空间;根级构建/CI 配置归 l3 `why=infra`);改表须两处同步。
 
 ## 新增测试的准入
 
