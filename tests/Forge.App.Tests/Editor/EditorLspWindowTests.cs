@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using Avalonia.Controls;
@@ -26,7 +24,7 @@ public sealed class EditorLspWindowTests : IDisposable
     [Fact]
     public Task Ctrl_space_applies_the_selected_completion_as_one_undo_step_and_syncs_the_server() => Ui(async () =>
     {
-        await using var rig = await Rig.OpenAsync(root, "foo\n", new() { ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"foobar","additionalTextEdits":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":0}},"newText":"// added\n"}]}]}""" });
+        await using var rig = await EditorLspRig.OpenAsync(root, "foo\n", new() { ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"foobar","additionalTextEdits":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":0}},"newText":"// added\n"}]}]}""" });
         rig.Editor.CaretOffset = 3;
         rig.Window.KeyPressQwerty(PhysicalKey.Space, RawInputModifiers.Control);
         await rig.Server.WaitForAsync("textDocument/completion");
@@ -51,7 +49,7 @@ public sealed class EditorLspWindowTests : IDisposable
     [Fact]
     public Task Typing_a_dot_requests_completion_at_the_exact_caret_position() => Ui(async () =>
     {
-        await using var rig = await Rig.OpenAsync(root, "foo\n");
+        await using var rig = await EditorLspRig.OpenAsync(root, "foo\n");
         rig.Editor.CaretOffset = 3;
         rig.Window.KeyTextInput(".");
         using var request = JsonDocument.Parse(await rig.Server.WaitForAsync("textDocument/completion"));
@@ -65,7 +63,7 @@ public sealed class EditorLspWindowTests : IDisposable
     public Task A_completion_answered_after_the_user_kept_typing_is_dropped() => Ui(async () =>
     {
         var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var rig = await Rig.OpenAsync(root, "foo\n",
+        await using var rig = await EditorLspRig.OpenAsync(root, "foo\n",
             new() { ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"foobar"}]}""" },
             new() { ["textDocument/completion"] = hold });
         rig.Editor.CaretOffset = 3;
@@ -86,7 +84,7 @@ public sealed class EditorLspWindowTests : IDisposable
     {
         var path = Path.Combine(root, "Program.cs");
         var uri = LspUri.FromPath(path);
-        await using var rig = await Rig.OpenAsync(root, "class A { }\nclass B : A { }\n", new()
+        await using var rig = await EditorLspRig.OpenAsync(root, "class A { }\nclass B : A { }\n", new()
         {
             ["textDocument/definition"] = $$$$"""[{"uri":"{{{{uri}}}}","range":{"start":{"line":0,"character":6},"end":{"line":0,"character":7}}}]""",
         });
@@ -106,7 +104,7 @@ public sealed class EditorLspWindowTests : IDisposable
     {
         var other = Path.Combine(root, "Other.cs");
         await File.WriteAllTextAsync(other, "class Z { }\n");
-        await using var rig = await Rig.OpenAsync(root, "class B { Z z; }\n", new()
+        await using var rig = await EditorLspRig.OpenAsync(root, "class B { Z z; }\n", new()
         {
             ["textDocument/definition"] = $$$$"""[{"uri":"{{{{LspUri.FromPath(other)}}}}","range":{"start":{"line":2,"character":3},"end":{"line":2,"character":4}}}]""",
         });
@@ -125,7 +123,7 @@ public sealed class EditorLspWindowTests : IDisposable
     [Fact]
     public Task Arrow_keys_move_the_selection_in_the_completion_list() => Ui(async () =>
     {
-        await using var rig = await Rig.OpenAsync(root, "foo" + ((char)10).ToString(), new()
+        await using var rig = await EditorLspRig.OpenAsync(root, "foo" + ((char)10).ToString(), new()
         {
             ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"foobar"},{"label":"foobaz"},{"label":"fooqux"}]}""",
         });
@@ -166,7 +164,7 @@ public sealed class EditorLspWindowTests : IDisposable
                 "VS Code"),
         ]);
         var newline = ((char)10).ToString();
-        await using var rig = await Rig.OpenAsync(root, "class A { }" + newline, registry: registry);
+        await using var rig = await EditorLspRig.OpenAsync(root, "class A { }" + newline, registry: registry);
 
         await rig.Until(() => rig.Model.HasLspStatus);
         Assert.Contains("roslyn-language-server", rig.Model.LspStatus!, StringComparison.Ordinal);
@@ -180,7 +178,7 @@ public sealed class EditorLspWindowTests : IDisposable
         const string Capabilities = """
             {"capabilities":{"textDocumentSync":{"openClose":true,"change":2,"save":true},"diagnosticProvider":{"interFileDependencies":true}}}
             """;
-        await using var rig = await Rig.OpenAsync(
+        await using var rig = await EditorLspRig.OpenAsync(
             root,
             "class A { }" + newline,
             new()
@@ -204,7 +202,7 @@ public sealed class EditorLspWindowTests : IDisposable
     public Task A_declared_trigger_character_opens_the_completion_list() => Ui(async () =>
     {
         var newline = ((char)10).ToString();
-        await using var rig = await Rig.OpenAsync(root, "foo" + newline, new()
+        await using var rig = await EditorLspRig.OpenAsync(root, "foo" + newline, new()
         {
             ["textDocument/completion"] = """{"isIncomplete":false,"items":[{"label":"beta"}]}""",
         });
@@ -220,7 +218,7 @@ public sealed class EditorLspWindowTests : IDisposable
     public Task Folding_ranges_from_the_server_are_used_instead_of_the_heuristic() => Ui(async () =>
     {
         var newline = ((char)10).ToString();
-        await using var rig = await Rig.OpenAsync(
+        await using var rig = await EditorLspRig.OpenAsync(
             root,
             "// alpha" + newline + "// beta" + newline + "// gamma" + newline,
             new()
@@ -242,7 +240,7 @@ public sealed class EditorLspWindowTests : IDisposable
     [Fact]
     public Task Published_diagnostics_are_rendered_and_cleared_on_the_real_text_view() => Ui(async () =>
     {
-        await using var rig = await Rig.OpenAsync(root, "class A { }\n");
+        await using var rig = await EditorLspRig.OpenAsync(root, "class A { }\n");
         var renderer = rig.Editor.TextArea.TextView.BackgroundRenderers.OfType<EditorLspDiagnosticRenderer>().Single();
         await rig.Server.WaitForAsync("textDocument/didOpen");
         rig.Server.Notify("textDocument/publishDiagnostics",
@@ -276,235 +274,4 @@ public sealed class EditorLspWindowTests : IDisposable
     }
 
     private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
-
-    private sealed class Rig : IAsyncDisposable
-    {
-        private LanguageSessionPool? pool;
-        public required string Path { get; init; }
-        public required Window Window { get; init; }
-        public required TextEditor Editor { get; init; }
-        public FileDocumentView? View { get; private set; }
-        public required FileDocumentViewModel Model { get; init; }
-        public ScriptedServer Server { get; private set; } = null!;
-        public bool CompletionShown => !Editor.TextArea.StackedInputHandlers.IsEmpty;
-
-        public static async Task<Rig> OpenAsync(string root, string text,
-            Dictionary<string, string>? results = null, Dictionary<string, TaskCompletionSource>? holds = null,
-            LanguageRegistry? registry = null, string? capabilities = null)
-        {
-            var path = System.IO.Path.Combine(root, "Program.cs");
-            await File.WriteAllTextAsync(path, text);
-            ScriptedServer? server = null;
-            var previousFactory = LanguageServerProcess.DefaultFactory;
-            var sessionPool = new LanguageSessionPool(registry ?? LanguageRegistry.Default);
-            var model = FileDocumentViewModel.Create(null, sessionPool);
-            Window? window = null;
-            try
-            {
-                LanguageServerProcess.DefaultFactory = (_, policy) => server = new ScriptedServer(policy, results ?? [], holds ?? [], capabilities);
-                model.Workspace = root;
-                await model.LoadAsync(path, CancellationToken.None);
-                await model.LspOpening;
-                var view = new FileDocumentView { DataContext = model };
-                window = new Window { Width = 800, Height = 400, Content = view };
-                window.Show();
-                WorkbenchUi.Settle(window);
-                var editor = view.GetVisualDescendants().OfType<TextEditor>().Single();
-                editor.TextArea.Focus();
-                Assert.NotNull(server);
-                return new Rig { Path = path, Window = window, Editor = editor, Model = model, pool = sessionPool, Server = server, View = view };
-            }
-            catch
-            {
-                window?.Close();
-                await model.ReleaseDocumentAsync();
-                await sessionPool.DisposeAsync();
-                throw;
-            }
-            finally
-            {
-                LanguageServerProcess.DefaultFactory = previousFactory;
-            }
-        }
-
-        public async Task Until(Func<bool> condition)
-        {
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (true)
-            {
-                WorkbenchUi.Settle(Window);
-                if (condition())
-                {
-                    return;
-                }
-                Assert.True(DateTime.UtcNow < deadline, "Timed out waiting for the condition.");
-                await Task.Delay(10);
-            }
-        }
-
-        public async Task Pump(int milliseconds)
-        {
-            var until = DateTime.UtcNow.AddMilliseconds(milliseconds);
-            while (DateTime.UtcNow < until)
-            {
-                WorkbenchUi.Settle(Window);
-                await Task.Delay(20);
-            }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            Window.Close();
-            await Model.ReleaseDocumentAsync();
-            await pool!.DisposeAsync();
-        }
-    }
-
-    private sealed class ScriptedServer : LanguageServerProcess
-    {
-        private const string Capabilities = """{"capabilities":{"textDocumentSync":{"openClose":true,"change":2,"save":true},"completionProvider":{"triggerCharacters":[".",":"]},"foldingRangeProvider":true,"hoverProvider":true,"definitionProvider":true}}""";
-        private readonly object gate = new();
-        private readonly object writeGate = new();
-        private readonly List<(string Method, string Raw)> received = [];
-        private readonly List<IDisposable> pipes = [];
-        private readonly Dictionary<string, string> results;
-        private readonly Dictionary<string, TaskCompletionSource> holds;
-        private Stream? output;
-        private bool running;
-
-        public ScriptedServer(RestartPolicy policy, Dictionary<string, string> results, Dictionary<string, TaskCompletionSource> holds, string? capabilities = null)
-            : base(new LanguageServerLaunch("fake-language-server"), policy)
-        {
-            this.results = results;
-            this.holds = holds;
-            this.capabilities = capabilities;
-        }
-
-        private readonly string? capabilities;
-
-        private string InitializeResult => capabilities ?? Capabilities;
-        public override event EventHandler<LanguageServerExitedEventArgs>? Exited;
-        public override bool IsRunning { get { lock (gate) { return running; } } }
-        public int Count(string method) { lock (gate) { return received.Count(m => m.Method == method); } }
-
-        public override ProcessStreams Start()
-        {
-            lock (gate)
-            {
-                var clientToServer = new AnonymousPipeServerStream(PipeDirection.Out);
-                var serverInput = new AnonymousPipeClientStream(PipeDirection.In, clientToServer.ClientSafePipeHandle);
-                var serverToClient = new AnonymousPipeServerStream(PipeDirection.Out);
-                var clientInput = new AnonymousPipeClientStream(PipeDirection.In, serverToClient.ClientSafePipeHandle);
-                pipes.AddRange([clientToServer, serverInput, serverToClient, clientInput]);
-                output = serverToClient;
-                running = true;
-                _ = Task.Run(() => Serve(serverInput, serverToClient));
-                return new ProcessStreams(clientToServer, clientInput);
-            }
-        }
-
-        public override ValueTask StopAsync(CancellationToken ct = default)
-        {
-            bool wasRunning;
-            lock (gate)
-            {
-                wasRunning = running;
-                running = false;
-                foreach (var pipe in pipes) { pipe.Dispose(); }
-                pipes.Clear();
-            }
-            foreach (var hold in holds.Values) { hold.TrySetResult(); }
-            if (wasRunning) { Exited?.Invoke(this, new LanguageServerExitedEventArgs(0, true)); }
-            return ValueTask.CompletedTask;
-        }
-
-        public override async Task<ProcessStreams> RestartAsync(CancellationToken ct = default)
-        {
-            await StopAsync(ct);
-            return Start();
-        }
-        public override async ValueTask DisposeAsync() => await StopAsync();
-
-        public void Notify(string method, string paramsJson)
-        {
-            Stream? stream;
-            lock (gate) { stream = output; }
-            Send(stream!, "{\"jsonrpc\":\"2.0\",\"method\":\"" + method + "\",\"params\":" + paramsJson + "}");
-        }
-
-        public async Task<string> WaitForAsync(string method, int occurrence = 1)
-        {
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (true)
-            {
-                lock (gate)
-                {
-                    var matches = received.Where(m => m.Method == method).ToList();
-                    if (matches.Count >= occurrence) { return matches[occurrence - 1].Raw; }
-                }
-                Assert.True(DateTime.UtcNow < deadline, "The server never received " + method + " #" + occurrence);
-                await Task.Delay(10);
-            }
-        }
-
-        private void Serve(Stream input, Stream stream)
-        {
-            try
-            {
-                while (ReadFrame(input) is { } json)
-                {
-                    using var document = JsonDocument.Parse(json);
-                    var message = document.RootElement;
-                    var hasMethod = message.TryGetProperty("method", out var methodElement);
-                    var method = hasMethod ? methodElement.GetString() ?? string.Empty : string.Empty;
-                    lock (gate) { received.Add((method, json)); }
-                    if (hasMethod && message.TryGetProperty("id", out var id))
-                    {
-                        if (holds.TryGetValue(method, out var hold)) { hold.Task.Wait(); }
-                        var result = method == "initialize" ? InitializeResult : results.GetValueOrDefault(method, "null");
-                        Send(stream, "{\"jsonrpc\":\"2.0\",\"id\":" + id.GetRawText() + ",\"result\":" + result + "}");
-                    }
-                }
-            }
-            catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
-            {
-                System.Diagnostics.Trace.WriteLine("[test-lsp] pipe closed: " + exception.Message);
-            }
-        }
-
-        private static string? ReadFrame(Stream stream)
-        {
-            var length = -1;
-            var line = new StringBuilder();
-            while (true)
-            {
-                var next = stream.ReadByte();
-                if (next < 0) { return null; }
-                if (next != '\n') { line.Append((char)next); continue; }
-                var header = line.ToString().TrimEnd('\r');
-                line.Clear();
-                if (header.Length == 0) { if (length >= 0) { break; } continue; }
-                if (header.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
-                {
-                    length = int.Parse(header["Content-Length:".Length..].Trim(), CultureInfo.InvariantCulture);
-                }
-            }
-            var body = new byte[length];
-            var read = 0;
-            while (read < length)
-            {
-                var count = stream.Read(body, read, length - read);
-                if (count == 0) { return null; }
-                read += count;
-            }
-            return Encoding.UTF8.GetString(body);
-        }
-
-        private void Send(Stream stream, string json)
-        {
-            var body = Encoding.UTF8.GetBytes(json);
-            var header = Encoding.ASCII.GetBytes("Content-Length: " + body.Length.ToString(CultureInfo.InvariantCulture) + "\r\n\r\n");
-            lock (writeGate) { stream.Write(header); stream.Write(body); stream.Flush(); }
-        }
-    }
 }
