@@ -251,7 +251,7 @@ public sealed class FrameCoalescingTests
     /// <summary>An empty catalogue for tests that never touch providers; self-cleaning because the catalogue is in memory after load.</summary>
     private static List<string> RootTexts(SessionWorkspaceViewModel workspace) =>
         CardBlocks(workspace.Transcript).OfType<TurnTextViewModel>()
-            .Select(text => string.Concat(text.Segments.Select(segment => segment.Text)))
+            .Select(static text => text.CopyText)
             .ToList();
 
     private static List<ToolRowViewModel> RootTools(SessionWorkspaceViewModel workspace) =>
@@ -264,7 +264,7 @@ public sealed class FrameCoalescingTests
         {
             texts.AddRange(
                 CardBlocks(agent.Transcript).OfType<TurnTextViewModel>()
-                    .Select(text => string.Concat(text.Segments.Select(segment => segment.Text))));
+                    .Select(static text => text.CopyText));
         }
 
         return texts;
