@@ -16,6 +16,7 @@ namespace Forge.App.Settings;
 internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable, IReloadableSettingsSection
 {
     private readonly ProviderServices services;
+    private readonly AppPreferences? preferences;
     private readonly AgentDefaultsStore agentDefaults;
     private readonly ModelCatalogRefreshService? modelCatalogRefresh;
     private readonly Action<Action> post;
@@ -36,10 +37,12 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         ModelCatalogRefreshService? modelCatalogRefresh = null,
         Action<Action>? post = null,
         Forge.App.Prompts.PromptTemplateService? promptTemplates = null,
-        CompactionSettingsStore? compaction = null)
+        CompactionSettingsStore? compaction = null,
+        AppPreferences? preferences = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         this.services = services;
+        this.preferences = preferences;
         Compaction = new CompactionSettingsViewModel(compaction ?? new CompactionSettingsStore(services.Store.SettingsPath));
         Usage = new UsageLogSettingsViewModel(services.UsageLog, () => services.UsageRecorder.Directory);
         this.agentDefaults = agentDefaults ?? new AgentDefaultsStore(services.Store.SettingsPath);
@@ -50,6 +53,10 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         services.Changed += OnProvidersChanged;
         // A save on the prompts page runs on the thread pool; the agent rows are rebuilt on the UI thread.
         this.promptTemplates.Changed += OnPromptTemplatesChanged;
+        if (preferences is not null)
+        {
+            preferences.PropertyChanged += OnPreferencesChanged;
+        }
         // The catalog is written off the UI thread (the daily refresh, the startup catch-up), so its notifications come back
         // through the injected post, exactly like the window's other background sources of change.
         services.ModelCatalog.Changed += OnCatalogChanged;
@@ -413,6 +420,11 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         disposed = true;
         services.Changed -= OnProvidersChanged;
         promptTemplates.Changed -= OnPromptTemplatesChanged;
+        if (preferences is not null)
+        {
+            preferences.PropertyChanged -= OnPreferencesChanged;
+        }
+
         services.ModelCatalog.Changed -= OnCatalogChanged;
         if (modelCatalogRefresh is { } refresh)
         {
@@ -487,6 +499,21 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         Reload();
     }
 
+    /// <summary>A model hidden or shown on the visibility page must reach the agent-defaults combos that are already built.</summary>
+    private void OnPreferencesChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AppPreferences.ModelsHidden))
+        {
+            post(() =>
+            {
+                if (!disposed)
+                {
+                    RebuildAgentRows();
+                }
+            });
+        }
+    }
+
     private void OnPromptTemplatesChanged() => post(() =>
     {
         if (!disposed)
@@ -509,7 +536,8 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
                 agentDefaults.Get(agentId),
                 catalog,
                 notSet,
-                changed: OnAgentChanged));
+                changed: OnAgentChanged,
+                preferences: preferences));
         }
 
         // User agents follow the built-ins. Their label is the agent's own name: it is the user's content, not localized.
@@ -521,7 +549,8 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
                 agentDefaults.Get(agentId),
                 catalog,
                 notSet,
-                changed: OnAgentChanged));
+                changed: OnAgentChanged,
+                preferences: preferences));
         }
     }
 

@@ -343,9 +343,10 @@ internal sealed class AppComposition : IAsyncDisposable
         // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
         //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
         //     window; the overlay in MainWindow resolves it from NotificationCenter.Current.
+        var systemNotifier = new SystemNotifier();
         var notifications = new NotificationCenter(
             () => preferences.Current.Notifications,
-            new SystemNotifier());
+            systemNotifier);
         settings.Add(new SettingsSection(
             SettingsSectionIds.Notifications,
             NotificationsStrings.SectionTitle,
@@ -481,7 +482,8 @@ internal sealed class AppComposition : IAsyncDisposable
                 modelCatalogRefresh,
                 action => Avalonia.Threading.Dispatcher.UIThread.Post(action),
                 promptTemplates,
-                compactionSettings),
+                compactionSettings,
+                preferences.Current),
             SettingsGroups.Agent,
             "IconPlug"));
 
@@ -573,6 +575,9 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.FileTools = fileTools.All;
         // Switched-off built-in tools: read before every turn, so a toggle applies from the next turn of every session.
         runtimeServices.DisabledTools = () => preferences.Current.ToolsDisabled;
+        // The two sub-agent dials of the `agents` section: the cap is applied to every host as it is built and again before
+        // each turn (a raised cap wakes agents already queued), and switching spawning off takes spawn_agent out of the tools.
+        runtimeServices.SubAgents = () => SubAgentLimits.From(preferences.Current);
         runtimeServices.WebTools = webServices.CreateTools; // web tools
         var stepCommitter = new StepCommitter(
             git,
@@ -673,7 +678,8 @@ internal sealed class AppComposition : IAsyncDisposable
             git,
             notifications,
             modelCatalogRefresh,
-            promptTemplates);
+            promptTemplates,
+            idleArchive: () => IdleArchiveSettings.From(preferences.Current));
         composition.Automations = automations;
         settings.Add(AutomationComposition.Section(automations, projects, sessions, composition.AutomationUi));
 

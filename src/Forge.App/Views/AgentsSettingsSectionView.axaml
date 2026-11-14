@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.AgentsSettingsSectionView"
+             x:DataType="settings:AgentsSettingsSectionViewModel">
+  <!-- The `agents` section body: the cap on how many agents of one spawn tree run at once, and whether a session may spawn
+       sub-agents at all. Both values are live preferences, so the labels are the only text here. -->
+  <StackPanel Spacing="6">
+    <Grid ColumnDefinitions="180,*" Margin="0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [agents.maxParallel], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinParallel}"
+                     Maximum="{Binding MaxParallelLimit}"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding MaxParallel, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="agents-max-parallel"
+                     AutomationProperties.Name="{Binding [agents.maxParallel], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [agents.maxParallelHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [agents.subAgents], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox Grid.Column="1"
+                IsChecked="{Binding SubAgentsEnabled, Mode=TwoWay}"
+                AutomationProperties.AutomationId="agents-sub-agents"
+                AutomationProperties.Name="{Binding [agents.subAgents], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [agents.subAgentsHint], Source={x:Static loc:Loc.Instance}}" />
+  </StackPanel>
+</UserControl>

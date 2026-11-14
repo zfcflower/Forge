@@ -40,7 +40,8 @@ internal static class AutomationComposition
         GitCli git,
         INotifications? notifications,
         Providers.ModelCatalogRefreshService modelCatalogRefresh,
-        Prompts.PromptTemplateService? promptTemplates = null)
+        Prompts.PromptTemplateService? promptTemplates = null,
+        Func<IdleArchiveSettings>? idleArchive = null)
     {
         // Without the composition's service (a test) the user's ~/.forge and the workspace's .forge are still honoured.
         promptTemplates ??= new Prompts.PromptTemplateService(Agents.AgentRuntimeServices.UserDirectory());
@@ -54,7 +55,8 @@ internal static class AutomationComposition
             providers,
             defaultModel,
             notifications,
-            promptTemplates: promptTemplates);
+            promptTemplates: promptTemplates,
+            idleArchive: idleArchive);
         service.RegisterRunner(
             BuiltInAutomations.CiChain,
             new CiChainRunner(

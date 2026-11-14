@@ -239,6 +239,21 @@ public sealed class AgentHost
     /// </summary>
     public void SetDisabledTools(IEnumerable<string> names) => toolSurface.SetDisabled(names);
 
+    /// <summary>
+    /// Replaces the cap on how many agents of this host run at once (the <c>agents</c> settings section, read before every
+    /// turn). A raise lets agents that are already queued start at once, a lower cap only stops new ones from starting until
+    /// the running tree is back under it: nothing is interrupted, and no request or tool set changes, so the prompt cache
+    /// holds. Thread-safe; a no-op when the cap did not move.
+    /// </summary>
+    /// <returns>Whether the cap moved.</returns>
+    public bool SetMaxParallelSubAgents(int limit) => loop.SetMaxParallelSubAgents(limit);
+
+    /// <summary>
+    /// The cap in force on how many agents of this host run at once. For tests and diagnostics: the settings page edits the
+    /// value, no product code reads it back.
+    /// </summary>
+    public int MaxParallelSubAgents => loop.MaxParallelSubAgents;
+
     /// <summary>Every tool registered with this host, disabled ones included: the Core built-ins, then the external tools.</summary>
     public (IReadOnlyList<ITool> BuiltIns, IReadOnlyList<ITool> External) AllTools => (toolSurface.BuiltIns, toolSurface.External);
 
