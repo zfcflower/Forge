@@ -432,6 +432,32 @@ public class ProviderRateLimiterTests
     }
 
     [Fact]
+    public void A_reported_limit_outranks_a_hand_typed_override()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy
+        {
+            RequestsPerMinute = 100,
+            TokensPerMinute = 0,
+            Overrides = new Dictionary<string, ProviderRateLimitLimits> { ["p"] = new(RequestsPerMinute: 20) },
+        });
+
+        // The account reports 50 per window with 45 left. What a provider says about itself is more accurate than anything typed
+        // in the settings page - tier, plan and what its other clients already spent - so the bucket is adopted at 50 even
+        // though the override asked for 20. Pinned because it is the documented precedence, and a future "the override also caps
+        // calibration" change would silently make the local budget looser than the provider allows.
+        limiter.Observe("p", Throttle(new ProviderThrottle(50, 45, Start + TimeSpan.FromSeconds(60), null, null, null)), Start);
+
+        for (var request = 0; request < 45; request++)
+        {
+            Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+        }
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
     public void Normalizing_the_policy_drops_an_override_that_states_nothing()
     {
         var policy = new ProviderRateLimitPolicy

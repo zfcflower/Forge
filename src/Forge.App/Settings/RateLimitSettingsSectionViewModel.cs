@@ -193,16 +193,6 @@ internal sealed class RateLimitSettingsSectionViewModel : ObservableObject, IRel
         OnPropertyChanged(nameof(HasProviders));
     }
 
-    /// <summary>Clears every provider entry, so the whole table goes back to the global numbers.</summary>
-    public void ClearOverrides()
-    {
-        preferences.RateLimitOverrides = [];
-        foreach (var row in Rows)
-        {
-            row.Clear();
-        }
-    }
-
     public string OverridesHeading => RateLimitStrings.SettingsOverrides;
 
     public string OverridesHint => RateLimitStrings.SettingsOverridesHint;
