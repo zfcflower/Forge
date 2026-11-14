@@ -347,6 +347,82 @@ public class AgentLoopTests
         Assert.Equal(new[] { MessageRole.User }, root.History.Select(message => message.Role).ToArray());
     }
 
+    // ---------------------------------------------------------------- the local-budget wait the loop forwards
+
+    [Fact]
+    public async Task A_budget_wait_is_forwarded_as_a_quiet_status_with_the_agent_and_the_provider()
+    {
+        var provider = new FakeProvider((request, index) =>
+        [
+            new BudgetWait(TimeSpan.FromSeconds(7)),
+            new TextDelta("ok"),
+            new MessageCompleted(ChatMessage.Assistant("ok"), new TokenUsage(10, 5), StopReason.EndTurn),
+        ]);
+        var host = AgentTestHost.Create(provider);
+
+        var (root, events) = await AgentTestHost.RunRootAsync(host);
+
+        var wait = Assert.Single(events.OfType<AgentBudgetWait>());
+        Assert.Equal("root", wait.AgentId);
+        Assert.Equal("fake", wait.ProviderId);
+        Assert.Equal(TimeSpan.FromSeconds(7), wait.Wait);
+        Assert.Equal("ok", string.Concat(events.OfType<AgentTextDelta>().Select(delta => delta.Text)));
+        Assert.Empty(events.OfType<AgentFailed>());
+    }
+
+    /// <summary>
+    /// The wait line must not count as content: <c>received</c> is what guards the one compact-and-resend an overflow buys,
+    /// and a status line is nothing a resend would duplicate. The provider waits, overflows, and is then resent - proof the
+    /// guard was not tripped by the wait.
+    /// </summary>
+    [Fact]
+    public async Task A_budget_wait_is_not_content_so_the_overflow_retry_still_runs_after_one()
+    {
+        var compactor = new RecordingCompactor(result: () => new CompactionResult(100, 50));
+        var provider = new WaitingThenOverflowProvider();
+        var host = AgentTestHost.Create(
+            provider,
+            options: new AgentOptions { Compaction = new CompactionPolicy { ContextWindow = static _ => null } },
+            compactor: compactor);
+        var root = host.CreateRoot("session", Workspace);
+
+        var events = await AgentTestHost.CollectAsync(host.RunAsync(root, "hello"));
+
+        Assert.Empty(events.OfType<AgentFailed>());
+        Assert.Single(events.OfType<AgentCompacted>());
+        Assert.Single(events.OfType<AgentBudgetWait>());
+        Assert.Equal(2, provider.Calls);
+        Assert.Equal("done", Turn.Text(root.History[^1]));
+    }
+
+    private sealed class WaitingThenOverflowProvider : IChatProvider
+    {
+        private int calls;
+
+        public string Id => "fake";
+
+        public int Calls => Volatile.Read(ref calls);
+
+        public async IAsyncEnumerable<ChatStreamEvent> StreamAsync(
+            ChatRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            var index = Interlocked.Increment(ref calls) - 1;
+            await Task.Yield();
+            if (index == 0)
+            {
+                yield return new BudgetWait(TimeSpan.FromSeconds(7));
+                throw new ProviderException(
+                    """anthropic returned 400 BadRequest: {"error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}""",
+                    retryable: false,
+                    statusCode: 400);
+            }
+
+            yield return new TextDelta("done");
+            yield return new MessageCompleted(ChatMessage.Assistant("done"), new TokenUsage(10, 5), StopReason.EndTurn);
+        }
+    }
+
     [Fact]
     public void SetMaxParallelSubAgents_reports_whether_the_cap_moved()
     {

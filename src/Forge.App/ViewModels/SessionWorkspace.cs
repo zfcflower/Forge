@@ -1763,6 +1763,13 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 // per agent, and the strip belongs to the session.
                 Instruments.NoteRateLimit(Composer.ProviderId, limit.RateLimit);
                 break;
+            case AgentBudgetWait waiting:
+                // A wait on the provider's local budget is why the turn is quiet, not something to interrupt the user
+                // with: a line on the running turn, never a toast and never an error. Card() begins the root's turn when
+                // no card exists yet, so the first request's wait has a place to show itself too.
+                Card(waiting.AgentId)?.AddNotice(
+                    RateLimitStrings.Waiting(waiting.ProviderId, waiting.Wait), isError: false);
+                break;
             case AgentApprovalDenied denied:
                 Card(denied.AgentId)?.AddNotice(
                     SessionStrings.Denied(denied.Call.Name), isError: true, kind: TimelineNodeKind.Approval);

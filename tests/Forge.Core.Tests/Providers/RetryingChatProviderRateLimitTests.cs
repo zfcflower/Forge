@@ -9,8 +9,10 @@ namespace Forge.Core.Tests.Providers;
 /// <summary>
 /// The retry middleware as the one place a request is charged to its provider's budget (<see cref="ProviderRateLimiter"/>):
 /// every attempt pays, a payment wait does not consume an attempt, a wait longer than the budget limit is reported as a 429,
-/// and what the answer really cost replaces the estimate. Nothing here sleeps: the wait hook both records the delay and
-/// moves the test clock, so the numbers asserted are the ones the middleware computed.
+/// a wait the user should know about is yielded as a <see cref="BudgetWait"/> before the sleep it explains (once per
+/// attempt, only over the three-second noise threshold), and what the answer really cost - input and output - replaces the
+/// estimate. Nothing here sleeps: the wait hook both records the delay and moves the test clock, so the numbers asserted are
+/// the ones the middleware computed.
 /// </summary>
 public class RetryingChatProviderRateLimitTests
 {
@@ -138,28 +140,140 @@ public class RetryingChatProviderRateLimitTests
         Assert.InRange(delays[1], TimeSpan.FromSeconds(89.5), TimeSpan.FromSeconds(90));
     }
 
+    // ------------------------------------------------------------------ the wait the turn is told about
+
+    [Fact]
+    public async Task A_wait_of_three_seconds_or_more_is_yielded_before_the_sleep_it_describes()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 100 });
+
+        // Spent: the attempt has to earn one request's worth of tokens back before it may leave.
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", Estimate, out _));
+
+        var delays = new List<TimeSpan>();
+        var events = new List<ChatStreamEvent>();
+        var endpoint = new ScriptedEndpoint("p", Completes());
+        var provider = new RetryingChatProvider(
+            endpoint,
+            baseDelay: TimeSpan.FromMilliseconds(100),
+            delayAsync: (delay, token) =>
+            {
+                // The sleep is starting, so the line that explains it must already be in the consumer's hands: that is
+                // what "the event arrives before the sleep" can mean for an async iterator, whose yield has to have
+                // returned before this await can even run.
+                delays.Add(delay);
+                Assert.Single(events.OfType<BudgetWait>());
+                time.Advance(delay);
+                return ValueTask.CompletedTask;
+            },
+            jitter: delay => delay,
+            timeProvider: time,
+            rateLimiter: limiter,
+            tokenCounter: new FlatTokenCounter(Estimate));
+
+        await foreach (var evt in provider.StreamAsync(TestData.Request(), CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // The reported wait is the one this sleep is about - the ~60 s the budget needs to refill - and the answer
+        // still arrives after it.
+        var wait = Assert.Single(events.OfType<BudgetWait>());
+        Assert.InRange(wait.Wait, TimeSpan.FromSeconds(59.5), TimeSpan.FromSeconds(60.0));
+        Assert.Equal("ok", events.Text());
+        Assert.Single(Waits(delays));
+    }
+
+    [Fact]
+    public async Task A_wait_shorter_than_three_seconds_is_slept_but_not_reported()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+
+        // A rejected window two seconds out: the wait is real (it is slept), only too short to be worth a line.
+        limiter.Observe("p", RejectedUntil(Start + TimeSpan.FromSeconds(2)), Start);
+        var delays = new List<TimeSpan>();
+        var endpoint = new ScriptedEndpoint("p", Completes());
+
+        var events = await Wrap(endpoint, limiter, time, delays).CollectAsync(TestData.Request());
+
+        Assert.Equal("ok", events.Text());
+        Assert.Single(Waits(delays));
+        Assert.Empty(events.OfType<BudgetWait>());
+    }
+
+    [Fact]
+    public async Task One_attempt_reports_one_wait_even_when_the_bucket_waits_twice()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 100 });
+
+        // Spent: the attempt has to earn one request's worth of tokens back before it may leave.
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", Estimate, out _));
+
+        var delays = new List<TimeSpan>();
+        var endpoint = new ScriptedEndpoint("p", Completes());
+        var provider = new RetryingChatProvider(
+            endpoint,
+            delayAsync: (delay, token) =>
+            {
+                delays.Add(delay);
+                time.Advance(delay);
+
+                // Someone else spends half of what refilled during the first wait, so a second, shorter wait is
+                // needed: taking the whole refill back instead would leave the bucket a rounding residue short, and
+                // the residue re-ask is a sub-millisecond wait this file does not count as a segment.
+                if (delays.Count == 1)
+                {
+                    Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", Estimate / 2, out _));
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            timeProvider: time,
+            rateLimiter: limiter,
+            tokenCounter: new FlatTokenCounter(Estimate));
+
+        var events = await provider.CollectAsync(TestData.Request());
+
+        // Two wait segments on the same attempt (the refill, then the half that was spent again - both over the
+        // threshold), one line on the screen.
+        Assert.Equal("ok", events.Text());
+        Assert.Equal(2, Waits(delays).Length);
+        Assert.InRange(Waits(delays)[^1], TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(35));
+        Assert.Single(events.OfType<BudgetWait>());
+    }
+
     // ------------------------------------------------------------------ settling against the real usage
 
     [Theory]
-    // Cache reads and writes are already inside InputTokens (every adapter reports the complete metered input, and the cost
-    // math subtracts the cached parts to get the billed remainder), so the refund is estimate - InputTokens whatever the
-    // cache split: the two rows land on the same room, and a double count would make the first one 15 short.
-    [InlineData(30, 10, 5, 970)]
-    [InlineData(30, 0, 0, 970)]
-    [InlineData(100, 0, 0, 900)]
+    // The settle is input + output (a token-per-minute budget meters both sides), so the room left is the ceiling minus
+    // that sum, whatever the cache split: cache reads and writes are already inside InputTokens (every adapter reports
+    // the complete metered input, and the cost math subtracts the cached parts to get the billed remainder), so the two
+    // rows land on the same room, and a double count would make the first one 15 short.
+    [InlineData(30, 10, 5, 0, 970)]
+    [InlineData(30, 0, 0, 0, 970)]
+    // The output counts on top of the input, cache split or not.
+    [InlineData(30, 10, 5, 40, 930)]
+    [InlineData(30, 0, 0, 40, 930)]
+    [InlineData(100, 0, 0, 25, 875)]
     // No usage at all is not a free request: the estimate stands.
-    [InlineData(0, 0, 0, 900)]
+    [InlineData(0, 0, 0, 0, 900)]
     public async Task The_retry_settles_the_estimate_against_the_usage_it_reported(
         int inputTokens,
         int cacheReadTokens,
         int cacheWriteTokens,
+        int outputTokens,
         int expectedRoom)
     {
         var time = new SteppingTimeProvider(Start);
         var limiter = new ProviderRateLimiter(time);
         limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 0, TokensPerMinute = 1000 });
         var delays = new List<TimeSpan>();
-        var usage = new TokenUsage(inputTokens, 1, cacheReadTokens, cacheWriteTokens);
+        var usage = new TokenUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
         var endpoint = new ScriptedEndpoint("p", Completes(usage));
 
         await Wrap(endpoint, limiter, time, delays).CollectAsync(TestData.Request());
@@ -359,7 +473,12 @@ public class RetryingChatProviderRateLimitTests
         foreach (var limiter in new ProviderRateLimiter?[] { null, off })
         {
             var endpoint = new ScriptedEndpoint("p", Completes());
-            await new RetryingChatProvider(endpoint, rateLimiter: limiter, tokenCounter: counter).CollectAsync(TestData.Request());
+            var events = await new RetryingChatProvider(endpoint, rateLimiter: limiter, tokenCounter: counter)
+                .CollectAsync(TestData.Request());
+            Assert.Equal("ok", events.Text());
+
+            // No budget means no wait either: the turn has nothing to be told about.
+            Assert.Empty(events.OfType<BudgetWait>());
         }
 
         Assert.Equal(0, counter.Calls);

@@ -171,9 +171,15 @@ public sealed class AgentLoop(AgentLoopServices services)
                 {
                     await foreach (var chunk in provider.StreamAsync(request, ct).ConfigureAwait(false))
                     {
-                        received = true;
+                        // A wait on the provider's local budget is not content: `received` guards the overflow retry
+                        // (one compact-and-resend only while nothing has been observed), and a wait line is nothing that
+                        // resending would duplicate. It is forwarded as a quiet status for the turn it is holding up.
+                        received |= chunk is not BudgetWait;
                         switch (chunk)
                         {
+                            case BudgetWait wait:
+                                sink.Emit(new AgentBudgetWait(instance.Id, provider.Id, wait.Wait));
+                                break;
                             case TextDelta text:
                                 instance.AppendText(text.Text);
                                 sink.Emit(new AgentTextDelta(instance.Id, text.Text));

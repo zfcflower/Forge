@@ -4,7 +4,8 @@ namespace Forge.App.Localization;
 
 /// <summary>
 /// The per-provider rate limit table (wave W15): the <c>rate-limit</c> settings section, which sets the budget every model
-/// request is acquired from before it leaves, plus the spacing of automated resumes. Keys: <c>rateLimit.*</c>.
+/// request is acquired from before it leaves, plus the spacing of automated resumes, plus the line a running turn shows
+/// while it waits on that budget. Keys: <c>rateLimit.*</c>.
 /// <para>Only names and wording live here. The ranges and defaults the hints name are written out (as in the other settings
 /// tables) because they are compiled constants, not values a user or a provider supplies: a text that read them from the
 /// preference would be a cached string that a language switch has to rebuild.</para>
@@ -31,6 +32,9 @@ internal static class RateLimitStrings
     public const string SettingsInheritHintKey = "rateLimit.settings.inheritHint";
     public const string SettingsNoProvidersKey = "rateLimit.settings.noProviders";
     public const string SettingsClearUnusedKey = "rateLimit.settings.clearUnused";
+
+    // ---------------------------------------------------------------- a running turn's wait
+    public const string WaitingKey = "rateLimit.waiting";
 
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
@@ -69,6 +73,13 @@ internal static class RateLimitStrings
     public static string SettingsNoProviders => Loc.Instance[SettingsNoProvidersKey];
 
     public static string SettingsClearUnused => Loc.Instance[SettingsClearUnusedKey];
+
+    /// <summary>
+    /// The line a running turn shows while its next request waits on the provider's local budget: {0} is the provider id,
+    /// {1} the whole seconds of the wait, rounded up so the notice never understates it.
+    /// </summary>
+    public static LocText Waiting(string providerId, TimeSpan wait) =>
+        new(WaitingKey, providerId, (int)Math.Ceiling(wait.TotalSeconds));
 
     internal static void Register()
     {
@@ -117,5 +128,11 @@ internal static class RateLimitStrings
             SettingsClearUnusedKey,
             "清除已移除提供商的限度",
             "Clear ceilings of removed providers");
+
+        // The wait line is a status, not a setting: the provider and the seconds come from the budget event.
+        Loc.Register(
+            WaitingKey,
+            "本地限流：等待 {0} 恢复额度，约 {1} 秒",
+            "Rate limit: waiting for {0} to refill, about {1}s");
     }
 }

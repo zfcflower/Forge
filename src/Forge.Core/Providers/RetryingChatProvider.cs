@@ -16,6 +16,13 @@ public sealed class RetryingChatProvider : IChatProvider
     private static readonly TimeSpan DefaultMaxDelay = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DefaultMaxRetryAfter = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// A wait shorter than this is not reported as a <see cref="BudgetWait"/> event: sub-second hiccups explain nothing
+    /// the user can act on and would only flicker a line onto the running turn. It is a noise threshold for the UI, not a
+    /// setting — nobody tunes it, so it stays a private constant.
+    /// </summary>
+    private static readonly TimeSpan MinReportedBudgetWait = TimeSpan.FromSeconds(3);
+
     private readonly IChatProvider _inner;
     private readonly int _maxAttempts;
     private readonly TimeSpan _baseDelay;
@@ -82,7 +89,54 @@ public sealed class RetryingChatProvider : IChatProvider
         for (var attempt = 1; ; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            charged = await WaitForBudgetAsync(reserved, ct).ConfigureAwait(false);
+
+            // Waits until the provider's budget has room for one request of `reserved` tokens; inlined rather than a
+            // helper because the wait must be yielded from this iterator as a <see cref="BudgetWait"/> event *before* the
+            // sleep it describes, and a helper cannot yield. The semantics are the old ones: Authorized (charged),
+            // Disabled (nothing charged), ExceedsCapacity and NeverRefills all mean "send it" — the first two are
+            // permission, and the last two are shapes in which waiting helps nobody; a wait longer than
+            // <see cref="_maxRetryAfter"/> — or waits that would add up to more than that — is not slept through but
+            // reported as a retryable 429 carrying the delay, which is the shape the quota flow already understands (a
+            // provider asking for tens of minutes is a spent window, not jitter); bounding the total also makes this loop
+            // terminate whatever the clock does: a bucket that keeps reporting a short wait against a clock that never
+            // advances would otherwise spin here forever. `charged` ends up holding what the budget actually took for this
+            // attempt, which is what <see cref="Settle"/> reconciles; zero when nothing was.
+            charged = 0;
+            if (_rateLimiter is not null)
+            {
+                var waited = TimeSpan.Zero;
+                var reported = false;
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var decision = _rateLimiter.Acquire(_inner.Id, reserved, out var retryAfter, out charged);
+                    if (decision != RateLimitDecision.Wait)
+                    {
+                        break;
+                    }
+
+                    var need = retryAfter > TimeSpan.Zero ? retryAfter : TimeSpan.FromMilliseconds(1);
+                    if (need > _maxRetryAfter || waited + need > _maxRetryAfter)
+                    {
+                        // What is still missing, not what has already been slept: the delay a caller reads is "how long
+                        // until a request can go", and adding the time this loop already spent would push the reset past
+                        // the moment the budget returns.
+                        throw BudgetExhausted(need);
+                    }
+
+                    // At most one report per attempt, and only for a wait that clears the noise threshold: most waits
+                    // are ordinary bookkeeping. The record is allocated here and nowhere else, so a path with no wait
+                    // never pays for it. A retry is another attempt and may report its own wait.
+                    if (!reported && need >= MinReportedBudgetWait)
+                    {
+                        reported = true;
+                        yield return new BudgetWait(need);
+                    }
+
+                    await _delay(need, ct).ConfigureAwait(false);
+                    waited += need;
+                }
+            }
 
             var enumerator = _inner.StreamAsync(request, ct).GetAsyncEnumerator(ct);
             var yielded = false;
@@ -158,46 +212,6 @@ public sealed class RetryingChatProvider : IChatProvider
     };
 
     /// <summary>
-    /// Waits until the provider's budget has room for one request of <paramref name="reservedTokens"/> tokens. A wait longer
-    /// than <see cref="_maxRetryAfter"/> — or waits that would add up to more than that — is not slept through: it is reported
-    /// as a retryable 429 carrying the delay, which is the shape the quota flow already understands (a provider asking for tens
-    /// of minutes is a spent window, not jitter). Bounding the total also makes this loop terminate whatever the clock does: a
-    /// bucket that keeps reporting a short wait against a clock that never advances would otherwise spin here forever.
-    /// </summary>
-    /// <returns>The tokens the budget actually charged for this attempt (what <see cref="Settle"/> reconciles); zero when nothing was.</returns>
-    private async ValueTask<int> WaitForBudgetAsync(int reservedTokens, CancellationToken ct)
-    {
-        if (_rateLimiter is null)
-        {
-            return 0;
-        }
-
-        var waited = TimeSpan.Zero;
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            var decision = _rateLimiter.Acquire(_inner.Id, reservedTokens, out var retryAfter, out var charged);
-            if (decision != RateLimitDecision.Wait)
-            {
-                // Authorized (charged), Disabled (nothing charged), ExceedsCapacity and NeverRefills all mean "send it": the
-                // first two are permission, and the last two are shapes in which waiting helps nobody.
-                return charged;
-            }
-
-            var need = retryAfter > TimeSpan.Zero ? retryAfter : TimeSpan.FromMilliseconds(1);
-            if (need > _maxRetryAfter || waited + need > _maxRetryAfter)
-            {
-                // What is still missing, not what has already been slept: the delay a caller reads is "how long until a request
-                // can go", and adding the time this loop already spent would push the reset past the moment the budget returns.
-                throw BudgetExhausted(need);
-            }
-
-            await _delay(need, ct).ConfigureAwait(false);
-            waited += need;
-        }
-    }
-
-    /// <summary>
     /// Reports what the answer actually cost and what its headers said about the account's budget.
     /// </summary>
     private void Settle(int chargedTokens, TokenUsage usage, ProviderRateLimit? reading)
@@ -207,12 +221,17 @@ public sealed class RetryingChatProvider : IChatProvider
             return;
         }
 
-        // InputTokens is the complete metered input: every adapter reports cache reads and writes inside it (Anthropic sums the
-        // three, the OpenAI shapes pass prompt_tokens/input_tokens through), which is also why SessionUsageMath subtracts the
-        // cached parts again to get the *billed* remainder. Adding them here would charge a cached conversation twice - the one
-        // workload an agent runs all day. A provider that reports no usage at all leaves the estimate standing instead of
-        // refunding it: a missing number is not a free request.
-        var actual = usage.InputTokens;
+        // The settle is input + output because that is what a token-per-minute budget meters: the OpenAI family counts
+        // both sides of a request, so the budget must settle against the same sum. The estimate charged before the
+        // request counts input only (the answer's size is unknown until it exists); this is where both sides are
+        // corrected. An answer without an output count (OutputTokens 0) settles on the input alone, exactly as before.
+        //
+        // InputTokens stays the complete metered input: every adapter reports cache reads and writes inside it (Anthropic
+        // sums the three, the OpenAI shapes pass prompt_tokens/input_tokens through), which is also why SessionUsageMath
+        // subtracts the cached parts again to get the *billed* remainder. Adding them here would charge a cached
+        // conversation twice - the one workload an agent runs all day. A provider that reports no usage at all leaves the
+        // estimate standing instead of refunding it: a missing number is not a free request.
+        var actual = usage.InputTokens + usage.OutputTokens;
         if (actual > 0)
         {
             _rateLimiter.Settle(_inner.Id, chargedTokens, actual);
