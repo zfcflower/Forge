@@ -402,7 +402,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 **落点**:`Forge.Abstractions/Tools.cs`(请求 + RunKey)、`Forge.HostClient/ExtensionHostClient.cs`(一处命名实参)、`Forge.App/Approval/`(`ApprovalCardViewModel` 结果加 `AllowRestOfRun`、`ToolApprovalCardViewModel` 加 `RunKey`/`AllowRunCommand`/`PendingCount`、`SessionApprovalHandler` 加 grants + 串行组、`ApprovalQueueOverlay.axaml` 加按钮与计数行)、`Strings.Extensions.cs`(两个键 + 单复变体)、`ApprovalTestDoubles.ToolRequest` 加 `runKey` 形参。
 
-**测试(只跑相关)**:新 `ScriptRunApprovalTests`(8 例:单卡 + run 按钮、串行一卡 + 计数、允许剩余全部答齐 waiter 与后续调用且不写 rules、拒绝只答本调用、两 run 各自卡、null RunKey 不分组、取消退出组且计数回落、65 个 grant 后逐出最旧);回归 `Forge.App.Tests Approval` 193、`Forge.Approval.Tests` 全量 188、`Forge.HostClient.Tests RunCode|HostToolCall` 177、源码扫描门 137——全部全绿。`Forge.Integration.Tests`(`RunCodeScriptTests` 的逐次审批断言)按仓规不跑,其语义不受影响(无 grant 时逐次出卡不变)。
+**测试(只跑相关)**:新 `ScriptRunApprovalTests`(9 例:单卡 + run 按钮、串行一卡 + 计数、允许剩余全部答齐 waiter 与后续调用且不写 rules、拒绝只答本调用、两 run 各自卡、null RunKey 不分组、waiter 取消退出组且计数回落、leader 取消交出轮次、65 个 grant 后逐出最旧);回归 `Forge.App.Tests Approval` 194、`Forge.Approval.Tests` 全量 188、`Forge.HostClient.Tests RunCode|ExtensionHostClient|HostToolCall` 177、源码扫描门 137——全部全绿。`Forge.Integration.Tests`(`RunCodeScriptTests` 的逐次审批断言)按仓规不跑,其语义不受影响(无 grant 时逐次出卡不变)。
 
 ### 本批验证
 
