@@ -61,6 +61,38 @@ public sealed class MermaidMarkdownTests
     }
 
     [Fact]
+    public void Finality_does_not_finalize_a_trailing_indented_code_block_or_front_matter()
+    {
+        // A reply that ends on indented code (or is front matter alone) has no fence to close: those blocks report
+        // FenceClosed false by shape. Flipping them would only break the completion comparison and rebuild the whole
+        // view once for nothing, so finality leaves them exactly as the streaming parse read them.
+        var indented = MarkdownBlockParser.Parse(["text", "", "    code stays indented"], final: true)[^1];
+        Assert.Equal(MdBlockKind.Code, indented.Kind);
+        Assert.False(indented.FenceClosed);
+
+        var matter = Assert.Single(MarkdownBlockParser.Parse(["---", "title: x", "---"], final: true));
+        Assert.Equal(MdBlockKind.Code, matter.Kind);
+        Assert.Equal("yaml", matter.Info);
+        Assert.False(matter.FenceClosed);
+
+        // A fence indented up to three still counts as a fence the reply left open, so it is finalized.
+        Assert.True(Assert.Single(MarkdownBlockParser.Parse(["  ```mermaid", "flowchart TD"], final: true)).FenceClosed);
+    }
+
+    [Fact]
+    public void Completion_does_not_rebuild_a_reply_that_ends_on_indented_code()
+    {
+        var model = new StreamingMarkdown();
+        model.Append("text\n\n    code stays indented");
+        var before = model.Revision;
+
+        model.Complete();
+
+        // SameSequence holds: the final parse matches the streaming one, so no Revision bump, no whole-view rebuild.
+        Assert.Equal(before, model.Revision);
+    }
+
+    [Fact]
     public void Indented_code_is_never_a_closed_fence()
     {
         var block = Assert.Single(Parse("    flowchart TD"));

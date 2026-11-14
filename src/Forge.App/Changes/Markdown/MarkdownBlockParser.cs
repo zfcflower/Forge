@@ -126,18 +126,20 @@ internal static class MarkdownBlockParser
         ParseCore(text, src, 0, text.Length, result, top);
         if (final)
         {
-            FinalizeOpenFence(result);
+            FinalizeOpenFence(result, text, firstLineNumber);
         }
 
         return result;
     }
 
     /// <summary>
-    /// Reports the last block as fence-closed when it is a Code block whose fence never closed: a completed document is what
-    /// it says, so the half-written diagram it ends on gets its one render instead of sitting as source forever. Any other
-    /// last block is left exactly as parsed.
+    /// Reports the last block as fence-closed when it is a Code block that opened with a fence and never saw it close: a
+    /// completed document is what it says, so the half-written diagram it ends on gets its one render instead of sitting as
+    /// source forever. Only a fence-opening block is finalized - an indented code block or YAML front matter reports
+    /// <see cref="MdBlock.FenceClosed"/> false by shape (they have no fence to close), and flipping them would only break
+    /// the completion comparison and rebuild the whole view for nothing. Any other last block is left exactly as parsed.
     /// </summary>
-    private static void FinalizeOpenFence(List<MdBlock> blocks)
+    private static void FinalizeOpenFence(List<MdBlock> blocks, string[] text, int firstLineNumber)
     {
         if (blocks.Count == 0)
         {
@@ -146,6 +148,15 @@ internal static class MarkdownBlockParser
 
         var open = blocks[^1];
         if (open.Kind != MdBlockKind.Code || open.FenceClosed)
+        {
+            return;
+        }
+
+        // The same dispatch ParseCore used when it created the block: a fence opener is a line indented at most three
+        // whose remainder reads as a fence. A block whose first line is anything else was never fenced.
+        var first = text[open.StartLine - firstLineNumber];
+        var ind = Indent(first);
+        if (ind > 3 || !TryFence(first.AsSpan(ind), out _, out _, out _))
         {
             return;
         }
