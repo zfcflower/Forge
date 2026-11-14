@@ -43,7 +43,7 @@
         <Button Grid.Column="5"
                 Classes="ghost"
                 Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
-                IsVisible="{Binding IsLive}"
+                IsVisible="{Binding CanStop}"
                 Command="{Binding StopCommand}"
                 AutomationProperties.AutomationId="stop-subagent"
                 AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}"

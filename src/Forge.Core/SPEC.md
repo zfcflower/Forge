@@ -80,7 +80,7 @@ Additional focus: <text>` 追加到每个摘要请求的指令末尾。摘要被
 
 **工具结果多块。** `ToolResult`/`ToolResultBlock` 持有 `Blocks`(只允许 `TextBlock`/`ImageBlock`,构造与 `with` 都校验;传入后视为不可变),`(string, IsError)` 便捷构造保留;`Content` 是拉平文本(单文本块即原串,多块按行拼接,图片为占位文案),相等按元素比较。持久化:`tool_result` 恒写拉平后的 `content`,仅当块不是“恰好一个文本块”时多写 `blocks` 数组;旧行与旧读者照常工作,不升 schema。`AgentLoop` 的溢出归档只处理文本、图片块原样保留;`TokenCounter` 对工具结果里的每张图按附件图同一口径(1600 token)估算。**适配器目前只发拉平后的 `Content`(图片以占位文案到模型),按协议发送工具结果图片是后续工作(见 `docs/research/2026-11-13-thinkrail-gap-plan.md` W4),估算在那之前会偏大,但当前没有任何工具产出图片。**
 
-**工具进度。** `ToolContext.Progress`(`Action<string>?`)收到的是长任务实时输出的**最新尾部快照**(不是增量);`AgentLoop` 为每次调用派生独立 context,把它转成 `AgentToolProgress(AgentId, Call, Tail)`,夹在 `AgentToolStarted`/`Finished` 之间,不落库。监听者必须不阻塞(生产者在持锁时调用它以保证有序)。目前只有 `bash` 产出;`SessionWorkspace` 暂不消费。
+**工具进度。** `ToolContext.Progress`(`Action<string>?`)收到的是长任务实时输出的**最新尾部快照**(不是增量);`AgentLoop` 为每次调用派生独立 context,把它转成 `AgentToolProgress(AgentId, Call, Tail)`,夹在 `AgentToolStarted`/`Finished` 之间,不落库。监听者必须不阻塞(生产者在持锁时调用它以保证有序)。目前只有 `bash` 产出。**App 侧已消费(wave W8)**:`SessionWorkspace` 在工具执行线程上直接把快照写进该调用的实时条目(不派发、不落库),工具行的实时尾部与资源检查器在 UI 线程按自己的 tick 读最新快照;开始/结束仍走 coalescer,详见 `Forge.App/SPEC.md`「资源检查器」。
 
 **图片输入。** `ImageBlock(MediaType, Data)` 是用户消息的内容块(base64),`AgentHost.RunAsync(instance, ChatMessage, ct)` 接收带图片的用户消息。三个适配器按各自协议编码(Anthropic `image` source、OpenAI 兼容 `image_url` data URL、Responses `input_image`);`MessageJson` 原样持久化。`TokenCounter` 每张图按固定 1600 token 估算。压缩器给摘要模型的永远只是占位文本 `[image: <type>, <n> KB]`(文件为 `[file: <name>, <type>, <n> KB]`),原图与文件内容不进摘要请求。
 
