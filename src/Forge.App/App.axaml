@@ -178,7 +178,7 @@
       <views:InstrumentSectionView />
     </DataTemplate>
     <DataTemplate DataType="set:McpSettingsSectionViewModel" x:DataType="set:McpSettingsSectionViewModel">
-      <views:InstrumentSectionView />
+      <views:McpSettingsView />
     </DataTemplate>
     <DataTemplate DataType="set:ToolsSettingsSectionViewModel" x:DataType="set:ToolsSettingsSectionViewModel">
       <!-- Grouped by origin: built-in groups carry a switch per tool, extension and MCP tools are read-only here. -->

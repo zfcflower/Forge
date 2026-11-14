@@ -89,10 +89,6 @@ internal static class InstrumentsStrings
     public const string ApprovalsSectionUnavailableKey = "settings.approvals.unavailable";
     public const string SkillsSectionHintKey = "settings.skills.hint";
     public const string SkillsSectionEmptyKey = "settings.skills.empty";
-    public const string McpSectionHintKey = "settings.mcp.hint";
-    public const string McpSectionEmptyKey = "settings.mcp.empty";
-    public const string McpSectionEnabledKey = "settings.mcp.enabled";
-    public const string McpSectionDisabledKey = "settings.mcp.disabled";
     public const string ToolsSectionHintKey = "settings.tools.hint";
     public const string ToolsSectionEmptyKey = "settings.tools.empty";
     public const string ToolsSectionNoSessionKey = "settings.tools.noSession";
@@ -307,14 +303,6 @@ internal static class InstrumentsStrings
 
     public static string SkillsSectionEmpty => Loc.Instance[SkillsSectionEmptyKey];
 
-    public static string McpSectionHint => Loc.Instance[McpSectionHintKey];
-
-    public static string McpSectionEmpty => Loc.Instance[McpSectionEmptyKey];
-
-    public static string McpSectionEnabled => Loc.Instance[McpSectionEnabledKey];
-
-    public static string McpSectionDisabled => Loc.Instance[McpSectionDisabledKey];
-
     public static string ToolsSectionHint => Loc.Instance[ToolsSectionHintKey];
 
     public static string ToolsSectionEmpty => Loc.Instance[ToolsSectionEmptyKey];
@@ -468,14 +456,6 @@ internal static class InstrumentsStrings
             "工作区 .github/skills、.forge/skills 与用户目录 skills 下发现的技能（只读）。",
             "Skills discovered in the workspace's .github/skills and .forge/skills and in the user directory's skills (read-only).");
         Loc.Register(SkillsSectionEmptyKey, "没有发现技能", "No skills discovered");
-
-        Loc.Register(
-            McpSectionHintKey,
-            "mcp.json 里的服务器及其当前状态（只读）。",
-            "The servers in mcp.json and their current state (read-only).");
-        Loc.Register(McpSectionEmptyKey, "没有配置 MCP 服务器", "No MCP server configured");
-        Loc.Register(McpSectionEnabledKey, "已启用", "Enabled");
-        Loc.Register(McpSectionDisabledKey, "已停用", "Disabled");
 
         Loc.Register(
             ToolsSectionHintKey,
