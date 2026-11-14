@@ -23,6 +23,14 @@ internal static class RateLimitStrings
     public const string SettingsAutomationGapKey = "rateLimit.settings.automationGap";
     public const string SettingsAutomationGapHintKey = "rateLimit.settings.automationGapHint";
 
+    // ---------------------------------------------------------------- per-provider ceilings
+    public const string SettingsOverridesKey = "rateLimit.settings.overrides";
+    public const string SettingsOverridesHintKey = "rateLimit.settings.overridesHint";
+    public const string SettingsRequestsColumnKey = "rateLimit.settings.requestsColumn";
+    public const string SettingsTokensColumnKey = "rateLimit.settings.tokensColumn";
+    public const string SettingsInheritHintKey = "rateLimit.settings.inheritHint";
+    public const string SettingsNoProvidersKey = "rateLimit.settings.noProviders";
+
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
     internal static void Initialize() => Register();
@@ -46,6 +54,18 @@ internal static class RateLimitStrings
     public static string SettingsAutomationGap => Loc.Instance[SettingsAutomationGapKey];
 
     public static string SettingsAutomationGapHint => Loc.Instance[SettingsAutomationGapHintKey];
+
+    public static string SettingsOverrides => Loc.Instance[SettingsOverridesKey];
+
+    public static string SettingsOverridesHint => Loc.Instance[SettingsOverridesHintKey];
+
+    public static string SettingsRequestsColumn => Loc.Instance[SettingsRequestsColumnKey];
+
+    public static string SettingsTokensColumn => Loc.Instance[SettingsTokensColumnKey];
+
+    public static string SettingsInheritHint => Loc.Instance[SettingsInheritHintKey];
+
+    public static string SettingsNoProviders => Loc.Instance[SettingsNoProvidersKey];
 
     internal static void Register()
     {
@@ -74,5 +94,21 @@ internal static class RateLimitStrings
             SettingsAutomationGapHintKey,
             "同一个提供商两次自动恢复之间至少隔这么久，0 到 600 秒，默认 10 秒；0 表示不间隔。",
             "How long two automated resumes of the same provider are kept apart: 0 to 600 seconds, 10 by default; 0 means no spacing.");
+
+        Loc.Register(SettingsOverridesKey, "每个提供商自己的额度", "Per-provider ceilings");
+        Loc.Register(
+            SettingsOverridesHintKey,
+            "只为比上面默认值更严格的提供商填：自建网关、小额度套餐这类。留空 = 用上面的全局数字；填 0 = 这家不限。这里只是本地预算，提供商自己报出的真实限额仍然优先。",
+            "Fill these in only for a provider that is stricter than the defaults above: a self-hosted gateway, a small plan. Blank means the global number applies; 0 means no local limit for that provider. These are local budgets only - a limit the provider reports itself still wins.");
+        Loc.Register(SettingsRequestsColumnKey, "请求/分钟", "Requests/min");
+        Loc.Register(SettingsTokensColumnKey, "令牌/分钟", "Tokens/min");
+        Loc.Register(
+            SettingsInheritHintKey,
+            "留空 = 继承上面的全局值",
+            "Blank = inherit the global value above");
+        Loc.Register(
+            SettingsNoProvidersKey,
+            "还没有连接提供商，所以没有可以单独设限度的对象。",
+            "No provider is connected yet, so there is nothing to give its own ceilings to.");
     }
 }

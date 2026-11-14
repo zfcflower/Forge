@@ -27,14 +27,22 @@ internal static class RateLimitComposition
         ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(settings);
 
-        RegisterSection(composition.Preferences, settings);
+        // The provider table reads the live catalogue every time the section is selected, so a provider added after this module
+        // was built appears there without a restart.
+        RegisterSection(
+            composition.Preferences,
+            settings,
+            () => [.. composition.Providers.Catalog.Providers.Select(static provider => (provider.Definition.Id, provider.Definition.DisplayName))]);
     }
 
     /// <summary>
     /// The section, its view template and the publish wiring, without the composition root: the entry point the module calls
     /// and the seam a test uses, so the registration and the published policy are provable without building the whole graph.
     /// </summary>
-    internal static void RegisterSection(AppPreferences preferences, SettingsSections settings)
+    internal static void RegisterSection(
+        AppPreferences preferences,
+        SettingsSections settings,
+        Func<IReadOnlyList<(string Id, string Name)>>? providers = null)
     {
         ArgumentNullException.ThrowIfNull(preferences);
         ArgumentNullException.ThrowIfNull(settings);
@@ -43,7 +51,7 @@ internal static class RateLimitComposition
             SettingsSectionIds.RateLimit,
             RateLimitStrings.SettingsTitleKey,
             SettingsSectionIds.RateLimitOrder,
-            new RateLimitSettingsSectionViewModel(preferences),
+            new RateLimitSettingsSectionViewModel(preferences, providers),
             SettingsGroups.Agent,
             "IconLock"));
         SectionViewTemplate.Register<RateLimitSettingsSectionViewModel>(static () => new RateLimitSettingsSectionView());
@@ -57,14 +65,54 @@ internal static class RateLimitComposition
     /// already exist in place, so a lowered ceiling takes effect on the next request without rebuilding a provider; a policy
     /// change can therefore arrive from any thread and needs no dispatcher.
     /// </summary>
-    internal static void Publish(AppPreferences preferences) =>
+    internal static void Publish(AppPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
         ProviderRateLimiter.Shared.Publish(new ProviderRateLimitPolicy
         {
             Enabled = preferences.RateLimitEnabled,
             RequestsPerMinute = preferences.RateLimitRequestsPerMinute,
             TokensPerMinute = preferences.RateLimitTokensPerMinute,
             AutomationGap = TimeSpan.FromSeconds(preferences.RateLimitAutomationGapSeconds),
+            Overrides = Overrides(preferences),
         });
+    }
+
+    /// <summary>
+    /// The per-provider ceilings the table holds, keyed by provider id. Built on every publish (startup, a settings edit) from
+    /// the normalized preference entries; the limiter's buckets are reconfigured in place from it, so an entry added, changed or
+    /// cleared reaches the provider that is already running.
+    /// </summary>
+    private static IReadOnlyDictionary<string, ProviderRateLimitLimits> Overrides(AppPreferences preferences)
+    {
+        if (preferences.RateLimitOverrides.Count == 0)
+        {
+            return ProviderRateLimitPolicy.NoOverrides;
+        }
+
+        var overrides = new Dictionary<string, ProviderRateLimitLimits>(StringComparer.Ordinal);
+        foreach (var entry in preferences.RateLimitOverrides)
+        {
+            var parts = entry.Split(AppPreferences.RateLimitOverrideSeparator);
+            if (parts.Length < 3)
+            {
+                continue;
+            }
+
+            // The preference layer already normalized the numbers; the parse is only turning them back into the policy's shape
+            // (an empty field stays null, which inherits).
+            overrides[parts[0]] = new ProviderRateLimitLimits(
+                Parse(parts[1]),
+                Parse(parts[2]));
+        }
+
+        return overrides.Count == 0 ? ProviderRateLimitPolicy.NoOverrides : overrides;
+
+        static int? Parse(string text) =>
+            int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var value)
+                ? value
+                : null;
+    }
 
     private static void OnPreferenceChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -80,6 +128,7 @@ internal static class RateLimitComposition
         nameof(AppPreferences.RateLimitRequestsPerMinute) => true,
         nameof(AppPreferences.RateLimitTokensPerMinute) => true,
         nameof(AppPreferences.RateLimitAutomationGapSeconds) => true,
+        nameof(AppPreferences.RateLimitOverrides) => true,
         _ => false,
     };
 }

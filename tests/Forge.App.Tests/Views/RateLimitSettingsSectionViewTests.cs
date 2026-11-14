@@ -140,6 +140,85 @@ public sealed class RateLimitSettingsSectionViewTests
         Assert.Contains("Automation gap (seconds)", rendered.EnglishTexts);
     }
 
+    /// <summary>
+    /// The per-provider table: one row per connected provider, both fields blank when that provider inherits, and typing in a
+    /// field writes that provider's entry (the only thing the composition needs to publish a per-provider ceiling).
+    /// </summary>
+    [Fact]
+    public async Task The_provider_table_renders_a_row_per_provider_and_writes_its_entry()
+    {
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var rendered = await SharedUi.Session.Dispatch(
+            () =>
+            {
+                using var language = new LanguageScope(UiLanguage.Chinese);
+                var preferences = new AppPreferences();
+                preferences.SetRateLimitOverride("priced", 20, null);
+                Func<IReadOnlyList<(string Id, string Name)>> providers = () => [("priced", "Priced"), ("other", "Other")];
+                var section = new RateLimitSettingsSectionViewModel(preferences, providers);
+                section.Reload();
+                var window = SharedUi.Show(new RateLimitSettingsSectionView { DataContext = section }, 900, 700);
+                SharedUi.Settle(window);
+
+                var pricedRequests = Control<NumericUpDown>(window, "rate-limit-requests-priced");
+                var pricedTokens = Control<NumericUpDown>(window, "rate-limit-tokens-priced");
+                var otherRequests = Control<NumericUpDown>(window, "rate-limit-requests-other");
+                Assert.NotNull(pricedRequests);
+                Assert.NotNull(pricedTokens);
+                Assert.NotNull(otherRequests);
+
+                var initial = (
+                    PricedRequests: pricedRequests!.Value,
+                    PricedTokens: pricedTokens!.Value,
+                    OtherRequests: otherRequests!.Value,
+                    PricedRange: (pricedRequests.Minimum, pricedRequests.Maximum));
+
+                // Blank inherits, so the token field of a provider that only overrides requests starts empty.
+                otherRequests.Value = 12;
+                SharedUi.Settle(window);
+                var written = preferences.RateLimitOverrideFor("other");
+
+                // Typing the empty field back to nothing clears that dimension, and clearing both removes the whole entry.
+                otherRequests.Value = null;
+                SharedUi.Settle(window);
+                var afterClear = preferences.RateLimitOverrideFor("other");
+                preferences.SetRateLimitOverride("priced", null, null);
+                SharedUi.Settle(window);
+
+                // A catalogue with no provider hides the table and says so instead.
+                var empty = new RateLimitSettingsSectionViewModel(preferences, static () => []);
+                empty.Reload();
+                var emptyWindow = SharedUi.Show(new RateLimitSettingsSectionView { DataContext = empty }, 900, 700);
+                SharedUi.Settle(emptyWindow);
+                var emptyRows = emptyWindow.GetVisualDescendants().OfType<NumericUpDown>()
+                    .Count(field => AutomationProperties.GetAutomationId(field)?.StartsWith("rate-limit-requests-", StringComparison.Ordinal) == true);
+                var emptySaysSo = Texts(emptyWindow).Contains(RateLimitStrings.SettingsNoProviders);
+
+                window.Close();
+                emptyWindow.Close();
+                return (initial, written, afterClear, emptyRows, emptySaysSo);
+            },
+            budget.Token);
+
+        // The stored request ceiling is shown, the unstored dimension is blank, and the field keeps the same range as the global one.
+        Assert.Equal(20m, rendered.initial.PricedRequests);
+        Assert.Null(rendered.initial.PricedTokens);
+        Assert.Null(rendered.initial.OtherRequests);
+        Assert.Equal((0m, (decimal)AppPreferences.MaxRateLimitRequestsPerMinute), rendered.initial.PricedRange);
+
+        // Typing one dimension stores that one and leaves the other inheriting.
+        Assert.NotNull(rendered.written);
+        Assert.Equal(12, rendered.written!.Value.RequestsPerMinute);
+        Assert.Null(rendered.written.Value.TokensPerMinute);
+
+        // Emptying the field takes the dimension back out, and with both empty the entry is gone.
+        Assert.Null(rendered.afterClear);
+
+        // No provider connected: no row fields, and the section says why.
+        Assert.Equal(0, rendered.emptyRows);
+        Assert.True(rendered.emptySaysSo, "the empty state text was not shown");
+    }
+
     private static T? Control<T>(Visual from, string automationId)
         where T : Control =>
         from.GetVisualDescendants()

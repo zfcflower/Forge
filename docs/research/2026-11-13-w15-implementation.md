@@ -110,6 +110,14 @@
 2. **`nearly_identical`:设置分区视图模型的样板** (`RateLimitSettingsSectionViewModel` 与 `ResourceInspectorSettingsViewModel`/`FilesSettingsSectionViewModel`/`ChatSettingsSectionViewModel`,mass 78–195)。这是仓库里每个设置分区都在用的形状(直接读写偏好 + 暴露 Min/Max + 一行 XML 注释),`agents`/`files`/`inspector`/`chat` 之间本来就互为克隆。要消掉得抽一个 `SettingsSectionViewModel` 基类,那是跨多个已交付分区的重构,不在本波范围;**故意保留**。
 3. **`loosely_similar`/`structural_only`**:`ProviderRateLimiter` 与仓库里其它无锁/`Volatile`+CAS 代码(`PrReplyLedger`、`PluginLoadContext` 等)同形——是语言习语,不是克隆;`RateLimitPolicy` 与 `ReviewPackageLimits`/`ToolOptions`(带默认值的 `record` 配置);`RateLimitComposition` 与其它 `*Composition` 模块(组合根的样板,`FeatureComposition` 就是按这个形状设计的);`RateLimitScenarios` 与其它 bench 场景文件(场景骨架)。
 
+## 六之三、后续增量:每提供商数值覆盖(用户确认后补做)
+
+首轮把它记成"未做",理由写的是"唯一诚实入口是提供商编辑弹窗";这个判断不成立——`rate-limit` 分区自己就能列出提供商目录,归属路径内即可完成。补做内容:
+
+- **Core**:`ProviderRateLimitLimits(int? RequestsPerMinute, int? TokensPerMinute)` 与 `ProviderRateLimitPolicy.Overrides`;`LimitsFor(providerId)` 给出该提供商的生效值(缺的维度继承全局,0 = 不限),`Normalized()` 把负数夹成 0 并去掉"什么都没写"的条目。`ProviderRateLimiter` 建桶与 `Publish` 重配都走 `LimitsFor`,所以覆盖出现、改变、清除都在下一次请求生效;跳过某一维度的判断也用它,覆盖里的 0 才真的读作"这家不限"。
+- **App**:`preferences.rateLimitOverrides`(归一化条目 `id|requests|tokens`,空字段 = 继承,按 id 排序,超范围夹取而不是丢弃——手写的"十亿"是想要一个上限,不是想要默认值)、`RateLimitOverrideFor`/`SetRateLimitOverride`;分区里一张按 `composition.Providers.Catalog` 重建的提供商表(`RateLimitOverrideRowViewModel`,两个可空 `NumericUpDown`,留空 = 继承,清空两格 = 删掉条目);`RateLimitComposition.Publish` 把条目投成策略里的覆盖。
+- **测试**:Core 5 个(只影响该 provider、0 = 不限、单维覆盖另一维继承、清除后回到全局、归一化丢空条目),App 6 个(归一化与读回、增删只动该 provider、持久化往返、表按活目录重建且行写穿、headless 渲染含空状态、策略携带覆盖)。
+
 ## 七、验证
 
 实现会话(合入前,本机):
@@ -117,9 +125,9 @@
 | 命令 | 结果 |
 |---|---|
 | `dotnet build Forge.slnx -c Debug` | 0 警告 0 错误(含 Native AOT 分析器) |
-| `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2387 通过 / 0 失败 |
-| `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit"` | 104 通过(新增 51 个:桶 18、限速器 25、响应头 8+28 参数、重试层 8+4 参数;其中 2 个是评审修复的回归用例) |
-| `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 799 通过(新增 App 侧 14 个;另改写 `QuotaResumeTests` 的 4 个预留用例) |
+| `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2392 通过 / 0 失败 |
+| `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit"` | 109 通过(新增 51 个:桶 18、限速器 25、响应头 8+28 参数、重试层 8+4 参数;其中 2 个是评审修复的回归用例) |
+| `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 805 通过(新增 App 侧 20 个;另改写 `QuotaResumeTests` 的 4 个预留用例) |
 | `dotnet run -c Release --project tools/Forge.Bench -- ratelimit` | 4/4 验收通过(数字见第五节) |
 
 **一次失败记录**:上述 App 过滤第一次跑时 testhost 在 438 个用例后崩溃(无失败断言、无堆栈),重跑同一过滤 799 全绿;按仓库既有经验属该 headless UI 会话的偶发中断,不是本波的断言。

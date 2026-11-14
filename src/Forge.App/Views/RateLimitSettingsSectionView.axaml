@@ -77,5 +77,60 @@
     <TextBlock Classes="caption"
                TextWrapping="Wrap"
                Text="{Binding [rateLimit.settings.automationGapHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <!-- The per-provider table: one row per connected provider, each field blank to inherit the global number above. It is
+         rebuilt when the section is selected (Reload), so a provider added in the `provider` section shows up here. -->
+    <Border Margin="0,18,0,0"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource BorderBrush}"
+            Padding="0,12,0,0">
+      <StackPanel Spacing="6">
+        <TextBlock Classes="title"
+                   Text="{Binding OverridesHeading}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding OverridesHint}" />
+        <TextBlock Classes="caption"
+                   Margin="0,2,0,4"
+                   Text="{Binding InheritHint}" />
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   IsVisible="{Binding !HasProviders}"
+                   Text="{Binding NoProviders}" />
+        <ItemsControl ItemsSource="{Binding Rows}"
+                      IsVisible="{Binding HasProviders}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="settings:RateLimitOverrideRowViewModel">
+              <Grid ColumnDefinitions="180,120,120" Margin="0,0,0,6">
+                <TextBlock Classes="label"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding ProviderId}"
+                           Text="{Binding ProviderName}" />
+                <NumericUpDown Grid.Column="1"
+                               MinWidth="100"
+                               Margin="0,0,12,0"
+                               Minimum="{Binding MinRequestsPerMinute}"
+                               Maximum="{Binding MaxRequestsPerMinute}"
+                               Increment="10"
+                               FormatString="0"
+                               Value="{Binding RequestsPerMinute, Mode=TwoWay}"
+                               AutomationProperties.AutomationId="{Binding ProviderId, StringFormat='rate-limit-requests-{0}'}"
+                               AutomationProperties.Name="{Binding [rateLimit.settings.requestsColumn], Source={x:Static loc:Loc.Instance}}" />
+                <NumericUpDown Grid.Column="2"
+                               MinWidth="120"
+                               Minimum="{Binding MinTokensPerMinute}"
+                               Maximum="{Binding MaxTokensPerMinute}"
+                               Increment="100000"
+                               FormatString="0"
+                               Value="{Binding TokensPerMinute, Mode=TwoWay}"
+                               AutomationProperties.AutomationId="{Binding ProviderId, StringFormat='rate-limit-tokens-{0}'}"
+                               AutomationProperties.Name="{Binding [rateLimit.settings.tokensColumn], Source={x:Static loc:Loc.Instance}}" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
   </StackPanel>
 </UserControl>

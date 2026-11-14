@@ -84,10 +84,13 @@ public sealed class ProviderRateLimiter
         ArgumentNullException.ThrowIfNull(next);
         var normalized = next.Normalized();
         Volatile.Write(ref policy, normalized);
-        foreach (var (_, entry) in buckets)
+        foreach (var (providerId, entry) in buckets)
         {
-            entry.Requests.Configure(normalized.RequestsPerMinute, normalized.RequestsPerMinute / 60.0);
-            entry.Tokens.Configure(normalized.TokensPerMinute, normalized.TokensPerMinute / 60.0);
+            // Each bucket follows the ceilings of its own provider: an override that appears, changes or is removed has to reach
+            // the bucket that already exists, which is the whole point of reconfiguring in place instead of rebuilding providers.
+            var (requests, tokens) = normalized.LimitsFor(providerId);
+            entry.Requests.Configure(requests, requests / 60.0);
+            entry.Tokens.Configure(tokens, tokens / 60.0);
         }
     }
 
@@ -116,7 +119,10 @@ public sealed class ProviderRateLimiter
             return RateLimitDecision.Wait;
         }
 
-        if (current.RequestsPerMinute > 0)
+        // The ceilings this provider actually has: its own override where it has one, else the globals. Skipping a dimension is
+        // decided on those numbers, so an override of 0 really means "no limit here" rather than "whatever the global says".
+        var (requestsPerMinute, tokensPerMinute) = current.LimitsFor(providerId);
+        if (requestsPerMinute > 0)
         {
             var request = entry.Requests.Take(1, out retryAfter);
             if (request != RateLimitDecision.Authorized)
@@ -125,7 +131,7 @@ public sealed class ProviderRateLimiter
             }
         }
 
-        if (current.TokensPerMinute <= 0 || requestTokens <= 0)
+        if (tokensPerMinute <= 0 || requestTokens <= 0)
         {
             return RateLimitDecision.Authorized;
         }
@@ -155,7 +161,7 @@ public sealed class ProviderRateLimiter
         }
 
         var delta = (double)reservedTokens - actualTokens;
-        if (delta != 0 && Policy.TokensPerMinute > 0)
+        if (delta != 0 && Policy.LimitsFor(providerId).TokensPerMinute > 0)
         {
             entry.Tokens.Adjust(delta);
         }
@@ -237,7 +243,8 @@ public sealed class ProviderRateLimiter
             return existing;
         }
 
-        var created = new ProviderBuckets(this, current);
+        var (requestsPerMinute, tokensPerMinute) = current.LimitsFor(providerId);
+        var created = new ProviderBuckets(this, requestsPerMinute, tokensPerMinute);
         return buckets.TryAdd(providerId, created) ? created : buckets[providerId];
     }
 
@@ -332,10 +339,10 @@ public sealed class ProviderRateLimiter
     /// <summary>One provider's two budgets and its hold.</summary>
     private sealed class ProviderBuckets
     {
-        public ProviderBuckets(ProviderRateLimiter owner, ProviderRateLimitPolicy policy)
+        public ProviderBuckets(ProviderRateLimiter owner, int requestsPerMinute, int tokensPerMinute)
         {
-            Requests = new RateLimitBucket(owner.time, policy.RequestsPerMinute, policy.RequestsPerMinute / 60.0);
-            Tokens = new RateLimitBucket(owner.time, policy.TokensPerMinute, policy.TokensPerMinute / 60.0);
+            Requests = new RateLimitBucket(owner.time, requestsPerMinute, requestsPerMinute / 60.0);
+            Tokens = new RateLimitBucket(owner.time, tokensPerMinute, tokensPerMinute / 60.0);
             Hold = new Hold(owner.time);
         }
 

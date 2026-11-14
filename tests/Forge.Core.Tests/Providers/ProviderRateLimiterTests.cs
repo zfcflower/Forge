@@ -326,6 +326,128 @@ public class ProviderRateLimiterTests
         Assert.InRange(held, TimeSpan.FromSeconds(59), TimeSpan.FromSeconds(60));
     }
 
+    // ------------------------------------------------------------------ per-provider overrides
+
+    [Fact]
+    public void An_override_replaces_the_globals_for_that_provider_only()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy
+        {
+            RequestsPerMinute = 100,
+            TokensPerMinute = 0,
+            Overrides = new Dictionary<string, ProviderRateLimitLimits>
+            {
+                ["tight"] = new(RequestsPerMinute: 3),
+            },
+        });
+
+        // Three requests leave on the overridden provider, the fourth waits...
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("tight", 0, out _));
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("tight", 0, out _));
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("tight", 0, out _));
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("tight", 0, out var over));
+        Assert.InRange(over, TimeSpan.FromTicks(1), TimeSpan.FromSeconds(60));
+
+        // ...while a provider without an entry still has the whole global allowance.
+        for (var request = 0; request < 100; request++)
+        {
+            Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("loose", 0, out _));
+        }
+    }
+
+    [Fact]
+    public void An_override_of_zero_lifts_the_limit_for_that_provider()
+    {
+        var limiter = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+        limiter.Publish(new ProviderRateLimitPolicy
+        {
+            RequestsPerMinute = 2,
+            TokensPerMinute = 0,
+            Overrides = new Dictionary<string, ProviderRateLimitLimits>
+            {
+                ["unlimited"] = new(RequestsPerMinute: 0),
+            },
+        });
+
+        for (var request = 0; request < 500; request++)
+        {
+            Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("unlimited", 0, out _));
+        }
+    }
+
+    [Fact]
+    public void An_override_that_states_one_dimension_inherits_the_other()
+    {
+        var limiter = new ProviderRateLimiter(new SteppingTimeProvider(Start));
+        limiter.Publish(new ProviderRateLimitPolicy
+        {
+            RequestsPerMinute = 100,
+            TokensPerMinute = 1000,
+            Overrides = new Dictionary<string, ProviderRateLimitLimits>
+            {
+                ["p"] = new(RequestsPerMinute: 50),
+            },
+        });
+
+        // 1000 tokens is the global token ceiling: a request for all of it fits exactly once, so the override left the token
+        // dimension alone while cutting the request dimension in half.
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 1000, out _));
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 1000, out _));
+        for (var request = 0; request < 49; request++)
+        {
+            Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+        }
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public void Removing_an_override_restores_the_global_ceilings()
+    {
+        var time = new SteppingTimeProvider(Start);
+        var limiter = new ProviderRateLimiter(time);
+        limiter.Publish(new ProviderRateLimitPolicy
+        {
+            RequestsPerMinute = 100,
+            TokensPerMinute = 0,
+            Overrides = new Dictionary<string, ProviderRateLimitLimits> { ["p"] = new(RequestsPerMinute: 1) },
+        });
+        Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+
+        // The entry is cleared: the bucket that already exists is reconfigured in place, so it now holds 100 and refills at the
+        // global rate. A raised ceiling does not hand out credit retroactively (that rule is pinned by the bucket's own tests),
+        // so the minute that passes here is what fills it again.
+        limiter.Publish(new ProviderRateLimitPolicy { RequestsPerMinute = 100, TokensPerMinute = 0 });
+        time.Advance(TimeSpan.FromSeconds(60));
+
+        for (var request = 0; request < 100; request++)
+        {
+            Assert.Equal(RateLimitDecision.Authorized, limiter.Acquire("p", 0, out _));
+        }
+
+        Assert.Equal(RateLimitDecision.Wait, limiter.Acquire("p", 0, out _));
+    }
+
+    [Fact]
+    public void Normalizing_the_policy_drops_an_override_that_states_nothing()
+    {
+        var policy = new ProviderRateLimitPolicy
+        {
+            Overrides = new Dictionary<string, ProviderRateLimitLimits>
+            {
+                ["empty"] = new(),
+                ["negative"] = new(-5, -7),
+            },
+        }.Normalized();
+
+        Assert.Equal(0, policy.Overrides["negative"].RequestsPerMinute);
+        Assert.Equal(0, policy.Overrides["negative"].TokensPerMinute);
+        Assert.False(policy.Overrides.ContainsKey("empty"));
+    }
+
     // ------------------------------------------------------------------ Settle
 
     [Fact]

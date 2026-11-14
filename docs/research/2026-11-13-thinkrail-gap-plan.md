@@ -227,7 +227,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | 资源检查器日志尾行数、列表刷新间隔 | W8 | 200 行、1 s | inspector |
 | Mermaid 启用的图类型白名单、渲染超时 | W11 | 5 种(flowchart/sequence/state/class/er)、2 s | chat |
 | 克隆超时、默认克隆目录 | W9 | 无超时、项目父目录 | projects |
-| 本地限速开关、每提供商请求/分钟与令牌/分钟、自动化恢复间隔 | W15 | 开、600、4,000,000、10 s | rate-limit |
+| 本地限速开关、每提供商的请求/分钟与令牌/分钟(全局默认 + 按 provider id 的覆盖)、自动化恢复间隔 | W15 | 开、600、4,000,000、10 s(无覆盖) | rate-limit |
 | 更新检查频率、更新通道 | W10 | 每日、稳定 | updates |
 
 规则:新增项**先登记再写代码**;值只在 `AppPreferences` 读取,工具/服务通过构造参数或 options 注入,不在热路径里反复读文件;改动热加载(沿用 `IReloadableSettingsSection`)。登记表之外的新增可配置项,在该波的实现说明里补一行并说明为什么不是内部细节。
@@ -311,10 +311,10 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 
 **与计划文本的差异(均已记录,见实现说明第六节)。**
 1. 计划写"用 `x-ratelimit-*` 响应头校准",但代码里只有 `anthropic-ratelimit-*` 的消费者;本波补了通用家族(`RateLimitHeaders` + `HttpChatProvider` 的缺省钩子),否则 OpenAI 兼容提供商的校准等于不存在。
-2. 每提供商**数值覆盖**没做:配置面是全局一份策略(设置分区四项),按提供商区分的只有桶。手填单家的唯一诚实入口是提供商编辑弹窗(`provider` 分区),不属本波路径;服务端报的真实限额仍逐家收紧。已写进 `Forge.Core/SPEC.md` 未决。
+2. ~~每提供商**数值覆盖**没做~~ **已按用户确认补做**:`ProviderRateLimitPolicy.Overrides` + `ProviderRateLimitLimits` 按 provider id 覆盖(每一维可留空继承全局、填 0 表示这家不限),设置分区里是一张按活目录重建的提供商表,条目存 `preferences.rateLimitOverrides`(归一化 `id|requests|tokens`),`Publish` 就地重配已存在的桶。首轮没做是因为把入口错判成只能在提供商编辑弹窗——`rate-limit` 分区自己就能列提供商,本波归属路径内即可完成。
 3. `ReserveAutomationSlot` 不是令牌桶而是**预留**(同一瞬间三次得到 0、gap、2×gap),否则同一时刻到点的多个等待运行会一起放行——正是原 `ResumeStagger` 的 gap 要避免的。数值行为与旧实现逐个一致。
 4. `RateLimitDecision` 比计划多一个 `Disabled`(策略关闭时必须与"扣过了"区分开)。
 
 **基准(计划要求先于实现落基线)。** 实施前只有锁基线:成功路径 70 ns/acquire、等待路径 64 ns/acquire、8 线程争用 197 ns/op(5.1 Mitems/s),均 0 字节/次。实施后同一份场景对照(实现与基线在同一循环里交替):成功 38.8 ns 对 62.8 ns(0.62x)、等待 77.1 ns 对 65.9 ns(1.17x,拒绝必须读时钟算精确 retryTime,仍在 100 ns 内)、争用 72.3 ns/op/15.0 Mitems/s 对 185.7 ns/op(0.39x),紧预算共享 16.8 ms 对 33.1 ms(0.51x)。四条验收(0 字节/acquire、无争用 <100 ns、8 线程争用无一被拒、紧预算下 8000 请求只花一次)全绿。初版的“每线程计数在 2x 内”被评审指出是同义反复(全授权行的 spread 恒为 1),已改为紧预算共享行只断言“不超发”,spread 与锁基线的同项一起只作报告——十几毫秒的窗口里它主要反映任务落核,不做断言。
 
-**验证。** `dotnet build Forge.slnx -c Debug` 0 警告 0 错误(含 AOT 分析器);`Forge.Core.Tests` 全量 2296 通过(L2),其中 `~RateLimit|~Providers` 612 通过(新增 49 个);`Forge.App.Tests` 的 `~RateLimit|~QuotaResume|~Localization|~MinorRegression|~Settings|~Views` 799 通过(新增 14 个 + 改写 `QuotaResumeTests` 的 4 个预留用例);`Forge.Bench -- ratelimit` 3/3 验收通过。一次 testhost 在 438 个用例后崩溃(无失败断言),重跑全绿。独立评审(`custom-baidu-6f4a99/glm-5.3` high)报出 5 条,全部在本波内修好:`Settle` 把缓存读写计了两次(blocking,长缓存会话按两倍速吃预算);`SetRemaining` 不推进补充时间戳,校准会被陈旧窗口抹掉;一个维度有余额就取消另一维度的 hold;hold 过期后仍每请求读时钟;基准的公平性验收是同义反复(见上)。测试会话(独立、同模型)报出 1 个真实缺陷并在本波内修好:`RateLimitBucket.Adjust` 的负 delta 原本被非负的 `ToUnits` 压成 0,导致 `Settle` 的“实际用量更大则补扣”半边恒不生效(低估会单向累积);改成有符号的 `ToDelta` 后两个红灯转绿。未跑 `Forge.Integration.Tests`/`Forge.App.LiveSwitch.Tests`(按仓库约定只在 L3 跑,本波无跨模块协议改动),`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp` 未改未跑。
+**验证。** `dotnet build Forge.slnx -c Debug` 0 警告 0 错误(含 AOT 分析器);`Forge.Core.Tests` 全量 2296 通过(L2),其中 `~RateLimit|~Providers` 612 通过(新增 49 个);`Forge.App.Tests` 的 `~RateLimit|~QuotaResume|~Localization|~MinorRegression|~Settings|~Views` 805 通过(新增 20 个 + 改写 `QuotaResumeTests` 的 4 个预留用例);`Forge.Bench -- ratelimit` 3/3 验收通过。一次 testhost 在 438 个用例后崩溃(无失败断言),重跑全绿。独立评审(`custom-baidu-6f4a99/glm-5.3` high)报出 5 条,全部在本波内修好:`Settle` 把缓存读写计了两次(blocking,长缓存会话按两倍速吃预算);`SetRemaining` 不推进补充时间戳,校准会被陈旧窗口抹掉;一个维度有余额就取消另一维度的 hold;hold 过期后仍每请求读时钟;基准的公平性验收是同义反复(见上)。测试会话(独立、同模型)报出 1 个真实缺陷并在本波内修好:`RateLimitBucket.Adjust` 的负 delta 原本被非负的 `ToUnits` 压成 0,导致 `Settle` 的“实际用量更大则补扣”半边恒不生效(低估会单向累积);改成有符号的 `ToDelta` 后两个红灯转绿。未跑 `Forge.Integration.Tests`/`Forge.App.LiveSwitch.Tests`(按仓库约定只在 L3 跑,本波无跨模块协议改动),`Forge.Workspace`/`Forge.Editor`/`Forge.Mcp` 未改未跑。

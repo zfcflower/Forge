@@ -160,6 +160,36 @@ public sealed class RateLimitCompositionTests
         }
     }
 
+    [Fact]
+    public void The_per_provider_ceilings_reach_the_published_policy()
+    {
+        try
+        {
+            var preferences = new AppPreferences();
+
+            // Blank fields inherit: only the request number is overridden here, so the token dimension stays global.
+            preferences.SetRateLimitOverride("tight", 20, null);
+            RateLimitComposition.Publish(preferences);
+
+            var published = ProviderRateLimiter.Shared.Policy;
+            Assert.Single(published.Overrides);
+            Assert.Equal(20, published.Overrides["tight"].RequestsPerMinute);
+            Assert.Null(published.Overrides["tight"].TokensPerMinute);
+
+            // A provider without an entry keeps the globals.
+            Assert.Equal((published.RequestsPerMinute, published.TokensPerMinute), published.LimitsFor("other"));
+
+            // Clearing the entry republishes an empty map, so the bucket goes back to the global numbers.
+            preferences.SetRateLimitOverride("tight", null, null);
+            RateLimitComposition.Publish(preferences);
+            Assert.Empty(ProviderRateLimiter.Shared.Policy.Overrides);
+        }
+        finally
+        {
+            Restore();
+        }
+    }
+
     /// <summary>Puts the process-wide limiter back on the policy a test that does not publish expects to find.</summary>
     private static void Restore() => ProviderRateLimiter.Shared.Publish(ProviderRateLimitPolicy.Default);
 }

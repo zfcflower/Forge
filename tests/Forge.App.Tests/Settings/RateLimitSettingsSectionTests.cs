@@ -190,6 +190,106 @@ public sealed class RateLimitSettingsSectionTests
         Assert.Equal(900, preferences.RateLimitRequestsPerMinute);
     }
 
+    [Fact]
+    public void Overrides_are_stored_normalized_and_read_back_per_provider()
+    {
+        var preferences = new AppPreferences
+        {
+            // Messy input: an out-of-range number, an entry without numbers, an empty id, a duplicate and a stray separator.
+            RateLimitOverrides =
+            [
+                "  Tight  | 20 |  ",
+                "loose|0|999999999999",
+                "tight|50|",
+                "nonumbers||",
+                "|||",
+                "bad",
+            ],
+        };
+
+        // Sorted by id, de-duplicated (the last entry for an id wins), clamped, and an entry that states nothing is dropped.
+        Assert.Equal(["loose|0|1000000000", "tight|50|"], preferences.RateLimitOverrides);
+
+        var tight = preferences.RateLimitOverrideFor("tight");
+        Assert.NotNull(tight);
+        Assert.Equal(50, tight.Value.RequestsPerMinute);
+        Assert.Null(tight.Value.TokensPerMinute);
+
+        var loose = preferences.RateLimitOverrideFor("loose");
+        Assert.NotNull(loose);
+        Assert.Equal(0, loose.Value.RequestsPerMinute);
+        Assert.Equal(1_000_000_000, loose.Value.TokensPerMinute);
+
+        Assert.Null(preferences.RateLimitOverrideFor("absent"));
+    }
+
+    [Fact]
+    public void Setting_and_clearing_an_override_moves_only_that_provider()
+    {
+        var preferences = new AppPreferences();
+        var raised = PropertyChangeLog.For(preferences);
+
+        preferences.SetRateLimitOverride("a", 10, 20_000);
+        preferences.SetRateLimitOverride("b", null, 30_000);
+
+        Assert.Equal(["a|10|20000", "b||30000"], preferences.RateLimitOverrides);
+        Assert.Contains(nameof(AppPreferences.RateLimitOverrides), raised);
+
+        raised.Clear();
+        preferences.SetRateLimitOverride("a", 10, 20_000);
+        Assert.Empty(raised);
+
+        preferences.SetRateLimitOverride("a", null, null);
+        Assert.Equal(["b||30000"], preferences.RateLimitOverrides);
+    }
+
+    [Fact]
+    public void Overrides_survive_the_preferences_round_trip()
+    {
+        var source = new AppPreferences();
+        source.SetRateLimitOverride("gateway", 20, null);
+
+        var loaded = RoundTrip(source);
+
+        Assert.Equal(["gateway|20|"], loaded.RateLimitOverrides);
+        Assert.Equal(20, loaded.RateLimitOverrideFor("gateway")?.RequestsPerMinute);
+    }
+
+    [Fact]
+    public void The_provider_table_is_rebuilt_from_the_live_catalogue()
+    {
+        var preferences = new AppPreferences();
+        preferences.SetRateLimitOverride("priced", 20, null);
+        IReadOnlyList<(string Id, string Name)> providers =
+        [
+            ("other", "Other"),
+            ("priced", "Priced"),
+        ];
+        var section = new RateLimitSettingsSectionViewModel(preferences, () => providers);
+
+        Assert.False(section.HasProviders);
+        section.Reload();
+
+        Assert.True(section.HasProviders);
+        Assert.Equal(["Other", "Priced"], section.Rows.Select(row => row.ProviderName));
+        Assert.Null(section.Rows[0].RequestsPerMinute);
+        Assert.Equal(20, section.Rows[1].RequestsPerMinute);
+        Assert.Null(section.Rows[1].TokensPerMinute);
+
+        // A row writes through: the entry appears under that provider with only the dimension that was filled in.
+        section.Rows[0].TokensPerMinute = 250_000;
+        Assert.Equal(250_000, preferences.RateLimitOverrideFor("other")?.TokensPerMinute);
+        Assert.Null(preferences.RateLimitOverrideFor("other")?.RequestsPerMinute);
+        Assert.Equal(250_000, section.Rows[0].TokensPerMinute);
+
+        // Clearing a row removes its entry entirely; a catalogue that lost a provider drops its row with it.
+        section.Rows[0].Clear();
+        Assert.Equal(["priced|20|"], preferences.RateLimitOverrides);
+        providers = [("priced", "Priced")];
+        section.Reload();
+        Assert.Single(section.Rows);
+    }
+
     private static AppPreferences RoundTrip(AppPreferences source)
     {
         var json = JsonSerializer.Serialize(source.ToSection(), PreferencesJsonContext.Default.PreferencesSection);
