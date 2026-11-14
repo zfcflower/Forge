@@ -61,11 +61,17 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
     private readonly string projectId;
     private bool disposed;
 
-    public SessionApprovalHandler(ApprovalQueue queue, ApprovalRules rules, SessionInfo session, INotifications? notifications = null)
+    public SessionApprovalHandler(
+        ApprovalQueue queue,
+        ApprovalRules rules,
+        SessionInfo session,
+        INotifications? notifications = null,
+        Func<string, McpApprovalServer?>? mcpToolInfo = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         this.queue = queue ?? throw new ArgumentNullException(nameof(queue));
         this.rules = rules ?? throw new ArgumentNullException(nameof(rules));
+        this.mcpToolInfo = mcpToolInfo;
         SessionId = session.Id;
         SessionTitle = string.IsNullOrWhiteSpace(session.Title) ? session.Id : session.Title;
 
@@ -77,6 +83,9 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
 
     /// <summary>The shell's notification entry; null in a handler built on its own.</summary>
     private readonly INotifications? notifications;
+
+    /// <summary>Maps a tool name to what the card may show about its MCP server; null when no MCP information exists.</summary>
+    private readonly Func<string, McpApprovalServer?>? mcpToolInfo;
 
     public string SessionId { get; }
 
@@ -139,8 +148,10 @@ internal sealed class SessionApprovalHandler : IApprovalHandler, IDisposable
                 request.ToolName,
                 request.SideEffect,
                 request.WorkingDirectory,
-                request.ArgumentsJson),
-            queue.Dispatcher);
+                request.ArgumentsJson,
+                mcpToolInfo?.Invoke(request.ToolName)),
+            queue.Dispatcher,
+            rules);
 
         await queue.EnqueueAsync(card, ct).ConfigureAwait(false);
         notifications.Notify(
