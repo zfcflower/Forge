@@ -14,9 +14,10 @@ namespace Forge.App.Agents;
 /// build and once per inner tool call, each of which already pays an IPC round trip and a JSON parse.
 /// </para>
 /// <para>
-/// The list can only ever <b>narrow</b>: which tool families scripts may call at all is decided in code
-/// (<see cref="CodeModeToolRegistry"/>), because widening that set would route a write or execute tool past the
-/// per-call approval card the model's own calls get. A blank list therefore means "every candidate", never "add one".
+/// The list can only ever <b>narrow</b>: which tools scripts may call at all is decided in code
+/// (<see cref="CodeModeTools"/>). Built-in write and execute tools are kept out of it so that one script cannot raise a
+/// burst of approval cards (every inner call still goes through the session's approval path, which is where a plugin's own
+/// write or execute tool is asked about). A blank list therefore means "every candidate", never "add one".
 /// </para>
 /// </summary>
 internal sealed record CodeModeSettings(

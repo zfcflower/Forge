@@ -23,8 +23,7 @@ internal sealed class RunCodeProxyTool : ITool
     private readonly ExtensionHostClient client;
     private readonly IToolRegistry registry;
     private readonly RunCodeProxyOptions options;
-    private ToolDefinition? definition;
-    private int definitionFingerprint = int.MinValue;
+    private Published? published;
 
     internal RunCodeProxyTool(ExtensionHostClient client, IToolRegistry registry, RunCodeProxyOptions options)
     {
@@ -41,28 +40,37 @@ internal sealed class RunCodeProxyTool : ITool
             var execution = CurrentExecution;
             var fingerprint = RunCodeToolSurface.Fingerprint(
                 surface, options.DefaultTimeout, options.MaxTimeout, execution);
-            var current = Volatile.Read(ref definition);
-            if (current is null || fingerprint != definitionFingerprint)
+            var current = Volatile.Read(ref published);
+            if (current is null || fingerprint != current.Fingerprint)
             {
-                current = new ToolDefinition(Name, RunCodeDescription.Build(surface, options, execution), SchemaJson);
-                definitionFingerprint = fingerprint;
-                Volatile.Write(ref definition, current);
+                // The fingerprint and the definition built from it are one object, so a concurrent reader can never pair
+                // one thread's fingerprint with another thread's definition.
+                current = new Published(
+                    fingerprint, new ToolDefinition(Name, RunCodeDescription.Build(surface, options, execution), SchemaJson));
+                Volatile.Write(ref published, current);
             }
 
-            return current;
+            return current.Definition;
         }
     }
+
+    /// <summary>A built definition together with the fingerprint of the inputs it was built from.</summary>
+    private sealed record Published(int Fingerprint, ToolDefinition Definition);
 
     public ToolSideEffect SideEffect => ToolSideEffect.Execute;
 
     /// <summary>The bounds in force right now: the live provider when one is configured, else the fixed options.
     /// Read once per description build and once per invocation, so a settings change reaches the next turn's prompt
     /// and every later script without rebuilding the tool. A provider that answers null is a misconfiguration and throws:
-    /// falling back to <see cref="RunCodeProxyOptions.Execution"/> would silently run a script under budgets nobody chose.</summary>
+    /// falling back to <see cref="RunCodeProxyOptions.Execution"/> would silently run a script under budgets nobody chose.
+    /// The provider is validated only when the tool is created, so each answer is also clamped here
+    /// (<see cref="RunCodeProxyOptionsExtensions.Clamped"/>): a later zero or negative bound must not turn into a semaphore
+    /// that never admits an inner call.</summary>
     private CodeExecutionOptions CurrentExecution =>
         options.ExecutionProvider is { } provider
-            ? provider() ?? throw new InvalidOperationException(
-                "RunCodeProxyOptions.ExecutionProvider returned null; the run_code execution bounds are never optional.")
+            ? (provider() ?? throw new InvalidOperationException(
+                "RunCodeProxyOptions.ExecutionProvider returned null; the run_code execution bounds are never optional."))
+                .Clamped()
             : options.Execution;
 
     public async ValueTask<ToolResult> InvokeAsync(ToolCall call, ToolContext context, CancellationToken ct)
@@ -375,6 +383,30 @@ internal static class RunCodeDescription
 /// created instead of being silently clamped, so a misconfigured budget never reaches a script.</summary>
 internal static class RunCodeProxyOptionsExtensions
 {
+    /// <summary>The bounds with every non-positive one raised to the smallest usable value (the cache capacity to zero).
+    /// Returns the same instance when nothing is out of range, so the live path allocates nothing.</summary>
+    internal static CodeExecutionOptions Clamped(this CodeExecutionOptions execution)
+    {
+        if (execution.MaxConcurrentToolCalls > 0 && execution.MaxScriptChars > 0 && execution.MaxResultChars > 0
+            && execution.MaxInnerResultChars > 0 && execution.MaxLogChars > 0 && execution.MaxDiagnosticChars > 0
+            && execution.MaxDiagnosticCount > 0 && execution.CompilationCacheCapacity >= 0)
+        {
+            return execution;
+        }
+
+        return execution with
+        {
+            MaxConcurrentToolCalls = Math.Max(1, execution.MaxConcurrentToolCalls),
+            MaxScriptChars = Math.Max(1, execution.MaxScriptChars),
+            MaxResultChars = Math.Max(1, execution.MaxResultChars),
+            MaxInnerResultChars = Math.Max(1, execution.MaxInnerResultChars),
+            MaxLogChars = Math.Max(1, execution.MaxLogChars),
+            MaxDiagnosticChars = Math.Max(1, execution.MaxDiagnosticChars),
+            MaxDiagnosticCount = Math.Max(1, execution.MaxDiagnosticCount),
+            CompilationCacheCapacity = Math.Max(0, execution.CompilationCacheCapacity),
+        };
+    }
+
     internal static RunCodeProxyOptions Validated(this RunCodeProxyOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

@@ -142,29 +142,46 @@ public sealed class ScriptToolsFacadeTests
     }
 
     [Fact]
-    public async Task Describe_does_not_consume_a_concurrency_slot_and_the_following_call_still_runs()
+    public async Task Describe_and_List_answer_while_the_only_concurrency_slot_is_held_by_an_in_flight_call()
     {
-        // One slot in total: if Describe took or leaked one, the call after ten describes would deadlock this run.
-        var host = new RecordingHostFacade { Handler = (_, _, _) => Task.FromResult(new HostToolResult("ran!")) };
+        // One slot in total and it is taken: a Describe or List that needed a slot would wait on the call it runs beside,
+        // which only finishes after the script's own describes, so this run would stall instead of completing.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingHostFacade
+        {
+            Handler = async (_, _, _) =>
+            {
+                entered.TrySetResult();
+                await release.Task.ConfigureAwait(false);
+                return new HostToolResult("ran!");
+            },
+        };
         var tools = new[] { ScriptCodeSupport.Tool("worker") };
         var options = new CodeExecutionOptions { MaxConcurrentToolCalls = 1 };
 
-        var result = await Run(
+        var running = Run(
             """
+            var pending = Tools.Call("worker");
+            var described = 0;
             for (var i = 0; i < 10; i++)
             {
                 Tools.Describe("worker");
+                described += Tools.List().Count;
             }
 
-            return await Tools.Call("worker");
+            return described + "|" + await pending;
             """,
             tools,
             options,
             host);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        release.TrySetResult();
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.False(result.IsError, result.Content);
-        Assert.Equal("ran!", result.Content);
-        // The describes answered from the declarations; only the call reached the host.
+        Assert.Equal("10|ran!", result.Content);
+        // Only the call reached the host; the describes and lists were answered from the declarations.
         Assert.Equal(1, host.CallCount);
     }
 }

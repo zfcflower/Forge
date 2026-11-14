@@ -147,6 +147,10 @@ depends-on: [forge-ipc]
   `CodeExecutionOptions`,因此“内部调用并发上限 / 单次内部结果上限 / 返回结果上限”这三个用户设置改完即对下一回合的
   描述和下一个脚本生效,不必重建代理或会话宿主;`Execution` 是提供者为 null 时的固定值。读取点只有两处(描述构建、
   调用入口),不在热路径上循环读文件。
+  提供者只在创建代理时由 `Validated` 严格校验(非法值抛 `ArgumentOutOfRangeException`);之后每次读取都再过一遍轻量钳制
+  (`RunCodeProxyOptionsExtensions.Clamped`:非正的上限抬到 1,缓存容量到 0,全部合法时返回原实例不分配),所以提供者事后
+  答出 0 的并发上限也不会让每运行的信号量(`SemaphoreSlim(0)`)把内层调用挂到超时。返回 null 仍是配置错误并抛出。
+  `Definition` 的缓存把(指纹,定义)放进一个不可变对象,一次 `Volatile.Write` 原子发布,并发读者不会拿到一个线程的指纹配另一个线程的定义。
 - **run_code 的可调用面只有一个推导点。** `RunCodeToolSurface.Snapshot` 一次读出每个工具的定义字段(名称/描述/
   schema/副作用),描述文本、变更指纹与 `code.execute` 的 `tools` 声明全部来自同一份快照,因此三者不会对“哪些工具
   可调用”或“读到的定义内容”产生分歧。所有 `RunCodeProxyTool` 实例在**读 `Definition` 之前**按类型剔除:代理的
