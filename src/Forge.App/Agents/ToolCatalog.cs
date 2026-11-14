@@ -42,6 +42,10 @@ internal static class ToolCatalog
         [RequestReviewTool.Name] = ToolGroups.Agents,
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
+    /// <summary>The names Core's own built-in tools use, plus <c>run_code</c>: a plugin tool may not take one of them on the
+    /// <c>run_code</c> script surface.</summary>
+    public static IEnumerable<string> CoreNames { get; } = [.. CoreGroups.Keys, RunCode];
+
     /// <summary>A Core built-in tool's catalog entry; an unknown Core name lands in the session group.</summary>
     public static ToolDescriptor DescribeCore(string name) =>
         new(name, ToolOrigin.BuiltIn, CoreGroups.GetValueOrDefault(name, ToolGroups.Session), CanDisable: !Required.Contains(name));

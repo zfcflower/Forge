@@ -7,20 +7,26 @@ namespace Forge.App.Agents;
 /// <b>candidates</b> — the tools the session may offer a script at all, decided once when the session's external tools were
 /// collected — plus a live filter: the <c>tools</c> section's visible-tool list is read on every resolution, so narrowing
 /// the list applies to the next inner call and to the next description build without republishing the external set (which
-/// would drop the prompt cache for a change that touches no tool definition).
+/// would drop the prompt cache for a change that touches no tool definition). The user's own tool switches
+/// (<c>toolsDisabled</c>, <see cref="ToolCatalog.EffectiveDisabled"/>) are read live the same way: a tool the user switched
+/// off is neither listed to a script nor callable by one.
 /// <para>
-/// The candidate set is the security boundary and lives in code (<see cref="SessionRuntime"/>): only read-only tools of a
-/// fixed family set are ever candidates, because a script's inner call reaches the same approval path as any other call but
-/// must never be the way a write or an execute tool gets called in a fan-out. The filter can only remove from it.
+/// The candidate set is the security boundary and lives in code (<see cref="SessionRuntime"/>, <see cref="CodeModeTools"/>):
+/// the plugin tools the extension host registered plus the read-only tools of the workspace, web and MCP families. Built-in
+/// write and execute tools (<c>write</c>, <c>edit</c>, <c>bash</c>, git and PR tools, extension authoring) are not in it.
+/// A script's inner call still goes through the session's approval path, so a plugin's own write or execute tool asks per
+/// call. The filters can only remove from the candidates.
 /// </para>
 /// <para>
-/// Reads of <see cref="Tools"/> allocate a filtered list only when the list actually hides something; the blank list — the
-/// default — returns the snapshot array itself, so the common case costs nothing beyond the loop that decides it.
+/// Reads of <see cref="Tools"/> allocate a filtered list only when something is hidden; with a blank list and nothing
+/// switched off — the default — it returns the snapshot array itself, so the common case costs nothing beyond the loops
+/// that decide it.
 /// </para>
 /// </summary>
 internal sealed class CodeModeToolRegistry(
     IReadOnlyList<ITool> candidates,
-    Func<CodeModeSettings> settings) : IToolRegistry
+    Func<CodeModeSettings> settings,
+    Func<IReadOnlyList<string>>? disabledTools = null) : IToolRegistry
 {
     /// <summary>The callable tools right now, in the snapshot's order (the description sorts them by name itself).</summary>
     public IReadOnlyList<ITool> Tools
@@ -28,7 +34,8 @@ internal sealed class CodeModeToolRegistry(
         get
         {
             var current = settings();
-            if (current.VisibleTools.Count == 0)
+            var disabled = disabledTools?.Invoke() ?? [];
+            if (current.VisibleTools.Count == 0 && disabled.Count == 0)
             {
                 return candidates;
             }
@@ -36,7 +43,8 @@ internal sealed class CodeModeToolRegistry(
             var visible = new List<ITool>(candidates.Count);
             foreach (var tool in candidates)
             {
-                if (current.Allows(tool.Definition.Name))
+                var name = tool.Definition.Name;
+                if (current.Allows(name) && !IsSwitchedOff(disabled, name))
                 {
                     visible.Add(tool);
                 }
@@ -47,8 +55,9 @@ internal sealed class CodeModeToolRegistry(
     }
 
     /// <summary>
-    /// Resolves one inner call. A name outside the snapshot, or one the current list hides, is "unknown" — the same answer
-    /// the script gets for a tool that does not exist, so a narrowed list cannot be probed for what it hides.
+    /// Resolves one inner call. A name outside the snapshot, one the current list hides and one the user switched off are
+    /// all "unknown" — the same answer the script gets for a tool that does not exist, so a narrowed list cannot be probed
+    /// for what it hides.
     /// </summary>
     public bool TryGet(string name, out ITool tool)
     {
@@ -58,7 +67,7 @@ internal sealed class CodeModeToolRegistry(
             {
                 if (string.Equals(candidate.Definition.Name, name, StringComparison.Ordinal))
                 {
-                    if (settings().Allows(name))
+                    if (settings().Allows(name) && !IsSwitchedOff(disabledTools?.Invoke() ?? [], name))
                     {
                         tool = candidate;
                         return true;
@@ -70,6 +79,26 @@ internal sealed class CodeModeToolRegistry(
         }
 
         tool = null!;
+        return false;
+    }
+
+    /// <summary>Whether the user's switches turn <paramref name="name"/> off; names that may not be switched off are ignored,
+    /// exactly as for the session's own registry. Ordinal, like <c>ToolSurface</c>.</summary>
+    private static bool IsSwitchedOff(IReadOnlyList<string> stored, string name)
+    {
+        if (!ToolCatalog.CanDisable(name))
+        {
+            return false;
+        }
+
+        foreach (var entry in stored)
+        {
+            if (string.Equals(entry, name, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 }

@@ -73,6 +73,22 @@ public sealed class CodeModeToolsTests
     }
 
     [Fact]
+    public void A_plugin_tool_with_a_reserved_name_is_left_out_and_the_others_are_kept()
+    {
+        var shadow = new StubTool("todo", ToolSideEffect.Execute);
+        var fine = new StubTool("plugin_run", ToolSideEffect.Execute);
+        var reserved = new HashSet<string>(StringComparer.Ordinal) { "todo", "bash" };
+
+        var collected = CodeModeTools.Collect([shadow, new StubTool("bash", ToolSideEffect.Execute), fine], new FileTools().All, [], [], reserved);
+
+        Assert.DoesNotContain(collected, static tool => tool.Definition.Name == "todo");
+        // The plugin's "bash" is dropped; the file tools' own bash is not read-only, so no "bash" is callable at all.
+        Assert.DoesNotContain(collected, static tool => tool.Definition.Name == "bash");
+        Assert.Contains(fine, collected);
+        Assert.Contains(collected, static tool => tool.Definition.Name == "grep");
+    }
+
+    [Fact]
     public void The_plugin_order_is_kept_whatever_the_input_order_is()
     {
         var a = new StubTool("a", ToolSideEffect.Write);

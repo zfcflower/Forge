@@ -42,19 +42,37 @@ public sealed class SessionRuntimeGitHostTests
         var tools = rig.Runtime.BuildTools();
         var names = tools.Select(static tool => tool.Definition.Name).ToList();
 
-        // Host tools first, then run_code, then the git tools in registration order.
-        Assert.Equal(["echo", "run_code", .. GitToolNames], names);
+        // Host tools first, then the git tools in registration order, then run_code (CollectExternalTools adds it last).
+        Assert.Equal(["echo", .. GitToolNames, "run_code"], names);
 
         var runCode = tools.Single(static tool => tool.Definition.Name == "run_code");
         var listing = runCode.Definition.Description;
-        Assert.Contains("Tools (1), sorted by name:", listing, StringComparison.Ordinal);
-        Assert.Contains("  echo [read-only]:", listing, StringComparison.Ordinal);
+        Assert.Contains("Tools (1), sorted by name; Tools.Describe(\"name\")", listing, StringComparison.Ordinal);
+        Assert.EndsWith("\n  echo\n", listing, StringComparison.Ordinal);
         foreach (var name in GitToolNames)
         {
             Assert.DoesNotContain(name, listing, StringComparison.Ordinal);
         }
 
         Assert.DoesNotContain("git_", listing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_plugin_tool_named_like_a_session_tool_stays_off_the_script_surface()
+    {
+        await using var rig = await HostRig.StartAsync();
+        await rig.RegisterAsync("alpha", "echo", "todo", "ask_user", "git_status", "extension_create", "web_fetch");
+
+        rig.Runtime.BuildTools();
+        var surface = rig.Runtime.ScriptSurface!;
+
+        // Only the plugin's own name is script surface: each of the others would run the plugin's code under the approval
+        // rule of the built-in that owns the name (todo and ask_user are Allow, git_status is read-only, web_fetch asks).
+        Assert.Equal(["echo"], surface.Tools.Select(static tool => tool.Definition.Name).ToArray());
+        foreach (var name in new[] { "todo", "ask_user", "git_status", "extension_create", "web_fetch" })
+        {
+            Assert.False(surface.TryGet(name, out _), name);
+        }
     }
 
     [Fact]
@@ -90,8 +108,8 @@ public sealed class SessionRuntimeGitHostTests
 
         var runCode = scope.FindTool("run_code");
         Assert.NotNull(runCode);
-        Assert.Contains("Tools (2), sorted by name:", runCode!.Definition.Description, StringComparison.Ordinal);
-        Assert.Contains("  echo2 [read-only]:", runCode.Definition.Description, StringComparison.Ordinal);
+        Assert.Contains("Tools (2), sorted by name;", runCode!.Definition.Description, StringComparison.Ordinal);
+        Assert.EndsWith("\n  echo, echo2\n", runCode.Definition.Description, StringComparison.Ordinal);
         Assert.DoesNotContain("git_", runCode.Definition.Description, StringComparison.Ordinal);
 
         // The first plugin goes away.
@@ -103,7 +121,9 @@ public sealed class SessionRuntimeGitHostTests
             Assert.NotNull(scope.FindTool(name));
         }
 
-        Assert.Contains("Tools (1), sorted by name:", scope.FindTool("run_code")!.Definition.Description, StringComparison.Ordinal);
+        var remaining = scope.FindTool("run_code")!.Definition.Description;
+        Assert.Contains("Tools (1), sorted by name;", remaining, StringComparison.Ordinal);
+        Assert.EndsWith("\n  echo2\n", remaining, StringComparison.Ordinal);
 
         // The last one goes away: no host tool, so no run_code - and the git tools are still there.
         await rig.UnregisterAndWaitAsync("beta");
@@ -291,7 +311,7 @@ public sealed class SessionRuntimeGitHostTests
         }
 
         /// <summary>Registers one read-only tool for <paramref name="pluginId"/> and waits until the client has processed it.</summary>
-        public async Task RegisterAsync(string pluginId, string tool)
+        public async Task RegisterAsync(string pluginId, params string[] tools)
         {
             var seen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void OnChanged() => seen.TrySetResult();
@@ -302,7 +322,7 @@ public sealed class SessionRuntimeGitHostTests
                     Forge.Plugin.Sdk.ExtensionProtocol.ToolsRegister,
                     new ToolsRegisterNotification(
                         pluginId,
-                        [new Forge.Plugin.Sdk.ToolDeclaration(tool, "d", "{}", Forge.Plugin.Sdk.ToolSideEffect.ReadOnly)]));
+                        [.. tools.Select(static tool => new Forge.Plugin.Sdk.ToolDeclaration(tool, "d", "{}", Forge.Plugin.Sdk.ToolSideEffect.ReadOnly))]));
                 await seen.Task.WaitAsync(Budget);
             }
             finally

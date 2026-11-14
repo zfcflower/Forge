@@ -8,29 +8,34 @@ namespace Forge.App.Agents;
 /// <see cref="SessionRuntime.CollectExternalTools"/> — which is the only caller — so the rule is readable and testable
 /// without an extension host: the caller hands in the four sources it collected, and this decides.
 /// <para>
-/// The rule is one word: <b>read-only</b>. It is the same predicate the approval policy already uses
-/// (<c>DefaultApprovalPolicy.AutoAllowReadOnly</c>), so a tool a script can reach is never one whose direct call would have
-/// raised a card — except the two web tools, which stay read-only by declaration but are asked about per call by the
-/// session policy. Nothing a script must not run (<c>write</c>, <c>edit</c>, <c>bash</c>, the git and PR write tools, the
-/// extension authoring tools) is in the candidate set at all: it cannot be named, described or called.
+/// Built-in tools: only <b>read-only</b> ones, by the predicate the approval policy already uses
+/// (<c>DefaultApprovalPolicy.AutoAllowReadOnly</c>); the two web tools stay read-only by declaration but are asked about per
+/// call by the session policy. The built-in write and execute tools (<c>write</c>, <c>edit</c>, <c>bash</c>, the git and PR
+/// tools, the extension authoring tools) are not in the candidate set: a script cannot name, describe or call them. That is
+/// not an approval bypass (an inner call goes through <c>SessionToolCallRouter.ApproveAsync</c> like any other and would
+/// raise its card); it keeps a fan-out from raising a burst of cards.
 /// </para>
 /// <para>
-/// The plugin tools are the exception to the read-only filter and are taken wholesale, which is the behaviour scripts
-/// already had: a plugin declares the surface its callers may use, and a plugin's own write tool still goes to the approval
-/// card when a script calls it.
+/// The plugin tools are taken wholesale, write and execute ones included, which is the behaviour scripts already had: a
+/// plugin declares the surface its callers may use, and a plugin's write tool still goes to the approval card per call. A
+/// plugin tool whose name is <i>reserved</i> (a Core built-in, a name the approval policy has a rule for, or the name of
+/// another session tool) is dropped: the approval and the execution of one inner call must be about the same tool.
 /// </para>
 /// </summary>
 internal static class CodeModeTools
 {
     /// <summary>
     /// The script-facing candidates, in source order and without duplicate names (the registry keys by name, so the first
-    /// registration of a name wins — the same rule the session's own registry follows).
+    /// registration of a name wins: plugin tools, then file, web and MCP tools). That is the opposite of the session's own
+    /// registry, where a later registration of a name replaces an earlier one and Core built-ins come before plugins;
+    /// <paramref name="reservedNames"/> is what keeps the two from disagreeing about a name.
     /// </summary>
     internal static List<ITool> Collect(
         IReadOnlyList<ITool> pluginTools,
         IReadOnlyList<ITool> fileTools,
         IReadOnlyList<ITool> webTools,
-        IReadOnlyList<ITool> mcpTools)
+        IReadOnlyList<ITool> mcpTools,
+        IReadOnlySet<string>? reservedNames = null)
     {
         ArgumentNullException.ThrowIfNull(pluginTools);
         ArgumentNullException.ThrowIfNull(fileTools);
@@ -41,7 +46,10 @@ internal static class CodeModeTools
         var names = new HashSet<string>(candidates.Capacity, StringComparer.Ordinal);
         foreach (var tool in pluginTools)
         {
-            Add(candidates, names, tool);
+            if (reservedNames is null || !reservedNames.Contains(tool.Definition.Name))
+            {
+                Add(candidates, names, tool);
+            }
         }
 
         AppendReadOnly(candidates, names, fileTools);
