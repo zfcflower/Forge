@@ -1,9 +1,5 @@
-using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
-using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.Core.Agents;
-using Forge.Core.Storage;
 using Xunit;
 
 namespace Forge.App.Tests.Agents;
@@ -16,7 +12,7 @@ namespace Forge.App.Tests.Agents;
 public sealed class SessionRuntimeCompactionTests : IDisposable
 {
     // A 200k window with no output limit reserves 20%: U = 160k.
-    private const int Window = 200_000;
+    private const int Window = SessionRuntimeRig.Window;
     private const int Usable = 160_000;
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "forge-runtime-compaction-" + Guid.NewGuid().ToString("N"));
@@ -39,7 +35,7 @@ public sealed class SessionRuntimeCompactionTests : IDisposable
     public async Task A_settings_save_reaches_a_running_session_and_its_next_request()
     {
         var settings = new CompactionSettingsStore(Path.Combine(root, "settings.json"));
-        await using var rig = new Rig(root, services => services.CompactionChanges = settings);
+        await using var rig = new SessionRuntimeRig(root, services => services.CompactionChanges = settings);
 
         var before = await rig.TurnAsync();
         Assert.Equal(0.85, rig.Runtime.CompactionPolicy!.TriggerRatio);
@@ -68,7 +64,7 @@ public sealed class SessionRuntimeCompactionTests : IDisposable
     public async Task Settings_read_before_each_turn_replace_the_policy_the_host_was_built_with()
     {
         var current = new CompactionSettings(Enabled: true, TriggerPercent: 90, TargetPercent: 50);
-        await using var rig = new Rig(root, services => services.Compaction = () => current);
+        await using var rig = new SessionRuntimeRig(root, services => services.Compaction = () => current);
 
         var first = await rig.TurnAsync();
         Assert.Equal((int)(Usable * 0.90), first.TriggerTokens);
@@ -88,7 +84,7 @@ public sealed class SessionRuntimeCompactionTests : IDisposable
     public async Task A_save_before_the_first_turn_or_after_disposal_is_harmless()
     {
         var settings = new CompactionSettingsStore(Path.Combine(root, "settings.json"));
-        var rig = new Rig(root, services => services.CompactionChanges = settings);
+        var rig = new SessionRuntimeRig(root, services => services.CompactionChanges = settings);
         try
         {
             // No host yet: nothing to apply, and the host is later built from the saved value.
@@ -105,77 +101,5 @@ public sealed class SessionRuntimeCompactionTests : IDisposable
         // The disposed session no longer listens.
         settings.Save(new CompactionSettings(Enabled: true, TriggerPercent: 80, TargetPercent: 50));
         Assert.Null(rig.Runtime.CompactionPolicy);
-    }
-
-    private sealed class Rig : IAsyncDisposable
-    {
-        private readonly SqliteSessionStore store;
-        private readonly SqliteTodoStore todos;
-        private bool disposed;
-
-        public Rig(string root, Action<AgentRuntimeServices> configure)
-        {
-            var data = Path.Combine(root, "data-" + Guid.NewGuid().ToString("N"));
-            var workspace = Path.Combine(root, "ws");
-            Directory.CreateDirectory(data);
-            Directory.CreateDirectory(workspace);
-            store = new SqliteSessionStore(data);
-            todos = new SqliteTodoStore(data);
-            var services = new AgentRuntimeServices(
-                _ => Provider,
-                HostClient: null,
-                store,
-                store,
-                todos,
-                new ModelSettings("main-model"))
-            {
-                ContextWindow = static _ => Window,
-            };
-            configure(services);
-            Runtime = new SessionRuntime(services, new SessionInfo("s1", workspace, "t", DateTimeOffset.UnixEpoch));
-        }
-
-        public ScriptedProvider Provider { get; } = new();
-
-        public SessionRuntime Runtime { get; }
-
-        /// <summary>Runs one turn and returns the root's last context report of it.</summary>
-        public async Task<AgentContextMeasured> TurnAsync()
-        {
-            var events = new ConcurrentQueue<AgentEvent>();
-            await Runtime.RunTurnAsync("hello", events.Enqueue, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(60));
-            Assert.Empty(events.OfType<AgentFailed>());
-            return events.OfType<AgentContextMeasured>().Last(static e => e.AgentId == "root");
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (disposed)
-            {
-                return;
-            }
-
-            disposed = true;
-            Runtime.Dispose();
-            await store.DisposeAsync();
-            await todos.DisposeAsync();
-        }
-    }
-
-    private sealed class ScriptedProvider : IChatProvider
-    {
-        private readonly ConcurrentQueue<ChatRequest> queue = new();
-
-        public IReadOnlyList<ChatRequest> Requests => [.. queue];
-
-        public string Id => "scripted";
-
-        public async IAsyncEnumerable<ChatStreamEvent> StreamAsync(ChatRequest request, [EnumeratorCancellation] CancellationToken ct)
-        {
-            queue.Enqueue(request);
-            await Task.Yield();
-            yield return new TextDelta("done");
-            yield return new MessageCompleted(ChatMessage.Assistant("done"), new TokenUsage(3, 2), StopReason.EndTurn);
-        }
     }
 }

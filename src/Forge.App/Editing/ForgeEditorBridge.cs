@@ -18,7 +18,8 @@ namespace Forge.App.Editing;
 
 internal sealed class ForgeEditorBridge : IDisposable
 {
-    private const int HighlightLimit = 1 << 20;
+    /// <summary>Characters past which the lexical highlighter stays off; the semantic overlay uses the same ceiling.</summary>
+    internal const int HighlightLimit = 1 << 20;
     private readonly TextEditor editor;
     private readonly FileDocumentViewModel model;
     private readonly EditorDocument document;
@@ -75,6 +76,12 @@ internal sealed class ForgeEditorBridge : IDisposable
         InstallHighlighting(path);
         document.TextChanged += OnDocumentTextChanged;
     }
+
+    /// <summary>
+    /// Raised after a TextMate installation was created — after its own line transformer was appended: a transformer that has
+    /// to paint over the lexical colours re-appends itself here.
+    /// </summary>
+    public event EventHandler? HighlightingInstalled;
 
     /// <summary>The inline diagnostic dots of this document; the view feeds the latest diagnostic set in.</summary>
     public EditorDiagnosticAdornments Diagnostics => adornments;
@@ -237,6 +244,10 @@ internal sealed class ForgeEditorBridge : IDisposable
             installation.AppliedTheme += OnThemeApplied;
             installation.SetGrammar(grammarScope);
             RestoreForgeBrushes();
+
+            // The TextMate installation appends its own line transformer, which would paint over the semantic overlay of a
+            // view that attached before it. A listener puts itself back at the end of the list.
+            HighlightingInstalled?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception) when (IsAssetFailure(exception))
         {

@@ -16,6 +16,7 @@ using Forge.App.Git;
 using Forge.App.Workbench;
 using Forge.App.Lifecycle;
 using Forge.Core.Storage;
+using Forge.Editor.Lsp;
 using Forge.HostClient;
 using Forge.Workspace;
 using Forge.App.Logging;
@@ -156,6 +157,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer layoutSaveTimer;
     private readonly TerminalWorkbench terminals;
+    private readonly WorkspaceDiagnostics? problemsDiagnostics;
     private PanelToolButton newTerminalButton;
     private ReviewStore reviews;
     private PanelToolButton? openChangesTool;
@@ -267,9 +269,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Todos = new TodoListViewModel(composition.Todos, composition.TodoStepCommitter);
         Reviews = new ReviewPanelViewModel(reviews, path => ShowChangesAsync(path));
         Specs = new SpecTreeViewModel(root => new SpecGraph(root), path => OpenFile(path, newTab: false));
+
+        // One aggregator for every language session of the app: the pool spans workspaces, so the list does too. Null when
+        // there is no editor layer at all (a headless composition), and the panel then simply has nothing to show.
+        problemsDiagnostics = composition.Editor is { } editor ? new WorkspaceDiagnostics(editor.Sessions) : null;
+        Problems = new ProblemsPanelViewModel(problemsDiagnostics, OpenProblem);
         ShowChangesCommand = new RelayCommand(() => ShowChangesAsync(null));
         NewTerminalCommand = new RelayCommand(OpenTerminal);
-        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GeneralChats);
+        Workbench = new WorkbenchLayout(Projects, Files, Todos, Reviews, Specs, GeneralChats, Problems);
         terminals = new TerminalWorkbench(
             Workbench,
             composition.Preferences,
@@ -360,6 +367,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     public TodoListViewModel Todos { get; }
 
     public ReviewPanelViewModel Reviews { get; }
+
+    /// <summary>The Problems tab: every diagnostic the language sessions hold, across workspaces.</summary>
+    public ProblemsPanelViewModel Problems { get; }
 
     public SpecTreeViewModel Specs { get; }
 
@@ -942,7 +952,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Sessions,
             composition.Providers,
             OnSubAgentToolRequested,
-            instrumentSources: instruments)
+            instrumentSources: instruments,
+            preferences: composition.Preferences)
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
@@ -2461,9 +2472,15 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     private void OpenFile(string path, bool newTab) => _ = OpenFileAsync(path, newTab, CancellationToken.None);
 
+    /// <summary>
+    /// Opens or reuses a file tab. The two overrides are independent on purpose: a caller that knows which workspace owns the
+    /// file (a stored diagnostic, a definition target) can pass it without also claiming a review owner, and a caller that
+    /// knows the review owner does not have to know the workspace.
+    /// </summary>
     private async Task OpenFileAsync(
         string path, bool newTab, CancellationToken ct, string? workspaceOverride = null,
-        Review.ReviewOwner? reviewOwnerOverride = null, bool hasReviewOwnerOverride = false)
+        Review.ReviewOwner? reviewOwnerOverride = null, bool hasReviewOwnerOverride = false,
+        bool hasWorkspaceOverride = false)
     {
         var resolved = ResolveFilePath(path);
         if (resolved is null)
@@ -2472,7 +2489,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         var id = newTab ? WorkbenchIds.PinnedFileTab(resolved) : WorkbenchIds.PreviewTab;
-        var workspace = hasReviewOwnerOverride ? workspaceOverride : activeSession?.WorkDir;
+        var workspace = hasWorkspaceOverride ? workspaceOverride : activeSession?.WorkDir;
         if (FindFileTab(resolved) is { Content: FileDocumentViewModel same } sameTab)
         {
             if (!same.IsDirty && !same.IsSaving)
@@ -3185,6 +3202,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Todos.Dispose();
         Reviews.Dispose();
         Specs.Dispose();
+        Problems.Dispose();
+        problemsDiagnostics?.Dispose();
         Workbench.Dispose();
 
         // The final layout capture and the disposals above can still raise a layout change, which restarts the save

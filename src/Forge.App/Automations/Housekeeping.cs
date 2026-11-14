@@ -8,8 +8,9 @@ namespace Forge.App.Automations;
 
 /// <summary>
 /// <see cref="BuiltInAutomations.Housekeeping"/> (daily at 04:00): prunes stale worktree records of every repository project,
-/// removes empty General scratch folders no session uses, trims the run history, and archives automation-created sessions
-/// idle for <see cref="ArchiveAfter"/> that are not open. Every step is best effort: one failing step does not stop the others.
+/// removes empty General scratch folders no session uses, trims the run history, and archives the root sessions the
+/// configured <see cref="IdleArchiveSettings"/> selects (by default automation-created ones idle for
+/// <see cref="ArchiveAfter"/>) that are not open. Every step is best effort: one failing step does not stop the others.
 /// </summary>
 internal sealed class HousekeepingRunner(
     IProjectRegistry projects,
@@ -19,8 +20,10 @@ internal sealed class HousekeepingRunner(
     Func<string, CancellationToken, Task> pruneWorktrees,
     Func<IReadOnlySet<string>> openSessions,
     TimeProvider time,
-    Func<IReadOnlyList<string>, Task>? archivedSessions = null) : IAutomationRunner
+    Func<IReadOnlyList<string>, Task>? archivedSessions = null,
+    Func<IdleArchiveSettings>? archive = null) : IAutomationRunner
 {
+    /// <summary>The default idle window of the archive step; a configured <see cref="IdleArchiveSettings.After"/> replaces it.</summary>
     public static readonly TimeSpan ArchiveAfter = TimeSpan.FromDays(7);
 
     /// <summary>A scratch folder younger than this is never removed: a run that just created it may not have its catalog row yet.</summary>
@@ -29,6 +32,9 @@ internal sealed class HousekeepingRunner(
     public const int RunsPerAutomation = 200;
 
     public const int RunsTotal = 2000;
+
+    /// <summary>Read once per run, so a settings change applies from the next run. A null factory keeps the previous behaviour.</summary>
+    private readonly Func<IdleArchiveSettings> idleArchive = archive ?? (static () => IdleArchiveSettings.Default);
 
     public async Task<AutomationRunOutcome> RunAsync(IAutomationRunContext context, CancellationToken ct)
     {
@@ -190,7 +196,13 @@ internal sealed class HousekeepingRunner(
 
     private async Task<int> ArchiveIdleAsync(IReadOnlyList<SessionInfo> sessions, CancellationToken ct)
     {
-        var cutoff = time.GetUtcNow() - ArchiveAfter;
+        var settings = idleArchive();
+        if (!settings.Enabled)
+        {
+            return 0; // nothing to look up either: the fork references only matter to a step that archives
+        }
+
+        var cutoff = time.GetUtcNow() - settings.After;
         var open = openSessions();
         if (await ReferencedForkSessionsAsync(ct).ConfigureAwait(false) is not { } forks)
         {
@@ -200,7 +212,9 @@ internal sealed class HousekeepingRunner(
         var archived = new List<string>();
         foreach (var session in sessions)
         {
-            if (session is not { Status: SessionStatus.Active, ParentSessionId: null, AutomationId: not null } ||
+            // The automation-created condition is the scope; every other exemption stays as it was, whatever the scope.
+            if (session is not { Status: SessionStatus.Active, ParentSessionId: null } ||
+                (settings.Scope == IdleArchiveScope.AutomationSessions && session.AutomationId is null) ||
                 session.LastActiveAt > cutoff ||
                 open.Contains(session.Id) ||
                 forks.Contains(session.Id))

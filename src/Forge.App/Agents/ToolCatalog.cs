@@ -20,7 +20,8 @@ internal static class ToolCatalog
     /// <summary>
     /// Tools another feature cannot run without: <c>read_artifact</c> is how the model reads back output the loop moved into
     /// the artifact store, and the sub-agent control tools are how a parent reaches the children it already spawned
-    /// (switching off <c>spawn_agent</c> is the way to stop spawning). A stored switch for one of them is ignored.
+    /// (switching off <c>spawn_agent</c>, here or through the <c>agents</c> section's sub-agent switch, is the way to stop
+    /// spawning). A stored switch for one of them is ignored.
     /// </summary>
     private static readonly FrozenSet<string> Required = FrozenSet.Create(
         StringComparer.Ordinal,

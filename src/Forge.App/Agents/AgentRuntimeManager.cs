@@ -49,6 +49,21 @@ internal sealed class AgentRuntimeManager : IDisposable
         runtime.Dispose();
     }
 
+    /// <summary>Re-applies the sub-agent cap to every live runtime; called when the setting changes.</summary>
+    public void RefreshSubAgentLimits()
+    {
+        SessionRuntime[] all;
+        lock (gate)
+        {
+            all = [.. runtimes.Values];
+        }
+
+        foreach (var runtime in all)
+        {
+            runtime.RefreshSubAgentLimits();
+        }
+    }
+
     public void Dispose()
     {
         SessionRuntime[] all;
