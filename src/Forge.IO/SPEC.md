@@ -39,7 +39,7 @@ parent: forge-architecture
 
 ### 工具面
 
-- **只给七个工具,名字对齐提示词。** `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 与 `Forge.Core.Prompts.BuiltInAgents` 的白名单逐字一致(Scout/Plan/Reviewer 用前面四个,Worker 再加 `edit`/`write`/`bash`),所以工具落地不需要改提示词与白名单。不提供 `copy`/`move`/`delete` 独立工具:它们是 `bash` 的一行命令,而工具数量本身就是模型的选择成本。
+- **只给七个工具,名字对齐提示词。** `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` 的名字与 `Forge.Core.Prompts.BuiltInAgents` 的白名单逐字一致(Scout 与 Plan 用前面四个,Worker 再加 `edit`/`write`/`bash`;Reviewer 是前面四个加只读的 `git_diff`,它不属本模块,见 forge-core),所以工具落地不需要改提示词与白名单。不提供 `copy`/`move`/`delete` 独立工具:它们是 `bash` 的一行命令,而工具数量本身就是模型的选择成本。
 - **文件操作留在进程内。** 读、写、改、列、找、搜全部是原生实现,不搭 `cat`/`sed`/`find` 进程;只有真的需要外部程序时才创建子进程,`grep` 的 ripgrep 后端只是可选的加速,不是前提。
 - **常量 schema。** 每个工具的 `InputSchemaJson` 是 `const string`,参数由 `JsonDocument` 读取(无反射、无源生成以外的序列化);两次请求字节相同,提示词缓存不被无意义地打散。参数错误一律转成 `IsError` 结果,只有取消向外抛。
 - **审批只看副作用。** `read`/`ls`/`find`/`grep` 是 `ReadOnly`(走 `DefaultApprovalPolicy` 的自动放行),`write`/`edit` 是 `Write`,`bash` 是 `Execute`。这七个工具都不进 `run_code` 的脚本注册表:脚本内的调用不经过逐次审批呈现。

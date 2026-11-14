@@ -53,6 +53,9 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public IStepCommitter? StepCommitter { get; set; }
 
+    /// <summary>The git side of <c>request_review</c> (handed to <c>AgentHostOptions.Reviews</c>, which registers the tool). Null in a unit test: the session then has no review tool.</summary>
+    public IReviewChangeSetSource? Reviews { get; set; }
+
     /// <summary>
     /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
     /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
@@ -761,6 +764,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Store = services.Store,
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
+                Reviews = services.Reviews,
                 Artifacts = services.Artifacts,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),
