@@ -62,6 +62,15 @@ internal interface IDialogService
         await ConfirmAsync(title, message, options[0], options[^1]).ConfigureAwait(true) ? 0 : -1;
 
     /// <summary>
+    /// The add-project dialog (wave W9): a clone or a brand-new repository, described and run by
+    /// <paramref name="model"/>. Answers the created directory, or null when the user cancelled and nothing was created. A
+    /// host that cannot show it (a recording double, a headless test) answers null, so no project appears that nobody asked
+    /// for.
+    /// </summary>
+    Task<string?> RunProjectCreationAsync(ProjectCreationViewModel model, CancellationToken ct) =>
+        Task.FromResult<string?>(null);
+
+    /// <summary>
     /// The handover dialog (lifecycle 6.2): shows <paramref name="model"/>'s choices, runs
     /// <see cref="HandoverDialogModel.ExecuteAsync"/> and stays open with its error until it succeeds or the user
     /// cancels. True = handed over, false = cancelled; null = this host cannot show it (the caller reports that).
@@ -2812,48 +2821,12 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
     // ---------------------------------------------------------------- commands
 
-    private async Task AddProjectAsync(CancellationToken ct)
-    {
-        if (dialogs is null)
-        {
-            return;
-        }
-
-        var folder = await dialogs.PickFolderAsync(ShellStrings.PickRepositoryTitle).ConfigureAwait(true);
-        if (string.IsNullOrWhiteSpace(folder))
-        {
-            return;
-        }
-
-        var isRepository = await Task.Run(() => composition.Git.IsRepositoryAsync(folder, ct), ct).ConfigureAwait(true);
-        if (!isRepository)
-        {
-            var confirmed = await dialogs.ConfirmAsync(
-                    ShellStrings.NotRepositoryTitle,
-                    ShellStrings.NotRepositoryMessage(folder),
-                    ShellStrings.GitInit,
-                    ShellStrings.Cancel)
-                .ConfigureAwait(true);
-            if (!confirmed)
-            {
-                return;
-            }
-
-            var init = await Task.Run(() => composition.Git.RunAsync(folder, ["init"], ct), ct).ConfigureAwait(true);
-            if (!init.Success)
-            {
-                Status.SetWorkspaceProblem(ShellStrings.GitInitFailed(init.StandardError.Trim()));
-                return;
-            }
-        }
-
-        var name = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        var registry = composition.Projects;
-        await BackgroundRead.RunAsync(token => registry.AddAsync(folder, name, ProjectKind.Repository, token), ct)
-            .ConfigureAwait(true);
-        RefreshProjectCacheAsync();
-        await RefreshTreesAsync(ct).ConfigureAwait(true);
-    }
+    /// <summary>
+    /// The add-project button: an existing folder, a clone or a new repository. The flow itself lives in
+    /// <c>MainWindowViewModel.Projects.cs</c> (wave W9), next to the creation dialog and the registration every branch shares;
+    /// this method only keeps the name the command and the panel button were wired to.
+    /// </summary>
+    private Task AddProjectAsync(CancellationToken ct) => AddProjectFlowAsync(ct);
 
     private async Task<bool> ConfirmAndCreateAsync(Func<CancellationToken, Task<SessionInfo>> factory)
     {
@@ -3148,6 +3121,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         closing = true;
+        CloseOnboarding();
         if (settingsWindow is { } window)
         {
             window.Closed -= OnSettingsWindowClosed;

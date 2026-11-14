@@ -93,11 +93,11 @@ public sealed partial class GitCli
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
 
-        var stdoutTask = PumpAsync(process.StandardOutput.BaseStream, options.OnStandardOutputLine, captureLimit, keepTail: false, timeoutSource.Token);
+        var stdoutTask = PumpAsync(process.StandardOutput.BaseStream, options.OnStandardOutputLine, captureLimit, keepTail: false, options.CarriageReturnEndsLine, timeoutSource.Token);
 
         // git writes diagnostics to stderr with the decisive line last (a hook's verdict, the rejecting rule), so stderr
         // keeps its tail: a hook that prints more than the cap must not lose the line that says why it refused.
-        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, Math.Min(captureLimit, ErrorCaptureCharacters), keepTail: true, timeoutSource.Token);
+        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, Math.Min(captureLimit, ErrorCaptureCharacters), keepTail: true, options.CarriageReturnEndsLine, timeoutSource.Token);
         var stdinTask = standardInput is null ? Task.CompletedTask : WriteStandardInputAsync(process, standardInput, timeoutSource.Token);
 
         var timedOut = false;
@@ -187,7 +187,7 @@ public sealed partial class GitCli
         using var process = Start(workingDirectory, arguments);
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
-        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, keepTail: true, timeoutSource.Token);
+        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, keepTail: true, carriageReturnEndsLine: false, timeoutSource.Token);
 
         try
         {
@@ -224,7 +224,7 @@ public sealed partial class GitCli
         using var process = Start(workingDirectory, arguments);
         using var timeoutSource = CreateTimeoutSource(ct, timeout);
         using var killOnCancel = timeoutSource.Token.Register(static state => TryKill((Process)state!), process);
-        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, keepTail: true, timeoutSource.Token);
+        var stderrTask = PumpAsync(process.StandardError.BaseStream, options.OnStandardErrorLine, ErrorCaptureCharacters, keepTail: true, carriageReturnEndsLine: false, timeoutSource.Token);
 
         try
         {
@@ -1060,12 +1060,17 @@ public sealed partial class GitCli
         Action<string>? onLine,
         int captureLimit,
         bool keepTail,
+        bool carriageReturnEndsLine,
         CancellationToken ct)
     {
         var limit = Math.Max(0, captureLimit);
         var capture = new StringBuilder(Math.Min(limit, 64 * 1024));
         var line = onLine is null ? null : new StringBuilder(256);
         var truncated = false;
+
+        // A chunk that ends on '\r' has already ended its line; whether the '\n' that opens the next chunk is the
+        // second half of that CRLF can only be decided when the chunk arrives, so the pending skip survives between calls.
+        var skipLeadingLf = false;
         var decoder = Encoding.UTF8.GetDecoder();
         var bytes = ArrayPool<byte>.Shared.Rent(ByteBufferSize);
         var chars = ArrayPool<char>.Shared.Rent(Encoding.UTF8.GetMaxCharCount(ByteBufferSize));
@@ -1092,14 +1097,14 @@ public sealed partial class GitCli
                 var count = decoder.GetChars(bytes.AsSpan(0, read), chars, flush: false);
                 if (count > 0)
                 {
-                    Consume(chars.AsSpan(0, count), capture, line, onLine, limit, keepTail, ref truncated);
+                    Consume(chars.AsSpan(0, count), capture, line, onLine, limit, keepTail, carriageReturnEndsLine, ref skipLeadingLf, ref truncated);
                 }
             }
 
             var tail = decoder.GetChars(ReadOnlySpan<byte>.Empty, chars, flush: true);
             if (tail > 0)
             {
-                Consume(chars.AsSpan(0, tail), capture, line, onLine, limit, keepTail, ref truncated);
+                Consume(chars.AsSpan(0, tail), capture, line, onLine, limit, keepTail, carriageReturnEndsLine, ref skipLeadingLf, ref truncated);
             }
         }
         finally
@@ -1141,6 +1146,8 @@ public sealed partial class GitCli
         Action<string>? onLine,
         int limit,
         bool keepTail,
+        bool carriageReturnEndsLine,
+        ref bool skipLeadingLf,
         ref bool truncated)
     {
         if (keepTail)
@@ -1178,10 +1185,22 @@ public sealed partial class GitCli
         }
 
         var position = 0;
+
+        // The pending skip is spent on the first character of this chunk whatever it is: a '\n' is the second half of
+        // the CRLF that ended the last chunk, anything else means the '\r' stood alone and the break already happened.
+        if (skipLeadingLf)
+        {
+            skipLeadingLf = false;
+            if (span.Length > 0 && span[0] == '\n')
+            {
+                position = 1;
+            }
+        }
+
         while (position < span.Length)
         {
             var rest = span[position..];
-            var newline = rest.IndexOf('\n');
+            var newline = carriageReturnEndsLine ? rest.IndexOfAny('\n', '\r') : rest.IndexOf('\n');
             if (newline < 0)
             {
                 AppendBounded(line, rest, MaxCallbackLineCharacters);
@@ -1193,6 +1212,23 @@ public sealed partial class GitCli
             var text = line.Length > 0 && line[^1] == '\r' ? line.ToString(0, line.Length - 1) : line.ToString();
             line.Clear();
             onLine(text);
+
+            // CRLF is one break, not a break plus an empty line: swallow the '\n' that follows this '\r', in this
+            // chunk when it is already there and across the chunk boundary when it is not.
+            if (carriageReturnEndsLine && rest[newline] == '\r')
+            {
+                if (position < span.Length)
+                {
+                    if (span[position] == '\n')
+                    {
+                        position++;
+                    }
+                }
+                else
+                {
+                    skipLeadingLf = true;
+                }
+            }
         }
     }
 

@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.ProjectsSettingsSectionView"
+             x:DataType="settings:ProjectsSettingsSectionViewModel">
+  <!-- The `projects` section body: how long a clone may run, and where a cloned or created project goes. Both write the
+       live preferences, so the next add-project dialog uses them without a restart; the directory picker itself is the
+       view's, because it needs a window, and answers through CloneDirectory. -->
+  <StackPanel Spacing="6">
+    <Grid ColumnDefinitions="180,*" Margin="0,3,0,0">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [settings.projects.timeoutLabel], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinCloneTimeoutSeconds}"
+                     Maximum="{Binding MaxCloneTimeoutSeconds}"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding CloneTimeoutSeconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="settings-projects-timeout"
+                     AutomationProperties.Name="{Binding [settings.projects.timeoutLabel], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [settings.projects.timeoutHint], Source={x:Static loc:Loc.Instance}}" />
+
+    <Grid ColumnDefinitions="180,*,Auto,Auto" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [settings.projects.directoryLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBox Grid.Column="1"
+               IsReadOnly="True"
+               Text="{Binding EffectiveDirectoryText}"
+               AutomationProperties.AutomationId="settings-projects-directory"
+               AutomationProperties.Name="{Binding [settings.projects.directoryLabel], Source={x:Static loc:Loc.Instance}}" />
+      <Button Grid.Column="2"
+              Classes="ghost"
+              Margin="8,0,0,0"
+              Content="{Binding [settings.projects.browse], Source={x:Static loc:Loc.Instance}}"
+              Command="{Binding BrowseCommand}"
+              AutomationProperties.AutomationId="settings-projects-browse"
+              AutomationProperties.Name="{Binding [settings.projects.browse], Source={x:Static loc:Loc.Instance}}" />
+      <Button Grid.Column="3"
+              Classes="ghost"
+              Margin="8,0,0,0"
+              Content="{Binding [settings.projects.clear], Source={x:Static loc:Loc.Instance}}"
+              Command="{Binding ClearCommand}"
+              AutomationProperties.AutomationId="settings-projects-clear"
+              AutomationProperties.Name="{Binding [settings.projects.clear], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [settings.projects.directoryHint], Source={x:Static loc:Loc.Instance}}" />
+  </StackPanel>
+</UserControl>

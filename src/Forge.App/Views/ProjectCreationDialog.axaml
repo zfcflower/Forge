@@ -1,0 +1,126 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Forge.App.ViewModels"
+        xmlns:loc="using:Forge.App.Localization"
+        x:Class="Forge.App.Views.ProjectCreationDialog"
+        x:DataType="vm:ProjectCreationViewModel"
+        Title="{Binding TitleText}"
+        Width="560"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource SurfaceBackgroundBrush}"
+        AutomationProperties.AutomationId="project-creation-dialog">
+  <StackPanel Margin="18,16" Spacing="12">
+    <!-- What this dialog is for: one sentence, mode-dependent. -->
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding IntroText}"
+               AutomationProperties.AutomationId="project-create-intro" />
+
+    <!-- The remote, clone mode only: editing it re-derives the folder name until the name is typed by hand. -->
+    <StackPanel Spacing="4" IsVisible="{Binding IsClone}">
+      <TextBlock Classes="label"
+                 Text="{Binding [projectCreate.urlLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBox x:Name="UrlBox"
+               Text="{Binding Url, Mode=TwoWay}"
+               PlaceholderText="{Binding [projectCreate.urlPlaceholder], Source={x:Static loc:Loc.Instance}}"
+               AutomationProperties.AutomationId="project-create-url"
+               AutomationProperties.Name="{Binding [projectCreate.urlLabel], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+
+    <!-- Where the folder goes: picked with the folder browser, shown read-only (the picker is the one writer). -->
+    <StackPanel Spacing="4">
+      <TextBlock Classes="label"
+                 Text="{Binding [projectCreate.parentLabel], Source={x:Static loc:Loc.Instance}}" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBox x:Name="ParentBox"
+                 Grid.Column="0"
+                 IsReadOnly="True"
+                 Text="{Binding ParentDirectory}"
+                 AutomationProperties.AutomationId="project-create-parent"
+                 AutomationProperties.Name="{Binding [projectCreate.parentLabel], Source={x:Static loc:Loc.Instance}}" />
+        <Button Grid.Column="1"
+                Classes="ghost"
+                Margin="8,0,0,0"
+                Content="{Binding [projectCreate.browse], Source={x:Static loc:Loc.Instance}}"
+                Click="OnBrowseClick"
+                AutomationProperties.AutomationId="project-create-browse"
+                AutomationProperties.Name="{Binding [projectCreate.browse], Source={x:Static loc:Loc.Instance}}" />
+      </Grid>
+    </StackPanel>
+
+    <!-- The folder's name, prefilled from the URL for a clone; the hint is why Start cannot run yet. -->
+    <StackPanel Spacing="4">
+      <TextBlock Classes="label"
+                 Text="{Binding [projectCreate.nameLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBox x:Name="NameBox"
+               Text="{Binding Name, Mode=TwoWay}"
+               PlaceholderText="{Binding [projectCreate.namePlaceholder], Source={x:Static loc:Loc.Instance}}"
+               AutomationProperties.AutomationId="project-create-name"
+               AutomationProperties.Name="{Binding [projectCreate.nameLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Classes="caption"
+                 Foreground="{DynamicResource DangerBrush}"
+                 TextWrapping="Wrap"
+                 MaxHeight="72"
+                 IsVisible="{Binding HasHint}"
+                 Text="{Binding Hint}"
+                 AutomationProperties.AutomationId="project-create-hint" />
+    </StackPanel>
+
+    <!-- What exactly will be created, as one full path. -->
+    <Grid ColumnDefinitions="Auto,*" Margin="0,2,0,0">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Margin="0,0,12,0"
+                 Text="{Binding [projectCreate.destinationLabel], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 TextTrimming="CharacterEllipsis"
+                 ToolTip.Tip="{Binding DestinationText}"
+                 Text="{Binding DestinationText}"
+                 AutomationProperties.AutomationId="project-create-destination" />
+    </Grid>
+
+    <!-- Clone progress: the bar and the phase line only exist while a clone runs; a new repository reports nothing. -->
+    <StackPanel Spacing="4" IsVisible="{Binding IsClone}">
+      <ProgressBar Minimum="0"
+                   Maximum="100"
+                   IsVisible="{Binding IsRunning}"
+                   IsIndeterminate="{Binding IsProgressIndeterminate}"
+                   Value="{Binding ProgressPercent}"
+                   AutomationProperties.AutomationId="project-create-progress" />
+      <TextBlock Classes="caption"
+                 IsVisible="{Binding IsRunning}"
+                 TextTrimming="CharacterEllipsis"
+                 Text="{Binding ProgressText}"
+                 AutomationProperties.AutomationId="project-create-progress-text" />
+    </StackPanel>
+
+    <!-- The last attempt's own failure (git's message); refused input is the hint's job, not this row's. -->
+    <TextBlock Classes="caption"
+               Foreground="{DynamicResource DangerBrush}"
+               TextWrapping="Wrap"
+               MaxHeight="120"
+               IsVisible="{Binding HasError}"
+               Text="{Binding Error}"
+               AutomationProperties.AutomationId="project-create-error" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
+      <Button x:Name="CancelButton"
+              Classes="ghost"
+              Content="{Binding CancelText}"
+              IsCancel="True"
+              Click="OnCancelClick"
+              AutomationProperties.AutomationId="project-create-cancel" />
+      <Button x:Name="StartButton"
+              Classes="primary"
+              Content="{Binding StartText}"
+              IsDefault="True"
+              Command="{Binding StartCommand}"
+              AutomationProperties.AutomationId="project-create-start" />
+    </StackPanel>
+  </StackPanel>
+</Window>

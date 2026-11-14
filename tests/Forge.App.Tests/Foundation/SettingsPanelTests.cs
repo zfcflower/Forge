@@ -500,6 +500,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Files,
             SettingsSectionIds.Terminal,
             SettingsSectionIds.Git,
+            SettingsSectionIds.Projects,
             SettingsSectionIds.Extensions,
             SettingsSectionIds.Approvals,
             SettingsSectionIds.Skills,
