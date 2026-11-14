@@ -157,6 +157,20 @@ public sealed class RequestReviewTool : ITool
             return new ToolResult("The review could not be started: " + outcome.Text, IsError: true);
         }
 
+        if (outcome.Stopped)
+        {
+            // A stopped reviewer's partial text can already hold a verdict line it wrote before it read everything (or one
+            // quoted from its instructions); reading it would turn an unfinished review into an approval.
+            return new ToolResult(
+                new StringBuilder(160 + Math.Min(outcome.Text.Length, RequestReviewVerdict.MaxReviewChars))
+                    .Append("The review was stopped before it finished, so it has no verdict and is not an approval: ask for another review before relying on it.")
+                    .Append(ResultSeparator)
+                    .Append(RequestReviewVerdict.Clamp(outcome.Text))
+                    .Append(outcome.AgentId.Length > 0 ? "\n\n[agent_id: " + outcome.AgentId + "]" : string.Empty)
+                    .ToString(),
+                IsError: true);
+        }
+
         if (string.IsNullOrWhiteSpace(outcome.Text))
         {
             return new ToolResult("The reviewer returned no text; nothing was reviewed.", IsError: true);

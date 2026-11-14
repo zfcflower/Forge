@@ -50,6 +50,13 @@ public sealed record ReviewChangeSet
     public string? Base { get; init; }
 
     /// <summary>
+    /// The change set is one commit against its parent (<see cref="ReviewChangeSetRequest.Commit"/>) rather than a range
+    /// plus the working tree. <c>git_diff</c> only reads ranges up to HEAD plus the uncommitted tree, so the package has to
+    /// tell the reviewer that reading "the rest" with it also shows changes that are not part of this commit.
+    /// </summary>
+    public bool SingleCommit { get; init; }
+
+    /// <summary>
     /// The paths the change set was narrowed to; empty means the whole change set. The package restates them, because a
     /// reviewer cannot tell "nothing else changed" from "only these paths were read" and would report missing call sites
     /// that were simply filtered out.

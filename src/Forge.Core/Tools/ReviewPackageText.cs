@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 namespace Forge.Core.Tools;
 
@@ -41,9 +42,6 @@ public static class ReviewPackageText
         "The diff is git's output for tracked changes; a file listed as added with no diff section of its own is untracked - read it before you judge.";
 
     private const string ClosingLine = "Report findings as your instructions describe and end with the verdict line.";
-
-    private const string RestOfDiff =
-        "read the rest with git_diff, passing paths to narrow it or stat_only for the file list alone.";
 
     /// <summary>Renders the package text the reviewer receives as its task, and whether the diff inside it is incomplete.</summary>
     public static ReviewPackageBuild Render(ReviewBrief brief, ReviewChangeSet changeSet)
@@ -104,23 +102,16 @@ public static class ReviewPackageText
 
         if (changeSet.Paths.Count > 0)
         {
+            // The caller chooses the list, so it is held to the same field cap as the other caller-written text: thousands
+            // of paths must not push the diff out of the reviewer's context.
             builder.Append("narrowed to: ");
-            for (var index = 0; index < changeSet.Paths.Count; index++)
-            {
-                if (index > 0)
-                {
-                    builder.Append(", ");
-                }
-
-                builder.Append(changeSet.Paths[index]);
-            }
-
+            AppendClamped(builder, string.Join(", ", changeSet.Paths), MaxFieldChars);
             builder.Append(" (only these paths were read; changes outside them are not part of this review)\n");
         }
 
         builder.Append('\n');
         AppendCommits(builder, changeSet.Commits, changeSet.CommitsTruncated);
-        AppendFiles(builder, changeSet.Files);
+        AppendFiles(builder, changeSet);
 
         builder.Append("\nDiff:\n");
         if (diff.Length == 0)
@@ -139,12 +130,15 @@ public static class ReviewPackageText
             if (cut)
             {
                 builder.Append("[the diff was cut at ").Append(shown).Append(" of ").Append(diff.Length)
-                    .Append(" characters, so it is incomplete: ").Append(RestOfDiff).Append("]\n");
+                    .Append(" characters, so it is incomplete: read the rest with ");
+                AppendGitDiffHint(builder, changeSet, statOnly: false);
+                builder.Append("]\n");
             }
             else if (changeSet.DiffTruncated)
             {
-                builder.Append("[the diff is incomplete: it was truncated before this package was built; ")
-                    .Append(RestOfDiff).Append("]\n");
+                builder.Append("[the diff is incomplete: it was truncated before this package was built; read the rest with ");
+                AppendGitDiffHint(builder, changeSet, statOnly: false);
+                builder.Append("]\n");
             }
         }
 
@@ -208,8 +202,9 @@ public static class ReviewPackageText
     }
 
     /// <summary>One line per file, in git's order, within its own line budget.</summary>
-    private static void AppendFiles(StringBuilder builder, IReadOnlyList<ReviewChangedFile> files)
+    private static void AppendFiles(StringBuilder builder, ReviewChangeSet changeSet)
     {
+        var files = changeSet.Files;
         if (files.Count == 0)
         {
             builder.Append("\nFiles: none\n");
@@ -232,8 +227,57 @@ public static class ReviewPackageText
 
         if (written < files.Count)
         {
-            builder.Append("... and ").Append(files.Count - written)
-                .Append(" more files (run git_diff {\"stat_only\": true} to list them)\n");
+            builder.Append("... and ").Append(files.Count - written).Append(" more files (list them with ");
+            AppendGitDiffHint(builder, changeSet, statOnly: true);
+            builder.Append(")\n");
+        }
+    }
+
+    /// <summary>
+    /// How to read more of this change set with <c>git_diff</c>, with the arguments that reproduce it. A bare
+    /// <c>git_diff</c> compares the repository's default branch, so after a review against another base (or of one step's
+    /// commit) it would show a different change set and the reviewer would judge changes it was never asked about.
+    /// <c>git_diff</c> reads <c>base...HEAD</c> plus the uncommitted tree: with the merge-base this package was built from
+    /// that is exactly the branch change set, while for a single commit it is that commit and everything after it.
+    /// </summary>
+    private static void AppendGitDiffHint(StringBuilder builder, ReviewChangeSet changeSet, bool statOnly)
+    {
+        var baseSha = string.IsNullOrWhiteSpace(changeSet.Base) ? null : changeSet.Base.Trim();
+        if (changeSet.SingleCommit && baseSha is null)
+        {
+            builder.Append("the read tool on the listed files: git_diff cannot isolate a root commit");
+            return;
+        }
+
+        builder.Append("git_diff {");
+        if (baseSha is not null)
+        {
+            builder.Append("\"base\": \"").Append(JsonEncodedText.Encode(baseSha).Value).Append('"');
+            if (statOnly)
+            {
+                builder.Append(", ");
+            }
+        }
+
+        if (statOnly)
+        {
+            builder.Append("\"stat_only\": true");
+        }
+
+        builder.Append('}');
+        if (!statOnly)
+        {
+            builder.Append(", adding paths to narrow it or \"stat_only\": true for the file list alone");
+        }
+
+        if (changeSet.SingleCommit)
+        {
+            builder.Append(" - that range also holds every commit after ").Append(ShortSha(changeSet.HeadCommit))
+                .Append(" and the uncommitted tree, so judge only what this commit changed");
+        }
+        else if (baseSha is not null)
+        {
+            builder.Append(" - that base reproduces exactly this change set; without it git_diff compares the default branch instead");
         }
     }
 
@@ -284,10 +328,18 @@ public static class ReviewPackageText
         builder.Append(slice).Append('…');
     }
 
-    /// <summary>Where the diff stops: the last line boundary at or before the cap, or the cap itself when there is none.</summary>
+    /// <summary>
+    /// Where the diff stops: the last line boundary at or before the cap, or the cap itself when there is none - moved back
+    /// one character when that would split a surrogate pair, so the package never carries half a character.
+    /// </summary>
     private static int DiffCutLength(string diff)
     {
         var cut = diff.LastIndexOf('\n', MaxDiffChars - 1, MaxDiffChars);
-        return cut <= 0 ? MaxDiffChars : cut;
+        if (cut > 0)
+        {
+            return cut;
+        }
+
+        return char.IsHighSurrogate(diff[MaxDiffChars - 1]) ? MaxDiffChars - 1 : MaxDiffChars;
     }
 }

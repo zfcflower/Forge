@@ -118,7 +118,76 @@ public sealed class ReviewPackageTextTests
         Assert.Contains("modified src/f000.cs", text, StringComparison.Ordinal);
         Assert.Contains("modified src/f199.cs", text, StringComparison.Ordinal);
         Assert.DoesNotContain("src/f200.cs", text, StringComparison.Ordinal);
-        Assert.Contains("... and 50 more files (run git_diff {\"stat_only\": true} to list them)", text, StringComparison.Ordinal);
+        Assert.Contains(
+            "... and 50 more files (list them with git_diff {\"base\": \"0987654321fedcba\", \"stat_only\": true} - that base reproduces exactly this change set",
+            text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_cut_branch_diff_names_the_git_diff_base_that_reproduces_the_change_set()
+    {
+        // A bare git_diff compares the default branch; after a review against another base it would show other changes.
+        var diff = string.Concat(Enumerable.Range(0, 700).Select(DatedLine));
+
+        var text = Render(Brief(), ChangeSet(diff, [File(0)]));
+
+        Assert.Contains(
+            "read the rest with git_diff {\"base\": \"0987654321fedcba\"}, adding paths to narrow it",
+            text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_cut_single_commit_diff_warns_that_git_diff_also_shows_later_commits()
+    {
+        var diff = string.Concat(Enumerable.Range(0, 700).Select(DatedLine));
+        var changeSet = ChangeSet(diff, [File(0)]) with { SingleCommit = true };
+
+        var text = Render(Brief(), changeSet);
+
+        Assert.Contains("git_diff {\"base\": \"0987654321fedcba\"}", text, StringComparison.Ordinal);
+        Assert.Contains(
+            "that range also holds every commit after 1234567 and the uncommitted tree, so judge only what this commit changed",
+            text,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("reproduces exactly this change set", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_cut_root_commit_diff_points_at_the_files_because_git_diff_cannot_isolate_it()
+    {
+        var diff = string.Concat(Enumerable.Range(0, 700).Select(DatedLine));
+        var changeSet = ChangeSet(diff, [File(0)]) with { SingleCommit = true, Base = null };
+
+        var text = Render(Brief(), changeSet);
+
+        Assert.Contains("read the rest with the read tool on the listed files: git_diff cannot isolate a root commit", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_diff_without_line_breaks_is_never_cut_inside_a_surrogate_pair()
+    {
+        // The cap falls on the high half of the pair at its last position, so a naive cut would keep half a character.
+        var diff = new string('a', ReviewPackageText.MaxDiffChars - 1) + "\U0001F600" + "tail";
+
+        var text = Render(Brief(), ChangeSet(diff, [File(0)]));
+
+        Assert.Contains("cut at " + (ReviewPackageText.MaxDiffChars - 1), text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\uD83D", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_huge_path_list_is_held_to_the_field_cap()
+    {
+        var paths = Enumerable.Range(0, 2_000).Select(static index => $"src/very/long/directory/name/file{index:D4}.cs").ToArray();
+
+        var text = Render(Brief(), ChangeSet(files: [File(0)], paths: paths));
+
+        var start = text.IndexOf("narrowed to: ", StringComparison.Ordinal);
+        var end = text.IndexOf(" (only these paths were read;", start, StringComparison.Ordinal);
+        Assert.InRange(end - start, 1, ReviewPackageText.MaxFieldChars + "narrowed to: ".Length + 1);
+        Assert.Equal('…', text[end - 1]);
     }
 
     [Fact]

@@ -116,7 +116,8 @@ internal sealed record AgentRuntimeServices(
     /// The <c>agents</c> section's two dials: how many agents of a session tree may run at once, and whether a session may
     /// spawn sub-agents at all. Read when a host is built and again before every turn, so a change reaches a running session
     /// from its next turn: a raised cap lets agents that are already queued start at once, a lower one only stops new ones
-    /// from starting, and switching spawning off takes <c>spawn_agent</c> out of the model's tool set while the control tools
+    /// from starting, and switching spawning off takes <c>spawn_agent</c> and <c>request_review</c> (it runs a Reviewer
+    /// sub-agent) out of the model's tool set while the control tools
     /// a parent already needs (steer, follow-up, stop) stay. Null = <see cref="SubAgentLimits.Default"/> (a unit test, or
     /// a runtime assembled without the settings store).
     /// </summary>
@@ -583,9 +584,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     }
 
     /// <summary>
-    /// Re-applies the user's tool switches, plus <c>spawn_agent</c> while sub-agents are switched off: the model then has no
-    /// way to start a child, while the control tools a parent already needs stay available, so the children a session started
-    /// before the switch can still be steered and stopped. Publishes a new tool set only when a switch moved.
+    /// The tools that start a child agent, taken out while sub-agents are switched off. <c>request_review</c> is one of them:
+    /// it runs a Reviewer sub-agent, so leaving it in would let the model start a child the user just switched off.
+    /// </summary>
+    private static readonly string[] SpawningTools = [SpawnAgentTool.Name, RequestReviewTool.Name];
+
+    /// <summary>
+    /// Re-applies the user's tool switches, plus the spawning tools (<see cref="SpawningTools"/>) while sub-agents are
+    /// switched off: the model then has no way to start a child, while the control tools a parent already needs stay
+    /// available, so the children a session started before the switch can still be steered and stopped. Publishes a new tool
+    /// set only when a switch moved.
     /// </summary>
     private void ApplyDisabledTools(AgentHost target)
     {
@@ -593,12 +601,12 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         if (services.DisabledTools is not { } disabled)
         {
             // A runtime without the tools store (a unit test) still honours the sub-agent switch, in both directions.
-            target.SetDisabledTools(subAgents.Enabled ? [] : [SpawnAgentTool.Name]);
+            target.SetDisabledTools(subAgents.Enabled ? [] : SpawningTools);
             return;
         }
 
         var stored = ToolCatalog.EffectiveDisabled(disabled());
-        target.SetDisabledTools(subAgents.Enabled ? stored : stored.Append(SpawnAgentTool.Name));
+        target.SetDisabledTools(subAgents.Enabled ? stored : stored.Concat(SpawningTools));
     }
 
     /// <summary>

@@ -419,4 +419,118 @@ public sealed class ReviewChangeSetSourceTests
         Assert.Equal("modified", file.Status);
         Assert.Contains("+v2", changeSet.DiffText, StringComparison.Ordinal);
     }
+
+    // ------------------------------------------------------------ package contents: file kinds, caps, empty
+
+    [Fact]
+    public async Task A_commit_that_deletes_renames_and_adds_a_binary_file_lists_each_with_its_own_status()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        Commit(work, "setup", ("gone.txt", "doomed\n"), ("keep.txt", "one\ntwo\nthree\nfour\nfive\nsix\n"));
+        GitTestShell.RunChecked(work, "rm", "-q", "gone.txt");
+        GitTestShell.RunChecked(work, "mv", "keep.txt", "moved.txt");
+        File.WriteAllBytes(Path.Combine(work, "blob.bin"), [1, 2, 0, 3, 0, 4]);
+        GitTestShell.RunChecked(work, "add", "-A");
+        GitTestShell.RunChecked(work, "commit", "-q", "-m", "reshape");
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Commit = HeadOf(work) },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.True(changeSet.SingleCommit);
+        Assert.Contains(changeSet.Files, static file => file.Path == "gone.txt" && file.Status == "deleted" && !file.IsBinary);
+        Assert.Contains(changeSet.Files, static file => file.Path == "moved.txt" && file.Status == "renamed");
+        Assert.Contains(changeSet.Files, static file => file.Path == "blob.bin" && file.Status == "added" && file.IsBinary);
+        Assert.Equal(3, changeSet.Files.Count);
+    }
+
+    [Fact]
+    public async Task An_untracked_file_is_binary_exactly_when_git_would_say_so_from_its_first_8000_bytes()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        var early = new byte[100];
+        early[10] = 0;
+        Array.Fill(early, (byte)'a', 11, 89);
+        File.WriteAllBytes(Path.Combine(work, "early-nul.dat"), early);
+
+        // A NUL past git's 8000-byte window does not make a file binary to git; the 8000-byte probe agrees with git.
+        var late = Enumerable.Repeat((byte)'a', 20_000).ToArray();
+        late[15_000] = 0;
+        File.WriteAllBytes(Path.Combine(work, "late-nul.txt"), late);
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Base = "main" },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var files = result.ChangeSet!.Files;
+        Assert.Contains(files, static file => file.Path == "early-nul.dat" && file.Status == "added" && file.IsBinary);
+        Assert.Contains(files, static file => file.Path == "late-nul.txt" && file.Status == "added" && !file.IsBinary);
+        Assert.False(result.ChangeSet.SingleCommit);
+    }
+
+    [Fact]
+    public async Task A_diff_over_gits_capture_limit_fails_with_text_that_says_how_to_narrow_it()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        Write(work, "file.txt", string.Concat(Enumerable.Repeat("a long changed line of text\n", 400)));
+        var source = new ReviewChangeSetSource(new GitCli { MaxCapturedCharacters = 2_000 });
+
+        var result = await source.BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Base = "main" },
+            CancellationToken.None);
+
+        Assert.True(result.IsError);
+        Assert.Contains("larger than git's capture limit", result.Error, StringComparison.Ordinal);
+        Assert.Contains("paths", result.Error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    public async Task The_commit_list_is_marked_truncated_only_when_the_branch_has_more_commits_than_the_cap(
+        int cap,
+        bool truncated)
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+        var baseline = HeadOf(work);
+        Commit(work, "one", ("a.txt", "a\n"));
+        Commit(work, "two", ("b.txt", "b\n"));
+        Commit(work, "three", ("c.txt", "c\n"));
+
+        var result = await new ReviewChangeSetSource(new GitCli(), cap).BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Base = baseline },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.Equal(truncated, changeSet.CommitsTruncated);
+        Assert.Equal(truncated ? 2 : 3, changeSet.Commits.Count);
+        Assert.Equal("three", changeSet.Commits[0].Subject);
+        Assert.Equal(3, changeSet.Files.Count);
+    }
+
+    [Fact]
+    public async Task A_branch_with_no_change_against_its_base_is_an_empty_change_set_not_an_error()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var work = sandbox.CloneTracked("work");
+
+        var result = await NewSource().BuildAsync(
+            new ReviewChangeSetRequest { WorkingDirectory = work, Base = "main" },
+            CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var changeSet = result.ChangeSet!;
+        Assert.Empty(changeSet.Files);
+        Assert.Empty(changeSet.Commits);
+        Assert.Equal(string.Empty, changeSet.DiffText);
+        Assert.Equal(HeadOf(work), changeSet.Base);
+    }
 }

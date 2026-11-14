@@ -4,13 +4,24 @@ using Forge.Workspace;
 namespace Forge.App.Git;
 
 /// <summary>Builds the git side of a review request: what changed, in which commits, as the raw unified diff.</summary>
-internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
+internal sealed class ReviewChangeSetSource(GitCli git, int commitListLimit = ReviewChangeSetSource.DefaultCommitListLimit)
+    : IReviewChangeSetSource
 {
     /// <summary>
     /// Commits listed for a branch review, newest first; one more than the cap is fetched so a truncated list is known to be
-    /// truncated instead of being presented as the branch's commit count.
+    /// truncated instead of being presented as the branch's commit count. The constructor parameter exists for tests, which
+    /// cannot build a thousand-commit history cheaply.
     /// </summary>
-    private const int CommitListLimit = 1_000;
+    internal const int DefaultCommitListLimit = 1_000;
+
+    /// <summary>
+    /// Bytes of each untracked file read to build its file entry. The package only lists untracked files (path, status,
+    /// binary or not); the reviewer opens them itself. 8000 bytes is git's own binary heuristic window, so the binary flag
+    /// is what git would say, without reading up to a megabyte of every untracked file only to throw the text away.
+    /// </summary>
+    internal const int UntrackedProbeBytes = 8_000;
+
+    private readonly int commitCap = Math.Max(1, commitListLimit);
 
     /// <summary>
     /// Reads one change set: one commit against its first parent, or the branch plus the uncommitted tree against a base
@@ -46,8 +57,9 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
             GitDiffOptions options;
             IReadOnlyList<ReviewCommit> commits;
             bool commitsTruncated;
+            var singleCommit = !string.IsNullOrWhiteSpace(request.Commit);
 
-            if (!string.IsNullOrWhiteSpace(request.Commit))
+            if (singleCommit)
             {
                 // Resolve first: `git log <missing sha>` exits 128 with git's own fatal line, and a step whose commit was
                 // rebased away or collected must come back as something the model can act on.
@@ -121,13 +133,14 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
                     Paths = request.Paths,
                     // git has no diff text for a file it does not track; the file list adds synthetic add-diffs for them.
                     IncludeUntracked = true,
+                    MaxUntrackedBytes = UntrackedProbeBytes,
                 };
 
                 var history = head is null || baseRevision is null
                     ? []
                     : await ReadCommitsAsync(directory, baseRevision, head, request.Paths, ct).ConfigureAwait(false);
-                commitsTruncated = history.Count > CommitListLimit;
-                commits = commitsTruncated ? [.. history.Take(CommitListLimit)] : history;
+                commitsTruncated = history.Count > commitCap;
+                commits = commitsTruncated ? [.. history.Take(commitCap)] : history;
             }
 
             var snapshot = await git.GetDiffSnapshotAsync(directory, options, ct).ConfigureAwait(false);
@@ -144,6 +157,7 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
                     Branch = status.Branch,
                     HeadCommit = head,
                     Base = baseRevision,
+                    SingleCommit = singleCommit,
                     Paths = request.Paths,
                     Files = changed,
                     Commits = commits,
@@ -183,10 +197,10 @@ internal sealed class ReviewChangeSetSource(GitCli git) : IReviewChangeSetSource
     {
         var history = await git.GetLogAsync(
                 directory,
-                new GitLogOptions { Revision = exclude + ".." + head, Paths = paths, Limit = CommitListLimit + 1 },
+                new GitLogOptions { Revision = exclude + ".." + head, Paths = paths, Limit = commitCap + 1 },
                 ct)
             .ConfigureAwait(false);
-        var commits = new List<ReviewCommit>(Math.Min(history.Count, CommitListLimit));
+        var commits = new List<ReviewCommit>(history.Count);
         foreach (var commit in history)
         {
             commits.Add(new ReviewCommit(commit.Id, commit.Subject));

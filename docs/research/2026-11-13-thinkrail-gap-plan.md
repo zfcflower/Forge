@@ -273,3 +273,14 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 4. **minor——同一份 diff 跑两个 git 进程,且注释谎称两者同源。** 新增 `GitCli.GetDiffSnapshotAsync`(一次捕获同时给文本与文件,`GetDiffAsync` 改为它的 `.Files`),评审只调它;解析/补未跟踪的逻辑仍只有一份。
 5. **minor——提交对象被抹掉时给模型的是 git 原文。** 先 `rev-parse <sha>^{commit}` 判存在,不存在就返回“这个提交在本仓库里不存在”。
 6. **测试盲区已补**:基准领先 HEAD 的三点语义、默认基准解析成 sha(不再出现 `origin/`)、`GitCli` 提交对象丢失、`MaxParallelSubAgents = 1` 下 `Detach` 必需(实测把 `Detach` 拿掉该用例会 15s 超时)、`step_id` 指向 `CommitId == null` 的步骤、收窄字段与截断计数。
+
+**合入前复核(第二轮评审)拉出的问题(已改,各有测试)**:
+
+1. **被停止的 Reviewer 的部分文本会被当成结论。** `sub_agent_stop` 停掉的 Reviewer 若已写过 `verdict: approve`,工具会报通过。`SubAgentOutcome` 增 `Stopped`,`RequestReviewTool` 见到它直接返回错误“没有结论”,不解析原文。
+2. **子 Agent 开关关掉后 `request_review` 仍可派生 Reviewer。** `SessionRuntime.ApplyDisabledTools` 改为撤下 `SpawningTools = [spawn_agent, request_review]`。
+3. **截断退路指向裸 `git_diff`。** 裸调用比较默认分支,与自定义 `base`、单提交评审不是同一变更集;现在提示带 `{"base": "<sha>"}`,单提交时声明该范围还含之后的提交,根提交指向 `read`。`ReviewChangeSet` 增 `SingleCommit`。
+4. **每个未跟踪文件读满 1MB 只为列出它。** 改为只探 8000 字节(与 git 二进制判定窗口一致);内容本就不进包。
+5. **`narrowed to:` 路径列表无上限**,改按 2000 字符字段上限截断;**无换行 diff 的截断可能劈开代理对**,已避开。
+6. 测试补齐:停止/父取消/同回合两个评审并发/超长原文的结论读取/截断时给出可复现基准;源侧删除、重命名、二进制、未跟踪二进制窗口、超出捕获上限、提交清单截断(上限经构造参数注入)、空变更集;子 Agent 开关与 `request_review` 联动。
+
+**仍未改(记录原因)**:包内各上限(48000/50/200/2000/8000)仍是内部常量——进设置需要在六·二表登记、改 W0 冻结的 `AppPreferences.cs`、加设置界面与文案,属计划变更,须用户拍板;没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。

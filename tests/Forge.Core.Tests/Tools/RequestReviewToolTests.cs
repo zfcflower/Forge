@@ -116,13 +116,14 @@ public sealed class RequestReviewToolTests
         IChatProvider provider,
         FakeReviewChangeSetSource? source,
         ITodoStore? todos = null,
-        AgentOptions? options = null) =>
+        AgentOptions? options = null,
+        ITool? read = null) =>
         new(new AgentHostOptions
         {
             Providers = _ => provider,
             Tools =
             [
-                FakeTool.Echo("read"),
+                read ?? FakeTool.Echo("read"),
                 FakeTool.Echo("grep"),
                 FakeTool.Echo("find"),
                 FakeTool.Echo("ls"),
@@ -669,5 +670,152 @@ public sealed class RequestReviewToolTests
         {
             slot.Dispose();
         }
+    }
+
+    /// <summary>A reviewer read that blocks until its token is cancelled, signalling when it was entered.</summary>
+    private static FakeTool BlockingRead(TaskCompletionSource entered, TaskCompletionSource? cancelled = null) =>
+        new("read", ToolSideEffect.ReadOnly, async (_, _, ct) =>
+        {
+            entered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                cancelled?.TrySetResult();
+                throw;
+            }
+
+            return new ToolResult("unreachable");
+        });
+
+    /// <summary>
+    /// The parent asks for one review; the Reviewer's first answer already carries a verdict line next to a read it never
+    /// finishes, which is what a stop in the middle of a review leaves behind.
+    /// </summary>
+    private static FakeProvider PrematureVerdictScript() =>
+        new((request, index) =>
+            Turn.LastUserText(request).StartsWith("This is a review request:", StringComparison.Ordinal)
+                ?
+                [
+                    new MessageCompleted(
+                        new ChatMessage(
+                            MessageRole.Assistant,
+                            [new TextBlock("verdict: approve"), new ToolCallBlock("r-1", "read", "{}")]),
+                        new TokenUsage(10, 5),
+                        StopReason.ToolUse),
+                ]
+                : index == 0
+                    ? Turn.Call(("call-1", RequestReviewTool.Name, """{"intent":"add the request_review tool"}"""))
+                    : Turn.Say("parent done"));
+
+    [Fact]
+    public async Task A_reviewer_stopped_mid_review_is_an_error_and_never_its_partial_verdict()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = CreateHost(PrematureVerdictScript(), new FakeReviewChangeSetSource(), read: BlockingRead(entered));
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        var run = host.RunToCompletionAsync(root);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(SubAgentControlResult.Accepted, host.SubAgentControl.Stop("Reviewer-1", "user stopped it"));
+        await run;
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.True(result.IsError);
+        Assert.StartsWith("The review was stopped before it finished", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nothing blocking was found", result.Content, StringComparison.Ordinal);
+
+        // The partial text does carry the premature verdict line, so this case is the one a verdict parse would misread.
+        Assert.Contains("verdict: approve", result.Content, StringComparison.Ordinal);
+        Assert.False(result.Content.StartsWith("verdict:", StringComparison.Ordinal));
+        Assert.Contains("[agent_id: Reviewer-1]", result.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_parent_during_a_review_cancels_the_reviewer_and_returns_no_verdict()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = CreateHost(PrematureVerdictScript(), new FakeReviewChangeSetSource(), read: BlockingRead(entered, cancelled));
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+        using var cts = new CancellationTokenSource();
+
+        var run = AgentTestHost.CollectAsync(host.RunAsync(root, "go", cts.Token));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await cts.CancelAsync();
+
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The cancellation reached the reviewer's own tool and no tool result (least of all an approval) reached the parent.
+        Assert.DoesNotContain(
+            root.History.SelectMany(static message => message.Content.OfType<ToolResultBlock>()),
+            static block => block.Content.StartsWith("verdict:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Two_reviews_in_one_turn_run_side_by_side_and_each_returns_its_own_verdict()
+    {
+        var source = new FakeReviewChangeSetSource();
+        var provider = new FakeProvider((request, index) =>
+            Turn.LastUserText(request).StartsWith("This is a review request:", StringComparison.Ordinal)
+                ? Turn.Say(Turn.LastUserText(request).Contains("first change", StringComparison.Ordinal)
+                    ? "verdict: approve"
+                    : "blocking: broken\n\nverdict: request changes")
+                : index == 0
+                    ? Turn.Call(
+                        ("call-1", RequestReviewTool.Name, """{"intent":"first change"}"""),
+                        ("call-2", RequestReviewTool.Name, """{"intent":"second change"}"""))
+                    : Turn.Say("parent done"));
+        var host = CreateHost(provider, source, options: new AgentOptions { MaxParallelSubAgents = 2 });
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var results = root.History[2].Content.OfType<ToolResultBlock>().ToDictionary(static block => block.CallId);
+        Assert.Equal(2, results.Count);
+        Assert.StartsWith("verdict: approve", results["call-1"].Content, StringComparison.Ordinal);
+        Assert.StartsWith("verdict: request changes", results["call-2"].Content, StringComparison.Ordinal);
+        Assert.Equal(2, source.Calls);
+        Assert.Equal(2, host.SubAgents.Instances.Select(static instance => instance.Id).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task An_overlong_review_is_cut_in_the_result_but_its_verdict_is_read_from_the_whole_text()
+    {
+        var review = string.Concat(Enumerable.Repeat("minor: a long finding line\n", 400)) + "verdict: request changes";
+        Assert.True(review.Length > RequestReviewVerdict.MaxReviewChars);
+        var host = CreateHost(ReviewScript(review), new FakeReviewChangeSetSource());
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.StartsWith("verdict: request changes", result.Content, StringComparison.Ordinal);
+        Assert.Contains("[the review was cut", result.Content, StringComparison.Ordinal);
+        Assert.True(result.Content.Length < review.Length);
+    }
+
+    [Fact]
+    public async Task A_cut_diff_is_flagged_in_the_result_and_the_reviewer_is_given_the_base_that_reproduces_it()
+    {
+        var diff = "diff --git a/src/f0.cs b/src/f0.cs\n" + string.Concat(Enumerable.Repeat("+a changed line\n", 4_000));
+        Assert.True(diff.Length > ReviewPackageText.MaxDiffChars);
+        var source = new FakeReviewChangeSetSource
+        {
+            Handler = (_, _) => Task.FromResult(ReviewChangeSetResult.Ok(ChangeSet(1, diff))),
+        };
+        var provider = ReviewScript("verdict: approve");
+        var host = CreateHost(provider, source);
+        var root = host.CreateRoot(Session, Path.GetTempPath());
+
+        await host.RunToCompletionAsync(root);
+
+        var result = Assert.Single(root.History[2].Content.OfType<ToolResultBlock>());
+        Assert.Contains("note: the diff was cut", result.Content, StringComparison.Ordinal);
+        var package = Turn.LastUserText(ReviewerRequest(provider));
+        Assert.Contains("git_diff {\"base\": \"0987654321fedcba\"}", package, StringComparison.Ordinal);
     }
 }
