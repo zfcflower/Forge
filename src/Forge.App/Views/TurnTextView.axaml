@@ -6,18 +6,13 @@
              xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.TurnTextView"
              x:DataType="vm:TurnTextViewModel">
-  <!-- The reply text of a turn (wave W4b owns this file: Markdown rendering replaces the segment template). -->
+  <!-- The reply text of a turn, rendered as Markdown (wave W4b), plus the placeholder of a reply that never arrived and the
+       copy button of the whole text. The Markdown tree itself lives in ChatMarkdownView. -->
   <StackPanel>
-    <ItemsControl ItemsSource="{Binding Segments}">
-      <ItemsControl.ItemTemplate>
-        <DataTemplate x:DataType="vm:TextSegmentViewModel">
-          <SelectableTextBlock Text="{Binding Text}"
-                               TextWrapping="Wrap"
-                               Margin="0,2"
-                               Foreground="{DynamicResource TextPrimaryBrush}" />
-        </DataTemplate>
-      </ItemsControl.ItemTemplate>
-    </ItemsControl>
+    <views:ChatMarkdownView />
+    <TextBlock Classes="caption"
+               Text="{Binding PlaceholderText}"
+               IsVisible="{Binding HasPlaceholder}" />
     <views:CopyTextButton Classes="ghost icon"
                           Width="26"
                           Height="22"

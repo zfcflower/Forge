@@ -1,9 +1,7 @@
 using System.Globalization;
 using Avalonia;
-using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -211,25 +209,7 @@ internal static class MarkdownRenderer
         return tb;
     }
 
-    private static Control RenderCode(string text, string info)
-    {
-        var tb = new SelectableTextBlock { Text = text };
-        tb.Classes.Add("md-code-text");
-        var scroller = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = tb,
-        };
-        var border = new Border { Child = scroller };
-        border.Classes.Add("md-code");
-        if (info.Length > 0)
-        {
-            AutomationProperties.SetName(border, info);
-        }
-
-        return border;
-    }
+    private static MarkdownCodeBlock RenderCode(string text, string info) => new(text, info);
 
     private static Control RenderQuote(MdBlock block)
     {

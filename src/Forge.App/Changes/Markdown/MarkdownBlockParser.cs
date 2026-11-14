@@ -96,8 +96,11 @@ internal sealed class MdBlock
 /// </summary>
 internal static class MarkdownBlockParser
 {
-    /// <summary>Parses <paramref name="lines"/>; the first line is numbered <paramref name="firstLineNumber"/>.</summary>
-    public static List<MdBlock> Parse(IReadOnlyList<string> lines, int firstLineNumber = 1)
+    /// <summary>
+    /// Parses <paramref name="lines"/>; the first line is numbered <paramref name="firstLineNumber"/>. A fragment of a larger
+    /// document (<paramref name="top"/> false) is not probed for YAML front matter, which only a document can open with.
+    /// </summary>
+    public static List<MdBlock> Parse(IReadOnlyList<string> lines, int firstLineNumber = 1, bool top = true)
     {
         ArgumentNullException.ThrowIfNull(lines);
         var text = new string[lines.Count];
@@ -109,9 +112,13 @@ internal static class MarkdownBlockParser
         }
 
         var result = new List<MdBlock>();
-        ParseCore(text, src, 0, text.Length, result, top: true);
+        ParseCore(text, src, 0, text.Length, result, top);
         return result;
     }
+
+    /// <summary>Whether <paramref name="line"/> starts a list item that a list of the given orderedness continues with.</summary>
+    internal static bool StartsListItem(string line, bool ordered) =>
+        TryListMarker(line, out var marker) && marker.Ordered == ordered;
 
     public static string PlainText(IReadOnlyList<MdInline> inlines)
     {
