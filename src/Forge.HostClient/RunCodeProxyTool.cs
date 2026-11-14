@@ -57,9 +57,13 @@ internal sealed class RunCodeProxyTool : ITool
 
     /// <summary>The bounds in force right now: the live provider when one is configured, else the fixed options.
     /// Read once per description build and once per invocation, so a settings change reaches the next turn's prompt
-    /// and every later script without rebuilding the tool.</summary>
+    /// and every later script without rebuilding the tool. A provider that answers null is a misconfiguration and throws:
+    /// falling back to <see cref="RunCodeProxyOptions.Execution"/> would silently run a script under budgets nobody chose.</summary>
     private CodeExecutionOptions CurrentExecution =>
-        options.ExecutionProvider?.Invoke() ?? options.Execution;
+        options.ExecutionProvider is { } provider
+            ? provider() ?? throw new InvalidOperationException(
+                "RunCodeProxyOptions.ExecutionProvider returned null; the run_code execution bounds are never optional.")
+            : options.Execution;
 
     public async ValueTask<ToolResult> InvokeAsync(ToolCall call, ToolContext context, CancellationToken ct)
     {
@@ -230,7 +234,6 @@ internal static class RunCodeToolSurface
         hash.Add(execution.MaxResultChars);
         hash.Add(execution.MaxInnerResultChars);
         hash.Add(execution.MaxLogChars);
-        hash.Add(execution.MaxScriptChars);
         return hash.ToHashCode();
     }
 
@@ -393,8 +396,10 @@ internal static class RunCodeProxyOptionsExtensions
                 nameof(options), options.MaxTimeout, "MaxTimeout must not be shorter than DefaultTimeout.");
         }
 
-        var execution = (options.ExecutionProvider?.Invoke() ?? options.Execution)
-            ?? throw new ArgumentNullException(nameof(options), "Execution must not be null.");
+        var execution = options.ExecutionProvider is { } provider
+            ? provider() ?? throw new ArgumentException(
+                "ExecutionProvider returned null; the run_code execution bounds are never optional.", nameof(options))
+            : options.Execution;
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(execution.MaxConcurrentToolCalls, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(execution.MaxScriptChars, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(execution.MaxResultChars, 0);

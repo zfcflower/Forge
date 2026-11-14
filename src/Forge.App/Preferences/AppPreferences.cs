@@ -164,6 +164,20 @@ internal sealed class AppPreferences : ObservableObject
     public const string DefaultChatMermaidDiagramTypes = "flowchart,sequence,state,class,er";
     public const string DefaultProjectsCloneDirectory = "";
 
+    // Wave W14 registers the `run_code` script surface: how many inner tool calls one script keeps in flight, the character
+    // limit of the result the model gets back, the character limit of one Tools.Call result inside the script, and the
+    // tools a script may name (blank means every read-only candidate).
+    public const int MinCodeScriptMaxConcurrentCalls = 1;
+    public const int MaxCodeScriptMaxConcurrentCalls = 32;
+    public const int DefaultCodeScriptMaxConcurrentCalls = 8;
+    public const int MinCodeScriptResultChars = 1000;
+    public const int MaxCodeScriptResultChars = 400000;
+    public const int DefaultCodeScriptResultChars = 40000;
+    public const int MinCodeScriptInnerResultChars = 500;
+    public const int MaxCodeScriptInnerResultChars = 400000;
+    public const int DefaultCodeScriptInnerResultChars = 20000;
+    public const string DefaultCodeScriptTools = "";
+
     private string uiFontFamily = DefaultUiFontFamily;
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
@@ -228,6 +242,10 @@ internal sealed class AppPreferences : ObservableObject
     private string paletteExcludeDirectories = DefaultPaletteExcludeDirectories;
     private string chatMermaidDiagramTypes = DefaultChatMermaidDiagramTypes;
     private string projectsCloneDirectory = DefaultProjectsCloneDirectory;
+    private int codeScriptMaxConcurrentCalls = DefaultCodeScriptMaxConcurrentCalls;
+    private int codeScriptResultChars = DefaultCodeScriptResultChars;
+    private int codeScriptInnerResultChars = DefaultCodeScriptInnerResultChars;
+    private string codeScriptTools = DefaultCodeScriptTools;
     private IReadOnlyList<string> modelsHidden = [];
 
     public string UiFontFamily { get => uiFontFamily; set => Set(ref uiFontFamily, Family(value, DefaultUiFontFamily)); }
@@ -573,6 +591,33 @@ internal sealed class AppPreferences : ObservableObject
     /// <summary>Folder new clones go into; empty means beside the project (wave W9).</summary>
     public string ProjectsCloneDirectory { get => projectsCloneDirectory; set => Set(ref projectsCloneDirectory, Text(value, DefaultProjectsCloneDirectory)); }
 
+    /// <summary>Most inner tool calls one <c>run_code</c> script keeps in flight at once (wave W14). Clamped to [<see cref="MinCodeScriptMaxConcurrentCalls"/>, <see cref="MaxCodeScriptMaxConcurrentCalls"/>].</summary>
+    public int CodeScriptMaxConcurrentCalls
+    {
+        get => codeScriptMaxConcurrentCalls;
+        set => Set(ref codeScriptMaxConcurrentCalls, Math.Clamp(value, MinCodeScriptMaxConcurrentCalls, MaxCodeScriptMaxConcurrentCalls));
+    }
+
+    /// <summary>Characters of the result <c>run_code</c> hands back to the model (wave W14). Clamped to [<see cref="MinCodeScriptResultChars"/>, <see cref="MaxCodeScriptResultChars"/>].</summary>
+    public int CodeScriptResultChars
+    {
+        get => codeScriptResultChars;
+        set => Set(ref codeScriptResultChars, Math.Clamp(value, MinCodeScriptResultChars, MaxCodeScriptResultChars));
+    }
+
+    /// <summary>Characters of one <c>Tools.Call</c> result inside a script (wave W14). Clamped to [<see cref="MinCodeScriptInnerResultChars"/>, <see cref="MaxCodeScriptInnerResultChars"/>].</summary>
+    public int CodeScriptInnerResultChars
+    {
+        get => codeScriptInnerResultChars;
+        set => Set(ref codeScriptInnerResultChars, Math.Clamp(value, MinCodeScriptInnerResultChars, MaxCodeScriptInnerResultChars));
+    }
+
+    /// <summary>
+    /// Tools a <c>run_code</c> script may call (wave W14): names separated by commas, semicolons or newlines, an optional
+    /// trailing <c>*</c> as a wildcard; blank means every read-only candidate.
+    /// </summary>
+    public string CodeScriptTools { get => codeScriptTools; set => Set(ref codeScriptTools, Text(value, DefaultCodeScriptTools)); }
+
     /// <summary>
     /// Model ids every model picker hides (sorted, deduplicated; wave W1). Read through <see cref="IsModelHidden"/> so the
     /// session composer, the agent-defaults combo and the settings section share one definition of "hidden".
@@ -726,6 +771,16 @@ internal sealed class AppPreferences : ObservableObject
         paletteExcludeDirectories = Text(section.PaletteExcludeDirectories, DefaultPaletteExcludeDirectories);
         chatMermaidDiagramTypes = Text(section.ChatMermaidDiagramTypes, DefaultChatMermaidDiagramTypes);
         projectsCloneDirectory = Text(section.ProjectsCloneDirectory, DefaultProjectsCloneDirectory);
+        codeScriptMaxConcurrentCalls = section.CodeScriptMaxConcurrentCalls is { } codeScriptMaxConcurrentCallsLoaded
+            ? Math.Clamp(codeScriptMaxConcurrentCallsLoaded, MinCodeScriptMaxConcurrentCalls, MaxCodeScriptMaxConcurrentCalls)
+            : DefaultCodeScriptMaxConcurrentCalls;
+        codeScriptResultChars = section.CodeScriptResultChars is { } codeScriptResultCharsLoaded
+            ? Math.Clamp(codeScriptResultCharsLoaded, MinCodeScriptResultChars, MaxCodeScriptResultChars)
+            : DefaultCodeScriptResultChars;
+        codeScriptInnerResultChars = section.CodeScriptInnerResultChars is { } codeScriptInnerResultCharsLoaded
+            ? Math.Clamp(codeScriptInnerResultCharsLoaded, MinCodeScriptInnerResultChars, MaxCodeScriptInnerResultChars)
+            : DefaultCodeScriptInnerResultChars;
+        codeScriptTools = Text(section.CodeScriptTools, DefaultCodeScriptTools);
         modelsHidden = NormalizeNames(section.ModelsHidden);
     }
 
@@ -797,6 +852,10 @@ internal sealed class AppPreferences : ObservableObject
             PaletteExcludeDirectories = paletteExcludeDirectories,
             ChatMermaidDiagramTypes = chatMermaidDiagramTypes,
             ProjectsCloneDirectory = projectsCloneDirectory,
+            CodeScriptMaxConcurrentCalls = codeScriptMaxConcurrentCalls,
+            CodeScriptResultChars = codeScriptResultChars,
+            CodeScriptInnerResultChars = codeScriptInnerResultChars,
+            CodeScriptTools = codeScriptTools,
             ModelsHidden = modelsHidden.Count == 0 ? null : [.. modelsHidden],
         };
 
@@ -1112,6 +1171,18 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("projectsCloneDirectory")]
     public string? ProjectsCloneDirectory { get; set; }
+
+    [JsonPropertyName("codeScriptMaxConcurrentCalls")]
+    public int? CodeScriptMaxConcurrentCalls { get; set; }
+
+    [JsonPropertyName("codeScriptResultChars")]
+    public int? CodeScriptResultChars { get; set; }
+
+    [JsonPropertyName("codeScriptInnerResultChars")]
+    public int? CodeScriptInnerResultChars { get; set; }
+
+    [JsonPropertyName("codeScriptTools")]
+    public string? CodeScriptTools { get; set; }
 
     [JsonPropertyName("modelsHidden")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

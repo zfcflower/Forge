@@ -187,50 +187,9 @@
       <views:McpSettingsView />
     </DataTemplate>
     <DataTemplate DataType="set:ToolsSettingsSectionViewModel" x:DataType="set:ToolsSettingsSectionViewModel">
-      <!-- Grouped by origin: built-in groups carry a switch per tool, extension and MCP tools are read-only here. -->
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Spacing="10">
-          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
-          <TextBlock Classes="caption"
-                     TextWrapping="Wrap"
-                     Text="{Binding InventoryText}"
-                     IsVisible="{Binding HasInventory}"
-                     AutomationProperties.AutomationId="settings-tools-inventory" />
-          <ItemsControl ItemsSource="{Binding Groups}" AutomationProperties.AutomationId="settings-tools-groups">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="set:ToolGroupViewModel">
-                <StackPanel Spacing="2" Margin="0,4,0,6">
-                  <TextBlock Classes="label" FontWeight="SemiBold" Text="{Binding Title}" />
-                  <ItemsControl ItemsSource="{Binding Tools}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate x:DataType="set:ToolRowViewModel">
-                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                          <StackPanel Spacing="1" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Name}"
-                                       FontFamily="{DynamicResource FontMono}"
-                                       TextTrimming="CharacterEllipsis" />
-                            <TextBlock Classes="caption" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" />
-                          </StackPanel>
-                          <CheckBox Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding CanToggle}"
-                                    IsChecked="{Binding IsEnabled, Mode=TwoWay}"
-                                    AutomationProperties.Name="{Binding Name}"
-                                    AutomationProperties.AutomationId="settings-tools-switch" />
-                        </Grid>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <TextBlock Classes="caption"
-                     TextWrapping="Wrap"
-                     Text="{Binding EmptyText}"
-                     IsVisible="{Binding !HasGroups}" />
-        </StackPanel>
-      </ScrollViewer>
+      <!-- The script block (wave W14), then the catalog grouped by origin: built-in groups carry a switch per tool,
+           extension and MCP tools are read-only here. -->
+      <views:ToolsSettingsSectionView />
     </DataTemplate>
 
     <!-- The notification section: the one switch that decides whether anything is shown at all, in the window or on the desktop. -->

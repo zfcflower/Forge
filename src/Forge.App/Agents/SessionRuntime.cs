@@ -1216,14 +1216,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private List<ITool> CollectExternalTools()
     {
         var tools = new List<ITool>();
-        var scriptTools = new List<ITool>();
-        if (services.HostClient is { } client)
+        var plugins = services.HostClient?.Tools ?? [];
+        IReadOnlyList<ITool> web = [];
+        if (services.HostClient is not null)
         {
-            tools.AddRange(client.Tools);
-
-            // The plugin tools are the script surface it always had: a plugin declares what a caller may do, and its own
-            // approval policy decides the rest.
-            scriptTools.AddRange(client.Tools);
+            tools.AddRange(plugins);
             if (services.Approvals?.Extensions is { } extensions)
             {
                 tools.AddRange(ExtensionTools.Create(extensions));
@@ -1236,17 +1233,16 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         tools.AddRange(services.FileTools);
-        AppendReadOnly(scriptTools, services.FileTools);
         tools.AddRange(services.PullRequestTools);
         if (services.WebTools is { } webTools)
         {
-            var web = webTools();
+            web = webTools();
             tools.AddRange(web);
-            AppendReadOnly(scriptTools, web);
         }
 
         // Last, so every tool above keeps its name when an MCP server advertises the same one (AppendMcpTools drops the MCP
         // copy), and because the selection is the only part of this list that changes on its own.
+        var mcpTools = new List<ITool>();
         if (services.Mcp is { } mcp)
         {
             AppendMcpTools(tools, mcp);
@@ -1254,10 +1250,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             {
                 if (tool is McpToolAdapter { SideEffect: ToolSideEffect.ReadOnly })
                 {
-                    scriptTools.Add(tool);
+                    mcpTools.Add(tool);
                 }
             }
         }
+
+        // The script surface is decided in one place, from the same sources this list is built from (see CodeModeTools).
+        var scriptTools = CodeModeTools.Collect(plugins, services.FileTools, web, mcpTools);
 
         // A script needs something to call: with nothing to fan out over, run_code would be a prompt line that can only
         // compute. Its own surface is not part of the loop's tools, so this list is also the only writer of it.
@@ -1267,34 +1266,6 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         return tools;
-    }
-
-    /// <summary>Appends the read-only tools of <paramref name="candidates"/> that are not already in <paramref name="into"/>,
-    /// so a name a plugin or a web factory registered first keeps its place (the registry keys by name).</summary>
-    private static void AppendReadOnly(List<ITool> into, IReadOnlyList<ITool> candidates)
-    {
-        foreach (var tool in candidates)
-        {
-            if (tool.SideEffect != ToolSideEffect.ReadOnly)
-            {
-                continue;
-            }
-
-            var duplicate = false;
-            foreach (var held in into)
-            {
-                if (string.Equals(held.Definition.Name, tool.Definition.Name, StringComparison.Ordinal))
-                {
-                    duplicate = true;
-                    break;
-                }
-            }
-
-            if (!duplicate)
-            {
-                into.Add(tool);
-            }
-        }
     }
 
     /// <summary>The four script dials of the <c>tools</c> section right now; the defaults when the runtime has no store.</summary>

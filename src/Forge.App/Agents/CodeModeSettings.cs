@@ -25,21 +25,16 @@ internal sealed record CodeModeSettings(
     int InnerResultChars,
     IReadOnlyList<string> VisibleTools)
 {
+    /// <summary>The SDK's own defaults, the single source of the three numbers <see cref="Default"/> carries: a script
+    /// with no settings store must be bounded exactly like one that never touched the fields.</summary>
+    private static readonly Sdk.CodeExecutionOptions Defaults = new();
+
     /// <summary>The values in force when the runtime was assembled without the settings store (a unit test).</summary>
     public static CodeModeSettings Default { get; } = new(
-        DefaultMaxConcurrentCalls,
-        DefaultResultChars,
-        DefaultInnerResultChars,
+        Defaults.MaxConcurrentToolCalls,
+        Defaults.MaxResultChars,
+        Defaults.MaxInnerResultChars,
         []);
-
-    /// <summary>Same as <see cref="Sdk.CodeExecutionOptions.MaxConcurrentToolCalls"/>' default: eight parallel inner calls.</summary>
-    public const int DefaultMaxConcurrentCalls = 8;
-
-    /// <summary>Same as <see cref="Sdk.CodeExecutionOptions.MaxResultChars"/>' default.</summary>
-    public const int DefaultResultChars = 40_000;
-
-    /// <summary>Same as <see cref="Sdk.CodeExecutionOptions.MaxInnerResultChars"/>' default.</summary>
-    public const int DefaultInnerResultChars = 20_000;
 
     /// <summary>The characters that separate two names of the visible-tool list.</summary>
     private static readonly char[] Separators = [',', ';', '\n', '\r', '\t', ' '];
