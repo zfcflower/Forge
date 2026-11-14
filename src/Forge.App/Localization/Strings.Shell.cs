@@ -41,6 +41,7 @@ internal static class ShellStrings
     public const string TodoTitleKey = "workbench.todo";
     public const string ReviewTitleKey = "workbench.review";
     public const string SpecTreeTitleKey = "workbench.specTree";
+    public const string ProblemsTitleKey = "workbench.problems";
     public const string ChangesTitleKey = "workbench.changes";
 
     // ---------------------------------------------------------------- workbench title-bar buttons
@@ -170,6 +171,8 @@ internal static class ShellStrings
     public static string ReviewTitle => Loc.Instance[ReviewTitleKey];
 
     public static string SpecTreeTitle => Loc.Instance[SpecTreeTitleKey];
+
+    public static string ProblemsTitle => Loc.Instance[ProblemsTitleKey];
 
     public static string ChangesTitle => Loc.Instance[ChangesTitleKey];
 
@@ -338,6 +341,7 @@ internal static class ShellStrings
         Loc.Register(TodoTitleKey, "TODO", "TODO");
         Loc.Register(ReviewTitleKey, "评审", "Review");
         Loc.Register(SpecTreeTitleKey, "规格树", "Spec tree");
+        Loc.Register(ProblemsTitleKey, "问题", "Problems");
         Loc.Register(ChangesTitleKey, "± 改动", "± Changes");
 
         Loc.Register(AutoHideKey, "自动隐藏", "Auto-hide");

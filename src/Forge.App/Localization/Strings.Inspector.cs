@@ -3,8 +3,9 @@ using System.Runtime.CompilerServices;
 namespace Forge.App.Localization;
 
 /// <summary>
-/// The inspector's table: the files panel, the preview, the changes document, TODO, review and the spec tree.
-/// <para>Keys: <c>files.*</c>, <c>changes.*</c>, <c>todo.*</c>, <c>review.*</c>, <c>spec.*</c>. Each key has a Chinese and an English text; parameterized texts are exposed as typed accessor
+/// The inspector's table: the files panel, the preview, the changes document, TODO, review, the spec tree, the problems
+/// list and the editor's language features (references, diagnostics wording).
+/// <para>Keys: <c>files.*</c>, <c>changes.*</c>, <c>todo.*</c>, <c>review.*</c>, <c>spec.*</c>, <c>problems.*</c>. Each key has a Chinese and an English text; parameterized texts are exposed as typed accessor
 /// methods (formatted through <see cref="Loc.Format"/>), parameterless ones as properties that read
 /// <see cref="Loc.Instance"/>, so callers never cache a resolved string across a language switch.</para>
 /// <para>Texts that are stored now and shown later (a read failure, an unreadable diff, a git status description) are
@@ -49,6 +50,23 @@ internal static class InspectorStrings
     public const string EditorLspFeatureCompletion = "files.editorLsp.feature.completion";
     public const string EditorLspFeatureHover = "files.editorLsp.feature.hover";
     public const string EditorLspFeatureDefinition = "files.editorLsp.feature.definition";
+    public const string EditorLspFeatureReferences = "files.editorLsp.feature.references";
+    public const string EditorLspReferencesCountBase = "files.editorLsp.references.count";
+    public const string EditorLspReferencesNone = "files.editorLsp.references.none";
+    public const string EditorLspReferencesHint = "files.editorLsp.references.hint";
+    public const string EditorLspReferencesLocationPattern = "files.editorLsp.references.location";
+    public const string ProblemsPrefix = "problems.";
+    public const string ProblemsNone = "problems.none";
+    public const string ProblemsFailed = "problems.failed";
+    public const string ProblemsTruncated = "problems.truncated";
+    public const string ProblemsSummaryPattern = "problems.summary";
+    public const string ProblemsRowDescriptionPattern = "problems.row.description";
+    public const string ProblemsRowCodePattern = "problems.row.code";
+    public const string ProblemsFilterErrors = "problems.filter.errors";
+    public const string ProblemsFilterWarnings = "problems.filter.warnings";
+    public const string ProblemsFilterInformation = "problems.filter.information";
+    public const string ProblemsFilterHints = "problems.filter.hints";
+    public const string ProblemsRefresh = "problems.refresh";
     public const string EditorLspSnippetsConverted = "files.editorLsp.snippetsConverted";
     public const string EditorLspInvalidItems = "files.editorLsp.invalidItems";
     public const string EditorLspInvalidDiagnostics = "files.editorLsp.invalidDiagnostics";
@@ -193,6 +211,23 @@ internal static class InspectorStrings
         Loc.Register(EditorLspSeverityWarning, "警告", "Warning");
         Loc.Register(EditorLspSeverityInformation, "信息", "Info");
         Loc.Register(EditorLspSeverityHint, "提示", "Hint");
+        Loc.Register(EditorLspFeatureReferences, "查找引用", "find references");
+        Loc.Register(EditorLspReferencesCountBase + ".one", "{0} 处引用", "{0} reference");
+        Loc.Register(EditorLspReferencesCountBase + ".other", "{0} 处引用", "{0} references");
+        Loc.Register(EditorLspReferencesNone, "没有找到引用。", "No references found.");
+        Loc.Register(EditorLspReferencesHint, "Enter 跳到引用，Esc 关闭", "Enter jumps to the reference, Esc closes");
+        Loc.Register(EditorLspReferencesLocationPattern, "{0}:{1}", "{0}:{1}");
+        Loc.Register(ProblemsNone, "没有问题。", "No problems.");
+        Loc.Register(ProblemsFailed, "读取问题列表失败。", "Could not read the problem list.");
+        Loc.Register(ProblemsTruncated, "只显示前 {0} 条。", "Only the first {0} are shown.");
+        Loc.Register(ProblemsSummaryPattern, "{0} 个错误 · {1} 个警告 · 共 {2} 条", "{0} errors · {1} warnings · {2} total");
+        Loc.Register(ProblemsRowDescriptionPattern, "{0} — {1}", "{0} — {1}");
+        Loc.Register(ProblemsRowCodePattern, "{0}({1})", "{0}({1})");
+        Loc.Register(ProblemsFilterErrors, "错误", "Errors");
+        Loc.Register(ProblemsFilterWarnings, "警告", "Warnings");
+        Loc.Register(ProblemsFilterInformation, "信息", "Info");
+        Loc.Register(ProblemsFilterHints, "提示", "Hints");
+        Loc.Register(ProblemsRefresh, "刷新", "Refresh");
         Loc.Register(FilesLspStopped, "语言服务未能启动，编辑不受影响。", "The language server could not start; editing is unaffected.");
         Loc.Register(FilesLspServer, "语言服务：{0}（来源：{1}）", "Language server: {0} (from {1})");
         Loc.Register(FilesLspLoading, "语言服务正在加载项目，加载完成后才有诊断、悬停与跳转…", "The language server is still loading the project; diagnostics, hover and navigation arrive when it is done…");
@@ -334,6 +369,25 @@ internal static class InspectorStrings
 
     /// <summary>"12 份规格" / "12 specs".</summary>
     public static LocText SpecCount(int count) => LocText.Plural(SpecCountBase, count, TextFormat.Number(count));
+
+    /// <summary>"3 处引用" / "3 references".</summary>
+    public static LocText EditorLspReferences(int count) =>
+        LocText.Plural(EditorLspReferencesCountBase, count, TextFormat.Number(count));
+
+    /// <summary>"3 个错误 · 12 个警告 · 共 15 条": the two severities a reader scans first, then the filtered total.</summary>
+    public static LocText ProblemsSummary(int errors, int warnings, int total) =>
+        new(ProblemsSummaryPattern, TextFormat.Number(errors), TextFormat.Number(warnings), TextFormat.Number(total));
+
+    /// <summary>"只显示前 2000 条" / "Only the first 2,000 are shown".</summary>
+    public static LocText ProblemsTruncatedRows(int rows) => new(ProblemsTruncated, TextFormat.Number(rows));
+
+    /// <summary>"C#(CS0168)": the rule with its source, or just the rule when the server names no source.</summary>
+    public static string ProblemsRowCode(string? source, string code) =>
+        string.IsNullOrEmpty(source) ? code : Loc.Instance.Format(ProblemsRowCodePattern, source, code);
+
+    /// <summary>"<c>line</c>:<c>column</c>": both are identifiers, never grouped.</summary>
+    public static string EditorLspReferenceLocation(int line, int column) =>
+        Loc.Instance.Format(EditorLspReferencesLocationPattern, TextFormat.Id(line), TextFormat.Id(column));
 
     /// <summary>The git status description of a changed file; shown as the row's tooltip.</summary>
     public static LocText ChangeDescription(bool staged, bool unstaged) =>

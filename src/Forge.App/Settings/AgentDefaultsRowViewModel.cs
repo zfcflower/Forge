@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Localization;
+using Forge.App.Preferences;
 using Forge.App.Providers;
 using Forge.App.ViewModels;
 using Forge.Core.Providers;
@@ -39,7 +40,8 @@ internal sealed class AgentDefaultsRowViewModel : ObservableObject
         ProviderCatalog catalog,
         string notSetText,
         Func<string?, string?, IReadOnlyList<ThinkingEffort>>? levels = null,
-        Action<AgentDefaultsRowViewModel>? changed = null)
+        Action<AgentDefaultsRowViewModel>? changed = null,
+        AppPreferences? preferences = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -54,6 +56,13 @@ internal sealed class AgentDefaultsRowViewModel : ObservableObject
             providerNames[provider.Id] = provider.DisplayName;
             foreach (var model in provider.Models)
             {
+                // A hidden model is not on offer; when it is the stored default, Match below appends it like any other
+                // model no provider lists any more, because the agent really runs on it.
+                if (preferences?.IsModelHidden(model) == true)
+                {
+                    continue;
+                }
+
                 choices.Add(new AgentModelChoice(provider.Id, model, provider.DisplayName + " · " + model));
             }
         }
@@ -78,7 +87,7 @@ internal sealed class AgentDefaultsRowViewModel : ObservableObject
 
     /// <summary>
     /// The "not set" row first, then every model of every connected provider as "provider · model", and last the stored model
-    /// when no provider lists it any more so the combo still shows what the agent runs on.
+    /// when no provider lists it any more (or when it is hidden) so the combo still shows what the agent runs on.
     /// </summary>
     public IReadOnlyList<AgentModelChoice> Models { get; }
 

@@ -27,30 +27,17 @@ public sealed class SyntaxTokenTextBlock : TextBlock
 
     private void UpdateCategoryClasses()
     {
-        var category = Category;
-        Classes.Set("syntax-keyword", category is TokenCategory.Keyword or TokenCategory.Modifier);
-        Classes.Set("syntax-string", category is TokenCategory.String or TokenCategory.Escape or TokenCategory.Regexp);
-        Classes.Set("syntax-comment", category == TokenCategory.Comment);
-        Classes.Set("syntax-number", category == TokenCategory.Number);
-        Classes.Set(
-            "syntax-type",
-            category is TokenCategory.Type
-                or TokenCategory.Class
-                or TokenCategory.Struct
-                or TokenCategory.Interface
-                or TokenCategory.Enum
-                or TokenCategory.EnumMember
-                or TokenCategory.Namespace
-                or TokenCategory.TypeParameter);
-        Classes.Set("syntax-function", category is TokenCategory.Function or TokenCategory.Macro);
-        Classes.Set(
-            "syntax-variable",
-            category is TokenCategory.Constant
-                or TokenCategory.Variable
-                or TokenCategory.Property
-                or TokenCategory.Parameter
-                or TokenCategory.Event);
-        Classes.Set("syntax-preprocessor", category is TokenCategory.Preprocessor or TokenCategory.Decorator);
-        Classes.Set("syntax-invalid", category == TokenCategory.Invalid);
+        // Which categories look alike is decided once, in the editor layer, because the editor's semantic overlay paints
+        // from the same table; this control only names the classes.
+        var group = TokenCategoryGroups.Group(Category);
+        Classes.Set("syntax-keyword", group == TokenCategoryGroup.Keyword);
+        Classes.Set("syntax-string", group == TokenCategoryGroup.String);
+        Classes.Set("syntax-comment", group == TokenCategoryGroup.Comment);
+        Classes.Set("syntax-number", group == TokenCategoryGroup.Number);
+        Classes.Set("syntax-type", group == TokenCategoryGroup.Type);
+        Classes.Set("syntax-function", group == TokenCategoryGroup.Function);
+        Classes.Set("syntax-variable", group == TokenCategoryGroup.Variable);
+        Classes.Set("syntax-preprocessor", group == TokenCategoryGroup.Preprocessor);
+        Classes.Set("syntax-invalid", group == TokenCategoryGroup.Invalid);
     }
 }

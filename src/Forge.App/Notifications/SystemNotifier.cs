@@ -14,9 +14,18 @@ internal interface ISystemNotifier
     /// <summary>
     /// Shows <paramref name="title"/> and <paramref name="body"/> as a system notification. A notification that cannot be
     /// shown (no tool on this machine, the tool failed or hung) is skipped after a
-    /// <c>[notify]</c> trace line; only <paramref name="ct"/> being cancelled throws.
+    /// <c>[notify]</c> trace line; only <paramref name="ct"/> being cancelled throws. The outcome is not surfaced:
+    /// <see cref="NotificationCenter"/> never acts on it, and a caller that has to know asks <see cref="TryNotifyAsync"/>.
     /// </summary>
     Task NotifyAsync(string title, string body, CancellationToken ct);
+
+    /// <summary>
+    /// The same notification as <see cref="NotifyAsync"/>, reporting whether the platform took it: true when the tool
+    /// accepted it (exit code 0), false when this build has no tool for the platform, the tool failed, or it hung and was
+    /// abandoned. Only <paramref name="ct"/> being cancelled throws. True means "handed to the platform", not "the user saw
+    /// it": an OS with its notifications switched off still answers 0.
+    /// </summary>
+    Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct);
 }
 
 /// <summary>The desktop families the notifier knows how to talk to; the seam that lets a test pick one on any machine.</summary>
@@ -44,7 +53,9 @@ internal enum NotifyPlatform
 /// <c>run</c> handler, Linux behind <c>--</c> in <see cref="ProcessStartInfo.ArgumentList"/>. So text from a pull request
 /// cannot inject anything.
 /// <para>Bounded: a notification that takes longer than <see cref="Timeout"/> is abandoned (the default runner kills the
-/// whole process tree), and a missing tool, a non-zero exit code or any other failure is only traced. The macOS and Linux
+/// whole process tree), and a missing tool, a non-zero exit code or any other failure is traced and, on
+/// <see cref="TryNotifyAsync"/>, reported as not taken (<see cref="NotifyAsync"/> drops that result, as
+/// <see cref="NotificationCenter"/> always did). The macOS and Linux
 /// paths are written against the tools' documented interfaces and have not been run by the developers of this build; the
 /// Windows path has.</para>
 /// </summary>
@@ -98,7 +109,10 @@ internal sealed class SystemNotifier : ISystemNotifier
     }
 
     /// <inheritdoc />
-    public async Task NotifyAsync(string title, string body, CancellationToken ct)
+    public Task NotifyAsync(string title, string body, CancellationToken ct) => TryNotifyAsync(title, body, ct);
+
+    /// <inheritdoc />
+    public async Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(title);
         ArgumentNullException.ThrowIfNull(body);
@@ -108,7 +122,7 @@ internal sealed class SystemNotifier : ISystemNotifier
         if (info is null)
         {
             AppLogs.Notify.ZLogInformation($"skipped: no notification tool for this platform");
-            return;
+            return false;
         }
 
         using var limit = new CancellationTokenSource(Timeout, time);
@@ -119,15 +133,20 @@ internal sealed class SystemNotifier : ISystemNotifier
             if (exitCode != 0)
             {
                 AppLogs.Notify.ZLogWarning($"{info.FileName} exited with code {exitCode}");
+                return false;
             }
+
+            return true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             AppLogs.Notify.ZLogWarning($"{info.FileName} did not finish within {Timeout.TotalSeconds} seconds");
+            return false;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             AppLogs.Notify.ZLogWarning($"{info.FileName} failed: {exception.Message}");
+            return false;
         }
     }
 
@@ -177,7 +196,8 @@ internal sealed class SystemNotifier : ISystemNotifier
         return info;
     }
 
-    private static NotifyPlatform CurrentPlatform()
+    /// <summary>The platform family this process runs on; shared with <see cref="SystemNotificationPermissionGuide"/>.</summary>
+    internal static NotifyPlatform CurrentPlatform()
     {
         if (OperatingSystem.IsWindows())
         {

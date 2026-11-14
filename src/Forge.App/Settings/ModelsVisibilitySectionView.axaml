@@ -1,0 +1,77 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Settings.ModelsVisibilitySectionView"
+             x:DataType="settings:ModelsVisibilitySectionViewModel">
+  <!-- The models-visibility section body: one sentence, the page-only search, the hidden count and one switch per model of
+       every connected provider. The list is a ListBox because that is the control that virtualises by default: a provider
+       lists ~180 models, and the settings page's own ScrollViewer would hand an unbounded height to the panel, so the box
+       caps its height and scrolls inside it. -->
+  <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="6">
+    <TextBlock Grid.Row="0"
+               Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding Hint}"
+               AutomationProperties.AutomationId="models-visibility-hint" />
+
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+      <TextBox Grid.Column="0"
+               Text="{Binding SearchText, Mode=TwoWay}"
+               PlaceholderText="{Binding SearchPlaceholder}"
+               AutomationProperties.Name="{Binding SearchPlaceholder}"
+               AutomationProperties.AutomationId="models-visibility-search" />
+      <TextBlock Grid.Column="1"
+                 Classes="caption"
+                 VerticalAlignment="Center"
+                 Text="{Binding HiddenCountText}"
+                 AutomationProperties.AutomationId="models-visibility-count" />
+      <Button Grid.Column="2"
+              Content="{Binding ShowAllText}"
+              Command="{Binding ShowAllCommand}"
+              AutomationProperties.AutomationId="models-visibility-show-all" />
+    </Grid>
+
+    <!-- Name of the per-row switch: an empty checkbox column with no heading reads as "unknown toggle". -->
+    <TextBlock Grid.Row="2"
+               Classes="caption"
+               Text="{Binding VisibilityColumn}"
+               IsVisible="{Binding HasProviders}" />
+
+    <ListBox Grid.Row="3"
+             MaxHeight="480"
+             ItemsSource="{Binding Rows}"
+             IsVisible="{Binding HasProviders}"
+             AutomationProperties.AutomationId="models-visibility-rows">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="settings:ModelVisibilityRowViewModel">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" Margin="0,2">
+            <CheckBox Grid.Column="0"
+                      IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="{Binding Name}"
+                      AutomationProperties.AutomationId="{Binding Name, StringFormat=models-visibility-{0}}"
+                      AutomationProperties.Name="{Binding Name}" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding Name}"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="2"
+                       Classes="caption"
+                       Text="{Binding ProviderName}"
+                       VerticalAlignment="Center"
+                       MaxWidth="200"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding ProviderName}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <TextBlock Grid.Row="3"
+               Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding EmptyText}"
+               IsVisible="{Binding ShowsEmpty}"
+               AutomationProperties.AutomationId="models-visibility-empty" />
+  </Grid>
+</UserControl>

@@ -25,7 +25,7 @@ Agent 循环、模型提供商、提示词合成、SubAgent 调度与会话存�
 
 **循环。** 流式一轮 → 审批 → 执行 → 回写。连续只读工具并发,有副作用工具依序逐个执行;结果按调用顺序写成一条 Tool 消息。取消时每个待决调用都补一条"已取消"结果,保证历史始终合法。超长工具输出转存 Artifact,上下文里只留预览和 id。
 
-**SubAgent。** `spawn_agent` 按 `<kind>-<n>` 登记实例;同类型共享前缀,可按 id 续跑(同类型、且当前未在运行)。活跃 Agent 计数覆盖整棵树;父 Agent 等待子结果时交还名额,否则嵌套会死锁。深度上限 3。该工具对未超深度的所有 Agent 隐式可用,Agent 定义无法关闭它。
+**SubAgent。** `spawn_agent` 按 `<kind>-<n>` 登记实例;同类型共享前缀,可按 id 续跑(同类型、且当前未在运行)。活跃 Agent 计数覆盖整棵树;父 Agent 等待子结果时交还名额,否则嵌套会死锁。深度上限 3。树内并发上限默认 4、可在设置里调到 1–16(`AgentRuntimeServices.SubAgents` → `AgentOptions.MaxParallelSubAgents`,每回合前经 `AgentHost.SetMaxParallelSubAgents` 应用到活的宿主:扩容立即唤醒排队中的 Agent,缩容不打断已在跑的一轮、只是不再放新的进来)。该工具对未超深度的所有 Agent 隐式可用,Agent 定义无法关闭它;要停止派生就关掉它(工具开关或 `agents` 分区的子 Agent 开关,两者都落到同一个禁用集合),已在跑的子树仍可用 steer/follow_up/stop 管理。
 
 **子 Agent 控制。** 每次 spawn 是一个 run,有独立 `CancellationTokenSource`(链到父 run 令牌),父 Agent 的 `subagent_steer` / `subagent_followup` / `subagent_stop` 与 UI 停止按钮共用 `AgentHost.SubAgentControl`(`ISubAgentControl`)。
 - 转向在工具批次边界生效:已发出的调用跑完,本回合剩余未开始的调用补 `skipped: the agent was redirected` 错误结果(历史保持合法),指令作为下一条 user 消息注入;边界前的多条转向合并为一条消息、一个事件;批后无剩余调用时按丢弃 0 交付,指令不丢。
