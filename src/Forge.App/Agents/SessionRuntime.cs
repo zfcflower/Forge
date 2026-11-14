@@ -7,6 +7,7 @@ using Forge.Core.Prompts.Templates;
 using Forge.Core.Providers;
 using Forge.Core.Tools;
 using Forge.HostClient;
+using Forge.Mcp;
 using Forge.Workspace;
 using Forge.App.Logging;
 using ZLogger;
@@ -91,6 +92,12 @@ internal sealed record AgentRuntimeServices(
     /// </summary>
     public Func<IReadOnlyList<ITool>>? WebTools { get; set; }
     // --- end web tools ---
+
+    /// <summary>
+    /// The MCP servers of the app; null when the runtime was assembled without the composition root (a unit test), which then
+    /// has no MCP tools at all. The catalog, the per-turn limit and the search tool all come from here.
+    /// </summary>
+    public Composition.McpServices? Mcp { get; set; }
 
     /// <summary>
     /// The router the extension host client uses for plugin and workflow <c>host.tool_call</c>; each session registers its
@@ -189,6 +196,11 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     private AgentHost? builtHost;
     private ExtensionHostClient? listenedClient;
     private CompactionSettings? appliedCompaction;
+    // Built eagerly / published once: the turn thread (RefreshMcpTools) and a tool thread (the search callback) both reach them,
+    // and a second exposure instance created by a race would silently drop the pins the other one holds.
+    private readonly McpToolExposure mcpExposure = new();
+    private McpToolSearchTool? mcpSearchTool;
+    private string mcpFocus = string.Empty;
 
     /// <summary>The sub-agent cap last handed to the host; an unchanged value never touches it. Guarded by <see cref="gate"/>.</summary>
     private int appliedMaxParallel = SubAgentLimits.DefaultParallel;
@@ -250,6 +262,10 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
 
         ArgumentNullException.ThrowIfNull(sink);
         var message = UserMessage(userText, attachments);
+
+        // What this request is about decides which MCP tools are offered (see RefreshMcpTools); it is read when the tool
+        // surface is refreshed at the start of the turn and never stored.
+        Volatile.Write(ref mcpFocus, userText);
 
         var (agentHost, agent) = await Task.Run(() => ResolveAsync(), ct).ConfigureAwait(false);
         lock (gate)
@@ -531,6 +547,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 ApplyDisabledTools(host);
                 ApplySubAgentLimits(host);
                 RefreshWebTools(host);
+                RefreshMcpTools(host);
                 ApplyCompaction(host);
                 return (host, root);
             }
@@ -549,6 +566,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
             ApplyDisabledTools(host);
             ApplySubAgentLimits(host);
             RefreshWebTools(host);
+            RefreshMcpTools(host);
             ApplyCompaction(host);
             rootStale = !SameDefinition(rootDefinition, definition);
 
@@ -684,6 +702,179 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Brings the MCP tools <paramref name="target"/> offers in line with the request this turn is about, the way
+    /// <see cref="RefreshWebTools"/> does for the web tools: when the selected names differ from the held ones the external set
+    /// is published afresh, otherwise nothing is published and the prompt cache survives. Called at the start of every turn with
+    /// the gate held; a turn already running keeps its set until it ends.
+    /// </summary>
+    private void RefreshMcpTools(AgentHost target)
+    {
+        if (services.Mcp is not { } mcp)
+        {
+            return;
+        }
+
+        try
+        {
+            var selected = mcpExposure.Select(
+                mcp.Manager.Tools,
+                mcp.ToolSearchLimit,
+                Volatile.Read(ref mcpFocus),
+                out var truncated);
+            var (builtIns, external) = target.AllTools;
+            if (!SameMcpTools(selected, truncated, builtIns, external))
+            {
+                target.ReplaceExternalTools(CollectExternalTools());
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            AppLogs.Session.ZLogWarning($"the MCP tools could not be refreshed: {exception.Message}");
+        }
+    }
+
+    /// <summary>The MCP tools this session offers right now; a test reads it instead of the host.</summary>
+    internal IReadOnlyList<ITool> McpToolsForTest()
+    {
+        if (services.Mcp is not { } mcp)
+        {
+            return [];
+        }
+
+        var tools = new List<ITool>(4);
+        AppendMcpTools(tools, mcp);
+        return tools;
+    }
+
+    /// <summary>
+    /// Appends the selected MCP tools and, while the limit hides some, the search tool that reaches them. A name already in
+    /// <paramref name="into"/> (a plugin or web tool) wins over an MCP tool of the same name: the registry keys by name, so
+    /// appending the second one would silently replace a tool the user installed with one a server happens to advertise.
+    /// </summary>
+    private void AppendMcpTools(List<ITool> into, Composition.McpServices mcp)
+    {
+        var selected = mcpExposure.Select(
+            mcp.Manager.Tools,
+            mcp.ToolSearchLimit,
+            Volatile.Read(ref mcpFocus),
+            out var truncated);
+        if (selected.Count == 0 && !truncated)
+        {
+            return;
+        }
+
+        var taken = new HashSet<string>(into.Count + selected.Count + 1, StringComparer.Ordinal);
+        foreach (var tool in into)
+        {
+            taken.Add(tool.Definition.Name);
+        }
+
+        foreach (var adapter in selected)
+        {
+            if (taken.Add(adapter.ExposedName))
+            {
+                into.Add(adapter);
+            }
+        }
+
+        if (truncated && taken.Add(McpToolSearchTool.Name))
+        {
+            into.Add(LazyInitializer.EnsureInitialized(ref mcpSearchTool, () => new McpToolSearchTool(SearchMcpTools)));
+        }
+    }
+
+    /// <summary>
+    /// The search tool's callback: pin the matches, then republish so the next request really offers them. The model is told the
+    /// matches are callable, so publishing before returning is what makes the answer true.
+    /// </summary>
+    private IReadOnlyList<McpToolAdapter> SearchMcpTools(string query, int limit)
+    {
+        if (services.Mcp is not { } mcp)
+        {
+            return [];
+        }
+
+        // Never pin more than one request may offer: the answer tells the model every match is callable now, and a match past
+        // the limit would be pinned but cut from the very next surface.
+        var cap = mcp.ToolSearchLimit;
+        var matches = mcpExposure.Search(mcp.Manager.Tools, query, cap > 0 ? Math.Min(limit, cap) : limit);
+        if (matches.Count > 0)
+        {
+            OnToolsChanged();
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="held"/> already carries exactly the MCP tools the selection names; no allocation. A held adapter
+    /// counts only when its definition and side effect are still the selected one's: a server whose <c>readOnlyTools</c> or
+    /// schema changed republishes adapters under the same names, and keeping the old one would offer a stale schema or — worse —
+    /// skip the approval a tool that stopped being read-only now needs. A selected name a built-in or a plugin/web tool already
+    /// holds is shadowed (see <see cref="AppendMcpTools"/>) and is expected to be absent.
+    /// </summary>
+    internal static bool SameMcpTools(
+        IReadOnlyList<McpToolAdapter> selected,
+        bool truncated,
+        IReadOnlyList<ITool> builtIns,
+        IReadOnlyList<ITool> held)
+    {
+        var heldCount = 0;
+        var heldSearch = false;
+        foreach (var tool in held)
+        {
+            if (tool is McpToolAdapter)
+            {
+                heldCount++;
+            }
+            else if (string.Equals(tool.Definition.Name, McpToolSearchTool.Name, StringComparison.Ordinal))
+            {
+                heldSearch = true;
+            }
+        }
+
+        if (heldSearch != truncated)
+        {
+            return false;
+        }
+
+        var expected = 0;
+        foreach (var adapter in selected)
+        {
+            var match = Find(held, adapter.ExposedName);
+            if (match is McpToolAdapter current)
+            {
+                if (!ReferenceEquals(current, adapter) &&
+                    (current.SideEffect != adapter.SideEffect || !current.Definition.Equals(adapter.Definition)))
+                {
+                    return false;
+                }
+
+                expected++;
+            }
+            else if (match is null && Find(builtIns, adapter.ExposedName) is null)
+            {
+                return false;
+            }
+        }
+
+        return heldCount == expected;
+    }
+
+    private static ITool? Find(IReadOnlyList<ITool> tools, string name)
+    {
+        foreach (var tool in tools)
+        {
+            if (string.Equals(tool.Definition.Name, name, StringComparison.Ordinal))
+            {
+                return tool;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -928,6 +1119,21 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         {
             into.Add(new ToolDescriptor(tool.Definition.Name, ToolOrigin.BuiltIn, ToolGroups.PullRequests));
         }
+
+        // Every ready MCP tool, not only the ones this turn offers: the Tools section is where a user looks to see what a server
+        // provides, and a trimmed list there would read as a missing tool.
+        if (services.Mcp is { } mcp)
+        {
+            foreach (var adapter in mcp.Manager.Tools)
+            {
+                into.Add(new ToolDescriptor(
+                    adapter.ExposedName,
+                    ToolOrigin.Mcp,
+                    adapter.ServerName,
+                    adapter.ServerName,
+                    CanDisable: false));
+            }
+        }
     }
 
     // ISessionToolScope: what the router reads. The tool set is the live one (built-ins plus the current external tools).
@@ -989,6 +1195,13 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
         if (services.WebTools is { } webTools)
         {
             tools.AddRange(webTools());
+        }
+
+        // Last, so every tool above keeps its name when an MCP server advertises the same one (AppendMcpTools drops the MCP
+        // copy), and because the selection is the only part of this list that changes on its own.
+        if (services.Mcp is { } mcp)
+        {
+            AppendMcpTools(tools, mcp);
         }
 
         return tools;

@@ -510,6 +510,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.ModelsVisibility,
             SettingsSectionIds.Agents,
             SettingsSectionIds.IdleArchive,
+            SettingsSectionIds.Palette,
             SettingsSectionIds.NotificationPermission,
             SettingsSectionIds.Paths,
         ];

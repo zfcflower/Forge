@@ -1,0 +1,584 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:set="using:Forge.App.ViewModels.Settings"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:sys="using:System"
+             x:Class="Forge.App.Views.McpSettingsView"
+             x:DataType="set:McpSettingsSectionViewModel">
+
+  <UserControl.Styles>
+    <Style Selector="Border.mcp-badge">
+      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.mcp-error">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+    <Style Selector="TextBlock.mcp-status-error">
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <!-- The mcp section: manage the servers of mcp.json. All user-facing text is bound to the Loc table; the view only
+       arranges it. Every control the tests or automation touch carries an AutomationId from the mcp-* family. -->
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="8">
+
+      <!-- 1. Hint + action bar. -->
+      <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding Hint}" />
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <Button Classes="primary"
+                Command="{Binding AddCommand}"
+                Content="{Binding [settings.mcp.page.add], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="mcp-add"
+                AutomationProperties.Name="{Binding [settings.mcp.page.add], Source={x:Static loc:Loc.Instance}}" />
+        <Button Classes="ghost"
+                Command="{Binding ImportCommand}"
+                Content="{Binding [settings.mcp.page.import], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="mcp-import"
+                AutomationProperties.Name="{Binding [settings.mcp.page.import], Source={x:Static loc:Loc.Instance}}" />
+        <Button Classes="ghost"
+                Content="{Binding [settings.mcp.page.presets], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="mcp-presets"
+                AutomationProperties.Name="{Binding [settings.mcp.page.presets], Source={x:Static loc:Loc.Instance}}">
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedLeft">
+              <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Presets}" Margin="8">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="set:McpPresetOptionViewModel">
+                      <Button Command="{Binding ApplyCommand}"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Padding="10,6"
+                              Background="Transparent"
+                              BorderThickness="0">
+                        <StackPanel Spacing="1">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{Binding Title}" />
+                            <Border Classes="mcp-badge" IsVisible="{Binding NeedsPath}">
+                              <TextBlock Classes="caption"
+                                         Text="{Binding [settings.mcp.preset.needsPath], Source={x:Static loc:Loc.Instance}}" />
+                            </Border>
+                          </StackPanel>
+                          <TextBlock Classes="caption" Text="{Binding Description}" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+        <Button Classes="ghost"
+                Command="{Binding ReloadCommand}"
+                Content="{Binding [settings.mcp.page.reload], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="mcp-reload"
+                AutomationProperties.Name="{Binding [settings.mcp.page.reload], Source={x:Static loc:Loc.Instance}}" />
+      </StackPanel>
+
+      <!-- 2. Diagnostics and the status line. -->
+      <StackPanel Spacing="2" IsVisible="{Binding HasDiagnostics}" AutomationProperties.AutomationId="mcp-diagnostics">
+        <TextBlock Classes="caption" Text="{Binding [settings.mcp.diag.title], Source={x:Static loc:Loc.Instance}}" />
+        <ItemsControl ItemsSource="{Binding Diagnostics}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="sys:String">
+              <SelectableTextBlock Classes="mono mcp-error"
+                                   Text="{Binding}"
+                                   TextWrapping="Wrap" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+      <TextBlock Classes="caption"
+                 Classes.mcp-status-error="{Binding StatusIsError}"
+                 IsVisible="{Binding HasStatus}"
+                 TextWrapping="Wrap"
+                 Text="{Binding StatusText}"
+                 AutomationProperties.AutomationId="mcp-status" />
+
+      <!-- 3. The server list. -->
+      <ItemsControl ItemsSource="{Binding Servers}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="set:McpServerRowViewModel">
+            <Border Classes="turn-card" Padding="10" Margin="0,0,0,8" AutomationProperties.AutomationId="mcp-server-row">
+              <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                  <StackPanel Grid.Column="0"
+                              Orientation="Horizontal"
+                              Spacing="6"
+                              VerticalAlignment="Center"
+                              MaxWidth="340">
+                    <TextBlock Text="{Binding Name}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <Border Classes="mcp-badge">
+                      <TextBlock Classes="caption" Text="{Binding TransportText}" />
+                    </Border>
+                    <Border Classes="mcp-badge">
+                      <TextBlock Classes="caption" Text="{Binding ScopeText}" />
+                    </Border>
+                  </StackPanel>
+                  <TextBlock Grid.Column="1"
+                             Classes="caption"
+                             VerticalAlignment="Center"
+                             Text="{Binding StatusText}" />
+                  <CheckBox Grid.Column="2"
+                            VerticalAlignment="Center"
+                            IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                            AutomationProperties.AutomationId="mcp-server-enabled"
+                            AutomationProperties.Name="{Binding Name}" />
+                  <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4">
+                    <Button Classes="ghost"
+                            Command="{Binding ToggleRunningCommand}"
+                            Content="{Binding RunningToggleText}"
+                            AutomationProperties.AutomationId="mcp-server-running"
+                            AutomationProperties.Name="{Binding RunningToggleText}" />
+                    <Button Classes="ghost"
+                            Command="{Binding RestartCommand}"
+                            Content="{Binding [settings.mcp.row.restart], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="mcp-server-restart"
+                            AutomationProperties.Name="{Binding [settings.mcp.row.restart], Source={x:Static loc:Loc.Instance}}" />
+                    <Button Classes="ghost"
+                            Command="{Binding TestCommand}"
+                            Content="{Binding [settings.mcp.row.test], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="mcp-server-test"
+                            AutomationProperties.Name="{Binding [settings.mcp.row.test], Source={x:Static loc:Loc.Instance}}" />
+                    <Button Classes="ghost"
+                            Command="{Binding EditCommand}"
+                            Content="{Binding [settings.mcp.row.edit], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="mcp-server-edit"
+                            AutomationProperties.Name="{Binding [settings.mcp.row.edit], Source={x:Static loc:Loc.Instance}}" />
+                    <Button Classes="ghost"
+                            Command="{Binding DeleteCommand}"
+                            Content="{Binding [settings.mcp.row.delete], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="mcp-server-delete"
+                            AutomationProperties.Name="{Binding [settings.mcp.row.delete], Source={x:Static loc:Loc.Instance}}" />
+                  </StackPanel>
+                </Grid>
+
+                <Button Classes="link"
+                        HorizontalAlignment="Left"
+                        Command="{Binding ToggleExpandCommand}"
+                        Content="{Binding ExpandText}"
+                        AutomationProperties.Name="{Binding ExpandText}" />
+
+                <StackPanel Spacing="6" IsVisible="{Binding IsExpanded}">
+                  <TextBlock Classes="caption mcp-error"
+                             IsVisible="{Binding HasError}"
+                             TextWrapping="Wrap"
+                             Text="{Binding ErrorText}" />
+                  <StackPanel Spacing="2" IsVisible="{Binding HasStderr}">
+                    <TextBlock Classes="caption" Text="{Binding [settings.mcp.row.stderr], Source={x:Static loc:Loc.Instance}}" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                      <SelectableTextBlock Classes="mono"
+                                           Text="{Binding StderrTailText}"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </ScrollViewer>
+                  </StackPanel>
+
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Classes="label" Text="{Binding [settings.mcp.row.tools], Source={x:Static loc:Loc.Instance}}" />
+                      <Button Classes="link"
+                              Command="{Binding RefreshToolsCommand}"
+                              Content="{Binding [settings.mcp.row.refreshTools], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.AutomationId="mcp-server-refresh-tools"
+                              AutomationProperties.Name="{Binding [settings.mcp.row.refreshTools], Source={x:Static loc:Loc.Instance}}" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Tools}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="set:McpToolRowViewModel">
+                          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,2">
+                            <TextBlock Classes="mono" Text="{Binding Name}" />
+                            <TextBlock Grid.Column="1"
+                                       Classes="caption"
+                                       Text="{Binding Description}"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding HasDescription}" />
+                            <Border Grid.Column="2" Classes="mcp-badge">
+                              <TextBlock Classes="caption" Text="{Binding SideEffectText}" />
+                            </Border>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding ToolsTruncated}"
+                               Text="{Binding ToolsTruncatedText}" />
+                    <TextBlock Classes="caption"
+                               IsVisible="{Binding ToolsEmpty}"
+                               Text="{Binding [settings.mcp.row.toolsEmpty], Source={x:Static loc:Loc.Instance}}" />
+                  </StackPanel>
+
+                  <TextBlock Classes="caption"
+                             IsVisible="{Binding HasTestResult}"
+                             TextWrapping="Wrap"
+                             Text="{Binding TestResultText}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding EmptyText}"
+                 IsVisible="{Binding !HasServers}" />
+
+      <!-- 4. The entry editor. -->
+      <Border Classes="turn-card" Padding="12" IsVisible="{Binding IsEditing}">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="h2" Text="{Binding Editor.Title}" />
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Center"
+                       Text="{Binding [settings.mcp.editor.name], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Editor.Name, Mode=TwoWay}"
+                     PlaceholderText="{Binding [settings.mcp.editor.namePlaceholder], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="mcp-editor-name"
+                     AutomationProperties.Name="{Binding [settings.mcp.editor.name], Source={x:Static loc:Loc.Instance}}" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Center"
+                       Text="{Binding [settings.mcp.editor.transport], Source={x:Static loc:Loc.Instance}}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+              <RadioButton GroupName="mcp-transport"
+                           IsChecked="{Binding Editor.IsStdio, Mode=TwoWay}"
+                           Content="{Binding [settings.mcp.editor.transport.stdio], Source={x:Static loc:Loc.Instance}}" />
+              <RadioButton GroupName="mcp-transport"
+                           IsChecked="{Binding Editor.IsHttp, Mode=TwoWay}"
+                           Content="{Binding [settings.mcp.editor.transport.http], Source={x:Static loc:Loc.Instance}}" />
+            </StackPanel>
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2" IsVisible="{Binding Editor.IsStdio}">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Center"
+                       Text="{Binding [settings.mcp.editor.command], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Editor.Command, Mode=TwoWay}"
+                     PlaceholderText="{Binding [settings.mcp.editor.commandPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="mcp-editor-command"
+                     AutomationProperties.Name="{Binding [settings.mcp.editor.command], Source={x:Static loc:Loc.Instance}}" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2" IsVisible="{Binding Editor.IsStdio}">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Top"
+                       Text="{Binding [settings.mcp.editor.args], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Editor.ArgsText, Mode=TwoWay}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     Height="80"
+                     PlaceholderText="{Binding [settings.mcp.editor.argsPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                     AutomationProperties.AutomationId="mcp-editor-args"
+                     AutomationProperties.Name="{Binding [settings.mcp.editor.args], Source={x:Static loc:Loc.Instance}}" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2" IsVisible="{Binding Editor.IsStdio}">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Center"
+                       Text="{Binding [settings.mcp.editor.cwd], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Editor.WorkingDirectory, Mode=TwoWay}"
+                     PlaceholderText="{Binding [settings.mcp.editor.cwdPlaceholder], Source={x:Static loc:Loc.Instance}}" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2" IsVisible="{Binding Editor.IsHttp}">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Center"
+                       Text="{Binding [settings.mcp.editor.url], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Editor.Url, Mode=TwoWay}"
+                     PlaceholderText="{Binding [settings.mcp.editor.urlPlaceholder], Source={x:Static loc:Loc.Instance}}" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Top"
+                       Text="{Binding [settings.mcp.editor.env], Source={x:Static loc:Loc.Instance}}" />
+            <StackPanel Grid.Column="1" Spacing="4">
+              <ItemsControl ItemsSource="{Binding Editor.EnvRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="set:McpKeyValueRowViewModel">
+                    <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="6" Margin="0,2">
+                      <TextBox Text="{Binding Key, Mode=TwoWay}"
+                               PlaceholderText="{Binding [settings.mcp.editor.envKey], Source={x:Static loc:Loc.Instance}}" />
+                      <TextBox Grid.Column="1"
+                               Text="{Binding Value, Mode=TwoWay}"
+                               PlaceholderText="{Binding [settings.mcp.editor.envValue], Source={x:Static loc:Loc.Instance}}" />
+                      <Button Grid.Column="2"
+                              Classes="ghost"
+                              Command="{Binding RemoveCommand}"
+                              Content="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.Name="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button Classes="link"
+                      HorizontalAlignment="Left"
+                      Command="{Binding Editor.AddEnvCommand}"
+                      Content="{Binding [settings.mcp.editor.addRow], Source={x:Static loc:Loc.Instance}}" />
+            </StackPanel>
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Top"
+                       Text="{Binding [settings.mcp.editor.headers], Source={x:Static loc:Loc.Instance}}" />
+            <StackPanel Grid.Column="1" Spacing="4">
+              <ItemsControl ItemsSource="{Binding Editor.HeaderRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="set:McpKeyValueRowViewModel">
+                    <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="6" Margin="0,2">
+                      <TextBox Text="{Binding Key, Mode=TwoWay}"
+                               PlaceholderText="{Binding [settings.mcp.editor.headersKey], Source={x:Static loc:Loc.Instance}}" />
+                      <TextBox Grid.Column="1"
+                               Text="{Binding Value, Mode=TwoWay}"
+                               PlaceholderText="{Binding [settings.mcp.editor.headersValue], Source={x:Static loc:Loc.Instance}}" />
+                      <Button Grid.Column="2"
+                              Classes="ghost"
+                              Command="{Binding RemoveCommand}"
+                              Content="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.Name="{Binding [settings.mcp.editor.removeRow], Source={x:Static loc:Loc.Instance}}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button Classes="link"
+                      HorizontalAlignment="Left"
+                      Command="{Binding Editor.AddHeaderCommand}"
+                      Content="{Binding [settings.mcp.editor.addRow], Source={x:Static loc:Loc.Instance}}" />
+            </StackPanel>
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Top"
+                       Text="{Binding [settings.mcp.editor.readOnlyTools], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Editor.ReadOnlyToolsText, Mode=TwoWay}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     Height="60" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Center"
+                       Text="{Binding [settings.mcp.editor.timeout], Source={x:Static loc:Loc.Instance}}" />
+            <TextBox Grid.Column="1"
+                     MinWidth="140"
+                     HorizontalAlignment="Left"
+                     Text="{Binding Editor.TimeoutText, Mode=TwoWay}" />
+          </Grid>
+
+          <Grid ColumnDefinitions="150,*" Margin="0,2">
+            <TextBlock Classes="label"
+                       VerticalAlignment="Top"
+                       Text="{Binding [settings.mcp.editor.saveTarget], Source={x:Static loc:Loc.Instance}}" />
+            <StackPanel Grid.Column="1" Spacing="2">
+              <RadioButton GroupName="mcp-target"
+                           IsChecked="{Binding Editor.SaveToGlobal, Mode=TwoWay}"
+                           Content="{Binding Editor.GlobalTargetText}" />
+              <RadioButton GroupName="mcp-target"
+                           IsVisible="{Binding Editor.HasProjectTarget}"
+                           IsChecked="{Binding Editor.SaveToProject, Mode=TwoWay}"
+                           Content="{Binding Editor.ProjectTargetText}" />
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     IsVisible="{Binding Editor.HasShadowWarning}"
+                     AutomationProperties.AutomationId="mcp-editor-shadow-warning"
+                     Text="{Binding Editor.ShadowWarningText}" />
+
+          <StackPanel Spacing="2" IsVisible="{Binding Editor.HasIssues}">
+            <TextBlock Classes="caption mcp-error" Text="{Binding [settings.mcp.editor.issue], Source={x:Static loc:Loc.Instance}}" />
+            <ItemsControl ItemsSource="{Binding Editor.Issues}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="sys:String">
+                  <TextBlock Classes="caption mcp-error" Text="{Binding}" TextWrapping="Wrap" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+            <Button Classes="primary"
+                    Command="{Binding SaveCommand}"
+                    Content="{Binding [settings.mcp.editor.save], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="mcp-editor-save"
+                    AutomationProperties.Name="{Binding [settings.mcp.editor.save], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="ghost"
+                    Command="{Binding CancelEditCommand}"
+                    Content="{Binding [settings.mcp.editor.cancel], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="mcp-editor-cancel"
+                    AutomationProperties.Name="{Binding [settings.mcp.editor.cancel], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 5. The import panel. -->
+      <Border Classes="turn-card" Padding="12" IsVisible="{Binding IsImportOpen}">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="h2" Text="{Binding [settings.mcp.import.title], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     Text="{Binding [settings.mcp.import.hint], Source={x:Static loc:Loc.Instance}}" />
+
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <RadioButton GroupName="mcp-import-target"
+                         IsChecked="{Binding ImportToGlobal, Mode=TwoWay}"
+                         Content="{Binding ImportGlobalTargetText}" />
+            <RadioButton GroupName="mcp-import-target"
+                         IsVisible="{Binding HasImportProjectTarget}"
+                         IsChecked="{Binding ImportToProject, Mode=TwoWay}"
+                         Content="{Binding ImportProjectTargetText}" />
+          </StackPanel>
+
+          <ItemsControl ItemsSource="{Binding ImportCandidates}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="set:McpImportCandidateViewModel">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,2">
+                  <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                            AutomationProperties.Name="{Binding Name}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="2"
+                             Classes="caption"
+                             VerticalAlignment="Center"
+                             Text="{Binding Detail}"
+                             TextTrimming="CharacterEllipsis"
+                             IsVisible="{Binding HasDetail}" />
+                  <Border Grid.Column="3" Classes="mcp-badge" IsVisible="{Binding HasSource}">
+                    <TextBlock Classes="caption" Text="{Binding SourceText}" />
+                  </Border>
+                  <Border Grid.Column="4" Classes="mcp-badge">
+                    <TextBlock Classes="caption" Text="{Binding TransportText}" />
+                  </Border>
+                  <Border Grid.Column="5" Classes="mcp-badge" IsVisible="{Binding AlreadyExists}">
+                    <TextBlock Classes="caption" Text="{Binding [settings.mcp.import.exists], Source={x:Static loc:Loc.Instance}}" />
+                  </Border>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding ImportEmpty}"
+                     Text="{Binding [settings.mcp.import.none], Source={x:Static loc:Loc.Instance}}" />
+          <TextBlock Classes="caption"
+                     TextWrapping="Wrap"
+                     Text="{Binding ImportSummary}" />
+
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Button Classes="primary"
+                    Command="{Binding ApplyImportCommand}"
+                    Content="{Binding [settings.mcp.import.apply], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="mcp-import-apply"
+                    AutomationProperties.Name="{Binding [settings.mcp.import.apply], Source={x:Static loc:Loc.Instance}}" />
+            <Button Classes="ghost"
+                    Command="{Binding CancelImportCommand}"
+                    Content="{Binding [settings.mcp.import.cancel], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.Name="{Binding [settings.mcp.import.cancel], Source={x:Static loc:Loc.Instance}}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 6. The four default parameters, written straight into the live preferences. -->
+      <TextBlock Classes="h2"
+                 Margin="0,8,0,0"
+                 Text="{Binding [settings.mcp.pref.heading], Source={x:Static loc:Loc.Instance}}" />
+
+      <Grid ColumnDefinitions="220,*" Margin="0,3">
+        <TextBlock Classes="label"
+                   VerticalAlignment="Center"
+                   Text="{Binding [settings.mcp.pref.requestTimeout], Source={x:Static loc:Loc.Instance}}" />
+        <NumericUpDown Grid.Column="1"
+                       MinWidth="120"
+                       HorizontalAlignment="Left"
+                       Minimum="5"
+                       Maximum="600"
+                       Increment="5"
+                       FormatString="0"
+                       Value="{Binding McpRequestTimeoutSeconds, Mode=TwoWay}"
+                       AutomationProperties.AutomationId="mcp-request-timeout"
+                       AutomationProperties.Name="{Binding [settings.mcp.pref.requestTimeout], Source={x:Static loc:Loc.Instance}}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding [settings.mcp.pref.requestTimeoutHint], Source={x:Static loc:Loc.Instance}}" />
+
+      <Grid ColumnDefinitions="220,*" Margin="0,3">
+        <TextBlock Classes="label"
+                   VerticalAlignment="Center"
+                   Text="{Binding [settings.mcp.pref.reconnectDelay], Source={x:Static loc:Loc.Instance}}" />
+        <NumericUpDown Grid.Column="1"
+                       MinWidth="120"
+                       HorizontalAlignment="Left"
+                       Minimum="1"
+                       Maximum="60"
+                       Increment="1"
+                       FormatString="0"
+                       Value="{Binding McpReconnectInitialDelaySeconds, Mode=TwoWay}"
+                       AutomationProperties.AutomationId="mcp-reconnect-delay"
+                       AutomationProperties.Name="{Binding [settings.mcp.pref.reconnectDelay], Source={x:Static loc:Loc.Instance}}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding [settings.mcp.pref.reconnectDelayHint], Source={x:Static loc:Loc.Instance}}" />
+
+      <Grid ColumnDefinitions="220,*" Margin="0,3">
+        <TextBlock Classes="label"
+                   VerticalAlignment="Center"
+                   Text="{Binding [settings.mcp.pref.toolLimit], Source={x:Static loc:Loc.Instance}}" />
+        <NumericUpDown Grid.Column="1"
+                       MinWidth="120"
+                       HorizontalAlignment="Left"
+                       Minimum="0"
+                       Maximum="1000"
+                       Increment="10"
+                       FormatString="0"
+                       Value="{Binding McpToolSearchLimit, Mode=TwoWay}"
+                       AutomationProperties.AutomationId="mcp-tool-limit"
+                       AutomationProperties.Name="{Binding [settings.mcp.pref.toolLimit], Source={x:Static loc:Loc.Instance}}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding [settings.mcp.pref.toolLimitHint], Source={x:Static loc:Loc.Instance}}" />
+
+      <Grid ColumnDefinitions="220,*" Margin="0,3">
+        <TextBlock Classes="label"
+                   VerticalAlignment="Center"
+                   Text="{Binding [settings.mcp.pref.stderrLines], Source={x:Static loc:Loc.Instance}}" />
+        <NumericUpDown Grid.Column="1"
+                       MinWidth="120"
+                       HorizontalAlignment="Left"
+                       Minimum="20"
+                       Maximum="2000"
+                       Increment="20"
+                       FormatString="0"
+                       Value="{Binding McpStderrTailLines, Mode=TwoWay}"
+                       AutomationProperties.AutomationId="mcp-stderr-lines"
+                       AutomationProperties.Name="{Binding [settings.mcp.pref.stderrLines], Source={x:Static loc:Loc.Instance}}" />
+      </Grid>
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding [settings.mcp.pref.stderrLinesHint], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
