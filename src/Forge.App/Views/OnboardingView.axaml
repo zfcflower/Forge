@@ -1,0 +1,7 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.OnboardingView"
+             x:DataType="vm:OnboardingViewModel">
+  <!-- Placeholder: wave W9 owns this file. -->
+</UserControl>

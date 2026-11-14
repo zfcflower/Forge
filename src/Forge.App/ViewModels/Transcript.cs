@@ -20,7 +20,7 @@ internal abstract class TranscriptItemViewModel : NotifyingObject
 /// A user message, rendered as an IM-style bubble aligned right: the typed text, image thumbnails, and a chip (icon, name,
 /// size) for each other attachment - PDF, audio, video, or a text file inlined into the message.
 /// </summary>
-internal sealed class UserMessageViewModel : TranscriptItemViewModel
+internal sealed class UserMessageViewModel : TranscriptItemViewModel, ICopyableText
 {
     public UserMessageViewModel(string text, DateTimeOffset at, IReadOnlyList<ContentBlock>? attachments = null)
     {
@@ -67,6 +67,8 @@ internal sealed class UserMessageViewModel : TranscriptItemViewModel
 
     public string Time { get; }
 
+    string ICopyableText.CopyText => Text;
+
     public override void RefreshText()
     {
         foreach (var file in Files)
@@ -107,6 +109,8 @@ internal sealed class TextSegmentViewModel : ObservableObject
     /// <summary>A segment that shows a localized placeholder instead of model text - a reply that never arrived.</summary>
     public TextSegmentViewModel(LocText value) => placeholder = value;
 
+    internal bool IsPlaceholder => !placeholder.IsEmpty;
+
     public string Text
     {
         get => placeholder.IsEmpty ? text : placeholder.Resolve();
@@ -121,7 +125,7 @@ internal sealed class TextSegmentViewModel : ObservableObject
 /// and land in the open segment only, so a flush never re-materializes the whole reply; a segment is closed at the next
 /// paragraph break once it reaches <see cref="SegmentLimit"/> characters.
 /// </summary>
-internal sealed class TurnTextViewModel : TurnBlockViewModel
+internal sealed class TurnTextViewModel : TurnBlockViewModel, ICopyableText
 {
     private const int SegmentLimit = 2048;
     private const int HardLimit = SegmentLimit * 4;
@@ -140,10 +144,20 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel
         private set => Set(ref isStreaming, value);
     }
 
+    /// <summary>
+    /// The reply's whole text. Segments are cut at line breaks, so joining them restores the original exactly; the placeholder
+    /// of a reply that never arrived is not text and copies as nothing.
+    /// </summary>
+    public string CopyText => string.Concat(segments.Where(static segment => !segment.IsPlaceholder).Select(static segment => segment.Text));
+
     public void Append(string chunk)
     {
         open.Append(chunk);
         var closed = false;
+
+        // The last segment is the live one: it already shows the earlier part of the open text, so the first piece cut off
+        // replaces it instead of being added after it (which would show that text twice).
+        var liveShown = segments.Count > 0;
         while (open.Length > SegmentLimit)
         {
             var cut = LastBreak(open, '\n');
@@ -161,7 +175,17 @@ internal sealed class TurnTextViewModel : TurnBlockViewModel
                 }
             }
 
-            segments.Add(new TextSegmentViewModel(open.ToString(0, cut)));
+            var piece = open.ToString(0, cut);
+            if (liveShown)
+            {
+                segments[^1].Text = piece;
+                liveShown = false;
+            }
+            else
+            {
+                segments.Add(new TextSegmentViewModel(piece));
+            }
+
             open.Remove(0, cut);
             closed = true;
         }
@@ -216,103 +240,6 @@ internal sealed class TurnNoticeViewModel(LocText text, bool isError) : TurnBloc
     public bool IsError { get; } = isError;
 
     public override void RefreshText() => OnPropertyChanged(nameof(Text));
-}
-
-/// <summary>
-/// One tool call: "▸ name · argument summary · ✓" collapsed, full arguments and result when expanded.
-/// </summary>
-internal sealed class ToolRowViewModel(string name, string argumentsJson) : TurnBlockViewModel
-{
-    private const int SummaryLimit = 160;
-
-    private string status = "…";
-    private LocText result;
-    private bool hasResult;
-    private bool isError;
-    private bool isExpanded;
-
-    public string Name { get; } = name;
-
-    public string Arguments { get; } = argumentsJson;
-
-    public string ArgumentSummary { get; } = Compact(argumentsJson, SummaryLimit);
-
-    public string Status
-    {
-        get => status;
-        private set => Set(ref status, value);
-    }
-
-    /// <summary>The tool's answer in the current language; null until it returned something.</summary>
-    public string? Result => hasResult ? result.Resolve() : null;
-
-    public bool HasResult => hasResult;
-
-    public bool IsError
-    {
-        get => isError;
-        private set => Set(ref isError, value);
-    }
-
-    public bool IsExpanded
-    {
-        get => isExpanded;
-        set => Set(ref isExpanded, value);
-    }
-
-    public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
-
-    public void Complete(ToolResult toolResult) => Complete(LocText.Literal(toolResult.Content), toolResult.IsError);
-
-    /// <summary>
-    /// Closes the row with a result that is not the tool's own text - the placeholder of a call that never came back - so a
-    /// language switch still reaches it.
-    /// </summary>
-    public void Complete(LocText content, bool isError)
-    {
-        result = content;
-        hasResult = !string.IsNullOrEmpty(content.Resolve());
-        IsError = isError;
-        Status = isError ? "✗" : "✓";
-        OnPropertyChanged(nameof(Result));
-        OnPropertyChanged(nameof(HasResult));
-    }
-
-    public override void RefreshText()
-    {
-        OnPropertyChanged(nameof(Result));
-        OnPropertyChanged(nameof(HasResult));
-    }
-
-    internal static string Compact(string text, int limit)
-    {
-        var builder = new StringBuilder(Math.Min(text.Length, limit));
-        var pendingSpace = false;
-        foreach (var character in text)
-        {
-            if (char.IsWhiteSpace(character))
-            {
-                pendingSpace = builder.Length > 0;
-                continue;
-            }
-
-            if (builder.Length >= limit)
-            {
-                builder.Append('…');
-                break;
-            }
-
-            if (pendingSpace)
-            {
-                builder.Append(' ');
-                pendingSpace = false;
-            }
-
-            builder.Append(character);
-        }
-
-        return builder.ToString();
-    }
 }
 
 /// <summary>

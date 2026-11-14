@@ -740,7 +740,7 @@ public sealed class GitSyncViewModelTests
                 seen = draft;
                 return Task.FromResult<PullRequestDraft?>(null);
             },
-            describePullRequest: () => "## Summary\n" + "planned work");
+            describePullRequest: () => Task.FromResult<string?>("## Summary\n" + "planned work"));
         try
         {
             await AttachAndWaitAsync(ui, panel, "s1", work);
@@ -1176,7 +1176,7 @@ public sealed class GitSyncViewModelTests
         Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest = null,
         Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge = null,
         Func<string, string, Task<bool>>? confirm = null,
-        Func<string?>? describePullRequest = null) =>
+        Func<Task<string?>>? describePullRequest = null) =>
         new(
             new GitCli(),
             new GitPanelSettings(() => strategy, () => TimeSpan.FromSeconds(30)),

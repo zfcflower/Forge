@@ -71,9 +71,9 @@ public sealed class FileBlockStorageTests
     [Fact]
     public void The_placeholder_falls_back_to_the_media_type_and_shows_at_least_one_kilobyte()
     {
-        Assert.Equal("[file: video/mp4, 1 KB]", MessageJson.FilePlaceholder(new FileBlock("video/mp4", "AAAA")));
-        Assert.Equal("[file: audio/mpeg, 1 KB]", MessageJson.FilePlaceholder(new FileBlock("audio/mpeg", string.Empty, "  ")));
-        Assert.Equal("[file: a.pdf, 3 KB]", MessageJson.FilePlaceholder(new FileBlock("application/pdf", Base64, "a.pdf")));
+        Assert.Equal("[file: video/mp4, 1 KB]", ContentPlaceholders.FilePlaceholder(new FileBlock("video/mp4", "AAAA")));
+        Assert.Equal("[file: audio/mpeg, 1 KB]", ContentPlaceholders.FilePlaceholder(new FileBlock("audio/mpeg", string.Empty, "  ")));
+        Assert.Equal("[file: a.pdf, 3 KB]", ContentPlaceholders.FilePlaceholder(new FileBlock("application/pdf", Base64, "a.pdf")));
     }
 
     // ------------------------------------------------------------------ token estimate

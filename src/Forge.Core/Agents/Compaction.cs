@@ -803,8 +803,8 @@ public sealed class SummaryCompactor : IContextCompactor
             var text = block switch
             {
                 TextBlock value => value.Text,
-                ImageBlock image => MessageJson.ImagePlaceholder(image),
-                FileBlock file => MessageJson.FilePlaceholder(file),
+                ImageBlock image => ContentPlaceholders.ImagePlaceholder(image),
+                FileBlock file => ContentPlaceholders.FilePlaceholder(file),
                 ArtifactRefBlock artifact => ArtifactPlaceholder(artifact),
                 _ => null,
             };

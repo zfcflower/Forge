@@ -135,7 +135,7 @@ internal sealed class PrCommentEnvironment(
             ? result.Status with { Failure = GitRemoteFailureKind.Other }
             : result.Status;
         var report = GitToolFailure.ToToolResult(status, hint);
-        return report with { Content = what + " " + report.Content };
+        return new ToolResult(what + " " + report.Content, report.IsError);
     }
 
     /// <summary>The network timeout the settings ask for; zero or negative keeps the git default.</summary>

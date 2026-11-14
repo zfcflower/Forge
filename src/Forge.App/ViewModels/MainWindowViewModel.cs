@@ -256,7 +256,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ComposePullRequestAsync,
             ComposePullRequestMergeAsync,
             ConfirmGitRowActionAsync,
-            DescribePullRequest);
+            DescribePullRequestAsync);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -2428,7 +2428,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
     /// The description the 打开 PR dialog starts with: exactly what the agent's pr_create defaults to (the plan summary plus
     /// the generated plan), rendered from this session's plan. Nothing is sent until the dialog is confirmed.
     /// </summary>
-    private string? DescribePullRequest()
+    private async Task<string?> DescribePullRequestAsync()
     {
         if (activeSession is not { } session)
         {
@@ -2437,10 +2437,11 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         try
         {
+            // Three store reads: awaited, so the UI thread is free while they run.
             var todos = composition.Todos;
-            var plan = todos.GetPlanSummaryAsync(session.SessionId, CancellationToken.None).GetAwaiter().GetResult();
-            var steps = todos.ListAsync(session.SessionId, CancellationToken.None).GetAwaiter().GetResult();
-            var groups = todos.ListGroupsAsync(session.SessionId, CancellationToken.None).GetAwaiter().GetResult();
+            var plan = await todos.GetPlanSummaryAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
+            var steps = await todos.ListAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
+            var groups = await todos.ListGroupsAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
             var body = Forge.Workspace.PrBodyRenderer.Render(plan, steps, groups);
             return body.Length > 0 ? body : null;
         }

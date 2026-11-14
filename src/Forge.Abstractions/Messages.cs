@@ -11,7 +11,31 @@ public sealed record ThinkingBlock(string Text, string? Signature = null) : Cont
 
 public sealed record ToolCallBlock(string Id, string Name, string ArgumentsJson) : ContentBlock;
 
-public sealed record ToolResultBlock(string CallId, string Content, bool IsError = false) : ContentBlock;
+/// <summary>The answer to one <see cref="ToolCallBlock"/>: text and images in order, like <see cref="ToolResult"/>.</summary>
+public sealed record ToolResultBlock(string CallId, IReadOnlyList<ContentBlock> Blocks, bool IsError = false) : ContentBlock
+{
+    public ToolResultBlock(string CallId, string Content, bool IsError = false)
+        : this(CallId, [new TextBlock(Content)], IsError)
+    {
+    }
+
+    private readonly IReadOnlyList<ContentBlock> blocks = ToolResultBlocks.Validate(Blocks);
+
+    /// <summary>Text and image blocks only; a <c>with</c> expression is validated too.</summary>
+    public IReadOnlyList<ContentBlock> Blocks
+    {
+        get => blocks;
+        init => blocks = ToolResultBlocks.Validate(value);
+    }
+
+    /// <summary>The flattened text of <see cref="Blocks"/>; see <see cref="ToolResultBlocks.Flatten"/>.</summary>
+    public string Content => ToolResultBlocks.Flatten(Blocks);
+
+    public bool Equals(ToolResultBlock? other) =>
+        other is not null && CallId == other.CallId && IsError == other.IsError && ToolResultBlocks.SequenceEqual(Blocks, other.Blocks);
+
+    public override int GetHashCode() => HashCode.Combine(CallId, IsError, ToolResultBlocks.Hash(Blocks));
+}
 
 /// <summary>
 /// An image the user attached (user messages only for now). <paramref name="MediaType"/> is one of <c>image/png</c>,

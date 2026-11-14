@@ -346,7 +346,7 @@ internal abstract class FileChipViewModel : ObservableObject
                     string.IsNullOrWhiteSpace(file.Name) ? file.MediaType : file.Name,
                     FileAttachmentRules.KindOf(file),
                     file.MediaType,
-                    MessageJson.DecodedLength(file.Data));
+                    ContentPlaceholders.DecodedLength(file.Data));
             case TextBlock text when TextAttachment.TryParse(text.Text, out var name, out var bytes):
                 return (name, AttachmentKind.Text, "text/plain", bytes);
             default:

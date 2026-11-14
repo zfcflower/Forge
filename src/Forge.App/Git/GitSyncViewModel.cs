@@ -46,7 +46,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     private readonly Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest;
     private readonly Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge;
     private readonly Func<string, string, Task<bool>>? confirm;
-    private readonly Func<string?>? describePullRequest;
+    private readonly Func<Task<string?>>? describePullRequest;
     private readonly RelayCommand[] commands;
 
     /// <summary>The thread the row was built on (the UI thread); a language notification from another one is not ours.</summary>
@@ -101,7 +101,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest = null,
         Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge = null,
         Func<string, string, Task<bool>>? confirm = null,
-        Func<string?>? describePullRequest = null)
+        Func<Task<string?>>? describePullRequest = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(settings);
@@ -703,7 +703,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         var branch = BranchLabel;
         // Prefilled the way pr_create defaults its body: the plan summary plus the generated plan. The user edits from there;
         // nothing is sent until the dialog is confirmed.
-        var described = describePullRequest?.Invoke() ?? string.Empty;
+        var described = (describePullRequest is null ? null : await describePullRequest().ConfigureAwait(true)) ?? string.Empty;
         var draft = await composePullRequest(new PullRequestDraft(branch, described, false)).ConfigureAwait(true);
         if (draft is null || disposed || !string.Equals(context.WorkingDirectory, directory, StringComparison.Ordinal))
         {

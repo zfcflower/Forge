@@ -79,8 +79,8 @@
           </Button>
         </StackPanel>
 
-        <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: search is not a
-        feature yet, so the magnifier is a plain icon, and the extension host's state is the one live readout the
+        <!-- Right-aligned search affordance and host state, sitting just left of the caption buttons: the search button opens the palette
+        (disabled until wave W3), and the extension host's state is the one live readout the
         header carries — the same state the status bar spells out in words. -->
         <StackPanel Grid.Column="1"
                     Orientation="Horizontal"
@@ -88,13 +88,18 @@
                     Margin="0,0,12,0"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center">
-          <wc:FluentIcon Data="{StaticResource IconSearch}"
-                         Width="16"
-                         Height="16"
-                         Foreground="{DynamicResource TextMutedBrush}"
-                         ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
-                         AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
-                         AutomationProperties.AutomationId="shell-search" />
+          <Button Classes="ghost icon"
+                  Width="30"
+                  Height="26"
+                  Command="{Binding OpenPaletteCommand}"
+                  ToolTip.Tip="{Binding [shell.searchPlaceholder], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.Name="{Binding [shell.search], Source={x:Static loc:Loc.Instance}}"
+                  AutomationProperties.AutomationId="shell-search">
+            <wc:FluentIcon Data="{StaticResource IconSearch}"
+                           Width="16"
+                           Height="16"
+                           Foreground="{DynamicResource TextMutedBrush}" />
+          </Button>
           <StackPanel Orientation="Horizontal"
                       Spacing="6"
                       VerticalAlignment="Center"
@@ -161,6 +166,13 @@
 
     <!-- Approval queue: the non-modal panel in the bottom-right corner. It resolves the shell's approval services from
     its own constructor, so the root view model does not have to carry it. -->
+    <!-- Window overlays: each draws the template of its view model (App.axaml) and is empty while the property is null. -->
+    <ContentControl Grid.Row="1" Content="{Binding Palette}" />
+    <ContentControl Grid.Row="1" Content="{Binding Checks}" />
+    <ContentControl Grid.Row="1" Content="{Binding Plan}" />
+    <ContentControl Grid.Row="1" Content="{Binding Inspector}" />
+    <ContentControl Grid.Row="1" Content="{Binding Onboarding}" />
+
     <ap:ApprovalQueueOverlay Grid.Row="1" />
 
     <!-- The app status bar is gone: the extension host's state lives in the title row (dot plus tooltip), ahead/behind and
