@@ -244,7 +244,7 @@ public sealed class StdioTransport : IMcpTransport
             {
                 current.Process.Kill(entireProcessTree: true);
             }
-            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception or AggregateException)
             {
             }
 

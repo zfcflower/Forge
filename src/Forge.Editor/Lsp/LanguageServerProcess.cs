@@ -402,7 +402,7 @@ public class LanguageServerProcess : IAsyncDisposable
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or IOException)
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or IOException or AggregateException)
         {
         }
     }

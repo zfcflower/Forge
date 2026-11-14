@@ -559,7 +559,7 @@ internal sealed class ScriptExecutorSupervisor : IAsyncDisposable
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception or IOException or ObjectDisposedException)
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception or IOException or ObjectDisposedException or AggregateException)
         {
             // A wrapper that was already disposed by its own start path is not a survivor: the pid is what decides.
             if (!ProcessRunning(pid))
