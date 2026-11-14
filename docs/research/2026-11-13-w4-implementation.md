@@ -74,7 +74,14 @@ dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localizat
 
 `Forge.Mcp.Tests` 的那一条失败是 `StdioTransportTests.Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines`(`initialize did not complete within 3s`);在干净的 `main` 检出(`D:/FORGE/forge`)上跑同一条测试同样失败,所以是既有环境问题,与本波无关。
 
-`Workbench/MenuShellTests`(项目起始目录列举,计时敏感)在全量跑的高负载下每次失败的成员都不同(同一次 2 条、下一次 1 条、再下一次 2 条且名称各异),而在 `main` 与合并后的分支上单独跑都 38/38 通过,本波也没有任何文件落在这条路径上。这与仓库既有的记录一致(`docs/merge-notes/2026-11-06-agent-extensions-open-issues.md` §5:全量并行跑时每次会有不同的 1–4 个计时敏感用例失败,单跑连续 3 次全过),按既有抖动处理,不作为本波缺陷。
+`Workbench/MenuShellTests`(项目起始目录列举,计时敏感)是既有抖动,已实测确认与合并无关:全量跑里每次失败的成员都不同(5 次观察里出现过 6 个不同用例),实测对照如下——
+
+| 代码 | `MenuShellTests` 单独跑 |
+|---|---|
+| 本分支(合并 W0/W1/W2 后) | 38/38、38/38、38/38(三次) |
+| 干净的 `main`(`D:/FORGE/forge` @ 5bee438) | 38/38、**37/38**(失败成员 `A_sparse_workspace_holds_only_the_chosen_directories_and_leaves_the_main_checkout_alone`) |
+
+即同一条用例在未改动的 `main` 上也会失败,且失败成员每次不同、与目录/计时相关。这与仓库既有记录一致(`docs/merge-notes/2026-11-06-agent-extensions-open-issues.md` §5:全量并行跑时每次会有不同的 1–4 个计时敏感用例失败,单跑连续 3 次全过),按既有抖动处理,不作为本波缺陷。同一轮全量里偶尔出现的 `Terminal/TerminalPreferenceTests` 失败同样与计时/进程启动相关,单独跑通过。
 
 手测项(需真人看):工具行缩略图的观感与悬停提示;宽 CSV 的横向滚动与列对齐;大图(>4096 长边)预览的缩放质量;PDF 卡片的「用默认程序打开」、以及 `.html` 文件上同一个按钮换成「在浏览器中打开」后在 Windows 上是否真的唤出浏览器。
 
