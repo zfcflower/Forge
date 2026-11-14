@@ -1,3 +1,4 @@
+using Forge.Editor.Highlighting;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
 
@@ -46,4 +47,18 @@ internal sealed record EditorLspDiagnosticSet(int Version, IReadOnlyList<EditorL
 internal sealed class EditorLspDiagnosticsEventArgs(EditorLspDiagnosticSet set) : EventArgs
 {
     public EditorLspDiagnosticSet Set { get; } = set;
+}
+
+/// <summary>
+/// One place a symbol is referenced. <paramref name="Line"/> and <paramref name="Column"/> are 1-based, for display only;
+/// navigation goes through <paramref name="Target"/>, which carries the session's position encoding.
+/// </summary>
+internal sealed record EditorLspReference(string Path, int Line, int Column, EditorLspDefinitionTarget Target);
+
+/// <summary>The places a symbol is used, with the identifier the request was made for (empty when the caret was not on one).</summary>
+internal sealed record EditorLspReferenceList(string Symbol, IReadOnlyList<EditorLspReference> Items);
+
+internal sealed class EditorLspSemanticTokensEventArgs(SemanticLineIndex index) : EventArgs
+{
+    public SemanticLineIndex Index { get; } = index;
 }

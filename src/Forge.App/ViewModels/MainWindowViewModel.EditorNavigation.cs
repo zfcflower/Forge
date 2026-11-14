@@ -33,7 +33,8 @@ internal sealed partial class MainWindowViewModel
                     target.Path, newTab: true, CancellationToken.None,
                     workspaceOverride: source.EditorWorkspace,
                     reviewOwnerOverride: source.ReviewOwner,
-                    hasReviewOwnerOverride: true).ConfigureAwait(true);
+                    hasReviewOwnerOverride: true,
+                    hasWorkspaceOverride: true).ConfigureAwait(true);
                 if (!IsEditorNavigationSourceOpen(source))
                 {
                     return;

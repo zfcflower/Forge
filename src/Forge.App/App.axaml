@@ -60,6 +60,9 @@
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
     </DataTemplate>
+    <DataTemplate DataType="vm:ProblemsPanelViewModel" x:DataType="vm:ProblemsPanelViewModel">
+      <views:ProblemsPanelView />
+    </DataTemplate>
 
     <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
     <DataTemplate DataType="term:TerminalViewModel" x:DataType="term:TerminalViewModel">
