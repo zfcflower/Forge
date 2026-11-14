@@ -61,7 +61,7 @@ depends-on: [forge-goal]
 
 **审批与哈希。** 新插件默认未批准,展示源码差异与权限需求,用户批准后才可启用。每个插件记录 SourceHash、ApprovedHash、DependencyHash、SDKVersion 等;重启只恢复哈希匹配的已批准版本;源码或依赖变化使批准失效;不能通过改 manifest 或缓存状态绕过。插件调用主程序能力一律经 IPC,由主程序的权限引擎判断、审批与审计。
 
-**IPC。** 主程序↔Host、Host↔Worker 都用 `NamedPipeServerStream`/`ClientStream`(Linux/macOS 上由 Unix 域套接字实现)。消息含 ProtocolVersion、RequestId、PluginId、Operation、Arguments、Result、Error、Cancel、Timeout;有最大帧长;支持并发、取消、超时、批量与断连处理;协议版本不匹配时拒绝并提示。交互终端的字节流(`terminal.*`)也走主管道:输出按每终端 1 MiB 确认窗口流控,窗口满时 Host 停读 PTY,不丢输出(协议见 `forge-extension-host`)。
+**IPC。** 主程序↔Host、Host↔Worker 都用 `NamedPipeServerStream`/`ClientStream`(Linux/macOS 上由 Unix 域套接字实现)。帧体 = `IpcHeader`(`Version`、`Id`(0=通知)、`Operation`、`IsResponse`、`Error`)+ 至多一个 MessagePack 负载;协议版本 2,有最大帧长,支持并发、取消、超时与断连处理;版本不匹配拒绝该帧并提示、连接保持可用。`PluginId` 属上层消息语义、不在通用帧头;批量调用(batch)尚无契约面。帧格式与请求生命周期细节见 `forge-ipc`。交互终端的字节流(`terminal.*`)也走主管道:输出按每终端 1 MiB 确认窗口流控,窗口满时 Host 停读 PTY,不丢输出(协议见 `forge-extension-host`)。
 
 **可靠性。** Worker 支持超时、进程树清理、并发上限、崩溃自动恢复(在途请求明确失败、重启后重新注册工具);Windows 可设 Job Object 内存与进程数上限,其他平台不承诺。Host 崩溃时主程序检测退出、失败在途请求、重启 Host、恢复已批准插件并重新注册工具。进程隔离不是安全沙箱:同一操作系统账户下插件仍可访问该账户可访问的文件与网络;OS 级沙箱不在早期阶段承诺。
 

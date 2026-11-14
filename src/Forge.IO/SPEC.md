@@ -163,4 +163,4 @@ parent: forge-architecture
 - `GitCli`/`GhCli`/`ScreenshotShell` 仍各自实现进程执行与捕获,尚未改为复用 `ProcessRunner`(它们有各自的 head/tail 与逐行回调契约,单独立项)。
 - `bash` 的输出只在结束时一次性返回,不流式进 UI;`ls` 的截断发生在遍历顺序上而不是排序之后。
 - 已知分配成本(基准实测):`FileWalker` 约 353 B/文件(全路径 + 相对路径 + 分类);托管 `grep` 一次 1 万文件扫描分配约 82 MB、gen0 92 次,主因是每个文件 `rent + Encoding.UTF8.GetString` 整文件成串。两者都不影响内存上界(逐文件释放),但值得在需要时改成按行跨字节解码与复用相对路径缓冲。
-- 回收站服务:过期清理、容量上限、网络盘导出兖底与 jsonl 镜像联动均推迟。
+- 回收站服务:过期清理、容量上限、网络盘导出兜底与 jsonl 镜像联动均推迟。

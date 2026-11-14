@@ -81,7 +81,7 @@ depends-on: [forge-ipc]
   脚本不会被全局默认值截断,其他请求也没有被放宽。预算到期映射为 `IpcTimeoutException`;`run_code` 把它转成
   “脚本已停止”的错误结果,并作废该 run。
 - **超时只结束那一次调用,不动连接。** 预算到期是**调用级**结果,不是连接级故障:客户端只把该请求从 pending
-  移除、给 Host 发一条 `ipc.cancel` 通知,然后抛 `IpcTimeoutException`;peer、连接世代、`Status` 与已登记的
+  移除、给 Host 发一条 `cancel` 通知,然后抛 `IpcTimeoutException`;peer、连接世代、`Status` 与已登记的
   工具/贡献快照全部不变,紧接着的下一个请求走同一条连接。只有连接真的关闭(对端 `Closed`、管道 IO 失败)才会把
   状态改成 `Failed` 并让在途调用拿到 `IpcConnectionClosedException`。所以“超时后连接仍可用”是本模块的契约,
   不是调用方的期望:同一 `runId` 的迟到应答在 run 结束后一律作废(`EndRun` 已作废 pending 记录),不会被下一
