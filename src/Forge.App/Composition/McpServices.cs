@@ -122,11 +122,31 @@ internal sealed class McpServices : IAsyncDisposable
     /// both files and applies them to the running manager. Failures from the file (a root that is not an object, a locked file)
     /// surface as exceptions for the page to show; nothing is half-applied, because the manager is only touched after the write.
     /// </summary>
-    public Task SaveAsync(string path, McpServerEntry entry, CancellationToken ct, string? replacedName = null) =>
+    /// <param name="replacedName">The entry's name before an edit; a rename drops that key, so no ghost entry is left behind.</param>
+    /// <param name="replacedPath">
+    /// The file that entry lived in. When an edit also moves the entry to the other file the old key is removed from the file it
+    /// left, otherwise the move would leave the old entry running under its old name in the old file.
+    /// </param>
+    public Task SaveAsync(
+        string path,
+        McpServerEntry entry,
+        CancellationToken ct,
+        string? replacedName = null,
+        string? replacedPath = null) =>
         WriteThenApplyAsync(
             () =>
             {
-                store.Upsert(path, entry, replacedName);
+                if (replacedName is { Length: > 0 } previous &&
+                    replacedPath is { Length: > 0 } from &&
+                    !string.Equals(Path.GetFullPath(from), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+                {
+                    store.Remove(from, previous);
+                }
+
+                // The old key only has to be removed here when the entry stayed in its file: a move removed it above.
+                var sameFile = replacedPath is not { Length: > 0 } ||
+                               string.Equals(Path.GetFullPath(replacedPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
+                store.Upsert(path, entry, sameFile ? replacedName : null);
                 return true;
             },
             ct);

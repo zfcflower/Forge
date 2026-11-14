@@ -618,8 +618,9 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         try
         {
             var replacedName = current.OriginalName;
+            var replacedPath = current.OriginalSourcePath;
             await BackgroundRead.RunAsync(
-                token => services.SaveAsync(path, entry, token, replacedName),
+                token => services.SaveAsync(path, entry, token, replacedName, replacedPath),
                 ct).ConfigureAwait(true);
         }
         catch (OperationCanceledException)

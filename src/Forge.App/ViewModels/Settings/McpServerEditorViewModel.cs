@@ -61,6 +61,12 @@ internal sealed class McpServerEditorViewModel : NotifyingObject
 
     /// <summary>The name the entry had before this edit; a save renames it in the same write (null for a new entry).</summary>
     public string? OriginalName => original?.Name;
+
+    /// <summary>
+    /// The file the entry lived in before this edit; a save that also moves it to the other file removes the old key from the
+    /// file the entry left (null for a new entry).
+    /// </summary>
+    public string? OriginalSourcePath => original?.SourcePath;
     private readonly string globalPath;
     private readonly string? projectPath;
     private readonly bool isNew;

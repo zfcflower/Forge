@@ -82,6 +82,28 @@ public sealed class McpServicesTests : IDisposable
     }
 
     [Fact]
+    public async Task Moving_and_renaming_an_entry_drops_the_old_key_from_the_file_it_left()
+    {
+        WriteGlobal("""{"mcpServers":{"old":{"command":"never-spawned"}}}""");
+        await using var preferences = Preferences();
+        await using var services = McpServices.Create(Store(), preferences, null, null);
+        var projectPath = Assert.IsType<string>(services.Store.ProjectPath);
+        var globalPath = services.Store.GlobalPath;
+
+        await services.SaveAsync(
+            projectPath,
+            Entry("renamed"),
+            CancellationToken.None,
+            replacedName: "old",
+            replacedPath: globalPath);
+
+        Assert.Equal(["renamed"], services.Manager.ServerNames);
+        var files = services.Store.Read().Files;
+        Assert.Empty(files.Single(file => file.Path == globalPath).Entries);
+        Assert.Equal(["renamed"], files.Single(file => file.Path == projectPath).Entries.Select(entry => entry.Name));
+    }
+
+    [Fact]
     public async Task Deleting_the_last_server_still_stops_it()
     {
         WriteGlobal("""{"mcpServers":{"srv":{"command":"never-spawned"}}}""");
