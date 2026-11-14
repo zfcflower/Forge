@@ -99,6 +99,20 @@ internal sealed class ConfiguredPrPlatform(ConfiguredGh gh) : IPrPlatform
     public Task<PrResult<PrChecksSnapshot>> GetChecksAsync(string workingDirectory, int number, CancellationToken ct = default) =>
         Inner.GetChecksAsync(workingDirectory, number, ct);
 
+    public Task<PrResult<PrReference>> MergePullRequestAsync(
+        string workingDirectory,
+        int number,
+        PrMergeMethod method,
+        bool deleteBranch = false,
+        CancellationToken ct = default) =>
+        Inner.MergePullRequestAsync(workingDirectory, number, method, deleteBranch, ct);
+
+    public Task<PrResult<PrReference>> MarkPullRequestReadyAsync(
+        string workingDirectory,
+        int number,
+        CancellationToken ct = default) =>
+        Inner.MarkPullRequestReadyAsync(workingDirectory, number, ct);
+
     public Task<PrResult<PrMergeState>> GetMergeStateAsync(string workingDirectory, int number, CancellationToken ct = default) =>
         Inner.GetMergeStateAsync(workingDirectory, number, ct);
 

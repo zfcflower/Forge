@@ -5,11 +5,11 @@ using Forge.Abstractions;
 namespace Forge.Workspace;
 
 /// <summary>
-/// Renders what the PR check tools return to the model: compact plain text, verdict first, then the facts behind it. An
-/// empty check list is only ever described as "not determined yet" here; "no CI" is a verdict the poller reaches after
-/// several consecutive empty reads and nothing else.
+/// Renders what the PR check tools and the app's checks panel return to the model: compact plain text, verdict first, then
+/// the facts behind it. An empty check list is only ever described as "not determined yet" here; "no CI" is a verdict the
+/// poller reaches after several consecutive empty reads and nothing else.
 /// </summary>
-internal static class PrCheckText
+public static class PrCheckText
 {
     private const int MaxDescriptionCharacters = 200;
 
@@ -208,7 +208,7 @@ internal static class PrCheckText
 
         var ordered = checks.Checks
             .Select(static (check, index) => (check, index))
-            .OrderBy(static pair => Rank(pair.check.Bucket))
+            .OrderBy(static pair => BucketRank(pair.check.Bucket))
             .ThenBy(static pair => pair.index);
         foreach (var (check, _) in ordered)
         {
@@ -252,7 +252,11 @@ internal static class PrCheckText
         text.Append('\n');
     }
 
-    private static int Rank(PrCheckBucket bucket) => bucket switch
+    /// <summary>
+    /// Display order of the check buckets: what went wrong first, then what is still running, then what passed. The app's
+    /// checks panel lists its rows in the same order, so the two never disagree about what matters most.
+    /// </summary>
+    public static int BucketRank(PrCheckBucket bucket) => bucket switch
     {
         PrCheckBucket.Fail => 0,
         PrCheckBucket.Cancel => 1,

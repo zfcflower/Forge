@@ -15,7 +15,7 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 - 所有文件写入(规格、评审)被限制在所属工作区内;创建/更新/删除前解析符号链接与 junction 的真实目标,越界即拒绝。
 - 经 `Forge.Abstractions` 暴露 7 个规格工具:`spec_grep`/`spec_get`/`spec_graph`/`spec_validate`(只读)、`spec_create`/`spec_update`/`spec_delete`(写)。
 - 另有 6 个 git 工具(实现于 `Git/`,由 App 组合根构造、经 `AgentRuntimeServices.Git` 注入,不走 `Forge.Abstractions` 契约):`git_status`/`git_log`/`git_diff`/`git_fetch` 只读,`git_branch`/`git_sync` 写;副作用按工具名固定划分(`git_fetch` 只读、`git_sync` 含写),拉取策略与网络超时仅来自用户设置,不接受工具参数。
-- PR 工具与 git 工具同源(同样实现于 `Git/`、经 `AgentRuntimeServices.PullRequestTools` 注入):`pr_view`/`pr_workflow`/`pr_checks`/`pr_ci_log` 只读,`pr_create`/`pr_sync`/`pr_edit`/`pr_comment_reply`/`pr_comment_resolve`/`review_comment_resolve` 写,`pr_screenshots` 执行(`ToolSideEffect.Execute`)。工具与 UI 只依赖 `IPrPlatform` 接口;`GitHubPlatform`(基于 `GhCli`)是唯一实现,只做 GitHub。
+- PR 工具与 git 工具同源(同样实现于 `Git/`、经 `AgentRuntimeServices.PullRequestTools` 注入):`pr_view`/`pr_workflow`/`pr_checks`/`pr_ci_log` 只读,`pr_create`/`pr_sync`/`pr_edit`/`pr_comment_reply`/`pr_comment_resolve`/`review_comment_resolve` 写,`pr_screenshots` 执行(`ToolSideEffect.Execute`)。工具与 UI 只依赖 `IPrPlatform` 接口;`GitHubPlatform`(基于 `GhCli`)是唯一实现,只做 GitHub。**没有工具会合并 PR 或把它标记为可评审**:`MergePullRequestAsync` 与 `MarkPullRequestReadyAsync` 只由 UI 在用户点击后调用,接口给两者的默认实现都直接拒绝,所以平台不支持时调用方拿到的是一句明确答复而不是空实现。
 **评审意见存储。** 评审意见存应用数据目录的 SQLite,不入仓库;`MarkSentAsync` 幂等——对已发送评论重复标记不改写原始 `sent_at`。
 
 ## 关键决策
@@ -49,6 +49,8 @@ Git 与 Worktree、统一 Diff、规格树(spec-graph)、评审意见存储。�
 **PR 平台:经 `gh` CLI、接口隔离。** 工具与 UI 只依赖 `IPrPlatform`,`GitHubPlatform` 是唯一实现,基于 `GhCli`(与 `GitCli` 同一套 `ArgumentList`/字节捕获/超时杀树纪律;环境 `GH_PROMPT_DISABLED=1`、`GH_NO_UPDATE_NOTIFIER=1`、`GH_PAGER=cat`、`NO_COLOR=1` 并清掉仓库定位变量;JSON 走 `GhJsonContext` 源生成,不反射)。`GetAvailabilityAsync` 返回 `NotInstalled`/`NotAuthenticated`/`Ready`(`gh auth status`);不是 `Ready` 时 PR 工具报明确错误,本地 git 不受影响。
 
 **`pr_create` 五道闸门由代码强制,推送钉死被审阅的提交。** 闸门按序:(1) 工作树干净(未跟踪计入);(2) 现 fetch 后 `origin/<base>` 是 HEAD 祖先;(3) 本会话对**这个确切 HEAD** 读过完整 `git_diff`(`GitReviewLedger` 记下真正 diff 的那个 HEAD;代码只能强制“重读”,清理是否彻底是 Agent 的判断,工具描述诚实写明);(4) 正文 `## Testing` 非空且非空话(最小长度 + 禁用词);(5) 与 3 同源。闸门通过后重读 HEAD 与工作树,再把推送钉死到被审阅的提交:`GitPushOptions.SourceCommit` 把 refspec 写成 `<sha>:refs/heads/<branch>` 并在 push 前再核一次 HEAD,闸门之后落到 HEAD 的新提交不可能被发布——即 gate-to-push 竞态被拒绝而非静默发布;`-u` 对 sha refspec 不生效,由 `WriteUpstreamAsync` 成功后补写 `branch.<n>.remote`/`branch.<n>.merge`。`pr_sync` 拒绝没有 PR 的分支,按分支既有历史选 rebase 或 merge,冲突停下交 Agent 解,成功后带 lease 推送。`pr_edit` 读-改-核对。`pr_view`/`pr_workflow` 只读。
+
+**检查的判决、排序与文本只有一份。** `PrChecksPoller.Verdict(observation)` 是 `WaitAsync` 用的同一条判决规则的单次读出版:面板读一次就能标出“通过/失败/等待”,而“这个仓库没有 CI”只由等待模式在连续多次成功空读后得出(`Verdict` 传 streak 0,空列表永远是“未定”)。`PrCheckText` 与 `PrCheckText.BucketRank` 公开给 App:面板的行顺序、工具返回的文本、交给 agent 的修复消息共用同一套判决词汇与同一份检查清单渲染,不再有第二份实现。`MarkPullRequestReadyAsync` 走 `gh pr ready <n>`;gh 对已经是可评审的 PR 返回非零并说 "already ready",这正是调用方要的状态,因此记为成功(幂等),不把一次假失败报给用户。这一步与合并一样不重试、不改标题正文、不请求评审。
 
 **评审意见:先判断再改,verdict 由代码门禁。** 评审线程经 GraphQL 分页拉全(`reviewThreads` 与每条线程的 `comments` 都翻页,上限 100/50 页;超限或 cursor 空/不前进时拒绝返回残缺列表)。`pr_comment_reply` 必须带 verdict(`apply`/`push_back`/`clarify`);`apply` 引用的提交按 **PR 实际 head**(平台返回的 `headRefOid`)核对(`merge-base --is-ancestor`),不再按同名分支 ref;发回复超时后回读线程比对,不重复发。`pr_comment_resolve` 只对已回复且 verdict 为 apply/push_back 的线程生效,且 verdict 之后**任何**新评论(含同一 gh 登录)都阻塞 resolve;clarify 不能 resolve。本地 `review_comments`/`review_comment_resolve` 与 PR 意见共用同一“先判断再改”指引,草稿(未 Sent)意见不可 resolve。
 

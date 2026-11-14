@@ -47,6 +47,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     private readonly Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge;
     private readonly Func<string, string, Task<bool>>? confirm;
     private readonly Func<Task<string?>>? describePullRequest;
+    private readonly Action<int>? openChecks;
     private readonly RelayCommand[] commands;
 
     /// <summary>The thread the row was built on (the UI thread); a language notification from another one is not ours.</summary>
@@ -92,6 +93,10 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     /// Asks the user for a title, a body and the draft flag; null when this host cannot show a dialog, in which case the
     /// menu row reports that instead of creating a pull request nobody described.
     /// </param>
+    /// <param name="openChecks">
+    /// Opens the checks panel for a pull request's number. Null (a row built on its own, or a host without the panel) leaves
+    /// that row disabled and says why.
+    /// </param>
     public GitSyncViewModel(
         GitCli git,
         GitPanelSettings settings,
@@ -101,7 +106,8 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         Func<PullRequestDraft, Task<PullRequestDraft?>>? composePullRequest = null,
         Func<PullRequestMergeRequest, Task<PullRequestMergeChoice?>>? composeMerge = null,
         Func<string, string, Task<bool>>? confirm = null,
-        Func<Task<string?>>? describePullRequest = null)
+        Func<Task<string?>>? describePullRequest = null,
+        Action<int>? openChecks = null)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(settings);
@@ -115,6 +121,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         this.composeMerge = composeMerge;
         this.confirm = confirm;
         this.describePullRequest = describePullRequest;
+        this.openChecks = openChecks;
         current = emptyState;
 
         RefreshCommand = new RelayCommand(() => Launch(ReadOnlyAsync), CanRead);
@@ -125,11 +132,23 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         ContinueOperationCommand = new RelayCommand(() => Launch(ContinueOperationAsync, GitAction.Continue), CanOperate);
         ComposePullRequestCommand = new RelayCommand(() => Launch(ComposePullRequestAsync), () => !busy && CanComposePullRequest);
         OpenPullRequestCommand = new RelayCommand(OpenPullRequestInBrowser, () => PullRequestUrl.Length > 0);
+        OpenChecksCommand = new RelayCommand(
+            () =>
+            {
+                if (pullRequestNumber is { } number)
+                {
+                    openChecks?.Invoke(number);
+                }
+            },
+            () => pullRequestNumber is not null && openChecks is not null);
         ComparePageCommand = new RelayCommand(
             () => OpenUrl(CompareUrl),
             () => HasCompareUrl);
         MergeLocallyCommand = new RelayCommand(() => Launch(MergeLocallyAsync), () => !busy && CanMergeLocally());
         MergePullRequestCommand = new RelayCommand(() => Launch(MergePullRequestAsync), () => !busy && CanMergePullRequest);
+        MarkPullRequestReadyCommand = new RelayCommand(
+            () => Launch(MarkPullRequestReadyAsync),
+            () => !busy && CanMarkPullRequestReady);
         DeleteRemoteBranchCommand = new RelayCommand(() => Launch(DeleteRemoteBranchAsync), () => !busy && CanDeleteRemoteBranch);
         commands =
         [
@@ -141,8 +160,10 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             ContinueOperationCommand,
             ComposePullRequestCommand,
             OpenPullRequestCommand,
+            OpenChecksCommand,
             MergeLocallyCommand,
             MergePullRequestCommand,
+            MarkPullRequestReadyCommand,
             DeleteRemoteBranchCommand,
         ];
         RebuildShipActions();
@@ -436,6 +457,9 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         ? "#" + number.ToString(System.Globalization.CultureInfo.InvariantCulture)
         : string.Empty;
 
+    /// <summary>The number the platform reported for this branch's pull request, or null while there is none to act on.</summary>
+    public int? PullRequestNumber => pullRequestNumber;
+
     /// <summary>True once the platform has reported a pull request in any state.</summary>
     public bool HasPullRequestState => pullRequestPhase is PullRequestPhase.Open or PullRequestPhase.Draft
         or PullRequestPhase.Merged or PullRequestPhase.Closed;
@@ -530,11 +554,17 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     /// <summary>Opens the branch's pull request in the browser (the pill's own click).</summary>
     public RelayCommand OpenPullRequestCommand { get; }
 
+    /// <summary>Opens the checks panel for the pull request the row read; a host without the panel leaves it disabled.</summary>
+    public RelayCommand OpenChecksCommand { get; }
+
     /// <summary>Merges the session branch into the repository's default branch, in the root checkout.</summary>
     public RelayCommand MergeLocallyCommand { get; }
 
     /// <summary>Merges the open pull request with the strategy the user picks.</summary>
     public RelayCommand MergePullRequestCommand { get; }
+
+    /// <summary>Takes a draft pull request out of draft; nothing is destroyed, so it runs without a question.</summary>
+    public RelayCommand MarkPullRequestReadyCommand { get; }
 
     /// <summary>Deletes the branch on the platform; only after the commit landed there and only after a confirmation.</summary>
     public RelayCommand DeleteRemoteBranchCommand { get; }
@@ -546,6 +576,9 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
     public bool CanMergeLocally() =>
         context.ProjectRoot is { Length: > 0 } && defaultBranch is { Length: > 0 }
         && !string.Equals(defaultBranch, snapshot.Status?.Branch, StringComparison.Ordinal);
+
+    /// <summary>A draft pull request can be marked ready; every other state has nothing to take out of draft.</summary>
+    public bool CanMarkPullRequestReady => pullRequests is not null && pullRequestPhase == PullRequestPhase.Draft;
 
     /// <summary>A pull request can be merged when it is open, not a draft, and the platform says it is mergeable.</summary>
     public bool CanMergePullRequest =>
@@ -613,6 +646,18 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             () => Loc.Instance[GitStrings.ShipMergePullRequest],
             () => PullRequestMergeHint()));
         ShipActions.Add(new ShipActionViewModel(
+            "ready",
+            MarkPullRequestReadyCommand,
+            () => CanMarkPullRequestReady,
+            () => Loc.Instance[GitStrings.ShipMarkReady],
+            () => PullRequestReadyHint()));
+        ShipActions.Add(new ShipActionViewModel(
+            "checks",
+            OpenChecksCommand,
+            () => pullRequestNumber is not null && openChecks is not null,
+            () => Loc.Instance[GitStrings.ShipChecks],
+            () => ChecksHint()));
+        ShipActions.Add(new ShipActionViewModel(
             "delete-remote",
             DeleteRemoteBranchCommand,
             () => CanDeleteRemoteBranch && confirm is not null,
@@ -656,6 +701,27 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             _ => Loc.Instance[GitStrings.ShipMergeUnknown],
         },
     };
+
+    /// <summary>Why 标记为可评审 is unavailable: there is nothing read, no pull request, or it is not a draft.</summary>
+    private string PullRequestReadyHint() => pullRequestPhase switch
+    {
+        PullRequestPhase.Draft => string.Empty,
+        PullRequestPhase.None => Loc.Instance[GitStrings.ShipNoPullRequest],
+        PullRequestPhase.Unknown => Loc.Instance[GitStrings.ShipReading],
+        PullRequestPhase.Unavailable => PullRequestProblemText,
+        _ => Loc.Instance[GitStrings.ShipReadyNotDraft],
+    };
+
+    /// <summary>Why PR 检查… is unavailable: the pull request number was never read, or the host has no checks panel.</summary>
+    private string ChecksHint()
+    {
+        if (pullRequestNumber is null)
+        {
+            return Loc.Instance[GitStrings.ShipChecksNoPullRequest];
+        }
+
+        return openChecks is null ? Loc.Instance[GitStrings.ShipNoDialog] : string.Empty;
+    }
 
     /// <summary>Why 打开 PR is unavailable, in the order the user would hit the reasons.</summary>
     private string ShipComposeHint()
@@ -710,28 +776,27 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var baseBranch = await Task.Run(() => git.GetDefaultBranchAsync(directory, lifetime.Token), lifetime.Token)
-            .ConfigureAwait(true) ?? "main";
-        var created = await Task.Run(
-                () => pullRequests.CreatePullRequestAsync(directory, draft.Title, draft.Body, baseBranch, branch, draft.Draft, lifetime.Token),
-                lifetime.Token)
-            .ConfigureAwait(true);
-
-        if (!created.Success || created.Value is null)
+        // The platform call and its trailing re-read are a ship write like the others: the row is busy while gh works (a
+        // second click cannot open a second pull request) and released afterwards, which the plain read alone would not do.
+        await RunShipWriteAsync(async writing =>
         {
-            Report(current, ResultOf(created.Status));
-            return;
-        }
+            var baseBranch = await Task.Run(() => git.GetDefaultBranchAsync(directory, lifetime.Token), lifetime.Token)
+                .ConfigureAwait(true) ?? "main";
+            var created = await Task.Run(
+                    () => pullRequests.CreatePullRequestAsync(directory, draft.Title, draft.Body, baseBranch, branch, draft.Draft, lifetime.Token),
+                    lifetime.Token)
+                .ConfigureAwait(true);
 
-        Report(
-            current,
-            new PanelResult(
-                GitRemoteFailureKind.None,
-                Loc.Instance.Format(GitStrings.ShipCreated, created.Value.Number),
-                string.Empty,
-                null,
-                null));
-        await ReadCoreAsync().ConfigureAwait(true);
+            Report(writing, created.Success && created.Value is not null
+                ? new PanelResult(
+                    GitRemoteFailureKind.None,
+                    Loc.Instance.Format(GitStrings.ShipCreated, created.Value.Number),
+                    string.Empty,
+                    null,
+                    null)
+                : ResultOf(created.Status));
+            await ReadAfterShipWriteAsync(writing, directory).ConfigureAwait(true);
+        }).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -896,13 +961,23 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
                 string.Empty);
         }
 
-        var changes = await git.GetStatusAsync(root, includeUntracked: true, ct).ConfigureAwait(false);
-        return changes.Count > 0
+        var changes = await RootChangeCountAsync(root, ct).ConfigureAwait(false);
+        return changes > 0
             ? new GitRemoteResult(
                 GitRemoteFailureKind.DirtyWorkTree,
-                Loc.Instance.Format(GitStrings.ShipRootDirty, root, changes.Count),
+                Loc.Instance.Format(GitStrings.ShipRootDirty, root, changes),
                 string.Empty)
             : null;
+    }
+
+    /// <summary>
+    /// How many uncommitted changes (tracked and untracked) the root checkout carries — the one read both the local merge
+    /// and the post-merge finale make before touching that checkout.
+    /// </summary>
+    private async Task<int> RootChangeCountAsync(string root, CancellationToken ct)
+    {
+        var changes = await git.GetStatusAsync(root, includeUntracked: true, ct).ConfigureAwait(false);
+        return changes.Count;
     }
 
     /// <summary>Re-reads only if the worktree that started the write is still the attached one.</summary>
@@ -916,7 +991,12 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         await ReadCoreAsync().ConfigureAwait(true);
     }
 
-    /// <summary>合并 PR: the strategy and the "delete the head branch on the platform" flag come from the dialog.</summary>
+    /// <summary>
+    /// 合并 PR: the strategy and the "delete the head branch on the platform" flag come from the dialog. The write itself,
+    /// including the follow-up on the root checkout, runs under <see cref="RunShipWriteAsync"/> like the sync verbs: the
+    /// worktree is marked writing (so a second click is a no-op and a refresh queues instead of reading a half-finished
+    /// merge), and everything it touches was captured before the first await.
+    /// </summary>
     private async Task MergePullRequestAsync()
     {
         if (pullRequests is null || composeMerge is null || !CanMergePullRequest || pullRequestNumber is not { } number)
@@ -924,10 +1004,16 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Captured before the dialog and before any await: the answer must act on the worktree and the repository root the
+        // user was looking at, not on whatever is attached by the time the platform answers.
         var state = current;
         var directory = context.WorkingDirectory;
+        var root = context.ProjectRoot;
         var head = snapshot.Status?.Branch ?? string.Empty;
-        var baseBranch = defaultBranch ?? PullRequestBaseBranch ?? string.Empty;
+
+        // The pull request's own base first: a release branch is a legitimate base while the repository's default is not
+        // where this pull request merges, and the finale below must follow the branch it actually merged into.
+        var baseBranch = PullRequestBaseBranch ?? defaultBranch ?? string.Empty;
         var choice = await composeMerge(
                 new PullRequestMergeRequest(number, head, baseBranch))
             .ConfigureAwait(true);
@@ -936,42 +1022,164 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var merged = await Task.Run(
-                () => pullRequests.MergePullRequestAsync(directory, number, choice.Method, choice.DeleteBranch, lifetime.Token),
-                lifetime.Token)
-            .ConfigureAwait(true);
-        Report(
-            state,
-            merged.Success
-                ? new PanelResult(
-                    GitRemoteFailureKind.None,
-                    Loc.Instance.Format(GitStrings.ShipMergedNumber, number),
-                    string.Empty,
-                    null,
-                    null)
-                : ResultOf(merged.Status));
-
-        await ReadAfterShipWriteAsync(state, directory).ConfigureAwait(true);
-
-        // A repository with a merge queue accepts the merge and merges later: the pull request is still open right after a
-        // successful call. Saying "merged" there would be a lie, so the row reports the queue instead.
-        if (merged.Success && IsCurrent(state) && pullRequestPhase == PullRequestPhase.Open)
+        await RunShipWriteAsync(async writing =>
         {
+            var merged = await Task.Run(
+                    () => pullRequests.MergePullRequestAsync(directory, number, choice.Method, choice.DeleteBranch, lifetime.Token),
+                    lifetime.Token)
+                .ConfigureAwait(true);
             Report(
-                state,
-                new PanelResult(
-                    GitRemoteFailureKind.None,
-                    Loc.Instance.Format(GitStrings.ShipQueuedNumber, number),
-                    string.Empty,
-                    null,
-                    null));
+                writing,
+                merged.Success
+                    ? new PanelResult(
+                        GitRemoteFailureKind.None,
+                        Loc.Instance.Format(GitStrings.ShipMergedNumber, number),
+                        string.Empty,
+                        null,
+                        null)
+                    : ResultOf(merged.Status));
+
+            // 合并后收尾: the merged commits are on the platform, so the root checkout this merge was started from can follow
+            // its base branch. Only when there is such a root and the pull request named the base it merged into; a failure
+            // here is reported and never turned into a failed merge.
+            if (merged.Success && root is { Length: > 0 } projectRoot && baseBranch.Length > 0)
+            {
+                try
+                {
+                    var finale = await Task.Run(
+                            () => FinalizeMergeAsync(projectRoot, baseBranch, lifetime.Token),
+                            lifetime.Token)
+                        .ConfigureAwait(true);
+                    Report(writing, FinaleResult(number, finale));
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    Report(
+                        writing,
+                        new PanelResult(
+                            GitRemoteFailureKind.Other,
+                            Loc.Instance.Format(GitStrings.ShipMergedFinaleProblem, number, exception.Message),
+                            string.Empty,
+                            null,
+                            null));
+                }
+            }
+
+            await ReadAfterShipWriteAsync(writing, directory).ConfigureAwait(true);
+
+            // A repository with a merge queue accepts the merge and merges later: the pull request is still open right after
+            // a successful call. Saying "merged" there would be a lie, so the row reports the queue instead.
+            if (merged.Success && IsCurrent(writing) && pullRequestPhase == PullRequestPhase.Open)
+            {
+                Report(
+                    writing,
+                    new PanelResult(
+                        GitRemoteFailureKind.None,
+                        Loc.Instance.Format(GitStrings.ShipQueuedNumber, number),
+                        string.Empty,
+                        null,
+                        null));
+            }
+        }).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 合并后收尾: fetch with prune on the repository root, then fast-forward the base branch there when the root checkout is
+    /// on it and clean. Best effort: a failure is reported, never turned into a failed merge.
+    /// </summary>
+    private async Task<GitRemoteResult> FinalizeMergeAsync(string root, string baseBranch, CancellationToken ct)
+    {
+        // The same network budget the row's own fetch and pull use: the finale must not hang longer than a manual verb.
+        var network = NetworkOptions();
+        var fetched = await git.FetchAsync(root, null, network, ct).ConfigureAwait(false);
+        if (!fetched.Success)
+        {
+            return fetched;
         }
+
+        // The pull below integrates the checkout's upstream; on any other branch it would move work the user did not merge
+        // into, so the mismatch is a skip and says where the checkout is instead.
+        var branch = await git.GetCurrentBranchAsync(root, ct).ConfigureAwait(false);
+        if (!string.Equals(branch, baseBranch, StringComparison.Ordinal))
+        {
+            return GitRemoteResult.Ok(Loc.Instance.Format(GitStrings.ShipFinaleSkipped, baseBranch, branch ?? "HEAD"));
+        }
+
+        if (await RootChangeCountAsync(root, ct).ConfigureAwait(false) is > 0)
+        {
+            return GitRemoteResult.Ok(Loc.Instance.Format(GitStrings.ShipFinaleDirty, baseBranch));
+        }
+
+        var pulled = await git.PullAsync(root, settings.PullStrategy(), network, ct).ConfigureAwait(false);
+        if (!pulled.Success)
+        {
+            return pulled;
+        }
+
+        // Where the base branch landed: the short commit when git can name it, else the branch the head read reports.
+        var head = await git.GetHeadAsync(root, ct).ConfigureAwait(false);
+        var commit = await git.RevParseAsync(root, "HEAD", ct).ConfigureAwait(false);
+        var updated = commit is { Length: > 0 } ? Shorten(commit) : head.Branch ?? baseBranch;
+        return GitRemoteResult.Ok(Loc.Instance.Format(GitStrings.ShipFinaleUpdated, baseBranch, updated));
+    }
+
+    /// <summary>The follow-up's outcome in the row's words: still merged, plus what the fetch and pull did or why they failed.</summary>
+    private static PanelResult FinaleResult(int number, GitRemoteResult finale) =>
+        finale.Success
+            ? new PanelResult(
+                GitRemoteFailureKind.None,
+                Loc.Instance.Format(GitStrings.ShipMergedWithFinale, number, finale.Message),
+                string.Empty,
+                null,
+                null)
+            : new PanelResult(
+                finale.Failure,
+                Loc.Instance.Format(GitStrings.ShipMergedFinaleProblem, number, finale.Message),
+                finale.StandardError.Trim(),
+                null,
+                null);
+
+    /// <summary>
+    /// 标记为可评审: takes the draft out of draft on the platform. Nothing is destroyed and the pull request stays the same
+    /// otherwise, so it runs without a question. It is a ship write like the others: the row is busy for its duration (a
+    /// second click cannot ask twice) and is released afterwards. Only a success re-reads, because only a success changed
+    /// anything – a refusal keeps the platform's words instead of replacing them with a read problem.
+    /// </summary>
+    private async Task MarkPullRequestReadyAsync()
+    {
+        if (pullRequests is null || !CanMarkPullRequestReady || pullRequestNumber is not { } number)
+        {
+            return;
+        }
+
+        var directory = context.WorkingDirectory;
+        await RunShipWriteAsync(async writing =>
+        {
+            var ready = await Task.Run(
+                    () => pullRequests.MarkPullRequestReadyAsync(directory, number, lifetime.Token),
+                    lifetime.Token)
+                .ConfigureAwait(true);
+            Report(
+                writing,
+                ready.Success
+                    ? new PanelResult(
+                        GitRemoteFailureKind.None,
+                        Loc.Instance.Format(GitStrings.ShipReadyNumber, number),
+                        string.Empty,
+                        null,
+                        null)
+                    : ResultOf(ready.Status));
+            if (ready.Success)
+            {
+                await ReadAfterShipWriteAsync(writing, directory).ConfigureAwait(true);
+            }
+        }).ConfigureAwait(true);
     }
 
     /// <summary>删除远程分支: irreversible on the platform, so it exists only after the merge and only behind a question.</summary>
     private async Task DeleteRemoteBranchAsync()
     {
-        if (busy || !CanDeleteRemoteBranch || confirm is null || UpstreamBranchParts() is not { } tracked)
+        if (!CanDeleteRemoteBranch || confirm is null || UpstreamBranchParts() is not { } tracked)
         {
             return;
         }
@@ -990,12 +1198,15 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var deleted = await Task.Run(
-                () => git.DeleteRemoteBranchAsync(directory, remote, branch, lifetime.Token),
-                lifetime.Token)
-            .ConfigureAwait(true);
-        Report(state, ResultOf(deleted));
-        await ReadAfterShipWriteAsync(state, directory).ConfigureAwait(true);
+        await RunShipWriteAsync(async writing =>
+        {
+            var deleted = await Task.Run(
+                    () => git.DeleteRemoteBranchAsync(directory, remote, branch, lifetime.Token),
+                    lifetime.Token)
+                .ConfigureAwait(true);
+            Report(writing, ResultOf(deleted));
+            await ReadAfterShipWriteAsync(writing, directory).ConfigureAwait(true);
+        }).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -1693,6 +1904,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CompareUrl));
         OnPropertyChanged(nameof(HasCompareUrl));
         OnPropertyChanged(nameof(PullRequestLabel));
+        OnPropertyChanged(nameof(PullRequestNumber));
         OnPropertyChanged(nameof(PullRequestNumberText));
         OnPropertyChanged(nameof(HasPullRequestState));
         OnPropertyChanged(nameof(PullRequestIsOpen));
@@ -1704,6 +1916,7 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasPullRequestProblem));
         OnPropertyChanged(nameof(DefaultBranchLabel));
         OnPropertyChanged(nameof(CanMergePullRequest));
+        OnPropertyChanged(nameof(CanMarkPullRequestReady));
         OnPropertyChanged(nameof(CanDeleteRemoteBranch));
         OnPropertyChanged(nameof(ShipActions));
         RebuildShipActions();
