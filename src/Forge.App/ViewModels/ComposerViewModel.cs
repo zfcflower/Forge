@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using Forge.Abstractions;
 using Forge.App.Agents;
 using Forge.App.Composition;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Preferences;
 using Forge.App.Providers;
 using Forge.Core.Providers;
 using Forge.App.Services;
@@ -239,11 +241,15 @@ internal sealed class ComposerSuggestionItem : ObservableObject
 /// with, and the <c>/</c> (commands and skills) and <c>@</c> (workspace files) suggestion lists. A change of agent,
 /// model or effort is handed to <paramref name="apply"/> as the root definition for the next turn; the default agent with
 /// the configured model and effort hands over null, so a session nobody touched runs exactly as before.
+/// <para>The model list skips every model <see cref="AppPreferences.ModelsHidden"/> hides; the model the session is on
+/// stays listed (it is the state, not a choice), and a hidden flag raised by the settings page re-filters this list without
+/// a restart. Without preferences (a test, a standalone composer) nothing is filtered.</para>
 /// </summary>
-internal sealed partial class ComposerViewModel : NotifyingObject
+internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
 {
     private readonly Action<AgentDefinition?> apply;
     private readonly ComposerPreferences preferences;
+    private readonly AppPreferences? appPreferences;
     private readonly string workspace;
     private readonly ProviderServices services;
     private ProviderCatalog catalog;
@@ -254,6 +260,9 @@ internal sealed partial class ComposerViewModel : NotifyingObject
     private readonly Func<CancellationToken, Task> modelRefresh;
     private readonly Func<string?, string?, IReadOnlyList<ThinkingEffort>> thinkingLevels;
     private readonly List<ComposerModelOption> allModels = [];
+
+    /// <summary>Reused by <see cref="FilterModels"/>: a keystroke must not allocate a list of the whole catalogue.</summary>
+    private readonly List<ComposerModelOption> visibleModels = [];
     private IReadOnlyList<ThinkingEffort> effortSteps = [ThinkingEffort.Off];
     private string providerId = string.Empty;
     private ComposerAgentOption selectedAgent;
@@ -287,7 +296,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject
         Func<string?, string?, ModelInputs?>? imageInputs = null,
         Func<string?, string, bool>? wireCarries = null,
         INotifications? notifications = null,
-        string? notificationScope = null)
+        string? notificationScope = null,
+        AppPreferences? appPreferences = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(apply);
@@ -296,6 +306,14 @@ internal sealed partial class ComposerViewModel : NotifyingObject
         catalog = providers.Catalog;
         this.apply = apply;
         this.preferences = preferences;
+        this.appPreferences = appPreferences;
+        // The hidden set lives in the preferences, which are edited on the settings page while a composer stays open: the
+        // composer only re-filters, it never rebuilds the rows, so a hidden flag costs one property notification.
+        if (appPreferences is not null)
+        {
+            appPreferences.PropertyChanged += OnAppPreferencesChanged;
+        }
+
         this.workspace = workspace ?? string.Empty;
         this.fileSource = fileSource ?? ListWorkspaceFilesAsync;
         this.skillSource = skillSource ?? DiscoverSkills;
@@ -348,6 +366,15 @@ internal sealed partial class ComposerViewModel : NotifyingObject
         SaveDefaultsCommand = new RelayCommand(SaveDefaults, () => catalog.IsConfigured);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, onError: OnRefreshFailed);
         Apply();
+    }
+
+    /// <summary>Ends the preferences subscription; the session that owns the composer calls this from its own dispose.</summary>
+    public void Dispose()
+    {
+        if (appPreferences is not null)
+        {
+            appPreferences.PropertyChanged -= OnAppPreferencesChanged;
+        }
     }
 
     public IReadOnlyList<ComposerAgentOption> Agents { get; }
@@ -799,6 +826,8 @@ internal sealed partial class ComposerViewModel : NotifyingObject
         }
 
         MarkSelectedOption();
+        // The current model is exempt from hiding, so a hidden model the session just left has to drop out of the list now.
+        FilterModels();
         OnPropertyChanged(nameof(ModelLabel));
         RefreshEffortSteps();
         Apply();
@@ -909,19 +938,83 @@ internal sealed partial class ComposerViewModel : NotifyingObject
     private void FilterModels()
     {
         var query = modelSearch.Trim();
-        var visible = allModels
-            .Where(option => query.Length == 0 ||
-                             option.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                             option.ProviderName.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(option => option.IsPinned)
-            .ToList();
+        // Two passes over the catalogue instead of LINQ (no iterator, no sorted copy): pinned rows first, each pass keeping
+        // the catalogue order, which is what OrderByDescending did. The buffer is a field so a keystroke allocates nothing.
+        visibleModels.Clear();
+        for (var pass = 0; pass < 2; pass++)
+        {
+            var pinned = pass == 0;
+            foreach (var option in allModels)
+            {
+                if (option.IsPinned == pinned && Shows(option, query))
+                {
+                    visibleModels.Add(option);
+                }
+            }
+        }
+
+        // Typing a character that narrows nothing (or unhiding a model) must not churn a bound collection of ~180 rows.
+        if (SameAsVisible())
+        {
+            return;
+        }
+
+        var hadModels = Models.Count > 0;
         Models.Clear();
-        foreach (var option in visible)
+        foreach (var option in visibleModels)
         {
             Models.Add(option);
         }
 
-        OnPropertyChanged(nameof(HasNoModels));
+        if (hadModels != (Models.Count > 0))
+        {
+            OnPropertyChanged(nameof(HasNoModels));
+        }
+    }
+
+    /// <summary>Whether one row survives the search box and the hidden set; the current model is never filtered out.</summary>
+    private bool Shows(ComposerModelOption option, string query)
+    {
+        if (appPreferences?.IsModelHidden(option.Name) == true && !IsCurrentModel(option))
+        {
+            return false;
+        }
+
+        return query.Length == 0 ||
+               option.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               option.ProviderName.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The row the session runs on: hiding a model never takes the current state out of the picker.</summary>
+    private bool IsCurrentModel(ComposerModelOption option) =>
+        string.Equals(option.Name, model, StringComparison.Ordinal) &&
+        (providerId.Length == 0 || string.Equals(option.ProviderId, providerId, StringComparison.Ordinal));
+
+    private bool SameAsVisible()
+    {
+        if (Models.Count != visibleModels.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < visibleModels.Count; index++)
+        {
+            if (!ReferenceEquals(Models[index], visibleModels[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>A hidden flag moved on the settings page: re-filter in place, the rows themselves are unchanged.</summary>
+    private void OnAppPreferencesChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.Equals(e.PropertyName, nameof(AppPreferences.ModelsHidden), StringComparison.Ordinal))
+        {
+            FilterModels();
+        }
     }
 
     private void SaveDefaults()

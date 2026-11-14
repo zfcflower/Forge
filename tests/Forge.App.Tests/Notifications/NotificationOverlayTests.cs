@@ -214,5 +214,7 @@ public sealed class NotificationOverlayTests
     private sealed class OverlayFakeNotifier : ISystemNotifier
     {
         public Task NotifyAsync(string title, string body, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct) => Task.FromResult(true);
     }
 }

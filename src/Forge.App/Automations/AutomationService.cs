@@ -46,7 +46,8 @@ internal sealed class AutomationService : IAsyncDisposable
         INotifications? notifications,
         IUiThread? ui = null,
         TimeProvider? time = null,
-        Prompts.PromptTemplateService? promptTemplates = null)
+        Prompts.PromptTemplateService? promptTemplates = null,
+        Func<IdleArchiveSettings>? idleArchive = null)
     {
         this.ui = ui ?? DispatcherUiThread.Instance;
         this.time = time ?? TimeProvider.System;
@@ -90,7 +91,8 @@ internal sealed class AutomationService : IAsyncDisposable
                 {
                     await host.OnSessionsArchivedAsync(ids).ConfigureAwait(true);
                     return true;
-                })));
+                }),
+                idleArchive));
         watch = new SessionWatch(Engine, host, PendingApprovals, () => IsEnabled(BuiltInAutomations.SessionWatch), this.time);
         Engine.Changed += OnEngineChanged;
     }

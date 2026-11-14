@@ -3,8 +3,8 @@ using System.Runtime.CompilerServices;
 namespace Forge.App.Localization;
 
 /// <summary>
-/// The notification string table (the toast, its de-duplication badge and the settings section); keys are namespaced
-/// <c>notifications.*</c>.
+/// The notification string table (the toast, its de-duplication badge, the settings section and the permission guide); keys
+/// are namespaced <c>notifications.*</c>.
 /// </summary>
 internal static class NotificationsStrings
 {
@@ -18,6 +18,21 @@ internal static class NotificationsStrings
     public const string LevelSuccess = "notifications.level.success";
     public const string LevelWarning = "notifications.level.warning";
     public const string LevelError = "notifications.level.error";
+
+    // The permission guide (wave W1): one sentence per state of the permission, the two actions that change it, the switch
+    // that decides whether the first-run wizard keeps asking, and the text of the test notification itself.
+    public const string PermissionSectionTitle = "notifications.permission.section";
+    public const string PermissionStateNotApplicable = "notifications.permission.state.notApplicable";
+    public const string PermissionStateUnknown = "notifications.permission.state.unknown";
+    public const string PermissionStateGranted = "notifications.permission.state.granted";
+    public const string PermissionStateDenied = "notifications.permission.state.denied";
+    public const string PermissionTestAction = "notifications.permission.test";
+    public const string PermissionTestRunning = "notifications.permission.testRunning";
+    public const string PermissionOpenSettings = "notifications.permission.openSettings";
+    public const string PermissionReprompt = "notifications.permission.reprompt";
+    public const string PermissionRepromptHint = "notifications.permission.repromptHint";
+    public const string PermissionTestTitleKey = "notifications.permission.testTitle";
+    public const string PermissionTestBodyKey = "notifications.permission.testBody";
 
     // Titles of the notifications the shell raises from its own work. The body is usually the text the panel already shows
     // ("the turn could not run: ..."), so only the headline needs a line of its own; a sentence that also exists in a
@@ -94,6 +109,12 @@ internal static class NotificationsStrings
     public static LocText TerminalExited(string command, int exitCode) =>
         new(TerminalExitedBody, command, TextFormat.Id(exitCode));
 
+    /// <summary>Title of the test notification (one real toast the user can look for).</summary>
+    public static LocText PermissionTestTitle => new(PermissionTestTitleKey);
+
+    /// <summary>Body of the test notification.</summary>
+    public static LocText PermissionTestBody => new(PermissionTestBodyKey);
+
     [ModuleInitializer]
     internal static void Initialize() => Register();
 
@@ -107,6 +128,37 @@ internal static class NotificationsStrings
             EnabledHint,
             "关掉后既不显示窗口内提示，也不发系统通知。窗口最小化或不在前台时，通知改由操作系统弹出。",
             "When off, nothing is shown in the window and no desktop notification is raised. Windows minimized or in the background get a desktop notification instead.");
+
+        Loc.Register(PermissionSectionTitle, "通知权限", "Notification permission");
+        Loc.Register(
+            PermissionStateNotApplicable,
+            "这个构建没有可用的系统通知工具，不会弹桌面通知。",
+            "This build has no desktop notification tool, so no desktop notification can appear.");
+        Loc.Register(
+            PermissionStateUnknown,
+            "还不知道系统是否允许通知。发一条测试通知就能确认。",
+            "It is not known yet whether the system allows notifications. Send a test notification to find out.");
+        Loc.Register(
+            PermissionStateGranted,
+            "系统已接受测试通知，桌面通知应该能正常送达。",
+            "The system accepted the test notification, so desktop notifications should arrive.");
+        Loc.Register(
+            PermissionStateDenied,
+            "系统没有接受测试通知，可能已在系统设置里关掉了 Forge 的通知。",
+            "The system did not accept the test notification; Forge's notifications may be switched off in the system settings.");
+        Loc.Register(PermissionTestAction, "发送测试通知", "Send a test notification");
+        Loc.Register(PermissionTestRunning, "正在发送…", "Sending…");
+        Loc.Register(PermissionOpenSettings, "打开系统通知设置", "Open the system notification settings");
+        Loc.Register(PermissionReprompt, "再次提示", "Ask again");
+        Loc.Register(
+            PermissionRepromptHint,
+            "关掉后，首启向导与后台通知不再反复提示修复通知权限。",
+            "When off, the first-run wizard and background notifications stop offering to fix the notification permission.");
+        Loc.Register(PermissionTestTitleKey, "通知测试", "Notification test");
+        Loc.Register(
+            PermissionTestBodyKey,
+            "看到这条消息，说明系统通知是通的。",
+            "If you can see this, desktop notifications work.");
 
         Loc.Register(LevelInfo, "提示", "Info");
         Loc.Register(LevelSuccess, "成功", "Success");
