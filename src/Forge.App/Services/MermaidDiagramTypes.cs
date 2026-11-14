@@ -17,7 +17,8 @@ internal static class MermaidDiagramTypes
 
     /// <summary>
     /// The header keywords Mermaider detects (its <c>DiagramDetector</c> table), longest keyword first - <c>stateDiagram-v2</c>
-    /// must win over <c>stateDiagram</c>, and <c>flowchart</c> over <c>graph</c>. Order is part of the contract.
+    /// must win over <c>stateDiagram</c>, and <c>flowchart</c> over <c>graph</c>. Order is part of the contract. Mermaider also
+    /// takes the un-suffixed forms of the <c>-beta</c> types (<c>sankey</c>, <c>block</c>, ...), so both are listed.
     /// </summary>
     private static readonly Header[] Headers =
     [
@@ -27,14 +28,21 @@ internal static class MermaidDiagramTypes
         new("classDiagram", MermaidKinds.Class, "class"),
         new("erDiagram", MermaidKinds.Er, "er"),
         new("requirementDiagram", MermaidKinds.Requirement, "requirement"),
+        new("requirement", MermaidKinds.Requirement, "requirement"),
         new("quadrantChart", MermaidKinds.Quadrant, "quadrant"),
         new("architecture-beta", MermaidKinds.Architecture, "architecture"),
+        new("architecture", MermaidKinds.Architecture, "architecture"),
         new("treeView-beta", MermaidKinds.TreeView, "treeview"),
+        new("treeView", MermaidKinds.TreeView, "treeview"),
         new("treemap-beta", MermaidKinds.Treemap, "treemap"),
         new("xychart-beta", MermaidKinds.XyChart, "xychart"),
+        new("xychart", MermaidKinds.XyChart, "xychart"),
         new("sankey-beta", MermaidKinds.Sankey, "sankey"),
+        new("sankey", MermaidKinds.Sankey, "sankey"),
         new("packet-beta", MermaidKinds.Packet, "packet"),
+        new("packet", MermaidKinds.Packet, "packet"),
         new("block-beta", MermaidKinds.Block, "block"),
+        new("block", MermaidKinds.Block, "block"),
         new("radar-beta", MermaidKinds.Radar, "radar"),
         new("venn-beta", MermaidKinds.Venn, "venn"),
         new("C4Context", MermaidKinds.C4, "c4"),

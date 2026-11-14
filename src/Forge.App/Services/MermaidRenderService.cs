@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Forge.App.Localization;
 using Mermaider;
 using Mermaider.Models;
 using SkiaSharp;
@@ -21,6 +22,12 @@ internal enum MermaidRenderFailure
 
     /// <summary>Anything else: an SVG the rasterizer could not read, an unresolved colour, an unexpected exception.</summary>
     Internal,
+
+    /// <summary>
+    /// Mermaider rejected the diagram's type as outside the whitelist (a header the local sniffing does not know, such as a
+    /// flowchart variant): a display decision like any other disabled type, so the block stays an ordinary code block.
+    /// </summary>
+    Disabled,
 }
 
 /// <summary>What one render produced: a drawable picture, or the failure the block shows next to its source.</summary>
@@ -68,7 +75,7 @@ internal sealed class MermaidPicture
         this.owner = owner;
         if (owner.Picture is null)
         {
-            throw new InvalidOperationException("the SVG produced an empty picture");
+            throw new InvalidOperationException(Loc.Instance[MermaidStrings.EmptyPicture]);
         }
     }
 
@@ -97,6 +104,9 @@ internal sealed partial class MermaidRenderService
 
     /// <summary>The service the views use; replaced by tests and by hosts that want their own cache.</summary>
     internal static MermaidRenderService Current { get; set; } = new();
+
+    /// <summary>The render itself; a test seam (a slow or failing renderer without a pathological diagram), production keeps <see cref="RenderCore"/>.</summary>
+    internal Func<MermaidRenderRequest, MermaidRenderResult> Renderer { get; init; } = RenderCore;
 
     private readonly Lock cacheLock = new();
     private readonly Dictionary<CacheKey, Lazy<Task<MermaidRenderResult>>> cache = [];
@@ -187,7 +197,7 @@ internal sealed partial class MermaidRenderService
         try
         {
             // RenderCore catches its own failures, so this task cannot fault and a timeout leaves nothing unobserved.
-            var work = Task.Run(() => RenderCore(request));
+            var work = Task.Run(() => Renderer(request));
             try
             {
                 return await work.WaitAsync(request.Timeout).ConfigureAwait(false);
@@ -211,7 +221,34 @@ internal sealed partial class MermaidRenderService
         }
     }
 
-    private static MermaidRenderResult RenderCore(MermaidRenderRequest request)
+    /// <summary>
+    /// Everything after Mermaider: colour resolution, the external-reference refusal and the Svg.Skia parse. Separate so a
+    /// crafted SVG (which Mermaider's own sanitizer would never hand over) can be fed to the second line of defence in a test.
+    /// </summary>
+    internal static MermaidRenderResult FromSvg(string svg, MermaidPalette palette)
+    {
+        if (!MermaidSvgColors.TryResolve(svg, palette, out var concrete, out var problem))
+        {
+            return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, problem);
+        }
+
+        // The block never touches the network: a reference to anything but an element of the SVG itself is not handed to
+        // Svg.Skia (whose loaders could resolve it), and the diagram fails instead of fetching.
+        if (HasExternalReference(concrete))
+        {
+            return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, Loc.Instance[MermaidStrings.ExternalReference]);
+        }
+
+        var skSvg = SKSvg.CreateFromSvg(concrete);
+        if (skSvg.Picture is not { } picture || !(picture.CullRect.Width > 0) || !(picture.CullRect.Height > 0))
+        {
+            return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, Loc.Instance[MermaidStrings.EmptyPicture]);
+        }
+
+        return MermaidRenderResult.Rendered(new MermaidPicture(skSvg));
+    }
+
+    internal static MermaidRenderResult RenderCore(MermaidRenderRequest request)
     {
         try
         {
@@ -234,24 +271,17 @@ internal sealed partial class MermaidRenderService
                 Limits = ResourceLimits.Default with { RenderDeadline = request.Timeout },
             });
 
-            if (!MermaidSvgColors.TryResolve(svg, request.Palette, out var concrete, out var problem))
-            {
-                return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, problem);
-            }
-
-            var skSvg = SKSvg.CreateFromSvg(concrete);
-            if (skSvg.Picture is not { } picture || !(picture.CullRect.Width > 0) || !(picture.CullRect.Height > 0))
-            {
-                return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, "the SVG produced an empty picture");
-            }
-
-            return MermaidRenderResult.Rendered(new MermaidPicture(skSvg));
+            return FromSvg(svg, request.Palette);
         }
         catch (MermaidResourceLimitException limit)
         {
             return limit.LimitName.Contains("deadline", StringComparison.OrdinalIgnoreCase)
                 ? MermaidRenderResult.Failed(MermaidRenderFailure.Timeout)
                 : MermaidRenderResult.Failed(MermaidRenderFailure.TooLarge, limit.Message);
+        }
+        catch (MermaidParseException parse) when (parse.Message.Contains(NotAllowedMarker, StringComparison.Ordinal))
+        {
+            return MermaidRenderResult.Failed(MermaidRenderFailure.Disabled);
         }
         catch (MermaidParseException parse)
         {
@@ -266,6 +296,21 @@ internal sealed partial class MermaidRenderService
             return MermaidRenderResult.Failed(MermaidRenderFailure.Internal, exception.Message);
         }
     }
+
+    /// <summary>The fragment of Mermaider's "type is not in the allowed set" message (its only wording for a disabled type).</summary>
+    private const string NotAllowedMarker = "is not in the allowed set";
+
+    /// <summary>
+    /// True when the SVG points at anything outside itself: an <c>href</c>/<c>xlink:href</c> that is not a same-document
+    /// <c>#fragment</c>, a <c>url(...)</c> that is not one, or an <c>@import</c>. Mermaider's own sanitizer is the first line;
+    /// this is the second, so what reaches Svg.Skia can never resolve a network or file reference.
+    /// </summary>
+    internal static bool HasExternalReference(string svg) => ExternalReferencePattern().IsMatch(svg);
+
+    [GeneratedRegex(
+        @"(?:\bhref\s*=\s*[""'](?>\s*)(?!#)|\burl\((?>\s*)(?>[""']?)(?>\s*)(?!#)|@import\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ExternalReferencePattern();
 
     /// <summary>
     /// The source line an error points at, when the message names one. Mermaider 0.15 has no line numbers in its exceptions,

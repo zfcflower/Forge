@@ -26,8 +26,25 @@ public sealed class MermaidFixMessageTests
 
         Assert.Contains(Error, message, StringComparison.Ordinal);
         Assert.Contains(Flow, message, StringComparison.Ordinal);
-        Assert.Contains("```mermaid\n" + Flow + "\n```", message, StringComparison.Ordinal);
+        // The fence is exactly three backticks (the source has none), on its own lines, with nothing glued to either end.
+        Assert.Contains("Source:\n```mermaid\n" + Flow + "\n```\n\nReply", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("````", message, StringComparison.Ordinal);
         Assert.Contains("fix", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_source_that_contains_a_fence_is_wrapped_in_one_backtick_more_than_its_longest_run(bool english)
+    {
+        using var scope = new LanguageScope(english ? UiLanguage.English : UiLanguage.Chinese);
+        var source = "flowchart TD\n  A[````]-->B\n";
+
+        var message = MermaidFixMessage.Build(source, Error);
+
+        // The longest run is 4, so the fence is 5 - not the 8 that a template repeating the fence's own backticks would give.
+        Assert.Contains("\n`````mermaid\n" + source + "\n`````\n", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("``````", message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -68,7 +85,7 @@ public sealed class MermaidFixMessageTests
             Assert.NotEqual(english, chinese);
             // The error, the source and the fence are the same facts in both languages.
             Assert.Contains(Error, chinese, StringComparison.Ordinal);
-            Assert.Contains("```mermaid\n" + Flow + "\n```", chinese, StringComparison.Ordinal);
+            Assert.Contains("源码：\n```mermaid\n" + Flow + "\n```\n\n请只输出", chinese, StringComparison.Ordinal);
         }
         finally
         {

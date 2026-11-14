@@ -12,7 +12,8 @@
 | `Mermaider` | **0.15.1**(2026-10-06 发布) | 0.15.2/0.16/0.17 发布于 2026-11-11/12,未满两周;0.15.1 是满足规则的最新稳定版,已含 `RenderSvg`/`AllowedDiagrams`/`ResourceLimits`/`AsciiOptions` |
 | `Svg.Skia` | **4.9.1**(2026-05-20 发布) | 5.x 依赖 SkiaSharp 4.148,与 Avalonia 12.1.6 的 SkiaSharp 3.119.4 冲突(会把整个 UI 的 Skia 后端拉到 4.x);4.9.1 依赖 SkiaSharp ≥3.119.2、HarfBuzzSharp 8.3.1.3,与 Avalonia 完全同版 |
 
-`SkiaSharp` 不新增独立引用:它是 `Avalonia.Skia` 的传递依赖,`Svg.Skia` 只要求 ≥3.119.2,NuGet 统一到 Avalonia 的 3.119.4。
+`SkiaSharp` 不在 `Forge.App.csproj` 里显式引用:它是 `Avalonia.Skia` 的传递依赖,`Svg.Skia` 只要求 ≥3.119.2,NuGet 统一到 Avalonia 的 3.119.4(评审修复时先删掉了此前误加的显式 `SkiaSharp 3.119.4` 引用,重新还原后核对 `obj/project.assets.json` 仍解析为 3.119.4,故保持删除)。
+传递依赖清单(待用户确认批准范围,已同步登记到 `architecture.md` 的 NuGet 表):Mermaider → Sugiyama 0.15.1;Svg.Skia → ExCSS 4.3.1、ShimSkiaSharp / Svg.Model / Svg.Custom / Svg.Animation / Svg.SceneGraph 4.9.1。
 `Mermaider` 只有一个传递依赖 `Sugiyama`(布局引擎,零依赖)与 `Microsoft.Extensions.ObjectPool`(官方 .NET 库,白名单内直接放行)。
 
 ### 2. 渲染链路
@@ -32,8 +33,8 @@ MdBlock(Code, info 首词 = mermaid, FenceClosed)
 (`--_text`、`_line` 等自定义属性本身 Svg.Skia 能解析,`color-mix` 不能)。实测未解析的 `color-mix` 一律画成黑色
 (菱形决策框整块变黑、字压在上面)。`MermaidSvgColors` 只做两件事:把 `var(--x[, var(--y)])` 换成我们传进去的调色板值,
 把 `color-mix(in srgb, A p%, B)` 按 sRGB 通道加权算成 `#rrggbb`;**解析不了的表达式直接判失败**(绝不把黑图当成功)。
-mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(全部是 "hex 或 var, 百分比, hex 或 var"),
-预处理后断言 SVG 里不残留 `color-mix(`,再加一条测试钉住。
+mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(全部是 "hex 或 var, 百分比, hex 或 var")。
+生产代码**没有**"预处理后整份 SVG 不含 `color-mix(`"的断言:预处理只改标签属性与 `<style>` 正文、文本节点原样保留(标签文字可以合法地写这几个字),所以残留检查放在测试里——默认五种类型(flowchart / sequence / state / class / er)各渲一张,断言解析后无 `color-mix(`、Svg.Skia 得到非空 picture、画在白底上有非白像素且大半不是黑色。
 
 **为什么是矢量回放而不是 PNG/位图**:`ICustomDrawOperation` + `ISkiaSharpApiLeaseFeature` 在渲染线程拿到
 `SKCanvas`,直接 `SKPicture.Playback`。好处是:2x/3x DPI 与窗口缩放自动清晰(不需要换缩放重渲染)、
@@ -49,9 +50,8 @@ mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(
   存 `Task<MermaidRenderResult>`(同图并发请求共享同一次渲染),最多 24 条(插入序淘汰);失败的请求不缓存。
 - **超时**:`ResourceLimits.RenderDeadline` = 设置值(协作式,拦在 mermaid 自己的管线里)+ 外层 `WaitAsync` 兜底
   (库不吃取消时 UI 也能拿到失败),UI 永远不会无限等。
-- **取消**:控件离开可视树不取消底层渲染(缓存仍要被下一次重建用到);同一控件被替换/换主题时旧结果按代号丢弃。
-- **引用计数**:`MermaidPicture` 持有 `SKSvg`(= 持有 `SKPicture`),控件持 1 个引用、每个绘制操作持 1 个,
-  最后一个释放时 `Dispose`。不能"取完 Picture 就 Dispose SKSvg":实测直接 `AccessViolation`。
+- **取消**:控件离开可视树取消的是**这个控件的等待**(`CancellationToken` 只停 `WaitAsync`,不取消共享的底层渲染,缓存仍要被下一次重建用到);同一控件被替换/换主题时旧结果按代号丢弃;重新挂回时按当前主题与缓存重新取。服务层"已取消的 token 抛 `OperationCanceledException` 且共享渲染不受影响"、控件层"渲染中 detach → 结果被丢弃、重挂后重新渲染"各有用例。
+- **生命周期(没有引用计数)**:`MermaidPicture` 持有 `SKSvg`(= 持有 `SKPicture`),两者绑在一起,**代码里不显式 `Dispose`**,靠 SkiaSharp 终结器在控件、绘制操作与缓存都不再引用时释放原生句柄(一张约 2 KB,缓存封顶 24 条;显式释放会与可能还在回放上一帧 picture 的渲染线程竞争)。不能"取完 Picture 就 Dispose SKSvg":实测直接 `AccessViolation`。此前本文写的"引用计数、最后一个释放时 Dispose"与代码不符,以此为准。
 
 ### 4. 状态与界面
 
@@ -105,7 +105,8 @@ mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(
 - **分配**:控件态每个块几个对象;绘制操作每次 `Render` 一个(与 Avalonia 自带控件同量级);缓存命中的路径不解析
   SVG、不建 Picture。
 - **并发**:渲染在线程池,限 2 并发(32 核机器上也不让一次回复里的 10 张图同时抢满 CPU);缓存字典只在小临界区。
-- **内存**:缓存 24 条 × ~2 KB picture ≈ 50 KB 级;不缓存失败项;不缓存源码字符串(键里按引用/内容存一份,24 条封顶)。
+- **内存**:picture 本身 24 条 × ~2 KB ≈ 50 KB 级,但缓存键里持有**源码字符串**,上界按 24 × 64 KiB 字符(.NET 字符串 2 字节/字符)≈ 3 MB 量级;常见图只有几百字节。不缓存失败项。
+- **流式热路径(M4)**:围栏未闭合时每帧 `Update` 只替换文本;状态没变就提前返回,状态图标只在失败/非失败切换时重绑。同一线程 `GC.GetAllocatedBytesForCurrentThread` 口径(`MermaidBlockViewTests.A_streaming_frame_with_unchanged_state_allocates_far_less_than_a_state_pass`,2000 帧均值,headless、仅含调用线程):**修复前 2176 B/帧,修复后 160 B/帧**(不含耗时;未加 `tools/Forge.Bench` 场景,因为被测路径是带资源绑定的 Avalonia 控件,Bench 无 UI 宿主)。
 
 ### 依赖与 AOT
 
@@ -120,15 +121,14 @@ mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(
   `MdBlock.FenceClosed`(块解析器唯一所有者)、`MarkdownRenderer` 的 mermaid 分支、
   `MermaidSettings`(ambient 投影,与 `ToolImageSettings` 同一形态,组合根赋值)、
   `IAgentMessageHost`(会话 → "把消息交给 agent"的唯一入口,checks 与 mermaid 共用)。
-- 测试:纯函数(SVG 颜色解析、白名单解析、类型嗅探、失败行提取)、服务(缓存/并发/超时/取消/失败不缓存)、
+- 测试:纯函数(SVG 颜色解析、白名单解析、类型嗅探、失败行提取)、服务(缓存/并发/超时/失败不缓存;取消 = 服务层已取消 token 与等待中取消两条,控件层渲染中 detach 一条)、
   控件状态机(未闭合/禁用/成功/失败/重试/主题切换/修正按钮可见性/自动化 id)、
   以及一个 Skia headless 像素用例(证明真的画出了非白像素,而不是空白)。
 
 ### 回滚成本
 
 - 新增文件全部在 `Services/Mermaid*`、`Views/Mermaid*`、`Localization/Strings.Mermaid.cs`、测试目录;
-  产品改动只有 4 个小 hunk(`MarkdownBlockParser` 一个属性、`MarkdownRenderer` 一个分支、
-  `ChatSettingsSection*` 两行、`ViewerSettingsComposition` 一行)+ csproj/spec/architecture。
+  产品改动不止最初的 4 个小 hunk:另有 `MarkdownCodeChrome`(从 `MarkdownCodeBlock` 抽出共享头部/正文,供 Mermaid 块复用)、`ChatMarkdownView` 的就地升级分支、`IAgentMessageHost` 与 `SessionWorkspace.HandMessageAsync`(checks 与 Mermaid 共用的交接入口)、`ComposerDraft.Append`、`MainWindowViewModel.Checks` 的改接,外加 csproj/spec/architecture。
   单独 revert 即回到 W4b 的纯代码块状态,无残留 schema、无持久化格式变化。
 
 ## 四、已知限制(记录,不是待办)
@@ -195,7 +195,7 @@ mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(
 - Linux/macOS 的 AOT：本机只能验 win-x64；最终门是 PR CI 的三平台 `publish` 矩阵（`Svg.Skia` 不新增原生资产，托管程序集的 IL/trim 分析平台无关）。
 - 真实桌面主题下的视觉复核（headless 已用 `RequestedThemeVariant` 钉住 picture 变更）。
 - `MaxInputLength` 等 mermaider 资源上限的逐条映射（只构造了 `MaxLines` 一条）。
-- 失败分类到**本地化标题**的映射（Timeout/TooLarge 的界面文案）只有服务级分类用例，没有构造对应的 UI 用例（进入这两类需要确定性地触发超时/资源上限，UI 侧没有测试缝）。
+- (评审修复后已补)Timeout/TooLarge 的界面文案:`MermaidRenderService.Renderer` 是测试缝,控件层用例直接断言标题文字(Timeout 带本次请求的毫秒数)。
 
 ## 七、收尾验证(2026-11-14 最终树)
 
@@ -203,3 +203,22 @@ mermaider 0.15.1 在 `Gradient=false` 下只会产生 26 种 `color-mix` 形态(
 - `Forge.App.Tests` 全量(L2)→ **4830 通过 / 0 失败**,13 m 29 s。此前两次全量尝试各出现一次 `testhost` 原生崩溃(一次在 2852 个用例后、一次在第 116 个 `Git.StepCommitterTests` 用例处;崩溃前没有任何 Mermaid 用例执行过,Mermaid 过滤连跑 3 次全绿,`StepCommitterTests` 单独连跑 3 次全绿,同机另有一个工作区在跑测试),判定为与本波无关的环境问题;第三次在最终树上全量通过。
 - 定向:148(Mermaid)、727(Views|Changes|Services|Settings)、131(源码门槛)、15(ChecksHandOff)全部通过。
 - `dotnet publish src/Forge.App -c Release -r win-x64 -p:PublishAot=true -p:SelfContained=true -p:TreatWarningsAsErrors=true`(最终树) → 成功(原生 exe 73.8 MB,仅 Avalonia.Win32 既有的两条 ILC 信息行);依赖图不变(SkiaSharp 3.119.4 / HarfBuzzSharp 8.3.1.3 与 Avalonia 同版)。
+
+## 八、评审修复(2026-11-15)
+
+独立评审后按条修复,逐条见本节;测试只跑相关范围(见交付报告)。
+
+- **H1** `MarkdownCodeTextView`(`ScrollViewer`)、`MarkdownCodeHeader`(`Grid`)、`MermaidBlockView`(`Border`)补 `StyleKeyOverride`,否则按类型的样式/控件主题一个都不命中(源码正文没有 ScrollViewer 模板、头部丢边距、块没有底色)。补 headless 用例:块有底色与内边距、头部有边距、源码 `SelectableTextBlock` 在可视树里且 `Bounds` 非零。
+- **H2** Timeout 标题改取本次请求实际用的超时,按 `TotalMilliseconds`(原来读 `Milliseconds` 分量,2000 ms 显示成 0)。
+- **M1** `MermaidFixHost.Resolve`:有祖先 `SessionView` 就只返回它的会话,不能交接则 null,不回落活动会话;只有无 `SessionView` 才回落。用真实 `MainWindowViewModel` + `SessionView` 树测。
+- **M2** 重新挂树时比较当前主题调色板键与上次渲染所用的键,不同则 `keepDiagram` 重渲;补 detach → 切主题 → attach 与"主题不变不重渲"两条。
+- **M3** `MermaidRenderService.HasExternalReference` + `FromSvg`(服务里 Mermaider 之后的那段):不以 `#` 开头的 `href`/`xlink:href`、`url(...)`、`@import` 一律在 Svg.Skia 之前判 Internal 失败。
+- **M4** 见 §三 性能一节的数字。
+- **M5** 补 `SessionHandMessageTests`(空闲跑一轮 / 忙进草稿 / 已有草稿时追加 / 被停止(撤回)进草稿 / 抛异常进草稿 / 空白消息拒绝)与块的 FixQueued、抛异常、Retry 用例。
+- **L1** `SaveLayer` 的 `SKPaint` 改 `using var`。
+- **L2** `FixRequest` 模板只写 `{2}mermaid\n{1}\n{2}`,围栏长度 = `max(3, 最长反引号串 + 1)`;修正消息测试改精确前后缀断言(含源码带 4 个反引号的情形)。
+- **L3** 修正消息按界面语言拼、checks 消息固定英文:保持现状,写进 SPEC;服务层两条英文串(空图、外部引用)改走 `MermaidStrings`,`MermaidSvgColors` 的 problem 串保留英文,在 SPEC 标为诊断文本。
+- **L4** mermaider 答"not in the allowed set"映射为 `MermaidRenderFailure.Disabled`(块保持普通代码块);同时让本地嗅探也认 mermaider 接受的不带 `-beta` 的头(`sankey`/`xychart`/`packet`/`block`/`architecture`/`treeView`/`requirement`)。注意:评审举的 `flowchart-elk` 在 0.15.1 里是"Invalid mermaid header"(mermaider 根本不认),仍是头部错误,不是 Disabled。
+- **L5** 定稿后未闭合围栏:**选了"在 SPEC 的 Mermaid 未决里写明"**,没改块解析器(`FenceClosed` 的语义牵涉流式定稿与 diff 预览,改动面大)。
+- **L6** 本文 §一.1/§一.2/§一.3/§三 与缓存内存已按代码修正。
+- **M6** `architecture.md` NuGet 表 Svg.Skia 行改为如实措辞并补列传递依赖;`Forge.App.csproj` 的显式 `SkiaSharp` 引用已删(解析结果不变)。

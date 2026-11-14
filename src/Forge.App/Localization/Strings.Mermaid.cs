@@ -48,6 +48,12 @@ internal static class MermaidStrings
     /// <summary>Origin shown on the turn this hand-off starts.</summary>
     public const string FixOrigin = "mermaid.origin";
 
+    /// <summary>Diagnostic: the rasterizer produced no drawable picture.</summary>
+    public const string EmptyPicture = "mermaid.emptyPicture";
+
+    /// <summary>Diagnostic: the SVG referenced something outside itself and was refused (the block never touches the network).</summary>
+    public const string ExternalReference = "mermaid.externalReference";
+
     /// <summary>Accessible name of a rendered diagram.</summary>
     public const string Diagram = "mermaid.diagram";
 
@@ -69,10 +75,15 @@ internal static class MermaidStrings
         Loc.Register(FixQueued, "已放入输入框，发送后交给模型", "Added to the prompt box; send it to hand it over");
         Loc.Register(
             FixRequest,
-            "这张 Mermaid 图在本地渲染失败，请修正它。\n\n错误：{0}\n\n源码：\n```{2}mermaid\n{1}\n```{2}\n\n请只输出修正后的完整 Mermaid 代码块。",
-            "This Mermaid diagram failed to render locally; please fix it.\n\nError: {0}\n\nSource:\n```{2}mermaid\n{1}\n```{2}\n\nReply with the corrected, complete Mermaid code block only.");
+            "这张 Mermaid 图在本地渲染失败，请修正它。\n\n错误：{0}\n\n源码：\n{2}mermaid\n{1}\n{2}\n\n请只输出修正后的完整 Mermaid 代码块。",
+            "This Mermaid diagram failed to render locally; please fix it.\n\nError: {0}\n\nSource:\n{2}mermaid\n{1}\n{2}\n\nReply with the corrected, complete Mermaid code block only.");
         Loc.Register(FixTruncated, "…（源码过长，已截断）", "… (the source was truncated)");
         Loc.Register(FixOrigin, "Mermaid 图修正", "Mermaid diagram fix");
+        Loc.Register(EmptyPicture, "渲染结果为空图", "the SVG produced an empty picture");
+        Loc.Register(
+            ExternalReference,
+            "图里含有指向外部的引用，已拒绝（不会联网）",
+            "the SVG references something outside itself and was refused (diagrams never touch the network)");
         Loc.Register(Diagram, "Mermaid 图", "Mermaid diagram");
     }
 }
