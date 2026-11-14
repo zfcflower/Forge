@@ -1,0 +1,29 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:notif="using:Forge.App.Notifications"
+             x:Class="Forge.App.Views.NotificationPermissionSettingsView"
+             x:DataType="notif:NotificationPermissionSettingsViewModel">
+  <!-- The `notification-permission` section body: what this process knows about the OS permission (which can only come from
+       a real notification), the two actions that change it, and the switch the first-run wizard reads. -->
+  <StackPanel Spacing="6">
+    <TextBlock TextWrapping="Wrap"
+               Text="{Binding StateText}"
+               AutomationProperties.AutomationId="notification-permission-state" />
+    <StackPanel Orientation="Horizontal" Spacing="6">
+      <Button Content="{Binding TestActionText}"
+              Command="{Binding SendTestCommand}"
+              AutomationProperties.AutomationId="notification-permission-test" />
+      <Button Content="{Binding [notifications.permission.openSettings], Source={x:Static loc:Loc.Instance}}"
+              Command="{Binding OpenSettingsCommand}"
+              IsVisible="{Binding CanOpenSettings}"
+              AutomationProperties.AutomationId="notification-permission-open-settings" />
+    </StackPanel>
+    <CheckBox Content="{Binding [notifications.permission.reprompt], Source={x:Static loc:Loc.Instance}}"
+              IsChecked="{Binding Reprompt, Mode=TwoWay}"
+              AutomationProperties.AutomationId="notification-permission-reprompt" />
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [notifications.permission.repromptHint], Source={x:Static loc:Loc.Instance}}" />
+  </StackPanel>
+</UserControl>

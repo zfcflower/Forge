@@ -12,8 +12,9 @@ namespace Forge.App.Tests.Notifications;
 /// Pins <see cref="SystemNotifier"/>: the exact process each platform is asked to start (file, argument list, the
 /// Windows environment variables), that title and body never become part of a script or of a command line a shell would
 /// parse (hostile text included), that a missing tool, a failing tool and an unsupported platform end
-/// quietly with a <c>[notify]</c> trace line, that the 5 second limit and the caller's cancellation are told apart, and that
-/// only cancellation by the caller ever throws. A recording runner replaces the process start, so nothing is launched and no
+/// quietly with a <c>[notify]</c> trace line, that the 5 second limit and the caller's cancellation are told apart, that
+/// only cancellation by the caller ever throws, and that <see cref="ISystemNotifier.TryNotifyAsync"/> reports every one of
+/// those outcomes (taken only on exit code 0). A recording runner replaces the process start, so nothing is launched and no
 /// test depends on the machine having PowerShell, osascript or notify-send.
 /// </summary>
 [Collection("forge-app-ui")]
@@ -319,6 +320,85 @@ public sealed class SystemNotifierTests
         await notifier.NotifyAsync("quiet-title", "quiet-body", CancellationToken.None);
 
         Assert.DoesNotContain(trace.Lines, static line => line.StartsWith("[notify]", StringComparison.Ordinal));
+    }
+
+    // ------------------------------------------------------------ what a caller can learn from TryNotifyAsync
+
+    [Fact]
+    public async Task A_zero_exit_code_is_reported_as_taken()
+    {
+        var notifier = new SystemNotifier(run: static (_, _) => Task.FromResult(0), platform: NotifyPlatform.Linux);
+
+        Assert.True(await notifier.TryNotifyAsync(Title, Body, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(-1)]
+    public async Task A_non_zero_exit_code_is_reported_as_not_taken(int exitCode)
+    {
+        using var trace = new LogCapture();
+        var notifier = new SystemNotifier(run: (_, _) => Task.FromResult(exitCode), platform: NotifyPlatform.Linux);
+
+        Assert.False(await notifier.TryNotifyAsync(Title, Body, CancellationToken.None));
+
+        Assert.Contains(
+            trace.Lines,
+            line => line.Contains("[notify] notify-send exited with code " + exitCode, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_missing_tool_is_reported_as_not_taken()
+    {
+        using var trace = new LogCapture();
+        var notifier = new SystemNotifier(
+            run: static (_, _) => throw new Win32Exception(2, "The system cannot find the file specified."),
+            platform: NotifyPlatform.MacOS);
+
+        Assert.False(await notifier.TryNotifyAsync(Title, Body, CancellationToken.None));
+
+        Assert.Contains(
+            trace.Lines,
+            static line => line.Contains("[notify] osascript failed:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_unsupported_platform_is_reported_as_not_taken()
+    {
+        using var trace = new LogCapture();
+        var notifier = new SystemNotifier(platform: NotifyPlatform.Unsupported);
+
+        Assert.False(await notifier.TryNotifyAsync(Title, Body, CancellationToken.None));
+
+        Assert.Contains(trace.Lines, static line => line.Contains("[notify] skipped: no notification tool", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_notification_that_hangs_is_reported_as_not_taken()
+    {
+        using var trace = new LogCapture();
+        var time = new NotifyControlledTime();
+        var recorder = new RunnerRecorder { WaitForToken = true };
+        var notifier = new SystemNotifier(run: recorder.RunAsync, platform: NotifyPlatform.Windows, time: time);
+
+        var pending = notifier.TryNotifyAsync(Title, Body, CancellationToken.None);
+        await recorder.Entered.WhenAtLeastAsync(1, "the runner to start");
+        time.Advance(SystemNotifier.Timeout);
+
+        Assert.False(await pending.WaitAsync(NotifyBudget));
+        Assert.Contains(
+            trace.Lines,
+            static line => line.Contains("[notify] powershell.exe did not finish within 5 seconds", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task NotifyAsync_keeps_its_resultless_signature_over_the_same_outcome()
+    {
+        var notifier = new SystemNotifier(run: static (_, _) => Task.FromResult(1), platform: NotifyPlatform.Linux);
+
+        // The old entry point still completes without telling the caller anything; the center keeps using it.
+        await notifier.NotifyAsync(Title, Body, CancellationToken.None);
     }
 
     // ------------------------------------------------------------ the 5 second limit and cancellation

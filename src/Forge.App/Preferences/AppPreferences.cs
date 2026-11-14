@@ -528,7 +528,10 @@ internal sealed class AppPreferences : ObservableObject
     /// <summary>Folder new clones go into; empty means beside the project (wave W9).</summary>
     public string ProjectsCloneDirectory { get => projectsCloneDirectory; set => Set(ref projectsCloneDirectory, Text(value, DefaultProjectsCloneDirectory)); }
 
-    /// <summary>Model ids the model picker hides (sorted, deduplicated; wave W1).</summary>
+    /// <summary>
+    /// Model ids every model picker hides (sorted, deduplicated; wave W1). Read through <see cref="IsModelHidden"/> so the
+    /// session composer, the agent-defaults combo and the settings section share one definition of "hidden".
+    /// </summary>
     public IReadOnlyList<string> ModelsHidden
     {
         get => modelsHidden;
@@ -541,6 +544,16 @@ internal sealed class AppPreferences : ObservableObject
                 OnPropertyChanged();
             }
         }
+    }
+
+    /// <summary>Whether the named model is hidden from the pickers (present in <see cref="ModelsHidden"/>).</summary>
+    public bool IsModelHidden(string name) => modelsHidden.Contains(name, StringComparer.Ordinal);
+
+    /// <summary>Hides or shows one model; raises PropertyChanged for <see cref="ModelsHidden"/> only when it moved.</summary>
+    public void SetModelHidden(string name, bool hidden)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ModelsHidden = hidden ? [.. modelsHidden, name] : [.. modelsHidden.Where(n => !string.Equals(n, name, StringComparison.Ordinal))];
     }
 
     /// <summary>

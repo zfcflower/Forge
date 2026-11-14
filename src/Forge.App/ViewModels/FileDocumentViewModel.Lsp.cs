@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using Forge.App.Editing;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.Editor.Highlighting;
 using Forge.Editor.Languages;
 using Forge.Editor.Lsp;
 using Forge.Editor.Text;
@@ -25,6 +26,18 @@ internal sealed partial class FileDocumentViewModel
     private EditorLspDiagnosticSet editorDiagnostics = EditorLspDiagnosticSet.Empty;
     private EditorLspDefinitionTarget? pendingReveal;
     private PullLoop? pullLoop;
+    private SemanticLoop? semanticLoop;
+    private SemanticLineIndex semanticIndex = SemanticLineIndex.Empty;
+
+    /// <summary>Quiet period after an edit before the semantic classification is asked for again.</summary>
+    /// <summary>The most reference rows the list shows; past it the list says it is cut.</summary>
+    internal const int MaxReferenceRows = 2_000;
+
+    private const int SemanticDebounceMilliseconds = 400;
+
+    /// <summary>Second classification request after a document opens, for a server that analyses the project first.</summary>
+    private const int SemanticCatchUpMilliseconds = 2_500;
+
 
     /// <summary>Quiet period after an edit before the editor asks for diagnostics again.</summary>
     private const int PullDebounceMilliseconds = 500;
@@ -35,8 +48,21 @@ internal sealed partial class FileDocumentViewModel
     internal event EventHandler<EditorLspDiagnosticsEventArgs>? EditorDiagnosticsChanged;
     internal event EventHandler<EditorLspDefinitionTarget>? DefinitionRequested;
     internal event EventHandler? RevealRequested;
+
+    /// <summary>Raised on the UI thread with the lines the server newly classified.</summary>
+    internal event EventHandler<EditorLspSemanticTokensEventArgs>? SemanticTokensChanged;
+
     internal EditorLspDiagnosticSet EditorDiagnostics => editorDiagnostics;
+
+    /// <summary>The semantic classification in use: per line, stamped with the document version it maps against.</summary>
+    internal SemanticLineIndex EditorSemanticTokens => semanticIndex;
+
     internal string? EditorWorkspace => openWorkspace ?? Workspace;
+
+    /// <summary>Whether a path is this document's file, so navigation stays in the open buffer instead of reopening it.</summary>
+    internal bool IsEditorPath(string path) =>
+        path is { Length: > 0 } && Path is { Length: > 0 } &&
+        string.Equals(System.IO.Path.GetFullPath(path), System.IO.Path.GetFullPath(Path), StringComparison.OrdinalIgnoreCase);
 
     internal void BeginEditorLsp()
     {
@@ -55,6 +81,7 @@ internal sealed partial class FileDocumentViewModel
     internal void EndEditorLsp()
     {
         StopDiagnosticsPull();
+        StopSemanticTokens();
         editorLspGeneration++;
         var cts = editorLspCts;
         editorLspCts = null;
@@ -83,6 +110,11 @@ internal sealed partial class FileDocumentViewModel
         editorDiagnosticsSequence = -1;
         editorDiagnostics = EditorLspDiagnosticSet.Empty;
     }
+    /// <summary>
+    /// Writes the editor's status line only: an empty but valid answer (no references, no definition) is information, and
+    /// raising a warning notification for it would sit in the same slot as a real editor failure.
+    /// </summary>
+    internal void ReportEditorLspStatus(LocText notice) => SetLspStatus(notice);
 
     internal void ReportEditorLspNotice(LocText notice)
     {
@@ -126,20 +158,73 @@ internal sealed partial class FileDocumentViewModel
         return offset;
     }
 
+    /// <summary>
+    /// The prelude every capability-gated document request shares: a request that is still current, a server that declares the
+    /// capability (otherwise the status line names the missing feature), and one cancellation source that follows both the
+    /// caller's token and the editor's. Null means the caller returns null; the caller disposes <c>Linked</c>.
+    /// </summary>
+    private async Task<(EditorLspRequest Request, CancellationTokenSource Linked)?> BeginEditorRequestAsync(
+        int offset,
+        CancellationToken ct,
+        bool silent,
+        Func<EditorLspRequest, string?> missingFeature)
+    {
+        if (await PrepareEditorRequestAsync(offset, ct, silent).ConfigureAwait(true) is not { } request)
+        {
+            return null;
+        }
+
+        if (missingFeature(request) is { } feature)
+        {
+            ReportUnsupported(feature);
+            return null;
+        }
+
+        return (request, CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token));
+    }
+
+    /// <summary>
+    /// Asks the server for document locations the way every navigation request has to: a cancelled request is silence, a
+    /// protocol failure is a notice, both are a null answer the caller treats as "nothing to show".
+    /// </summary>
+    private async Task<IReadOnlyList<LspLocation>?> RequestLocationsAsync(
+        EditorLspRequest request,
+        Func<CancellationToken, Task<IReadOnlyList<LspLocation>?>> ask,
+        CancellationToken token)
+    {
+        try
+        {
+            return await ask(token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            ReportEditorLspFailure(exception, request, token);
+            return null;
+        }
+    }
+
+    private static string? MissingCompletion(EditorLspRequest request) =>
+        request.Session.Client?.Capabilities is { SupportsCompletion: false } ? InspectorStrings.EditorLspFeatureCompletion : null;
+
+    private static string? MissingDefinition(EditorLspRequest request) =>
+        request.Session.Client?.Capabilities is { SupportsDefinition: false } ? InspectorStrings.EditorLspFeatureDefinition : null;
+
+    private static string? MissingReferences(EditorLspRequest request) =>
+        request.Session.Client?.Capabilities is { SupportsReferences: false } ? InspectorStrings.EditorLspFeatureReferences : null;
+
     internal async Task<EditorLspCompletion?> RequestCompletionAsync(int offset, CancellationToken ct)
     {
-        if (await PrepareEditorRequestAsync(offset, ct, silent: false).ConfigureAwait(true) is not { } request)
+        if (await BeginEditorRequestAsync(offset, ct, silent: false, MissingCompletion).ConfigureAwait(true) is not { } scope)
         {
             return null;
         }
 
-        if (request.Session.Client?.Capabilities is { SupportsCompletion: false })
-        {
-            ReportUnsupported(InspectorStrings.EditorLspFeatureCompletion);
-            return null;
-        }
-
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token);
+        var request = scope.Request;
+        using var linked = scope.Linked;
         CompletionResult? result;
         try
         {
@@ -272,32 +357,17 @@ internal sealed partial class FileDocumentViewModel
 
     internal async Task<EditorLspDefinition?> RequestDefinitionAsync(int offset, CancellationToken ct)
     {
-        if (await PrepareEditorRequestAsync(offset, ct, silent: false).ConfigureAwait(true) is not { } request)
+        if (await BeginEditorRequestAsync(offset, ct, silent: false, MissingDefinition).ConfigureAwait(true) is not { } scope)
         {
             return null;
         }
 
-        if (request.Session.Client?.Capabilities is { SupportsDefinition: false })
-        {
-            ReportUnsupported(InspectorStrings.EditorLspFeatureDefinition);
-            return null;
-        }
-
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, request.Token);
-        IReadOnlyList<LspLocation>? locations;
-        try
-        {
-            locations = await request.Session.RequestDefinitionAsync(request.Document, offset, linked.Token).ConfigureAwait(true);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-        catch (Exception exception) when (IsLspFailure(exception))
-        {
-            ReportEditorLspFailure(exception, request, linked.Token);
-            return null;
-        }
+        var request = scope.Request;
+        using var linked = scope.Linked;
+        var locations = await RequestLocationsAsync(
+            request,
+            token => request.Session.RequestDefinitionAsync(request.Document, offset, token),
+            linked.Token).ConfigureAwait(true);
 
         if (linked.IsCancellationRequested || !IsEditorRequestCurrent(request))
         {
@@ -352,6 +422,107 @@ internal sealed partial class FileDocumentViewModel
         }
 
         return definition;
+    }
+
+    /// <summary>
+    /// Every place the symbol at <paramref name="offset"/> is used, from the server's <c>textDocument/references</c>. A
+    /// null result means no answer (no session, cancelled, or a server that does not declare the capability); an empty list
+    /// is a real answer — nothing uses the symbol.
+    /// </summary>
+    internal async Task<EditorLspReferenceList?> RequestReferencesAsync(int offset, CancellationToken ct)
+    {
+        if (await BeginEditorRequestAsync(offset, ct, silent: false, MissingReferences).ConfigureAwait(true) is not { } scope)
+        {
+            return null;
+        }
+
+        var request = scope.Request;
+        using var linked = scope.Linked;
+        var locations = await RequestLocationsAsync(
+            request,
+            token => request.Session.RequestReferencesAsync(request.Document, offset, true, token),
+            linked.Token).ConfigureAwait(true);
+
+        if (locations is null || linked.IsCancellationRequested || !IsEditorRequestCurrent(request))
+        {
+            return null;
+        }
+
+        if (locations.Count == 0)
+        {
+            return new EditorLspReferenceList(EditorLspMapping.WordAt(request.Snapshot, offset), []);
+        }
+
+        var symbol = EditorLspMapping.WordAt(request.Snapshot, offset);
+        var encoding = request.Session.Client?.PositionEncoding ?? request.Snapshot.PositionEncoding;
+        var ownPath = System.IO.Path.GetFullPath(Path);
+        (IReadOnlyList<EditorLspReference> Items, bool Truncated) references;
+        try
+        {
+            references = await Task.Run(() => MapReferences(locations, ownPath, encoding), linked.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+
+        return linked.IsCancellationRequested || !IsEditorRequestCurrent(request)
+            ? null
+            : new EditorLspReferenceList(symbol, references.Items, references.Truncated);
+    }
+
+    /// <summary>
+    /// Turns locations into list rows off the UI thread: remote URIs are dropped (nothing to open), duplicates are folded
+    /// away because servers routinely report the same range twice, and the order is the one a reader expects — this file
+    /// first, then path, line, column.
+    /// </summary>
+    private static (IReadOnlyList<EditorLspReference> Items, bool Truncated) MapReferences(IReadOnlyList<LspLocation> locations, string ownPath, PositionEncoding encoding)
+    {
+        var items = new List<EditorLspReference>(locations.Count);
+        var seen = new HashSet<(string Path, int Line, int Character)>(locations.Count);
+        foreach (var location in locations)
+        {
+            if (LspUri.ToPath(location.Uri) is not { Length: > 0 } path)
+            {
+                continue;
+            }
+
+            var start = location.Range.Start;
+            if (start.Line < 0 || start.Character < 0 || !seen.Add((path, start.Line, start.Character)))
+            {
+                continue;
+            }
+
+            items.Add(new EditorLspReference(
+                path,
+                start.Line + 1,
+                start.Character + 1,
+                new EditorLspDefinitionTarget(path, start, encoding)));
+        }
+
+        items.Sort((left, right) =>
+        {
+            bool Own(EditorLspReference reference) => string.Equals(reference.Path, ownPath, StringComparison.OrdinalIgnoreCase);
+            var leftOwn = Own(left);
+            var rightOwn = Own(right);
+            if (leftOwn != rightOwn)
+            {
+                return leftOwn ? -1 : 1;
+            }
+
+            var byPath = string.Compare(left.Path, right.Path, StringComparison.OrdinalIgnoreCase);
+            if (byPath != 0)
+            {
+                return byPath;
+            }
+
+            var byLine = left.Line.CompareTo(right.Line);
+            return byLine != 0 ? byLine : left.Column.CompareTo(right.Column);
+        });
+
+        // A server can report tens of thousands of uses; the list is for reading, so it is capped after sorting (this file
+        // and the nearest paths survive) and says so.
+        return items.Count > MaxReferenceRows ? (items.GetRange(0, MaxReferenceRows), true) : (items, false);
     }
 
     /// <summary>
@@ -542,6 +713,226 @@ internal sealed partial class FileDocumentViewModel
     }
 
     /// <summary>
+    /// Semantic classification (LSP <c>textDocument/semanticTokens</c>): the lexical colours say what a word looks like, the
+    /// server says what it is. Asked for when the editor attaches, after every edit (debounced), whenever the server reports
+    /// that its analysis moved, and immediately again when an answer was mapped against text that has already changed. The
+    /// tokens are bucketed per line off the UI thread, so drawing a line reads an array instead of scanning the document.
+    /// </summary>
+    private void StartSemanticTokens(TextDocument doc, LanguageSession active)
+    {
+        StopSemanticTokens();
+        if (active.Client?.Capabilities.SemanticTokens is not { Full: true })
+        {
+            return;
+        }
+
+        var generation = editorLspGeneration;
+        var loop = new SemanticLoop(active, doc);
+        semanticLoop = loop;
+
+        void OnRefresh(object? sender, EventArgs e) => loop.Request();
+        void OnChanged(object? sender, Forge.Editor.Text.TextChangedEventArgs e) => loop.Request();
+        active.SemanticTokensRefreshRequested += OnRefresh;
+        doc.Changed += OnChanged;
+        loop.Subscriptions = () =>
+        {
+            active.SemanticTokensRefreshRequested -= OnRefresh;
+            doc.Changed -= OnChanged;
+        };
+
+        loop.Request();
+        _ = PumpSemanticTokensAsync(loop, doc, generation);
+        _ = CatchUpSemanticTokensAsync(loop, doc, generation);
+    }
+
+    /// <summary>
+    /// One request after the quiet period, then another as soon as the pump is signalled again: an edit that arrives while
+    /// a request is in flight is not lost, it becomes the next round.
+    /// </summary>
+    private async Task PumpSemanticTokensAsync(SemanticLoop loop, TextDocument doc, int generation)
+    {
+        while (!loop.Token.IsCancellationRequested)
+        {
+            try
+            {
+                await loop.WaitForRequestAsync().ConfigureAwait(true);
+                await Task.Delay(SemanticDebounceMilliseconds, loop.Token).ConfigureAwait(true);
+                await RequestSemanticTokensAsync(loop, doc, generation).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                // The loop was stopped between the wait waking up and the next line; nothing left to pump.
+                return;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // Anything else would end this fire-and-forget pump silently and leave the file uncoloured with no trace.
+                AppLogs.File.ZLogError(exception, $"semantic token pump stopped");
+                return;
+            }
+        }
+    }
+
+    private async Task CatchUpSemanticTokensAsync(SemanticLoop loop, TextDocument doc, int generation)
+    {
+        try
+        {
+            await Task.Delay(SemanticCatchUpMilliseconds, loop.Token).ConfigureAwait(true);
+            if (generation == editorLspGeneration && ReferenceEquals(document, doc))
+            {
+                loop.Request();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RequestSemanticTokensAsync(SemanticLoop loop, TextDocument doc, int generation)
+    {
+        var snapshot = doc.Snapshot;
+        if (snapshot.Length > ForgeEditorBridge.HighlightLimit)
+        {
+            // Over the ceiling the overlay is dropped rather than kept from the last small version of the file.
+            if (!semanticIndex.IsEmpty)
+            {
+                semanticIndex = SemanticLineIndex.Empty;
+                SemanticTokensChanged?.Invoke(this, new EditorLspSemanticTokensEventArgs(semanticIndex));
+            }
+
+            return;
+        }
+
+        var encoding = loop.Session.Client?.PositionEncoding ?? snapshot.PositionEncoding;
+        SemanticTokensResult? result;
+        try
+        {
+            result = await loop.Session.RequestSemanticTokensAsync(doc, loop.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (IsLspFailure(exception))
+        {
+            AppLogs.File.ZLogWarning($"semantic tokens failed: {exception.Message}");
+            return;
+        }
+
+        if (result is null || loop.Token.IsCancellationRequested || generation != editorLspGeneration ||
+            !ReferenceEquals(document, doc) || !ReferenceEquals(semanticLoop, loop))
+        {
+            return;
+        }
+
+        var previous = semanticIndex;
+        SemanticLineIndex index;
+        try
+        {
+            index = await Task.Run(
+                () => SemanticTokenMap.ToLineIndex(result, snapshot, encoding, previous),
+                loop.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            AppLogs.File.ZLogError(exception, $"mapping semantic tokens failed");
+            return;
+        }
+
+        if (generation != editorLspGeneration || !ReferenceEquals(document, doc) || !ReferenceEquals(semanticLoop, loop))
+        {
+            return;
+        }
+
+        semanticIndex = index;
+        SemanticTokensChanged?.Invoke(this, new EditorLspSemanticTokensEventArgs(index));
+
+        // The server classified text that no longer exists: ask again rather than leave those ranges painted until the next
+        // keystroke happens to ask for them.
+        if (index.Version != doc.Snapshot.Version)
+        {
+            loop.Request();
+        }
+    }
+
+    private void StopSemanticTokens()
+    {
+        var loop = semanticLoop;
+        semanticLoop = null;
+        loop?.Dispose();
+        if (!semanticIndex.IsEmpty)
+        {
+            semanticIndex = SemanticLineIndex.Empty;
+            SemanticTokensChanged?.Invoke(this, new EditorLspSemanticTokensEventArgs(semanticIndex));
+        }
+    }
+
+    /// <summary>One document's semantic-token pump: the session, the request signal and the cancellation root.</summary>
+    private sealed class SemanticLoop(LanguageSession session, TextDocument document) : IDisposable
+    {
+        private readonly SemaphoreSlim signal = new(0, 1);
+        private readonly CancellationTokenSource lifetime = new();
+
+        // Read by the editor, session-event and pump threads.
+        private volatile bool disposed;
+
+        public LanguageSession Session { get; } = session;
+
+        public TextDocument Document { get; } = document;
+
+        public CancellationToken Token => lifetime.Token;
+
+        public Action? Subscriptions { get; set; }
+
+        /// <summary>Marks the classification for another round; several requests in a row collapse into one round.</summary>
+        public void Request()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            try
+            {
+                signal.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // A round is already pending; the signal is a flag, not a count of edits.
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposed between the flag read and the release: the document is going away, so the request is moot.
+            }
+        }
+
+        public Task WaitForRequestAsync() => signal.WaitAsync(lifetime.Token);
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            Subscriptions?.Invoke();
+            Subscriptions = null;
+            lifetime.Cancel();
+            lifetime.Dispose();
+            signal.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Foldable ranges from the language server, or null when there is no session, the session is not ready, or the
     /// server did not declare <c>foldingRangeProvider</c> — in every such case the editor falls back to the structural
     /// heuristic instead of reporting a missing capability.
@@ -616,6 +1007,10 @@ internal sealed partial class FileDocumentViewModel
             // Pull diagnostics belong to the attached view: the server answers per request, so the editor asks here, on
             // every edit and whenever the server says its analysis moved.
             StartDiagnosticsPull(doc, active);
+
+            // Semantic classification rides the same session and the same document events, but its own debounce: the
+            // server re-analyses on its own schedule and reports it through workspace/semanticTokens/refresh.
+            StartSemanticTokens(doc, active);
         }
         catch (OperationCanceledException)
         {

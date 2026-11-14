@@ -19,10 +19,13 @@ public partial class FileDocumentView
     private FileDocumentViewModel? lspModel;
     private EditorDocument? lspDocument;
     private EditorLspDiagnosticRenderer? diagnosticRenderer;
+    private SemanticTokenColorizer? semanticColorizer;
     private CompletionWindow? completionWindow;
     private CancellationTokenSource? completionCts;
     private CancellationTokenSource? hoverCts;
     private CancellationTokenSource? definitionCts;
+    private CancellationTokenSource? referencesCts;
+    private Flyout? referenceFlyout;
     private int lspGeneration;
     private bool completionIncomplete;
     private int hoverPendingOffset = -1;
@@ -49,7 +52,18 @@ public partial class FileDocumentView
         var textView = Editor.TextArea.TextView;
         diagnosticRenderer = new EditorLspDiagnosticRenderer(document);
         textView.BackgroundRenderers.Add(diagnosticRenderer);
+
+        // The semantic layer is a line transformer, not a renderer: it recolours existing text runs, and the library only
+        // calls it for lines it is about to draw.
+        semanticColorizer = new SemanticTokenColorizer(Editor, () => EditorOptionsApplier.IsDarkTheme(Editor, EditorSettings.Current));
+        textView.LineTransformers.Add(semanticColorizer);
+        semanticColorizer.SetIndex(viewModel.EditorSemanticTokens);
+        if (bridge is { } attached)
+        {
+            attached.HighlightingInstalled += OnHighlightingInstalled;
+        }
         viewModel.EditorDiagnosticsChanged += OnEditorDiagnosticsChanged;
+        viewModel.SemanticTokensChanged += OnSemanticTokensChanged;
         viewModel.RevealRequested += OnEditorRevealRequested;
         Editor.TextArea.TextEntered += OnEditorLspTextEntered;
         textView.PointerHover += OnEditorHover;
@@ -71,10 +85,25 @@ public partial class FileDocumentView
         if (lspModel is { } viewModel)
         {
             viewModel.EditorDiagnosticsChanged -= OnEditorDiagnosticsChanged;
+            viewModel.SemanticTokensChanged -= OnSemanticTokensChanged;
             viewModel.RevealRequested -= OnEditorRevealRequested;
             viewModel.EndEditorLsp();
             lspModel = null;
         }
+
+        if (semanticColorizer is { } colorizer)
+        {
+            textView.LineTransformers.Remove(colorizer);
+            colorizer.Clear();
+            semanticColorizer = null;
+        }
+
+        if (bridge is { } attached)
+        {
+            attached.HighlightingInstalled -= OnHighlightingInstalled;
+        }
+
+        CloseReferenceList();
 
         if (diagnosticRenderer is { } renderer)
         {
@@ -112,6 +141,26 @@ public partial class FileDocumentView
     }
 
     private void OnEditorRevealRequested(object? sender, EventArgs e) => ApplyPendingReveal();
+
+    private void OnSemanticTokensChanged(object? sender, EditorLspSemanticTokensEventArgs e) => semanticColorizer?.SetIndex(e.Index);
+
+    /// <summary>
+    /// TextMate just appended its own line transformer, which would paint over the semantic ranges; moving this one to the end
+    /// of the list keeps the semantic classification on top, whatever order the two were installed in.
+    /// </summary>
+    private void OnHighlightingInstalled(object? sender, EventArgs e)
+    {
+        if (semanticColorizer is not { } colorizer)
+        {
+            return;
+        }
+
+        var transformers = Editor.TextArea.TextView.LineTransformers;
+        if (transformers.Remove(colorizer))
+        {
+            transformers.Add(colorizer);
+        }
+    }
 
     private void ApplyPendingReveal()
     {
@@ -151,6 +200,16 @@ public partial class FileDocumentView
         {
             e.Handled = true;
             _ = GoToDefinitionAsync(Editor.CaretOffset);
+        }
+        else if (e.Key == Key.F12 && e.KeyModifiers == KeyModifiers.Shift)
+        {
+            e.Handled = true;
+            _ = ShowReferencesAsync(Editor.CaretOffset);
+        }
+        else if (referenceFlyout is not null && e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+        {
+            e.Handled = true;
+            CloseReferenceList();
         }
         else if (completionWindow is { } popup && TryMoveCompletionSelection(popup.CompletionList, e))
         {
@@ -568,12 +627,103 @@ public partial class FileDocumentView
         }
     }
 
+    /// <summary>
+    /// "Find references" (Shift+F12): the server lists every place the symbol at the caret is used, and the list opens next
+    /// to it. A request that outlived its document is dropped like every other editor request.
+    /// </summary>
+    private async Task ShowReferencesAsync(int offset)
+    {
+        if (lspModel is not { } viewModel || Editor.Document is not { } document)
+        {
+            return;
+        }
+
+        CloseReferenceList();
+        var generation = lspGeneration;
+        var cts = ReplaceCts(ref referencesCts);
+        var versionBefore = document.Version;
+        try
+        {
+            var list = await viewModel.RequestReferencesAsync(offset, cts.Token).ConfigureAwait(true);
+            if (list is null || cts.IsCancellationRequested || !IsLspCurrent(viewModel, generation) ||
+                !ReferenceEquals(Editor.Document, document) || document.Version.CompareAge(versionBefore) != 0)
+            {
+                return;
+            }
+
+            if (list.Items.Count == 0)
+            {
+                viewModel.ReportEditorLspStatus(new LocText(InspectorStrings.EditorLspReferencesNone));
+                return;
+            }
+
+            OpenReferenceList(viewModel, list);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            ReportLspViewError(viewModel, generation, exception);
+        }
+        finally
+        {
+            if (ReferenceEquals(referencesCts, cts))
+            {
+                referencesCts = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void OpenReferenceList(FileDocumentViewModel viewModel, EditorLspReferenceList list)
+    {
+        CloseReferenceList();
+        var content = new ReferenceListView
+        {
+            DataContext = new ReferenceListViewModel(list, list.Symbol, reference => OpenReference(viewModel, reference)),
+        };
+        content.CloseRequested += (_, _) => CloseReferenceList();
+        var flyout = new Flyout { Content = content, Placement = PlacementMode.Pointer };
+        flyout.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(referenceFlyout, flyout))
+            {
+                referenceFlyout = null;
+            }
+        };
+        referenceFlyout = flyout;
+        flyout.ShowAt(Editor, true);
+    }
+
+    private void CloseReferenceList()
+    {
+        var flyout = referenceFlyout;
+        referenceFlyout = null;
+        referencesCts?.Cancel();
+        flyout?.Hide();
+    }
+
+    private void OpenReference(FileDocumentViewModel viewModel, EditorLspReference reference)
+    {
+        if (viewModel.IsEditorPath(reference.Path))
+        {
+            viewModel.RevealEditorPosition(reference.Target);
+        }
+        else
+        {
+            viewModel.OpenDefinition(reference.Target);
+        }
+    }
+
     private void CancelEditorLspWork()
     {
         completionCts?.Cancel();
         definitionCts?.Cancel();
         CloseHover();
         CloseCompletionWindow();
+        CloseReferenceList();
     }
 
     private static CancellationTokenSource ReplaceCts(ref CancellationTokenSource? field)
