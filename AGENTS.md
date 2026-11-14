@@ -2,15 +2,6 @@
 
 这些规则约束**开发 Forge 这个产品时的 Agent 分工**,不是 Forge 自身的运行时行为。
 
-## 角色分工
-
-| 角色 | 模型 | 负责 |
-|---|---|---|
-| 主 Agent(规划/调度) | `claude-bridge/claude-opus-5-5:medium`(中推理) | 读代码与 spec、拆解任务、写接口与骨架、派活、复核结果、合并、更新 spec、提交。能并行时才派活,不能并行时自己实现。 |
-| 实现 Worker | `opencode-go/deepseek-v4.1-flash:xhigh`(超高推理) | 按任务写实现代码。只在自己副本里工作,测试通过后只拷回自己负责的路径。 |
-| 测试 | `opencode-go/muse-spark-1.3-contributor:xhigh`(超高推理) | 只编写测试,不做 review。 |
-| Review | `opencode-go/gpt-6-luna`;该模型不在 opencode-go 目录时回退 `opencode-go/glm-5.3-flash` | 只读评审,输出实质性问题与结论。 |
-
 ## 评审标准
 
 评审不止于找代码 Bug,三项按优先级排序:
@@ -23,7 +14,7 @@
 ## 派活规则
 
 - **先问能不能并行,再决定派不派活**:只有当拆出的多个任务互不依赖、可以同时交给多个子 Agent 时,才用子 Agent 并行做;拆不出并行(单任务、有先后依赖、上下文紧密耦合)时,主 Agent 自己完成,不要为了“守分工”把单个任务外包给一个 Worker 再等它回来。
-- 测试与评审必须使用彼此独立的会话。
+- 测试与评审必须使用彼此独立的会话，模型不能与Worker模型相同。
 - 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs /R:1 /W:1 /NFL /NDL /NJH /NJS`:`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节在能并行时交给 Worker,不能并行时自己写。
 - 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**(见下节)、并检查是否越界改动,再决定是否采纳。
