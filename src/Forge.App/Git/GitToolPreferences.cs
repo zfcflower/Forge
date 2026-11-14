@@ -1,4 +1,5 @@
 using Forge.App.Preferences;
+using Forge.Core.Tools;
 using Forge.Workspace;
 
 namespace Forge.App.Git;
@@ -27,5 +28,15 @@ internal static class GitToolPreferences
             Interval = TimeSpan.FromSeconds(preferences.GitChecksPollSeconds),
             MaxWait = TimeSpan.FromMinutes(preferences.GitChecksMaxWaitMinutes),
             NoChecksConfirmations = preferences.GitChecksNoChecksConfirmations,
+        };
+
+    /// <summary>How much of a change set a review package carries, read per review from the live preferences.</summary>
+    public static ReviewPackageLimits ReviewLimits(AppPreferences preferences) =>
+        new()
+        {
+            DiffChars = preferences.GitReviewDiffMaxChars,
+            CommitLines = preferences.GitReviewMaxCommits,
+            FileLines = preferences.GitReviewMaxFiles,
+            FieldChars = preferences.GitReviewFieldMaxChars,
         };
 }

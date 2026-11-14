@@ -594,6 +594,7 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.StepCommitter = stepCommitter;
         // Core has no git: the review change set is built here over the app's git layer and handed to the host.
         runtimeServices.Reviews = new ReviewChangeSetSource(git);
+        runtimeServices.ReviewLimits = () => GitToolPreferences.ReviewLimits(preferences.Current);
         runtimeServices.Mcp = mcp;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;

@@ -245,7 +245,7 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 1. **没有新建 `Localization/Strings.Review.cs`**。W12 没有用户可见的新表面:工具行显示工具名与结果(与其他工具一样),评审结论是模型可读的英文。计划本身在 W0 已否掉"建空表"的做法,所以不为凑文件名建一张空表;要让评审有本地化界面,应该是结论持久化/计划面板显示那一档(见下面的延后项)。
 2. **动了一个 `Forge.Workspace` 文件**:`GitCli.Review.cs` 的 `EmptyTreeSha` 由 `private` 提升为 `public`。评审"仓库的第一个提交"必须对空树做 diff,而那个常量只能有一份定义。没有新增 API、没有改行为。
 3. **动了三个计划外的 App 文件**(`SessionRuntime.cs` 两行、`AppComposition.cs` 三行、`ToolCatalog.cs` 两行):`request_review` 只有在组合根把 git 实现交出去时才存在,而 `FeatureComposition` 的各模块拿不到 `GitCli`,所以运行期接线只能留在 `Create()`。
-4. **内部常量**(不进设置,六·二表无 W12 项):包内 diff 48000 字符、提交清单 50 行与文件清单 200 行各自独立、每个文本字段 2000 字符、结论原文 8000 字符。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
+4. **包内上限**(起初是内部常量,后续已进设置,见第二轮评审之后的「上限进设置」):包内 diff 48000 字符、提交清单 50 行与文件清单 200 行各自独立、每个文本字段 2000 字符(现为 `GitReviewDiffMaxChars`/`GitReviewMaxCommits`/`GitReviewMaxFiles`/`GitReviewFieldMaxChars` 的默认值);结论原文 8000 字符仍是内部常量。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
 5. **评审方式可配置未做**(`goal-and-requirements.md` 的"Reviewer 子 Agent 一次评审,或人工逐行评审"):需要设置项 + 一条"步骤提交后自动评审"的触发路径,属于新的产品面,未在 W12 授权范围内。结论也不持久化。
 
 **验证**(合入前与两次 `git merge main`(W6、W8)之后各跑一遍,数字一致):
@@ -283,4 +283,6 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 5. **`narrowed to:` 路径列表无上限**,改按 2000 字符字段上限截断;**无换行 diff 的截断可能劈开代理对**,已避开。
 6. 测试补齐:停止/父取消/同回合两个评审并发/超长原文的结论读取/截断时给出可复现基准;源侧删除、重命名、二进制、未跟踪二进制窗口、超出捕获上限、提交清单截断(上限经构造参数注入)、空变更集;子 Agent 开关与 `request_review` 联动。
 
-**仍未改(记录原因)**:包内各上限(48000/50/200/2000/8000)仍是内部常量——进设置需要在六·二表登记、改 W0 冻结的 `AppPreferences.cs`、加设置界面与文案,属计划变更,须用户拍板;没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。
+**上限进设置(已实施,分支 `review-limits-settings`)**:包内 diff 字符、提交清单行数、文件清单行数、文本字段字符数四项进了 `AppPreferences`(`GitReviewDiffMaxChars` 1000–500000 默认 48000;`GitReviewMaxCommits` 5–500 默认 50;`GitReviewMaxFiles` 20–2000 默认 200;`GitReviewFieldMaxChars` 200–20000 默认 2000),界面在 `git` 设置分区;Core 以 `ReviewPackageLimits`(默认即旧常量)经 `AgentHostOptions.ReviewLimits` 每次评审现读。未跟踪文件的 8000 字节探测与 git 的二进制判定窗口一致,保持内部常量。
+
+**仍未改(记录原因)**:没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。

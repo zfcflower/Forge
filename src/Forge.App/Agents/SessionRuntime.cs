@@ -57,6 +57,9 @@ internal sealed record AgentRuntimeServices(
     /// <summary>The git side of <c>request_review</c> (handed to <c>AgentHostOptions.Reviews</c>, which registers the tool). Null in a unit test: the session then has no review tool.</summary>
     public IReviewChangeSetSource? Reviews { get; set; }
 
+    /// <summary>How much of a change set the review package carries, read per review from the settings (handed to <c>AgentHostOptions.ReviewLimits</c>). Null: the package defaults.</summary>
+    public Func<ReviewPackageLimits>? ReviewLimits { get; set; }
+
     /// <summary>
     /// Where oversized tool output is stored (handed to <c>AgentHostOptions.Artifacts</c>, which also adds the tool that
     /// reads it back). Null when the runtime was assembled without the composition root: output then stays inline.
@@ -980,6 +983,7 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
                 Todos = services.Todos,
                 StepCommitter = services.StepCommitter,
                 Reviews = services.Reviews,
+                ReviewLimits = services.ReviewLimits,
                 Artifacts = services.Artifacts,
                 Templates = templates,
                 Agents = ResolveAgentDefaults(templates),

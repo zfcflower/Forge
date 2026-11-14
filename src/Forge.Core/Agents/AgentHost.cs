@@ -49,6 +49,12 @@ public sealed record AgentHostOptions
     public IReviewChangeSetSource? Reviews { get; init; }
 
     /// <summary>
+    /// How much of a change set the review package carries, read when each review is built so a settings change applies to
+    /// the next one. Null means <see cref="ReviewPackageLimits.Default"/>. Only used together with <see cref="Reviews"/>.
+    /// </summary>
+    public Func<ReviewPackageLimits>? ReviewLimits { get; init; }
+
+    /// <summary>
     /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
     /// default compactor takes its summarizer prompt from the <c>compaction.summarizer</c> slot. Null = compiled-in texts.
     /// The system slot is not read from here: it is <see cref="Layers"/>' <see cref="PromptLayers.System"/>.
@@ -142,7 +148,7 @@ public sealed class AgentHost
 
         if (options.Reviews is { } reviews)
         {
-            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos));
+            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos, options.ReviewLimits));
         }
 
         var compactor = options.Compactor

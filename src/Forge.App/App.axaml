@@ -589,6 +589,69 @@
         <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
           <TextBlock Classes="label"
                      VerticalAlignment="Center"
+                     Text="{Binding [git.settings.reviewDiffChars], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="1000"
+                         Maximum="500000"
+                         Increment="1000"
+                         FormatString="0"
+                         Value="{Binding ReviewDiffMaxChars, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-review-diff-chars"
+                         AutomationProperties.Name="{Binding [git.settings.reviewDiffChars], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.reviewCommits], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="5"
+                         Maximum="500"
+                         Increment="5"
+                         FormatString="0"
+                         Value="{Binding ReviewMaxCommits, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-review-commits"
+                         AutomationProperties.Name="{Binding [git.settings.reviewCommits], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.reviewFiles], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="20"
+                         Maximum="2000"
+                         Increment="10"
+                         FormatString="0"
+                         Value="{Binding ReviewMaxFiles, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-review-files"
+                         AutomationProperties.Name="{Binding [git.settings.reviewFiles], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.reviewFieldChars], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="200"
+                         Maximum="20000"
+                         Increment="100"
+                         FormatString="0"
+                         Value="{Binding ReviewFieldMaxChars, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-review-field-chars"
+                         AutomationProperties.Name="{Binding [git.settings.reviewFieldChars], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <TextBlock Classes="caption"
+                   TextWrapping="Wrap"
+                   Text="{Binding [git.settings.reviewHint], Source={x:Static loc:Loc.Instance}}" />
+        <Grid ColumnDefinitions="150,*" Margin="0,9,0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
                      Text="{Binding [git.settings.ghPath], Source={x:Static loc:Loc.Instance}}" />
           <TextBox Grid.Column="1"
                    MinWidth="260"

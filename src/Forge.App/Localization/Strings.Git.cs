@@ -29,6 +29,11 @@ internal static class GitStrings
     public const string SettingsChecksNoChecks = "git.settings.checksNoChecks";
     public const string SettingsChecksLogTail = "git.settings.checksLogTail";
     public const string SettingsChecksHint = "git.settings.checksHint";
+    public const string SettingsReviewDiffChars = "git.settings.reviewDiffChars";
+    public const string SettingsReviewCommits = "git.settings.reviewCommits";
+    public const string SettingsReviewFiles = "git.settings.reviewFiles";
+    public const string SettingsReviewFieldChars = "git.settings.reviewFieldChars";
+    public const string SettingsReviewHint = "git.settings.reviewHint";
     public const string SettingsGhPath = "git.settings.ghPath";
     public const string SettingsGhPathHint = "git.settings.ghPathHint";
 
@@ -324,6 +329,14 @@ internal static class GitStrings
             SettingsChecksHint,
             "“等待检查”每隔多少秒向 GitHub 查询一次（10–300 秒）、最长等待多少分钟（1–180 分钟）、连续几轮读不到检查才判定没有 CI（1–10 次），以及失败日志交给 Agent 的尾行数（20–2000 行）；改动对下一次等待生效。",
             "How often waiting for checks asks GitHub (10–300 seconds), the longest it keeps waiting (1–180 minutes), how many polls in a row must find no checks before it concludes there is no CI (1–10), and how many tail lines of a failed log the agent gets (20–2000); a change applies to the next wait.");
+        Loc.Register(SettingsReviewDiffChars, "评审包 diff 字符上限", "Review package diff characters");
+        Loc.Register(SettingsReviewCommits, "评审包提交行数", "Review package commit lines");
+        Loc.Register(SettingsReviewFiles, "评审包文件行数", "Review package file lines");
+        Loc.Register(SettingsReviewFieldChars, "评审包字段字符上限", "Review package field characters");
+        Loc.Register(
+            SettingsReviewHint,
+            "request_review 交给评审者的材料上限：diff 字符数（1000–500000，超出会截断并注明）、列出的提交行数（5–500）、文件行数（20–2000），以及意图、步骤说明、关注点、提交标题与限定路径列表各自保留的字符数（200–20000）；改动对下一次评审生效。",
+            "Caps on what request_review hands the reviewer: diff characters (1000–500000, a longer diff is cut and says so), commit lines listed (5–500), file lines listed (20–2000), and the characters kept of the intent, step text, focus, commit subjects and the narrowed-to path list (200–20000); a change applies to the next review.");
         Loc.Register(SettingsGhPath, "gh 可执行文件", "gh executable");
         Loc.Register(
             SettingsGhPathHint,
