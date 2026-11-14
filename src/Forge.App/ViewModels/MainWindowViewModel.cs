@@ -321,6 +321,10 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             () => true,
             OnCommandFailed);
 
+        // The resource inspector's panel and the row of the strip's resources menu that opens it (wave W8). Created before
+        // the window binds anything, because the sessions built below are handed OpenInspector as a callback.
+        InitializeInspector();
+
         // The plan panel's view model and the command that opens it (wave W7). Created before the window binds, so the
         // overlay in MainWindow.axaml has its data context from the first frame.
         InitializePlan();
@@ -961,7 +965,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             composition.Providers,
             OnSubAgentToolRequested,
             instrumentSources: instruments,
-            preferences: composition.Preferences)
+            preferences: composition.Preferences,
+            openInspector: OpenInspector)
         {
             ChildQuery = readOnly
                 ? (parent, token) => catalog.QueryAsync(new SessionQuery { ParentSessionId = parent }, token)
@@ -3171,6 +3176,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         {
             approvalServices.Queue.Changed -= OnApprovalQueueChanged;
         }
+
+        // The overlay reads one session's live work; it goes before the sessions it reads do.
+        CloseInspector();
 
         DetachAutomations();
         foreach (var session in sessions.Values)

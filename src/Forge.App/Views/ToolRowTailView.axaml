@@ -1,7 +1,29 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.ToolRowTailView"
              x:DataType="vm:ToolRowViewModel">
-  <!-- Placeholder: wave W8 owns this file. -->
+  <!-- The live output of a call that is still running: it appears with the first streamed chunk and goes away when the call
+       returns (the result then carries the whole output). Bounded so a chatty command cannot push the transcript around. -->
+  <Border IsVisible="{Binding HasLiveOutput}"
+          Background="{DynamicResource SurfaceSunkenBrush}"
+          CornerRadius="{StaticResource RadiusSm}"
+          Padding="8,6">
+    <StackPanel Spacing="2">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Classes="label" Text="{Binding [resources.tail], Source={x:Static loc:Loc.Instance}}" />
+        <TextBlock Classes="mono caption" Text="{Binding LiveElapsedText}" />
+      </StackPanel>
+      <ScrollViewer MaxHeight="160"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Auto">
+        <SelectableTextBlock Classes="mono"
+                             FontSize="{DynamicResource FontSizeSm}"
+                             TextWrapping="NoWrap"
+                             Foreground="{DynamicResource TextSecondaryBrush}"
+                             Text="{Binding LiveOutputText}" />
+      </ScrollViewer>
+    </StackPanel>
+  </Border>
 </UserControl>
