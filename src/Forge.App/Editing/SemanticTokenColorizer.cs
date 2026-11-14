@@ -23,7 +23,8 @@ internal sealed class SemanticTokenColorizer : DocumentColorizingTransformer
     private static readonly string[] s_brushKeys = BuildBrushKeys();
     private readonly TextEditor editor;
     private readonly Func<bool> isDarkTheme;
-    private readonly IBrush?[] brushes = new IBrush?[s_brushKeys.Length];
+    // One painter per group, built once per theme variant: a per-token lambda would allocate on every redraw and scroll.
+    private readonly Action<VisualLineElement>?[] painters = new Action<VisualLineElement>?[s_brushKeys.Length];
     private SemanticLineIndex index = SemanticLineIndex.Empty;
     private ThemeVariant? brushVariant;
 
@@ -82,6 +83,14 @@ internal sealed class SemanticTokenColorizer : DocumentColorizingTransformer
             return;
         }
 
+        // One comparison per line: the brushes are per theme variant, and the variant can change while the view lives.
+        var variant = isDarkTheme() ? ThemeVariant.Dark : ThemeVariant.Light;
+        if (brushVariant != variant)
+        {
+            Array.Clear(painters);
+            brushVariant = variant;
+        }
+
         foreach (var token in tokens)
         {
             var from = Math.Min(token.Start, length);
@@ -92,39 +101,36 @@ internal sealed class SemanticTokenColorizer : DocumentColorizingTransformer
             }
 
             var group = TokenCategoryGroups.Group(token.Category);
-            if (group == TokenCategoryGroup.None || BrushFor(group) is not { } brush)
+            if (group == TokenCategoryGroup.None || PainterFor(group, variant) is not { } painter)
             {
                 continue;
             }
 
-            ChangeLinePart(line.Offset + from, line.Offset + to, element => element.TextRunProperties.SetForegroundBrush(brush));
+            ChangeLinePart(line.Offset + from, line.Offset + to, painter);
         }
     }
 
-    private IBrush? BrushFor(TokenCategoryGroup group)
+    private Action<VisualLineElement>? PainterFor(TokenCategoryGroup group, ThemeVariant variant)
     {
         var slot = (int)group;
-        if ((uint)slot >= (uint)brushes.Length)
+        if ((uint)slot >= (uint)painters.Length)
         {
             return null;
         }
 
-        // One comparison per line: the brushes are per theme variant, and the variant can change while the view lives.
-        var variant = isDarkTheme() ? ThemeVariant.Dark : ThemeVariant.Light;
-        if (brushVariant != variant)
-        {
-            Array.Clear(brushes);
-            brushVariant = variant;
-        }
-
-        if (brushes[slot] is { } cached)
+        if (painters[slot] is { } cached)
         {
             return cached;
         }
 
-        var brush = EditorOptionsApplier.Brush(editor, variant, s_brushKeys[slot]);
-        brushes[slot] = brush;
-        return brush;
+        if (EditorOptionsApplier.Brush(editor, variant, s_brushKeys[slot]) is not { } brush)
+        {
+            return null;
+        }
+
+        Action<VisualLineElement> painter = element => element.TextRunProperties.SetForegroundBrush(brush);
+        painters[slot] = painter;
+        return painter;
     }
 
     private static string[] BuildBrushKeys()

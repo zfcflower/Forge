@@ -56,7 +56,7 @@ internal sealed class EditorLspDiagnosticsEventArgs(EditorLspDiagnosticSet set) 
 internal sealed record EditorLspReference(string Path, int Line, int Column, EditorLspDefinitionTarget Target);
 
 /// <summary>The places a symbol is used, with the identifier the request was made for (empty when the caret was not on one).</summary>
-internal sealed record EditorLspReferenceList(string Symbol, IReadOnlyList<EditorLspReference> Items);
+internal sealed record EditorLspReferenceList(string Symbol, IReadOnlyList<EditorLspReference> Items, bool Truncated = false);
 
 internal sealed class EditorLspSemanticTokensEventArgs(SemanticLineIndex index) : EventArgs
 {

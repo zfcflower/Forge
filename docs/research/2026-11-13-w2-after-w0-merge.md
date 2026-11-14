@@ -53,3 +53,10 @@ dotnet test tests/Forge.App.Tests/Forge.App.Tests.csproj -p:BaseOutputPath=artif
 ```
 
 结果:构建 0 警告 0 错误;503 通过;943 通过。
+
+## 评审后的处理(合并前)
+
+- **已改**:问题面板的快照移到工作线程;引用列表加 2000 行上限并提示截断;语义 token 泵的兜底异常写日志;`SemanticLoop.disposed` 改 `volatile`;着色器按组缓存画刷委托,不再每个 token 每次重绘分配闭包。
+- **接受的偏差(已记录)**:
+  - 过期的语义索引在下一次应答到来前仍会绘制(Editor SPEC 已写明)。着色器把每个范围夹到所在行内,最坏只是被编辑的行短暂错色,整体丢弃会在每次按键闪烁,所以不丢。
+  - 去抖 400 ms、追补 2500 ms、问题 2000 行、引用 2000 行、语义上限沿用 `HighlightLimit` 是内部默认常量,不进设置:它们是防抖和显示上限,不是用户有理由调的行为;若日后要调,再进 `AppPreferences`(冻结,需单独决定)。

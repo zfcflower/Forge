@@ -30,6 +30,9 @@ internal sealed partial class FileDocumentViewModel
     private SemanticLineIndex semanticIndex = SemanticLineIndex.Empty;
 
     /// <summary>Quiet period after an edit before the semantic classification is asked for again.</summary>
+    /// <summary>The most reference rows the list shows; past it the list says it is cut.</summary>
+    internal const int MaxReferenceRows = 2_000;
+
     private const int SemanticDebounceMilliseconds = 400;
 
     /// <summary>Second classification request after a document opens, for a server that analyses the project first.</summary>
@@ -453,7 +456,7 @@ internal sealed partial class FileDocumentViewModel
         var symbol = EditorLspMapping.WordAt(request.Snapshot, offset);
         var encoding = request.Session.Client?.PositionEncoding ?? request.Snapshot.PositionEncoding;
         var ownPath = System.IO.Path.GetFullPath(Path);
-        IReadOnlyList<EditorLspReference> references;
+        (IReadOnlyList<EditorLspReference> Items, bool Truncated) references;
         try
         {
             references = await Task.Run(() => MapReferences(locations, ownPath, encoding), linked.Token).ConfigureAwait(true);
@@ -465,7 +468,7 @@ internal sealed partial class FileDocumentViewModel
 
         return linked.IsCancellationRequested || !IsEditorRequestCurrent(request)
             ? null
-            : new EditorLspReferenceList(symbol, references);
+            : new EditorLspReferenceList(symbol, references.Items, references.Truncated);
     }
 
     /// <summary>
@@ -473,7 +476,7 @@ internal sealed partial class FileDocumentViewModel
     /// away because servers routinely report the same range twice, and the order is the one a reader expects — this file
     /// first, then path, line, column.
     /// </summary>
-    private static IReadOnlyList<EditorLspReference> MapReferences(IReadOnlyList<LspLocation> locations, string ownPath, PositionEncoding encoding)
+    private static (IReadOnlyList<EditorLspReference> Items, bool Truncated) MapReferences(IReadOnlyList<LspLocation> locations, string ownPath, PositionEncoding encoding)
     {
         var items = new List<EditorLspReference>(locations.Count);
         var seen = new HashSet<(string Path, int Line, int Character)>(locations.Count);
@@ -517,7 +520,9 @@ internal sealed partial class FileDocumentViewModel
             return byLine != 0 ? byLine : left.Column.CompareTo(right.Column);
         });
 
-        return items;
+        // A server can report tens of thousands of uses; the list is for reading, so it is capped after sorting (this file
+        // and the nearest paths survive) and says so.
+        return items.Count > MaxReferenceRows ? (items.GetRange(0, MaxReferenceRows), true) : (items, false);
     }
 
     /// <summary>
@@ -763,6 +768,12 @@ internal sealed partial class FileDocumentViewModel
                 // The loop was stopped between the wait waking up and the next line; nothing left to pump.
                 return;
             }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // Anything else would end this fire-and-forget pump silently and leave the file uncoloured with no trace.
+                AppLogs.File.ZLogError(exception, $"semantic token pump stopped");
+                return;
+            }
         }
     }
 
@@ -869,7 +880,9 @@ internal sealed partial class FileDocumentViewModel
     {
         private readonly SemaphoreSlim signal = new(0, 1);
         private readonly CancellationTokenSource lifetime = new();
-        private bool disposed;
+
+        // Read by the editor, session-event and pump threads.
+        private volatile bool disposed;
 
         public LanguageSession Session { get; } = session;
 

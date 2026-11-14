@@ -205,6 +205,20 @@ internal sealed class EditorLspRig : IAsyncDisposable
             Send(stream!, "{\"jsonrpc\":\"2.0\",\"method\":\"" + method + "\",\"params\":" + paramsJson + "}");
         }
 
+        /// <summary>Changes the answer to every later request of that method (safe while the server is serving).</summary>
+        public void SetResult(string method, string resultJson)
+        {
+            lock (gate) { results[method] = resultJson; }
+        }
+
+        /// <summary>Sends a server-to-client request (it carries an id the client answers), e.g. <c>workspace/semanticTokens/refresh</c>.</summary>
+        public void Request(string method, string paramsJson = "null")
+        {
+            Stream? stream;
+            lock (gate) { stream = output; }
+            Send(stream!, "{\"jsonrpc\":\"2.0\",\"id\":9001,\"method\":\"" + method + "\",\"params\":" + paramsJson + "}");
+        }
+
         /// <summary>The raw JSON of the <paramref name="occurrence"/>-th request of that method, waiting for it to arrive.</summary>
         public async Task<string> WaitForAsync(string method, int occurrence = 1)
         {
@@ -235,7 +249,8 @@ internal sealed class EditorLspRig : IAsyncDisposable
                     if (hasMethod && message.TryGetProperty("id", out var id))
                     {
                         if (holds.TryGetValue(method, out var hold)) { hold.Task.Wait(); }
-                        var result = method == "initialize" ? InitializeResult : results.GetValueOrDefault(method, "null");
+                        string result;
+                        lock (gate) { result = method == "initialize" ? InitializeResult : results.GetValueOrDefault(method, "null"); }
                         Send(stream, "{\"jsonrpc\":\"2.0\",\"id\":" + id.GetRawText() + ",\"result\":" + result + "}");
                     }
                 }

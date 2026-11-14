@@ -18,6 +18,7 @@ internal sealed class ReferenceListViewModel
         ArgumentNullException.ThrowIfNull(open);
         this.open = open;
         SymbolName = symbolName;
+        IsTruncated = list.Truncated;
         Items = [.. list.Items.Select(static reference => new ReferenceRowViewModel(
             InspectorStrings.EditorLspReferenceLocation(reference.Line, reference.Column),
             System.IO.Path.GetFileName(reference.Path),
@@ -30,10 +31,14 @@ internal sealed class ReferenceListViewModel
 
     public IReadOnlyList<ReferenceRowViewModel> Items { get; }
 
+    /// <summary>True when the row cap cut the list, so a capped list never reads as every use of the symbol.</summary>
+    public bool IsTruncated { get; }
+
     /// <summary>"3 处引用" / "3 references", or the symbol it belongs to when one was read.</summary>
-    public string Summary => SymbolName.Length == 0
+    public string Summary => (SymbolName.Length == 0
         ? InspectorStrings.EditorLspReferences(Items.Count).Resolve()
-        : SymbolName + " · " + InspectorStrings.EditorLspReferences(Items.Count).Resolve();
+        : SymbolName + " · " + InspectorStrings.EditorLspReferences(Items.Count).Resolve())
+        + (IsTruncated ? " · " + InspectorStrings.ProblemsTruncatedRows(Items.Count).Resolve() : string.Empty);
 
     /// <summary>The keyboard hint under the list; the flyout closes on Escape by itself.</summary>
     public static string Hint => Loc.Instance[InspectorStrings.EditorLspReferencesHint];

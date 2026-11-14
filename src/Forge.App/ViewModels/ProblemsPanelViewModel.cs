@@ -173,9 +173,10 @@ internal sealed class ProblemsPanelViewModel : ObservableObject, IDisposable
                 Volatile.Write(ref refreshRequested, 0);
                 var filters = new SeverityFilter(showErrors, showWarnings, showInformation, showHints);
                 var previous = rowsByKey;
-                var snapshot = source.Snapshot();
+                // The snapshot is taken on the worker too: reconciling the sessions and flattening every store is the work this
+                // pass moves off the UI thread (the aggregator is thread-safe).
                 var rows = await Task.Run(
-                    () => BuildRows(snapshot, filters, previous),
+                    () => BuildRows(source.Snapshot(), filters, previous),
                     ct).ConfigureAwait(true);
 
                 if (disposed || ct.IsCancellationRequested)
