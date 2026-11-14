@@ -53,7 +53,8 @@ internal static class RuntimeSettingsComposition
 
         // The guide owns no platform state of its own, so it builds the notifier it probes with; the notification center keeps
         // its own instance, because a cancelled toast must not reach into the guide's probe. The wizard (wave W9) reads the
-        // frozen interface, the section uses the concrete type for the test notification that settles the state.
+        // frozen interface, the section asks for the wider INotificationPermissionSection that also offers the test
+        // notification settling the state.
         var guide = new SystemNotificationPermissionGuide(new SystemNotifier());
         composition.NotificationPermissionGuide = guide;
         SectionViewTemplate.Register<NotificationPermissionSettingsViewModel>(static () => new NotificationPermissionSettingsView());

@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.Settings;
 using Forge.App.ViewModels;
@@ -74,8 +75,9 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     [InlineData(SettingsSectionIds.NotificationPermission, "notification-permission-state")]
     public async Task A_wave_section_renders_its_own_body(string sectionId, string marker)
     {
-        // The registry knows the four sections, but only a template in App.axaml gives them a body: without one the pane stays
-        // blank and every registry test still passes, so each section is selected and asked for an element of its own.
+        // The registry knows the four sections, but only a view registered through SectionViewTemplate gives them a body: without
+        // one the pane stays blank and every registry test still passes, so each section is selected and asked for an element
+        // of its own.
         var session = fixture.Session;
         await using var shell = await OpensAsync(session);
         var token = new CancellationTokenSource(StepBudget).Token;
@@ -91,6 +93,30 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             token);
 
         Assert.Contains(marker, shown);
+    }
+
+    [Fact]
+    public async Task A_wave_section_body_binds_the_section_as_its_data_context()
+    {
+        // A registered view with no data context would still show its AutomationIds, so one section is asked for text it can
+        // only render from its view model.
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        var (expected, shown) = await session.Dispatch(
+            () =>
+            {
+                var section = shell.ViewModel.Settings.Sections.Items.Single(
+                    item => item.Id == SettingsSectionIds.NotificationPermission);
+                shell.ViewModel.Settings.SelectedSection = section;
+                SharedUi.Settle(shell.Window);
+                var viewModel = Assert.IsType<NotificationPermissionSettingsViewModel>(section.ViewModel);
+                return (viewModel.StateText, PanelShell.SelectedTexts(shell.Window));
+            },
+            token);
+
+        Assert.Contains(expected, shown);
     }
 
     [Fact]

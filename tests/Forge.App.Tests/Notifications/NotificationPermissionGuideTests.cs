@@ -50,6 +50,40 @@ public sealed class NotificationPermissionGuideTests
             static line => line.Contains("[notify] the test notification failed: powershell.exe is gone", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task The_frozen_read_reports_what_the_last_test_notification_settled()
+    {
+        // Wave W9 calls only the frozen interface, so this pins the member it will actually use: the state before anything was
+        // sent, then what a real notification settled, then the same again through the interface type.
+        var notifier = new GuideFakeNotifier { Taken = false };
+        INotificationPermissionGuide guide = new SystemNotificationPermissionGuide(
+            notifier,
+            new GuideFakeOpener().OpenAsync,
+            NotifyPlatform.Windows);
+
+        Assert.Equal(NotificationPermissionState.Unknown, await guide.GetStateAsync(CancellationToken.None));
+
+        Assert.Equal(NotificationPermissionState.Denied, await ((SystemNotificationPermissionGuide)guide).SendTestAsync(CancellationToken.None));
+        Assert.Equal(NotificationPermissionState.Denied, await guide.GetStateAsync(CancellationToken.None));
+
+        // A cancelled token is not an exception here: the frozen contract says the member never throws, and a wizard whose
+        // token expired still needs the answer.
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Equal(NotificationPermissionState.Denied, await guide.GetStateAsync(cancelled.Token));
+    }
+
+    [Fact]
+    public async Task A_platform_without_a_tool_reports_not_applicable_through_the_frozen_read()
+    {
+        INotificationPermissionGuide guide = new SystemNotificationPermissionGuide(
+            new GuideFakeNotifier(),
+            new GuideFakeOpener().OpenAsync,
+            NotifyPlatform.Unsupported);
+
+        Assert.Equal(NotificationPermissionState.NotApplicable, await guide.GetStateAsync(CancellationToken.None));
+    }
+
     [Theory]
     [InlineData(1, true)]
     [InlineData(2, true)]

@@ -50,8 +50,8 @@ internal static class NotificationPermissionTexts
 /// failing tool and settles the state as denied. Test results are remembered for the life of the process; the OS can still
 /// change its mind, which is why the section also offers the settings page.</para>
 /// <para>Implements the seam wave W0 declared: the first-run wizard (wave W9) calls only
-/// <see cref="INotificationPermissionGuide"/>, while the settings section uses the concrete type because it also offers the
-/// test notification that settles the state.</para>
+/// <see cref="INotificationPermissionGuide"/>, while the settings section asks for the wider
+/// <see cref="INotificationPermissionSection"/> because it also offers the test notification that settles the state.</para>
 /// </summary>
 internal sealed class SystemNotificationPermissionGuide : INotificationPermissionSection
 {
@@ -112,14 +112,15 @@ internal sealed class SystemNotificationPermissionGuide : INotificationPermissio
     /// <inheritdoc />
     /// <remarks>
     /// Nothing is sent here: the state can only come from a real notification (<see cref="SendTestAsync"/>), so a read
-    /// answers what the last one said. It stays async because the seam wave W9 was written against is async, and a future
-    /// platform that *can* be queried must be able to answer without changing the contract.
+    /// answers what the last one said - <see cref="NotificationPermissionState.Unknown"/> until then, which is what the
+    /// wizard has to say in a process where nobody pressed "send a test notification". It stays async because the seam wave
+    /// W9 was written against is async, and a future platform that *can* be queried must be able to answer without changing
+    /// the contract. <paramref name="cancellationToken"/> is ignored on purpose: the read is one field, so there is nothing
+    /// to cancel, and the frozen contract says the member never throws - a wizard whose token expired must still get an
+    /// answer instead of an exception.
     /// </remarks>
-    public Task<NotificationPermissionState> GetStateAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(state);
-    }
+    public Task<NotificationPermissionState> GetStateAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(state);
 
     /// <summary>
     /// Raises one real desktop notification and returns the state it settles on. The caller's cancellation rethrows and
