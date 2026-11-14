@@ -56,4 +56,40 @@ internal static class EditorUi
             .Select(static r => r.Properties?.ForegroundBrush as ISolidColorBrush)
             .OfType<ISolidColorBrush>().Select(static b => b.Color)];
     }
+
+    /// <summary>
+    /// The foreground color the rendered run covering <paramref name="offset"/> is drawn with, or null when that run carries
+    /// no brush of its own (the control's foreground then applies). Used to see one identifier's color rather than the palette
+    /// of the whole document.
+    /// </summary>
+    public static Color? TextRunColorAt(TextEditor editor, int offset)
+    {
+        var textView = editor.TextArea.TextView;
+        textView.Redraw();
+        textView.EnsureVisualLines();
+        foreach (var visualLine in textView.VisualLines)
+        {
+            foreach (var textLine in visualLine.TextLines)
+            {
+                var position = textLine.Start;
+                foreach (var run in textLine.TextRuns)
+                {
+                    if (run is TextEndOfLine)
+                    {
+                        continue;
+                    }
+
+                    var length = run.Text.Length;
+                    if (offset >= position && offset < position + length)
+                    {
+                        return (run.Properties?.ForegroundBrush as ISolidColorBrush)?.Color;
+                    }
+
+                    position += length;
+                }
+            }
+        }
+
+        return null;
+    }
 }

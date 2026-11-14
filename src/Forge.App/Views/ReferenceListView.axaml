@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             x:Class="Forge.App.Views.ReferenceListView"
+             x:DataType="vm:ReferenceListViewModel"
+             Width="460">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <TextBlock Margin="12,10,12,6" Classes="caption" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+
+    <ListBox x:Name="ReferenceList"
+             Grid.Row="1"
+             MaxHeight="300"
+             ItemsSource="{Binding Items}"
+             AutomationProperties.AutomationId="reference-list"
+             DoubleTapped="OnDoubleTapped">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="vm:ReferenceRowViewModel">
+          <Grid ColumnDefinitions="Auto,*,Auto" Margin="2,2" ColumnSpacing="8">
+            <TextBlock Classes="mono" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="1"
+                       Classes="caption"
+                       Text="{Binding Directory}"
+                       TextTrimming="CharacterEllipsis"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <TextBlock Grid.Column="2" Classes="mono" Text="{Binding Location}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <TextBlock Grid.Row="2"
+               Margin="12,6,12,10"
+               Classes="caption"
+               Text="{x:Static vm:ReferenceListViewModel.Hint}"
+               Foreground="{DynamicResource TextMutedBrush}" />
+  </Grid>
+</UserControl>

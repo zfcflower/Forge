@@ -32,6 +32,29 @@ internal static class EditorLspMapping
         return start;
     }
 
+    /// <summary>
+    /// The identifier around <paramref name="offset"/> — what a "find references" list names its subject after — or empty
+    /// when the caret is not inside one.
+    /// </summary>
+    public static string WordAt(TextSnapshot snapshot, int offset)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        var clamp = Math.Clamp(offset, 0, snapshot.Length);
+        var start = WordStart(snapshot, clamp);
+        var end = Math.Min(clamp, snapshot.Length);
+        while (end < snapshot.Length && (char.IsLetterOrDigit(snapshot[end]) || snapshot[end] == '_'))
+        {
+            end++;
+        }
+
+        return end <= start || end - start > 256 ? string.Empty : snapshot.GetText(start, end - start);
+    }
+
     public static EditorLspDiagnosticSet MapDiagnostics(DiagnosticSnapshot published, TextSnapshot text, PositionEncoding encoding)
     {
         var items = new List<EditorLspDiagnostic>(published.Diagnostics.Count);

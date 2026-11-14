@@ -54,6 +54,9 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     private readonly Dictionary<string, double> belowHeights = new(StringComparer.Ordinal);
     private double bottomHeight = WorkbenchMetrics.DefaultBottomHeight;
 
+    /// <summary>Whether the inspector's tools group carries the problems tab; its heading names the tabs it holds.</summary>
+    private readonly bool hasProblemsTab;
+
     /// <summary>The bottom group's intent to sit at title-bar height; held while the group has nothing to show.</summary>
     private bool bottomMinimized;
     private bool isDragging;
@@ -74,8 +77,18 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
     /// <param name="review">View model of the review tab.</param>
     /// <param name="specs">View model of the spec tree tab.</param>
     /// <param name="generalContent">View model of the general-chats panel, stacked above the projects panel; null leaves the panel out.</param>
-    public WorkbenchLayout(object projectContent, object filesContent, object todo, object review, object specs, object? generalContent = null)
+    /// <param name="problems">View model of the problems tab, after the spec tree; null leaves the tab out (layout tests and hosts without an editor layer).</param>
+    public WorkbenchLayout(
+        object projectContent,
+        object filesContent,
+        object todo,
+        object review,
+        object specs,
+        object? generalContent = null,
+        object? problems = null)
     {
+        // Before any tab exists: the inspector group's heading names the tabs it holds, and it is built a few lines down.
+        hasProblemsTab = problems is not null;
         project = new RegionModel(RegionRole.Project, WorkbenchMetrics.DefaultProjectWidth);
         main = new RegionModel(RegionRole.Main, 0);
         inspector = new RegionModel(RegionRole.Inspector, WorkbenchMetrics.DefaultInspectorWidth);
@@ -102,7 +115,7 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
             CanPin = true,
         };
 
-        inspectorTools = new TabGroupModel(WorkbenchIds.InspectorTools, RegionRole.Inspector, InspectorToolsTitleText)
+        inspectorTools = new TabGroupModel(WorkbenchIds.InspectorTools, RegionRole.Inspector, BaseInspectorToolsTitle)
         {
             CanPin = true,
         };
@@ -110,6 +123,11 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.TodoTab, TabKind.Todo, todo, ShellStrings.TodoTitle, closable: false, inspectorTools));
         inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.ReviewTab, TabKind.Review, review, ShellStrings.ReviewTitle, closable: false, inspectorTools));
         inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.SpecsTab, TabKind.Specs, specs, ShellStrings.SpecTreeTitle, closable: false, inspectorTools));
+        if (problems is not null)
+        {
+            inspectorTools.Tabs.Add(CreateTab(WorkbenchIds.ProblemsTab, TabKind.Problems, problems, ShellStrings.ProblemsTitle, closable: false, inspectorTools));
+            inspectorTools.Title = InspectorToolsTitle;
+        }
         inspectorTools.ActiveTab = inspectorTools.Tabs[0];
 
         project.Panels.Add(projectPanel);
@@ -164,17 +182,23 @@ internal sealed class WorkbenchLayout : ObservableObject, IDisposable
         mainTabs.Title = ShellStrings.DocumentsTitle;
         bottomTabs.Title = ShellStrings.SubAgentsTitle;
         previewTabs.Title = ShellStrings.PreviewTitle;
-        inspectorTools.Title = InspectorToolsTitleText;
+        inspectorTools.Title = InspectorToolsTitle;
 
         RefreshFixedTabTitle(WorkbenchIds.TodoTab, ShellStrings.TodoTitle);
         RefreshFixedTabTitle(WorkbenchIds.ReviewTab, ShellStrings.ReviewTitle);
         RefreshFixedTabTitle(WorkbenchIds.SpecsTab, ShellStrings.SpecTreeTitle);
+        RefreshFixedTabTitle(WorkbenchIds.ProblemsTab, ShellStrings.ProblemsTitle);
         RefreshFixedTabTitle(WorkbenchIds.ChangesTab, ShellStrings.ChangesTitle);
     }
 
-    /// <summary>The inspector tools group has no single heading: its title is the three tabs it holds.</summary>
-    private static string InspectorToolsTitleText =>
+    /// <summary>The tabs the inspector tools group holds, in order: it has no single heading to name it.</summary>
+    private static string BaseInspectorToolsTitle =>
         ShellStrings.TodoTitle + " | " + ShellStrings.ReviewTitle + " | " + ShellStrings.SpecTreeTitle;
+
+    /// <summary>The group's heading: the tabs it actually holds, so a host without the problems tab still reads right.</summary>
+    private string InspectorToolsTitle => hasProblemsTab
+        ? BaseInspectorToolsTitle + " | " + ShellStrings.ProblemsTitle
+        : BaseInspectorToolsTitle;
 
     private void RefreshFixedTabTitle(string id, string title)
     {

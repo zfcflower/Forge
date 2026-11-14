@@ -238,33 +238,43 @@ public static class SemanticTokensDecoder
             return [.. previous];
         }
 
-        var result = new List<int>(previous.Length + 32);
-        result.AddRange(previous.ToArray());
-        var prefix = new List<int>(result.Capacity);
-        var applied = 0;
-        var consumed = 0;
-        var buffer = new List<int>();
-        foreach (var edit in edits)
+        // Edits are applied against the original array's positions, so an out-of-order list is sorted first and each start
+        // is clamped into the span the previous edit left. A server that overlaps its own edits therefore gets a splice
+        // rather than an out-of-range copy.
+        var ordered = SortedEdits(edits);
+        var length = 0;
+        var position = 0;
+        foreach (var edit in ordered)
         {
-            var start = Math.Clamp(edit.Start, 0, previous.Length);
-            _ = start;
-            break;
+            var start = Math.Clamp(edit.Start, position, previous.Length);
+            length += start - position;
+            if (edit.Data is { Length: > 0 } data)
+            {
+                length += data.Length;
+            }
+
+            position = Math.Min(previous.Length, start + Math.Max(0, edit.DeleteCount));
         }
 
-        // apply edits against the original array positions, in ascending start order
-        var ordered = edits.OrderBy(static e => e.Start).ToList();
-        var position = 0;
+        length += previous.Length - position;
+
+        // One right-sized result: the delta is applied straight from the old data into it, without an intermediate list.
+        var result = new int[length];
+        var written = 0;
+        position = 0;
         foreach (var edit in ordered)
         {
             var start = Math.Clamp(edit.Start, position, previous.Length);
             if (start > position)
             {
-                buffer.AddRange(previous[position..start].ToArray());
+                previous[position..start].CopyTo(result.AsSpan(written));
+                written += start - position;
             }
 
-            if (edit.Data is { Length: > 0 })
+            if (edit.Data is { Length: > 0 } data)
             {
-                buffer.AddRange(edit.Data);
+                data.CopyTo(result, written);
+                written += data.Length;
             }
 
             position = Math.Min(previous.Length, start + Math.Max(0, edit.DeleteCount));
@@ -272,13 +282,25 @@ public static class SemanticTokensDecoder
 
         if (position < previous.Length)
         {
-            buffer.AddRange(previous[position..].ToArray());
+            previous[position..].CopyTo(result.AsSpan(written));
         }
 
-        _ = prefix;
-        _ = applied;
-        _ = consumed;
-        return [.. buffer];
+        return result;
+    }
+
+    private static IReadOnlyList<SemanticTokensEdit> SortedEdits(IReadOnlyList<SemanticTokensEdit> edits)
+    {
+        for (var i = 1; i < edits.Count; i++)
+        {
+            if (edits[i].Start < edits[i - 1].Start)
+            {
+                var copy = edits.ToArray();
+                Array.Sort(copy, static (left, right) => left.Start.CompareTo(right.Start));
+                return copy;
+            }
+        }
+
+        return edits;
     }
 
     /// <summary>Reads the <c>data</c> array of a <c>semanticTokens</c> result.</summary>
