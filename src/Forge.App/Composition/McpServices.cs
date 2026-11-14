@@ -330,11 +330,47 @@ internal sealed class McpServices : IAsyncDisposable
                 return;
             }
 
+            var before = new HashSet<string>(manager.ServerNames, StringComparer.Ordinal);
             await manager.ApplyConfigAsync(config, ct).ConfigureAwait(false);
+            StartAdded(before);
         }
         finally
         {
             applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Starts, in the background, every enabled server the apply just added. The manager registers a new server lazily ("on
+    /// first use"), but a session only offers the tools of a server that is ready — so a server added from the settings page or
+    /// a hand edit would otherwise never be used until the app restarts. A start failure lands on that server's state (and its
+    /// toast); nothing here waits for it, so a save returns as soon as the file is applied.
+    /// </summary>
+    private void StartAdded(HashSet<string> before)
+    {
+        foreach (var name in manager.ServerNames)
+        {
+            if (!before.Contains(name))
+            {
+                _ = Task.Run(() => StartInBackgroundAsync(name));
+            }
+        }
+    }
+
+    private async Task StartInBackgroundAsync(string name)
+    {
+        try
+        {
+            if (disposed || !manager.IsEnabled(name))
+            {
+                return;
+            }
+
+            await manager.StartAsync(name, lifetime.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Recorded on the server's state by the manager; a server removed again meanwhile is simply gone.
         }
     }
 

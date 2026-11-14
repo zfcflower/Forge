@@ -36,6 +36,7 @@
 - 之前 `McpServerManager.Tools` 在 App 零消费,MCP 工具从未到达模型。`SessionRuntime.CollectExternalTools` 现在追加 MCP 适配器,`DescribeExternal` 追加 `ToolOrigin.Mcp` 描述符。
 - `Agents/McpToolExposure`:`mcpToolSearchLimit` 为 0(默认)时全给;大于 0 时选面 = 固定的(pin;多于上限时取最近固定的)→ 按本回合用户文本打分的前若干名 → 按目录顺序补足,结果按暴露名排序(集合不变则工具定义字节不变)。打分是小写词包含(暴露名 4 分 > 工具名/服务器名 3 分 > 描述 1 分),每个(目录快照, 上限, 请求文本)算一次并缓存;`Lock` 保护(回合线程与工具线程都会碰)。
 - `Forge.Mcp/McpToolSearchTool`(`mcp_tool_search`,只读):命中即 pin 并**当场重新发布**工具面,所以上限永远不会让某台服务器的工具不可达;`SessionRuntime.RefreshMcpTools` 每回合开始比较"选中的名字"与"宿主持有的名字",不一致才 `ReplaceExternalTools`(与 `web_search` 有无的同一机制),集合没变就不发布、提示词缓存不破。
+- 合并后评审补强(2026-11-14):`SameMcpTools` 不只比名字,还比定义与副作用——`readOnlyTools` 或 schema 变了的服务器会以同名重新发布适配器,沿用旧适配器会带着过期 schema,或以错误的副作用绕过/多出审批;与内置/插件/web 工具**同名**的 MCP 工具让位(registry 按名覆盖,否则会悄悄替换掉用户装的工具),比较时把被遮蔽的名字视为应缺席,不会每回合重发;`mcp_tool_search` 一次 pin 的数量不超过工具上限(否则回答说"可调用"的工具下一面就被裁掉);`McpToolExposure` 改为构造时建好(回合线程与工具线程竞态建两份会丢 pin);超大 `inputSchema` 跳过、长描述截断(见 `Forge.Mcp/SPEC.md`「工具面的体积」);设置页或手改**新增**的启用服务器由 `McpServices` 在 apply 后后台启动——管理器仍是懒注册,但会话只提供就绪服务器的工具,"首次使用"永远不会发生,此前新加的服务器要重启应用才进得了会话。
 
 ### 6. 偏好(六·二登记的四个 MCP 项)
 

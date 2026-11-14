@@ -7,8 +7,8 @@ using Xunit;
 namespace Forge.App.Tests.Mcp;
 
 /// <summary>
-/// The composition-facing MCP services over real temp files: a save lands in the manager without starting anything
-/// (servers start lazily on first use), reads reflect the files verbatim, and the approval/limit helpers behave.
+/// The composition-facing MCP services over real temp files: a save lands in the manager (a newly added server is started in
+/// the background, see McpReadyServerTests), reads reflect the files verbatim, and the approval/limit helpers behave.
 /// </summary>
 public sealed class McpServicesTests : IDisposable
 {
@@ -139,7 +139,7 @@ public sealed class McpServicesTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_adds_the_server_to_the_manager_still_stopped()
+    public async Task SaveAsync_adds_the_server_to_the_manager_and_the_file()
     {
         await using var preferences = Preferences();
         await using var services = McpServices.Create(Store(), preferences, null, null);
@@ -148,7 +148,7 @@ public sealed class McpServicesTests : IDisposable
 
         Assert.Equal(["new"], services.Manager.ServerNames);
         var state = Assert.Single(services.States);
-        Assert.Equal(McpServerStatus.Stopped, state.Status);
+        Assert.True(state.Enabled);
         var entry = Assert.Single((await services.ReadConfigAsync(CancellationToken.None)).Files[0].Entries);
         Assert.Equal("new", entry.Name);
         Assert.Equal("new-cmd", entry.Command);

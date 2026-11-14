@@ -35,6 +35,8 @@ MCP(Model Context Protocol)客户端与服务器管理。自写 JSON-RPC 与传�
 
 **选项活读。** `McpServerManager` 接受 `Func<McpServerManagerOptions>`:请求超时在每次建客户端时读,重连延迟在每次退避时读,所以设置页改完的值对下一次连接生效,不需要重建管理器(重建会杀掉所有已连接服务器及其工具)。
 
+**工具面的体积。** `tools/list` 里 `inputSchema` 超过 `MaxToolSchemaChars`(默认 64 K 字符,0 关闭)的工具**不提供给模型**,并在该服务器的 `LastError` 上写明跳过了几个、第一个是谁;描述超过 `MaxToolDescriptionChars`(默认 4 K)截断加省略号,不拆代理对。每次请求都带着全部已提供的 schema,一台病态服务器不能独自占满上下文。这两项与 `MaxResultChars` 一样是库默认值,不是用户偏好。
+
 **工具命名反查。** `ConfigOfTool(exposedName)` 走与暴露名分配同一张表反查服务器,所以消歧过的名字也不会认错服务器;审批卡用它展示“这条命令来自哪台服务器”。
 
 **工具选面与检索。** 上限为 0 时全部就绪工具都给模型(默认,与引入上限前一致)。上限生效时由 App 的 `McpToolExposure` 选面:固定的(pin) → 按当前请求打分的前若干名;被隐藏时同时提供 `mcp_tool_search`,`Search` 命中即 pin 并触发重新发布,保证上限永远不会让某台服务器的工具**不可达**。打分只做小写词包含(暴露名 > 工具名/服务器名 > 描述),每次(目录快照, 上限, 请求文本)算一次并缓存,不动锁、不写状态。

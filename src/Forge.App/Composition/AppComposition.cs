@@ -393,9 +393,6 @@ internal sealed class AppComposition : IAsyncDisposable
         //     and before the window so the queue overlay finds it.
         var approvals = ApprovalServices.Create(paths, host, hostProblem, notifications);
 
-        // The approval card shows the MCP server behind a tool, whose services are created further down: the card asks this
-        // resolver when it is built, so assigning it after both exist is enough.
-
         // 3. Workspace.
         WorkspaceServices? workspace = null;
         var workspaceProblem = default(LocText);

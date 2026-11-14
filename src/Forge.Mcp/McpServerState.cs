@@ -49,6 +49,16 @@ public sealed class McpServerManagerOptions
 
     public int MaxResultChars { get; init; } = 64 * 1024;
 
+    /// <summary>
+    /// A tool whose <c>inputSchema</c> is longer than this (compact JSON characters) is not offered to the model: every request
+    /// carries every offered schema, so one pathological server could otherwise fill the context window on its own. The skip is
+    /// recorded on the server's <see cref="McpServerState.LastError"/>. Zero or negative disables the check.
+    /// </summary>
+    public int MaxToolSchemaChars { get; init; } = 64 * 1024;
+
+    /// <summary>A tool description longer than this is cut (with an ellipsis) before it reaches the model; zero or negative keeps it whole.</summary>
+    public int MaxToolDescriptionChars { get; init; } = 4 * 1024;
+
     public IReadOnlyList<McpRoot> Roots { get; init; } = [];
 
     public string ClientName { get; init; } = "forge";

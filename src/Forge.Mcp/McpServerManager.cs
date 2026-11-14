@@ -759,16 +759,34 @@ public sealed class McpServerManager : IAsyncDisposable
 
     private void PublishTools(ManagedServer server, IReadOnlyList<McpToolInfo> infos)
     {
-        var adapters = new McpToolAdapter[infos.Count];
+        var options = Options;
+        var maxSchema = options.MaxToolSchemaChars;
+        var adapters = new List<McpToolAdapter>(infos.Count);
+        string? skipped = null;
+        var skippedCount = 0;
         lock (gate)
         {
             for (var i = 0; i < infos.Count; i++)
             {
                 var info = infos[i];
-                adapters[i] = CreateAdapter(server, info, AssignNameLocked(server.Config.Name, info.Name));
+                if (maxSchema > 0 && info.InputSchemaJson.Length > maxSchema)
+                {
+                    // Every request carries every offered schema: one oversized tool must not fill the context on its own.
+                    skipped ??= info.Name;
+                    skippedCount++;
+                    continue;
+                }
+
+                adapters.Add(CreateAdapter(server, info, AssignNameLocked(server.Config.Name, info.Name), options));
             }
 
-            server.Tools = adapters;
+            server.Tools = [.. adapters];
+            if (skippedCount > 0)
+            {
+                server.LastError =
+                    $"{skippedCount} tool(s) not offered because the input schema exceeds {maxSchema} characters (first: '{skipped}').";
+            }
+
             PublishToolsLocked();
         }
 
@@ -819,7 +837,7 @@ public sealed class McpServerManager : IAsyncDisposable
         return stable;
     }
 
-    private McpToolAdapter CreateAdapter(ManagedServer server, McpToolInfo info, string exposedName)
+    private McpToolAdapter CreateAdapter(ManagedServer server, McpToolInfo info, string exposedName, McpServerManagerOptions options)
     {
         var serverName = server.Config.Name;
         var toolName = info.Name;
@@ -827,11 +845,28 @@ public sealed class McpServerManager : IAsyncDisposable
             serverName,
             toolName,
             exposedName,
-            info.Description,
+            CapDescription(info.Description, options.MaxToolDescriptionChars),
             info.InputSchemaJson,
             server.Config.IsReadOnlyTool(toolName) ? ToolSideEffect.ReadOnly : ToolSideEffect.Execute,
             (arguments, token) => InvokeToolAsync(serverName, toolName, arguments, token),
-            Options.MaxResultChars);
+            options.MaxResultChars);
+    }
+
+    private static string? CapDescription(string? description, int max)
+    {
+        if (description is null || max <= 0 || description.Length <= max)
+        {
+            return description;
+        }
+
+        // Never split a surrogate pair: half of one is not valid text for a provider's JSON encoder.
+        var keep = Math.Max(0, max - 1);
+        if (keep > 0 && char.IsHighSurrogate(description[keep - 1]))
+        {
+            keep--;
+        }
+
+        return string.Concat(description.AsSpan(0, keep), "…");
     }
 
     private void OnClientClosed(ManagedServer server, McpClient client, Exception? error)
