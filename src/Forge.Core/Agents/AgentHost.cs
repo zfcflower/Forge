@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Forge.Abstractions;
 using Forge.Core.Providers;
 using Forge.Core.Prompts;
+using Forge.Core.Tools;
 
 namespace Forge.Core.Agents;
 
@@ -43,6 +44,9 @@ public sealed record AgentHostOptions
     /// Null leaves step commits to the host application, such as the TODO panel.
     /// </summary>
     public IStepCommitter? StepCommitter { get; init; }
+
+    /// <summary>Registers the <c>request_review</c> tool when set; the app implements it over its git layer (Core has no git).</summary>
+    public IReviewChangeSetSource? Reviews { get; init; }
 
     /// <summary>
     /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
@@ -135,6 +139,11 @@ public sealed class AgentHost
         builtIns.Add(new SubAgentSteerTool(scheduler));
         builtIns.Add(new SubAgentFollowUpTool(scheduler));
         builtIns.Add(new SubAgentStopTool(scheduler));
+
+        if (options.Reviews is { } reviews)
+        {
+            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos));
+        }
 
         var compactor = options.Compactor
                         ?? (options.Store is { } summaryStore

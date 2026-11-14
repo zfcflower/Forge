@@ -11,7 +11,7 @@ public sealed partial class GitCli
     public const int FullContextLines = 1_000_000;
 
     /// <summary>The well-known empty tree object; git resolves it even when the object database does not contain it.</summary>
-    private const string EmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    public const string EmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
     private const string CommitLogFormat = "--format=%H%x1f%s%x1f%aI%x1f%P%x1e";
 
