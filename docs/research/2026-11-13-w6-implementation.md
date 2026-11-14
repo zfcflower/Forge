@@ -65,11 +65,19 @@
 
 ## 四、验收
 
-构建:
-```
-dotnet build Forge.slnx            → 已成功生成,0 警告 0 错误
-```
-测试(命令与结果见下):`Forge.Mcp.Tests` 全量;`Forge.App.Tests` 的 `Settings`/`Approval`/`Agents`/`Mcp`/`Localization`/`MinorRegression`。手测项:加一台 stdio 服务器保存 → 文件只多这一条、其余字节不变;停用 → 子进程退出;从 Claude/Cursor 导入 → 占位符与未知字段原样保留;审批卡显示 command 与 env 键名、撤销生效;`mcpToolSearchLimit` 设 3 时模型只看到 3 个工具且 `mcp_tool_search` 出现,检索后命中工具可调用。
+构建:`dotnet build Forge.slnx` → 通过,0 警告 0 错误(`Forge.ExtensionHost` 在 `Forge.App` 正开着时会被锁住的 `bin` 挡住,属既有 MSB3027,不是代码问题)。
+
+自动化验收(全部实测):
+
+| 命令 | 结果 |
+|---|---|
+| `dotnet test tests/Forge.Mcp.Tests` | 290 通过 / 0 失败 / 0 跳过 |
+| `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~Mcp\|~Approval\|~Localization\|~MinorRegression"` | 390 通过 / 0 失败 / 0 跳过 |
+| `dotnet test tests/Forge.App.Tests --filter "~SettingsPanel\|~HeadlessSmoke\|~MainWindowStartup\|~Workbench"` | 591 通过 / 0 失败 / 0 跳过 |
+
+评审:三个独立只读评审会话(实现后 / 修复后 / 最终),结论依次 `request_changes`(3 个 Blocking)→ `request_changes`(1 个新 Blocking)→ `approve`。三个 Blocking 与四条非阻塞全部修好并补了测试:改名删除旧键、跨文件移动先写后删、文件读不懂时保留运行中服务器、条目变更回收传输、重名提示按保存目标选名单。
+
+手测项:加一台 stdio 服务器保存 → 文件只多这一条、其余字节不变;停用 → 子进程退出;从 Claude/Cursor 导入 → 占位符与未知字段原样保留;审批卡显示 command 与 env 键名、撤销生效;`mcpToolSearchLimit` 设 3 时模型只看到 3 个工具且 `mcp_tool_search` 出现,检索后命中工具可调用。
 
 ## 五、偏差与遗留
 
