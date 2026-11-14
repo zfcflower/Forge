@@ -61,6 +61,23 @@
       <views:SpecTreeToolView />
     </DataTemplate>
 
+    <!-- Window overlays (MainWindowViewModel.Palette/Checks/Plan/Inspector/Onboarding): placeholders until their waves. -->
+    <DataTemplate DataType="vm:PaletteViewModel" x:DataType="vm:PaletteViewModel">
+      <views:PaletteView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ChecksPanelViewModel" x:DataType="vm:ChecksPanelViewModel">
+      <views:ChecksPanelView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:PlanPanelViewModel" x:DataType="vm:PlanPanelViewModel">
+      <views:PlanPanelView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ResourceInspectorViewModel" x:DataType="vm:ResourceInspectorViewModel">
+      <views:ResourceInspectorView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:OnboardingViewModel" x:DataType="vm:OnboardingViewModel">
+      <views:OnboardingView />
+    </DataTemplate>
+
     <!-- Terminal: the tab body of a terminal and the terminal settings section. -->
     <DataTemplate DataType="term:TerminalViewModel" x:DataType="term:TerminalViewModel">
       <term:TerminalView />
@@ -104,6 +121,9 @@
       </Grid>
     </DataTemplate>
 
+    <!-- Settings sections added by later waves: registered through SectionViewTemplate.Register from their composition module. -->
+    <views:SectionViewTemplate />
+
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
     <DataTemplate DataType="autoset:AutomationsSettingsViewModel" x:DataType="autoset:AutomationsSettingsViewModel">
       <autoset:AutomationsSettingsView />
@@ -113,99 +133,6 @@
     </DataTemplate>
     <DataTemplate DataType="settings:ProvidersSettingsViewModel" x:DataType="settings:ProvidersSettingsViewModel">
       <settings:ProvidersSettingsView />
-    </DataTemplate>
-
-    <!-- Which models the pickers offer: one switch per model of every connected provider, plus a page-local search. -->
-    <DataTemplate DataType="settings:ModelsVisibilitySectionViewModel" x:DataType="settings:ModelsVisibilitySectionViewModel">
-      <settings:ModelsVisibilitySectionView />
-    </DataTemplate>
-
-    <!-- The sub-agent dials: how many agents of one spawn tree run at once, and whether spawning is allowed at all. -->
-    <DataTemplate DataType="settings:AgentsSettingsSectionViewModel" x:DataType="settings:AgentsSettingsSectionViewModel">
-      <StackPanel Spacing="6">
-        <Grid ColumnDefinitions="180,*" Margin="0,3">
-          <TextBlock Classes="label"
-                     VerticalAlignment="Center"
-                     Text="{Binding [agents.maxParallel], Source={x:Static loc:Loc.Instance}}" />
-          <NumericUpDown Grid.Column="1"
-                         MinWidth="120"
-                         HorizontalAlignment="Left"
-                         Minimum="{Binding MinParallel}"
-                         Maximum="{Binding MaxParallelLimit}"
-                         Increment="1"
-                         FormatString="0"
-                         Value="{Binding MaxParallel, Mode=TwoWay}"
-                         AutomationProperties.AutomationId="agents-max-parallel"
-                         AutomationProperties.Name="{Binding [agents.maxParallel], Source={x:Static loc:Loc.Instance}}" />
-        </Grid>
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [agents.maxParallelHint], Source={x:Static loc:Loc.Instance}}" />
-        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
-          <TextBlock Classes="label"
-                     VerticalAlignment="Center"
-                     Text="{Binding [agents.subAgents], Source={x:Static loc:Loc.Instance}}" />
-          <CheckBox Grid.Column="1"
-                    IsChecked="{Binding SubAgentsEnabled, Mode=TwoWay}"
-                    AutomationProperties.AutomationId="agents-sub-agents"
-                    AutomationProperties.Name="{Binding [agents.subAgents], Source={x:Static loc:Loc.Instance}}" />
-        </Grid>
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [agents.subAgentsHint], Source={x:Static loc:Loc.Instance}}" />
-      </StackPanel>
-    </DataTemplate>
-
-    <!-- The housekeeping archive step: switch, idle window and scope; the window and scope grey out while it is off. -->
-    <DataTemplate DataType="settings:IdleArchiveSettingsSectionViewModel" x:DataType="settings:IdleArchiveSettingsSectionViewModel">
-      <StackPanel Spacing="6">
-        <CheckBox Content="{Binding [idleArchive.enabled], Source={x:Static loc:Loc.Instance}}"
-                  IsChecked="{Binding Enabled, Mode=TwoWay}"
-                  AutomationProperties.AutomationId="idle-archive-enabled"
-                  AutomationProperties.Name="{Binding [idleArchive.enabled], Source={x:Static loc:Loc.Instance}}" />
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [idleArchive.enabledHint], Source={x:Static loc:Loc.Instance}}" />
-        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3" IsEnabled="{Binding CanConfigure}">
-          <TextBlock Classes="label"
-                     VerticalAlignment="Center"
-                     Text="{Binding [idleArchive.days], Source={x:Static loc:Loc.Instance}}" />
-          <NumericUpDown Grid.Column="1"
-                         MinWidth="120"
-                         HorizontalAlignment="Left"
-                         Minimum="{Binding MinDays}"
-                         Maximum="{Binding MaxDays}"
-                         Increment="1"
-                         FormatString="0"
-                         Value="{Binding Days, Mode=TwoWay}"
-                         AutomationProperties.AutomationId="idle-archive-days"
-                         AutomationProperties.Name="{Binding [idleArchive.days], Source={x:Static loc:Loc.Instance}}" />
-        </Grid>
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [idleArchive.daysHint], Source={x:Static loc:Loc.Instance}}" />
-        <Grid ColumnDefinitions="180,*" Margin="0,9,0,3" IsEnabled="{Binding CanConfigure}">
-          <TextBlock Classes="label"
-                     VerticalAlignment="Center"
-                     Text="{Binding [idleArchive.scope], Source={x:Static loc:Loc.Instance}}" />
-          <ComboBox Grid.Column="1"
-                    MinWidth="220"
-                    HorizontalAlignment="Left"
-                    ItemsSource="{Binding Scopes}"
-                    SelectedItem="{Binding SelectedScope, Mode=TwoWay}"
-                    AutomationProperties.AutomationId="idle-archive-scope"
-                    AutomationProperties.Name="{Binding [idleArchive.scope], Source={x:Static loc:Loc.Instance}}">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="settings:IdleArchiveScopeOption">
-                <TextBlock Classes="caption" Text="{Binding Label}" />
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
-        </Grid>
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [idleArchive.scopeHint], Source={x:Static loc:Loc.Instance}}" />
-      </StackPanel>
     </DataTemplate>
 
     <DataTemplate DataType="loc:LanguageSettingsViewModel" x:DataType="loc:LanguageSettingsViewModel">
@@ -313,31 +240,6 @@
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"
                    Text="{Binding [notifications.enabledHint], Source={x:Static loc:Loc.Instance}}" />
-      </StackPanel>
-    </DataTemplate>
-
-    <!-- The notification permission guide (14f): what is known about the OS permission, a real test notification and the
-         page that changes it. The first-run wizard calls the same guide and reuses these strings. -->
-    <DataTemplate DataType="notif:NotificationPermissionSettingsViewModel" x:DataType="notif:NotificationPermissionSettingsViewModel">
-      <StackPanel Spacing="6">
-        <TextBlock TextWrapping="Wrap"
-                   Text="{Binding StateText}"
-                   AutomationProperties.AutomationId="notification-permission-state" />
-        <StackPanel Orientation="Horizontal" Spacing="6">
-          <Button Content="{Binding TestActionText}"
-                  Command="{Binding SendTestCommand}"
-                  AutomationProperties.AutomationId="notification-permission-test" />
-          <Button Content="{Binding [notifications.permission.openSettings], Source={x:Static loc:Loc.Instance}}"
-                  Command="{Binding OpenSettingsCommand}"
-                  IsVisible="{Binding CanOpenSettings}"
-                  AutomationProperties.AutomationId="notification-permission-open-settings" />
-        </StackPanel>
-        <CheckBox Content="{Binding [notifications.permission.reprompt], Source={x:Static loc:Loc.Instance}}"
-                  IsChecked="{Binding Reprompt, Mode=TwoWay}"
-                  AutomationProperties.AutomationId="notification-permission-reprompt" />
-        <TextBlock Classes="caption"
-                   TextWrapping="Wrap"
-                   Text="{Binding [notifications.permission.repromptHint], Source={x:Static loc:Loc.Instance}}" />
       </StackPanel>
     </DataTemplate>
 
@@ -731,7 +633,18 @@
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource TextPrimaryBrush}" />
         </Border>
-        <TextBlock Classes="caption" Text="{Binding Time}" HorizontalAlignment="Right" />
+        <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+          <views:CopyTextButton Classes="ghost icon"
+                                Width="26"
+                                Height="22"
+                                IsVisible="{Binding HasText}"
+                                ToolTip.Tip="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}"
+                                AutomationProperties.AutomationId="message-copy"
+                                AutomationProperties.Name="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}">
+            <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
+          </views:CopyTextButton>
+          <TextBlock Classes="caption" Text="{Binding Time}" VerticalAlignment="Center" />
+        </StackPanel>
       </StackPanel>
     </DataTemplate>
 
@@ -770,16 +683,7 @@
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnTextViewModel" x:DataType="vm:TurnTextViewModel">
-      <ItemsControl ItemsSource="{Binding Segments}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:TextSegmentViewModel">
-            <SelectableTextBlock Text="{Binding Text}"
-                                 TextWrapping="Wrap"
-                                 Margin="0,2"
-                                 Foreground="{DynamicResource TextPrimaryBrush}" />
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      <views:TurnTextView />
     </DataTemplate>
 
     <DataTemplate DataType="vm:TurnNoticeViewModel" x:DataType="vm:TurnNoticeViewModel">
@@ -789,40 +693,7 @@
     </DataTemplate>
 
     <DataTemplate DataType="vm:ToolRowViewModel" x:DataType="vm:ToolRowViewModel">
-      <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}">
-        <StackPanel Spacing="2">
-          <Button Classes="link"
-                  Command="{Binding ToggleCommand}"
-                  HorizontalAlignment="Stretch"
-                  HorizontalContentAlignment="Left">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto">
-              <TextBlock Classes="glyph" Text="▸" />
-              <TextBlock Grid.Column="1" Classes="mono" Margin="6,0,0,0" Text="{Binding Name}" />
-              <TextBlock Grid.Column="2"
-                         Classes="caption"
-                         Margin="8,0"
-                         Text="{Binding ArgumentSummary}" />
-              <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
-            </Grid>
-          </Button>
-          <StackPanel IsVisible="{Binding IsExpanded}" Spacing="4" Margin="14,2,0,2">
-            <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
-            <SelectableTextBlock Classes="mono"
-                                 Text="{Binding Arguments}"
-                                 TextWrapping="Wrap"
-                                 Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBlock Classes="label"
-                       Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
-                       IsVisible="{Binding HasResult}" />
-            <SelectableTextBlock Classes="mono"
-                                 Text="{Binding Result}"
-                                 TextWrapping="Wrap"
-                                 MaxHeight="240"
-                                 Foreground="{DynamicResource TextSecondaryBrush}"
-                                 IsVisible="{Binding HasResult}" />
-          </StackPanel>
-        </StackPanel>
-      </Border>
+      <views:ToolRowView />
     </DataTemplate>
   </Application.DataTemplates>
 

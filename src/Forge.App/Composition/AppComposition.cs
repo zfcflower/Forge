@@ -237,11 +237,10 @@ internal sealed class AppComposition : IAsyncDisposable
     public NotificationCenter Notifications { get; private set; } = null!;
 
     /// <summary>
-    /// What this build knows about the operating system's notification permission, and the two actions that change it. The
-    /// settings section is one caller; the first-run wizard (wave W9) is the other, and it calls only this interface. Null
-    /// until the composition root has created it, which is before the window exists.
+    /// The notification-permission guide: the runtime-settings module sets it, the first-run wizard only calls it. Null until
+    /// registered, and on a platform with nothing to guide.
     /// </summary>
-    public INotificationPermissionGuide NotificationPermission { get; private set; } = null!;
+    public INotificationPermissionGuide? NotificationPermissionGuide { get; set; }
 
     /// <summary>
     /// Commits a finished TODO step into the session's worktree. The agent's <c>todo</c> tool reaches it through the
@@ -354,17 +353,6 @@ internal sealed class AppComposition : IAsyncDisposable
             new NotificationsSettingsViewModel(preferences.Current),
             SettingsGroups.System,
             "IconBell"));
-
-        // 0c-bis. The notification permission guide (14f): the settings section and the first-run wizard share one instance,
-        //         because the state is what the last real test notification said, not something that can be re-queried.
-        var notificationPermission = new SystemNotificationPermissionGuide(systemNotifier);
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.NotificationPermission,
-            NotificationsStrings.PermissionSectionTitle,
-            SettingsSectionIds.NotificationPermissionOrder,
-            new NotificationPermissionSettingsViewModel(preferences.Current, notificationPermission),
-            SettingsGroups.System,
-            "IconShieldCheck"));
 
         // 0d. Network: ONE stack for every outbound connection (providers, model catalog, web tools, MCP over HTTP). The
         //     `network` section is read before the first client exists, so the first connection already uses it; Apply on
@@ -497,17 +485,6 @@ internal sealed class AppComposition : IAsyncDisposable
                 preferences.Current),
             SettingsGroups.Agent,
             "IconPlug"));
-
-        // 6a. Models visibility (14a): one switch per model of every connected provider. The section writes
-        //     preferences.modelsHidden; the composer's picker and the per-agent defaults read it through IsModelHidden, so a
-        //     hidden model disappears from both selection surfaces while a model already in use keeps showing.
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.ModelsVisibility,
-            ModelsVisibilityStrings.SectionTitleKey,
-            SettingsSectionIds.ModelsVisibilityOrder,
-            new ModelsVisibilitySectionViewModel(providers, preferences.Current),
-            SettingsGroups.Agent,
-            "IconEye"));
 
         // --- web tools: settings section and tool factory ---
         var webServices = new Forge.App.Web.WebServices(new Forge.App.Web.WebSettingsStore(paths.SettingsPath), providers.Secrets, network);
@@ -646,7 +623,6 @@ internal sealed class AppComposition : IAsyncDisposable
             gitSettings,
             initialization);
         composition.Approvals = approvals;
-        composition.NotificationPermission = notificationPermission;
         composition.Network = network;
         composition.NetworkProblem = networkSettings.LoadProblem;
         composition.webServices = webServices;
@@ -738,24 +714,7 @@ internal sealed class AppComposition : IAsyncDisposable
             SettingsGroups.Agent,
             "IconWrench"));
 
-        // The two runtime dials W1 owns: the sub-agent cap and switch (`agents`) and the housekeeping archive step
-        // (`idle-archive`). Both edit the live preferences, so their values reach the running runtime and the next nightly
-        // run without a restart.
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.Agents,
-            AgentSettingsStrings.AgentsSectionTitleKey,
-            SettingsSectionIds.AgentsOrder,
-            new AgentsSettingsSectionViewModel(preferences.Current),
-            SettingsGroups.Agent,
-            "IconBot"));
-        settings.Add(new SettingsSection(
-            SettingsSectionIds.IdleArchive,
-            AgentSettingsStrings.IdleArchiveSectionTitleKey,
-            SettingsSectionIds.IdleArchiveOrder,
-            new IdleArchiveSettingsSectionViewModel(preferences.Current),
-            SettingsGroups.System,
-            "IconArchive"));
-
+        FeatureComposition.RegisterAll(composition, settings);
         return composition;
     }
 

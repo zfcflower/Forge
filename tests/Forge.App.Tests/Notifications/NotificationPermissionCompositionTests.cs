@@ -7,7 +7,7 @@ using Xunit;
 namespace Forge.App.Tests.Notifications;
 
 /// <summary>
-/// Pins the composition root's half of the notification permission guide: <see cref="AppComposition.NotificationPermission"/>
+/// Pins the composition root's half of the notification permission guide: <see cref="AppComposition.NotificationPermissionGuide"/>
 /// is one instance, and the <c>notification-permission</c> section is handed that same instance instead of building one of
 /// its own - the state is what the last real test notification said, so the first-run wizard (which only reads the
 /// composition) and the section must not disagree about it. The section itself is covered by
@@ -29,10 +29,11 @@ public sealed class NotificationPermissionCompositionTests
                 var section = Assert.IsType<NotificationPermissionSettingsViewModel>(
                     Assert.Single(composition.Settings.Items, IsPermissionSection).ViewModel);
 
-                Assert.Same(composition.NotificationPermission, GuideOf(section));
+                var exposed = Assert.IsAssignableFrom<INotificationPermissionGuide>(composition.NotificationPermissionGuide);
+                Assert.Same(exposed, GuideOf(section));
 
                 // The sentence the user sees is that guide's state, not a second copy that was taken at construction time.
-                Assert.Equal(NotificationPermissionTexts.StateText(composition.NotificationPermission.State), section.StateText);
+                Assert.Equal(NotificationPermissionTexts.StateText(((INotificationPermissionSection)exposed).State), section.StateText);
             }
             finally
             {

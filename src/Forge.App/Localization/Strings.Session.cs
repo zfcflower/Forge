@@ -80,6 +80,7 @@ internal static class SessionStrings
     public const string ToolArgumentsKey = "turn.toolArguments";
     public const string ToolResultKey = "turn.toolResult";
     public const string NoTextKey = "turn.noText";
+    public const string CopyMessageKey = "turn.copyMessage";
     public const string NoToolResultKey = "turn.noToolResult";
     public const string TurnFailedKey = "turn.failed";
     public const string DeniedKey = "turn.denied";
@@ -460,6 +461,7 @@ internal static class SessionStrings
         Loc.Register(ToolArgumentsKey, "参数", "Arguments");
         Loc.Register(ToolResultKey, "结果", "Result");
         Loc.Register(NoTextKey, "（模型没有返回文本）", "(the model returned no text)");
+        Loc.Register(CopyMessageKey, "复制消息", "Copy message");
         Loc.Register(NoToolResultKey, "没有结果：本轮已结束", "No result: the turn ended");
         Loc.Register(TurnFailedKey, "本轮无法运行：{0}", "This turn could not run: {0}");
         Loc.Register(DeniedKey, "已拒绝：{0}（尚未配置审批对话框）", "Denied: {0} (no approval dialog yet)");

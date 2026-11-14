@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Views.TurnTextView"
+             x:DataType="vm:TurnTextViewModel">
+  <!-- The reply text of a turn (wave W4b owns this file: Markdown rendering replaces the segment template). -->
+  <StackPanel>
+    <ItemsControl ItemsSource="{Binding Segments}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:TextSegmentViewModel">
+          <SelectableTextBlock Text="{Binding Text}"
+                               TextWrapping="Wrap"
+                               Margin="0,2"
+                               Foreground="{DynamicResource TextPrimaryBrush}" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <views:CopyTextButton Classes="ghost icon"
+                          Width="26"
+                          Height="22"
+                          HorizontalAlignment="Left"
+                          IsVisible="{Binding !IsStreaming}"
+                          ToolTip.Tip="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}"
+                          AutomationProperties.AutomationId="message-copy"
+                          AutomationProperties.Name="{Binding [turn.copyMessage], Source={x:Static loc:Loc.Instance}}">
+      <wc:FluentIcon Data="{StaticResource IconCopy}" Width="13" Height="13" />
+    </views:CopyTextButton>
+  </StackPanel>
+</UserControl>

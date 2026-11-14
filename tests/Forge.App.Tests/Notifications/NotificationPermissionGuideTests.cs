@@ -9,7 +9,7 @@ namespace Forge.App.Tests.Notifications;
 
 /// <summary>
 /// Pins <see cref="SystemNotificationPermissionGuide"/>: the state starts where the platform puts it (no tool means
-/// <see cref="NotificationPermissionState.Unsupported"/>, anything else <see cref="NotificationPermissionState.Unknown"/>)
+/// <see cref="NotificationPermissionState.NotApplicable"/>, anything else <see cref="NotificationPermissionState.Unknown"/>)
 /// and only a real test notification settles it; the settings page is opened with the platform's own URI, is never
 /// attempted where there is none, and a failing opener is a false plus a <c>[notify]</c> trace line instead of an
 /// exception. A recording notifier and a recording opener replace the process start, so nothing is launched and no test
@@ -24,13 +24,13 @@ public sealed class NotificationPermissionGuideTests
         var opener = new GuideFakeOpener();
         var guide = new SystemNotificationPermissionGuide(notifier, opener.OpenAsync, NotifyPlatform.Unsupported);
 
-        Assert.Equal(NotificationPermissionState.Unsupported, guide.State);
+        Assert.Equal(NotificationPermissionState.NotApplicable, guide.State);
         Assert.False(guide.CanOpenSettings);
         Assert.Null(guide.SettingsUri);
 
-        Assert.Equal(NotificationPermissionState.Unsupported, await guide.SendTestAsync(CancellationToken.None));
+        Assert.Equal(NotificationPermissionState.NotApplicable, await guide.SendTestAsync(CancellationToken.None));
 
-        Assert.Equal(NotificationPermissionState.Unsupported, guide.State);
+        Assert.Equal(NotificationPermissionState.NotApplicable, guide.State);
         Assert.Empty(notifier.Calls);
     }
 
@@ -74,9 +74,9 @@ public sealed class NotificationPermissionGuideTests
         var notifier = new GuideFakeNotifier { Taken = true };
         var guide = new SystemNotificationPermissionGuide(notifier, platform: NotifyPlatform.Windows);
 
-        Assert.Equal(NotificationPermissionState.Allowed, await guide.SendTestAsync(CancellationToken.None));
+        Assert.Equal(NotificationPermissionState.Granted, await guide.SendTestAsync(CancellationToken.None));
 
-        Assert.Equal(NotificationPermissionState.Allowed, guide.State);
+        Assert.Equal(NotificationPermissionState.Granted, guide.State);
         Assert.Single(notifier.Calls);
     }
 
@@ -100,7 +100,7 @@ public sealed class NotificationPermissionGuideTests
         var notifier = new GuideFakeNotifier { Taken = true };
         var guide = new SystemNotificationPermissionGuide(notifier, platform: NotifyPlatform.MacOS);
 
-        Assert.Equal(NotificationPermissionState.Allowed, await guide.SendTestAsync(CancellationToken.None));
+        Assert.Equal(NotificationPermissionState.Granted, await guide.SendTestAsync(CancellationToken.None));
 
         notifier.Taken = false;
         Assert.Equal(NotificationPermissionState.Denied, await guide.SendTestAsync(CancellationToken.None));
@@ -108,8 +108,8 @@ public sealed class NotificationPermissionGuideTests
         Assert.Equal(2, notifier.Calls.Count);
 
         notifier.Taken = true;
-        Assert.Equal(NotificationPermissionState.Allowed, await guide.SendTestAsync(CancellationToken.None));
-        Assert.Equal(NotificationPermissionState.Allowed, guide.State);
+        Assert.Equal(NotificationPermissionState.Granted, await guide.SendTestAsync(CancellationToken.None));
+        Assert.Equal(NotificationPermissionState.Granted, guide.State);
     }
 
     [Fact]

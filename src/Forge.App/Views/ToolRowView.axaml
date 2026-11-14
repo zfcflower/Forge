@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:views="using:Forge.App.Views"
+             xmlns:loc="using:Forge.App.Localization"
+             x:Class="Forge.App.Views.ToolRowView"
+             x:DataType="vm:ToolRowViewModel">
+  <Border Classes="tool-row" Classes.expanded="{Binding IsExpanded}">
+    <StackPanel Spacing="2">
+      <Button Classes="link"
+              Command="{Binding ToggleCommand}"
+              HorizontalAlignment="Stretch"
+              HorizontalContentAlignment="Left">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+          <TextBlock Classes="glyph" Text="▸" />
+          <TextBlock Grid.Column="1" Classes="mono" Margin="6,0,0,0" Text="{Binding Name}" />
+          <TextBlock Grid.Column="2"
+                     Classes="caption"
+                     Margin="8,0"
+                     Text="{Binding ArgumentSummary}" />
+          <TextBlock Grid.Column="3" Classes="caption" Text="{Binding Status}" />
+        </Grid>
+      </Button>
+      <StackPanel IsVisible="{Binding IsExpanded}" Spacing="4" Margin="14,2,0,2">
+        <TextBlock Classes="label" Text="{Binding [turn.toolArguments], Source={x:Static loc:Loc.Instance}}" />
+        <SelectableTextBlock Classes="mono"
+                             Text="{Binding Arguments}"
+                             TextWrapping="Wrap"
+                             Foreground="{DynamicResource TextSecondaryBrush}" />
+        <TextBlock Classes="label"
+                   Text="{Binding [turn.toolResult], Source={x:Static loc:Loc.Instance}}"
+                   IsVisible="{Binding HasResult}" />
+        <SelectableTextBlock Classes="mono"
+                             Text="{Binding Result}"
+                             TextWrapping="Wrap"
+                             MaxHeight="240"
+                             Foreground="{DynamicResource TextSecondaryBrush}"
+                             IsVisible="{Binding HasResult}" />
+        <!-- Result images (wave W4 owns ToolRowImagesView) and the live output tail (wave W8 owns ToolRowTailView). -->
+        <views:ToolRowImagesView />
+        <views:ToolRowTailView />
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

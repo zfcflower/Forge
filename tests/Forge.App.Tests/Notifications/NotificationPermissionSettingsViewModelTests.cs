@@ -21,13 +21,13 @@ public sealed class NotificationPermissionSettingsViewModelTests
     // ------------------------------------------------------------ the sentence
 
     [Theory]
-    [InlineData(0, NotificationsStrings.PermissionStateUnsupported)]
-    [InlineData(1, NotificationsStrings.PermissionStateUnknown)]
-    [InlineData(2, NotificationsStrings.PermissionStateAllowed)]
-    [InlineData(3, NotificationsStrings.PermissionStateDenied)]
+    [InlineData(0, NotificationsStrings.PermissionStateUnknown)]
+    [InlineData(1, NotificationsStrings.PermissionStateGranted)]
+    [InlineData(2, NotificationsStrings.PermissionStateDenied)]
+    [InlineData(3, NotificationsStrings.PermissionStateNotApplicable)]
     public void The_sentence_follows_the_guide(int stateValue, string key)
     {
-        // The numbers are the enum members (Unsupported, Unknown, Allowed, Denied): an attribute argument of an internal
+        // The numbers are the enum members (Unknown, Granted, Denied, NotApplicable): an attribute argument of an internal
         // enum type does not compile in a public test method.
         using var _ = new LanguageScope(UiLanguage.Chinese);
         using var section = new NotificationPermissionSettingsViewModel(
@@ -42,15 +42,15 @@ public sealed class NotificationPermissionSettingsViewModelTests
     public async Task A_finished_test_updates_the_sentence()
     {
         using var _ = new LanguageScope(UiLanguage.English);
-        var guide = new FakeGuide { State = NotificationPermissionState.Unknown, NextState = NotificationPermissionState.Allowed };
+        var guide = new FakeGuide { State = NotificationPermissionState.Unknown, NextState = NotificationPermissionState.Granted };
         using var section = new NotificationPermissionSettingsViewModel(new AppPreferences(), guide);
         Assert.Equal(Loc.Instance[NotificationsStrings.PermissionStateUnknown], section.StateText);
 
         await RunAsync(section.SendTestCommand);
 
         Assert.Equal(1, guide.Sent);
-        Assert.Equal(Loc.Instance[NotificationsStrings.PermissionStateAllowed], section.StateText);
-        Assert.Equal(NotificationPermissionState.Allowed, guide.State);
+        Assert.Equal(Loc.Instance[NotificationsStrings.PermissionStateGranted], section.StateText);
+        Assert.Equal(NotificationPermissionState.Granted, guide.State);
     }
 
     // ------------------------------------------------------------ the test action
@@ -146,7 +146,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
         using var chinese = new LanguageScope(UiLanguage.Chinese);
         using var section = new NotificationPermissionSettingsViewModel(
             new AppPreferences(),
-            new FakeGuide { State = NotificationPermissionState.Allowed });
+            new FakeGuide { State = NotificationPermissionState.Granted });
         var raised = new List<string?>();
         section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
         var chineseState = section.StateText;
@@ -157,7 +157,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
             Assert.Contains(nameof(NotificationPermissionSettingsViewModel.StateText), raised);
             Assert.Contains(nameof(NotificationPermissionSettingsViewModel.TestActionText), raised);
 
-            Assert.Equal(Loc.Instance[NotificationsStrings.PermissionStateAllowed], section.StateText);
+            Assert.Equal(Loc.Instance[NotificationsStrings.PermissionStateGranted], section.StateText);
             Assert.Equal(Loc.Instance[NotificationsStrings.PermissionTestAction], section.TestActionText);
             Assert.NotEqual(chineseState, section.StateText);
             Assert.NotEqual(chineseAction, section.TestActionText);
@@ -177,7 +177,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
         var raised = new List<string?>();
         section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
 
-        guide.State = NotificationPermissionState.Allowed;
+        guide.State = NotificationPermissionState.Granted;
         Assert.NotEqual(before, section.StateText);
 
         section.Reload();
@@ -236,12 +236,12 @@ public sealed class NotificationPermissionSettingsViewModelTests
     }
 
     /// <summary>A guide whose state and open-settings answer the test decides, and whose test notification can be held open.</summary>
-    private sealed class FakeGuide : INotificationPermissionGuide
+    private sealed class FakeGuide : INotificationPermissionSection
     {
         /// <summary>When set, <see cref="SendTestAsync"/> stays suspended on it until the test completes it.</summary>
         public Task? Gate { get; init; }
 
-        public NotificationPermissionState NextState { get; init; } = NotificationPermissionState.Allowed;
+        public NotificationPermissionState NextState { get; init; } = NotificationPermissionState.Granted;
 
         public int Sent { get; private set; }
 
@@ -250,6 +250,16 @@ public sealed class NotificationPermissionSettingsViewModelTests
         public NotificationPermissionState State { get; set; } = NotificationPermissionState.Unknown;
 
         public bool CanOpenSettings { get; init; }
+
+        /// <summary>The read the frozen seam asks for: a fake answers what it was told and counts the call.</summary>
+        public Task<NotificationPermissionState> GetStateAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Reads++;
+            return Task.FromResult(State);
+        }
+
+        public int Reads { get; private set; }
 
         public async Task<NotificationPermissionState> SendTestAsync(CancellationToken ct)
         {

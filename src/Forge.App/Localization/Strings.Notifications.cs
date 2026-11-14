@@ -22,9 +22,9 @@ internal static class NotificationsStrings
     // The permission guide (wave W1): one sentence per state of the permission, the two actions that change it, the switch
     // that decides whether the first-run wizard keeps asking, and the text of the test notification itself.
     public const string PermissionSectionTitle = "notifications.permission.section";
-    public const string PermissionStateUnsupported = "notifications.permission.state.unsupported";
+    public const string PermissionStateNotApplicable = "notifications.permission.state.notApplicable";
     public const string PermissionStateUnknown = "notifications.permission.state.unknown";
-    public const string PermissionStateAllowed = "notifications.permission.state.allowed";
+    public const string PermissionStateGranted = "notifications.permission.state.granted";
     public const string PermissionStateDenied = "notifications.permission.state.denied";
     public const string PermissionTestAction = "notifications.permission.test";
     public const string PermissionTestRunning = "notifications.permission.testRunning";
@@ -131,7 +131,7 @@ internal static class NotificationsStrings
 
         Loc.Register(PermissionSectionTitle, "通知权限", "Notification permission");
         Loc.Register(
-            PermissionStateUnsupported,
+            PermissionStateNotApplicable,
             "这个构建没有可用的系统通知工具，不会弹桌面通知。",
             "This build has no desktop notification tool, so no desktop notification can appear.");
         Loc.Register(
@@ -139,7 +139,7 @@ internal static class NotificationsStrings
             "还不知道系统是否允许通知。发一条测试通知就能确认。",
             "It is not known yet whether the system allows notifications. Send a test notification to find out.");
         Loc.Register(
-            PermissionStateAllowed,
+            PermissionStateGranted,
             "系统已接受测试通知，桌面通知应该能正常送达。",
             "The system accepted the test notification, so desktop notifications should arrive.");
         Loc.Register(

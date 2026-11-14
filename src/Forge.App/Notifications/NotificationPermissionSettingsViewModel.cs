@@ -12,7 +12,7 @@ namespace Forge.App.Notifications;
 /// sentence saying what is known about the system's notification permission, two actions that change it (send a real test
 /// notification, open the platform's notification settings) and the "ask again" switch the first-run wizard reads.
 /// <para>It holds no state of its own beyond whether a test is running: the sentence reads
-/// <see cref="INotificationPermissionGuide.State"/> and the switch reads <see cref="AppPreferences"/> on every access. The
+/// <see cref="INotificationPermissionSection.State"/> and the switch reads <see cref="AppPreferences"/> on every access. The
 /// action labels and the sentence are computed in C#, which is why the section drops its <see cref="Loc.LanguageChanged"/>
 /// subscription in <see cref="Dispose"/> - the table is process-wide and would otherwise outlive the composition that owns
 /// this.</para>
@@ -23,7 +23,7 @@ namespace Forge.App.Notifications;
 internal sealed class NotificationPermissionSettingsViewModel : ObservableObject, IDisposable, IReloadableSettingsSection
 {
     private readonly AppPreferences preferences;
-    private readonly INotificationPermissionGuide guide;
+    private readonly INotificationPermissionSection guide;
 
     /// <summary>The thread the section was built on (the UI thread); a language notification from another one is not ours.</summary>
     private readonly int uiThread = Environment.CurrentManagedThreadId;
@@ -31,7 +31,7 @@ internal sealed class NotificationPermissionSettingsViewModel : ObservableObject
     private bool sendingTest;
     private bool disposed;
 
-    public NotificationPermissionSettingsViewModel(AppPreferences preferences, INotificationPermissionGuide guide)
+    public NotificationPermissionSettingsViewModel(AppPreferences preferences, INotificationPermissionSection guide)
     {
         ArgumentNullException.ThrowIfNull(preferences);
         ArgumentNullException.ThrowIfNull(guide);
@@ -57,7 +57,7 @@ internal sealed class NotificationPermissionSettingsViewModel : ObservableObject
     /// <summary>Opens the platform's notification settings; disabled while the attempt runs.</summary>
     public ICommand OpenSettingsCommand { get; }
 
-    /// <summary>The sentence describing <see cref="INotificationPermissionGuide.State"/>, in the current UI language.</summary>
+    /// <summary>The sentence describing <see cref="INotificationPermissionSection.State"/>, in the current UI language.</summary>
     public string StateText => NotificationPermissionTexts.StateText(guide.State);
 
     /// <summary>Whether this platform has a notification settings page to open.</summary>
