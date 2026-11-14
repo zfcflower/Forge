@@ -365,3 +365,39 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 **独立评审**(glm-5.3,只读):结论 `approve`,5 条 minor 已全部处理——(1) `Forget` 在 `order` 里留陈旧位 → 改 `LinkedList` + 位置字典;(2) `color-mix` 扫描会改写 `<text>` 标签文本 → 只解析标签属性与 `<style>` 正文,补两条用例;(3) 状态图标每次迁移重复 `Bind` 不释放 → 保存并 Dispose 旧绑定;(4) 默认类型的端到端用例与 Timeout/TooLarge 未构造 → 已补;(5) 实现说明的收尾小节为空 → 已填。评审同时核对了 ASCII 偏差、清单外文件、64 KiB 边界、测试缝、color-mix 数学、checks 语义迁移与 `MermaidPicture` 不显式 Dispose 的决定,确认与记录一致。
 
 **收尾验证**:`Forge.App.Tests` 全量在最终树上 **4830 通过 / 0 失败**(13 m 29 s)。过程中的两次 `testhost` 原生崩溃(2852 个用例后、以及第 116 个 `Git.StepCommitterTests` 用例处)判定为与本波无关的环境问题:崩溃前没有任何 Mermaid 用例执行过,Mermaid 过滤连跑 3 次全绿,`StepCommitterTests` 单独连跑 3 次全绿,同机另有一个工作区在跑测试;更早的一次全量还出现 1 个 `Terminal.TerminalLifecycleTests.Osc_title_becomes_the_tab_title` 偶发失败,单独连跑 3 次全绿(`Terminal/**` 本波未改)。
+
+## 十一、W11–W15 跟进(2026-11-15 用户拍板)
+
+四波交付评审后的跟进决定与落地记录。分支 `fix-wave-followups`(基于 `integ` `c956eae`)。
+
+### 用户逐条批准的四项(均已实施)
+
+1. **W11 修正消息改固定英文**(推翻上一轮"按界面语言发"的拍板):`MermaidFixMessage` 弃 `Loc`,英文原文逐字移入常量;`mermaid.fixRequest`/`fixTruncated` 两键删除;界面可见的失败标题、按钮、`FixOrigin` 起源标签仍本地化。
+2. **W11 未闭合围栏定稿时渲染**:`MarkdownBlockParser.Parse(final:)` 的 `FinalizeOpenFence` 把末尾未闭合围栏按闭合定稿,`StreamingMarkdown.Complete()` 走 final 路径;`SameBlock` 纳入 `FenceClosed` 比较,定稿翻转触发一次 `Revision++` 整重建;解析失败走既有失败回路,不再静默只显源码。
+3. **W15 等待最小提示**:新增契约 `BudgetWait` 流事件 + `AgentBudgetWait` 代理事件;入睡且 ≥3 秒且每 attempt 至多一次时上报;`SessionWorkspace` 在运行中轮次加非错误提示行(无 toast、不落库);等待循环因此内联进 `RetryingChatProvider.StreamAsync`(helper 不能 yield)。
+4. **W15 令牌对账并入输出**:`Settle` 的实际值 `InputTokens` → `InputTokens + OutputTokens`(TPM 双侧口径;估算仍只算输入,应答后校正;`OutputTokens=0` 时与旧行为一致)。
+
+### 追认(2026-11-15,一句话生效)
+
+- **W14/W15 触碰 W0 冻结文件**(`AppPreferences.cs`、`SettingsSection.cs`、`FeatureComposition.cs`、`App.axaml` 的 tools 模板抽出):均为新增行/搬移、不动既有内容,追认通过;`App.axaml` 的那次改动方向恰是 W0"新分区视图不再改 App.axaml"的贯彻。
+- **W11 三方传递闭包**(Mermaider → Sugiyama;Svg.Skia → ExCSS、ShimSkiaSharp、Svg.Model、Svg.Custom、Svg.Animation、Svg.SceneGraph):批准根包即批准闭包,不单独引用、版本由还原锁定,已写进 `architecture.md` 白名单。
+- **W11 AOT 以 CI 为门**:Windows 本地 publish 0 警告 + CI 三平台 publish 矩阵为编译门,CI 三 OS 测试矩阵里的真实渲染用例(`MermaidRenderServiceTests` 走 `RenderAsync → SKPicture`)为运行时验证;AOT 产物里不单独起渲染测试宿主。
+- **W13 空闲节点**(已结束且无脚注的空轮次画空闲节点):SPEC 轴端例外一节本已记录,此为用户追认;**W13 ReduceMotion 不跟随系统**:用户认可(跟随需 P/Invoke + 平台分支,等 Avalonia 暴露后接,不做仅 Windows 的折中)。
+
+### 按讨论结论处理、不改代码的未决项
+
+- **W15 按日/小时头被当按分钟**:P3 只记录(后果偏松、多余 429 由 `Retry-After` 兜底;后续如修,方向是 reset 时长 ≤2 分钟才入补充率)。已更新 `Forge.Core/SPEC.md` 未决项。
+- **W14 脚本面语义更正**:计划 W14 行括号里"脚本内调用不经逐次审批卡"的理据是错的——脚本里每个内层调用都走 `SessionToolCallRouter.ApproveAsync` 出卡(`RunCodeScriptTests` 双向钉住);"写入/执行类仍排除"针对内置工具,插件工具 W14 之前就在脚本面。以 `Forge.App/SPEC.md`「会话运行」一节为准。
+- **W14 run_code 默认开放**(每回合约 +1000 字符):接受,已更新未决记录。
+
+### 仍待用户定夺
+
+- **W14b 批量审批卡**:脚本内 `web_fetch` 扇出会同时弹 N 张卡(默认并发 8 封顶)。候选方案:同一脚本运行内同工具的连续卡折叠成一张批卡(列前几个目标 +「允许本次运行剩余全部」,作用域限本次 run、不落持久化),需要动 `SessionApprovalHandler` 与审批浮层,独立立项。
+
+### 本批验证
+
+`fix-wave-followups` 上:`dotnet build Forge.slnx -c Debug` 0 警 0 错;Core `RetryingChatProvider|RateLimit|AgentLoop` 173/173;App `Mermaid|Markdown` 318/318;App `SessionWorkspace|RateLimit` 27/27;源码扫描门(Localization|MinorRegression|KeyRegistry|StringTable|NoHardcodedChinese)137/137。实现与测试由两个并行 Worker 会话在 `D:/FORGE/work23a`、`D:/FORGE/work23b` 完成(含各自副本内全量 App 4244/5216 通过),主 Agent 复核 diff 后合入。
+
+### 手测清单
+
+见 `docs/research/2026-11-15-visual-checklist.md`(W11/W13/W14/W15 的真实 App 视觉复核项,跨波一次过)。
