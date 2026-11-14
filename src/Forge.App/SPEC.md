@@ -370,7 +370,7 @@ UI 自动化只认 `AutomationProperties.AutomationId`,它不随语言变。
 
 ## 未决
 
-- 文件预览已支持编辑保存、TextMate 着色及 LSP 文档同步(AvaloniaEdit 编辑视图),非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF/HTML 占位(见「富文件查看器」;不含 SVG 内部渲染——按文本打开——与图片 diff、缩放/平移);LSP 诊断、悬停、补全与跳转定义已接到 UI。未做:语义 token 叠加(`HighlightMerger`/`SemanticTokenMapper` 在 App 零调用)、查找引用 UI、问题列表面板、code action / rename。声明式插件面板渲染未做。
+- 文件预览已支持编辑保存、TextMate 着色及 LSP 文档同步(AvaloniaEdit 编辑视图),非文本文件另有图片/CSV/TSV/.ipynb/LFS/二进制预览与 PDF 占位,网页则直接给可编辑源码 + 「在浏览器中打开」(见「富文件查看器」;不含 SVG 内部渲染——按文本打开——与图片 diff、缩放/平移);LSP 诊断、悬停、补全与跳转定义已接到 UI。未做:语义 token 叠加(`HighlightMerger`/`SemanticTokenMapper` 在 App 零调用)、查找引用 UI、问题列表面板、code action / rename。声明式插件面板渲染未做。
 - 聊天消息:助手回复与用户消息下各有一枚复制按钮(`CopyTextButton`,点击时读 `ICopyableText.CopyText`,整条纯文本);流式回复结束前不显示。聊天尚不过 Markdown 渲染。
 - git 写工具(`git_branch`/`git_sync`)按工具名划为写操作,经会话的审批队列逐次询问;读工具自动放行,且 git 工具不暴露给 `run_code` 脚本(脚本内调用不经逐次审批呈现)。
 - 搜索图标是按钮(AutomationId `shell-search`),绑 `OpenPaletteCommand`;命令面板落地(W3)前禁用。

@@ -23,7 +23,7 @@
 - **LFS 指针最先判**(内容前缀,不看扩展名)——被 LFS 管的 PNG 在磁盘上就是文本指针。
 - 其后按扩展名:图片 / `.csv .tsv` / `.ipynb` / `.pdf` / `.html .htm`;其余走原文本路径,`TextDocument.LoadAsync` 抛 `NotSupportedException` 时才出二进制占位(超 8 MiB 仍是原来的“文件过大”)。
 - **只读**:`HasDocument` 为 false,编辑器与换行/保存/复制/编辑菜单一起隐藏,`IsDirty`/`CanSave` 恒 false。
-- **PDF/HTML 不做内部渲染**:占位卡 + 「用默认程序打开」(`Process.Start(UseShellExecute)`);HTML 另给「查看源码」按文本重开,不渲染也不丢能力。
+- **PDF 不做内部渲染**:占位卡 + 「用默认程序打开」(`Process.Start(UseShellExecute)`)。**网页不设占位**(按用户 2026-11-13 修订):`.html/.htm` 直接进编辑器成为可编辑源码,工具条的打开按钮对网页改口为「在浏览器中打开」(`ExternalOpenLabel`),不渲染网页、也不多要一次点击。
 - 图片:后台解码,长边 > 4096 先 `CreateScaledBitmap` 再释放原图;解码器可注入,无头测试不碰渲染。
 - 表格:真 RFC 4180(引号、成对引号、CRLF/LF、字段内换行、参差行补齐);TSV 不认引号;超上限照常流式读完只计数;a11y 行虚拟化 `VirtualizingStackPanel`,列宽按前 200 行最宽单元格算,表头与数据行放在**同一个横向 ScrollViewer** 里,宽表整体横向滚动、列不歪。
 - 笔记本:`nbformat` 四种输出(`stream`/`execute_result`/`display_data`/`error`),每段按字符上限截断并标记,`image/png` 按需解码,坏 JSON 出提示不出异常。
@@ -47,7 +47,7 @@
 | 查看器先分类后读 | 读完文本失败再按扩展名兜底 | 先读会把 20 MB 图片当文本读进内存再报错;分类是纯函数,先看 512 字节就能决定走哪条路。 |
 | 表格行虚拟化 + 预计算列宽 | 整表画成一段等宽文本 | 1000 行 × N 列的 `TextBlock` 是几十万字符的单控件,布局与选择都退化;等宽文本还丢列对齐。 |
 | 表格外层横向 ScrollViewer | 禁止横向滚动(让单元格省略) | 宽 CSV 的右半边列不可达,这不是可用性问题而是缺陷。 |
-| PDF/HTML 占位 + OS 打开 | WebView / PDF 渲染库 | 引 JS 运行时或原生 PDF 库,与「能交给 OS 的不引渲染器」直接冲突。 |
+| PDF 占位 + OS 打开;网页给源码 + 浏览器 | WebView / PDF 渲染库 | 引 JS 运行时或原生 PDF 库,与「能交给 OS 的不引渲染器」直接冲突。 |
 | 指针文件按内容判 LFS | 按 `git lfs` 命令或 `.gitattributes` 查 | 那要读仓库状态(`.gitattributes`、LFS 存储),查看器不该依赖仓库;内容前缀是文件自身的事实。 |
 
 ## 三、为什么这是最优(按四判据)
@@ -74,7 +74,7 @@ dotnet test tests/Forge.App.Tests --filter Preview|Transcript|Settings|Localizat
 
 `Forge.Mcp.Tests` 的那一条失败是 `StdioTransportTests.Timed_out_request_sends_cancellation_and_handshake_messages_arrive_on_stdin_as_lines`(`initialize did not complete within 3s`);在干净的 `main` 检出(`D:/FORGE/forge` @ 5dd2068)上跑同一条测试同样失败,所以是既有环境问题,与本波无关。
 
-手测项(需真人看):工具行缩略图的观感与悬停提示;宽 CSV 的横向滚动与列对齐;大图(>4096 长边)预览的缩放质量;PDF/HTML 卡片的「用默认程序打开」在 Windows 上真的开对程序;HTML 的「查看源码」切回文本。
+手测项(需真人看):工具行缩略图的观感与悬停提示;宽 CSV 的横向滚动与列对齐;大图(>4096 长边)预览的缩放质量;PDF 卡片的「用默认程序打开」、以及 `.html` 文件上同一个按钮换成「在浏览器中打开」后在 Windows 上是否真的唤出浏览器。
 
 ## 五、与计划的偏差
 
