@@ -73,7 +73,8 @@ internal sealed class MdBlock
 
     /// <summary>
     /// A fenced code block whose closing fence was seen. An open fence is the block a streaming reply is still writing, so a
-    /// renderer waits for it (wave W11): parsing half a diagram would report errors the finished text does not have.
+    /// renderer waits for it (wave W11): parsing half a diagram would report errors the finished text does not have. A final
+    /// parse closes a trailing open fence (<see cref="MarkdownBlockParser.Parse"/>) - a completed document is what it says.
     /// </summary>
     public bool FenceClosed { get; init; }
 
@@ -105,8 +106,12 @@ internal static class MarkdownBlockParser
     /// <summary>
     /// Parses <paramref name="lines"/>; the first line is numbered <paramref name="firstLineNumber"/>. A fragment of a larger
     /// document (<paramref name="top"/> false) is not probed for YAML front matter, which only a document can open with.
+    /// <para><paramref name="final"/> marks a completed document: the text is what it is, so a fence it ends without closing
+    /// is finalized as the block it holds and reported with <see cref="MdBlock.FenceClosed"/> set - only the last block can
+    /// be one, because everything after an opening fence is inside the fence. The default keeps the streaming reading: an
+    /// open fence is still being written, so it waits.</para>
     /// </summary>
-    public static List<MdBlock> Parse(IReadOnlyList<string> lines, int firstLineNumber = 1, bool top = true)
+    public static List<MdBlock> Parse(IReadOnlyList<string> lines, int firstLineNumber = 1, bool top = true, bool final = false)
     {
         ArgumentNullException.ThrowIfNull(lines);
         var text = new string[lines.Count];
@@ -119,7 +124,38 @@ internal static class MarkdownBlockParser
 
         var result = new List<MdBlock>();
         ParseCore(text, src, 0, text.Length, result, top);
+        if (final)
+        {
+            FinalizeOpenFence(result);
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// Reports the last block as fence-closed when it is a Code block whose fence never closed: a completed document is what
+    /// it says, so the half-written diagram it ends on gets its one render instead of sitting as source forever. Any other
+    /// last block is left exactly as parsed.
+    /// </summary>
+    private static void FinalizeOpenFence(List<MdBlock> blocks)
+    {
+        if (blocks.Count == 0)
+        {
+            return;
+        }
+
+        var open = blocks[^1];
+        if (open.Kind != MdBlockKind.Code || open.FenceClosed)
+        {
+            return;
+        }
+
+        blocks[^1] = new MdBlock(MdBlockKind.Code, open.StartLine, open.EndLine)
+        {
+            Text = open.Text,
+            Info = open.Info,
+            FenceClosed = true,
+        };
     }
 
     /// <summary>Whether <paramref name="line"/> starts a list item that a list of the given orderedness continues with.</summary>

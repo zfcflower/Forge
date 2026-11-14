@@ -185,7 +185,7 @@ public sealed class StreamingMarkdownTests
     }
 
     [Fact]
-    public void SameBlock_compares_only_kind_and_the_source_line_range()
+    public void SameBlock_compares_kind_line_range_and_fence_closure()
     {
         var block = new MdBlock(MdBlockKind.Code, 2, 5) { Text = "first" };
 
@@ -193,6 +193,8 @@ public sealed class StreamingMarkdownTests
         Assert.False(StreamingMarkdown.SameBlock(block, new MdBlock(MdBlockKind.Html, 2, 5) { Text = "first" }));
         Assert.False(StreamingMarkdown.SameBlock(block, new MdBlock(MdBlockKind.Code, 3, 5) { Text = "first" }));
         Assert.False(StreamingMarkdown.SameBlock(block, new MdBlock(MdBlockKind.Code, 2, 6) { Text = "first" }));
+        // Completion closes a trailing open fence without moving a line, so that difference must count too.
+        Assert.False(StreamingMarkdown.SameBlock(block, new MdBlock(MdBlockKind.Code, 2, 5) { Text = "first", FenceClosed = true }));
     }
 
     [Fact]

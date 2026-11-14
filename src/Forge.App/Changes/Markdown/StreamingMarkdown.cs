@@ -10,8 +10,9 @@ namespace Forge.App.Changes.Markdown;
 /// that block's first line and the next append re-parses it, so a loose list is never rendered as two lists while it streams.
 /// </para>
 /// <para><see cref="Complete"/> re-parses the whole reply once and replaces the incremental result when the two differ
-/// (indented code across a blank line, an HTML comment across one, a fence this line-level scan judged differently, or an
-/// over-long paragraph committed in fragments), so a completed document renders exactly like a single
+/// (indented code across a blank line, an HTML comment across one, a fence this line-level scan judged differently, an
+/// over-long paragraph committed in fragments, or a fence the reply ended without closing - finality closes it, so its
+/// half-written diagram gets its one render), so a completed document renders exactly like a single final
 /// <see cref="MarkdownBlockParser.Parse"/> of every line. That equality is the invariant the chat renderer relies on.</para>
 /// </summary>
 internal sealed class StreamingMarkdown
@@ -65,10 +66,13 @@ internal sealed class StreamingMarkdown
 
     /// <summary>Whether two blocks from this source are the same block, so a renderer may keep the control it already built.</summary>
     /// <remarks>
-    /// The content of a block is a pure function of its kind and its source lines, so equal ranges and kind mean equal content.
+    /// The content of a block is a pure function of its kind and its source lines, so equal ranges and kind mean equal content -
+    /// except fence closure, which a final parse can change without moving a line (a trailing open fence is closed at
+    /// finality), so it is compared too.
     /// </remarks>
     internal static bool SameBlock(MdBlock left, MdBlock right) =>
-        left.Kind == right.Kind && left.StartLine == right.StartLine && left.EndLine == right.EndLine;
+        left.Kind == right.Kind && left.StartLine == right.StartLine && left.EndLine == right.EndLine &&
+        left.FenceClosed == right.FenceClosed;
 
     /// <summary>Appends one streamed chunk and re-parses only what is not committed yet.</summary>
     public void Append(string chunk)
@@ -102,8 +106,9 @@ internal sealed class StreamingMarkdown
     }
 
     /// <summary>
-    /// Closes the reply: the unfinished line becomes a line, and the whole text is parsed once to correct anything the
-    /// incremental split got wrong. Idempotent.
+    /// Closes the reply: the unfinished line becomes a line, and the whole text is parsed once - as a final document, so a
+    /// fence the reply ended without closing is finalized as closed - to correct anything the incremental split got wrong.
+    /// Idempotent.
     /// </summary>
     public void Complete()
     {
@@ -114,7 +119,7 @@ internal sealed class StreamingMarkdown
             Scan();
         }
 
-        var whole = MarkdownBlockParser.Parse(lines);
+        var whole = MarkdownBlockParser.Parse(lines, final: true);
         ParseLive();
         if (SameSequence(whole))
         {

@@ -3,9 +3,10 @@ using System.Runtime.CompilerServices;
 namespace Forge.App.Localization;
 
 /// <summary>
-/// The Mermaid feature's own string table (wave W11): the block's states, its source/diagram toggle and the prompt that hands
-/// a broken diagram back to the model. Keys are namespaced <c>mermaid.*</c> and registered from a module initializer, so no
-/// shared table has to be edited. The two settings rows live in <see cref="ChatStrings"/> with the rest of the chat section.
+/// The Mermaid feature's own string table (wave W11): the block's states, its source/diagram toggle, and the labels the hand-off
+/// shows the user. Keys are namespaced <c>mermaid.*</c> and registered from a module initializer, so no shared table has to be
+/// edited. The two settings rows live in <see cref="ChatStrings"/> with the rest of the chat section. The hand-off message
+/// itself is not here: it is model-directed text, so <see cref="Views.MermaidFixMessage"/> keeps it in fixed English.
 /// </summary>
 internal static class MermaidStrings
 {
@@ -39,12 +40,6 @@ internal static class MermaidStrings
     /// <summary>Shown while the hand-off is in flight (the turn may take a while); replaced by sent/queued when it returns.</summary>
     public const string FixSending = "mermaid.fixSending";
 
-    /// <summary>The message sent to the model: <c>{0}</c> error, <c>{1}</c> source, <c>{2}</c> the fence to wrap it in.</summary>
-    public const string FixRequest = "mermaid.fixRequest";
-
-    /// <summary>Appended when the source had to be cut to fit the message.</summary>
-    public const string FixTruncated = "mermaid.fixTruncated";
-
     /// <summary>Origin shown on the turn this hand-off starts.</summary>
     public const string FixOrigin = "mermaid.origin";
 
@@ -73,11 +68,6 @@ internal static class MermaidStrings
         Loc.Register(FixSent, "已发送给模型", "Sent to the model");
         Loc.Register(FixSending, "已交给模型，等待回复…", "Handed to the model, waiting for its reply…");
         Loc.Register(FixQueued, "已放入输入框，发送后交给模型", "Added to the prompt box; send it to hand it over");
-        Loc.Register(
-            FixRequest,
-            "这张 Mermaid 图在本地渲染失败，请修正它。\n\n错误：{0}\n\n源码：\n{2}mermaid\n{1}\n{2}\n\n请只输出修正后的完整 Mermaid 代码块。",
-            "This Mermaid diagram failed to render locally; please fix it.\n\nError: {0}\n\nSource:\n{2}mermaid\n{1}\n{2}\n\nReply with the corrected, complete Mermaid code block only.");
-        Loc.Register(FixTruncated, "…（源码过长，已截断）", "… (the source was truncated)");
         Loc.Register(FixOrigin, "Mermaid 图修正", "Mermaid diagram fix");
         Loc.Register(EmptyPicture, "渲染结果为空图", "the SVG produced an empty picture");
         Loc.Register(
