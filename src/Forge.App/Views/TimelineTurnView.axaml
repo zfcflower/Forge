@@ -10,7 +10,7 @@
        card around it, so every gutter lands on the same x as the rows of every other transcript item. -->
   <StackPanel>
     <Grid ColumnDefinitions="Auto,*">
-      <views:TimelineGutter Role="TurnHeader" Kind="Turn" />
+      <views:TimelineGutter Role="TurnHeader" Kind="Turn" IsRunning="{Binding IsRunning}" />
       <Button Grid.Column="1"
               Classes="link"
               Margin="0,3,8,2"

@@ -60,7 +60,7 @@ internal static class TimelineStrings
 
         Loc.Register(StateRunning, "运行中", "running");
         Loc.Register(StateFailed, "失败", "failed");
-        Loc.Register(StateWarning, "需要处理", "needs attention");
+        Loc.Register(StateWarning, "已拒绝", "denied");
 
         Loc.Register(Node, "{0}，{1}", "{0}, {1}");
     }

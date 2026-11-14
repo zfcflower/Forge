@@ -19,11 +19,20 @@ internal static class TimelineLayout
     public static TimelineRowLayout Item(bool isFirst, bool isLast) => new(true, !isFirst, !isLast);
 
     /// <summary>
-    /// The turn header: turn metadata is not an event, so it has no node; it carries the axis through only when there is a
-    /// node above it and one below it (a visible block, a footnote, or a later item).
+    /// The turn header: turn metadata is not an event, so it normally has no node; it carries the axis through only when
+    /// there is a node above it and one below it (a visible block, a footnote, or a later item).
+    /// <para>The exception is a header with nothing visible of its own turn (no visible block, no footnote: still empty and
+    /// running, finished empty, or collapsed) that sits at an end of the transcript. Left node-less it would leave the
+    /// neighbouring node's line hanging into nothing (a user message above a turn that has produced no output yet; a
+    /// collapsed first turn above the second turn), so it becomes the end node of the axis itself.</para>
     /// </summary>
     public static TimelineRowLayout TurnHeader(bool isFirst, bool isLast, int visibleBlocks, bool hasFootnote)
     {
+        if (visibleBlocks == 0 && !hasFootnote && (isFirst || isLast))
+        {
+            return new(true, !isFirst, !isLast);
+        }
+
         var line = !isFirst && (visibleBlocks > 0 || hasFootnote || !isLast);
         return new(false, line, line);
     }

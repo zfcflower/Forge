@@ -127,6 +127,17 @@ public sealed class TimelineNodeMapTests
         Assert.Equal(TimelineNodeKind.Notice, TimelineNodeMap.EffectiveKind(TimelineNodeKind.Notice, TimelineNodeState.Idle));
     }
 
+    // A pending ask_user question maps to a notice that is merely running: only a failure may swap its icon for the error one.
+    [Theory]
+    [InlineData(nameof(TimelineNodeState.Running))]
+    [InlineData(nameof(TimelineNodeState.Warning))]
+    public void A_notice_that_is_running_or_warned_keeps_its_own_icon(string stateName)
+    {
+        var state = Enum.Parse<TimelineNodeState>(stateName);
+
+        Assert.Equal(TimelineNodeKind.Notice, TimelineNodeMap.EffectiveKind(TimelineNodeKind.Notice, state));
+    }
+
     [Fact]
     public void Every_other_kind_keeps_its_own_icon_in_every_state()
     {

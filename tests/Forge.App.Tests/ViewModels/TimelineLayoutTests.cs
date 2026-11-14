@@ -30,18 +30,20 @@ public sealed class TimelineLayoutTests
 
     // ---------------------------------------------------------------- TurnHeader
 
-    // A header draws both segments from one boolean: the axis either passes through it or it does not.
+    // A header normally draws both segments from one boolean: the axis either passes through it or it does not. The one
+    // exception is a header with nothing visible of its own turn at an end of the transcript (the rows with 0 blocks and
+    // no footnote that are first or last): it becomes the end node, so no neighbour's line hangs into nothing.
 
     [Theory]
-    [InlineData(true, true, 0, false, false, false, false)]
+    [InlineData(true, true, 0, false, true, false, false)]
     [InlineData(true, true, 0, true, false, false, false)]
     [InlineData(true, true, 1, false, false, false, false)]
     [InlineData(true, true, 1, true, false, false, false)]
-    [InlineData(true, false, 0, false, false, false, false)]
+    [InlineData(true, false, 0, false, true, false, true)]
     [InlineData(true, false, 0, true, false, false, false)]
     [InlineData(true, false, 1, false, false, false, false)]
     [InlineData(true, false, 1, true, false, false, false)]
-    [InlineData(false, true, 0, false, false, false, false)]
+    [InlineData(false, true, 0, false, true, true, false)]
     [InlineData(false, true, 0, true, false, true, true)]
     [InlineData(false, true, 1, false, false, true, true)]
     [InlineData(false, true, 1, true, false, true, true)]
@@ -49,7 +51,7 @@ public sealed class TimelineLayoutTests
     [InlineData(false, false, 0, true, false, true, true)]
     [InlineData(false, false, 1, false, false, true, true)]
     [InlineData(false, false, 1, true, false, true, true)]
-    public void A_turn_header_has_no_node_and_carries_the_axis_only_between_existing_nodes(
+    public void A_turn_header_has_no_node_unless_it_is_an_empty_end_of_the_transcript(
         bool isFirst, bool isLast, int visibleBlocks, bool hasFootnote,
         bool showNode, bool showTopLine, bool showBottomLine)
     {
@@ -145,54 +147,110 @@ public sealed class TimelineLayoutTests
 
     // ---------------------------------------------------------------- the continuity invariant
 
-    [Theory]
-    [InlineData(0, false)]
-    [InlineData(0, true)]
-    [InlineData(1, false)]
-    [InlineData(1, true)]
-    [InlineData(2, false)]
-    [InlineData(2, true)]
-    [InlineData(3, false)]
-    [InlineData(3, true)]
-    public void A_modeled_transcript_draws_exactly_one_contiguous_axis(int visibleBlocks, bool hasFootnote)
+    /// <summary>Where the modeled turn sits in the transcript.</summary>
+    public enum TurnPlace
     {
-        var rows = ModeledRows(visibleBlocks, hasFootnote);
+        First,
+        Middle,
+        Last,
+    }
 
-        // The model really is user message, node-less turn header, blocks, optional footnote, closing notice.
-        Assert.Equal(3 + visibleBlocks + (hasFootnote ? 1 : 0), rows.Count);
-        Assert.True(rows[0].ShowNode);
-        Assert.False(rows[1].ShowNode);
-        Assert.True(rows[^1].ShowNode);
+    public static TheoryData<TurnPlace, int, bool, bool> ModeledTurns()
+    {
+        var data = new TheoryData<TurnPlace, int, bool, bool>();
+        foreach (var place in Enum.GetValues<TurnPlace>())
+        {
+            for (var blocks = 0; blocks <= 3; blocks++)
+            {
+                foreach (var footnote in new[] { false, true })
+                {
+                    foreach (var collapsed in new[] { false, true })
+                    {
+                        data.Add(place, blocks, footnote, collapsed);
+                    }
+                }
+            }
+        }
 
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ModeledTurns))]
+    public void A_modeled_transcript_draws_exactly_one_contiguous_axis(TurnPlace place, int blocks, bool hasFootnote, bool collapsed)
+    {
+        var rows = ModeledRows(place, blocks, hasFootnote, collapsed);
+
+        // Whatever the turn shows, the transcript has at least one node (the user message, notice or the turn's own).
         AssertSingleContiguousAxis(rows);
     }
 
     /// <summary>
-    /// The rows of one modeled transcript: a user message, a turn header with <paramref name="visibleBlocks"/> visible
-    /// blocks and an optional footnote, and a closing notice. The turn is a middle item (a user message before it, a
-    /// notice after it), so it is neither the transcript's first nor last row.
+    /// The H3 regression, spelled out: a user message followed by a still-empty running turn must not leave the user row's
+    /// line hanging; the turn's header is the end node.
     /// </summary>
-    private static List<TimelineRowLayout> ModeledRows(int visibleBlocks, bool hasFootnote)
+    [Fact]
+    public void A_user_message_above_an_empty_last_turn_ends_on_the_turns_header_node()
     {
-        var rows = new List<TimelineRowLayout>
+        var rows = ModeledRows(TurnPlace.Last, 0, false, collapsed: false);
+
+        Assert.Equal(2, rows.Count);
+        Assert.True(rows[0].ShowBottomLine);
+        Assert.True(rows[1].ShowNode);
+        Assert.True(rows[1].ShowTopLine);
+        Assert.False(rows[1].ShowBottomLine);
+    }
+
+    /// <summary>The M1 regression: a collapsed first turn above a second turn is the axis start, not a hanging line.</summary>
+    [Fact]
+    public void A_collapsed_first_turn_starts_the_axis_for_the_turn_after_it()
+    {
+        var first = TimelineLayout.TurnHeader(isFirst: true, isLast: false, visibleBlocks: 0, hasFootnote: false);
+        var second = TimelineLayout.TurnHeader(isFirst: false, isLast: true, visibleBlocks: 0, hasFootnote: false);
+
+        Assert.True(first.ShowNode);
+        Assert.False(first.ShowTopLine);
+        Assert.True(first.ShowBottomLine);
+        Assert.True(second.ShowNode);
+        Assert.True(second.ShowTopLine);
+        Assert.False(second.ShowBottomLine);
+    }
+
+    /// <summary>
+    /// The rows of one modeled transcript. The turn (header, its visible blocks unless collapsed, optional footnote) sits
+    /// <paramref name="place"/>: a user message before it unless it is first, a closing notice after it unless it is last.
+    /// </summary>
+    private static List<TimelineRowLayout> ModeledRows(TurnPlace place, int blocks, bool hasFootnote, bool collapsed)
+    {
+        var visibleBlocks = collapsed ? 0 : blocks;
+        var hasBefore = place != TurnPlace.First;
+        var hasAfter = place != TurnPlace.Last;
+        var rows = new List<TimelineRowLayout>();
+        if (hasBefore)
         {
-            TimelineLayout.Item(isFirst: true, isLast: false),
-            TimelineLayout.TurnHeader(isFirst: false, isLast: false, visibleBlocks, hasFootnote),
-        };
+            rows.Add(TimelineLayout.Item(isFirst: true, isLast: false));
+        }
+
+        var isFirst = !hasBefore;
+        var isLast = !hasAfter;
+        rows.Add(TimelineLayout.TurnHeader(isFirst, isLast, visibleBlocks, hasFootnote));
         for (var i = 0; i < visibleBlocks; i++)
         {
-            rows.Add(TimelineLayout.TurnBlock(i, visibleBlocks, isFirst: false, isLast: false, hasFootnote));
+            rows.Add(TimelineLayout.TurnBlock(i, visibleBlocks, isFirst, isLast, hasFootnote));
         }
 
         if (hasFootnote)
         {
-            rows.Add(TimelineLayout.TurnFootnote(visibleBlocks, isFirst: false, isLast: false));
+            rows.Add(TimelineLayout.TurnFootnote(visibleBlocks, isFirst, isLast));
         }
 
-        rows.Add(TimelineLayout.Item(isFirst: false, isLast: true));
+        if (hasAfter)
+        {
+            rows.Add(TimelineLayout.Item(isFirst: false, isLast: true));
+        }
+
         return rows;
     }
-
     /// <summary>
     /// The axis is one contiguous run: it starts at the first node (no line above it, no stub before it), ends at the
     /// last node (no line below it, no stub after it), and every consecutive pair of rows inside the run is connected -

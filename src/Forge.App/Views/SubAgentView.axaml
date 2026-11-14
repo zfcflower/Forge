@@ -8,7 +8,7 @@
     <ListBox x:Name="Transcript"
              Grid.Row="0"
              ItemsSource="{Binding Transcript.Items}"
-             Padding="12,8"
+             Padding="{DynamicResource ChatTranscriptPadding}"
              SelectionMode="Single"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
 
