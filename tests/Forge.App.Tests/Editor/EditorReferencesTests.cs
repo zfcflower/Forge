@@ -152,5 +152,11 @@ public sealed class EditorReferencesTests : IDisposable
             Calls.Add((title, body));
             return Task.CompletedTask;
         }
+
+        public Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct)
+        {
+            Calls.Add((title, body));
+            return Task.FromResult(true);
+        }
     }
 }

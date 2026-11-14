@@ -24,6 +24,15 @@ internal static class RuntimeSettingsComposition
 
         var preferences = composition.Preferences;
 
+        // A cap edited while children are queued must reach the running trees now; the per-turn apply only covers the next turn.
+        preferences.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppPreferences.AgentsMaxParallelSubAgents))
+            {
+                composition.Runtimes.RefreshSubAgentLimits();
+            }
+        };
+
         SectionViewTemplate.Register<ModelsVisibilitySectionViewModel>(static () => new ModelsVisibilitySectionView());
         settings.Add(new SettingsSection(
             SettingsSectionIds.ModelsVisibility,

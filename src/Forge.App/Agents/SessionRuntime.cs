@@ -570,6 +570,21 @@ internal sealed class SessionRuntime : IDisposable, ISessionToolScope
     /// Hands the current sub-agent cap to the host when it differs from the one it last got, so an unchanged value never
     /// touches the host. Caller holds <see cref="gate"/>.
     /// </summary>
+    /// <summary>
+    /// Pushes the current sub-agent cap into the live host now, not at the next turn: a cap raised while children are queued
+    /// must start them at once. A session that has not built its host yet has nothing to update (the build reads the cap).
+    /// </summary>
+    internal void RefreshSubAgentLimits()
+    {
+        lock (gate)
+        {
+            if (host is { } live)
+            {
+                ApplySubAgentLimits(live);
+            }
+        }
+    }
+
     private void ApplySubAgentLimits(AgentHost target)
     {
         var limits = CurrentSubAgentLimits();

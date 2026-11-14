@@ -53,6 +53,10 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         services.Changed += OnProvidersChanged;
         // A save on the prompts page runs on the thread pool; the agent rows are rebuilt on the UI thread.
         this.promptTemplates.Changed += OnPromptTemplatesChanged;
+        if (preferences is not null)
+        {
+            preferences.PropertyChanged += OnPreferencesChanged;
+        }
         // The catalog is written off the UI thread (the daily refresh, the startup catch-up), so its notifications come back
         // through the injected post, exactly like the window's other background sources of change.
         services.ModelCatalog.Changed += OnCatalogChanged;
@@ -416,6 +420,11 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         disposed = true;
         services.Changed -= OnProvidersChanged;
         promptTemplates.Changed -= OnPromptTemplatesChanged;
+        if (preferences is not null)
+        {
+            preferences.PropertyChanged -= OnPreferencesChanged;
+        }
+
         services.ModelCatalog.Changed -= OnCatalogChanged;
         if (modelCatalogRefresh is { } refresh)
         {
@@ -488,6 +497,21 @@ internal sealed class ProvidersSettingsViewModel : NotifyingObject, IDisposable,
         OnPropertyChanged(nameof(AgentsModelHeader));
         OnPropertyChanged(nameof(AgentsThinkingHeader));
         Reload();
+    }
+
+    /// <summary>A model hidden or shown on the visibility page must reach the agent-defaults combos that are already built.</summary>
+    private void OnPreferencesChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AppPreferences.ModelsHidden))
+        {
+            post(() =>
+            {
+                if (!disposed)
+                {
+                    RebuildAgentRows();
+                }
+            });
+        }
     }
 
     private void OnPromptTemplatesChanged() => post(() =>

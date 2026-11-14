@@ -96,7 +96,8 @@ internal sealed class NotificationPermissionSettingsViewModel : ObservableObject
     }
 
     /// <summary>Drops the <see cref="Loc.LanguageChanged"/> subscription; idempotent.</summary>
-    public void Dispose()    {
+    public void Dispose()
+    {
         if (disposed)
         {
             return;

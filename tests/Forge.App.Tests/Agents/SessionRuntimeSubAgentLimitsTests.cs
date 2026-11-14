@@ -186,6 +186,116 @@ public sealed class SessionRuntimeSubAgentLimitsTests : IDisposable
         }
     }
 
+    private static bool IsRootTurn(ChatRequest request) =>
+        !LastUserText(request).StartsWith("child-", StringComparison.Ordinal);
+
+    [Fact]
+    public async Task A_refresh_starts_queued_children_without_a_new_turn()
+    {
+        limits = new SubAgentLimits(1, Enabled: true);
+        await using var rig = NewRig();
+        HoldChildren(rig);
+        try
+        {
+            await rig.TurnAsync();
+            var published = rig.Runtime.PublishedTools;
+            var spawned = Spawn(rig, "child-1", "child-2", "child-3");
+            var first = await gates.NextArrivalAsync();
+            await QueuedAsync();
+            await QueuedAsync();
+            var turnsBefore = rig.Provider.Requests.Count(IsRootTurn);
+
+            limits = new SubAgentLimits(3, Enabled: true);
+            rig.Runtime.RefreshSubAgentLimits();
+
+            // Both queued children reach the model with no turn run in between: the raise was pushed, not left for later.
+            var woken = new List<string> { await gates.NextArrivalAsync(), await gates.NextArrivalAsync() };
+            Assert.DoesNotContain(first, woken);
+            Assert.Equal(woken.Count, woken.Distinct(StringComparer.Ordinal).Count());
+            Assert.Equal(turnsBefore, rig.Provider.Requests.Count(IsRootTurn));
+            Assert.Same(published, rig.Runtime.PublishedTools);
+
+            gates.Release(first);
+            woken.ForEach(gates.Release);
+            var results = await Task.WhenAll(spawned).WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.All(results, static result => Assert.False(result.IsError, result.Text));
+            Assert.Empty(childEvents.OfType<AgentFailed>());
+        }
+        finally
+        {
+            gates.ReleaseAll("child-1", "child-2", "child-3");
+        }
+    }
+
+    [Fact]
+    public async Task A_refresh_before_the_host_exists_is_a_no_op_and_the_first_turn_still_reads_the_cap()
+    {
+        limits = new SubAgentLimits(1, Enabled: true);
+        await using var rig = NewRig();
+        HoldChildren(rig);
+        try
+        {
+            // No turn has run, so there is no host: nothing to update and nothing to throw about.
+            Assert.Null(Record.Exception(rig.Runtime.RefreshSubAgentLimits));
+
+            limits = new SubAgentLimits(2, Enabled: true);
+            Assert.Null(Record.Exception(rig.Runtime.RefreshSubAgentLimits));
+            await rig.TurnAsync();
+
+            // The host the first turn built read the cap at build time, so two children run and the third waits.
+            var spawned = Spawn(rig, "child-1", "child-2", "child-3");
+            var running = new List<string> { await gates.NextArrivalAsync(), await gates.NextArrivalAsync() };
+            await QueuedAsync();
+            running.ForEach(gates.Release);
+            gates.Release(await gates.NextArrivalAsync());
+            var results = await Task.WhenAll(spawned).WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.All(results, static result => Assert.False(result.IsError, result.Text));
+            Assert.Single(childEvents.OfType<AgentSubAgentQueued>());
+        }
+        finally
+        {
+            gates.ReleaseAll("child-1", "child-2", "child-3");
+        }
+    }
+
+    [Fact]
+    public async Task Lowering_the_cap_through_a_refresh_never_interrupts_a_running_child()
+    {
+        limits = new SubAgentLimits(3, Enabled: true);
+        await using var rig = NewRig();
+        HoldChildren(rig);
+        try
+        {
+            await rig.TurnAsync();
+            var spawned = Spawn(rig, "child-1", "child-2");
+            var running = new List<string> { await gates.NextArrivalAsync(), await gates.NextArrivalAsync() };
+
+            limits = new SubAgentLimits(1, Enabled: true);
+            rig.Runtime.RefreshSubAgentLimits();
+
+            // Both running children are over the new cap but keep going: neither is cancelled or failed by the lowering.
+            Assert.All(spawned, static task => Assert.False(task.IsCompleted));
+            Assert.Empty(childEvents.OfType<AgentFailed>());
+
+            // A child spawned now is held back until the tree is under the lowered cap.
+            var late = Spawn(rig, "child-3");
+            await QueuedAsync();
+
+            running.ForEach(gates.Release);
+            Assert.Equal("child-3", await gates.NextArrivalAsync());
+            gates.Release("child-3");
+
+            var results = await Task.WhenAll(spawned.Concat(late)).WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.All(results, static result => Assert.False(result.IsError, result.Text));
+            Assert.Empty(childEvents.OfType<AgentFailed>());
+            Assert.Equal(3, childEvents.OfType<AgentSubAgentFinished>().Count());
+        }
+        finally
+        {
+            gates.ReleaseAll("child-1", "child-2", "child-3");
+        }
+    }
+
     [Fact]
     public async Task Switching_spawning_off_takes_spawn_agent_out_and_keeps_the_control_tools()
     {
