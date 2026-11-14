@@ -149,7 +149,16 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | **W6** MCP 管理面 | 配置写入(原子写 + 同款互斥)、增删改/启停/测试/重连/工具清单/错误与 stderr 尾、从 Claude/Cursor 导入、预设;审批卡补 command/args/cwd/env/headers 键名与即时撤销 | `Forge.Mcp/McpConfig*.cs`、`McpServerManager.cs`、`McpServerState.cs`、`ViewModels/Settings/McpSettingsSectionViewModel.cs`(W0 已从 `InstrumentSettingsSections.cs` 拆出)、`Views/McpSettingsView*`、`Approval/**` | 4–5 天 |
 | **W7** Plan 会话 | 摘要面板 + 步骤与验证状态、修订历史、下一步、导出 Markdown、从计划开 PR | `Core/Storage/SqliteTodoStore.cs`(修订读写)、`Core/Storage/StorageSchema.cs`(v10→v11,W7 独占)、`ViewModels/PlanPanelViewModel*`、`Views/PlanPanelView*`、`ViewModels/MainWindowViewModel.Plan.cs` | 4–6 天 |
 | **W8** 资源检查器 | 运行中工具/命令与子 Agent 统一列表(耗时、日志尾、停止)、消费 `AgentToolProgress` | `ViewModels/SessionWorkspace*.cs`、`ViewModels/Transcript.Tools.cs`、`ViewModels/SessionInstrumentsViewModel.cs`、`Views/ResourceInspectorView*`、`ViewModels/MainWindowViewModel.Inspector.cs` | 3 天 |
+> **W8 已交付。** 实现说明见 `2026-11-13-w8-resource-inspector.md`。入口按用户拍板做在**输入条「资源 ▾」菜单的第五行**（不是标题栏按钮），范围起初是**活动会话**（换会话即关），W8 follow-up 按用户要求改为**所有打开会话、按会话分组**（活动会话排前，换会话只重排），工具行的停止改为只停该调用（Core 新增单调用取消，见实现说明第七节）。新增：`ViewModels/SessionWorkspace.Tools.cs`、`ViewModels/ResourceInspectorViewModel.cs`（占位替换）、`Settings/ResourceInspectorSettingsViewModel.cs`、`Views/ResourceInspectorSettingsSectionView*`、`Localization/Strings.Resources.cs`、`Services/TextTail.cs`；改动：`ViewModels/SessionWorkspace.cs`（partial + 进度消费接线）、`ViewModels/Transcript.Tools.cs`（`LiveToolViewModel`）、`ViewModels/SessionInstrumentsViewModel.cs`、`ViewModels/MainWindowViewModel.Inspector.cs`、`Views/ResourceInspectorView*`、`Views/ToolRowTailView.axaml`、`Views/ResourceInspectorSettingsSectionView*`、`Composition/InspectorComposition.cs`、`Forge.App/SPEC.md`。**破格改动的共享文件（已记录，勿重复）：** `Views/SessionView.axaml`（一行菜单项，入口必须挂在「资源」按钮上）、`ViewModels/Transcript.cs`（`AddTool` 返回刚建的行，2 行）、`Automations/CiChain.cs`（`Tail` 委托给 `TextTail.Keep`，与 W5 分支同一处改动）、`ViewModels/MainWindowViewModel.cs`（`InitializeInspector()`、会话构造多一个 `openInspector:` 实参、`Dispose` 里一行 `CloseInspector()`）、`Views/SubAgentView.axaml`（停止按钮改绑 `CanStop`,排队中的子 Agent 不再显示一枚点不动的按钮）、测试侧 `StringTableTests`（前缀表加 `resources`）与 `SettingsPanelTests`（`KnownSectionIds` 补齐漏掉的 `SettingsSectionIds.Inspector`）各一行。**跨波提示：** `Services/TextTail.cs` 与 W5 分支为同一文件同一内容（add/add 同文本，合并取任一）。
+
 | **W9** 首启与项目创建 | 首启向导(语言/提供商/通知权限,权限一步只调 `INotificationPermissionGuide`,不碰 `Notifications/**`)、克隆仓库(带进度与取消)、新建项目目录 + `git init` | `Views/Onboarding*`、`ViewModels/Onboarding*`、`ViewModels/MainWindowViewModel.Onboarding.cs`、`Forge.Workspace/Git/GitCli.Clone.cs`(W0 预建)、`Services/ProjectCreation*` | 3 天 |
+
+> **W9 已交付,并在三处碰了清单外的文件(已记录,勿重复踩)。**
+> **交付面。** ①首启向导 `ViewModels/OnboardingViewModel.cs` + `Views/OnboardingView.axaml`:语言(写 `AppPreferences.Language`,当场切换、跳过也生效)、提供商(只显示 `ProviderServices.Catalog` 的状态并深链到 `provider` 分区,**不重写** `ProviderEditorWindow` 的校验/测试/保存链)、通知权限(只经冻结的 `INotificationPermissionGuide` 读状态/开设置页,`Notifications/**` 一行未改)。是否显示由 `Services/OnboardingState.cs` 的一条 `ui_state`(`onboarding`,版本 1)决定;判定是“该行不存在**且**没有仓库项目”——不能只数行数,因为每个安装启动时都会注册常规工作区(`ProjectKind.General`),按行数会让全新安装永远看不到向导(测试会话发现并钉住了这个真实缺陷)。触发点在窗口且由 `App` 置 `MainWindowViewModel.ShowFirstRunWizardOnStartup = true`,所以自带窗口的 headless 宿主不会突然被浮层挡住。②添加项目 `ViewModels/MainWindowViewModel.Projects.cs`:`PickAsync` 选 已有文件夹 / 克隆仓库 / 新建项目,三条分支共用“注册 + 刷新项目缓存 + 刷新两棵树”收尾,注册抛错发一条错误通知而不是逃进调度器。③`Services/ProjectCreationService.cs`(名字规则、URL 建议名、目标目录、`git init`、克隆)+ `ViewModels/ProjectCreationViewModel.cs` + `Views/ProjectCreationDialog.axaml`(进度、停止、失败留在窗口里);名字规则的**磁盘存在性检查**在 200 ms 防抖后跑在线程池上(`ValidateNameShape` 是零 IO 的那一半),UI 线程不碰文件。④`projects` 设置分区(`Settings/ProjectsSettingsSectionViewModel.cs` + `Views/ProjectsSettingsSectionView.axaml`,克隆超时与默认目录,读的是 §6.2 登记的两项)。⑤`Forge.Workspace/Git/GitCli.Clone.cs`:+ 共用的 `GitRunOptions.CarriageReturnEndsLine`。
+> **破了清单的文件(3 个产品文件 + 2 个 spec)。** `src/Forge.Workspace/Git/GitExecution.cs`(`GitRunOptions` 的 record 不能拆 partial,新选项只能加在那里)与 `src/Forge.Workspace/Git/GitCli.cs`(`PumpAsync`/`Consume` 多一个 `carriageReturnEndsLine` 参数,才能把 `git clone --progress` 的 `\r` 原地重绘变成逐条更新;开关默认关,关着时逐字节不变,`StreamLinesAsync`/`StreamRecordsAsync` 不受影响)——这两个文件没有任何波次占用,而“带进度”离开它就是假的。`App.axaml.cs` 加一行 `ShowFirstRunWizardOnStartup = true`;`MainWindow.axaml.cs` 加 `ShellDialogs.RunProjectCreationAsync`(对话框宿主)与 `InitializeAsync` 里对向导的那次询问;`ViewModels/MainWindowViewModel.cs` 只把 `AddProjectAsync` 的方法体换成一行转到 `AddProjectFlowAsync`,并在 `IDialogService` 上加一个默认返回 null 的 `RunProjectCreationAsync`(五个测试双因此不用改)。**未做**:向导不内嵌提供商编辑器(会复制一条写入口)、不做浅克隆/子模块/`--filter`。
+> **测试**:`tests/Forge.Workspace.Tests/Git/GitCliCloneTests.cs`(33:进度解析表、真仓库克隆、非空/空目标、`-` 开头与相对目标被拒、失败与取消的清理、坏回调、用一个假可执行文件确定性地钉住 `\r` 与跨 chunk CRLF),`tests/Forge.App.Tests` 的 146 个 W9 用例(`Services/ProjectCreationServiceTests`、`Services/OnboardingStateTests`、`ViewModels/{ProjectCreation,Onboarding}ViewModelTests`、`Settings/ProjectsSettingsSectionTests`、`Views/{ProjectsSettingsSectionView,ProjectCreationDialog}Tests`、`Foundation/OnboardingViewTests`、`Workbench/{OnboardingShell,AddProjectFlow}Tests`)。顺带两处既有测试的必要更正:`StringTableTests.KnownPrefixes` 加 `onboarding`/`projectCreate`/`projectFlow`,`Foundation/SettingsPanelTests.KnownSectionIds` 补 `projects`(W0 分配了 id 却没登记进那张表),`FileIndexTests` 的 `Services.FileIndex` 改成全名(新的 `Forge.App.Tests.Services` 命名空间把它遮蔽了)。
+> **评审发现并已修的(均在本波范围内,故未遗留)。** ①`ProjectCreationDialog` 在成功那一次关不掉自己(`Completed` 在 `isRunning` 落回 false 之前发,而 `OnClosing` 只看 `IsRunning`),后果是 `ShowDialog` 永不完成、建好的仓库从不被登记——改成“运行状态落定后才发完成” + `OnClosing` 只否决用户主动关窗(`!e.IsProgrammatic`),并补了真空窗用例(把两半都拆掉时它 60 s 超时失败,证明确实能抓到这个缺陷)。②“克隆超时 0 = 不限”被实现成传 `null` 给 `GitCloneOptions.Timeout`,而 null 的含义是“用 git 层默认的 2 分钟”,默认配置下大仓库会在用户被告知“不限”的情况下被杀——改成 `Timeout.InfiniteTimeSpan`,用例同步改为断言它。③超时失败的对话框只显示 stderr(本波之后全是进度重绘行),丢掉唯一说清原因的一句——超时(`ExitCode < 0`)改用 `GitException.Message`。④`ShowOnboarding` 替换模型前不 `Dispose`、窗口销毁时也不向导的旧订阅——两处补上。
+> **合并 main 后的第二轮评审(安全与清理)又修了六条。** ⑤克隆地址没有 scheme 白名单:`ext::sh -c …` 这类 `transport::address` 能过 `IsUsableUrl`,只靠用户的 git 配置挡——现在应用层只收 https/http/ssh/git+ssh/ssh+git/git/file、scp 形式与本地路径,git 层再给克隆进程设 `GIT_ALLOW_PROTOCOL`(压过任何 `protocol.*.allow`)。⑥凭据泄露:`GitException` 的消息与 `Arguments` 里是原样 URL,超时一路又直接把消息显示在对话框里——现在消息/参数/stderr 一律经 `GitCli.RedactCredentials` 脱敏;带密码的地址(会进 git 的 argv)在对话框里单独提示并拒绝,只带用户名的照常放行。⑦调用方准备的空目标目录在克隆或 `git init` 失败/取消后留着 git 写的半截 `.git`,重试被判“已存在”——现在保留目录但清空(`GitCli.DeleteTreeQuietlyAsync(keepRoot)`,`ProjectCreationService` 原先复制的一份删除逻辑也改为调用它)。⑧相对父目录会解析到进程工作目录——改为提示并拒绝,目标路径栏不再显示那个位置。⑨`OnboardingState` 在 UI 线程直接读写 `ui_state`,改走 `BackgroundRead`(与 `LayoutStateLoader` 一致)。⑩`ProjectCreationViewModel` 每次运行的 `CancellationTokenSource` 不释放——运行结束即释放。**未做**:向导没有“再次运行”入口(删掉 `ui_state` 的 `onboarding` 行即可重新触发;入口要落在调色板/菜单,不归本波);只带用户名的令牌式地址(`https://<token>@github.com/…`)仍会进 argv,消息里已脱敏。
 | **W12** 评审包 + `request_review` | 给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话);评审是产品核心目标,放在并行批里 | `Forge.Core/Prompts/BuiltInAgents.cs`、新建 `Forge.Core/Tools/RequestReview*.cs` + `ReviewPackage*.cs`、`Localization/Strings.Review.cs` | 4 天 |
 | **W11** 流程图 / Mermaid(**等拍板,且串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 
@@ -221,3 +230,68 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 隐私统计/问卷/反馈、JetBrains Central;不引新包前提下的语法高亮替换、tree-sitter;PDF 预览在拍板前不做(占位页);网页不在面板内渲染,只给可编辑源码与「在浏览器中打开」。
 
 **W0 收尾补充**:新增设置分区的视图不再改 `App.axaml`——`App.axaml` 已挂一个 `Views/SectionViewTemplate`,各波在自己的 `*Composition.Register` 里调 `SectionViewTemplate.Register<TViewModel>(() => new XView())` 即可。`chat` 分区归 W5(Mermaid 与工具图片缩略图两项设置的视图都放进 W5 的 chat 分区视图;W4 只提供数据项,不建分区)。
+
+## 八、W12 交付记录(评审包 + `request_review`)
+
+开工前分支落后 `main` 55 个提交(W0–W5、W7 已合入,`pr_create` 的四道闸门、`GitReviewLedger`、计划面板都在),先快进再动手。开工期间 `main` 又进了两波:W6(MCP 管理与工具暴露)、W8(资源检查器),收尾时分两次 `git merge main`——W6 那次只有一处真冲突(`AppComposition.cs` 里 `runtimeServices.Reviews` 与 `runtimeServices.Mcp` 相邻两行,两条都保留),W8 那次全部自动合并(两个 SPEC 与计划文档的不同段落);每次合并后都重新构建并重跑相关过滤(见下验证)。
+
+**范围**:计划里 W12 的两条——给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话)。三条边界在开工前由用户拍定:
+
+1. **评审目标两种都要**:`step_id`(审一个计划步骤,用它自己的那次提交)与自由范围(`base` + `paths`,默认仓库默认分支,含未提交与未跟踪)。
+2. **一次评审不满足 `pr_create` 的自评闸门**:闸门仍只认本会话在这个 HEAD 上读过完整 `git_diff`;Reviewer 的 `git_diff` 记在它自己的子会话上(`GitReviewLedger` 按 sessionId + worktree 分键)。
+3. **`request changes` 只回会话**:工具结果由归一化结论 + 下一步组成,代码层面不硬阻断任何东西;不落存储、不升 schema、不改计划面板。
+
+**落点**(对照计划给的独占路径):
+
+- `src/Forge.Core/Tools/ReviewPackage.cs`(契约,主 Agent 写,FROZEN)、`ReviewPackageText.cs`(包渲染)、`RequestReviewVerdict.cs`(结论归一化)、`RequestReviewTool.cs`(工具)。
+- `src/Forge.Core/Prompts/BuiltInAgents.cs`:Reviewer 白名单加只读 `git_diff`,提示词加一段"你会收到评审包,diff 被截断时用 `git_diff` 读其余"。
+- `src/Forge.Core/Agents/AgentHost.cs`:`AgentHostOptions.Reviews`(可空)+ 注册 `request_review`(没有实现就没有这个工具)。
+- `src/Forge.App/Git/ReviewChangeSetSource.cs`:实现 `IReviewChangeSetSource`,用 `GitCli` 公开 API;`AgentRuntimeServices.Reviews` 与组合根接线;`ToolCatalog` 把它归到 `agents` 组。
+- 规格:`Forge.Core/SPEC.md`(评审工具一段 + 未决两条)、`Forge.App/SPEC.md`(会话工具面一段)、`Forge.IO/SPEC.md`(白名单那句不再笼统地说"Scout/Plan/Reviewer 用前面四个")。
+
+**偏差(已记录)**:
+
+1. **没有新建 `Localization/Strings.Review.cs`**。W12 没有用户可见的新表面:工具行显示工具名与结果(与其他工具一样),评审结论是模型可读的英文。计划本身在 W0 已否掉"建空表"的做法,所以不为凑文件名建一张空表;要让评审有本地化界面,应该是结论持久化/计划面板显示那一档(见下面的延后项)。
+2. **动了一个 `Forge.Workspace` 文件**:`GitCli.Review.cs` 的 `EmptyTreeSha` 由 `private` 提升为 `public`。评审"仓库的第一个提交"必须对空树做 diff,而那个常量只能有一份定义。没有新增 API、没有改行为。
+3. **动了三个计划外的 App 文件**(`SessionRuntime.cs` 两行、`AppComposition.cs` 三行、`ToolCatalog.cs` 两行):`request_review` 只有在组合根把 git 实现交出去时才存在,而 `FeatureComposition` 的各模块拿不到 `GitCli`,所以运行期接线只能留在 `Create()`。
+4. **包内上限**(起初是内部常量,后续已进设置,见第二轮评审之后的「上限进设置」):包内 diff 48000 字符、提交清单 50 行与文件清单 200 行各自独立、每个文本字段 2000 字符(现为 `GitReviewDiffMaxChars`/`GitReviewMaxCommits`/`GitReviewMaxFiles`/`GitReviewFieldMaxChars` 的默认值);结论原文 8000 字符仍是内部常量。它们是防止子 Agent 上下文爆炸的边界,与 `AgentLoop` 的 artifact 阈值同性质;`diff` 与清单的 `stat_only` 退路都是 `git_diff`。
+5. **评审方式可配置未做**(`goal-and-requirements.md` 的"Reviewer 子 Agent 一次评审,或人工逐行评审"):需要设置项 + 一条"步骤提交后自动评审"的触发路径,属于新的产品面,未在 W12 授权范围内。结论也不持久化。
+
+**验证**(合入前与两次 `git merge main`(W6、W8)之后各跑一遍,数字一致):
+
+- `dotnet build Forge.slnx` → 0 警告 0 错误(含 Native AOT 分析器)。
+- `Forge.Core.Tests --filter "Tools|Agents"` → 825 通过;`--filter "Review|AgentCatalog"` → 90 通过。
+- `Forge.App.Tests --filter "Forge.App.Tests.Git"` → 413 通过;`--filter "Localization|MinorRegression|ReviewChangeSetSource|Settings"` → 340 通过(前三项是仓库硬门槛,`Settings` 是因为 W6/W8 都改过设置与 `SessionRuntime`/`ToolCatalog`/`AppComposition` 一带)。
+- `Forge.Workspace.Tests --filter "Git"` → 1006 通过(`EmptyTreeSha` 提高可见性 + 新增 `GetDiffSnapshotAsync`);这一条在合并 W6/W8 前跑,`Forge.Workspace` 没被那两波改过。
+- 未跑全量 `dotnet test`(按仓库约定,全量混着与本次无关的偶发失败);只跑与改动落点相关的过滤。渲染样例人工核对过一次(评审包的段落与空行可读,收窄与截断信息自述)。
+
+**测试 Agent 拉出来的四个真问题(已改)**——它们不是测试补丁,而是实现缺陷:
+
+1. 结论行只往下扫 40 行:把结论写在前面、补充说明写在后面的 Reviewer 会被判成 `unstructured`,代价是多跑一轮评审。改成扫全文。
+2. `AppendClamped` 无换行时取“第一个空格前”,一个 2500 字符的 URL 前面写着 `Fix ` 时,意图到达 Reviewer 只剩 `Fix…`。改成只在词边界能保留 ≥3/4 字段时才采用,否则硬截。
+3. 用户改写 Reviewer 模板把 `request_review` 加进白名单后,评审可以要求再评审(靠深度上限兜住,但会白烧 token)。按 agent 名拦下。
+4. 子 Agent 被深度上限拒绝时的文案只说“不能派生”,不指向评审。前缀改成 `The review could not be started: `。
+
+另外两处一致性修正:分支评审的**提交清单也按 `paths` 收窄**(否则评审包里会列出全部不在范围内的提交);`ReviewChangeSetSource` 把“是否 git 仓库”的检查移进 `try`,git 起不来时也变成可读文本而不是原始异常。
+
+**独立评审会话(deepseek,与实现/测试会话分开)拉出的问题(已改)**:
+
+1. **blocking——基准没解析成提交,比较语义也错。** 原实现把 `base` 原样交给 `git diff <base>`(两点语义),而 `git_diff`/PR 正文/`pr_create` 全是 `base...HEAD`。默认基准 `origin/main` 只要 fetch 过一次就越过分叉点,上游新提交会在包里显示成“本次变更在删除它们”,Reviewer 会据此报假 blocking;同时 `Base` 是 ref 名却被 `ShortSha` 截断,包里印 `base origin/`。现改为先 `RevParse` 成提交、再取与 HEAD 的 merge-base,`Base` 因此恒为 sha;与 HEAD 无共同历史时 `Failed`。
+2. **major——收窄信息没进包。** `Paths` 作用在 diff/文件表/提交表上,但包里不写“只看了这些路径”,Reviewer 分不出“别处没改”与“被过滤掉了”。`ReviewChangeSet` 增 `Paths` 与 `CommitsTruncated`,包内自述 `narrowed to: …`,计数在截断时写 `at least N commits`。
+3. **minor——提交数被当成总数,且长提交历史会把文件表挤掉。** 提交清单上限 200 写死且与文件表共享 200 行预算,`... and N more` 永远不会触发。现拆为各自独立预算(提交 50 行、文件 200 行),源取“上限+1”条以区分“恰好”与“被截断”。
+4. **minor——同一份 diff 跑两个 git 进程,且注释谎称两者同源。** 新增 `GitCli.GetDiffSnapshotAsync`(一次捕获同时给文本与文件,`GetDiffAsync` 改为它的 `.Files`),评审只调它;解析/补未跟踪的逻辑仍只有一份。
+5. **minor——提交对象被抹掉时给模型的是 git 原文。** 先 `rev-parse <sha>^{commit}` 判存在,不存在就返回“这个提交在本仓库里不存在”。
+6. **测试盲区已补**:基准领先 HEAD 的三点语义、默认基准解析成 sha(不再出现 `origin/`)、`GitCli` 提交对象丢失、`MaxParallelSubAgents = 1` 下 `Detach` 必需(实测把 `Detach` 拿掉该用例会 15s 超时)、`step_id` 指向 `CommitId == null` 的步骤、收窄字段与截断计数。
+
+**合入前复核(第二轮评审)拉出的问题(已改,各有测试)**:
+
+1. **被停止的 Reviewer 的部分文本会被当成结论。** `sub_agent_stop` 停掉的 Reviewer 若已写过 `verdict: approve`,工具会报通过。`SubAgentOutcome` 增 `Stopped`,`RequestReviewTool` 见到它直接返回错误“没有结论”,不解析原文。
+2. **子 Agent 开关关掉后 `request_review` 仍可派生 Reviewer。** `SessionRuntime.ApplyDisabledTools` 改为撤下 `SpawningTools = [spawn_agent, request_review]`。
+3. **截断退路指向裸 `git_diff`。** 裸调用比较默认分支,与自定义 `base`、单提交评审不是同一变更集;现在提示带 `{"base": "<sha>"}`,单提交时声明该范围还含之后的提交,根提交指向 `read`。`ReviewChangeSet` 增 `SingleCommit`。
+4. **每个未跟踪文件读满 1MB 只为列出它。** 改为只探 8000 字节(与 git 二进制判定窗口一致);内容本就不进包。
+5. **`narrowed to:` 路径列表无上限**,改按 2000 字符字段上限截断;**无换行 diff 的截断可能劈开代理对**,已避开。
+6. 测试补齐:停止/父取消/同回合两个评审并发/超长原文的结论读取/截断时给出可复现基准;源侧删除、重命名、二进制、未跟踪二进制窗口、超出捕获上限、提交清单截断(上限经构造参数注入)、空变更集;子 Agent 开关与 `request_review` 联动。
+
+**上限进设置(已实施,分支 `review-limits-settings`)**:包内 diff 字符、提交清单行数、文件清单行数、文本字段字符数四项进了 `AppPreferences`(`GitReviewDiffMaxChars` 1000–500000 默认 48000;`GitReviewMaxCommits` 5–500 默认 50;`GitReviewMaxFiles` 20–2000 默认 200;`GitReviewFieldMaxChars` 200–20000 默认 2000),界面在 `git` 设置分区;Core 以 `ReviewPackageLimits`(默认即旧常量)经 `AgentHostOptions.ReviewLimits` 每次评审现读。未跟踪文件的 8000 字节探测与 git 的二进制判定窗口一致,保持内部常量。
+
+**仍未改(记录原因)**:没有墙钟超时,评审与 `spawn_agent` 一样由 MaxTurns 100 与深度 3 兜住;超过 git 8MB 捕获上限时评审以可读文本失败而不是回落到 stat。

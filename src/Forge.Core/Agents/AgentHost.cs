@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Forge.Abstractions;
 using Forge.Core.Providers;
 using Forge.Core.Prompts;
+using Forge.Core.Tools;
 
 namespace Forge.Core.Agents;
 
@@ -43,6 +44,15 @@ public sealed record AgentHostOptions
     /// Null leaves step commits to the host application, such as the TODO panel.
     /// </summary>
     public IStepCommitter? StepCommitter { get; init; }
+
+    /// <summary>Registers the <c>request_review</c> tool when set; the app implements it over its git layer (Core has no git).</summary>
+    public IReviewChangeSetSource? Reviews { get; init; }
+
+    /// <summary>
+    /// How much of a change set the review package carries, read when each review is built so a settings change applies to
+    /// the next one. Null means <see cref="ReviewPackageLimits.Default"/>. Only used together with <see cref="Reviews"/>.
+    /// </summary>
+    public Func<ReviewPackageLimits>? ReviewLimits { get; init; }
 
     /// <summary>
     /// The prompt templates this host was built from (<see cref="Prompts.Templates.PromptTemplateStore.Resolve"/>). The
@@ -136,6 +146,11 @@ public sealed class AgentHost
         builtIns.Add(new SubAgentFollowUpTool(scheduler));
         builtIns.Add(new SubAgentStopTool(scheduler));
 
+        if (options.Reviews is { } reviews)
+        {
+            builtIns.Add(new RequestReviewTool(scheduler, reviews, options.Todos, options.ReviewLimits));
+        }
+
         var compactor = options.Compactor
                         ?? (options.Store is { } summaryStore
                             ? new SummaryCompactor(
@@ -199,6 +214,18 @@ public sealed class AgentHost
     public ISubAgentControl SubAgentControl => scheduler;
 
     public ToolRegistry Tools => toolSurface.Tools;
+
+    /// <summary>
+    /// Stops one running tool call of this host's tree - the root's or any sub-agent's, keyed by the agent id and call id of
+    /// its <see cref="AgentToolStarted"/> - without stopping the turn: a shell command's process tree is killed, a spawned
+    /// child is cancelled, and the model receives an error result saying the user cancelled the call, then continues.
+    /// Thread-safe and non-blocking (the cancellation callbacks run on the thread pool). False when no such call is running.
+    /// </summary>
+    public bool CancelToolCall(string agentId, string callId) =>
+        !string.IsNullOrEmpty(agentId) && !string.IsNullOrEmpty(callId) && loop.CancelToolCall(agentId, callId);
+
+    /// <summary>Tool calls of this tree that can be stopped right now; zero between calls. For tests and diagnostics.</summary>
+    internal int RunningToolCallCount => loop.RunningToolCallCount;
 
     /// <summary>
     /// Host side of <c>spawn_agent</c>: starts a <paramref name="kind"/> sub-agent under <paramref name="root"/> outside a

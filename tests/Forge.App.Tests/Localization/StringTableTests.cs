@@ -20,7 +20,8 @@ public sealed class StringTableTests
     {
         "shell", "window", "workbench", "status", "provider", "providers", "diag", "dialog",
         "project", "session", "turn", "subagent", "files", "changes", "todo",
-        "review", "spec", "problems", "language", "settings", "format", "terminal", "appearance", "Extensions", "git", "editor", "lifecycle", "notifications", "automations", "modelCatalog", "prompts", "questions", "web", "compaction", "network", "modelsVisibility", "agents", "idleArchive", "plan", "chat", "checks", "palette"
+        "review", "spec", "problems", "language", "settings", "format", "terminal", "appearance", "Extensions", "git", "editor", "lifecycle", "notifications", "automations", "modelCatalog", "prompts", "questions", "web", "compaction", "network", "modelsVisibility", "agents", "idleArchive", "plan", "chat", "checks", "palette", "resources",
+        "onboarding", "projectCreate", "projectFlow",
     };
 
     private static readonly Regex Cjk = new("[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]", RegexOptions.Compiled);
@@ -183,20 +184,5 @@ public sealed class StringTableTests
         Assert.True(violations.Count == 0, "unregistered .axaml keys:\n" + string.Join("\n", violations));
     }
 
-    /// <summary>Walks up from the test binaries to the checkout root (the directory holding Forge.slnx).</summary>
-    private static string? FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Forge.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
-    }
+    private static string? FindRepositoryRoot() => RepoRoot.Find();
 }

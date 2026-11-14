@@ -10,6 +10,13 @@
     <PackageReference Include="Avalonia.Headless" Version="12.1.6" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Stamps the checkout root so source-scanning tests work with any output directory. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>ForgeRepoRoot</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../..'))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Forge.App\Forge.App.csproj" />
   </ItemGroup>
 </Project>

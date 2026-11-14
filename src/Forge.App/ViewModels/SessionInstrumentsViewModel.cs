@@ -55,6 +55,10 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
     private readonly Func<string?> currentProvider;
     private readonly HashSet<string> usedTools = new(StringComparer.Ordinal);
     private readonly HashSet<string> usedSkills = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The window's resource inspector; null leaves its menu row out rather than showing a dead entry.</summary>
+    private readonly Action? openInspector;
+    private int runningResources;
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     private IReadOnlyList<SlashEntry> skills = [];
@@ -83,7 +87,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         ISessionInstrumentSources sources,
         Func<IReadOnlyList<string>> availableTools,
         Func<string> currentModel,
-        Func<string?>? currentProvider = null)
+        Func<string?>? currentProvider = null,
+        Action? openInspector = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         this.session = session;
@@ -91,6 +96,9 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         this.availableTools = availableTools ?? (static () => []);
         this.currentModel = currentModel ?? (static () => string.Empty);
         this.currentProvider = currentProvider ?? (static () => null);
+        this.openInspector = openInspector;
+
+        OpenInspectorCommand = new RelayCommand(() => this.openInspector?.Invoke(), () => CanOpenInspector);
 
         OpenApprovalsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Approvals));
         OpenSkillsCommand = new RelayCommand(() => this.sources.OpenSettingsSection(Preferences.SettingsSectionIds.Skills));
@@ -681,6 +689,45 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
 
     public RelayCommand OpenToolsCommand { get; }
 
+    // ---------------------------------------------------------------- the resources menu's inspector row
+
+    /// <summary>False only when no window wired the overlay (a test, a standalone view), which hides the row instead of disabling it.</summary>
+    public bool CanOpenInspector => openInspector is not null;
+
+    /// <summary>Opens the window's resource inspector; the row lives in the strip's resources menu.</summary>
+    public RelayCommand OpenInspectorCommand { get; }
+
+    /// <summary>
+    /// "运行中的资源…", with this session's live count when something runs: the strip sits in the composer, so it is the one
+    /// place a user can see that commands are still going without opening the inspector. Derived on every read, so a
+    /// language switch and a count change both only re-raise it.
+    /// </summary>
+    public string OpenInspectorMenuText => runningResources > 0
+        ? ResourceInspectorStrings.MenuCount(runningResources)
+        : ResourceInspectorStrings.Menu;
+
+    public string OpenInspectorTooltip => ResourceInspectorStrings.MenuTooltip;
+
+    /// <summary>Rows the inspector would list right now (running calls plus every live sub-agent, a queued child included).</summary>
+    public int RunningResources => runningResources;
+
+    /// <summary>
+    /// Records how many rows the inspector would list right now (running calls plus every live sub-agent, a queued child
+    /// included); the session pushes it whenever that set changes. Equal counts are ignored, so a redundant push costs nothing.
+    /// </summary>
+    public void NoteRunningResources(int running)
+    {
+        var next = Math.Max(0, running);
+        if (next == runningResources)
+        {
+            return;
+        }
+
+        runningResources = next;
+        OnPropertyChanged(nameof(RunningResources));
+        OnPropertyChanged(nameof(OpenInspectorMenuText));
+    }
+
     /// <summary>Records one tool call of this session (root or child): the numerator of the tool counter.</summary>
     public void NoteToolUsed(string? toolName)
     {
@@ -897,6 +944,8 @@ internal sealed class SessionInstrumentsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(ToolsLabel));
         OnPropertyChanged(nameof(ResourcesLabel));
         OnPropertyChanged(nameof(ResourcesTooltip));
+        OnPropertyChanged(nameof(OpenInspectorMenuText));
+        OnPropertyChanged(nameof(OpenInspectorTooltip));
         OnPropertyChanged(nameof(ApprovalMenuText));
         OnPropertyChanged(nameof(SkillMenuText));
         OnPropertyChanged(nameof(McpMenuText));

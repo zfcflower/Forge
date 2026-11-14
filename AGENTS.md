@@ -2,15 +2,6 @@
 
 这些规则约束**开发 Forge 这个产品时的 Agent 分工**,不是 Forge 自身的运行时行为。
 
-## 角色分工
-
-| 角色 | 模型 | 负责 |
-|---|---|---|
-| 主 Agent(规划/调度) | `claude-bridge/claude-opus-5-5:medium`(中推理) | 读代码与 spec、拆解任务、写接口与骨架、派活、复核结果、合并、更新 spec、提交。能并行时才派活,不能并行时自己实现。 |
-| 实现 Worker | `opencode-go/deepseek-v4.1-flash:xhigh`(超高推理) | 按任务写实现代码。只在自己副本里工作,测试通过后只拷回自己负责的路径。 |
-| 测试 | `opencode-go/muse-spark-1.3-contributor:xhigh`(超高推理) | 只编写测试,不做 review。 |
-| Review | `opencode-go/gpt-6-luna`;该模型不在 opencode-go 目录时回退 `opencode-go/glm-5.3-flash` | 只读评审,输出实质性问题与结论。 |
-
 ## 评审标准
 
 评审不止于找代码 Bug,三项按优先级排序:
@@ -23,12 +14,27 @@
 ## 派活规则
 
 - **先问能不能并行,再决定派不派活**:只有当拆出的多个任务互不依赖、可以同时交给多个子 Agent 时,才用子 Agent 并行做;拆不出并行(单任务、有先后依赖、上下文紧密耦合)时,主 Agent 自己完成,不要为了“守分工”把单个任务外包给一个 Worker 再等它回来。
-- 测试与评审必须使用彼此独立的会话。
+- 测试与评审必须使用彼此独立的会话，模型不能与Worker模型相同。
 - 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs /R:1 /W:1 /NFL /NDL /NJH /NJS`:`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节在能并行时交给 Worker,不能并行时自己写。
-- 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**、不跑全量 `dotnet test`,并检查是否越界改动,再决定是否采纳。全量约 5 分钟,且混着与本次改动无关的偶发失败,判不出真伪;相关范围按改动落点定——改了 `src/Forge.App/Workbench/`、`Resources/` 或视图就带 `Forge.App.Tests.Workbench`;改了 `.cs`/`.axaml` 源文件就再加 `Localization` 与 `MinorRegressionTests`(它们扫源码,是硬门槛);只改文档/spec 时无需跑测试。
-- 本地跑测试而 `Forge.App` 正开着时,`src/Forge.App/bin/Debug/net11.0/` 被进程锁住,构建以 `MSB3027`/`MSB3026` 失败(不是代码问题)。用 `dotnet test <proj> -p:BaseOutputPath=artifacts/<name>/` 重定向输出。**输出目录必须留在仓库内**:`KeyRegistryTests`、`NoHardcodedChineseTests`、`StringTableTests`、`MinorRegressionTests` 从测试程序集往上找 `Forge.slnx` 读源码,放到仓库外(如 `D:/tmp/...`)时它们会以“找不到仓库根”失败,看起来像真失败。
+- 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**(见下节)、并检查是否越界改动,再决定是否采纳。
+- **进程锁(`MSB3027`/`MSB3026`)的处理:让长驻进程换目录,而不是让每次构建/测试换目录。** 锁的来源只有两类,都不是代码问题:(a) 人在开着 `Forge.App`;(b) 上一次被中断的测试留下的 `testhost`/`ExtensionHost` 孤儿进程(也会让源码扫描类测试出现假红)。
+  1. **默认不要给 `dotnet build`/`dotnet test` 加 `-p:BaseOutputPath=...`**,测试用默认 `bin/`,不新建逐任务的 `artifacts/<name>/`(不会被清理,会堆积)。万一必须重定向,输出放哪都行:源码扫描类测试的仓库根在构建时由 `Forge.App.Tests.csproj` 写进程序集元数据(`ForgeRepoRoot`,由 `tests/Forge.App.Tests/RepoRoot.cs` 读取),不再依赖输出目录位置。
+  2. **开 App 时设 `FORGE_RUN=1`**:`FORGE_RUN=1 dotnet run --project src/Forge.App`(PowerShell:`$env:FORGE_RUN=1`)。`Directory.Build.props` 会把 `Forge.App` 的输出固定到 `artifacts/run/`,整个仓库只有这一个目录,反复覆盖;`artifacts/` 已在 `.gitignore`,删除即清理。`src/Forge.App/bin/` 因此不会被运行中的 App 锁住。**跑测试的 shell 里不要设 `FORGE_RUN`**(否则测试项目会引用到 `artifacts/run/` 的 Forge.App)。
+  3. **遇到锁先排查再动手**:用 `tasklist`/`Get-Process Forge.App,testhost,ExtensionHost` 找占用者。是孤儿 `testhost`/`ExtensionHost` 就结束它们;是用户正在用的 `Forge.App` 就报告阻塞并请用户关闭或改用 `artifacts/run/` 启动,不要自行绕开。
 - 派活文本里写明该任务适用的 `.github/skills/...` 路径。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
+
+## 测试分层与执行
+
+判定依据、落点映射与新增/删除测试的规则见 `testing.md`(id `forge-testing`)。本节只写操作口径。
+
+- **L1(每次任务)**:先 `dotnet build Forge.slnx -c Debug` 一次,之后所有 `dotnet test` 都带 `--no-build`;只跑改动落点对应的命名空间,例如 `dotnet test tests/Forge.App.Tests --no-build --filter "FullyQualifiedName~Forge.App.Tests.Workbench"`。改了任何 `.cs`/`.axaml` 源文件时追加源码扫描门槛:`--filter "FullyQualifiedName~Localization|FullyQualifiedName~MinorRegressionTests|FullyQualifiedName~KeyRegistry|FullyQualifiedName~StringTable|FullyQualifiedName~NoHardcodedChinese"`。只改文档/spec 时无需跑测试。
+- **L2(模块完成、接口变化、较大重构)**:跑承载改动的那个测试项目全量,例如 `dotnet test tests/Forge.Core.Tests --no-build`。
+- **L3(合并前、发布、跨模块、公共协议变化)**:13 个测试项目全量。触发条件按 `testing.md`;`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests` 只在 L3 跑。
+- 不跑与本次改动无关的测试,也不为“保险”跑全量;全量混着与本次改动无关的偶发失败,判不出真伪。
+- 报告里写清:实际执行的命令、用例数、耗时、结果;没跑的部分说明原因与未验证范围。
+- 新增或删除测试前先读 `testing.md` 的准入与清理规则;删除测试必须在报告里逐条说明理由。
+- 源码扫描类门槛(`StringTableTests`/`NoHardcodedChineseTests`/`KeyRegistryTests`/`MinorRegressionTests`)报“源码里明明已注册/已存在”的错误时,先 `dotnet build`(必要时加 `-t:Rebuild`)再跑一次:复用旧 `bin` 的 `--no-build` 会报假红。
 
 ## 开发 Skills
 

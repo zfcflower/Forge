@@ -77,21 +77,7 @@ public sealed class NoHardcodedChineseTests
         }
     }
 
-    private static string? FindSourceRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Forge.slnx")))
-            {
-                return Path.Combine(directory.FullName, "src", "Forge.App");
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
-    }
+    private static string? FindSourceRoot() => RepoRoot.Find() is { } root ? Path.Combine(root, "src", "Forge.App") : null;
 
     private static bool IsSkippedDirectory(string relative) =>
         relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(static part =>

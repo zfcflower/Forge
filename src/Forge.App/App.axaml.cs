@@ -50,7 +50,7 @@ public partial class App : Application
             }
 
             composition = AppComposition.Create();
-            viewModel = new MainWindowViewModel(composition);
+            viewModel = new MainWindowViewModel(composition) { ShowFirstRunWizardOnStartup = true };
             var window = new MainWindow { DataContext = viewModel };
             viewModel.SettingsOwner = () => window;
             desktop.MainWindow = window;

@@ -1,7 +1,119 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.OnboardingView"
              x:DataType="vm:OnboardingViewModel">
-  <!-- Placeholder: wave W9 owns this file. -->
+
+  <!-- The first-run wizard. The shell mounts it as a plain ContentControl over the workbench, so the view supplies its own
+       two layers: a dimmed border that swallows every pointer hit (the workbench under it must not be reachable from behind
+       the wizard), and the card itself, centred and bounded so it never grows past the window even at the largest texts. -->
+  <Grid>
+    <Grid Background="#66000000" />
+
+    <Border Width="560"
+            MaxHeight="640"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Margin="16"
+            Background="{DynamicResource SurfaceElevatedBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource OverlayCornerRadius}"
+            BoxShadow="{StaticResource ShadowMd}"
+            Padding="{StaticResource PaddingCard}">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="8">
+
+          <!-- The step counter, the heading and the one-line intro; all three are computed by the view model so a language
+               switch re-renders them in place. -->
+          <TextBlock Classes="caption" Text="{Binding StepCaption}" AutomationProperties.AutomationId="onboarding-step-caption" />
+          <TextBlock FontSize="{DynamicResource FontSizeLg}"
+                     FontWeight="Medium"
+                     Text="{Binding StepTitle}"
+                     AutomationProperties.AutomationId="onboarding-step-title" />
+          <TextBlock Classes="caption"
+                     Text="{Binding StepIntro}"
+                     TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="onboarding-step-intro" />
+
+          <!-- The language step: three radio buttons over the same preference the language section writes, so the choice
+               applies live and the first one names the language "follow the system" currently resolves to. -->
+          <StackPanel Spacing="6" Margin="0,10,0,0" IsVisible="{Binding IsLanguageStep}">
+            <RadioButton GroupName="onboarding-language"
+                         IsChecked="{Binding IsSystemLanguage, Mode=TwoWay}"
+                         Content="{Binding SystemLanguageText}"
+                         AutomationProperties.AutomationId="onboarding-language-system" />
+            <RadioButton GroupName="onboarding-language"
+                         IsChecked="{Binding IsChineseLanguage, Mode=TwoWay}"
+                         Content="{Binding ChineseLanguageText}"
+                         AutomationProperties.AutomationId="onboarding-language-chinese" />
+            <RadioButton GroupName="onboarding-language"
+                         IsChecked="{Binding IsEnglishLanguage, Mode=TwoWay}"
+                         Content="{Binding EnglishLanguageText}"
+                         AutomationProperties.AutomationId="onboarding-language-english" />
+          </StackPanel>
+
+          <!-- The provider step: the catalogue's own status sentence with a state dot, and the one action that leaves the
+               wizard (the shell opens the settings page's provider section — the editor itself is not rebuilt here). -->
+          <StackPanel Spacing="8" Margin="0,10,0,0" IsVisible="{Binding IsProviderStep}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Ellipse Classes="status-dot"
+                       Classes.running="{Binding IsProviderConnected}"
+                       Classes.starting="{Binding !IsProviderConnected}" />
+              <TextBlock Text="{Binding ProviderStatus}"
+                         TextWrapping="Wrap"
+                         VerticalAlignment="Center"
+                         AutomationProperties.AutomationId="onboarding-provider-status" />
+            </StackPanel>
+            <Button Classes="ghost"
+                    HorizontalAlignment="Left"
+                    Command="{Binding ProviderSetupCommand}"
+                    Content="{Binding [onboarding.provider.open], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="onboarding-provider-open" />
+          </StackPanel>
+
+          <!-- The notification permission step: the state sentence, the hint shown only after the platform refused to open
+               its own settings, and the action itself (disabled where there is nothing to open). -->
+          <StackPanel Spacing="8" Margin="0,10,0,0" IsVisible="{Binding IsNotificationsStep}">
+            <TextBlock Text="{Binding NotificationState}"
+                       TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="onboarding-notification-status" />
+            <TextBlock Classes="caption"
+                       Text="{Binding NotificationHint}"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding HasNotificationHint}"
+                       AutomationProperties.AutomationId="onboarding-notification-hint" />
+            <Button Classes="ghost"
+                    HorizontalAlignment="Left"
+                    IsEnabled="{Binding CanOpenNotificationSettings}"
+                    Command="{Binding OpenNotificationSettingsCommand}"
+                    Content="{Binding [onboarding.notifications.open], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="onboarding-notification-open" />
+          </StackPanel>
+
+          <!-- The bottom bar: skip (the shell records the same "seen"), back (disabled on the first step) and the primary
+               button, which is the window's default so Enter walks the wizard. -->
+          <StackPanel Orientation="Horizontal"
+                      Spacing="8"
+                      HorizontalAlignment="Right"
+                      Margin="0,10,0,0">
+            <Button Classes="ghost"
+                    Command="{Binding SkipCommand}"
+                    Content="{Binding [onboarding.skip], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="onboarding-skip" />
+            <Button Classes="ghost"
+                    Command="{Binding BackCommand}"
+                    Content="{Binding [onboarding.back], Source={x:Static loc:Loc.Instance}}"
+                    AutomationProperties.AutomationId="onboarding-back" />
+            <Button Classes="primary"
+                    IsDefault="True"
+                    Command="{Binding NextCommand}"
+                    Content="{Binding NextText}"
+                    AutomationProperties.AutomationId="onboarding-next" />
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+  </Grid>
 </UserControl>

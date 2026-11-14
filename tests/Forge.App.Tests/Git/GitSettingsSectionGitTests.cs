@@ -121,6 +121,58 @@ public sealed class GitSettingsSectionGitTests : IDisposable
         Assert.Equal(expected, preferences.GitChecksMaxWaitMinutes);
     }
 
+    // ------------------------------------------------------------ review package limits
+
+    [Fact]
+    public void The_review_limits_default_to_the_values_the_package_always_used()
+    {
+        var preferences = new AppPreferences();
+        using var section = new GitSettingsSectionViewModel(preferences);
+
+        Assert.Equal(48_000, section.ReviewDiffMaxChars);
+        Assert.Equal(50, section.ReviewMaxCommits);
+        Assert.Equal(200, section.ReviewMaxFiles);
+        Assert.Equal(2_000, section.ReviewFieldMaxChars);
+        Assert.Equal(Forge.Core.Tools.ReviewPackageLimits.Default, GitToolPreferences.ReviewLimits(preferences));
+    }
+
+    [Fact]
+    public void The_review_limits_clamp_in_the_section_and_in_the_preferences()
+    {
+        var preferences = new AppPreferences();
+        using var section = new GitSettingsSectionViewModel(preferences);
+
+        section.ReviewDiffMaxChars = 1;
+        section.ReviewMaxCommits = 0;
+        section.ReviewMaxFiles = 1_000_000;
+        section.ReviewFieldMaxChars = int.MaxValue;
+
+        Assert.Equal(AppPreferences.MinGitReviewDiffMaxChars, preferences.GitReviewDiffMaxChars);
+        Assert.Equal(AppPreferences.MinGitReviewMaxCommits, section.ReviewMaxCommits);
+        Assert.Equal(AppPreferences.MaxGitReviewMaxFiles, preferences.GitReviewMaxFiles);
+        Assert.Equal(AppPreferences.MaxGitReviewFieldMaxChars, section.ReviewFieldMaxChars);
+    }
+
+    [Fact]
+    public void A_change_in_the_section_reaches_the_next_review_limits_without_a_restart()
+    {
+        var preferences = new AppPreferences();
+        using var section = new GitSettingsSectionViewModel(preferences);
+        Func<Forge.Core.Tools.ReviewPackageLimits> live = () => GitToolPreferences.ReviewLimits(preferences);
+        Assert.Equal(48_000, live().DiffChars);
+
+        section.ReviewDiffMaxChars = 20_000;
+        section.ReviewMaxCommits = 7;
+        section.ReviewMaxFiles = 33;
+        section.ReviewFieldMaxChars = 900;
+
+        var limits = live();
+        Assert.Equal(20_000, limits.DiffChars);
+        Assert.Equal(7, limits.CommitLines);
+        Assert.Equal(33, limits.FileLines);
+        Assert.Equal(900, limits.FieldChars);
+    }
+
     // ------------------------------------------------------------ the section edits the preferences
 
     [Fact]
@@ -145,8 +197,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
     public void The_gh_path_raises_no_change_notification_because_the_box_is_edited_character_by_character()
     {
         using var section = new GitSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.GhPath = "C:\\tools\\gh.exe";
 
@@ -203,8 +254,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
     public void Every_edited_property_raises_its_own_change_notification()
     {
         using var section = new GitSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.SelectedPullStrategy = section.PullStrategies[2];
         section.NetworkTimeoutSeconds = 45;

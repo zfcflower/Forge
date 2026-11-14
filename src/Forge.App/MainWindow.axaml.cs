@@ -202,6 +202,14 @@ public partial class MainWindow : Window
         try
         {
             await model.InitializeAsync().ConfigureAwait(true);
+
+            // The first-run wizard is the real application's business (App sets the flag) and comes after the restore, so
+            // its "is this install already in use" answer counts the projects the restore just loaded. A host that built
+            // this window itself (a headless test, a recorder) leaves the flag off and keeps the workbench unobstructed.
+            if (model.ShowFirstRunWizardOnStartup)
+            {
+                await model.ShowFirstRunWizardIfNeededAsync(CancellationToken.None).ConfigureAwait(true);
+            }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -253,6 +261,25 @@ internal sealed class ShellDialogs(Window owner, GitCli git) : IDialogService
         var model = new NewBranchDialogViewModel(git, request, ct);
         var dialog = new NewBranchDialog { DataContext = model };
         return await dialog.ShowDialog<NewBranchChoice?>(owner).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// The add-project dialog (wave W9): the dialog owns the input and the run (the model it is given), so this only shows it
+    /// and answers what came back. A cancellation from the flow that opened it (the window closing) takes the dialog with
+    /// it instead of leaving a clone running with nothing to show it in.
+    /// </summary>
+    public async Task<string?> RunProjectCreationAsync(ProjectCreationViewModel model, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        var dialog = new ProjectCreationDialog { DataContext = model };
+        using var registration = ct.Register(() => Dispatcher.UIThread.Post(() =>
+        {
+            if (dialog.IsVisible)
+            {
+                dialog.Close(null);
+            }
+        }));
+        return await dialog.ShowDialog<string?>(owner).ConfigureAwait(true);
     }
 
     public async Task<string?> PickFolderAsync(string title)

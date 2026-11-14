@@ -118,8 +118,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
     {
         var preferences = new AppPreferences();
         using var section = new NotificationPermissionSettingsViewModel(preferences, new FakeGuide());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         Assert.True(section.Reprompt);
         Assert.True(preferences.NotificationPermissionReprompt);
@@ -147,8 +146,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
         using var section = new NotificationPermissionSettingsViewModel(
             new AppPreferences(),
             new FakeGuide { State = NotificationPermissionState.Granted });
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
         var chineseState = section.StateText;
         var chineseAction = section.TestActionText;
 
@@ -174,8 +172,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
         var guide = new FakeGuide { State = NotificationPermissionState.Unknown };
         using var section = new NotificationPermissionSettingsViewModel(new AppPreferences(), guide);
         var before = section.StateText;
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         guide.State = NotificationPermissionState.Granted;
         Assert.NotEqual(before, section.StateText);
@@ -191,8 +188,7 @@ public sealed class NotificationPermissionSettingsViewModelTests
     {
         using var chinese = new LanguageScope(UiLanguage.Chinese);
         var section = new NotificationPermissionSettingsViewModel(new AppPreferences(), new FakeGuide());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.Dispose();
         section.Dispose();

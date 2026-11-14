@@ -209,19 +209,5 @@ public sealed class KeyRegistryTests
         return matches.Count == 1 ? matches[0] : null;
     }
 
-    private static string? FindSourceRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Forge.slnx")))
-            {
-                return Path.Combine(directory.FullName, "src", "Forge.App");
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
-    }
+    private static string? FindSourceRoot() => RepoRoot.Find() is { } root ? Path.Combine(root, "src", "Forge.App") : null;
 }

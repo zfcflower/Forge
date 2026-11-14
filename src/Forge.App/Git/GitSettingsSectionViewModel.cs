@@ -17,6 +17,9 @@ namespace Forge.App.Git;
 /// <c>gitChecksNoChecksConfirmations</c> = integer clamped to [1, 10], default 3 (wait mode: polls in a row that must find
 /// no checks before it concludes there is no CI); <c>gitChecksFailureLogTailLines</c> = integer clamped to [20, 2000],
 /// default 200 (lines of a failed check's log handed to the agent);
+/// <c>gitReviewDiffMaxChars</c> = integer clamped to [1000, 500000], default 48000, <c>gitReviewMaxCommits</c> = [5, 500],
+/// default 50, <c>gitReviewMaxFiles</c> = [20, 2000], default 200 and <c>gitReviewFieldMaxChars</c> = [200, 20000],
+/// default 2000 (how much of a change set the review package for <c>request_review</c> carries, read for each review);
 /// <c>gitGhPath</c> = string, default empty meaning <c>gh</c> from PATH, trimmed. The end of a wait is one notification
 /// through <see cref="INotifications"/>; whether notifications are wanted at all is the <c>notifications</c> switch of the
 /// notification section, not a git preference.</para>
@@ -137,6 +140,50 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         set
         {
             preferences.GitChecksFailureLogTailLines = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Characters of diff a review package carries before it cuts and says so (1000 to 500000).</summary>
+    public int ReviewDiffMaxChars
+    {
+        get => preferences.GitReviewDiffMaxChars;
+        set
+        {
+            preferences.GitReviewDiffMaxChars = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Commit lines a review package lists (5 to 500).</summary>
+    public int ReviewMaxCommits
+    {
+        get => preferences.GitReviewMaxCommits;
+        set
+        {
+            preferences.GitReviewMaxCommits = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>File lines a review package lists (20 to 2000).</summary>
+    public int ReviewMaxFiles
+    {
+        get => preferences.GitReviewMaxFiles;
+        set
+        {
+            preferences.GitReviewMaxFiles = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Characters kept of each intent, step text, focus, commit subject and the narrowed-to path list in a review package (200 to 20000).</summary>
+    public int ReviewFieldMaxChars
+    {
+        get => preferences.GitReviewFieldMaxChars;
+        set
+        {
+            preferences.GitReviewFieldMaxChars = value;
             OnPropertyChanged();
         }
     }

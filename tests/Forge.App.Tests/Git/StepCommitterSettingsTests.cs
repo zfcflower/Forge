@@ -43,8 +43,7 @@ public sealed class StepCommitterSettingsTests : IDisposable
     public void The_setter_raises_PropertyChanged_only_for_a_real_change()
     {
         var preferences = new AppPreferences();
-        var raised = new List<string?>();
-        preferences.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(preferences);
 
         preferences.GitStepCommits = true;
         Assert.Empty(raised);
@@ -64,8 +63,7 @@ public sealed class StepCommitterSettingsTests : IDisposable
     public void ApplyLoaded_reads_the_flag_and_treats_a_missing_one_as_on(bool? stored, bool expected)
     {
         var preferences = new AppPreferences { GitStepCommits = !expected };
-        var raised = new List<string?>();
-        preferences.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(preferences);
 
         preferences.ApplyLoaded(new PreferencesSection { GitStepCommits = stored }, UiLanguage.English);
 
@@ -202,8 +200,7 @@ public sealed class StepCommitterSettingsTests : IDisposable
     {
         var preferences = new AppPreferences { GitPullStrategy = "rebase", GitNetworkTimeoutSeconds = 45 };
         using var section = new GitSettingsSectionViewModel(preferences);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         Assert.True(section.StepCommits);
 

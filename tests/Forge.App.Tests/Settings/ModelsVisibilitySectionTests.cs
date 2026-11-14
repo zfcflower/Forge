@@ -58,8 +58,7 @@ public sealed class ModelsVisibilitySectionTests : IDisposable
     public void Toggling_a_row_writes_the_preference_and_raises_it()
     {
         var preferences = new AppPreferences();
-        var raised = new List<string?>();
-        preferences.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(preferences);
         var services = Services(TwoProviders);
         using var page = new ModelsVisibilitySectionViewModel(services, preferences);
         page.Reload();

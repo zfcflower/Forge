@@ -445,7 +445,7 @@ internal sealed class WorkerProcess : IAsyncDisposable
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception or IOException or ObjectDisposedException)
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception or IOException or ObjectDisposedException or AggregateException)
         {
             fallbackProblem = exception.Message;
         }

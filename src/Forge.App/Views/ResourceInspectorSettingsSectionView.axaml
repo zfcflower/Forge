@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.ResourceInspectorSettingsSectionView"
+             x:DataType="settings:ResourceInspectorSettingsViewModel">
+  <!-- The `inspector` section body: how much output the overlay keeps and how often it re-ticks. Both values are read on
+       the next refresh, so the fields need no apply step. -->
+  <StackPanel Spacing="6">
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [resources.settings.hint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [resources.settings.tailLines], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinTailLines}"
+                     Maximum="{Binding MaxTailLines}"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding TailLines, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="inspector-tail-lines"
+                     AutomationProperties.Name="{Binding [resources.settings.tailLines], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [resources.settings.tailLinesHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [resources.settings.refresh], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinRefreshMilliseconds}"
+                     Maximum="{Binding MaxRefreshMilliseconds}"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding RefreshMilliseconds, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="inspector-refresh"
+                     AutomationProperties.Name="{Binding [resources.settings.refresh], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [resources.settings.refreshHint], Source={x:Static loc:Loc.Instance}}" />
+  </StackPanel>
+</UserControl>

@@ -21,8 +21,7 @@ public sealed class IdleArchiveSettingsSectionTests
     {
         var preferences = new AppPreferences();
         using var section = new IdleArchiveSettingsSectionViewModel(preferences);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
         Assert.True(section.Enabled);
         Assert.True(section.CanConfigure);
 
@@ -72,8 +71,7 @@ public sealed class IdleArchiveSettingsSectionTests
         var preferences = new AppPreferences();
         using var section = new IdleArchiveSettingsSectionViewModel(preferences);
         var option = section.Scopes.Single(candidate => string.Equals(candidate.Token, token, StringComparison.Ordinal));
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.SelectedScope = option;
 
@@ -87,8 +85,7 @@ public sealed class IdleArchiveSettingsSectionTests
     {
         var preferences = new AppPreferences { IdleArchiveScope = IdleArchiveSettings.AllScopeToken };
         using var section = new IdleArchiveSettingsSectionViewModel(preferences);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.SelectedScope = null!;
 
@@ -119,8 +116,7 @@ public sealed class IdleArchiveSettingsSectionTests
         using var chinese = new LanguageScope(UiLanguage.Chinese);
         var preferences = new AppPreferences { IdleArchiveScope = IdleArchiveSettings.AllScopeToken };
         using var section = new IdleArchiveSettingsSectionViewModel(preferences);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
         var before = section.Scopes.Select(static option => option.Label).ToList();
         Assert.Equal(
             [AgentSettingsStrings.IdleArchiveScopeAutomation, AgentSettingsStrings.IdleArchiveScopeAll],
@@ -145,8 +141,7 @@ public sealed class IdleArchiveSettingsSectionTests
     {
         using var chinese = new LanguageScope(UiLanguage.Chinese);
         var section = new IdleArchiveSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.Dispose();
         section.Dispose();

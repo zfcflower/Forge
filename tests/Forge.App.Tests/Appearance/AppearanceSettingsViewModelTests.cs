@@ -81,8 +81,7 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     [Fact]
     public void Typing_a_family_does_not_write_the_preference_until_it_is_committed()
     {
-        var changes = new List<string?>();
-        preferences.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+        var changes = PropertyChangeLog.For(preferences);
 
         viewModel.Ui.FamilyText = "G";
         viewModel.Ui.FamilyText = "Ge";
@@ -152,8 +151,7 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     [Fact]
     public void A_committed_family_updates_the_preview_family()
     {
-        var raised = new List<string?>();
-        viewModel.Ui.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(viewModel.Ui);
 
         viewModel.Ui.FamilyText = "Georgia, serif";
         viewModel.Ui.CommitFamily();
@@ -215,8 +213,7 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     public void A_cleared_size_is_ignored_and_keeps_the_stored_value()
     {
         viewModel.Ui.Size = 17m;
-        var changes = new List<string?>();
-        preferences.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+        var changes = PropertyChangeLog.For(preferences);
 
         viewModel.Ui.Size = null;
 
@@ -281,8 +278,7 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
     [Fact]
     public void An_external_preference_change_is_echoed_into_the_editors()
     {
-        var raised = new List<string?>();
-        viewModel.Ui.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(viewModel.Ui);
         viewModel.Code.PropertyChanged += (_, e) => raised.Add("code:" + e.PropertyName);
 
         preferences.UiFontFamily = "Georgia";
@@ -358,8 +354,7 @@ public sealed class AppearanceSettingsViewModelTests : IDisposable
         Assert.Equal("Interface font", viewModel.Ui.Title);
         Assert.Equal("Code font", viewModel.Code.Title);
         var englishPreview = viewModel.Ui.PreviewText;
-        var raised = new List<string?>();
-        viewModel.Ui.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(viewModel.Ui);
 
         Loc.Instance.Language = UiLanguage.Chinese;
 

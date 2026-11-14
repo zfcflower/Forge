@@ -2,8 +2,8 @@ namespace Forge.App.Services;
 
 /// <summary>
 /// Trims one long text to the part that matters at the end of it: the tail of a failed job log, where the failure is.
-/// Used by the CI fix chain and by the checks panel (a row's log and the message handed to the agent), so the two never
-/// disagree about what "the last 200 lines" means.
+/// Used by the CI fix chain, by the checks panel (a row's log and the message handed to the agent) and by the resource
+/// inspector's live output tail, so none of them disagree about what "the last 200 lines" means.
 /// </summary>
 internal static class TextTail
 {

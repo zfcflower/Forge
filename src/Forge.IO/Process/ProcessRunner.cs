@@ -348,7 +348,7 @@ public sealed class ProcessRunner : IProcessRunner
             }
         }
         catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException
-            or Win32Exception or ObjectDisposedException)
+            or Win32Exception or ObjectDisposedException or AggregateException)
         {
         }
     }

@@ -1,7 +1,287 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:wc="using:Forge.App.Workbench.Controls"
+             xmlns:loc="using:Forge.App.Localization"
              x:Class="Forge.App.Views.ResourceInspectorView"
-             x:DataType="vm:ResourceInspectorViewModel">
-  <!-- Placeholder: wave W8 owns this file. -->
+             x:DataType="vm:ResourceInspectorViewModel"
+             AutomationProperties.AutomationId="resource-inspector">
+
+  <UserControl.Styles>
+    <!-- The scrim covers the whole workbench row: it dims what is behind the panel and takes the click that closes it. -->
+    <Style Selector="Grid.inspector-scrim">
+      <Setter Property="Background" Value="#55000000" />
+    </Style>
+
+    <!-- One card, centred and capped. Wider than the plan panel: a row carries a command line and its output. -->
+    <Style Selector="Border.inspector-card">
+      <Setter Property="MaxWidth" Value="880" />
+      <Setter Property="MaxHeight" Value="680" />
+      <Setter Property="Margin" Value="16,0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceElevatedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusLg}" />
+      <Setter Property="BoxShadow" Value="{DynamicResource ShadowMd}" />
+    </Style>
+
+    <!-- The count beside the title: the same chip shape the strip uses for its sub-agent badge. -->
+    <Style Selector="Border.inspector-count">
+      <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.inspector-count TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+    </Style>
+
+    <!-- The row list: no chrome of its own, no selection tint; rows are virtualized by the ListBox. -->
+    <Style Selector="ListBox.inspector-rows">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.inspector-rows ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+    </Style>
+    <Style Selector="ListBox.inspector-rows ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <!-- One row: a flat band separated from the next one by a single rule. -->
+    <Style Selector="Border.inspector-row">
+      <Setter Property="Padding" Value="14,8" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+
+    <!-- A session's group header: a tinted band above that session's rows. -->
+    <Style Selector="Border.inspector-group">
+      <Setter Property="Padding" Value="14,6" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    </Style>
+
+    <!-- The streamed output: sunken, monospaced, scrollable on its own so a chatty command cannot stretch the panel. -->
+    <Style Selector="Border.inspector-tail">
+      <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}" />
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusSm}" />
+      <Setter Property="Padding" Value="8,6" />
+    </Style>
+    <Style Selector="Border.inspector-tail SelectableTextBlock">
+      <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid x:Name="Scrim"
+        Classes="inspector-scrim"
+        Focusable="True"
+        PointerPressed="OnScrimPressed"
+        KeyDown="OnKeyDown">
+    <Border Classes="inspector-card">
+      <Grid RowDefinitions="Auto,*">
+        <!-- Title row: what the list is, how much is running, and the way out. -->
+        <Border Grid.Row="0"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource BorderBrush}"
+                Padding="14,10,10,10">
+          <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+            <TextBlock Classes="label"
+                       FontWeight="SemiBold"
+                       FontSize="{DynamicResource FontSizeBase}"
+                       VerticalAlignment="Center"
+                       Text="{Binding Title}" />
+            <Border Grid.Column="1"
+                    Classes="inspector-count"
+                    Margin="8,0,0,0"
+                    IsVisible="{Binding HasRunning}"
+                    AutomationProperties.AutomationId="inspector-count">
+              <TextBlock Text="{Binding CountText}" />
+            </Border>
+            <Button Grid.Column="3"
+                    x:Name="CloseButton"
+                    Classes="ghost icon"
+                    Width="28"
+                    Height="24"
+                    Command="{Binding CloseCommand}"
+                    ToolTip.Tip="{Binding CloseTooltip}"
+                    AutomationProperties.AutomationId="inspector-close"
+                    AutomationProperties.Name="{Binding CloseLabel}">
+              <wc:FluentIcon Data="{StaticResource IconClose}" Width="12" Height="12" />
+            </Button>
+          </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
+          <ListBox Classes="inspector-rows"
+                   ItemsSource="{Binding Items}"
+                   IsVisible="{Binding HasRunning}"
+                   SelectionMode="Single"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.DataTemplates>
+              <!-- A session's group header: its title, its own count, and a tag on the session the window shows. -->
+              <DataTemplate x:DataType="vm:ResourceInspectorGroupViewModel">
+                <Border Classes="inspector-group">
+                  <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Classes="label"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Text="{Binding Title}"
+                               ToolTip.Tip="{Binding Title}" />
+                    <Border Grid.Column="1"
+                            Classes="inspector-count"
+                            Margin="8,0,0,0"
+                            IsVisible="{Binding IsActive}"
+                            AutomationProperties.AutomationId="inspector-group-active">
+                      <TextBlock Text="{Binding ActiveText}" />
+                    </Border>
+                    <TextBlock Grid.Column="2"
+                               Classes="caption"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               Text="{Binding CountText}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+
+              <!-- A running tool call: who runs it, for how long, a stop for just this call, and the live output tail. -->
+              <DataTemplate x:DataType="vm:LiveToolViewModel">
+                <Border Classes="inspector-row">
+                  <StackPanel Spacing="3">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                      <Button Classes="link"
+                              Command="{Binding ToggleCommand}"
+                              AutomationProperties.AutomationId="inspector-tool-toggle"
+                              AutomationProperties.Name="{Binding ArgumentSummary}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Classes="glyph" Text="{Binding ExpandGlyph}" />
+                          <TextBlock Classes="mono" Text="{Binding Name}" />
+                        </StackPanel>
+                      </Button>
+                      <TextBlock Grid.Column="1"
+                                 Classes="caption"
+                                 Margin="8,0"
+                                 VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis"
+                                 Text="{Binding AgentLabel}" />
+                      <TextBlock Grid.Column="2"
+                                 Classes="mono"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,10,0"
+                                 Text="{Binding ElapsedText}" />
+                      <TextBlock Grid.Column="3"
+                                 Classes="caption"
+                                 VerticalAlignment="Center"
+                                 IsVisible="{Binding IsStopRequested}"
+                                 Text="{Binding [resources.stopping], Source={x:Static loc:Loc.Instance}}" />
+                      <Button Grid.Column="3"
+                              Classes="ghost"
+                              Content="{Binding [resources.stop], Source={x:Static loc:Loc.Instance}}"
+                              Command="{Binding StopCommand}"
+                              IsVisible="{Binding CanStop}"
+                              ToolTip.Tip="{Binding [resources.stop.tooltip], Source={x:Static loc:Loc.Instance}}"
+                              AutomationProperties.AutomationId="inspector-stop-tool"
+                              AutomationProperties.Name="{Binding [resources.stop.name], Source={x:Static loc:Loc.Instance}}" />
+                    </Grid>
+
+                    <!-- The call as the model wrote it; compacted to one line, the transcript's row has the whole JSON. -->
+                    <SelectableTextBlock Classes="mono caption"
+                                         MaxLines="1"
+                                         TextTrimming="CharacterEllipsis"
+                                         IsVisible="{Binding IsExpanded}"
+                                         Text="{Binding ArgumentSummary}" />
+
+                    <StackPanel Spacing="2" IsVisible="{Binding IsExpanded}">
+                      <TextBlock Classes="label" Text="{Binding [resources.tail], Source={x:Static loc:Loc.Instance}}" />
+                      <Border Classes="inspector-tail">
+                        <ScrollViewer MaxHeight="132"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Auto">
+                          <StackPanel>
+                            <SelectableTextBlock TextWrapping="NoWrap"
+                                                 IsVisible="{Binding HasTail}"
+                                                 Text="{Binding TailText}" />
+                            <TextBlock Classes="caption"
+                                       IsVisible="{Binding !HasTail}"
+                                       Text="{Binding [resources.tail.empty], Source={x:Static loc:Loc.Instance}}" />
+                          </StackPanel>
+                        </ScrollViewer>
+                      </Border>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+
+              <!-- A live sub-agent: the same row rhythm, its own stop (which does cancel just that child). -->
+              <DataTemplate x:DataType="vm:SubAgentViewModel">
+                <Border Classes="inspector-row">
+                  <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                    <Ellipse Classes="status-dot"
+                             Classes.running="{Binding IsLive}"
+                             VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Margin="8,0" Spacing="1">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="mono" Text="{Binding Kind}" />
+                        <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding StatusText}" />
+                      </StackPanel>
+                      <TextBlock Classes="caption"
+                                 MaxLines="1"
+                                 TextTrimming="CharacterEllipsis"
+                                 Text="{Binding TaskSummary}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2"
+                               Classes="mono"
+                               Margin="0,0,10,0"
+                               VerticalAlignment="Center"
+                               Text="{Binding ElapsedText}" />
+                    <Button Grid.Column="3"
+                            Classes="ghost"
+                            Content="{Binding [subagent.stop], Source={x:Static loc:Loc.Instance}}"
+                            Command="{Binding StopCommand}"
+                            IsVisible="{Binding CanStop}"
+                            ToolTip.Tip="{Binding [subagent.stopTooltip], Source={x:Static loc:Loc.Instance}}"
+                            AutomationProperties.AutomationId="inspector-stop-agent"
+                            AutomationProperties.Name="{Binding [subagent.stopName], Source={x:Static loc:Loc.Instance}}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.DataTemplates>
+          </ListBox>
+
+          <!-- Idle session: one line, centred, saying there is nothing to watch rather than an empty frame. -->
+          <StackPanel IsVisible="{Binding IsEmpty}"
+                      VerticalAlignment="Center"
+                      HorizontalAlignment="Center"
+                      MaxWidth="440"
+                      Spacing="6">
+            <TextBlock Classes="label"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Text="{Binding Empty}" />
+            <TextBlock Classes="caption"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Text="{Binding EmptyHint}" />
+          </StackPanel>
+
+          <!-- A window without an open session (the last tab closed while the panel was open). -->
+          <TextBlock Classes="caption"
+                     IsVisible="{Binding !HasSession}"
+                     VerticalAlignment="Center"
+                     HorizontalAlignment="Center"
+                     Text="{Binding NoSession}" />
+        </Grid>
+      </Grid>
+    </Border>
+  </Grid>
 </UserControl>

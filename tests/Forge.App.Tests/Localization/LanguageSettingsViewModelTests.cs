@@ -67,8 +67,7 @@ public sealed class LanguageSettingsViewModelTests
     {
         var preferences = new AppPreferences();
         using var section = new LanguageSettingsViewModel(preferences);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         preferences.Language = UiLanguage.English;
 
@@ -87,8 +86,7 @@ public sealed class LanguageSettingsViewModelTests
         var preferences = new AppPreferences();
         using var section = new LanguageSettingsViewModel(preferences);
         using var pin = new LanguageScope(UiLanguage.Chinese);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         Loc.Instance.Language = UiLanguage.English;
 
@@ -148,8 +146,7 @@ public sealed class LanguageSettingsViewModelTests
         var preferences = new AppPreferences();
         var section = new LanguageSettingsViewModel(preferences);
         using var pin = new LanguageScope(UiLanguage.Chinese);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.Dispose();
         section.Dispose();
@@ -166,8 +163,7 @@ public sealed class LanguageSettingsViewModelTests
     {
         var preferences = new AppPreferences();
         using var section = new LanguageSettingsViewModel(preferences);
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.Language = UiLanguage.English;
 

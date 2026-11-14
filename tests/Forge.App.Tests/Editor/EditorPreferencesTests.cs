@@ -191,8 +191,7 @@ public sealed class EditorPreferencesTests : IDisposable
     public void A_settings_change_reaches_a_listener()
     {
         var settings = new EditorSettings();
-        var changed = new List<string?>();
-        settings.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        var changed = PropertyChangeLog.For(settings);
 
         settings.ShowTabs = true;
         settings.ShowTabs = true;

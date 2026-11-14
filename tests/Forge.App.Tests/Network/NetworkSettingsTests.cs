@@ -284,8 +284,7 @@ public sealed class NetworkSettingsSectionViewModelTests : IDisposable
         using (vm)
         using (stack)
         {
-            var changed = new List<string?>();
-            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+            var changed = PropertyChangeLog.For(vm);
 
             vm.IsDnsServers = false;
             Assert.True(vm.IsDnsSystem);
@@ -457,8 +456,7 @@ public sealed class NetworkSettingsSectionViewModelTests : IDisposable
         using (vm)
         using (stack)
         {
-            var changed = new List<string?>();
-            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+            var changed = PropertyChangeLog.For(vm);
 
             // Not in manual mode: a socks4 URL typed in the hidden field gives no hint.
             vm.ProxyUrl = "socks4://127.0.0.1:1080";

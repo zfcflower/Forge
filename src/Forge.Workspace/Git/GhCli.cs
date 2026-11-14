@@ -506,7 +506,7 @@ public sealed class GhCli
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or Win32Exception or ObjectDisposedException)
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or Win32Exception or ObjectDisposedException or AggregateException)
         {
         }
     }

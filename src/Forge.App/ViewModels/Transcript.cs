@@ -255,12 +255,14 @@ internal sealed class TurnCardViewModel : TranscriptItemViewModel
         openText.Append(chunk);
     }
 
-    public void AddTool(ToolCall call)
+    /// <summary>Adds a running tool call's row and hands it back: the session attaches the live state (wave W8).</summary>
+    public ToolRowViewModel AddTool(ToolCall call)
     {
         SealText();
         var row = new ToolRowViewModel(call.Name, call.ArgumentsJson);
         toolRows[call.Id] = row;
         blocks.Add(row);
+        return row;
     }
 
     public void CompleteTool(ToolCall call, ToolResult result)

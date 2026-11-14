@@ -78,8 +78,7 @@ public sealed class AgentsSettingsSectionTests
     public void A_write_raises_the_property_that_moved()
     {
         var section = new AgentsSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.MaxParallel = 2;
         Assert.Equal([nameof(AgentsSettingsSectionViewModel.MaxParallel)], raised);

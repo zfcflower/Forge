@@ -159,7 +159,7 @@ internal sealed class HostProcess : IAsyncDisposable
                 {
                     process.Kill(entireProcessTree: true);
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or Win32Exception)
+                catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or Win32Exception or AggregateException)
                 {
                 }
             }

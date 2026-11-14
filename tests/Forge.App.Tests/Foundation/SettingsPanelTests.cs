@@ -500,6 +500,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Files,
             SettingsSectionIds.Terminal,
             SettingsSectionIds.Git,
+            SettingsSectionIds.Projects,
             SettingsSectionIds.Extensions,
             SettingsSectionIds.Approvals,
             SettingsSectionIds.Skills,
@@ -513,6 +514,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Palette,
             SettingsSectionIds.NotificationPermission,
             SettingsSectionIds.Paths,
+            SettingsSectionIds.Inspector,
         ];
 
         private static Button? NavButton(Window window, string id) =>

@@ -741,8 +741,7 @@ public sealed class PaletteViewModelTests
         var viewModel = new PaletteViewModel(new FakePaletteHost(), new AppPreferences());
         viewModel.Open(PaletteSource.Commands);
         Assert.NotEmpty(viewModel.Items);
-        var raised = new List<string?>();
-        viewModel.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(viewModel);
 
         viewModel.Dispose();
         viewModel.Dispose();

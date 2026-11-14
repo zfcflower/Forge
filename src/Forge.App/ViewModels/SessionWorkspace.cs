@@ -46,7 +46,7 @@ internal enum TurnRejection
 /// <see cref="Loc.LanguageChanged"/>: the cards, tool rows, notices and sub-agent labels re-derive their texts when the
 /// language changes and are told to re-raise them from here, and the subscription ends with <see cref="Dispose"/>.</para>
 /// </summary>
-internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, IAutomationSession
+internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisposable, IAutomationSession
 {
     /// <summary>How much text of a child agent is parked while its start event is still in flight.</summary>
     private const int EarlyDeltaLimit = 8192;
@@ -57,6 +57,9 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
     private readonly ISessionStore? store;
     private readonly Action<SubAgentViewModel>? subAgentOpened;
     private readonly string providerModel;
+
+    /// <summary>The live preferences this session reads values from (the inspector's line limit); null lists the defaults.</summary>
+    private readonly AppPreferences? appPreferences;
     private readonly ObservableCollection<SubAgentViewModel> subAgents = [];
     private readonly ConcurrentDictionary<string, SubAgentViewModel> subAgentById = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TokenUsage> agentUsage = new(StringComparer.Ordinal);
@@ -120,8 +123,10 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 
     /// <param name="runtime">The live runtime, or <see langword="null"/> for a read-only view of a session that is not
     /// <see cref="SessionStatus.Active"/>: the transcript is replayed from the store and nothing can be sent.</param>
-    /// <param name="preferences">The live preferences the composer filters hidden models with; <see langword="null"/> (a
-    /// test, a standalone view) lists every model.</param>
+    /// <param name="preferences">The live preferences the composer filters hidden models with and the inspector reads its
+    /// output-tail limit from; <see langword="null"/> (a test, a standalone view) lists every model and uses the defaults.</param>
+    /// <param name="openInspector">Opens the window's resource inspector; the strip's resources menu carries the row, and
+    /// <see langword="null"/> (a test, a standalone view) leaves that row out instead of offering a dead entry.</param>
     public SessionWorkspaceViewModel(
         SessionInfo session,
         SessionRuntime? runtime,
@@ -134,7 +139,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         Func<IReadOnlyList<SlashEntry>>? skillSource = null,
         ISessionInstrumentSources? instrumentSources = null,
         INotifications? notifications = null,
-        AppPreferences? preferences = null)
+        AppPreferences? preferences = null,
+        Action? openInspector = null)
     {
         Info = session;
         this.runtime = runtime;
@@ -143,6 +149,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         this.store = store;
         this.notifications = notifications;
         this.subAgentOpened = subAgentOpened;
+        appPreferences = preferences;
         providerModel = providers.Catalog.Default?.DefaultModel ?? string.Empty;
         Transcript = new TranscriptViewModel(collapseOlderTurns: false);
         coalescer = new FrameCoalescer<AgentEvent>(HandleOnUi, FlushAllPendingText);
@@ -171,7 +178,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
             instrumentSources ?? EmptySessionInstrumentSources.Instance,
             ToolNames,
             () => Composer.Model,
-            () => Composer.ProviderId);
+            () => Composer.ProviderId,
+            openInspector);
         if (!providers.IsConfigured)
         {
             var missing = SessionStrings.ProviderMissing(providers.StatusText.Resolve());
@@ -455,6 +463,10 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
             {
                 RefreshCanSend();
                 CancelCommand.NotifyCanExecuteChanged();
+                // Either turn boundary drops what this agent left behind: at the end because a cancelled call never reports a
+                // finish of its own, at the start so a snapshot parked for the previous turn cannot seed a row of this one. A
+                // live child's entries are left alone - it may be streaming outside the turn (see ClearTurnTools).
+                ClearTurnTools();
             }
         }
     }
@@ -576,6 +588,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         OnPropertyChanged(nameof(RunningSubAgentCount));
         OnPropertyChanged(nameof(HasRunningSubAgents));
         OnPropertyChanged(nameof(SubAgentToggleName));
+        RaiseRunningResources();
     }
 
     public void Rename(string title)
@@ -725,6 +738,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
         {
             agent.Tick();
         }
+
+        TickLiveTools();
     }
 
     /// <summary>Stops the running turn; queued messages stay and wait for the next send.</summary>
@@ -1573,8 +1588,10 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
                 break;
             case AgentThinkingDelta:
                 break;
-            case AgentToolProgress:
-                // The resource inspector is the only consumer; until it subscribes, a running tool's tail is not queued.
+            case AgentToolProgress progress:
+                // Not queued: a snapshot supersedes the one before it, the producer already throttles, and the UI reads the
+                // latest one on its own tick (see SessionWorkspace.Tools.cs).
+                NoteToolTail(progress.AgentId, progress.Call, progress.Tail);
                 break;
             default:
                 coalescer.Enqueue(value);
@@ -1671,9 +1688,16 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
                 break;
             case AgentToolStarted started:
                 Instruments.NoteToolUsed(started.Call.Name);
-                Card(started.AgentId)?.AddTool(started.Call);
+                // The row always appears; the live state only for a call that may still be running (see TrackTool: the session's
+                // own agent needs a turn, a live child does not). The session clock reads the tail, so nothing is dispatched.
+                if (Card(started.AgentId)?.AddTool(started.Call) is { } row && TrackTool(started.AgentId, started.Call) is { } activity)
+                {
+                    row.AttachLive(activity);
+                }
+
                 break;
             case AgentToolFinished finishedTool:
+                FinishTool(finishedTool.AgentId, finishedTool.Call.Id);
                 Card(finishedTool.AgentId)?.CompleteTool(finishedTool.Call, finishedTool.Result);
                 break;
             case AgentTurnCompleted completed:
@@ -1939,6 +1963,7 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
                 "subagent:" + finishedEvent.AgentId);
         }
         subAgentById.TryRemove(finishedEvent.AgentId, out _);
+        FinishToolsOf(finishedEvent.AgentId);
         agentUsage.Remove(finishedEvent.AgentId);
         subAgents.Remove(agent);
         finished.Add(agent);
@@ -1960,6 +1985,8 @@ internal sealed class SessionWorkspaceViewModel : NotifyingObject, IDisposable, 
 
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        ClearLiveTools();
+        ReleaseInspectorListeners();
         Instruments.Dispose();
         Composer.Dispose();
         foreach (var message in queued.ToArray())
@@ -2049,7 +2076,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
         Model = model;
         this.stopRequested = stopRequested;
         Transcript = new TranscriptViewModel(collapseOlderTurns: true);
-        StopCommand = new RelayCommand(RequestStop, () => IsLive && !isStopRequested);
+        StopCommand = new RelayCommand(RequestStop, () => CanStop);
     }
 
     /// <summary>The main session this sub-agent belongs to; its tab never shows under another session.</summary>
@@ -2078,6 +2105,12 @@ internal sealed class SubAgentViewModel : NotifyingObject
 
     public RelayCommand StopCommand { get; }
 
+    /// <summary>
+    /// True while stopping this run would do something: it holds a run slot and no stop was requested yet. A queued child has
+    /// no run to stop (<c>SubAgentControl.Stop</c> answers "not found" for it), so the buttons hide instead of doing nothing.
+    /// </summary>
+    public bool CanStop => status == SubAgentStatus.Running && !isStopRequested;
+
     public string TabTitle => (IsReadOnly ? "○ " : "▸ ") + Kind + " · " + ToolRowViewModel.Compact(Task, TabTaskLimit);
 
     public bool IsReadOnly
@@ -2105,6 +2138,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
             {
                 OnPropertyChanged(nameof(IsFinished));
                 OnPropertyChanged(nameof(IsLive));
+                OnPropertyChanged(nameof(CanStop));
                 StopCommand.NotifyCanExecuteChanged();
             }
         }
@@ -2122,6 +2156,12 @@ internal sealed class SubAgentViewModel : NotifyingObject
         };
 
     public bool IsFinished => outcomeUnknown || status is SubAgentStatus.Completed or SubAgentStatus.Stopped or SubAgentStatus.Failed;
+
+    /// <summary>
+    /// When the run acquired a run slot (Core's <c>AgentSubAgentRunning.At</c>); <see cref="DateTimeOffset.MinValue"/> while it
+    /// still waits for one. The elapsed reading counts from here, and the resource inspector orders its rows by it.
+    /// </summary>
+    public DateTimeOffset StartedAt => startedAt;
 
     public bool IsLive => !IsFinished;
 
@@ -2289,6 +2329,7 @@ internal sealed class SubAgentViewModel : NotifyingObject
     {
         isStopRequested = true;
         SetStatusNote(SessionStrings.SubAgentStopRequested);
+        OnPropertyChanged(nameof(CanStop));
         StopCommand.NotifyCanExecuteChanged();
         stopRequested?.Invoke(AgentId);
     }
