@@ -345,7 +345,15 @@ public sealed record McpEntryIssue(McpEntryField Field, McpEntryProblem Problem,
 /// <summary>One file's view of <c>mcpServers</c>: its entries in file order and the problems that belong to the file itself.</summary>
 public sealed record McpConfigEntries(
     IReadOnlyList<McpServerEntry> Entries,
-    IReadOnlyList<McpConfigDiagnostic> Diagnostics);
+    IReadOnlyList<McpConfigDiagnostic> Diagnostics)
+{
+    /// <summary>
+    /// True when the document is a readable object that simply has no <c>mcpServers</c> key — an application that never configured
+    /// MCP. It is still reported as a diagnostic (the runtime read says the same), but a caller looking for something to import
+    /// can tell this apart from a file it could not read at all.
+    /// </summary>
+    public bool HasNoServersProperty { get; init; }
+}
 
 /// <summary>
 /// Reads and writes the text of one <c>mcp.json</c>. Pure on purpose: no file, no lock, no environment, so the whole merge is
@@ -398,7 +406,10 @@ public static class McpConfigFile
             {
                 // The runtime read calls this a problem, so the file view must too: otherwise a hand edit that dropped the key
                 // hides every server from the page while the manager keeps running them.
-                return new McpConfigEntries([], [new McpConfigDiagnostic(label, null, "No \"mcpServers\" object.")]);
+                return new McpConfigEntries([], [new McpConfigDiagnostic(label, null, "No \"mcpServers\" object.")])
+                {
+                    HasNoServersProperty = true,
+                };
             }
 
             if (servers.ValueKind != JsonValueKind.Object)

@@ -43,6 +43,21 @@ public class McpConfigFileTests
         var diagnostic = Assert.Single(result.Diagnostics);
         Assert.Equal("empty.json", diagnostic.Source);
         Assert.Null(diagnostic.ServerName);
+        Assert.True(result.HasNoServersProperty);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[]")]
+    [InlineData("""{"mcpServers":[]}""")]
+    public void Read_only_calls_a_document_without_the_key_an_unconfigured_one(string json)
+    {
+        // Everything else is a failure to read, and a caller that looks for something to import must not mistake it for an
+        // empty configuration.
+        var result = McpConfigFile.Read(json, "broken.json");
+
+        Assert.False(result.HasNoServersProperty);
+        Assert.NotEmpty(result.Diagnostics);
     }
 
     [Theory]

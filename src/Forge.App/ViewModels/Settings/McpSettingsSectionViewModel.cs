@@ -879,8 +879,8 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
 
             var read = McpConfigFile.Read(text, source.FilePath);
             // Another application's config may have no `mcpServers` at all (a fresh Claude Code install): that is "nothing to
-            // import from this file", not a read that failed.
-            if (read.Entries.Count > 0)
+            // import from this file", not a read that failed. Every other problem stays a problem.
+            if (!(read.HasNoServersProperty && read.Entries.Count == 0))
             {
                 problem ??= read.Diagnostics.Count > 0 ? read.Diagnostics[0].Message : null;
             }
