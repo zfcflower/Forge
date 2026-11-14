@@ -153,6 +153,8 @@ W1–W9(含 W4b、W12)之间**文件级零重叠**,可以同时派给多个 Work
 | **W12** 评审包 + `request_review` | 给 Reviewer 补 `git_diff` 与变更集包;`request_review` 工具(主 Agent 发起评审、结果回到会话);评审是产品核心目标,放在并行批里 | `Forge.Core/Prompts/BuiltInAgents.cs`、新建 `Forge.Core/Tools/RequestReview*.cs` + `ReviewPackage*.cs`、`Localization/Strings.Review.cs` | 4 天 |
 | **W11** 流程图 / Mermaid(**等拍板,且串在 W4b 之后**) | 聊天与 diff 预览里的 ```mermaid 代码块本地渲染、图类型白名单(可配置)、失败回路(源码 + 错误行 + 回给模型修)、主题跟随 | `Changes/Markdown/**`(W4b 先落地代码块渲染)、新建 `Views/Mermaid*` + `Services/MermaidRender*` | 3 天 |
 
+**W4b 已实施**:聊天助手回复按 Markdown 增量渲染(标题/段落/列表/引用/表格/链接/围栏代码块),代码块带语言标签与复制按钮;新增纯状态机 `Changes/Markdown/StreamingMarkdown.cs` 与 `Views/ChatMarkdownView*`,删除 `TextSegmentViewModel`。方案、被否备选、四条判据、与上表独占路径的三处偏差(`Resources/MarkdownStyles.axaml` 的追加式两条样式、不建 `Strings.ChatMarkdown.cs`、用户消息仍按纯文本)见 `2026-11-13-w4b-implementation.md`。
+
 **W6 已实施**:实现记录、被否备选与验收见 `2026-11-13-w6-implementation.md`。计划外并入一项(已与用户确认):MCP 工具此前从未进入会话(`McpServerManager.Tools` 零消费),本波一并接上,`工具检索上限` 因此才有意义。
 
 **跨波语义依赖(全部在 W0 满足,不构成串行边)**:W4/W8 依赖 W0 的契约、进度生产侧与流水线接线;W7 独占自己的 schema 升版(与其他波无交叉);W2/W3 依赖 W0 的 `Forge.Editor` API 确认;W5/W6/W9 依赖 W0 的 host/模板/模块骨架;W9 依赖 W0 的 `INotificationPermissionGuide` 接口;全部新文案表依赖 W0 的 `Loc.cs` 登记。**W1–W9(含 W4b、W12)之间没有任何一条"先做 A 才能做 B"的边。**
