@@ -93,7 +93,16 @@ internal sealed class ModelsVisibilitySectionViewModel : NotifyingObject, IDispo
         this.preferences = preferences;
         preferences.PropertyChanged += OnPreferencesChanged;
         Loc.Instance.LanguageChanged += OnLanguageChanged;
+        ShowAllCommand = new RelayCommand(() => preferences.ModelsHidden = [], () => preferences.ModelsHidden.Count > 0);
     }
+
+    /// <summary>
+    /// Clears the whole hidden set, including ids no provider lists any more (a model that left the catalogue, a provider
+    /// that is offline): such an id has no row to switch back on, so this is the one way to take it out.
+    /// </summary>
+    public RelayCommand ShowAllCommand { get; }
+
+    public string ShowAllText => ModelsVisibilityStrings.ShowAll;
 
     /// <summary>The rows the search currently matches; a hidden model is still listed here, that is how it is unhidden.</summary>
     public ObservableCollection<ModelVisibilityRowViewModel> Rows { get; } = [];
@@ -233,6 +242,7 @@ internal sealed class ModelsVisibilitySectionViewModel : NotifyingObject, IDispo
         }
 
         RefreshHiddenCount();
+        ShowAllCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>Recounts the distinct hidden model names of the listed rows; the name set is reused, so a switch allocates nothing.</summary>
@@ -264,5 +274,6 @@ internal sealed class ModelsVisibilitySectionViewModel : NotifyingObject, IDispo
         OnPropertyChanged(nameof(VisibilityColumn));
         OnPropertyChanged(nameof(HiddenCountText));
         OnPropertyChanged(nameof(EmptyText));
+        OnPropertyChanged(nameof(ShowAllText));
     }
 }

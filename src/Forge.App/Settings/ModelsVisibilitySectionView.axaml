@@ -14,7 +14,7 @@
                Text="{Binding Hint}"
                AutomationProperties.AutomationId="models-visibility-hint" />
 
-    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
       <TextBox Grid.Column="0"
                Text="{Binding SearchText, Mode=TwoWay}"
                PlaceholderText="{Binding SearchPlaceholder}"
@@ -25,6 +25,10 @@
                  VerticalAlignment="Center"
                  Text="{Binding HiddenCountText}"
                  AutomationProperties.AutomationId="models-visibility-count" />
+      <Button Grid.Column="2"
+              Content="{Binding ShowAllText}"
+              Command="{Binding ShowAllCommand}"
+              AutomationProperties.AutomationId="models-visibility-show-all" />
     </Grid>
 
     <!-- Name of the per-row switch: an empty checkbox column with no heading reads as "unknown toggle". -->

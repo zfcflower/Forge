@@ -173,6 +173,102 @@ public sealed class ModelsVisibilitySectionTests : IDisposable
     }
 
     [Fact]
+    public void Show_all_clears_every_hidden_model_including_ids_no_provider_lists()
+    {
+        var preferences = new AppPreferences();
+        preferences.SetModelHidden("alpha-1", hidden: true);
+        preferences.SetModelHidden("shared", hidden: true);
+        preferences.SetModelHidden("gone-from-catalogue", hidden: true);
+        var services = Services(TwoProviders);
+        using var page = new ModelsVisibilitySectionViewModel(services, preferences);
+        page.Reload();
+        Assert.Equal(2, page.HiddenCount);
+        Assert.True(page.ShowAllCommand.CanExecute(null));
+
+        page.ShowAllCommand.Execute(null);
+
+        // The stale id has no row to switch back on; Show all is the one way it leaves the set.
+        Assert.Empty(preferences.ModelsHidden);
+        Assert.False(preferences.IsModelHidden("gone-from-catalogue"));
+        Assert.Equal(0, page.HiddenCount);
+        Assert.Equal("0 models hidden", WithEnglish(() => page.HiddenCountText));
+        Assert.All(page.Rows, static row => Assert.True(row.IsVisible));
+        Assert.False(page.ShowAllCommand.CanExecute(null));
+
+        // Executing a disabled command is a no-op rather than a write.
+        var raised = 0;
+        preferences.PropertyChanged += (_, _) => raised++;
+        page.ShowAllCommand.Execute(null);
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
+    public void Show_all_is_disabled_while_nothing_is_hidden_and_follows_the_hidden_set()
+    {
+        var preferences = new AppPreferences();
+        var services = Services(TwoProviders);
+        using var page = new ModelsVisibilitySectionViewModel(services, preferences);
+        page.Reload();
+        var changed = 0;
+        page.ShowAllCommand.CanExecuteChanged += (_, _) => changed++;
+
+        Assert.False(page.ShowAllCommand.CanExecute(null));
+
+        // A change made on this page, then one made elsewhere (the composer's pin dialog, another settings page): both
+        // re-evaluate the button.
+        page.Rows[0].IsVisible = false;
+        Assert.Equal(1, changed);
+        Assert.True(page.ShowAllCommand.CanExecute(null));
+
+        preferences.SetModelHidden("stale-id", hidden: true);
+        Assert.Equal(2, changed);
+        Assert.True(page.ShowAllCommand.CanExecute(null));
+
+        preferences.ModelsHidden = [];
+        Assert.Equal(3, changed);
+        Assert.False(page.ShowAllCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void Show_all_is_enabled_for_a_stale_id_alone_although_the_page_counts_zero()
+    {
+        var preferences = new AppPreferences();
+        preferences.SetModelHidden("gone-from-catalogue", hidden: true);
+        var services = Services(TwoProviders);
+        using var page = new ModelsVisibilitySectionViewModel(services, preferences);
+        page.Reload();
+
+        Assert.Equal(0, page.HiddenCount);
+        Assert.True(page.ShowAllCommand.CanExecute(null));
+
+        page.ShowAllCommand.Execute(null);
+
+        Assert.Empty(preferences.ModelsHidden);
+        Assert.False(page.ShowAllCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void The_show_all_label_is_translated_in_both_languages()
+    {
+        var preferences = new AppPreferences();
+        var services = Services(TwoProviders);
+        using var page = new ModelsVisibilitySectionViewModel(services, preferences);
+
+        using (new LanguageScope(UiLanguage.English))
+        {
+            Assert.Equal("Show all", page.ShowAllText);
+        }
+
+        using (new LanguageScope(UiLanguage.Chinese))
+        {
+            Assert.NotEqual("Show all", page.ShowAllText);
+            Assert.False(string.IsNullOrWhiteSpace(page.ShowAllText));
+        }
+
+        Assert.NotEqual("[" + ModelsVisibilityStrings.ShowAllKey + "]", page.ShowAllText);
+    }
+
+    [Fact]
     public void Reload_is_idempotent_and_picks_up_a_catalogue_change()
     {
         var preferences = new AppPreferences();
@@ -214,6 +310,12 @@ public sealed class ModelsVisibilitySectionTests : IDisposable
     public void Dispose()
     {
         TestTempFiles.DeleteQuietly(root);
+    }
+
+    private static string WithEnglish(Func<string> read)
+    {
+        using var scope = new LanguageScope(UiLanguage.English);
+        return read();
     }
 
     private const string TwoProviders = """

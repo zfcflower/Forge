@@ -449,6 +449,28 @@ public sealed class HousekeepingTests : IDisposable
         Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
     }
 
+    [Fact]
+    public async Task A_recently_active_session_is_never_archived_in_the_wide_scope_even_when_no_tab_has_it_open()
+    {
+        // A running agent bumps LastActiveAt (AgentLoop touches the session after every model response), and the open-tab
+        // set does not know about background runs. The recency check is what protects such a session, so it has to hold on
+        // its own for a root session that is not open.
+        var window = TimeSpan.FromDays(7);
+        catalog.Sessions =
+        [
+            Session("running", "/w/running", TimeSpan.FromMinutes(5), automation: null),
+            Session("just-inside", "/w/inside", window - TimeSpan.FromSeconds(1), automation: null),
+            Session("stale", "/w/stale", window + TimeSpan.FromDays(1), automation: null),
+        ];
+        Assert.DoesNotContain("running", open);
+
+        var outcome = await Runner(archive: Settings(window, scope: IdleArchiveScope.AllRootSessions)).RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Equal(["stale"], catalog.StatusChanges.Select(static c => c.Id));
+        Assert.Equal(["stale"], Assert.Single(archiveNotices));
+        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
+    }
+
     // ------------------------------------------------------------------ worktree pruning
 
     [Fact]

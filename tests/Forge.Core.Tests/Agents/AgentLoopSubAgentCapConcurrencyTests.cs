@@ -1,104 +1,90 @@
-using System.Reflection;
 using Forge.Core.Agents;
 using Xunit;
 
 namespace Forge.Core.Tests.Agents;
 
 /// <summary>
-/// The cap an <see cref="AgentLoop"/> reports and the limit its slot pool enforces move together: two threads setting
-/// different caps at once must never leave them disagreeing, because the readout would then lie about the live cap.
-/// The pool is private to the loop, so its real limit is read the only way it shows: by taking permits until none is free.
+/// The public contract of <see cref="AgentHost.SetMaxParallelSubAgents"/>: it reports whether the cap moved, floors the cap at
+/// one, and the readout is the cap in force. The loop keeps no copy of the cap (the pool holds the only one), so the readout
+/// cannot disagree with what is enforced; what is left to pin is that concurrent setters leave one of the values that were set.
 /// </summary>
 public sealed class AgentLoopSubAgentCapConcurrencyTests
 {
-    private const int Iterations = 60;
     private const int Threads = 8;
-    private const int SettersPerThread = 40;
+
+    private static AgentHost NewHost(int cap = 4) =>
+        AgentTestHost.Create(new FakeProvider((_, _) => Turn.Say("unused")), options: new AgentOptions { MaxParallelSubAgents = cap });
 
     [Fact]
-    public async Task Concurrent_setters_leave_the_reported_cap_equal_to_the_pools_limit()
+    public void Setting_the_cap_reports_true_only_when_it_moved()
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2.5);
-        var rounds = 0;
-        for (var iteration = 0; iteration < Iterations && DateTime.UtcNow < deadline; iteration++)
-        {
-            var host = AgentTestHost.Create(
-                new FakeProvider((_, _) => Turn.Say("unused")), options: new AgentOptions { MaxParallelSubAgents = 4 });
-            var loop = LoopOf(host);
-            using var start = new ManualResetEventSlim(false);
+        var host = NewHost(4);
+        Assert.Equal(4, host.MaxParallelSubAgents);
 
-            var workers = Enumerable.Range(0, Threads).Select(seed => Task.Factory.StartNew(
-                () =>
-                {
-                    var random = new Random(seed * 7919 + iteration);
-                    start.Wait();
-                    for (var step = 0; step < SettersPerThread; step++)
-                    {
-                        loop.SetMaxParallelSubAgents(random.Next(1, 17));
-                    }
-                },
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default)).ToArray();
+        Assert.False(host.SetMaxParallelSubAgents(4));
+        Assert.True(host.SetMaxParallelSubAgents(7));
+        Assert.Equal(7, host.MaxParallelSubAgents);
+        Assert.False(host.SetMaxParallelSubAgents(7));
+        Assert.True(host.SetMaxParallelSubAgents(2));
+        Assert.Equal(2, host.MaxParallelSubAgents);
+    }
 
-            start.Set();
-            await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30));
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-9)]
+    public void A_cap_below_one_is_floored_to_one(int requested)
+    {
+        var host = NewHost(4);
 
-            var reported = loop.MaxParallelSubAgents;
-            Assert.InRange(reported, 1, 16);
-            Assert.Equal(reported, PoolLimitOf(loop));
-            Assert.Equal(reported, host.MaxParallelSubAgents);
-            rounds++;
-        }
+        Assert.True(host.SetMaxParallelSubAgents(requested));
+        Assert.Equal(1, host.MaxParallelSubAgents);
 
-        Assert.True(rounds >= 5, $"only {rounds} rounds ran inside the time budget");
+        // The floor is the cap now, so asking for another value that floors the same way is not a move.
+        Assert.False(host.SetMaxParallelSubAgents(requested - 1));
+        Assert.False(host.SetMaxParallelSubAgents(1));
+        Assert.Equal(1, host.MaxParallelSubAgents);
     }
 
     [Fact]
-    public void Out_of_range_caps_set_concurrently_still_agree_with_the_pool()
+    public void A_host_built_with_a_non_positive_cap_starts_at_one()
     {
-        var host = AgentTestHost.Create(
-            new FakeProvider((_, _) => Turn.Say("unused")), options: new AgentOptions { MaxParallelSubAgents = 4 });
-        var loop = LoopOf(host);
+        var host = NewHost(0);
+
+        Assert.Equal(1, host.MaxParallelSubAgents);
+        Assert.False(host.SetMaxParallelSubAgents(1));
+    }
+
+    [Fact]
+    public void Concurrent_setters_leave_a_cap_one_of_them_set()
+    {
+        var host = NewHost(4);
+        var moves = 0;
+
+        // Every call sets a value in 5..9, none equal to the start (4), so the final cap is one that was really requested
+        // and at least the first call moved it.
+        Parallel.For(0, 400, new ParallelOptions { MaxDegreeOfParallelism = Threads }, index =>
+        {
+            var value = 5 + (index % 5);
+            if (host.SetMaxParallelSubAgents(value))
+            {
+                Interlocked.Increment(ref moves);
+            }
+        });
+
+        Assert.InRange(host.MaxParallelSubAgents, 5, 9);
+        Assert.InRange(moves, 1, 400);
+        Assert.False(host.SetMaxParallelSubAgents(host.MaxParallelSubAgents));
+    }
+
+    [Fact]
+    public void Out_of_range_caps_set_concurrently_keep_the_floor()
+    {
+        var host = NewHost(4);
 
         Parallel.For(0, 200, new ParallelOptions { MaxDegreeOfParallelism = Threads }, index =>
-            loop.SetMaxParallelSubAgents(index % 3 == 0 ? -index : index % 20));
+            host.SetMaxParallelSubAgents(index % 3 == 0 ? -index : index % 20));
 
-        // Zero and negative caps are lifted to a single permit, so the floor holds under contention too.
-        Assert.True(loop.MaxParallelSubAgents >= 1);
-        Assert.Equal(loop.MaxParallelSubAgents, PoolLimitOf(loop));
-    }
-
-    private static AgentLoop LoopOf(AgentHost host)
-    {
-        var field = typeof(AgentHost).GetField("loop", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        return Assert.IsType<AgentLoop>(field.GetValue(host));
-    }
-
-    /// <summary>Takes permits until the pool has none free, which is exactly its limit when nothing else holds one.</summary>
-    private static int PoolLimitOf(AgentLoop loop)
-    {
-        var field = typeof(AgentLoop).GetField("slots", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        var pool = Assert.IsType<AgentSlotPool>(field.GetValue(loop));
-        var held = new List<AgentSlot>();
-        try
-        {
-            while (pool.TryAcquire() is { } slot)
-            {
-                held.Add(slot);
-                Assert.True(held.Count <= 64, "the pool handed out more permits than any cap allows");
-            }
-
-            return held.Count;
-        }
-        finally
-        {
-            foreach (var slot in held)
-            {
-                slot.Dispose();
-            }
-        }
+        Assert.InRange(host.MaxParallelSubAgents, 1, 19);
+        Assert.False(host.SetMaxParallelSubAgents(host.MaxParallelSubAgents));
     }
 }

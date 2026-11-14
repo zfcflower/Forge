@@ -59,6 +59,48 @@ public sealed class ModelsVisibilitySectionViewTests : IDisposable
         Assert.Equal(5, rendered.Restored);
     }
 
+    [Fact]
+    public async Task The_show_all_button_is_bound_to_the_command_and_clears_the_hidden_set()
+    {
+        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var result = await SharedUi.Session.Dispatch(
+            () =>
+            {
+                var preferences = new AppPreferences();
+                var services = Services();
+                using var page = new ModelsVisibilitySectionViewModel(services, preferences);
+                page.Reload();
+
+                var window = SharedUi.Show(new ModelsVisibilitySectionView { DataContext = page }, 900, 700);
+                SharedUi.Settle(window);
+
+                var button = window.GetVisualDescendants().OfType<Button>()
+                    .Single(static candidate => AutomationProperties.GetAutomationId(candidate) == "models-visibility-show-all");
+                var disabledAtStart = !button.IsEffectivelyEnabled;
+
+                preferences.SetModelHidden("alpha-1", hidden: true);
+                preferences.SetModelHidden("gone-from-catalogue", hidden: true);
+                SharedUi.Settle(window);
+                var enabledWhenHidden = button.IsEffectivelyEnabled;
+
+                button.Command!.Execute(null);
+                SharedUi.Settle(window);
+                var hiddenAfter = preferences.ModelsHidden.Count;
+                var disabledAfter = !button.IsEffectivelyEnabled;
+                var switchesOn = Switches(window).All(static box => box.IsChecked == true);
+
+                window.Close();
+                return (disabledAtStart, enabledWhenHidden, hiddenAfter, disabledAfter, switchesOn);
+            },
+            budget.Token);
+
+        Assert.True(result.disabledAtStart);
+        Assert.True(result.enabledWhenHidden);
+        Assert.Equal(0, result.hiddenAfter);
+        Assert.True(result.disabledAfter);
+        Assert.True(result.switchesOn);
+    }
+
     private static List<CheckBox> Switches(Window window) =>
         window.GetVisualDescendants()
             .OfType<CheckBox>()

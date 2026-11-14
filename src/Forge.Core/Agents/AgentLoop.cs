@@ -74,8 +74,6 @@ public sealed class AgentLoop(AgentLoopServices services)
     private readonly SemaphoreSlim approvalGate = new(1, 1);
     private readonly AgentSlotPool slots = new(services.Options.MaxParallelSubAgents);
     private CompactionPolicy compactionPolicy = services.Options.Compaction;
-    private readonly object limitGate = new();
-    private int maxParallelSubAgents = Math.Max(SubAgentLimitsHardFloor, services.Options.MaxParallelSubAgents);
 
     /// <summary>
     /// Replaces the cap on how many agents of this tree may run at once (the <c>agents</c> settings section). Raising it lets
@@ -86,24 +84,13 @@ public sealed class AgentLoop(AgentLoopServices services)
     /// <returns>Whether the cap moved.</returns>
     internal bool SetMaxParallelSubAgents(int limit)
     {
+        // The pool holds the only copy of the cap, so the value read back can never disagree with the one enforced.
         var clamped = Math.Max(SubAgentLimitsHardFloor, limit);
-
-        // The recorded cap and the pool's limit move together: two concurrent setters must not leave them disagreeing.
-        lock (limitGate)
-        {
-            if (maxParallelSubAgents == clamped)
-            {
-                return false;
-            }
-
-            maxParallelSubAgents = clamped;
-            slots.SetLimit(clamped);
-            return true;
-        }
+        return slots.SetLimit(clamped);
     }
 
     /// <summary>The cap in force on how many agents of this tree run at once; see <see cref="SetMaxParallelSubAgents"/>.</summary>
-    internal int MaxParallelSubAgents => Volatile.Read(ref maxParallelSubAgents);
+    internal int MaxParallelSubAgents => slots.Limit;
 
     /// <summary>
     /// The compaction policy in force. It starts as <see cref="AgentOptions.Compaction"/> and is replaced through
