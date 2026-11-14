@@ -120,7 +120,7 @@ internal static class PaletteQuery
 
     /// <summary>Clamps a configured result limit into the range the settings page also allows.</summary>
     public static int ClampLimit(int limit) =>
-        Math.Clamp(limit, Preferences.AppPreferences.MinPaletteResultLimit, Preferences.AppPreferences.MaxPaletteResultLimit);
+        Math.Clamp(limit, Preferences.AppPreferences.MinPalettePerSourceLimit, Preferences.AppPreferences.MaxPalettePerSourceLimit);
 
     private static bool IsSegmentStart(char previous) =>
         previous is '/' or '\\' or '.' or ':' or '-' or ' ' or '_' or '(';

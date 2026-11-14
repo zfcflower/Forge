@@ -29,7 +29,7 @@ internal sealed partial class PaletteViewModel
     /// landing refresh, a language switch) keeps the row the user had.
     /// </summary>
     private void Rebuild(bool keepSelection = false) =>
-        Replace(Build(PaletteQuery.ClampLimit(preferences.PaletteResultLimit)), keepSelection);
+        Replace(Build(PaletteQuery.ClampLimit(preferences.PalettePerSourceLimit)), keepSelection);
 
     private IReadOnlyList<PaletteItem> Build(int limit) => source switch
     {

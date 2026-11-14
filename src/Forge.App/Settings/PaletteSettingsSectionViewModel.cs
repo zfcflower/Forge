@@ -24,22 +24,22 @@ internal sealed class PaletteSettingsSectionViewModel : NotifyingObject
     /// <summary>Rows one source may list; the preference clamps it, and the bounds are what the editor allows.</summary>
     public int ResultLimit
     {
-        get => preferences.PaletteResultLimit;
+        get => preferences.PalettePerSourceLimit;
         set
         {
-            if (preferences.PaletteResultLimit == value)
+            if (preferences.PalettePerSourceLimit == value)
             {
                 return;
             }
 
-            preferences.PaletteResultLimit = value;
+            preferences.PalettePerSourceLimit = value;
             OnPropertyChanged();
         }
     }
 
-    public double MinimumLimit => AppPreferences.MinPaletteResultLimit;
+    public double MinimumLimit => AppPreferences.MinPalettePerSourceLimit;
 
-    public double MaximumLimit => AppPreferences.MaxPaletteResultLimit;
+    public double MaximumLimit => AppPreferences.MaxPalettePerSourceLimit;
 
     /// <summary>Comma-separated directory names the content search skips; empty leaves it to <c>.gitignore</c>.</summary>
     public string ExcludeDirectories

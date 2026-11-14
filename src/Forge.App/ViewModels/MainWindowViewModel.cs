@@ -3178,7 +3178,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // The long-lived owners subscribe to the string table themselves; they drop it with the window.
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         PropertyChanged -= OnPaletteActiveSessionChanged;
-        Palette.Dispose();
+        paletteViewModel.PropertyChanged -= OnPaletteOpenChanged;
+        paletteViewModel.Dispose();
         Status.Dispose();
         Settings.Dispose();
         Projects.Dispose();

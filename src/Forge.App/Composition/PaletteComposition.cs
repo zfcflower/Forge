@@ -1,4 +1,3 @@
-using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.Settings;
 using Forge.App.Views;
@@ -19,7 +18,7 @@ internal static class PaletteComposition
 
         settings.Add(new SettingsSection(
             SettingsSectionIds.Palette,
-            PaletteStrings.SettingsTitle,
+            PaletteSettingsSectionViewModel.SectionTitle,
             SettingsSectionIds.PaletteOrder,
             new PaletteSettingsSectionViewModel(composition.Preferences),
             SettingsGroups.Interface,

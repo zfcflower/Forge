@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Headless;
 using Avalonia.Input;
@@ -79,6 +80,7 @@ public sealed class PaletteViewTests
         scene.Press(PhysicalKey.Escape);
 
         Assert.False(scene.ViewModel.IsOpen);
+        Assert.Null(scene.Shown);
         Assert.Single(scene.Host.Activations);
         return Task.CompletedTask;
     });
@@ -150,20 +152,36 @@ public sealed class PaletteViewTests
 
     private static Task Ui(Func<Task> body) => SharedUi.RunAsync(body);
 
+    /// <summary>The one template the slot needs: it builds the palette view for the view model, as <c>App.axaml</c> does.</summary>
+    private sealed class PaletteTemplate : IDataTemplate
+    {
+        public bool Match(object? data) => data is PaletteViewModel;
+
+        public Control? Build(object? param) =>
+            param is PaletteViewModel model ? new PaletteView { DataContext = model } : null;
+    }
+
     /// <summary>
-    /// One shown palette over one host, hosted the way <c>MainWindow</c> hosts it: the view sits in a panel whose
-    /// visibility follows <see cref="PaletteViewModel.IsOpen"/>, so a closed palette is really out of sight.
+    /// One shown palette over one host, hosted the way <c>MainWindow</c> hosts it: a content slot whose content is the view
+    /// model only while the palette is open (<c>MainWindowViewModel.Palette</c> is null when it is closed), so a closed
+    /// palette has no view at all - which is also what makes the focus-on-attach path real.
     /// </summary>
     private sealed class Scene : IDisposable
     {
-        private Scene(Window window, PaletteViewModel viewModel, FakePaletteHost host)
+        private readonly ContentControl slot;
+
+        private Scene(Window window, ContentControl slot, PaletteViewModel viewModel, FakePaletteHost host)
         {
             Window = window;
+            this.slot = slot;
             ViewModel = viewModel;
             Host = host;
         }
 
         public Window Window { get; }
+
+        /// <summary>The slot's content: the view model while the palette is open, null while it is closed.</summary>
+        public object? Shown => slot.Content;
 
         public PaletteViewModel ViewModel { get; }
 
@@ -176,16 +194,29 @@ public sealed class PaletteViewTests
         public static Scene Show(FakePaletteHost host, AppPreferences? preferences = null)
         {
             var viewModel = new PaletteViewModel(host, preferences ?? new AppPreferences());
-            var panel = new Panel { DataContext = viewModel, Children = { new PaletteView { DataContext = viewModel } } };
-            panel.Bind(Visual.IsVisibleProperty, new Binding(nameof(PaletteViewModel.IsOpen)));
-            var window = SharedUi.Show(panel, WindowWidth, WindowHeight);
+            var slot = new ContentControl { DataTemplates = { new PaletteTemplate() } };
+            viewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(PaletteViewModel.IsOpen))
+                {
+                    slot.Content = viewModel.IsOpen ? viewModel : null;
+                }
+            };
+            var window = SharedUi.Show(slot, WindowWidth, WindowHeight);
             SharedUi.Settle(window);
-            return new Scene(window, viewModel, host);
+            return new Scene(window, slot, viewModel, host);
         }
 
         public void Open(PaletteSource source)
         {
             ViewModel.Open(source);
+            SharedUi.Settle(Window);
+        }
+
+        /// <summary>Closes the palette the way the window does and settles, so the slot is really empty again.</summary>
+        public void Close()
+        {
+            ViewModel.Close();
             SharedUi.Settle(Window);
         }
 
