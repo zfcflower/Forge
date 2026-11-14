@@ -26,9 +26,21 @@
 - 测试与评审必须使用彼此独立的会话。
 - 实现与测试 Agent 都在自己的仓库副本里干活(`D:/FORGE/workN/<part>`),跑完与本次任务相关的测试且全绿后只把归属路径拷回主仓库;不碰其他路径、`*.csproj`、`Directory.Build.props`、`Forge.slnx`,不执行 git 命令。副本不存在须先创建,复制失败须报告阻塞,不得回退到共享主仓原地修改。创建副本用 `robocopy <主仓> <副本> /E /XD bin obj .git .vs /R:1 /W:1 /NFL /NDL /NJH /NJS`:`.vs` 里有 IDE 锁住的文件,不排除、不限重试时 robocopy 默认每 30 秒重试、最多 100 万次,会无限挂起。子 Agent 只在自己的副本内搜索,搜索排除 `bin`/`obj`;禁止在 `D:/FORGE` 根下递归搜索(那里有大量副本,曾导致单条 grep 跑了一小时)。NuGet 包里的类型搜源码搜不到,参考仓内现有用法。副本用完即可删除。
 - 主 Agent 只写接口契约(`Forge.Abstractions`)、调度、集成与 spec;实现细节在能并行时交给 Worker,不能并行时自己写。
-- 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**、不跑全量 `dotnet test`,并检查是否越界改动,再决定是否采纳。全量约 5 分钟,且混着与本次改动无关的偶发失败,判不出真伪;相关范围按改动落点定——改了 `src/Forge.App/Workbench/`、`Resources/` 或视图就带 `Forge.App.Tests.Workbench`;改了 `.cs`/`.axaml` 源文件就再加 `Localization` 与 `MinorRegressionTests`(它们扫源码,是硬门槛);只改文档/spec 时无需跑测试。
-- 本地跑测试而 `Forge.App` 正开着时,`src/Forge.App/bin/Debug/net11.0/` 被进程锁住,构建以 `MSB3027`/`MSB3026` 失败(不是代码问题)。用 `dotnet test <proj> -p:BaseOutputPath=artifacts/<name>/` 重定向输出。**输出目录必须留在仓库内**:`KeyRegistryTests`、`NoHardcodedChineseTests`、`StringTableTests`、`MinorRegressionTests` 从测试程序集往上找 `Forge.slnx` 读源码,放到仓库外(如 `D:/tmp/...`)时它们会以“找不到仓库根”失败,看起来像真失败。
+- 无论自己实现还是复核子 Agent 的产出,都要**构建**、**只跑与本次改动相关的测试**(见下节)、并检查是否越界改动,再决定是否采纳。
+- 本地跑测试而 `Forge.App` 正开着时,`src/Forge.App/bin/Debug/net11.0/` 被进程锁住,构建以 `MSB3027`/`MSB3026` 失败(不是代码问题)。用 `dotnet test <proj> -p:BaseOutputPath=artifacts/<name>/` 重定向输出。**输出目录必须留在仓库内**:`KeyRegistryTests`、`NoHardcodedChineseTests`、`StringTableTests`、`MinorRegressionTests` 从测试程序集往上找 `Forge.slnx` 读源码,放到仓库外(如 `D:/tmp/...`)时它们会以“找不到仓库根”失败,看起来像真失败。同一现象也会由**上一个被中断的测试留下的 `testhost`/`ExtensionHost` 孤儿进程**造成:先确认没有残留进程再改代码,不要把它当成代码问题。
 - 派活文本里写明该任务适用的 `.github/skills/...` 路径。Worker 的上下文是干净的,不会自己去找 skill,不带路径等于没这份约束。
+
+## 测试分层与执行
+
+判定依据、落点映射与新增/删除测试的规则见 `testing.md`(id `forge-testing`)。本节只写操作口径。
+
+- **L1(每次任务)**:先 `dotnet build Forge.slnx -c Debug` 一次,之后所有 `dotnet test` 都带 `--no-build`;只跑改动落点对应的命名空间,例如 `dotnet test tests/Forge.App.Tests --no-build --filter "FullyQualifiedName~Forge.App.Tests.Workbench"`。改了任何 `.cs`/`.axaml` 源文件时追加源码扫描门槛:`--filter "FullyQualifiedName~Localization|FullyQualifiedName~MinorRegressionTests|FullyQualifiedName~KeyRegistry|FullyQualifiedName~StringTable|FullyQualifiedName~NoHardcodedChinese"`。只改文档/spec 时无需跑测试。
+- **L2(模块完成、接口变化、较大重构)**:跑承载改动的那个测试项目全量,例如 `dotnet test tests/Forge.Core.Tests --no-build`。
+- **L3(合并前、发布、跨模块、公共协议变化)**:13 个测试项目全量。触发条件按 `testing.md`;`Forge.Integration.Tests` 与 `Forge.App.LiveSwitch.Tests` 只在 L3 跑。
+- 不跑与本次改动无关的测试,也不为“保险”跑全量;全量混着与本次改动无关的偶发失败,判不出真伪。
+- 报告里写清:实际执行的命令、用例数、耗时、结果;没跑的部分说明原因与未验证范围。
+- 新增或删除测试前先读 `testing.md` 的准入与清理规则;删除测试必须在报告里逐条说明理由。
+- 源码扫描类门槛(`StringTableTests`/`NoHardcodedChineseTests`/`KeyRegistryTests`/`MinorRegressionTests`)报“源码里明明已注册/已存在”的错误时,先 `dotnet build`(必要时加 `-t:Rebuild`)再跑一次:复用旧 `bin` 的 `--no-build` 会报假红。
 
 ## 开发 Skills
 
