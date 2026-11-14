@@ -61,7 +61,7 @@ public sealed class ResourceInspectorHeadlessTests
         foreach (var id in new[]
                  {
                      "resource-inspector", "inspector-close", "inspector-count", "inspector-tool-toggle",
-                     "inspector-stop-tool", "inspector-stop-agent",
+                     "inspector-stop-tool", "inspector-stop-agent", "inspector-group-active",
                  })
         {
             Assert.Contains(id, state.Ids);
@@ -74,6 +74,40 @@ public sealed class ResourceInspectorHeadlessTests
         Assert.Contains(ChildKind, state.Tail);
         Assert.Contains(state.Tool.TailText, state.Tail);
         Assert.Contains(state.Agent.TaskSummary, state.Tail);
+
+        // The session's group header names the session and tags it as the one the window shows.
+        Assert.Contains("demo session", state.Tail);
+        Assert.Contains("当前会话", state.Tail);
+    }
+
+    [Fact]
+    public async Task Stopping_a_tool_row_hides_its_stop_button_and_shows_stopping()
+    {
+        var session = SharedUi.Session;
+        var state = await session.Dispatch(
+            () =>
+            {
+                using var language = new LanguageScope(UiLanguage.Chinese);
+                var (model, tool, _) = CreateModel();
+                using (model)
+                {
+                    var window = Show(model);
+                    var stop = Find<Button>(window, "inspector-stop-tool");
+                    Assert.NotNull(stop);
+                    var before = (Visible: AutomationIds(window, onlyVisible: true), Shown: VisibleTexts(window));
+                    Click(window, stop!);
+                    var after = (Visible: AutomationIds(window, onlyVisible: true), Shown: VisibleTexts(window));
+                    window.Close();
+                    return (before, after, tool.IsStopRequested, Stopping: ResourceInspectorStrings.Stopping);
+                }
+            },
+            CancellationToken.None);
+
+        Assert.Contains("inspector-stop-tool", state.before.Visible);
+        Assert.DoesNotContain(state.Stopping, state.before.Shown);
+        Assert.True(state.IsStopRequested);
+        Assert.DoesNotContain("inspector-stop-tool", state.after.Visible);
+        Assert.Contains(state.Stopping, state.after.Shown);
     }
 
     [Fact]
@@ -123,8 +157,10 @@ public sealed class ResourceInspectorHeadlessTests
             () =>
             {
                 using var language = new LanguageScope(UiLanguage.Chinese);
+                var source = new Source("demo session");
                 var model = new ResourceInspectorViewModel(
-                    () => new ResourceInspectorSession("demo session", [], []),
+                    source.Collect,
+                    () => source,
                     new AppPreferences(),
                     close: () => { },
                     schedule: NoTimer);
@@ -157,8 +193,10 @@ public sealed class ResourceInspectorHeadlessTests
             () =>
             {
                 var closed = 0;
+                var source = new Source("demo session");
                 var model = new ResourceInspectorViewModel(
-                    () => new ResourceInspectorSession("demo session", [], []),
+                    source.Collect,
+                    () => source,
                     new AppPreferences(),
                     close: () => closed++,
                     schedule: NoTimer);
@@ -201,7 +239,7 @@ public sealed class ResourceInspectorHeadlessTests
             {
                 using var language = new LanguageScope(UiLanguage.Chinese);
                 var row = new ToolRowViewModel("Bash", """{"command":"npm test"}""");
-                var live = new LiveToolViewModel("root", static () => null, new ToolCall("call-1", "Bash", "{}"), At, static () => { });
+                var live = new LiveToolViewModel("root", static () => null, new ToolCall("call-1", "Bash", "{}"), At, static (_, _) => true);
                 row.AttachLive(live);
                 live.RecordTail(Snapshot);
                 live.Tick(AppPreferences.DefaultInspectorLogTailLines, At.AddSeconds(1));
@@ -304,15 +342,16 @@ public sealed class ResourceInspectorHeadlessTests
 
     private static (ResourceInspectorViewModel Model, LiveToolViewModel Tool, SubAgentViewModel Agent) CreateModel()
     {
-        var tool = new LiveToolViewModel("root", static () => null, new ToolCall("call-1", "Bash", """{"command":"npm test"}"""), At, static () => { });
+        var tool = new LiveToolViewModel("root", static () => null, new ToolCall("call-1", "Bash", """{"command":"npm test"}"""), At, static (_, _) => true);
         tool.RecordTail(Snapshot);
         var agent = new SubAgentViewModel(SessionId, "child-1", "child-session", ChildKind, ChildTask, "model", stopRequested: null);
         agent.MarkRunning(At.AddSeconds(1));
+        var source = new Source("demo session");
+        source.Rows.Add(tool);
+        source.Rows.Add(agent);
         var model = new ResourceInspectorViewModel(
-            () => new ResourceInspectorSession(
-                "demo session",
-                new List<LiveToolViewModel> { tool },
-                new List<SubAgentViewModel> { agent }),
+            source.Collect,
+            () => source,
             new AppPreferences(),
             close: () => { },
             schedule: NoTimer);
@@ -403,6 +442,24 @@ public sealed class ResourceInspectorHeadlessTests
             .Where(static block => block.IsEffectivelyVisible)
             .Select(static block => block.Text ?? string.Empty)
             .ToList();
+
+    /// <summary>One open session as the panel reads it.</summary>
+    private sealed class Source(string title) : IResourceInspectorSource
+    {
+        public string Title { get; } = title;
+
+        public List<object> Rows { get; } = [];
+
+        public event EventHandler? RunningResourcesChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public void Collect(List<IResourceInspectorSource> into) => into.Add(this);
+
+        public void CollectRunning(List<object> into) => into.AddRange(Rows);
+    }
 
     /// <summary>A timer the tests never fire: the overlay is drawn from one explicit pull.</summary>
     private sealed class NoopTicker : IDisposable

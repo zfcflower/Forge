@@ -213,23 +213,42 @@ internal sealed class LiveToolViewModel : NotifyingObject
     private DateTimeOffset clockAt;
     private bool isRunning = true;
     private bool isExpanded = true;
+    private bool isStopRequested;
 
-    public LiveToolViewModel(string agentId, Func<string?> agentKind, ToolCall call, DateTimeOffset startedAt, Action stopTurn)
+    /// <summary>Asks the session's runtime to cancel this one call; null for a call that cannot be stopped (a read-only view).</summary>
+    private readonly Func<string, string, bool>? stopCall;
+
+    /// <param name="stopCall">
+    /// Cancels exactly this call, by (agent id, call id), and answers whether a running call was found - the turn and the
+    /// other calls go on (Core gives every call its own token). The session passes one cached delegate for all its calls;
+    /// null when nothing can be stopped (no runtime).
+    /// </param>
+    public LiveToolViewModel(
+        string agentId,
+        Func<string?> agentKind,
+        ToolCall call,
+        DateTimeOffset startedAt,
+        Func<string, string, bool>? stopCall)
     {
         ArgumentNullException.ThrowIfNull(agentKind);
         ArgumentNullException.ThrowIfNull(call);
-        ArgumentNullException.ThrowIfNull(stopTurn);
         AgentId = agentId;
+        CallId = call.Id;
         this.agentKind = agentKind;
+        this.stopCall = stopCall;
         Name = call.Name;
         ArgumentSummary = ToolRowViewModel.Compact(call.ArgumentsJson, SummaryLimit);
         StartedAt = startedAt;
         clockAt = startedAt;
-        StopCommand = new RelayCommand(stopTurn, () => isRunning);
+        StopCommand = new RelayCommand(RequestStop, () => CanStop);
+        ToggleCommand = new RelayCommand(() => IsExpanded = !IsExpanded);
     }
 
     /// <summary>The agent whose tool call this is: <c>"root"</c> or a sub-agent's id.</summary>
     public string AgentId { get; }
+
+    /// <summary>The provider's id of the call; with <see cref="AgentId"/> it is what Core's single-call cancel is keyed by.</summary>
+    public string CallId { get; }
 
     public string Name { get; }
 
@@ -267,10 +286,39 @@ internal sealed class LiveToolViewModel : NotifyingObject
 
     public string ExpandGlyph => isExpanded ? "\u25be" : "\u25b8";
 
-    public RelayCommand ToggleCommand => new(() => IsExpanded = !IsExpanded);
+    /// <summary>Built once: a getter that returned a new command would hand every binding read its own instance.</summary>
+    public RelayCommand ToggleCommand { get; }
 
-    /// <summary>Stops the turn the call belongs to: a single tool call cannot be cancelled on its own (Core hands it the turn's token).</summary>
+    /// <summary>
+    /// Stops this one call (a command is killed with its process tree, a spawned child is cancelled); the turn continues and
+    /// the model is told the user cancelled the call. Disabled once requested, after the call ended, and without a runtime.
+    /// </summary>
     public RelayCommand StopCommand { get; }
+
+    /// <summary>True while a stop would do something: the call runs, can be stopped, and no stop is pending yet.</summary>
+    public bool CanStop => isRunning && !isStopRequested && stopCall is not null;
+
+    /// <summary>A stop was accepted and the call is winding down; the row says so until the call's finish removes it.</summary>
+    public bool IsStopRequested => isStopRequested;
+
+    private void RequestStop()
+    {
+        if (!CanStop)
+        {
+            return;
+        }
+
+        // False: the call already returned (its finish is on its way) - nothing to mark, the row goes with that finish.
+        if (!stopCall!(AgentId, CallId))
+        {
+            return;
+        }
+
+        isStopRequested = true;
+        StopCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanStop));
+        OnPropertyChanged(nameof(IsStopRequested));
+    }
 
     /// <summary>Tool's output thread: publish the newest snapshot. Dropping an intermediate one is free - it is a snapshot.</summary>
     public void RecordTail(string snapshot) => Volatile.Write(ref tail, snapshot ?? string.Empty);
@@ -340,6 +388,7 @@ internal sealed class LiveToolViewModel : NotifyingObject
         shownTail = string.Empty;
         StopCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsRunning));
+        OnPropertyChanged(nameof(CanStop));
         OnPropertyChanged(nameof(TailText));
         OnPropertyChanged(nameof(HasTail));
     }

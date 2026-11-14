@@ -9,26 +9,103 @@ using ZLogger;
 namespace Forge.App.ViewModels;
 
 /// <summary>
-/// One session as the resource inspector reads it: the live tool calls, the live sub-agents, and what it calls itself. The
-/// inspector never holds a <see cref="SessionWorkspaceViewModel"/> - the shell answers this per pull, so the panel cannot keep
-/// a closed session alive and cannot write anything into it.
+/// One open session as the resource inspector reads it (implemented by <see cref="SessionWorkspaceViewModel"/>). The panel
+/// only reads rows through it and listens for "the set changed"; it never writes into a session, and it forgets a session
+/// (and its listener) on the first refresh after the shell stopped listing it.
 /// </summary>
-/// <param name="Tools">The calls running right now (<see cref="SessionWorkspaceViewModel.RunningTools"/>).</param>
-internal sealed record ResourceInspectorSession(
-    string Title,
-    ICollection<LiveToolViewModel> Tools,
-    IReadOnlyList<SubAgentViewModel> SubAgents);
+internal interface IResourceInspectorSource
+{
+    /// <summary>The session's title, shown on its group header.</summary>
+    string Title { get; }
+
+    /// <summary>
+    /// UI thread: appends this session's live rows - a <see cref="SubAgentViewModel"/> per live child, a
+    /// <see cref="LiveToolViewModel"/> per running call of the root or any child - in any order. Nothing for a closed session.
+    /// </summary>
+    void CollectRunning(List<object> into);
+
+    /// <summary>UI thread: the rows <see cref="CollectRunning"/> would add changed, or the session is closing.</summary>
+    event EventHandler? RunningResourcesChanged;
+}
 
 /// <summary>
-/// The resource inspector (wave W8, 缺口 #13): everything the active session is running right now - its streaming tool calls
-/// and its sub-agents - in one list with the elapsed time, the tail of the output and a stop button.
-/// <para>It is a <em>pull</em>: <see cref="Refresh"/> asks the session for what runs and reconciles the rows, and it runs on
-/// the panel's own timer (<c>AppPreferences.InspectorRefreshMilliseconds</c>) only while the overlay is open. Progress itself
-/// is not dispatched - the session publishes each snapshot into its entry and this panel reads it on the next tick - so the
-/// cost of a running command never reaches the dispatcher, and a closed panel costs nothing at all.</para>
-/// <para>Rows are never rebuilt: a row appears when something starts and goes away when it stops, so a binding, the scroll
-/// position and a collapsed row all survive every tick. Stops go through the row's own command: a sub-agent stops through
-/// <c>SubAgentControl</c>, a tool call stops its whole turn, because Core hands a tool the turn's token and nothing finer.</para>
+/// The header row of one session's group in the inspector: its title, how many rows it lists and whether it is the session
+/// the window shows. Owned by the panel (one per open session that has something running), never by the session.
+/// </summary>
+internal sealed class ResourceInspectorGroupViewModel : NotifyingObject
+{
+    private string title;
+    private int count;
+    private bool isActive;
+
+    internal ResourceInspectorGroupViewModel(IResourceInspectorSource source)
+    {
+        Source = source;
+        title = source.Title;
+    }
+
+    internal IResourceInspectorSource Source { get; }
+
+    /// <summary>The refresh pass that last saw this session listed by the shell; an older value means it closed.</summary>
+    internal int Generation { get; set; }
+
+    public string Title => title;
+
+    public int Count => count;
+
+    /// <summary>"2 项进行中" for this session's rows.</summary>
+    public string CountText => ResourceInspectorStrings.Count(count);
+
+    /// <summary>True for the session the window shows; its group is listed first and tagged.</summary>
+    public bool IsActive => isActive;
+
+    public string ActiveText => ResourceInspectorStrings.ActiveSession;
+
+    /// <summary>UI thread: re-reads the title and applies the pass's count and active flag, raising only what moved.</summary>
+    internal void Update(int rows, bool active)
+    {
+        var currentTitle = Source.Title;
+        if (!string.Equals(currentTitle, title, StringComparison.Ordinal))
+        {
+            title = currentTitle;
+            OnPropertyChanged(nameof(Title));
+        }
+
+        if (rows != count)
+        {
+            count = rows;
+            OnPropertyChanged(nameof(Count));
+            OnPropertyChanged(nameof(CountText));
+        }
+
+        if (active != isActive)
+        {
+            isActive = active;
+            OnPropertyChanged(nameof(IsActive));
+        }
+    }
+
+    internal void RefreshText()
+    {
+        OnPropertyChanged(nameof(CountText));
+        OnPropertyChanged(nameof(ActiveText));
+    }
+}
+
+/// <summary>
+/// The resource inspector (wave W8, 缺口 #13): everything the open sessions are running right now - their streaming tool
+/// calls and their sub-agents - in one list grouped by session (the active session first), with the elapsed time, the tail
+/// of the output and a stop button per row.
+/// <para>It is a <em>pull</em>: <see cref="Refresh"/> asks every open session for what runs and reconciles the rows. It runs
+/// on the panel's own timer (<c>AppPreferences.InspectorRefreshMilliseconds</c>) only while the overlay is open, and when a
+/// session reports that its set changed (<see cref="IResourceInspectorSource.RunningResourcesChanged"/>) - those requests are
+/// coalesced into one background-priority refresh, however many arrive in a burst. Progress itself is never dispatched: the
+/// session publishes each snapshot into its entry and this panel reads it on the next pull.</para>
+/// <para>Rows are never rebuilt: a row appears when something starts and goes away when it stops (or its session closes),
+/// so a binding, the scroll position and a collapsed row all survive every pull. The pull reuses its buffers, so a steady
+/// state allocates nothing beyond what the sessions' own enumerators need. Stops go through the row's own command, which
+/// belongs to the row's session: a sub-agent stops through <c>SubAgentControl</c>, a tool call through Core's single-call
+/// cancel (the turn goes on).</para>
 /// </summary>
 internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
 {
@@ -36,38 +113,75 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
     private static readonly Func<TimeSpan, Action, IDisposable> DefaultSchedule =
         static (interval, tick) => new DispatcherTicker(interval, tick);
 
-    /// <summary>Where the rows come from: the active session, or null when the window has none (the panel then says so).</summary>
-    private readonly Func<ResourceInspectorSession?> sessionSource;
+    /// <summary>The default coalesced refresh: one background-priority post, below input and render.</summary>
+    private static readonly Action<Action> DefaultPost =
+        static action => Dispatcher.UIThread.Post(action, DispatcherPriority.Background);
+
+    private static readonly Comparison<object> RowOrder = CompareRows;
+
+    /// <summary>Fills the list with every open session, in the shell's order; asked once per pull.</summary>
+    private readonly Action<List<IResourceInspectorSource>> collectSessions;
+
+    /// <summary>The session the window shows (its group goes first); null when none.</summary>
+    private readonly Func<IResourceInspectorSource?> activeSession;
     private readonly AppPreferences preferences;
     private readonly Action? close;
     private readonly Func<TimeSpan, Action, IDisposable> schedule;
+    private readonly Action<Action> post;
     private readonly ObservableCollection<object> items = [];
+
+    /// <summary>One header per open session, keyed by the session itself; each entry also owns the panel's listener on it.</summary>
+    private readonly Dictionary<IResourceInspectorSource, ResourceInspectorGroupViewModel> groups =
+        new(ReferenceEqualityComparer.Instance);
+
+    // Buffers reused by every pull, so a refresh at a steady state allocates nothing of its own.
+    private readonly List<IResourceInspectorSource> sources = [];
+    private readonly List<object> desired = [];
+    private readonly List<object> scratch = [];
+    private readonly List<IResourceInspectorSource> stale = [];
+    private readonly HashSet<object> desiredSet = new(ReferenceEqualityComparer.Instance);
+
+    private readonly EventHandler onSourceChanged;
+    private readonly Action runQueuedRefresh;
 
     /// <summary>The thread the panel was built on (the UI thread); a language notification from another one is not ours.</summary>
     private readonly int uiThread = Environment.CurrentManagedThreadId;
 
     private IDisposable? ticker;
+    private int generation;
+    private int total;
+    private bool hasSession;
+    private int refreshQueued;
     private bool disposed;
 
-    /// <param name="sessionSource">The session the rows describe; asked once per pull, and once per property that depends on it.</param>
+    /// <param name="collectSessions">Appends every open session, in the shell's order; asked once per pull.</param>
+    /// <param name="activeSession">The session the window shows; its group is listed first and tagged.</param>
     /// <param name="preferences">The live preferences: the line limit is read on every pull, the refresh interval at every reschedule.</param>
     /// <param name="close">Closes the overlay (its close button, Escape or a click on the scrim).</param>
     /// <param name="schedule">
     /// How the periodic pull is driven. Defaults to a dispatcher timer at the UI's background priority; a test passes its own
     /// and calls <see cref="Refresh"/> directly, so the panel is testable without a message loop.
     /// </param>
+    /// <param name="post">How a coalesced refresh is queued; defaults to one background-priority dispatcher post.</param>
     public ResourceInspectorViewModel(
-        Func<ResourceInspectorSession?> sessionSource,
+        Action<List<IResourceInspectorSource>> collectSessions,
+        Func<IResourceInspectorSource?> activeSession,
         AppPreferences preferences,
         Action? close = null,
-        Func<TimeSpan, Action, IDisposable>? schedule = null)
+        Func<TimeSpan, Action, IDisposable>? schedule = null,
+        Action<Action>? post = null)
     {
-        ArgumentNullException.ThrowIfNull(sessionSource);
+        ArgumentNullException.ThrowIfNull(collectSessions);
+        ArgumentNullException.ThrowIfNull(activeSession);
         ArgumentNullException.ThrowIfNull(preferences);
-        this.sessionSource = sessionSource;
+        this.collectSessions = collectSessions;
+        this.activeSession = activeSession;
         this.preferences = preferences;
         this.close = close;
         this.schedule = schedule ?? DefaultSchedule;
+        this.post = post ?? DefaultPost;
+        onSourceChanged = OnSourceChanged;
+        runQueuedRefresh = RunQueuedRefresh;
 
         Items = new ReadOnlyObservableCollection<object>(items);
         CloseCommand = new RelayCommand(() => this.close?.Invoke(), () => !disposed);
@@ -76,20 +190,15 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
     }
 
     /// <summary>
-    /// The rows: a <see cref="SubAgentViewModel"/> for a live child, a <see cref="LiveToolViewModel"/> for a running call, in
-    /// the order they started.
+    /// The rows, flat (the list stays virtualized): per session with something running, a
+    /// <see cref="ResourceInspectorGroupViewModel"/> header followed by its <see cref="SubAgentViewModel"/> and
+    /// <see cref="LiveToolViewModel"/> rows in the order they started. The active session's group comes first.
     /// </summary>
     public ReadOnlyObservableCollection<object> Items { get; }
 
     public RelayCommand CloseCommand { get; }
 
     public string Title => ResourceInspectorStrings.Title;
-
-    /// <summary>The session whose work is listed, beside the title: the overlay covers the window, and "which session" is the
-    /// first thing it has to answer. Empty while no session exists (the state text says that instead).</summary>
-    public string SessionTitle => sessionSource()?.Title ?? string.Empty;
-
-    public bool HasSessionTitle => SessionTitle.Length > 0;
 
     public string CloseLabel => ResourceInspectorStrings.Close;
 
@@ -101,16 +210,22 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
 
     public string NoSession => ResourceInspectorStrings.NoSession;
 
-    /// <summary>False only in the window that has no session open at all; the shell closes the panel on a session switch.</summary>
-    public bool HasSession => sessionSource() is not null;
+    /// <summary>False only while the window has no session open at all.</summary>
+    public bool HasSession => hasSession;
 
-    public bool HasRunning => items.Count > 0;
+    /// <summary>Rows listed across every session, headers not counted.</summary>
+    public int RunningCount => total;
 
-    /// <summary>"3 个运行中": the count beside the title, hidden while nothing runs.</summary>
-    public string CountText => ResourceInspectorStrings.Count(items.Count);
+    public bool HasRunning => total > 0;
 
-    /// <summary>Open, a session exists and nothing runs: the one line that says the session is idle.</summary>
-    public bool IsEmpty => HasSession && items.Count == 0;
+    /// <summary>"3 项进行中": the count beside the title, hidden while nothing runs.</summary>
+    public string CountText => ResourceInspectorStrings.Count(total);
+
+    /// <summary>Open, a session exists and nothing runs anywhere: the one line that says everything is idle.</summary>
+    public bool IsEmpty => hasSession && total == 0;
+
+    /// <summary>Sessions the panel currently listens to (one per open session); for tests, which check that none leaks.</summary>
+    internal int ListenedSessions => groups.Count;
 
     /// <summary>Starts the periodic pull and reads the rows once, so the panel is drawn populated on its first frame.</summary>
     public void Start()
@@ -125,8 +240,23 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
     }
 
     /// <summary>
-    /// Reads the session's live work and reconciles the rows: a finished call goes, a started one is inserted at its
-    /// start-time position. Also re-cuts every running call's tail at the current line limit. UI thread only.
+    /// Queues one refresh; further requests before it runs are absorbed. Safe from any thread (the refresh itself runs where
+    /// <c>post</c> puts it, the UI thread by default).
+    /// </summary>
+    internal void RequestRefresh()
+    {
+        if (disposed || Interlocked.Exchange(ref refreshQueued, 1) == 1)
+        {
+            return;
+        }
+
+        post(runQueuedRefresh);
+    }
+
+    /// <summary>
+    /// Reads every open session's live work and reconciles the rows: a finished call or a closed session's rows go, a started
+    /// one is inserted at its start-time position inside its session's group. Also re-cuts every running call's tail at the
+    /// current line limit. UI thread only.
     /// </summary>
     internal void Refresh()
     {
@@ -135,58 +265,82 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
             return;
         }
 
-        var session = sessionSource();
+        var pass = ++generation;
+        sources.Clear();
+        collectSessions(sources);
+        var active = activeSession();
         var maxLines = preferences.InspectorLogTailLines;
 
-        var wanted = new List<object>((session?.SubAgents.Count ?? 0) + (session?.Tools.Count ?? 0));
-        if (session is not null)
+        // Listen to every open session (an idle one included: its first call must refresh the panel), forget closed ones.
+        foreach (var source in sources)
         {
-            foreach (var agent in session.SubAgents)
+            if (!groups.TryGetValue(source, out var group))
             {
-                wanted.Add(agent);
+                group = new ResourceInspectorGroupViewModel(source);
+                groups[source] = group;
+                source.RunningResourcesChanged += onSourceChanged;
             }
 
-            foreach (var tool in session.Tools)
+            group.Generation = pass;
+        }
+
+        stale.Clear();
+        foreach (var pair in groups)
+        {
+            if (pair.Value.Generation != pass)
             {
-                wanted.Add(tool);
+                stale.Add(pair.Key);
             }
         }
 
-        // Rows that stopped running leave; the ones that remain keep their position, their binding and their collapsed state.
-        for (var index = items.Count - 1; index >= 0; index--)
+        foreach (var source in stale)
         {
-            if (!wanted.Contains(items[index], ReferenceEqualityComparer.Instance))
+            source.RunningResourcesChanged -= onSourceChanged;
+            groups.Remove(source);
+        }
+
+        stale.Clear();
+
+        // The rows wanted now: the active session's group first, then the others in the shell's order.
+        desired.Clear();
+        var rows = 0;
+        if (active is not null && groups.TryGetValue(active, out var activeGroup))
+        {
+            rows += AppendGroup(activeGroup, isActive: true, maxLines);
+        }
+
+        foreach (var source in sources)
+        {
+            if (!ReferenceEquals(source, active))
             {
-                items.RemoveAt(index);
+                rows += AppendGroup(groups[source], isActive: false, maxLines);
             }
         }
 
-        foreach (var row in wanted)
+        sources.Clear();
+        Reconcile();
+        desired.Clear();
+
+        var wasTotal = total;
+        var hadSession = hasSession;
+        total = rows;
+        hasSession = groups.Count > 0;
+        if (wasTotal != total)
         {
-            if (!items.Contains(row))
-            {
-                // Inserted at its start-time position, not appended: rows arrive here when the panel opens (all of them at
-                // once) and when something starts (after older rows), and the list must read as a timeline either way.
-                items.Insert(IndexOfStart(row), row);
-            }
+            OnPropertyChanged(nameof(RunningCount));
+            OnPropertyChanged(nameof(HasRunning));
+            OnPropertyChanged(nameof(CountText));
         }
 
-        if (session is not null)
+        if (wasTotal != total || hadSession != hasSession)
         {
-            foreach (var tool in session.Tools)
-            {
-                // Tail only: the elapsed readings are the session clock's (see LiveToolViewModel.Tick), so this panel's own
-                // interval never changes what a duration reads.
-                tool.RefreshTail(maxLines);
-            }
+            OnPropertyChanged(nameof(IsEmpty));
         }
 
-        OnPropertyChanged(nameof(HasRunning));
-        OnPropertyChanged(nameof(IsEmpty));
-        OnPropertyChanged(nameof(HasSession));
-        OnPropertyChanged(nameof(SessionTitle));
-        OnPropertyChanged(nameof(HasSessionTitle));
-        OnPropertyChanged(nameof(CountText));
+        if (hadSession != hasSession)
+        {
+            OnPropertyChanged(nameof(HasSession));
+        }
     }
 
     public void Dispose()
@@ -201,25 +355,129 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         preferences.PropertyChanged -= OnPreferencesChanged;
         ticker?.Dispose();
         ticker = null;
+        foreach (var source in groups.Keys)
+        {
+            source.RunningResourcesChanged -= onSourceChanged;
+        }
+
+        groups.Clear();
         items.Clear();
+        CloseCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>Where a row goes: the first existing row that started later, else the end. Linear over a handful of rows.</summary>
-    private int IndexOfStart(object row)
+    /// <summary>Adds one session's header and rows to <see cref="desired"/> when it runs anything; returns its row count.</summary>
+    private int AppendGroup(ResourceInspectorGroupViewModel group, bool isActive, int maxLines)
     {
-        var startedAt = StartOf(row);
-        for (var index = 0; index < items.Count; index++)
+        scratch.Clear();
+        group.Source.CollectRunning(scratch);
+        group.Update(scratch.Count, isActive);
+        if (scratch.Count == 0)
         {
-            if (StartOf(items[index]) > startedAt)
+            return 0;
+        }
+
+        scratch.Sort(RowOrder);
+        desired.Add(group);
+        foreach (var row in scratch)
+        {
+            desired.Add(row);
+            if (row is LiveToolViewModel tool)
+            {
+                // Tail only: the elapsed readings are the session clock's (see LiveToolViewModel.Tick), so this panel's own
+                // interval never changes what a duration reads.
+                tool.RefreshTail(maxLines);
+            }
+        }
+
+        var count = scratch.Count;
+        scratch.Clear();
+        return count;
+    }
+
+    /// <summary>
+    /// Brings <see cref="items"/> to <see cref="desired"/> with the fewest collection changes: rows that left are removed,
+    /// rows that stayed keep their instance (and their container), new ones are inserted, a reordered group is moved.
+    /// </summary>
+    private void Reconcile()
+    {
+        desiredSet.Clear();
+        foreach (var row in desired)
+        {
+            desiredSet.Add(row);
+        }
+
+        for (var index = items.Count - 1; index >= 0; index--)
+        {
+            if (!desiredSet.Contains(items[index]))
+            {
+                items.RemoveAt(index);
+            }
+        }
+
+        desiredSet.Clear();
+        for (var index = 0; index < desired.Count; index++)
+        {
+            var row = desired[index];
+            if (index < items.Count && ReferenceEquals(items[index], row))
+            {
+                continue;
+            }
+
+            var at = IndexOf(row, index + 1);
+            if (at >= 0)
+            {
+                items.Move(at, index);
+            }
+            else
+            {
+                items.Insert(index, row);
+            }
+        }
+    }
+
+    private int IndexOf(object row, int from)
+    {
+        for (var index = from; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index], row))
             {
                 return index;
             }
         }
 
-        return items.Count;
+        return -1;
     }
 
-    /// <summary>When a row's work started: a queued child reads <see cref="DateTimeOffset.MinValue"/>, so it sorts first.</summary>
+    /// <summary>
+    /// Start time first (a queued child reads <see cref="DateTimeOffset.MinValue"/>, so it sorts first), then children before
+    /// calls, then the ids - a total order, so equal start times never swap places between two pulls.
+    /// </summary>
+    private static int CompareRows(object left, object right)
+    {
+        var byStart = StartOf(left).CompareTo(StartOf(right));
+        if (byStart != 0)
+        {
+            return byStart;
+        }
+
+        var byKind = KindOf(left).CompareTo(KindOf(right));
+        if (byKind != 0)
+        {
+            return byKind;
+        }
+
+        return (left, right) switch
+        {
+            (SubAgentViewModel a, SubAgentViewModel b) => string.CompareOrdinal(a.AgentId, b.AgentId),
+            (LiveToolViewModel a, LiveToolViewModel b) => string.CompareOrdinal(a.AgentId, b.AgentId) is var byAgent and not 0
+                ? byAgent
+                : string.CompareOrdinal(a.CallId, b.CallId),
+            _ => 0,
+        };
+    }
+
+    private static int KindOf(object row) => row is SubAgentViewModel ? 0 : 1;
+
     private static DateTimeOffset StartOf(object row) => row switch
     {
         LiveToolViewModel tool => tool.StartedAt,
@@ -239,6 +497,14 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         // The setter clamps, so the interval is always within the documented range even if the file was edited by hand.
         var interval = TimeSpan.FromMilliseconds(preferences.InspectorRefreshMilliseconds);
         ticker = schedule(interval, OnTick);
+    }
+
+    private void OnSourceChanged(object? sender, EventArgs e) => RequestRefresh();
+
+    private void RunQueuedRefresh()
+    {
+        Volatile.Write(ref refreshQueued, 0);
+        OnTick();
     }
 
     private void OnTick()
@@ -288,8 +554,6 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
         }
 
         OnPropertyChanged(nameof(Title));
-        OnPropertyChanged(nameof(SessionTitle));
-        OnPropertyChanged(nameof(HasSessionTitle));
         OnPropertyChanged(nameof(CloseLabel));
         OnPropertyChanged(nameof(CloseTooltip));
         OnPropertyChanged(nameof(Empty));
@@ -305,6 +569,9 @@ internal sealed class ResourceInspectorViewModel : NotifyingObject, IDisposable
                     break;
                 case SubAgentViewModel agent:
                     agent.RefreshText();
+                    break;
+                case ResourceInspectorGroupViewModel group:
+                    group.RefreshText();
                     break;
             }
         }

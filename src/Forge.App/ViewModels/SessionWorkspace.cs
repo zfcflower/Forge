@@ -1986,6 +1986,7 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
         disposed = true;
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
         ClearLiveTools();
+        ReleaseInspectorListeners();
         Instruments.Dispose();
         Composer.Dispose();
         foreach (var message in queued.ToArray())

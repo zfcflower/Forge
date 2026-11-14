@@ -71,8 +71,23 @@ public sealed class AgentLoop(AgentLoopServices services)
     /// </summary>
     private const int SubAgentLimitsHardFloor = 1;
 
+    /// <summary>What a call that the user stopped on its own returns to the model: an error result, and the turn goes on.</summary>
+    internal const string CancelledByUserResult = "Cancelled by the user: this tool call was stopped before it finished.";
+
     private readonly SemaphoreSlim approvalGate = new(1, 1);
     private readonly AgentSlotPool slots = new(services.Options.MaxParallelSubAgents);
+    private readonly ToolCallCancellations toolCalls = new();
+
+    /// <summary>
+    /// Stops one running tool call of this tree (the root or any sub-agent) without stopping its turn: the call's own token
+    /// fires (a shell command's process tree is killed, a spawned child is cancelled), and the loop answers the call with
+    /// <see cref="CancelledByUserResult"/> as an error result so the model continues. False when no such call is running -
+    /// it already finished, it never started, or it is still waiting for approval.
+    /// </summary>
+    internal bool CancelToolCall(string agentId, string callId) => toolCalls.Cancel(agentId, callId);
+
+    /// <summary>Calls registered for <see cref="CancelToolCall"/> right now; zero between calls (tests check for leaks).</summary>
+    internal int RunningToolCallCount => toolCalls.Count;
     private CompactionPolicy compactionPolicy = services.Options.Compaction;
 
     /// <summary>
@@ -916,20 +931,33 @@ public sealed class AgentLoop(AgentLoopServices services)
             return new ToolResultBlock(call.Id, "The user denied this tool call.", IsError: true);
         }
 
-        sink.Emit(new AgentToolStarted(instance.Id, call));
-        var callContext = context with { Progress = tail => sink.Emit(new AgentToolProgress(instance.Id, call, tail)) };
+        // The call's own token, linked to the turn's: a turn cancel still reaches every call, and CancelToolCall reaches this
+        // one only. Registered before the start event, so a stop pressed as soon as the row shows finds it.
+        var callSource = toolCalls.Begin(instance.Id, call.Id, ct);
         ToolResult result;
         try
         {
-            result = await tool.InvokeAsync(call, callContext, ct).ConfigureAwait(false);
+            sink.Emit(new AgentToolStarted(instance.Id, call));
+            var callContext = context with { Progress = tail => sink.Emit(new AgentToolProgress(instance.Id, call, tail)) };
+            result = await tool.InvokeAsync(call, callContext, callSource.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
+        catch (OperationCanceledException) when (callSource.IsCancellationRequested)
+        {
+            // Stopped on its own (the turn's token is untouched, checked above): a normal error result, so the model sees what
+            // happened and the turn continues with the other calls.
+            result = new ToolResult(CancelledByUserResult, IsError: true);
+        }
         catch (Exception exception)
         {
             result = new ToolResult(exception.Message, IsError: true);
+        }
+        finally
+        {
+            toolCalls.End(instance.Id, call.Id, callSource);
         }
 
         result = await SpillAsync(instance, tool, result, ct).ConfigureAwait(false);

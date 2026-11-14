@@ -509,7 +509,8 @@
                       <MenuItem Header="{Binding Instruments.ToolMenuText}"
                                 Command="{Binding Instruments.OpenToolsCommand}"
                                 AutomationProperties.AutomationId="strip-resources-tools" />
-                      <!-- The resource inspector: this session's running tool calls and sub-agents. Hidden when no window wired
+                      <!-- The resource inspector: the running tool calls and sub-agents of every open session (the count beside it is
+                           this session's). Hidden when no window wired
                            the overlay (a standalone view), so the row is never a dead entry. -->
                       <MenuItem Header="{Binding Instruments.OpenInspectorMenuText}"
                                 Command="{Binding Instruments.OpenInspectorCommand}"

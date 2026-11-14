@@ -15,8 +15,57 @@ namespace Forge.App.ViewModels;
 // them would only queue work the UI then has to merge. The registry is a ConcurrentDictionary keyed by (agent, call); the
 // snapshot path is a lookup plus one volatile write into the entry. Everything a bound control observes is raised from
 // Tick/Finish, which only run on the UI thread.
-internal sealed partial class SessionWorkspaceViewModel
+internal sealed partial class SessionWorkspaceViewModel : IResourceInspectorSource
 {
+    /// <summary>The one stop delegate every live entry of this session shares (cached: a call start allocates no closure for it).</summary>
+    private Func<string, string, bool>? stopToolCall;
+
+    /// <summary>
+    /// UI thread: the set of rows the resource inspector would list for this session changed (a call started or finished, a
+    /// child came or went, a turn boundary cleared leftovers), and once more when the session closes. The inspector listens
+    /// to coalesce its refresh; the session drops every listener on <see cref="Dispose"/>.
+    /// </summary>
+    public event EventHandler? RunningResourcesChanged;
+
+    string IResourceInspectorSource.Title => Title;
+
+    /// <summary>
+    /// UI thread: this session's live rows for the inspector, sub-agents first; no copy of the registry is made. The children
+    /// are read by index (a <c>Collection&lt;T&gt;</c> enumerator is a boxed interface), so only the registry's own enumerator
+    /// is allocated per pull.
+    /// </summary>
+    void IResourceInspectorSource.CollectRunning(List<object> into)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        for (var index = 0; index < subAgents.Count; index++)
+        {
+            into.Add(subAgents[index]);
+        }
+
+        foreach (var pair in liveTools)
+        {
+            into.Add(pair.Value);
+        }
+    }
+
+    /// <summary>
+    /// The inspector's stop for one call: Core cancels exactly that call's token and the turn continues. Never the turn's
+    /// cancel - that also paused the queued messages and took every other call down with it.
+    /// </summary>
+    private bool StopToolCall(string agentId, string callId) =>
+        !disposed && runtime is { } live && live.CancelToolCall(agentId, callId);
+
+    /// <summary>The session is closing: tell the inspector once (so it drops this session's rows) and forget every listener.</summary>
+    private void ReleaseInspectorListeners()
+    {
+        RunningResourcesChanged?.Invoke(this, EventArgs.Empty);
+        RunningResourcesChanged = null;
+    }
+
     /// <summary>
     /// A snapshot published on the producer thread is not dispatched; the UI reads it on its next tick. Only a start event
     /// creates an entry, so a late snapshot can never bring back a row that the turn's end already cleared.
@@ -57,7 +106,8 @@ internal sealed partial class SessionWorkspaceViewModel
         var key = (agentId, call.Id);
         if (!liveTools.TryGetValue(key, out var tracked))
         {
-            var created = new LiveToolViewModel(agentId, () => AgentKindOf(agentId), call, DateTimeOffset.Now, Cancel);
+            var stop = runtime is null ? null : stopToolCall ??= StopToolCall;
+            var created = new LiveToolViewModel(agentId, () => AgentKindOf(agentId), call, DateTimeOffset.Now, stop);
             tracked = liveTools.GetOrAdd(key, created);
             if (pendingTails.TryRemove(key, out var pending))
             {
@@ -224,6 +274,9 @@ internal sealed partial class SessionWorkspaceViewModel
     /// running calls plus every live sub-agent, a queued child included (it is listed, so it is counted; the sub-agent chip's
     /// own badge still counts only the ones that hold a run slot).
     /// </summary>
-    private void RaiseRunningResources() =>
+    private void RaiseRunningResources()
+    {
         Instruments.NoteRunningResources(RunningToolCount + subAgents.Count);
+        RunningResourcesChanged?.Invoke(this, EventArgs.Empty);
+    }
 }
