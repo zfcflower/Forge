@@ -49,7 +49,7 @@
 
 ## 性能测试
 
-性能基准参照 [aspnet/Benchmarks](https://github.com/aspnet/Benchmarks)(crank 场景、指标口径:吞吐、延迟分位、分配、GC)的方法;微基准用官方 `BenchmarkDotNet`(属 dotnet 基金会,归入官方库)。基准放独立项目,不进常规测试集,不在 L1/L2 跑;热路径改动须给出改前改后的分配与耗时数字。
+性能基准用仓内现成的 `tools/Forge.Bench`(无包依赖;场景注册表、预热 + 定次计时、延迟分位/吞吐/分配/GC/峰值内存、与 BCL 基线的语义签名对账、验收检查,`dotnet run -c Release --project tools/Forge.Bench -- [filter] [--quick]`)。新增热路径基准就是往它加 `*Scenarios.cs` 场景,需要时给它加 `ProjectReference`;指标口径与场景设计参照 [aspnet/Benchmarks](https://github.com/aspnet/Benchmarks)。不另起 BenchmarkDotNet 项目,基准不进 L1/L2。热路径改动须给出改前改后的分配与耗时数字。
 
 ## 并行与串行
 
