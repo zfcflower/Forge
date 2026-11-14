@@ -3121,6 +3121,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         }
 
         closing = true;
+        CloseOnboarding();
         if (settingsWindow is { } window)
         {
             window.Closed -= OnSettingsWindowClosed;

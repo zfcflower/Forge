@@ -55,6 +55,8 @@ internal static class ProjectCreationStrings
     public const string NameTooLongKey = "projectCreate.hint.nameTooLong";
     public const string NameExistsKey = "projectCreate.hint.nameExists";
     public const string UrlNotUsableKey = "projectCreate.hint.url";
+    public const string UrlPasswordKey = "projectCreate.hint.urlPassword";
+    public const string ParentRelativeKey = "projectCreate.hint.parentRelative";
 
     // ---------------------------------------------------------------- the dialog: clone progress (git's own phase names)
 
@@ -114,6 +116,8 @@ internal static class ProjectCreationStrings
         Loc.Register(NameNotSegmentKey, "名称只能是单独一段路径,不能包含路径分隔。", "The name is a single path segment, not a path.");
         Loc.Register(NameTooLongKey, "名称太长,Windows 无法创建。", "The name is too long for Windows to create.");
         Loc.Register(NameExistsKey, "同名文件夹已存在且不为空。", "A folder with that name already exists and is not empty.");
+        Loc.Register(UrlPasswordKey, "地址里带有密码或令牌;请去掉 “用户名:密码@” 部分,git 会通过凭据管理器询问。", "The address carries a password or token; remove the \"user:password@\" part and git asks through the credential manager.");
+        Loc.Register(ParentRelativeKey, "父目录必须是完整的绝对路径。", "The parent directory must be a full, absolute path.");
         Loc.Register(UrlNotUsableKey, "请输入完整的远程地址(https:// 或 git@ 开头)。", "Enter a complete remote address (starting with https:// or git@).");
 
         Loc.Register(PhaseConnectingKey, "连接远程", "Connecting");
@@ -185,6 +189,12 @@ internal static class ProjectCreationStrings
 
     /// <summary>Why a clone's URL cannot be handed to git; the service reports it, the dialog shows it live.</summary>
     public static LocText UrlNotUsable => new(UrlNotUsableKey);
+
+    /// <summary>Why a clone's URL is refused when it embeds a password: it would sit on git's command line and in its errors.</summary>
+    public static LocText UrlCarriesPassword => new(UrlPasswordKey);
+
+    /// <summary>Why a typed parent directory is refused when it is relative: it would resolve against the process's directory.</summary>
+    public static LocText ParentDirectoryNotAbsolute => new(ParentRelativeKey);
 
     /// <summary>The sentence for one refused name, in the order <see cref="ProjectNameProblem"/> checks.</summary>
     public static LocText NameProblem(ProjectNameProblem problem) => problem switch

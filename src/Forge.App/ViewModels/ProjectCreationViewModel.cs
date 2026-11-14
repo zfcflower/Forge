@@ -168,8 +168,9 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
         {
             var parent = parentDirectory.Trim();
             var candidate = name.Trim();
-            if (parent.Length == 0 || candidate.Length == 0)
+            if (candidate.Length == 0 || !Path.IsPathFullyQualified(parent))
             {
+                // A relative parent would resolve against the process's directory, which is not where the project goes.
                 return string.Empty;
             }
 
@@ -286,6 +287,7 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
         errorText = null;
         shownProgress = null;
         RaiseRunState(beginning: true);
+        var created = false;
         try
         {
             var result = await Task.Run(() => service.RunAsync(request, OnCloneProgress, source.Token), source.Token)
@@ -294,10 +296,10 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
             if (result.Directory is { } directory)
             {
                 createdDirectory = directory;
+                created = true;
                 OnPropertyChanged(nameof(CreatedDirectory));
                 OnPropertyChanged(nameof(CanStart));
                 StartCommand.NotifyCanExecuteChanged();
-                RaiseCompleted();
                 return true;
             }
 
@@ -326,9 +328,33 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
                 ApplyProgress(latest);
             }
 
+            // The run is over, so nothing holds the token any more and the source can go; a Dispose that already let go
+            // of it (the dialog closing mid-run) has cancelled it, which is all it needed.
             runSource = null;
+            source.Dispose();
             runTask = null;
             RaiseRunState(beginning: false);
+
+            // A failed or cancelled creation removes the folder it half-wrote, so the occupancy answer taken before the run
+            // is stale from here on. It is dropped at once, because the very next thing the dialog does is ask whether the
+            // input is usable again; the check scheduled below then confirms it off the UI thread.
+            if (createdDirectory is null && targetOccupied)
+            {
+                targetOccupied = false;
+                OnPropertyChanged(nameof(Hint));
+                OnPropertyChanged(nameof(HasHint));
+                OnPropertyChanged(nameof(CanStart));
+                StartCommand.NotifyCanExecuteChanged();
+            }
+
+            ScheduleOccupancyCheck();
+
+            // The completion notification goes out last, after the run state is down: its listener closes the dialog, and a
+            // dialog that still believes a run is in progress refuses to close.
+            if (created)
+            {
+                RaiseCompleted();
+            }
         }
     }
 
@@ -398,9 +424,9 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
     /// <summary>Why Start is unavailable, or null when it is: name first, then the remote, then the parent directory.</summary>
     private string? DescribeProblem()
     {
-        if (string.IsNullOrWhiteSpace(parentDirectory))
+        if (ProjectCreationService.DescribeParentProblem(parentDirectory) is { } parentProblem)
         {
-            return ProjectCreationStrings.ParentDirectoryMissing.Resolve();
+            return parentProblem.Resolve();
         }
 
         if (shapeProblem != ProjectNameProblem.None)
@@ -408,9 +434,9 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
             return ProjectCreationStrings.NameProblem(shapeProblem).Resolve();
         }
 
-        if (isClone && !ProjectCreationService.IsUsableUrl(url))
+        if (isClone && ProjectCreationService.DescribeUrlProblem(url) is { } urlProblem)
         {
-            return ProjectCreationStrings.UrlNotUsable.Resolve();
+            return urlProblem.Resolve();
         }
 
         return targetOccupied ? ProjectCreationStrings.NameProblem(ProjectNameProblem.Exists).Resolve() : null;
@@ -438,7 +464,7 @@ internal sealed class ProjectCreationViewModel : NotifyingObject, IDisposable
     {
         var parent = parentDirectory.Trim();
         var candidate = name.Trim();
-        if (shapeProblem != ProjectNameProblem.None || parent.Length == 0 || candidate.Length == 0)
+        if (shapeProblem != ProjectNameProblem.None || candidate.Length == 0 || !Path.IsPathFullyQualified(parent))
         {
             ApplyOccupancy(generation, occupied: false);
             return;

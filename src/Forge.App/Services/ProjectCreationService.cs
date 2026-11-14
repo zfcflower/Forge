@@ -120,11 +120,15 @@ internal sealed class ProjectCreationService
         }
     }
 
-    /// <summary>The configured clone timeout; <c>null</c> when the setting says "no timeout" (<c>0</c>).</summary>
-    public TimeSpan? CloneTimeout =>
+    /// <summary>
+    /// The clone timeout the setting asks for: <c>0</c> means no timeout, spelled <see cref="Timeout.InfiniteTimeSpan"/>
+    /// because a <c>null</c> <see cref="GitCloneOptions.Timeout"/> means "the git layer's default" (two minutes) — the
+    /// opposite of what the setting says.
+    /// </summary>
+    public TimeSpan CloneTimeout =>
         preferences.ProjectsCloneTimeoutSeconds > 0
             ? TimeSpan.FromSeconds(preferences.ProjectsCloneTimeoutSeconds)
-            : null;
+            : Timeout.InfiniteTimeSpan;
 
     /// <summary>
     /// The folder name a clone suggests: the last path segment of the URL without a trailing slash, a query or the
@@ -171,7 +175,17 @@ internal sealed class ProjectCreationService
             : segment;
     }
 
-    /// <summary>Whether the clone's URL is usable at all: an absolute URL or a scp-like <c>host:path</c>, not an option.</summary>
+    /// <summary>
+    /// The URL schemes a clone accepts, the dialog-side half of <see cref="GitCli.AllowedCloneProtocols"/> (git refuses the
+    /// rest anyway; this half says so before anything runs). <c>git+ssh</c>/<c>ssh+git</c> are git's aliases of ssh.
+    /// </summary>
+    private static readonly string[] AllowedSchemes = ["https", "http", "ssh", "git+ssh", "ssh+git", "git", "file"];
+
+    /// <summary>
+    /// Whether the clone's URL is usable at all: an absolute URL of an allowed scheme, an scp-like <c>host:path</c> or a
+    /// local path — never an option, never a <c>transport::address</c> (<c>ext::</c> runs a command), never an address
+    /// that carries a password (see <see cref="CarriesPassword"/>).
+    /// </summary>
     public static bool IsUsableUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -191,8 +205,107 @@ internal sealed class ProjectCreationService
             return false;
         }
 
+        if (HasTransportPrefix(text) || CarriesPassword(text))
+        {
+            return false;
+        }
+
+        var schemeEnd = text.IndexOf("://", StringComparison.Ordinal);
+        if (schemeEnd >= 0)
+        {
+            var scheme = text[..schemeEnd];
+            var allowed = false;
+            foreach (var candidate in AllowedSchemes)
+            {
+                allowed |= string.Equals(scheme, candidate, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // An allowed scheme with nothing after it names no repository.
+            return allowed && text.Length > schemeEnd + 3;
+        }
+
         // A bare word is a name, not an address: an absolute URL carries "//", an scp-like one a colon.
         return text.Contains('/') || text.Contains(':');
+    }
+
+    /// <summary>
+    /// Why a clone's remote cannot be handed to git, or null when it can: a password in the address has its own sentence
+    /// (the fix is to drop it, not to retype the address), every other refusal shares <see cref="ProjectCreationStrings.UrlNotUsable"/>.
+    /// </summary>
+    public static LocText? DescribeUrlProblem(string? url)
+    {
+        if (IsUsableUrl(url))
+        {
+            return null;
+        }
+
+        return CarriesPassword(url) ? ProjectCreationStrings.UrlCarriesPassword : ProjectCreationStrings.UrlNotUsable;
+    }
+
+    /// <summary>
+    /// Why a parent directory cannot be used, or null when it can: it must be given and fully qualified. A relative one
+    /// (<c>projects</c>, <c>..\x</c>) would resolve against the process's working directory — somewhere the user never chose.
+    /// </summary>
+    public static LocText? DescribeParentProblem(string? parentDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            return ProjectCreationStrings.ParentDirectoryMissing;
+        }
+
+        return Path.IsPathFullyQualified(parentDirectory.Trim()) ? null : ProjectCreationStrings.ParentDirectoryNotAbsolute;
+    }
+
+    /// <summary>
+    /// Whether a <c>scheme://</c> address holds a password (<c>https://user:token@host/…</c>). Such an address is refused
+    /// rather than run: git would receive it on its command line, where every other process of the session can read it,
+    /// and echo it in its errors. A user name alone (<c>https://org@dev.azure.com/…</c>, <c>ssh://git@host/…</c>) is fine —
+    /// the credential manager asks for the secret.
+    /// </summary>
+    public static bool CarriesPassword(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        var text = url.Trim();
+        var schemeEnd = text.IndexOf("://", StringComparison.Ordinal);
+        if (schemeEnd < 0)
+        {
+            return false;
+        }
+
+        var authorityStart = schemeEnd + 3;
+        var authorityEnd = text.IndexOfAny(['/', '?', '#'], authorityStart);
+        var authority = authorityEnd < 0 ? text[authorityStart..] : text[authorityStart..authorityEnd];
+        var at = authority.LastIndexOf('@');
+        return at >= 0 && authority[..at].Contains(':');
+    }
+
+    /// <summary>
+    /// Whether the text is git's <c>transport::address</c> form (<c>ext::sh -c …</c>, <c>fd::3</c>): a word of scheme
+    /// characters followed by <c>::</c>. An IPv6 host (<c>https://[::1]/repo</c>) is not one, because its <c>::</c> comes
+    /// after the scheme's <c>://</c>.
+    /// </summary>
+    private static bool HasTransportPrefix(string text)
+    {
+        var separator = text.IndexOf("::", StringComparison.Ordinal);
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < separator; i++)
+        {
+            var character = text[i];
+            if (!char.IsAsciiLetterOrDigit(character) && character is not ('+' or '-' or '.'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -285,10 +398,15 @@ internal sealed class ProjectCreationService
             return ProjectCreationResult.Failed(ProjectCreationStrings.NameProblem(problem));
         }
 
-        var url = request.Url?.Trim();
-        if (request.Mode == ProjectCreationMode.Clone && !IsUsableUrl(url))
+        if (DescribeParentProblem(request.ParentDirectory) is { } parentProblem)
         {
-            return ProjectCreationResult.Failed(ProjectCreationStrings.UrlNotUsable);
+            return ProjectCreationResult.Failed(parentProblem);
+        }
+
+        var url = request.Url?.Trim();
+        if (request.Mode == ProjectCreationMode.Clone && DescribeUrlProblem(url) is { } urlProblem)
+        {
+            return ProjectCreationResult.Failed(urlProblem);
         }
 
         var parent = request.ParentDirectory.Trim();
@@ -336,7 +454,11 @@ internal sealed class ProjectCreationService
             await git.CloneAsync(
                     url,
                     destination,
-                    new GitCloneOptions { OnProgress = onProgress, Timeout = CloneTimeout },
+                    new GitCloneOptions
+                    {
+                        OnProgress = onProgress,
+                        Timeout = CloneTimeout,
+                    },
                     ct)
                 .ConfigureAwait(false);
         }
@@ -346,7 +468,9 @@ internal sealed class ProjectCreationService
         }
         catch (GitException exception)
         {
-            var message = string.IsNullOrWhiteSpace(exception.StandardError)
+            // A timed-out clone's stderr is nothing but progress rewrites, so the decisive sentence ("git clone … timed
+            // out") exists only in the message; every other failure is best explained by git's own last line.
+            var message = exception.ExitCode < 0 || string.IsNullOrWhiteSpace(exception.StandardError)
                 ? exception.Message
                 : ErrorTail(exception.StandardError);
             return ProjectCreationResult.Failed(LocText.Literal(message));
@@ -385,17 +509,17 @@ internal sealed class ProjectCreationService
             }
 
             var message = init.StandardError.Length > 0 ? init.StandardError : init.StandardOutput;
-            TryDeleteCreated(destination, createdHere);
+            await GitCli.DeleteTreeQuietlyAsync(destination, keepRoot: !createdHere).ConfigureAwait(false);
             return ProjectCreationResult.Failed(LocText.Literal(ErrorTail(message)));
         }
         catch (OperationCanceledException)
         {
-            TryDeleteCreated(destination, createdHere);
+            await GitCli.DeleteTreeQuietlyAsync(destination, keepRoot: !createdHere).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            TryDeleteCreated(destination, createdHere);
+            await GitCli.DeleteTreeQuietlyAsync(destination, keepRoot: !createdHere).ConfigureAwait(false);
             return ProjectCreationResult.Failed(LocText.Literal(ErrorTail(exception.Message)));
         }
     }
@@ -475,23 +599,5 @@ internal sealed class ProjectCreationService
         }
 
         return false;
-    }
-
-    /// <summary>Removes the folder this run created when its initialization failed; a folder that survived is left alone.</summary>
-    private static void TryDeleteCreated(string destination, bool createdHere)
-    {
-        if (!createdHere)
-        {
-            return;
-        }
-
-        try
-        {
-            Directory.Delete(destination, recursive: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            // Best effort: a folder that could not be removed stays and fails the next attempt with "not empty".
-        }
     }
 }

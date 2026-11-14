@@ -47,10 +47,14 @@ internal partial class ProjectCreationDialog : Window
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         base.OnClosing(e);
-        if (model?.IsRunning == true)
+
+        // A programmatic close is the model's own answer ("done, here is the folder") or the shell taking the dialog away;
+        // only a user close during a run is a stop request. Refusing the former would leave a finished creation invisible:
+        // the window stays open, ShowDialog never completes and the project is never registered.
+        if (model?.IsRunning == true && !e.IsProgrammatic)
         {
             // Closing mid-clone is a stop request, not an abandonment of a half-written folder: the close is held
-            // back while the clone is being cancelled, and the dialog then stays with its result.
+            // back while the creation is being cancelled, and the dialog then stays with its result.
             e.Cancel = true;
             model.Cancel();
         }

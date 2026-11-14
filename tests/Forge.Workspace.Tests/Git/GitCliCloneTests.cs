@@ -298,6 +298,142 @@ public sealed class GitCliCloneTests
         Assert.Equal(source.Head(), RevParse(destination, "HEAD"));
     }
 
+    // ---------------------------------------------------------------- security: credentials, transports, a prepared folder
+
+    [Theory]
+    [InlineData("https://alice:s3cret@host/team/repo.git", "https://host/team/repo.git")]
+    [InlineData("https://ghp_token@github.com/o/r", "https://github.com/o/r")]
+    [InlineData("fatal: unable to access 'https://a:b@h/r.git/': refused", "fatal: unable to access 'https://h/r.git/': refused")]
+    [InlineData("two https://a:b@h1/x and ssh://u:p@h2/y", "two https://h1/x and ssh://h2/y")]
+    [InlineData("https://host/path@with-at", "https://host/path@with-at")]
+    [InlineData("git@host:team/repo.git", "git@host:team/repo.git")]
+    [InlineData("https://", "https://")]
+    [InlineData("", "")]
+    public void Credentials_are_removed_from_every_address_in_a_text(string text, string expected)
+    {
+        Assert.Equal(expected, GitCli.RedactCredentials(text));
+    }
+
+    /// <summary>
+    /// git echoes the address it failed on, token and all. A stand-in git prints exactly such a line and fails, so the test
+    /// pins what reaches the caller — message, argument list and stderr — without a network.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_clone_never_carries_the_urls_credentials_into_the_exception()
+    {
+        using var fake = new ScriptedGit(
+            "echo fatal: unable to access 'https://alice:s3cret@example.invalid/x.git/': Could not resolve host 1>&2\r\nexit /b 128\r\n",
+            "echo \"fatal: unable to access 'https://alice:s3cret@example.invalid/x.git/': Could not resolve host\" >&2\nexit 128\n");
+        var destination = Path.Combine(fake.WorkingDirectory, "clone");
+
+        var failure = await Assert.ThrowsAsync<GitException>(
+            () => new GitCli(fake.Executable).CloneAsync("https://alice:s3cret@example.invalid/x.git", destination));
+
+        Assert.Equal(128, failure.ExitCode);
+        Assert.DoesNotContain("s3cret", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("s3cret", failure.StandardError, StringComparison.Ordinal);
+        Assert.All(failure.Arguments, argument => Assert.DoesNotContain("s3cret", argument, StringComparison.Ordinal));
+
+        // The redaction keeps what explains the failure: the host and git's own reason.
+        Assert.Contains("https://example.invalid/x.git", failure.StandardError, StringComparison.Ordinal);
+        Assert.Contains("Could not resolve host", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_refused_url_names_it_without_its_credentials()
+    {
+        using var sandbox = new TempDirectory();
+
+        var failure = await Assert.ThrowsAsync<ArgumentException>(
+            () => Git.CloneAsync("-https://alice:s3cret@host/x.git", sandbox.Combine("clone")));
+
+        Assert.DoesNotContain("s3cret", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The transport allowlist is git's own (<c>GIT_ALLOW_PROTOCOL</c>, stronger than any <c>protocol.*.allow</c> in the
+    /// user's config). A stand-in git reports the variable it was started with, which pins that every clone carries it.
+    /// </summary>
+    [Fact]
+    public async Task Every_clone_runs_with_the_transport_allowlist()
+    {
+        using var fake = new ScriptedGit(
+            "echo allow=%GIT_ALLOW_PROTOCOL% 1>&2\r\nexit /b 1\r\n",
+            "echo \"allow=$GIT_ALLOW_PROTOCOL\" >&2\nexit 1\n");
+
+        var failure = await Assert.ThrowsAsync<GitException>(
+            () => new GitCli(fake.Executable).CloneAsync("https://host/x.git", Path.Combine(fake.WorkingDirectory, "clone")));
+
+        Assert.Contains("allow=" + GitCli.AllowedCloneProtocols, failure.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("ext", GitCli.AllowedCloneProtocols, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_transport_outside_the_allowlist_is_refused_by_git()
+    {
+        if (!GitProbe.IsAvailable)
+        {
+            return;
+        }
+
+        using var sandbox = new TempDirectory();
+        var destination = sandbox.Combine("ftp-clone");
+
+        // ftp is a transport git would otherwise try (its default policy lets the user pick it); with the allowlist git
+        // refuses it before connecting anywhere.
+        var failure = await Assert.ThrowsAsync<GitException>(() => Git.CloneAsync("ftp://127.0.0.1:1/x.git", destination));
+
+        Assert.Contains("not allowed", failure.StandardError, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    /// <summary>
+    /// A prepared empty folder is the caller's, so a failed clone keeps it — but not what git wrote into it, or the retry is
+    /// refused as "not empty". A stand-in git writes into the destination and fails, the way a killed clone leaves it.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_clone_into_a_prepared_empty_folder_keeps_the_folder_and_empties_it()
+    {
+        using var probe = new TempDirectory();
+        var destination = probe.Combine("prepared");
+        Directory.CreateDirectory(destination);
+        using var fake = new ScriptedGit(
+            "mkdir \"" + destination + "\\.git\"\r\necho junk> \"" + destination + "\\.git\\HEAD\"\r\nexit /b 128\r\n",
+            "mkdir -p '" + destination + "/.git'\necho junk > '" + destination + "/.git/HEAD'\nexit 128\n");
+
+        await Assert.ThrowsAsync<GitException>(
+            () => new GitCli(fake.Executable).CloneAsync("https://host/x.git", destination));
+
+        Assert.True(Directory.Exists(destination), "the prepared folder is the caller's and must stay");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
+    }
+
+    [Fact]
+    public async Task Deleting_a_tree_clears_read_only_files_and_can_keep_the_root()
+    {
+        using var sandbox = new TempDirectory();
+        var root = sandbox.Combine("tree");
+        var nested = Path.Combine(root, ".git", "objects");
+        Directory.CreateDirectory(nested);
+        var locked = Path.Combine(nested, "pack");
+        File.WriteAllText(locked, "x");
+        File.SetAttributes(locked, FileAttributes.ReadOnly);
+        File.WriteAllText(Path.Combine(root, "top.txt"), "y");
+
+        await GitCli.DeleteTreeQuietlyAsync(root, keepRoot: true);
+        Assert.True(Directory.Exists(root));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+
+        Directory.CreateDirectory(nested);
+        File.WriteAllText(locked, "x");
+        File.SetAttributes(locked, FileAttributes.ReadOnly);
+        await GitCli.DeleteTreeQuietlyAsync(root);
+        Assert.False(Directory.Exists(root));
+
+        // A tree that is not there is not an error.
+        await GitCli.DeleteTreeQuietlyAsync(root);
+    }
+
     // ---------------------------------------------------------------- CarriageReturnEndsLine
 
     /// <summary>
@@ -458,4 +594,40 @@ internal sealed class FixedOutputGit : IDisposable
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
         return shell;
     }
+}
+
+/// <summary>
+/// A stand-in for git that runs a short script of the test's choosing (a batch file on Windows, sh elsewhere) in place of
+/// the real executable, so what git prints, the environment it sees and what it leaves on disk are fixed by the test.
+/// </summary>
+internal sealed class ScriptedGit : IDisposable
+{
+    private readonly TempDirectory root = new();
+
+    public ScriptedGit(string windowsBody, string unixBody)
+    {
+        var directory = root.Combine("fake");
+        Directory.CreateDirectory(directory);
+        WorkingDirectory = root.Combine("work");
+        Directory.CreateDirectory(WorkingDirectory);
+        if (OperatingSystem.IsWindows())
+        {
+            Executable = Path.Combine(directory, "git.cmd");
+            File.WriteAllText(Executable, "@echo off\r\n" + windowsBody, Encoding.ASCII);
+        }
+        else
+        {
+            Executable = Path.Combine(directory, "git");
+            File.WriteAllText(Executable, "#!/bin/sh\n" + unixBody, new UTF8Encoding(false));
+            File.SetUnixFileMode(
+                Executable,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+        }
+    }
+
+    public string Executable { get; }
+
+    public string WorkingDirectory { get; }
+
+    public void Dispose() => root.Dispose();
 }

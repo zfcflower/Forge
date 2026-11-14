@@ -209,9 +209,58 @@ public sealed class ProjectCreationServiceTests
     [InlineData("", false)]
     [InlineData("   ", false)]
     [InlineData(null, false)]
+    [InlineData("git+ssh://git@host/team/repo.git", true)]
+    [InlineData("https://[::1]:8443/team/repo.git", true)]
+    [InlineData("https://org@dev.azure.com/org/project/_git/repo", true)]
+    [InlineData(@"C:\repos\source", true)]
+    [InlineData("/srv/git/source.git", true)]
+    [InlineData("ext::sh -c touch% /tmp/pwned", false)]
+    [InlineData("fd::3", false)]
+    [InlineData("ftp://host/team/repo.git", false)]
+    [InlineData("javascript://host/x", false)]
+    [InlineData("https://", false)]
+    [InlineData("https://alice:s3cret@host/team/repo.git", false)]
     public void An_address_must_be_absolute_and_must_not_be_an_option(string? url, bool usable)
     {
         Assert.Equal(usable, ProjectCreationService.IsUsableUrl(url));
+    }
+
+    [Theory]
+    [InlineData("https://alice:s3cret@host/team/repo.git", true)]
+    [InlineData("https://:token@host/repo", true)]
+    [InlineData("ssh://git:pw@host/repo", true)]
+    [InlineData("https://alice@host/repo", false)]
+    [InlineData("git@host:team/repo.git", false)]
+    [InlineData("https://host/a:b@c", false)]
+    [InlineData(null, false)]
+    public void Only_a_password_in_the_authority_counts_as_a_credential(string? url, bool carries)
+    {
+        Assert.Equal(carries, ProjectCreationService.CarriesPassword(url));
+    }
+
+    [Fact]
+    public void A_refused_address_names_the_password_when_that_is_why()
+    {
+        Assert.Null(ProjectCreationService.DescribeUrlProblem("https://host/team/repo.git"));
+        Assert.Equal(
+            ProjectCreationStrings.UrlPasswordKey,
+            ProjectCreationService.DescribeUrlProblem("https://alice:s3cret@host/team/repo.git")!.Value.Key);
+        Assert.Equal(ProjectCreationStrings.UrlNotUsableKey, ProjectCreationService.DescribeUrlProblem("ext::sh")!.Value.Key);
+    }
+
+    [Fact]
+    public async Task A_clone_whose_address_carries_a_password_never_starts_git()
+    {
+        using var sandbox = NewSandbox();
+        var service = Service();
+
+        var result = await service.RunAsync(new ProjectCreationRequest(
+            ProjectCreationMode.Clone, sandbox.Path, "clone", "https://alice:s3cret@example.invalid/team/repo.git"));
+
+        // Refused before anything runs, so the secret never reaches git's command line, its stderr or this message.
+        Assert.Null(result.Directory);
+        Assert.Equal(ProjectCreationStrings.UrlPasswordKey, result.Error!.Value.Key);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(sandbox.Path));
     }
 
     // ---------------------------------------------------------------- ResolveDirectory
@@ -305,6 +354,60 @@ public sealed class ProjectCreationServiceTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(sandbox.Path));
     }
 
+    [Theory]
+    [InlineData("projects")]
+    [InlineData(@"..\elsewhere")]
+    public async Task A_relative_parent_directory_is_refused_before_anything_is_created(string parent)
+    {
+        var service = Service();
+        var resolved = Path.GetFullPath(Path.Combine(parent, "fresh-relative-w9"));
+
+        var result = await service.RunAsync(new ProjectCreationRequest(ProjectCreationMode.Create, parent, "fresh-relative-w9"));
+
+        // A relative parent would resolve against the process's working directory, a place the user never chose.
+        Assert.Null(result.Directory);
+        Assert.Equal(ProjectCreationStrings.ParentRelativeKey, result.Error!.Value.Key);
+        Assert.False(Directory.Exists(resolved));
+    }
+
+    [Fact]
+    public async Task A_cancelled_init_in_a_prepared_empty_folder_keeps_the_folder_and_empties_it()
+    {
+        using var sandbox = NewSandbox();
+        var service = Service();
+        var prepared = Path.Combine(sandbox.Path, "prepared");
+        Directory.CreateDirectory(prepared);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.RunAsync(
+            new ProjectCreationRequest(ProjectCreationMode.Create, sandbox.Path, "prepared"),
+            null,
+            cancelled.Token));
+
+        // The folder was the user's, so it stays; whatever the killed init wrote into it goes, so the retry is not
+        // refused as "already exists".
+        Assert.True(Directory.Exists(prepared));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(prepared));
+        Assert.Equal(ProjectNameProblem.None, ProjectCreationService.ValidateName(sandbox.Path, "prepared"));
+    }
+
+    [Fact]
+    public async Task A_cancelled_init_of_a_new_folder_leaves_no_folder()
+    {
+        using var sandbox = NewSandbox();
+        var service = Service();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.RunAsync(
+            new ProjectCreationRequest(ProjectCreationMode.Create, sandbox.Path, "fresh"),
+            null,
+            cancelled.Token));
+
+        Assert.False(Directory.Exists(Path.Combine(sandbox.Path, "fresh")));
+    }
+
     // ---------------------------------------------------------------- RunAsync: a clone
 
     [Fact]
@@ -394,12 +497,15 @@ public sealed class ProjectCreationServiceTests
     }
 
     [Fact]
-    public void The_clone_timeout_is_null_for_zero_and_the_preference_otherwise()
+    public void The_clone_timeout_is_unlimited_for_zero_and_the_preference_otherwise()
     {
         var preferences = new AppPreferences();
         var service = new ProjectCreationService(new GitCli(), preferences, @"C:\fallback");
         Assert.Equal(AppPreferences.DefaultProjectsCloneTimeoutSeconds, preferences.ProjectsCloneTimeoutSeconds);
-        Assert.Null(service.CloneTimeout);
+
+        // 0 means "no limit", which the git layer only understands as InfiniteTimeSpan: a null timeout would fall back to
+        // its two-minute default, and a large clone over a slow link would be killed while the settings page says otherwise.
+        Assert.Equal(Timeout.InfiniteTimeSpan, service.CloneTimeout);
 
         preferences.ProjectsCloneTimeoutSeconds = 30;
         Assert.Equal(TimeSpan.FromSeconds(30), service.CloneTimeout);

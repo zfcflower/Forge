@@ -1,5 +1,6 @@
 using Forge.Abstractions;
 using Forge.App.Logging;
+using Forge.App.ViewModels;
 using ZLogger;
 
 namespace Forge.App.Services;
@@ -32,7 +33,9 @@ internal sealed class OnboardingState
     {
         try
         {
-            var entry = await uiState.GetAsync(Key, ct).ConfigureAwait(false);
+            // Off the dispatcher like every other ui_state access (LayoutStateLoader): this runs on the window's startup path,
+            // and a SQLite read's synchronous part would otherwise stall the first frame.
+            var entry = await BackgroundRead.RunAsync(token => uiState.GetAsync(Key, token), ct).ConfigureAwait(false);
             return entry is not null;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -47,7 +50,7 @@ internal sealed class OnboardingState
     {
         try
         {
-            await uiState.PutAsync(Key, CurrentVersion, "{\"completed\":true}", ct).ConfigureAwait(false);
+            await BackgroundRead.RunAsync(token => uiState.PutAsync(Key, CurrentVersion, "{\"completed\":true}", token), ct).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

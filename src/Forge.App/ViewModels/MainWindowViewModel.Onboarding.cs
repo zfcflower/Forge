@@ -77,6 +77,10 @@ internal sealed partial class MainWindowViewModel
     /// </summary>
     private void ShowOnboarding(OnboardingState state)
     {
+        // A second wizard replaces the first one: the replaced model unsubscribes from the static language event and from the
+        // provider catalogue in `Dispose`, so letting it go without that would leak both subscriptions for the process.
+        (Onboarding as OnboardingViewModel)?.Dispose();
+
         var model = new OnboardingViewModel(
             composition.Preferences,
             composition.Providers,
@@ -104,5 +108,20 @@ internal sealed partial class MainWindowViewModel
         Onboarding = null;
         model.Dispose();
         await state.MarkCompletedAsync(CancellationToken.None).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Drops the wizard, if one is open, without writing the "seen" record: called when the window itself is disposed, where
+    /// the only thing that matters is that the model stops listening to the process-wide language and provider events.
+    /// </summary>
+    private void CloseOnboarding()
+    {
+        if (Onboarding is not OnboardingViewModel model)
+        {
+            return;
+        }
+
+        Onboarding = null;
+        model.Dispose();
     }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Forge.Workspace;
 
@@ -244,12 +245,13 @@ public sealed partial class GitCli
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
 
         // The '--' on the command line is the second half of the injection guard; the first is refusing a URL that
-        // starts with '-', which git would otherwise read as an option.
+        // starts with '-', which git would otherwise read as an option. The URL never reaches a message unredacted: a
+        // token in its user-info must not end up in a dialog or a log.
         var repositoryUrl = url.Trim();
         if (repositoryUrl.StartsWith('-'))
         {
             throw new ArgumentException(
-                $"'{url}' is not a valid repository URL: a leading '-' would be parsed as a git option.",
+                $"'{RedactCredentials(repositoryUrl)}' is not a valid repository URL: a leading '-' would be parsed as a git option.",
                 nameof(url));
         }
 
@@ -275,14 +277,14 @@ public sealed partial class GitCli
 
         var arguments = Args("clone", "--progress", "--", repositoryUrl, target);
 
-        // Both pumps parse: git writes the progress to stderr, but routing stdout through the same filter costs nothing
-        // and keeps the callback contract independent of which stream a future git version chooses.
+        // Only stderr is parsed: git writes the progress there, and a second reporting thread would break the caller's
+        // assumption that every update arrives on one thread (the dialog's throttle clock is not shared-state free by
+        // accident).
         var filter = options.OnProgress is null ? null : new CloneProgressFilter(options.OnProgress);
         var runOptions = new GitRunOptions
         {
             Timeout = options.Timeout,
             CarriageReturnEndsLine = true,
-            OnStandardOutputLine = filter is null ? null : filter.OnLine,
             OnStandardErrorLine = filter is null ? null : filter.OnLine,
         };
 
@@ -292,32 +294,99 @@ public sealed partial class GitCli
                 parent ?? target,
                 arguments,
                 runOptions,
-                environment: null,
+                CloneEnvironment,
                 ct,
                 standardInput: null,
                 keepCompletedResult: false).ConfigureAwait(false);
             if (!result.Success)
             {
-                throw Failure(result, arguments);
+                throw CloneFailure(result, arguments);
             }
         }
         catch
         {
-            // An interrupted clone must not leave a half-filled repository behind, but a directory that was already
-            // there (an empty one the caller prepared) is not this call's to delete.
-            if (!existed)
-            {
-                await DeleteDirectoryQuietlyAsync(target).ConfigureAwait(false);
-            }
-
+            // An interrupted clone must not leave a half-filled repository behind. A directory that was already there (an
+            // empty one the caller prepared) is not this call's to delete, but what git wrote into it is: it was empty, so
+            // emptying it again restores exactly what the caller had, and a retry is not refused as "not empty".
+            await DeleteTreeQuietlyAsync(target, keepRoot: existed).ConfigureAwait(false);
             throw;
         }
     }
 
     /// <summary>
+    /// The transports a clone may use, as git's own allowlist (<c>GIT_ALLOW_PROTOCOL</c>, which overrides every
+    /// <c>protocol.*.allow</c> setting): the network transports plus local paths. Everything else — <c>ext::</c> (runs an
+    /// arbitrary command), <c>fd::</c>, a remote helper a user's config enabled — is refused by git itself, so a pasted
+    /// address can never become a command line whatever the user's git configuration says.
+    /// </summary>
+    public const string AllowedCloneProtocols = "https:http:ssh:git:file";
+
+    private static readonly Dictionary<string, string> CloneEnvironment = new(StringComparer.Ordinal)
+    {
+        ["GIT_ALLOW_PROTOCOL"] = AllowedCloneProtocols,
+    };
+
+    /// <summary>
+    /// The clone's failure with the URL's credentials removed from every part of it: the message, the argument list and the
+    /// stderr git printed (git echoes the address in "unable to access" and "repository not found"), because each of those
+    /// reaches a dialog or a log.
+    /// </summary>
+    private static GitException CloneFailure(GitCommandResult result, IReadOnlyList<string> arguments)
+    {
+        var redactedArguments = new List<string>(arguments.Count);
+        foreach (var argument in arguments)
+        {
+            redactedArguments.Add(RedactCredentials(argument));
+        }
+
+        return Failure(result with { StandardError = RedactCredentials(result.StandardError) }, redactedArguments);
+    }
+
+    /// <summary>
+    /// Removes the user-info (<c>user:token@</c>) of every <c>scheme://</c> address in <paramref name="text"/>, keeping the
+    /// rest of the text as it was. An scp-like address (<c>git@host:path</c>) has no secret part and is left alone.
+    /// </summary>
+    public static string RedactCredentials(string text)
+    {
+        if (string.IsNullOrEmpty(text) || !text.Contains("://", StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var builder = new StringBuilder(text.Length);
+        var position = 0;
+        while (true)
+        {
+            var scheme = text.IndexOf("://", position, StringComparison.Ordinal);
+            if (scheme < 0)
+            {
+                builder.Append(text, position, text.Length - position);
+                return builder.ToString();
+            }
+
+            var authorityStart = scheme + 3;
+            builder.Append(text, position, authorityStart - position);
+            var authorityEnd = authorityStart;
+            while (authorityEnd < text.Length && !EndsAuthority(text[authorityEnd]))
+            {
+                authorityEnd++;
+            }
+
+            var at = authorityEnd > authorityStart
+                ? text.LastIndexOf('@', authorityEnd - 1, authorityEnd - authorityStart)
+                : -1;
+            position = at >= 0 ? at + 1 : authorityStart;
+        }
+    }
+
+    private static bool EndsAuthority(char character) =>
+        character is '/' or '?' or '#' or '\'' or '"' or '<' or '>' or '`' || char.IsWhiteSpace(character);
+
+    /// <summary>
     /// Reports each update once and in order. Git redraws a line in place, so a phase repeats its current percentage many
     /// times and occasionally redraws a smaller one; the percentage is the phase's own (the phases share no common
-    /// denominator), so the high-water mark is tracked per phase. Both pumps call in, which makes the state shared.
+    /// denominator), so the high-water mark is tracked per phase. Only the stderr pump calls in — the stream git writes
+    /// progress to — so the state needs no lock and the reporter runs on that one thread.
     /// </summary>
     private sealed class CloneProgressFilter(Action<GitCloneProgress> report)
     {
@@ -326,7 +395,6 @@ public sealed partial class GitCli
 
         // One slot per phase; NoPercent stands in for a line git printed without a percentage.
         private readonly int[] highWater = InitializeHighWater();
-        private readonly object gate = new();
 
         public void OnLine(string? line)
         {
@@ -335,20 +403,16 @@ public sealed partial class GitCli
                 return;
             }
 
-            lock (gate)
+            var slot = (int)progress.Phase;
+            var percent = progress.Percent ?? NoPercent;
+            if (percent <= highWater[slot])
             {
-                var slot = (int)progress.Phase;
-                var percent = progress.Percent ?? NoPercent;
-                if (percent <= highWater[slot])
-                {
-                    return;
-                }
-
-                highWater[slot] = percent;
+                return;
             }
 
-            // Outside the lock: the reporter is caller code and must not block the pump that feeds it. It is also
-            // untrusted: a broken reporter must not fail the clone.
+            highWater[slot] = percent;
+
+            // The reporter is caller code and is untrusted: a broken reporter must not fail the clone.
             try
             {
                 report(progress);
@@ -377,12 +441,14 @@ public sealed partial class GitCli
     }
 
     /// <summary>
-    /// Best-effort removal of a directory tree this call created. git writes its pack and object files read-only, so
-    /// their attributes are cleared before the delete; a file a scanner still holds open, a kill whose file handles the
-    /// operating system has not released yet or a permission problem must not replace the clone's real failure with a
-    /// cleanup failure, so the retries are short and bounded and everything left is swallowed.
+    /// Best-effort removal of a directory tree git wrote — a clone or an <c>init</c> that failed or was cancelled. git writes
+    /// its pack and object files read-only, so their attributes are cleared before the delete; a file a scanner still holds
+    /// open, a kill whose file handles the operating system has not released yet or a permission problem must not replace
+    /// the real failure with a cleanup failure, so the retries are short and bounded and everything left is swallowed.
     /// </summary>
-    private static async Task DeleteDirectoryQuietlyAsync(string path)
+    /// <param name="path">The tree to remove.</param>
+    /// <param name="keepRoot">Empty <paramref name="path"/> but keep the directory itself (one the caller prepared).</param>
+    public static async Task DeleteTreeQuietlyAsync(string path, bool keepRoot = false)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -395,20 +461,41 @@ public sealed partial class GitCli
                         File.SetAttributes(file, FileAttributes.Normal);
                     }
 
-                    Directory.Delete(path, recursive: true);
+                    if (keepRoot)
+                    {
+                        foreach (var directory in Directory.GetDirectories(path))
+                        {
+                            Directory.Delete(directory, recursive: true);
+                        }
+
+                        foreach (var file in Directory.GetFiles(path))
+                        {
+                            File.Delete(file);
+                        }
+                    }
+                    else
+                    {
+                        Directory.Delete(path, recursive: true);
+                    }
                 }
 
                 return;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
-                if (attempt == 4)
+                if (attempt == CleanupAttempts - 1)
                 {
                     return;
                 }
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
+            await Task.Delay(CleanupPause).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Attempts at removing a tree; the first can lose to a just-killed git whose handles are still open.</summary>
+    private const int CleanupAttempts = 5;
+
+    /// <summary>Pause between those attempts; long enough for a killed child's handles to close, short enough not to stall a dialog.</summary>
+    private static readonly TimeSpan CleanupPause = TimeSpan.FromMilliseconds(100);
 }

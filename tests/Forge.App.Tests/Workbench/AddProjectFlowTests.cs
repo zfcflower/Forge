@@ -161,6 +161,31 @@ public sealed class AddProjectFlowTests
         });
     }
 
+    [Fact]
+    public async Task A_registration_the_store_refuses_is_reported_once_and_registers_nothing()
+    {
+        await WithShellAsync(async shell =>
+        {
+            using var sandbox = new ProjectSandbox();
+            using var repository = GitTestSandbox.Create();
+            var folder = repository.CloneTracked("refused");
+            shell.RefuseProjectInserts();
+            shell.Dialogs.PickAnswers.Enqueue(0);
+            shell.Dialogs.FolderAnswer = folder;
+
+            shell.Shell.AddProjectCommand.Execute(null);
+
+            // The row is what failed, so the failure is the shell's to report: one error toast under the flow's own key, and
+            // no half-registered project in the tree.
+            var toast = await WaitForToastAsync(shell, "project-add-failed");
+            Assert.Equal(Forge.App.Notifications.NotificationLevel.Error, toast.Level);
+            Assert.Equal(ProjectFlowStrings.AddFailedTitle, toast.Title);
+            Assert.Contains("refused insert", toast.Body, StringComparison.Ordinal);
+            Assert.Equal(ProjectKind.General, Assert.Single(await shell.Composition.Projects.ListAsync(CancellationToken.None)).Kind);
+            Assert.DoesNotContain(shell.Shell.Projects.Sections, static node => node.Key.StartsWith("project:", StringComparison.Ordinal));
+        });
+    }
+
     // ---------------------------------------------------------------- the real composition root
 
     private static async Task WithShellAsync(Func<ProjectShell, Task> body)
@@ -193,6 +218,21 @@ public sealed class AddProjectFlowTests
             Assert.True(DateTimeOffset.UtcNow < deadline, "Timed out waiting for: " + what);
             await Task.Delay(10);
         }
+    }
+
+    /// <summary>Waits for the toast the flow raises under <paramref name="key"/>; the notification centre merges by key.</summary>
+    private static async Task<Forge.App.Notifications.NotificationItemViewModel> WaitForToastAsync(ProjectShell shell, string key)
+    {
+        Forge.App.Notifications.NotificationItemViewModel? match = null;
+        await WaitForAsync(
+            () =>
+            {
+                match = shell.Composition.Notifications.Items.LastOrDefault(item =>
+                    string.Equals(item.Key, key, StringComparison.Ordinal));
+                return match is not null;
+            },
+            "the notification under " + key);
+        return match!;
     }
 
     /// <summary>
@@ -255,6 +295,20 @@ public sealed class AddProjectFlowTests
             SqliteConnection.ClearAllPools();
             previous.Restore();
             TestTempFiles.DeleteTree(root);
+        }
+
+        /// <summary>
+        /// Makes every later project insert fail, the way the tree-menu tests inject a store failure: a trigger in the
+        /// throw-away database. Nothing else about the registry changes, so the flow runs its real code into a real refusal.
+        /// </summary>
+        public void RefuseProjectInserts()
+        {
+            using var connection = new SqliteConnection("Data Source=" + Composition.Paths.DatabasePath);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                "CREATE TRIGGER w9_refuse_project BEFORE INSERT ON projects BEGIN SELECT RAISE(ABORT, 'refused insert'); END;";
+            command.ExecuteNonQuery();
         }
     }
 

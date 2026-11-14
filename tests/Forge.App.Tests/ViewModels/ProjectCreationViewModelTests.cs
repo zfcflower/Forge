@@ -69,6 +69,47 @@ public sealed class ProjectCreationViewModelTests
     }
 
     [Fact]
+    public async Task A_relative_parent_directory_is_named_in_the_hint_and_shows_no_destination()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            using var sandbox = new ProjectSandbox();
+            using var model = new ProjectCreationViewModel(ProjectCreationMode.Create, Service(sandbox.Path));
+            model.Name = "fresh";
+
+            model.ParentDirectory = "projects";
+
+            // Resolved against the process's directory it would point somewhere the user never chose, so the dialog
+            // shows no destination at all instead of that one.
+            Assert.Equal(ProjectCreationStrings.ParentDirectoryNotAbsolute.Resolve(), model.Hint);
+            Assert.False(model.CanStart);
+            Assert.Equal(string.Empty, model.DestinationText);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task A_remote_that_carries_a_password_is_named_as_such_and_blocks_the_start()
+    {
+        await SharedUi.RunAsync(() =>
+        {
+            using var sandbox = new ProjectSandbox();
+            using var model = new ProjectCreationViewModel(ProjectCreationMode.Clone, Service(sandbox.Path));
+
+            model.Url = "https://alice:s3cret@host/team/repo.git";
+
+            Assert.Equal(ProjectCreationStrings.UrlCarriesPassword.Resolve(), model.Hint);
+            Assert.False(model.CanStart);
+
+            model.Url = "https://alice@host/team/repo.git";
+
+            Assert.Null(model.Hint);
+            Assert.True(model.CanStart);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public async Task An_unusable_name_is_named_in_the_hint_and_blocks_the_start()
     {
         await SharedUi.RunAsync(() =>
@@ -265,7 +306,73 @@ public sealed class ProjectCreationViewModelTests
         });
     }
 
+    [Fact]
+    public async Task A_folder_that_already_exists_blocks_the_starting_until_it_is_gone()
+    {
+        await SharedUi.RunAsync(async () =>
+        {
+            using var sandbox = new ProjectSandbox();
+            using var model = new ProjectCreationViewModel(ProjectCreationMode.Create, Service(sandbox.Path));
+            var occupied = Path.Combine(sandbox.Path, "taken");
+            Directory.CreateDirectory(occupied);
+            File.WriteAllText(Path.Combine(occupied, "a.txt"), "x");
+
+            model.Name = "taken";
+
+            // The name rules hold synchronously; only "a folder of that name is already there" costs a disk read, and that
+            // answer arrives from the thread pool, so the test waits for it instead of assuming it is instant.
+            await WaitForAsync(
+                () => model.Hint == ProjectCreationStrings.NameProblem(ProjectNameProblem.Exists).Resolve(),
+                "the occupancy hint");
+            Assert.False(model.CanStart);
+            Assert.False(model.StartCommand.CanExecute(null));
+
+            Directory.Delete(occupied, recursive: true);
+
+            // A different input is what asks again: the answer is cached per input, not polled.
+            model.Name = "taken2";
+            await WaitForAsync(() => model.CanStart && model.Hint is null, "the released name");
+        });
+    }
+
+    [Fact]
+    public async Task A_failed_run_drops_the_stale_occupancy_answer_so_the_retry_can_start()
+    {
+        await SharedUi.RunAsync(async () =>
+        {
+            using var sandbox = new ProjectSandbox();
+            using var model = new ProjectCreationViewModel(ProjectCreationMode.Create, Service(sandbox.Path));
+            var occupied = Path.Combine(sandbox.Path, "taken");
+            Directory.CreateDirectory(occupied);
+            File.WriteAllText(Path.Combine(occupied, "a.txt"), "x");
+
+            model.Name = "taken";
+            await WaitForAsync(
+                () => model.Hint == ProjectCreationStrings.NameProblem(ProjectNameProblem.Exists).Resolve(),
+                "the occupancy hint");
+
+            // Start refuses (the service re-checks and reports), and the run's own failure has to leave the input usable: the
+            // folder is gone a moment later, so an answer taken before the run must not survive it.
+            Assert.False(await model.StartAsync());
+            Assert.True(model.HasError);
+            Directory.Delete(occupied, recursive: true);
+
+            await WaitForAsync(() => model.CanStart && model.Hint is null, "the released input after a failed run");
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /// <summary>A bounded wait over a condition the model satisfies on the dispatcher or the thread pool.</summary>
+    private static async Task WaitForAsync(Func<bool> condition, string what)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+        while (!condition())
+        {
+            Assert.True(DateTimeOffset.UtcNow < deadline, "Timed out waiting for: " + what);
+            await Task.Delay(10);
+        }
+    }
 
     /// <summary>
     /// A real service over a throw-away parent and the live default preferences: the model's rules, retries and cleanup are
