@@ -31,6 +31,7 @@ internal static class McpSettingsStrings
     // ------------------------------------------------------------------ diagnostics
     public const string DiagTitleKey = "settings.mcp.diag.title";
     public const string DiagFileKey = "settings.mcp.diag.file";
+    public const string DiagKeptServerKey = "settings.mcp.diag.keptServer";
     public const string DiagEntryKey = "settings.mcp.diag.entry";
 
     // ------------------------------------------------------------------ shared labels
@@ -190,6 +191,10 @@ internal static class McpSettingsStrings
 
     public static string DiagnosticEntry(string serverName, McpEntryIssue issue) =>
         Loc.Instance.Format(DiagEntryKey, serverName, IssueText(issue));
+
+    /// <summary>A server the manager still runs although its file could not be read: named, with the file to repair.</summary>
+    public static string DiagnosticKeptServer(string name, string source) =>
+        Loc.Instance.Format(DiagKeptServerKey, name, source);
 
     // ------------------------------------------------------------------ shared labels
     public static string TransportStdio => Loc.Instance[TransportStdioKey];
@@ -376,6 +381,10 @@ internal static class McpSettingsStrings
         Loc.Register(DiagTitleKey, "诊断", "Diagnostics");
         Loc.Register(DiagFileKey, "{0}：{1}", "{0}: {1}");
         Loc.Register(DiagEntryKey, "{0} · {1}", "{0} · {1}");
+        Loc.Register(
+            DiagKeptServerKey,
+            "服务器 {0} 仍在运行，但它的文件 {1} 现在读不懂；修好该文件后它会重新出现在列表里。",
+            "Server {0} is still running, but its file {1} cannot be read right now; repair that file and it appears in the list again.");
 
         Loc.Register(TransportStdioKey, "stdio", "stdio");
         Loc.Register(TransportHttpKey, "http", "http");

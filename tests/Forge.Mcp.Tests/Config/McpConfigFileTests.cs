@@ -33,12 +33,16 @@ public class McpConfigFileTests
     }
 
     [Fact]
-    public void Read_treats_a_missing_mcpServers_as_an_empty_config()
+    public void Read_reports_a_missing_mcpServers_the_same_way_the_runtime_read_does()
     {
+        // The runtime read calls a document without `mcpServers` a problem; the file view has to agree, or a hand edit that
+        // dropped the key would hide every server from the settings page while the manager still runs them.
         var result = McpConfigFile.Read("{}", "empty.json");
 
         Assert.Empty(result.Entries);
-        Assert.Empty(result.Diagnostics);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("empty.json", diagnostic.Source);
+        Assert.Null(diagnostic.ServerName);
     }
 
     [Theory]

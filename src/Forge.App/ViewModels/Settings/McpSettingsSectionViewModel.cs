@@ -478,12 +478,45 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
             return false;
         }
 
-        Rebuild(snapshot, services.Manager.States);
+        Rebuild(snapshot, services.Manager.States, KeptServers(services, snapshot));
         return true;
     }
 
+    /// <summary>
+    /// The running servers the file read could not see (a file whose root is unreadable contributes no entries, and the manager
+    /// keeps its servers). They have no row, so the page names them and the file to fix instead of hiding them.
+    /// </summary>
+    private static List<(string Name, string Source)> KeptServers(McpServices services, McpConfigSnapshot snapshot)
+    {
+        var fromFiles = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in snapshot.Files)
+        {
+            foreach (var entry in file.Entries)
+            {
+                fromFiles.Add(entry.Name);
+            }
+        }
+
+        var kept = new List<(string Name, string Source)>(2);
+        foreach (var name in services.Manager.ServerNames)
+        {
+            if (fromFiles.Contains(name))
+            {
+                continue;
+            }
+
+            var config = services.Manager.GetServer(name);
+            kept.Add((name, config.Source ?? string.Empty));
+        }
+
+        return kept;
+    }
+
     /// <summary>Rebuilds rows and diagnostics from the snapshot, keeping the rows that still exist (expansion survives).</summary>
-    private void Rebuild(McpConfigSnapshot snapshot, IReadOnlyList<McpServerState> states)
+    private void Rebuild(
+        McpConfigSnapshot snapshot,
+        IReadOnlyList<McpServerState> states,
+        IReadOnlyList<(string Name, string Source)> keptServers)
     {
         var byName = new Dictionary<string, McpServerState>(states.Count, StringComparer.Ordinal);
         foreach (var state in states)
@@ -507,6 +540,11 @@ internal sealed class McpSettingsSectionViewModel : NotifyingObject, IDisposable
         foreach (var diagnostic in snapshot.Diagnostics)
         {
             diagnostics.Add(McpSettingsStrings.DiagnosticFile(diagnostic));
+        }
+
+        foreach (var (name, source) in keptServers)
+        {
+            diagnostics.Add(McpSettingsStrings.DiagnosticKeptServer(name, source));
         }
 
         var existing = new Dictionary<string, McpServerRowViewModel>(Servers.Count, StringComparer.Ordinal);

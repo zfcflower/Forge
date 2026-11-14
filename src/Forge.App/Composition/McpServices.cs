@@ -136,17 +136,17 @@ internal sealed class McpServices : IAsyncDisposable
         WriteThenApplyAsync(
             () =>
             {
-                if (replacedName is { Length: > 0 } previous &&
-                    replacedPath is { Length: > 0 } from &&
-                    !string.Equals(Path.GetFullPath(from), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
-                {
-                    store.Remove(from, previous);
-                }
-
-                // The old key only has to be removed here when the entry stayed in its file: a move removed it above.
+                // The entry is written first and the file it left is cleaned afterwards: if that write fails (a file the user
+                // broke, a lock) the old entry must still be there, because a failed save may not change the configuration at all.
                 var sameFile = replacedPath is not { Length: > 0 } ||
                                string.Equals(Path.GetFullPath(replacedPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
                 store.Upsert(path, entry, sameFile ? replacedName : null);
+
+                if (!sameFile && replacedName is { Length: > 0 } previous && File.Exists(replacedPath))
+                {
+                    store.Remove(replacedPath!, previous);
+                }
+
                 return true;
             },
             ct);

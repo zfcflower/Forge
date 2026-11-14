@@ -394,7 +394,9 @@ public static class McpConfigFile
 
             if (!document.RootElement.TryGetProperty(ServersProperty, out var servers))
             {
-                return new McpConfigEntries([], []);
+                // The runtime read calls this a problem, so the file view must too: otherwise a hand edit that dropped the key
+                // hides every server from the page while the manager keeps running them.
+                return new McpConfigEntries([], [new McpConfigDiagnostic(label, null, "No \"mcpServers\" object.")]);
             }
 
             if (servers.ValueKind != JsonValueKind.Object)

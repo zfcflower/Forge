@@ -104,6 +104,29 @@ public sealed class McpServicesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_move_whose_target_file_cannot_be_written_leaves_the_old_entry_alone()
+    {
+        WriteGlobal("""{"mcpServers":{"old":{"command":"never-spawned"}}}""");
+        TestTempFiles.WriteFile(root, "workspace/.forge/mcp.json", "[]");
+        await using var preferences = Preferences();
+        await using var services = McpServices.Create(Store(), preferences, null, null);
+        var projectPath = Assert.IsType<string>(services.Store.ProjectPath);
+        var globalPath = services.Store.GlobalPath;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => services.SaveAsync(
+            projectPath,
+            Entry("renamed"),
+            CancellationToken.None,
+            replacedName: "old",
+            replacedPath: globalPath));
+
+        // The failed save may not have taken the old entry with it: the write that failed came first.
+        Assert.Equal(["old"], services.Manager.ServerNames);
+        var files = services.Store.Read().Files;
+        Assert.Equal(["old"], files.Single(file => file.Path == globalPath).Entries.Select(entry => entry.Name));
+    }
+
+    [Fact]
     public async Task Deleting_the_last_server_still_stops_it()
     {
         WriteGlobal("""{"mcpServers":{"srv":{"command":"never-spawned"}}}""");
