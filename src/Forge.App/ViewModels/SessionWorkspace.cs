@@ -1718,7 +1718,8 @@ internal sealed partial class SessionWorkspaceViewModel : NotifyingObject, IDisp
                 Instruments.NoteRateLimit(Composer.ProviderId, limit.RateLimit);
                 break;
             case AgentApprovalDenied denied:
-                Card(denied.AgentId)?.AddNotice(SessionStrings.Denied(denied.Call.Name), isError: true);
+                Card(denied.AgentId)?.AddNotice(
+                    SessionStrings.Denied(denied.Call.Name), isError: true, kind: TimelineNodeKind.Approval);
                 break;
             case AgentCompacted compacted:
                 Card(compacted.AgentId)?.AddNotice(SessionStrings.Compacted(compacted.TokensBefore, compacted.TokensAfter));

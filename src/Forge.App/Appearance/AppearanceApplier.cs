@@ -3,19 +3,21 @@ using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Forge.App.Preferences;
+using Forge.App.ViewModels;
 using Forge.App.Logging;
 using ZLogger;
 
 namespace Forge.App.Appearance;
 
 /// <summary>
-/// Pushes the font preferences into a resource dictionary (at runtime <c>Application.Current.Resources</c>) under
-/// <see cref="FontResourceKeys"/>. UI thread only.
+/// Pushes the appearance preferences into the app: the font values into a resource dictionary (at runtime
+/// <c>Application.Current.Resources</c>) under <see cref="FontResourceKeys"/>, and the motion switch into the global
+/// <see cref="TreeMotion"/> gate that both the tree and the chat timeline read. UI thread only.
 /// <para>The values live in one child dictionary owned by this class and merged into the target; every apply builds a new
 /// child and swaps it in place, so a preference change raises at most two whole-dictionary notifications (Avalonia
 /// notifies once when the old child lets go of the host and once when the new one takes it) instead of one per key. Only
-/// the four font properties trigger an apply, and an apply whose values equal the current ones swaps nothing. A family
-/// that does not parse keeps the previous valid family and is reported through <c>Trace</c>.</para>
+/// the four font properties and the motion switch trigger an apply, and a font apply whose values equal the current ones
+/// swaps nothing. A family that does not parse keeps the previous valid family and is reported through <c>Trace</c>.</para>
 /// </summary>
 internal sealed class AppearanceApplier : IDisposable
 {
@@ -62,6 +64,10 @@ internal sealed class AppearanceApplier : IDisposable
         var code = Resolve(preferences.CodeFontFamily, applied?.Code, "code", AppPreferences.DefaultCodeFontFamily, ref rejectedCode);
         var sizes = FontScale.Compute(preferences.UiFontSize);
         var codeSize = preferences.CodeFontSize;
+
+        // Not a resource: the animation gate is read by live controls (the tree rows and the chat timeline's gutters), which
+        // subscribe to TreeMotion.Changed; setting it before the early return keeps the switch live even when no font changed.
+        TreeMotion.ReducedMotion = preferences.ReduceMotion;
 
         // Compare the resolved values, not the raw text: a family that failed to parse resolved to the previous one,
         // so re-reporting the same broken text is not a change.
@@ -191,17 +197,18 @@ internal sealed class AppearanceApplier : IDisposable
     private void OnPreferenceChanged(object? sender, PropertyChangedEventArgs e)
     {
         // An empty name means "every property changed", which includes the fonts.
-        if (e.PropertyName is not { Length: > 0 } name || IsFontPreference(name))
+        if (e.PropertyName is not { Length: > 0 } name || IsAppliedPreference(name))
         {
             Apply();
         }
     }
 
-    private static bool IsFontPreference(string name) =>
+    private static bool IsAppliedPreference(string name) =>
         string.Equals(name, nameof(AppPreferences.UiFontFamily), StringComparison.Ordinal)
         || string.Equals(name, nameof(AppPreferences.UiFontSize), StringComparison.Ordinal)
         || string.Equals(name, nameof(AppPreferences.CodeFontFamily), StringComparison.Ordinal)
-        || string.Equals(name, nameof(AppPreferences.CodeFontSize), StringComparison.Ordinal);
+        || string.Equals(name, nameof(AppPreferences.CodeFontSize), StringComparison.Ordinal)
+        || string.Equals(name, nameof(AppPreferences.ReduceMotion), StringComparison.Ordinal);
 
     /// <summary>A resolved chain: the text it came from (the change key) and the family it produced.</summary>
     private readonly record struct ResolvedFamily(string Text, FontFamily Value);

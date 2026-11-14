@@ -40,6 +40,12 @@ internal sealed class AppPreferences : ObservableObject
     public const double DefaultUiFontSize = 13;
     public const double DefaultCodeFontSize = 13;
 
+    /// <summary>
+    /// Whether looping animations (a running agent's breathing in the tree, a running timeline node in the chat) are off.
+    /// Default off-the-animations, i.e. motion is allowed; the switch exists for users who need the app to stand still.
+    /// </summary>
+    public const bool DefaultReduceMotion = false;
+
     /// <summary>Lower bound of the terminal scrollback; below it the ring is too short to scroll a build log.</summary>
     public const int MinScrollbackLines = 1000;
 
@@ -168,6 +174,7 @@ internal sealed class AppPreferences : ObservableObject
     private double uiFontSize = DefaultUiFontSize;
     private string codeFontFamily = DefaultCodeFontFamily;
     private double codeFontSize = DefaultCodeFontSize;
+    private bool reduceMotion = DefaultReduceMotion;
     private UiLanguage language = UiLanguage.System;
     private string terminalShell = string.Empty;
     private string terminalArguments = string.Empty;
@@ -237,6 +244,9 @@ internal sealed class AppPreferences : ObservableObject
     public string CodeFontFamily { get => codeFontFamily; set => Set(ref codeFontFamily, Family(value, DefaultCodeFontFamily)); }
 
     public double CodeFontSize { get => codeFontSize; set => Set(ref codeFontSize, Size(value, DefaultCodeFontSize)); }
+
+    /// <summary>Whether looping animations are off; see <see cref="DefaultReduceMotion"/>.</summary>
+    public bool ReduceMotion { get => reduceMotion; set => Set(ref reduceMotion, value); }
 
     public UiLanguage Language { get => language; set => Set(ref language, value); }
 
@@ -612,6 +622,7 @@ internal sealed class AppPreferences : ObservableObject
         uiFontSize = Size(section.UiFontSize, DefaultUiFontSize);
         codeFontFamily = Family(section.CodeFontFamily, DefaultCodeFontFamily);
         codeFontSize = Size(section.CodeFontSize, DefaultCodeFontSize);
+        reduceMotion = section.ReduceMotion ?? DefaultReduceMotion;
         language = loadedLanguage;
         terminalShell = (section.TerminalShell ?? string.Empty).Trim();
         terminalArguments = section.TerminalArguments ?? string.Empty;
@@ -737,6 +748,7 @@ internal sealed class AppPreferences : ObservableObject
             UiFontSize = uiFontSize,
             CodeFontFamily = codeFontFamily,
             CodeFontSize = codeFontSize,
+            ReduceMotion = reduceMotion,
             Language = LanguageToken(language),
             TerminalShell = terminalShell,
             TerminalArguments = terminalArguments,
@@ -923,6 +935,9 @@ internal sealed class PreferencesSection
 
     [JsonPropertyName("codeFontSize")]
     public double? CodeFontSize { get; set; }
+
+    [JsonPropertyName("reduceMotion")]
+    public bool? ReduceMotion { get; set; }
 
     [JsonPropertyName("language")]
     public string? Language { get; set; }

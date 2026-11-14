@@ -1,0 +1,86 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wc="using:Forge.App.Workbench.Controls"
+        xmlns:views="using:Forge.App.Views">
+
+  <!--
+    The chat timeline's presentation (wave W13). One place answers "how thick is the axis, how big is a node, how far is a
+    node from the row's top, what colour is each state and how does a running node pulse"; the views only place the gutter.
+    Sizes are tokens (Resources/Tokens.axaml), colours are the theme's brushes, so a theme or font change needs nothing here.
+  -->
+
+  <Styles.Resources>
+    <!-- The left column of one transcript row: the axis with this row's node on it. Both a row with a node (icon between the
+         two line segments) and the node-less turn header (one continuous segment through the middle row) use it; a fixed
+         top row and icon row mean the node never moves when a segment is hidden. -->
+    <ControlTheme x:Key="{x:Type views:TimelineGutter}" TargetType="views:TimelineGutter">
+      <Setter Property="Width" Value="{DynamicResource TimelineGutterWidth}" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="IsTabStop" Value="False" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Grid RowDefinitions="Auto,Auto,*">
+            <Panel Grid.Row="0" Height="{DynamicResource TimelineNodeTopGap}">
+              <Border x:Name="PART_TopLine" Classes="timeline-line" IsVisible="{TemplateBinding ShowTopLine}" />
+            </Panel>
+            <Panel Grid.Row="1" Height="{DynamicResource TimelineNodeSize}">
+              <Border x:Name="PART_MidLine" Classes="timeline-line" IsVisible="False" />
+              <wc:FluentIcon x:Name="PART_Icon"
+                             Classes="timeline-node"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+            </Panel>
+            <Border x:Name="PART_BottomLine"
+                    Grid.Row="2"
+                    Classes="timeline-line"
+                    IsVisible="{TemplateBinding ShowBottomLine}" />
+          </Grid>
+        </ControlTemplate>
+      </Setter>
+    </ControlTheme>
+  </Styles.Resources>
+
+  <Style Selector="Border.timeline-line">
+    <Setter Property="Width" Value="{DynamicResource TimelineAxisWidth}" />
+    <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.timeline-node">
+    <Setter Property="Width" Value="{DynamicResource TimelineNodeSize}" />
+    <Setter Property="Height" Value="{DynamicResource TimelineNodeSize}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.timeline-node.running">
+    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.timeline-node.failed">
+    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+  </Style>
+
+  <Style Selector="wc|FluentIcon.timeline-node.warning">
+    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+  </Style>
+
+  <!-- The class is only present while motion is allowed (the control drops it when the appearance preference says so), so
+       "reduce motion" needs no second selector and stops the pulse the moment the preference changes. -->
+  <Style Selector="wc|FluentIcon.timeline-node.pulsing">
+    <Style.Animations>
+      <Animation Duration="0:0:2" IterationCount="INFINITE" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+        <KeyFrame Cue="50%">
+          <Setter Property="Opacity" Value="0.45" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+</Styles>

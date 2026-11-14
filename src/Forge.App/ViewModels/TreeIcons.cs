@@ -137,12 +137,34 @@ internal static class TreeIcons
     }
 }
 
-/// <summary>Global motion gate for tree animations. Avalonia 12 exposes no OS reduced-motion preference and this module
-/// forbids P/Invoke, so the shell can set this once it reads the preference another way.</summary>
+/// <summary>Global motion gate for looping animations - the tree's running-agent breathing and the chat timeline's running
+/// node. Avalonia 12 exposes no OS reduced-motion preference and this module forbids P/Invoke, so the shell sets this from
+/// the appearance preference (<see cref="Forge.App.Appearance.AppearanceApplier"/>).</summary>
 internal static class TreeMotion
 {
+    private static bool reducedMotion;
+
     /// <summary>True when looping tree animations (the running agent's breathing) must not play.</summary>
-    public static bool ReducedMotion { get; set; }
+    public static bool ReducedMotion
+    {
+        get => reducedMotion;
+        set
+        {
+            if (reducedMotion == value)
+            {
+                return;
+            }
+
+            reducedMotion = value;
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Raised on the UI thread when <see cref="ReducedMotion"/> changed, so a live looping animation (a running timeline
+    /// node) can stop at once instead of on its next unrelated notification.
+    /// </summary>
+    public static event EventHandler? Changed;
 }
 
 /// <summary>One indent step of a tree row; <see cref="DrawLine"/> is the 1 px guide line of a tree, not of an agent list,

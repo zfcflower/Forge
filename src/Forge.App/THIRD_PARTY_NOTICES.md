@@ -22,7 +22,11 @@ binaries, so the published output of `Forge.App` (the app package, the installer
   `edit`, `eye`, `flash` (regular + filled), `folder`,
   `folder_add`, `home_garage`, `layer`, `more_horizontal` (regular + filled), `open`, `pause_circle`, `person`, `pin` (regular +
   filled), `plug_connected`, `local_language`, `save`, `search`, `send`, `server`, `settings`, `shield_checkmark`, `sparkle`, `square`,
-  `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`.
+  `square_multiple`, `star` (regular + filled), `stop`, `subtract`, `text_wrap`, `window_new_rotate_180`, `wrench`,
+  `code`, `document_text`, `globe`, `info`, `lightbulb`, `task_list_ltr`, `warning`.
+  The chat timeline (wave W13) added a second, exact regular variant of `search`, `edit`, `globe`, `plug_connected`,
+  `shield_checkmark` and `wrench` (`*Regular` + `*Filled` in `Icons.axaml`) because the older outline keys were
+  coordinate-rounded replays of the same FIS path; the two variants of one node type must be the same glyph at two weights.
 - One icon comes from the 20 px set: `panel_bottom` exists only at 20 px, so its path was scaled by 24/20 about the grid
   centre into the 24 grid the app renders on (`IconTerminal`, the terminal button).
 - The same geometry, for the tree glyphs, is reused through `src/Forge.App/ViewModels/TreeIcons.cs` (`branch`,

@@ -100,5 +100,19 @@
       </Border>
     </StackPanel>
 
+    <!-- Motion: the one switch for looping animations, shared by the running agent's tree glyph and the chat timeline node. -->
+    <StackPanel Spacing="{StaticResource Space2}">
+      <TextBlock Classes="h2"
+                 FontSize="{DynamicResource FontSizeMd}"
+                 Text="{Binding [appearance.motion.title], Source={x:Static loc:Loc.Instance}}" />
+      <CheckBox IsChecked="{Binding ReduceMotion, Mode=TwoWay}"
+                Content="{Binding [appearance.reduceMotion], Source={x:Static loc:Loc.Instance}}"
+                AutomationProperties.AutomationId="appearance-reduce-motion"
+                AutomationProperties.Name="{Binding [appearance.reduceMotion], Source={x:Static loc:Loc.Instance}}" />
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="{Binding [appearance.reduceMotionHint], Source={x:Static loc:Loc.Instance}}" />
+    </StackPanel>
+
   </StackPanel>
 </UserControl>

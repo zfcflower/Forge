@@ -18,6 +18,10 @@ internal static class AppearanceStrings
     public const string UiPreview = "appearance.ui.preview";
     public const string CodePreview = "appearance.code.preview";
 
+    public const string MotionGroupTitle = "appearance.motion.title";
+    public const string ReduceMotion = "appearance.reduceMotion";
+    public const string ReduceMotionHint = "appearance.reduceMotionHint";
+
     [ModuleInitializer]
     internal static void Initialize() => Register();
 
@@ -36,5 +40,12 @@ internal static class AppearanceStrings
 
         Loc.Register(UiPreview, "界面文字预览 The quick brown fox", "Interface preview — The quick brown fox");
         Loc.Register(CodePreview, "代码预览 0O1lI {}[] => != 中文", "Code preview 0O1lI {}[] => !=");
+
+        Loc.Register(MotionGroupTitle, "动效", "Motion");
+        Loc.Register(ReduceMotion, "减少动画", "Reduce animations");
+        Loc.Register(
+            ReduceMotionHint,
+            "关闭运行中的 Agent 与聊天时间轴节点的循环动画;颜色与图标状态不变。",
+            "Stops the looping animations of a running agent and of a running timeline node; colours and icon states stay.");
     }
 }
