@@ -107,6 +107,12 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
     /// <summary>The <c>extensions</c> settings section body.</summary>
     public ExtensionsSettingsSectionViewModel SettingsSection { get; }
 
+    /// <summary>
+    /// Resolves the MCP server behind an exposed tool name for a tool approval card. Assigned by the composition root after the
+    /// MCP services exist (they are created after this one); null when the app has no MCP services at all.
+    /// </summary>
+    public Func<string, McpApprovalServer?>? McpToolInfo { get; set; }
+
     public bool HasHost => host is not null;
 
     public string? HostProblem => hostProblem.IsEmpty ? null : hostProblem.Resolve();
@@ -130,7 +136,7 @@ internal sealed class ApprovalServices : IAsyncDisposable, IExtensionHostState
     {
         ArgumentNullException.ThrowIfNull(session);
         Sessions.Register(session.Id, session.Title);
-        return new SessionApprovalHandler(Queue, Rules, session, Notifications);
+        return new SessionApprovalHandler(Queue, Rules, session, Notifications, McpToolInfo);
     }
 
     /// <summary>The <c>ask_user</c> handler of one session; its cards share the approval queue and its notifications.</summary>

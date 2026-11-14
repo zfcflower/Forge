@@ -1,5 +1,9 @@
+using Forge.App.Approval;
 using Forge.App.Localization;
 using Forge.App.Notifications;
+using Forge.App.Preferences;
+using Forge.App.Services;
+using Forge.App.ViewModels;
 using Forge.Mcp;
 
 namespace Forge.App.Composition;
@@ -7,30 +11,54 @@ namespace Forge.App.Composition;
 /// <summary>
 /// MCP server management. The config is read from the global and project <c>mcp.json</c> files; a broken entry becomes a
 /// diagnostic instead of an exception, so a bad config never stops the app from starting.
+/// <para>Two views of the same files: <see cref="Manager"/> runs the servers from the expanded config (a <c>${VAR}</c> becomes
+/// its value), while <see cref="ReadConfigAsync"/> and the save/remove methods work on the files themselves through
+/// <see cref="McpConfigStore"/>, so an edit in the settings page never writes an expanded secret back. A save always ends in
+/// <see cref="ApplyConfigAsync"/>: re-read, then diff into the running manager, so the page and the running servers never
+/// disagree about what the file says.</para>
 /// </summary>
 internal sealed class McpServices : IAsyncDisposable
 {
     private readonly McpServerManager manager;
+    private readonly McpConfigStore store;
+    private readonly PreferencesStore preferences;
     private readonly INotifications? notifications;
     private readonly HttpClient? http;
+    private readonly SemaphoreSlim applyGate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
     private bool disposed;
 
-    private McpServices(McpServerManager manager, INotifications? notifications, HttpClient? http)
+    private McpServices(
+        McpServerManager manager,
+        McpConfigStore store,
+        PreferencesStore preferences,
+        INotifications? notifications,
+        HttpClient? http)
     {
         this.manager = manager;
+        this.store = store;
+        this.preferences = preferences;
         this.notifications = notifications;
         this.http = http;
         manager.StateChanged += OnServerStateChanged;
-        ConfigDiagnostics = manager.Diagnostics.Count;
-        ConfiguredServers = manager.ServerNames.Count;
     }
 
-    public int ConfiguredServers { get; }
+    /// <summary>How many servers the current config defines; follows a save.</summary>
+    public int ConfiguredServers => manager.ServerNames.Count;
 
-    public int ConfigDiagnostics { get; }
+    /// <summary>
+    /// How many MCP tools one request may offer the model (<c>mcpToolSearchLimit</c>); 0 offers every ready tool. Read live, so a
+    /// change reaches the next turn of every session.
+    /// </summary>
+    public int ToolSearchLimit => preferences.Current.McpToolSearchLimit;
+
+    /// <summary>How many problems the last config read reported; follows a save.</summary>
+    public int ConfigDiagnostics => manager.Diagnostics.Count;
 
     public McpServerManager Manager => manager;
+
+    /// <summary>The file layer, exposed so the settings page can name the two files it edits.</summary>
+    public McpConfigStore Store => store;
 
     public IReadOnlyList<McpServerState> States => manager.States;
 
@@ -38,19 +66,34 @@ internal sealed class McpServices : IAsyncDisposable
     /// The client of every HTTP server (the composition routes it through the network stack); owned by the services and
     /// disposed after the manager. Null keeps the transport's own default client.
     /// </param>
-    public static McpServices Create(AppPaths paths, INotifications? notifications = null, HttpClient? http = null)
-    {
-        McpConfig config;
-        try
-        {
-            config = McpConfigLoader.Load(paths.WorkspaceDirectory);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            config = McpConfig.Empty;
-        }
+    public static McpServices Create(
+        AppPaths paths,
+        PreferencesStore preferences,
+        INotifications? notifications = null,
+        HttpClient? http = null) =>
+        Create(new McpConfigStore(McpConfigLoader.GlobalPath, paths.WorkspaceDirectory), preferences, notifications, http);
 
-        return new McpServices(new McpServerManager(config, new McpServerManagerOptions { HttpClient = http }), notifications, http);
+    /// <summary>Same wiring over explicit files, for a test that has no user profile to read.</summary>
+    /// <param name="transportFactory">
+    /// Replaces the transport a server would spawn. A test uses it to answer the handshake in memory, which is the only way to
+    /// reach a ready server (and therefore a ready server's tools and their server lookup) without launching a process.
+    /// </param>
+    public static McpServices Create(
+        McpConfigStore store,
+        PreferencesStore preferences,
+        INotifications? notifications = null,
+        HttpClient? http = null,
+        Func<McpServerConfig, IMcpTransport>? transportFactory = null)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(preferences);
+
+        // The manager reads these options whenever it needs one, so a changed timeout or reconnect delay applies to the next
+        // connection without restarting a server or rebuilding the manager.
+        var manager = new McpServerManager(
+            LoadInitial(store),
+            () => ServerOptions(preferences.Current, http, transportFactory));
+        return new McpServices(manager, store, preferences, notifications, http);
     }
 
     /// <summary>Starts every enabled server in the background; per-server failures stay in <see cref="States"/>.</summary>
@@ -68,6 +111,124 @@ internal sealed class McpServices : IAsyncDisposable
         catch (Exception)
         {
         }
+    }
+
+    /// <summary>Both files with their entries verbatim and their problems; read off the UI thread by the caller.</summary>
+    public Task<McpConfigSnapshot> ReadConfigAsync(CancellationToken ct) =>
+        BackgroundRead.RunAsync(_ => Task.FromResult(store.Read()), ct);
+
+    /// <summary>
+    /// Adds or replaces one entry, imports entries verbatim, removes one, or flips one's <c>disabled</c> flag — then re-reads
+    /// both files and applies them to the running manager. Failures from the file (a root that is not an object, a locked file)
+    /// surface as exceptions for the page to show; nothing is half-applied, because the manager is only touched after the write.
+    /// </summary>
+    /// <param name="replacedName">The entry's name before an edit; a rename drops that key, so no ghost entry is left behind.</param>
+    /// <param name="replacedPath">
+    /// The file that entry lived in. When an edit also moves the entry to the other file the old key is removed from the file it
+    /// left, otherwise the move would leave the old entry running under its old name in the old file.
+    /// </param>
+    public Task SaveAsync(
+        string path,
+        McpServerEntry entry,
+        CancellationToken ct,
+        string? replacedName = null,
+        string? replacedPath = null) =>
+        WriteThenApplyAsync(
+            () =>
+            {
+                // The entry is written first and the file it left is cleaned afterwards: if that write fails (a file the user
+                // broke, a lock) the old entry must still be there, because a failed save may not change the configuration at all.
+                var sameFile = replacedPath is not { Length: > 0 } ||
+                               string.Equals(Path.GetFullPath(replacedPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
+                store.Upsert(path, entry, sameFile ? replacedName : null);
+
+                if (!sameFile && replacedName is { Length: > 0 } previous && File.Exists(replacedPath))
+                {
+                    store.Remove(replacedPath!, previous);
+                }
+
+                return true;
+            },
+            ct);
+
+    public Task ImportAsync(string path, IReadOnlyList<McpServerEntry> entries, CancellationToken ct) =>
+        WriteThenApplyAsync(
+            () =>
+            {
+                store.Import(path, entries);
+                return true;
+            },
+            ct);
+
+    public Task RemoveAsync(string path, string name, CancellationToken ct) =>
+        WriteThenApplyAsync(
+            () =>
+            {
+                store.Remove(path, name);
+                return true;
+            },
+            ct);
+
+    public Task SetDisabledAsync(string path, string name, bool disabled, CancellationToken ct) =>
+        // A flag that is already what the caller asked for changes nothing, so there is nothing to apply either.
+        WriteThenApplyAsync(() => store.SetDisabled(path, name, disabled), ct);
+
+    /// <summary>Picks the file up after a hand edit (the page's "re-read" action).</summary>
+    public Task ReloadAsync(CancellationToken ct) => ApplyAsync(ct);
+
+    /// <summary>
+    /// What an approval card may show about the server behind an exposed tool name: the command line and <em>the names</em> of
+    /// its env vars and headers. Values are deliberately absent — the card is a screenshot away from being shared.
+    /// </summary>
+    public McpApprovalServer? DescribeForApproval(string toolName)
+    {
+        if (manager.ConfigOfTool(toolName) is not { } config)
+        {
+            return null;
+        }
+
+        return new McpApprovalServer(
+            config.Name,
+            config.IsHttp ? "http" : "stdio",
+            config.Command,
+            config.Args,
+            config.WorkingDirectory,
+            Keys(config.Env),
+            Keys(config.Headers),
+            config.Url);
+    }
+
+    /// <summary>The tools one server exposes right now; empty while it is stopped or failed.</summary>
+    public IReadOnlyList<McpToolAdapter> ToolsOf(string serverName) => manager.ToolsOf(serverName);
+
+    /// <summary>The settings page's test: connect, list the tools and report how long it took.</summary>
+    public Task<McpServerProbe> ProbeAsync(string serverName, CancellationToken ct) => manager.ProbeAsync(serverName, ct);
+
+    /// <summary>The tail of a server's stderr, cut to <paramref name="lines"/> lines for display.</summary>
+    public static string? Tail(string? stderr, int lines)
+    {
+        if (string.IsNullOrEmpty(stderr) || lines <= 0)
+        {
+            return stderr;
+        }
+
+        var end = stderr.Length;
+        var found = 0;
+        for (var index = end - 1; index >= 0; index--)
+        {
+            if (stderr[index] != '\n')
+            {
+                continue;
+            }
+
+            found++;
+            if (found == lines)
+            {
+                return stderr[Math.Min(index + 1, end)..];
+            }
+        }
+
+        return stderr;
     }
 
     /// <summary>
@@ -111,8 +272,170 @@ internal sealed class McpServices : IAsyncDisposable
 
         disposed = true;
         await lifetime.CancelAsync().ConfigureAwait(false);
-        lifetime.Dispose();
+        manager.StateChanged -= OnServerStateChanged;
         await manager.DisposeAsync().ConfigureAwait(false);
+        // The gate is deliberately not disposed: an apply still winding down would throw on release, and a SemaphoreSlim without
+        // a wait handle owns nothing that needs freeing.
+        lifetime.Dispose();
         http?.Dispose();
+    }
+
+    /// <summary>The config the manager starts from; a file it cannot parse simply contributes no server at startup.</summary>
+    private static McpConfig LoadInitial(McpConfigStore store)
+    {
+        try
+        {
+            return store.Load();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return McpConfig.Empty;
+        }
+    }
+
+    /// <summary>The manager's options from the live preferences; everything else keeps the library defaults.</summary>
+    private static McpServerManagerOptions ServerOptions(
+        AppPreferences preferences,
+        HttpClient? http,
+        Func<McpServerConfig, IMcpTransport>? transportFactory) => new()
+    {
+        HttpClient = http,
+        TransportFactory = transportFactory,
+        RequestTimeout = TimeSpan.FromSeconds(preferences.McpRequestTimeoutSeconds),
+        InitialReconnectDelay = TimeSpan.FromSeconds(preferences.McpReconnectInitialDelaySeconds),
+    };
+
+    /// <param name="write">Writes the file; false means the file did not change, so there is nothing to apply.</param>
+    private Task WriteThenApplyAsync(Func<bool> write, CancellationToken ct) =>
+        BackgroundRead.RunAsync(
+            _ => write() ? ApplyCoreAsync(ct) : Task.CompletedTask,
+            ct);
+
+    /// <summary>Re-reads both files and diffs the result into the running manager; one apply at a time.</summary>
+    private Task ApplyAsync(CancellationToken ct) => BackgroundRead.RunAsync(_ => ApplyCoreAsync(ct), ct);
+
+    private async Task ApplyCoreAsync(CancellationToken ct)
+    {
+        await applyGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            if (IncomingConfig(store) is not { } config)
+            {
+                // Nothing could be read at all (an IO failure): leave the running servers exactly as they are.
+                return;
+            }
+
+            var before = new HashSet<string>(manager.ServerNames, StringComparer.Ordinal);
+            await manager.ApplyConfigAsync(config, ct).ConfigureAwait(false);
+            StartAdded(before);
+        }
+        finally
+        {
+            applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Starts, in the background, every enabled server the apply just added. The manager registers a new server lazily ("on
+    /// first use"), but a session only offers the tools of a server that is ready — so a server added from the settings page or
+    /// a hand edit would otherwise never be used until the app restarts. A start failure lands on that server's state (and its
+    /// toast); nothing here waits for it, so a save returns as soon as the file is applied.
+    /// </summary>
+    private void StartAdded(HashSet<string> before)
+    {
+        foreach (var name in manager.ServerNames)
+        {
+            if (!before.Contains(name))
+            {
+                _ = Task.Run(() => StartInBackgroundAsync(name));
+            }
+        }
+    }
+
+    private async Task StartInBackgroundAsync(string name)
+    {
+        try
+        {
+            if (disposed || !manager.IsEnabled(name))
+            {
+                return;
+            }
+
+            await manager.StartAsync(name, lifetime.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Recorded on the server's state by the manager; a server removed again meanwhile is simply gone.
+        }
+    }
+
+    /// <summary>
+    /// What the running manager should be told the files say. A file whose root is unreadable (invalid JSON, not an object, no
+    /// <c>mcpServers</c>) contributes no servers to the read, and reading that as "the user deleted them" would stop every server
+    /// of that file over one typo — so the servers that came from such a file are carried over unchanged. Everything else applies
+    /// as usual, including a file whose entries are all gone (an intentional deletion reports no document-level problem).
+    /// Null when nothing could be read at all: the running servers then stay exactly as they are.
+    /// </summary>
+    private McpConfig? IncomingConfig(McpConfigStore store)
+    {
+        McpConfig loaded;
+        try
+        {
+            loaded = store.Load();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+
+        HashSet<string>? broken = null;
+        foreach (var diagnostic in loaded.Diagnostics)
+        {
+            if (diagnostic.ServerName is null)
+            {
+                (broken ??= new HashSet<string>(StringComparer.Ordinal)).Add(diagnostic.Source);
+            }
+        }
+
+        if (broken is null)
+        {
+            return loaded;
+        }
+
+        var kept = new List<McpServerConfig>(loaded.Servers.Count + 2);
+        kept.AddRange(loaded.Servers);
+        foreach (var name in manager.ServerNames)
+        {
+            var current = manager.GetServer(name);
+            if (current.Source is { Length: > 0 } source && broken.Contains(source))
+            {
+                kept.Add(current);
+            }
+        }
+
+        return new McpConfig(kept, loaded.Diagnostics);
+    }
+
+    private static string[] Keys(IReadOnlyDictionary<string, string> pairs)
+    {
+        if (pairs.Count == 0)
+        {
+            return [];
+        }
+
+        var keys = new string[pairs.Count];
+        var index = 0;
+        foreach (var key in pairs.Keys)
+        {
+            keys[index++] = key;
+        }
+
+        Array.Sort(keys, StringComparer.Ordinal);
+        return keys;
     }
 }

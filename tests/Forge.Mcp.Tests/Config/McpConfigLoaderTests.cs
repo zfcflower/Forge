@@ -341,4 +341,22 @@ public class McpConfigLoaderTests : IDisposable
         Assert.False(server.IsStdio);
         Assert.False(server.IsHttp);
     }
+
+    [Fact]
+    public void An_unreadable_file_yields_a_diagnostic_and_keeps_the_other_sources()
+    {
+        var globalPath = Path.Combine(root, "global.json");
+        var workspace = Path.Combine(root, "ws");
+        Directory.CreateDirectory(Path.Combine(workspace, ".forge"));
+        File.WriteAllText(globalPath, """{"mcpServers":{"g":{"command":"g"}}}""");
+        File.WriteAllText(McpConfigLoader.ProjectPath(workspace), """{"mcpServers":{"p":{"command":"p"}}}""");
+        using var locked = new FileStream(globalPath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var config = McpConfigLoader.LoadFrom(globalPath, workspace, Env);
+
+        Assert.Equal(["p"], config.Servers.Select(server => server.Name));
+        var diagnostic = Assert.Single(config.Diagnostics);
+        Assert.Equal(globalPath, diagnostic.Source);
+        Assert.Contains("Could not read the file", diagnostic.Message);
+    }
 }
