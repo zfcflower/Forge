@@ -3,5 +3,30 @@
              xmlns:vm="using:Forge.App.ViewModels"
              x:Class="Forge.App.Views.ToolRowImagesView"
              x:DataType="vm:ToolRowViewModel">
-  <!-- Placeholder: wave W4 owns this file. -->
+  <!-- The pictures a tool result carried (wave W4). Each thumbnail is decoded lazily by its own view model, so a long
+       transcript does not decode the images of rows nobody scrolled to; the edge comes from the chat settings. -->
+  <ItemsControl ItemsSource="{Binding Images}" IsVisible="{Binding HasImages}">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <WrapPanel Orientation="Horizontal" ItemSpacing="6" LineSpacing="6" />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate x:DataType="vm:ToolImageViewModel">
+        <Border Background="{DynamicResource SurfaceElevatedBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="2"
+                ToolTip.Tip="{Binding Caption}">
+          <Image Source="{Binding Thumbnail}"
+                 MaxWidth="{Binding ThumbnailEdge}"
+                 MaxHeight="{Binding ThumbnailEdge}"
+                 Stretch="Uniform"
+                 AutomationProperties.AutomationId="tool-image"
+                 AutomationProperties.Name="{Binding Caption}" />
+        </Border>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
 </UserControl>

@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:preview="using:Forge.App.ViewModels.Preview"
+             x:Class="Forge.App.Views.Preview.TablePreviewView"
+             x:DataType="preview:TableFilePreviewViewModel">
+  <UserControl.Resources>
+    <!-- One shared cell template: both the header row and the data rows lay cells out at the precomputed column
+         widths, so the columns align. Font family and size are inherited from the host ItemsControl. -->
+    <DataTemplate x:Key="TableCellTemplate" x:DataType="preview:TablePreviewCellViewModel">
+      <TextBlock Text="{Binding Text}"
+                 Width="{Binding Width}"
+                 Height="24"
+                 Padding="6,2"
+                 TextTrimming="CharacterEllipsis" />
+    </DataTemplate>
+  </UserControl.Resources>
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+    <TextBlock Classes="caption" Margin="12,6,12,2" Text="{Binding Caption}" />
+    <TextBlock Grid.Row="1" Classes="caption" Margin="12,0,12,4" Text="{Binding Summary}" />
+    <!-- One horizontal scroller around the header and the rows, so a wide table scrolls as one piece and the columns
+         stay aligned; the rows keep their own vertical virtualization inside it. -->
+    <ScrollViewer Grid.Row="2"
+                  HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Disabled">
+      <Grid RowDefinitions="Auto,*">
+        <ItemsControl Margin="12,0" IsVisible="{Binding HasHeader}"
+                      FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}"
+                      FontWeight="SemiBold"
+                      ItemsSource="{Binding Header.Cells}" ItemTemplate="{StaticResource TableCellTemplate}"
+                      AutomationProperties.AutomationId="table-preview-header">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      AutomationProperties.AutomationId="table-preview-rows">
+          <ItemsControl ItemsSource="{Binding Rows}"
+                        FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource FontSizeCode}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="preview:TablePreviewRowViewModel">
+                <ItemsControl Margin="12,0" ItemsSource="{Binding Cells}" ItemTemplate="{StaticResource TableCellTemplate}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                </ItemsControl>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </ScrollViewer>
+    <TextBlock Grid.Row="3" Classes="caption" Margin="12,6" TextWrapping="Wrap"
+               Foreground="{DynamicResource DangerBrush}"
+               IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
+               AutomationProperties.AutomationId="file-preview-notice" />
+  </Grid>
+</UserControl>

@@ -109,6 +109,19 @@ internal static class TestData
         return (new AnthropicProvider(AnthropicConfig(), handler.CreateClient()), handler);
     }
 
+    /// <summary>An OpenAI Responses provider over a fake handler primed with only the terminal <c>response.completed</c> event.</summary>
+    public static (OpenAiResponsesProvider Provider, FakeHttpMessageHandler Handler) ResponsesProvider()
+    {
+        var handler = new FakeHttpMessageHandler().EnqueueSse(WithEvent(
+            "response.completed",
+            """{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}"""));
+        return (
+            new OpenAiResponsesProvider(
+                new ProviderConfig("responses", ProviderFactory.OpenAiResponsesKind, "https://api.example.test/v1", "sk-test"),
+                handler.CreateClient()),
+            handler);
+    }
+
     public static ProviderConfig OpenAiConfig(string baseUrl = "https://api.example.test/v1") =>
         new("openai", ProviderFactory.OpenAiCompatibleKind, baseUrl, "sk-test");
 

@@ -13,6 +13,7 @@ using Forge.App.Localization;
 using Forge.App.Network;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
+using Forge.App.ViewModels;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
@@ -237,6 +238,12 @@ internal sealed class AppComposition : IAsyncDisposable
     public NotificationCenter Notifications { get; private set; } = null!;
 
     /// <summary>
+    /// The notification-permission guide: the runtime-settings module sets it, the first-run wizard only calls it. Null until
+    /// registered, and on a platform with nothing to guide.
+    /// </summary>
+    public INotificationPermissionGuide? NotificationPermissionGuide { get; set; }
+
+    /// <summary>
     /// Commits a finished TODO step into the session's worktree. The agent's <c>todo</c> tool reaches it through the
     /// runtime services; the TODO panel calls it when the user ticks an item or retries a failed commit.
     /// </summary>
@@ -336,9 +343,10 @@ internal sealed class AppComposition : IAsyncDisposable
         // 0c. Notifications: one entry for the whole shell. The switch is the live preference (read on every notification)
         //     and the desktop notifier is the platform's own tool, so nothing here needs a restart. Created before the
         //     window; the overlay in MainWindow resolves it from NotificationCenter.Current.
+        var systemNotifier = new SystemNotifier();
         var notifications = new NotificationCenter(
             () => preferences.Current.Notifications,
-            new SystemNotifier());
+            systemNotifier);
         settings.Add(new SettingsSection(
             SettingsSectionIds.Notifications,
             NotificationsStrings.SectionTitle,
@@ -483,7 +491,8 @@ internal sealed class AppComposition : IAsyncDisposable
                 modelCatalogRefresh,
                 action => Avalonia.Threading.Dispatcher.UIThread.Post(action),
                 promptTemplates,
-                compactionSettings),
+                compactionSettings,
+                preferences.Current),
             SettingsGroups.Agent,
             "IconPlug"));
 
@@ -560,6 +569,11 @@ internal sealed class AppComposition : IAsyncDisposable
         // (catalog snapshot → provider report → default context window → per-model override).
         runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
         runtimeServices.MaxOutputTokens = model => providers.ModelCatalog.View.Find(null, model.Model)?.MaxOutputTokens;
+        // A model the catalog knows to take no image input gets a tool result's text, not its pictures; unknown stays
+        // "may take images", the same rule the composer applies to a user attachment.
+        runtimeServices.ModelInputs = model =>
+            providers.Catalog.MetadataFor(model.Model, model.ProviderId).Capabilities?.Inputs;
+        runtimeServices.SendToolImages = () => preferences.Current.ChatToolImagesToModel;
         // Read before every turn and re-applied to every live session on each save, so a change reaches a running turn at
         // its next model request.
         runtimeServices.CompactionChanges = compactionSettings;
@@ -570,6 +584,9 @@ internal sealed class AppComposition : IAsyncDisposable
         runtimeServices.FileTools = fileTools.All;
         // Switched-off built-in tools: read before every turn, so a toggle applies from the next turn of every session.
         runtimeServices.DisabledTools = () => preferences.Current.ToolsDisabled;
+        // The two sub-agent dials of the `agents` section: the cap is applied to every host as it is built and again before
+        // each turn (a raised cap wakes agents already queued), and switching spawning off takes spawn_agent out of the tools.
+        runtimeServices.SubAgents = () => SubAgentLimits.From(preferences.Current);
         runtimeServices.WebTools = webServices.CreateTools; // web tools
         var stepCommitter = new StepCommitter(
             git,
@@ -671,7 +688,8 @@ internal sealed class AppComposition : IAsyncDisposable
             git,
             notifications,
             modelCatalogRefresh,
-            promptTemplates);
+            promptTemplates,
+            idleArchive: () => IdleArchiveSettings.From(preferences.Current));
         composition.Automations = automations;
         settings.Add(AutomationComposition.Section(automations, projects, sessions, composition.AutomationUi));
 

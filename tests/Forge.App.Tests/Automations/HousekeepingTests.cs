@@ -79,7 +79,7 @@ public sealed class HousekeepingTests : IDisposable
 
     private static ProjectInfo Repo(string id, string path) => new(id, id, path, ProjectKind.Repository, 1, DateTimeOffset.UnixEpoch);
 
-    private HousekeepingRunner Runner(ISessionCatalog? withCatalog = null) => new(
+    private HousekeepingRunner Runner(ISessionCatalog? withCatalog = null, Func<IdleArchiveSettings>? archive = null) => new(
         projects,
         withCatalog ?? catalog,
         runs,
@@ -95,7 +95,15 @@ public sealed class HousekeepingTests : IDisposable
         {
             archiveNotices.Add([.. ids]);
             return archiveNoticeFailure is null ? Task.CompletedTask : Task.FromException(archiveNoticeFailure);
-        });
+        },
+        archive);
+
+    /// <summary>A factory for the idle-archive step's settings: the window defaults to <see cref="HousekeepingRunner.ArchiveAfter"/>.</summary>
+    private static Func<IdleArchiveSettings> Settings(
+        TimeSpan? after = null,
+        bool enabled = true,
+        IdleArchiveScope scope = IdleArchiveScope.AutomationSessions) =>
+        () => new(enabled, after ?? HousekeepingRunner.ArchiveAfter, scope);
 
     private static RunnerContext Context() =>
         new(RunnerContext.NewRun(BuiltInAutomations.Housekeeping, DateTimeOffset.UnixEpoch), new AutomationDefinition(BuiltInAutomations.Housekeeping, "hk"));
@@ -322,6 +330,145 @@ public sealed class HousekeepingTests : IDisposable
 
         Assert.Empty(catalog.StatusChanges);
         Assert.Equal(Summary(0, 0, 0, 0), outcome.Message);
+    }
+
+    // ------------------------------------------------------------------ configurable idle archive
+
+    [Fact]
+    public void The_default_settings_are_the_previously_hard_coded_step()
+    {
+        Assert.True(IdleArchiveSettings.Default.Enabled);
+        Assert.Equal(HousekeepingRunner.ArchiveAfter, IdleArchiveSettings.Default.After);
+        Assert.Equal(IdleArchiveScope.AutomationSessions, IdleArchiveSettings.Default.Scope);
+    }
+
+    [Fact]
+    public async Task A_disabled_step_archives_nothing_and_tells_no_window_while_the_other_steps_still_run()
+    {
+        catalog.Sessions = [Session("old", "/w/old", TimeSpan.FromDays(30))];
+        runs.TrimResult = 4;
+
+        var outcome = await Runner(archive: Settings(enabled: false)).RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Empty(catalog.StatusChanges);
+        Assert.Empty(archiveNotices);
+        Assert.Equal(Summary(0, 0, 4, 0), outcome.Message);
+        Assert.Equal((HousekeepingRunner.RunsPerAutomation, HousekeepingRunner.RunsTotal), Assert.Single(runs.Trims));
+    }
+
+    [Fact]
+    public async Task A_shorter_window_archives_a_session_the_default_window_keeps()
+    {
+        var window = TimeSpan.FromDays(2);
+        catalog.Sessions =
+        [
+            Session("inside", "/w/inside", window - TimeSpan.FromMinutes(1)),
+            Session("at-window", "/w/at-window", window),
+        ];
+
+        var outcome = await Runner(archive: Settings(window)).RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Equal(["at-window"], catalog.StatusChanges.Select(static c => c.Id));
+        Assert.Equal(["at-window"], Assert.Single(archiveNotices));
+        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
+    }
+
+    [Fact]
+    public async Task A_longer_window_keeps_a_session_the_default_window_archives()
+    {
+        var window = TimeSpan.FromDays(30);
+        catalog.Sessions =
+        [
+            Session("default-would-archive", "/w/default-would-archive", TimeSpan.FromDays(9)),
+            Session("at-window", "/w/at-window", window),
+        ];
+
+        var outcome = await Runner(archive: Settings(window)).RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Equal(["at-window"], catalog.StatusChanges.Select(static c => c.Id));
+        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
+    }
+
+    [Fact]
+    public async Task The_all_root_sessions_scope_archives_a_user_session_and_keeps_every_other_exemption()
+    {
+        definitions.Items.Add(new AutomationDefinition("weekly", "Weekly"));
+        await runs.SetStateAsync(CatalogAutomationSessions.ForkStatePrefix + "weekly", "fork", CancellationToken.None);
+        catalog.Sessions =
+        [
+            Session("user", "/w/user", TimeSpan.FromDays(30), automation: null),
+            Session("open", "/w/open", TimeSpan.FromDays(30), automation: null),
+            Session("child", "/w/child", TimeSpan.FromDays(30), automation: null, parent: "user"),
+            Session("fork", "/w/fork", TimeSpan.FromDays(30), automation: null),
+            Session("automation", "/w/automation", TimeSpan.FromDays(30)),
+        ];
+        open.Add("open");
+
+        var outcome = await Runner(archive: Settings(scope: IdleArchiveScope.AllRootSessions)).RunAsync(Context(), CancellationToken.None).Within();
+
+        // Only the automation condition is dropped: the open session, the child of another session and the branch a weekly
+        // automation reuses stay, whatever the scope, and the automation-created session is archived like the user's.
+        Assert.Equal(["user", "automation"], catalog.StatusChanges.Select(static c => c.Id));
+        Assert.Equal(["user", "automation"], Assert.Single(archiveNotices));
+        Assert.Equal(Summary(0, 0, 0, 2), outcome.Message);
+    }
+
+    [Fact]
+    public async Task A_disabled_step_leaves_pruning_scratch_cleanup_and_run_trimming_working()
+    {
+        projects.Projects = [General(), Repo("r1", "/repo/one")];
+        MakeScratch("empty");
+        catalog.Sessions = [Session("old", "/w/old", TimeSpan.FromDays(30))];
+        runs.TrimResult = 4;
+
+        var outcome = await Runner(archive: Settings(enabled: false)).RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Empty(catalog.StatusChanges);
+        Assert.Empty(archiveNotices);
+        Assert.Equal(Summary(1, 1, 4, 0), outcome.Message);
+        Assert.Equal(["/repo/one"], pruned);
+        Assert.False(Directory.Exists(Scratch("empty")));
+        Assert.Equal((HousekeepingRunner.RunsPerAutomation, HousekeepingRunner.RunsTotal), Assert.Single(runs.Trims));
+    }
+
+    [Fact]
+    public async Task A_session_exactly_at_the_configured_cutoff_is_archived_in_the_wide_scope()
+    {
+        var window = TimeSpan.FromDays(3);
+        catalog.Sessions =
+        [
+            Session("edge", "/w/edge", window, automation: null),
+            Session("young", "/w/young", window - TimeSpan.FromMinutes(1), automation: null),
+        ];
+
+        var outcome = await Runner(archive: Settings(window, scope: IdleArchiveScope.AllRootSessions)).RunAsync(Context(), CancellationToken.None).Within();
+
+        // Only LastActiveAt > cutoff is exempt, so equality is still inside the window: the configured cutoff is inclusive.
+        Assert.Equal(["edge"], catalog.StatusChanges.Select(static c => c.Id));
+        Assert.Equal(["edge"], Assert.Single(archiveNotices));
+        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
+    }
+
+    [Fact]
+    public async Task A_recently_active_session_is_never_archived_in_the_wide_scope_even_when_no_tab_has_it_open()
+    {
+        // A running agent bumps LastActiveAt (AgentLoop touches the session after every model response), and the open-tab
+        // set does not know about background runs. The recency check is what protects such a session, so it has to hold on
+        // its own for a root session that is not open.
+        var window = TimeSpan.FromDays(7);
+        catalog.Sessions =
+        [
+            Session("running", "/w/running", TimeSpan.FromMinutes(5), automation: null),
+            Session("just-inside", "/w/inside", window - TimeSpan.FromSeconds(1), automation: null),
+            Session("stale", "/w/stale", window + TimeSpan.FromDays(1), automation: null),
+        ];
+        Assert.DoesNotContain("running", open);
+
+        var outcome = await Runner(archive: Settings(window, scope: IdleArchiveScope.AllRootSessions)).RunAsync(Context(), CancellationToken.None).Within();
+
+        Assert.Equal(["stale"], catalog.StatusChanges.Select(static c => c.Id));
+        Assert.Equal(["stale"], Assert.Single(archiveNotices));
+        Assert.Equal(Summary(0, 0, 0, 1), outcome.Message);
     }
 
     // ------------------------------------------------------------------ worktree pruning

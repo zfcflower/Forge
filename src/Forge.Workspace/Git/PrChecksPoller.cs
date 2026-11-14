@@ -118,8 +118,9 @@ public sealed record PrWaitResult(
 
 /// <summary>
 /// Polls the checks and merge state of a pull request until they settle. Shared by the <c>pr_checks</c> tool (wait mode)
-/// and the App's Git panel watcher, so both reach the same verdict from the same observations. Stateless between calls
-/// and safe to use from several threads at once; every delay goes through the injected <see cref="TimeProvider"/>.
+/// and the App's checks panel (which reads through <see cref="ObserveAsync"/> and takes its verdict from
+/// <see cref="Verdict"/>), so both reach the same verdict from the same observations. Stateless between calls and safe to
+/// use from several threads at once; every delay goes through the injected <see cref="TimeProvider"/>.
 /// </summary>
 /// <remarks>
 /// Outcome rules, evaluated on every successful poll in this order:
@@ -167,6 +168,31 @@ public sealed class PrChecksPoller
         ArgumentNullException.ThrowIfNull(time);
         this.platform = platform;
         this.time = time;
+    }
+
+    /// <summary>
+    /// The verdict one reading supports, or null when it is not determined yet (checks still running, merge state still
+    /// UNKNOWN, or an empty list that could still be a workflow that has not registered – the app's panel shows a snapshot
+    /// with this, the wait modes go through <see cref="WaitAsync"/>). A snapshot never concludes "no CI": that needs the
+    /// consecutive empty reads only <see cref="WaitAsync"/> counts.
+    /// </summary>
+    public static PrWaitOutcome? Verdict(PrChecksObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        return Evaluate(observation, 0, int.MaxValue);
+    }
+
+    /// <summary>
+    /// The verdict of one reading in a series a caller counts itself: <paramref name="noChecksStreak"/> is how many
+    /// consecutive successful reads (this one included) reported no checks, so the app's checks panel reaches "no CI" after
+    /// the same <paramref name="noChecksConfirmations"/> empty reads <see cref="WaitAsync"/> needs, and by the same rule.
+    /// </summary>
+    public static PrWaitOutcome? Verdict(PrChecksObservation observation, int noChecksStreak, int noChecksConfirmations)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        ArgumentOutOfRangeException.ThrowIfNegative(noChecksStreak);
+        ArgumentOutOfRangeException.ThrowIfLessThan(noChecksConfirmations, 1);
+        return Evaluate(observation, noChecksStreak, noChecksConfirmations);
     }
 
     /// <summary>

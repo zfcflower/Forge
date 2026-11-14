@@ -59,6 +59,20 @@ public interface IPrPlatform
             "This platform cannot merge pull requests."));
 
     /// <summary>
+    /// Marks the pull request ready for review, i.e. takes it out of draft. Nothing else about it changes: the title, the
+    /// body, the head branch and its commits stay as they are, and no review is requested. Marking a pull request that is
+    /// already ready is a success, not an error. The default implementation refuses, so a platform that cannot do this (a
+    /// test double, a future host) needs no boilerplate – callers must therefore treat "not supported" as a real answer.
+    /// </summary>
+    Task<PrResult<PrReference>> MarkPullRequestReadyAsync(
+        string workingDirectory,
+        int number,
+        CancellationToken ct = default) =>
+        Task.FromResult(PrResult<PrReference>.Fail(
+            GitRemoteFailureKind.Other,
+            "This platform cannot mark a pull request ready."));
+
+    /// <summary>
     /// The checks reported for the pull request. A successful read with no checks means none are reported yet – CI may
     /// not have registered for a fresh head – and is not an error.
     /// </summary>

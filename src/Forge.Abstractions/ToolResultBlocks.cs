@@ -65,6 +65,61 @@ internal static class ToolResultBlocks
         return builder.ToString();
     }
 
+    /// <summary>
+    /// The result's own words — the text blocks in order, one per line, and nothing standing in for an image. A provider
+    /// that writes the images itself (Anthropic's <c>tool_result</c> content array, the Responses API's output array) uses
+    /// this instead of <see cref="Flatten"/>: the flattened text already names the image, and sending both the placeholder
+    /// and the picture would tell the model about the same screenshot twice.
+    /// </summary>
+    public static string TextOnly(IReadOnlyList<ContentBlock> blocks)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
+        if (blocks.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        if (blocks.Count == 1 && blocks[0] is TextBlock only)
+        {
+            return only.Text;
+        }
+
+        var builder = new StringBuilder();
+        var written = false;
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (blocks[index] is not TextBlock text)
+            {
+                continue;
+            }
+
+            if (written)
+            {
+                builder.Append(TextSeparator);
+            }
+
+            builder.Append(text.Text);
+            written = true;
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>Whether the result carries a picture, without materializing a list of them.</summary>
+    public static bool HasImage(IReadOnlyList<ContentBlock> blocks)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (blocks[index] is ImageBlock)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool SequenceEqual(IReadOnlyList<ContentBlock> left, IReadOnlyList<ContentBlock> right)
     {
         if (ReferenceEquals(left, right))

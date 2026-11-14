@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Forge.App.Composition;
 using Forge.App.Localization;
+using Forge.App.Notifications;
 using Forge.App.Preferences;
 using Forge.App.Settings;
 using Forge.App.ViewModels;
@@ -67,6 +68,57 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Contains(shell.Composition.Paths.GeneralWorkspaceDirectory, pathsTexts);
     }
 
+    [Theory]
+    [InlineData(SettingsSectionIds.ModelsVisibility, "models-visibility-search")]
+    [InlineData(SettingsSectionIds.Agents, "agents-max-parallel")]
+    [InlineData(SettingsSectionIds.IdleArchive, "idle-archive-days")]
+    [InlineData(SettingsSectionIds.NotificationPermission, "notification-permission-state")]
+    public async Task A_wave_section_renders_its_own_body(string sectionId, string marker)
+    {
+        // The registry knows the four sections, but only a view registered through SectionViewTemplate gives them a body: without
+        // one the pane stays blank and every registry test still passes, so each section is selected and asked for an element
+        // of its own.
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        var shown = await session.Dispatch(
+            () =>
+            {
+                var section = shell.ViewModel.Settings.Sections.Items.Single(item => item.Id == sectionId);
+                shell.ViewModel.Settings.SelectedSection = section;
+                SharedUi.Settle(shell.Window);
+                return PanelShell.SelectedAutomationIds(shell.Window);
+            },
+            token);
+
+        Assert.Contains(marker, shown);
+    }
+
+    [Fact]
+    public async Task A_wave_section_body_binds_the_section_as_its_data_context()
+    {
+        // A registered view with no data context would still show its AutomationIds, so one section is asked for text it can
+        // only render from its view model.
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        var (expected, shown) = await session.Dispatch(
+            () =>
+            {
+                var section = shell.ViewModel.Settings.Sections.Items.Single(
+                    item => item.Id == SettingsSectionIds.NotificationPermission);
+                shell.ViewModel.Settings.SelectedSection = section;
+                SharedUi.Settle(shell.Window);
+                var viewModel = Assert.IsType<NotificationPermissionSettingsViewModel>(section.ViewModel);
+                return (viewModel.StateText, PanelShell.SelectedTexts(shell.Window));
+            },
+            token);
+
+        Assert.Contains(expected, shown);
+    }
+
     [Fact]
     public async Task The_settings_window_groups_sections_agent_then_interface_then_system()
     {
@@ -88,6 +140,48 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
         Assert.Equal(SettingsSectionIds.Provider, rendered[0]);
         Assert.Equal(SettingsSectionIds.Paths, rendered[^1]);
         Assert.Contains(SettingsSectionIds.Extensions, rendered);
+    }
+
+    [Fact]
+    public async Task The_chat_and_files_sections_draw_their_bodies()
+    {
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        // A section body is built by its data template, which needs a layout pass; a loaded machine needs more than one, so
+        // each wait pumps until the section's own hint line appears instead of assuming one tick is enough.
+        async Task<string[]> TextsOf(string id, string expected)
+        {
+            var texts = Array.Empty<string>();
+            for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
+            {
+                texts = await session.Dispatch(
+                    () =>
+                    {
+                        shell.ViewModel.Settings.SelectedSection =
+                            shell.ViewModel.Settings.Sections.Items.First(section => section.Id == id);
+                        SharedUi.Settle(shell.Window);
+                        return PanelShell.SelectedTexts(shell.Window).ToArray();
+                    },
+                    token);
+                if (texts.Contains(expected, StringComparer.Ordinal))
+                {
+                    break;
+                }
+            }
+
+            return texts;
+        }
+
+        // A section whose data template is missing draws nothing at all, so the hint line proves the template resolved.
+        var chat = await TextsOf(SettingsSectionIds.Chat, Loc.Instance[ChatStrings.SettingsHint]);
+        Assert.Contains(Loc.Instance[ChatStrings.SettingsHint], chat);
+        Assert.Contains(Loc.Instance[ChatStrings.SettingsSendToolImages], chat);
+
+        var files = await TextsOf(SettingsSectionIds.Files, Loc.Instance[PreviewStrings.SettingsHintKey]);
+        Assert.Contains(Loc.Instance[PreviewStrings.SettingsHintKey], files);
+        Assert.Contains(Loc.Instance[PreviewStrings.SettingsRowsKey], files);
     }
 
     [Fact]
@@ -326,6 +420,20 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
                     .ToList();
         }
 
+        /// <summary>The automation ids inside the section body, so a test can prove which section rendered what.</summary>
+        public static IReadOnlyList<string> SelectedAutomationIds(Window window)
+        {
+            var body = window.GetVisualDescendants()
+                .FirstOrDefault(control => string.Equals(AutomationProperties.GetAutomationId(control), "settings-body", StringComparison.Ordinal));
+            return body is null
+                ? []
+                : body.GetVisualDescendants()
+                    .Select(AutomationProperties.GetAutomationId)
+                    .Where(static id => !string.IsNullOrEmpty(id))
+                    .Select(static id => id!)
+                    .ToList();
+        }
+
         /// <summary>Everything the open window shows, read in one UI dispatch.</summary>
         public static (string? ProviderTitle, string? PathsTitle, IReadOnlyList<string> Groups, IReadOnlyList<string> Texts) Read(Window window) =>
             (
@@ -386,8 +494,10 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Prompts,
             Forge.App.Web.WebSettingsSectionViewModel.SectionId,
             SettingsSectionIds.Appearance,
+            SettingsSectionIds.Chat,
             SettingsSectionIds.Language,
             SettingsSectionIds.Editor,
+            SettingsSectionIds.Files,
             SettingsSectionIds.Terminal,
             SettingsSectionIds.Git,
             SettingsSectionIds.Extensions,
@@ -397,6 +507,10 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Tools,
             SettingsSectionIds.Notifications,
             SettingsSectionIds.Network,
+            SettingsSectionIds.ModelsVisibility,
+            SettingsSectionIds.Agents,
+            SettingsSectionIds.IdleArchive,
+            SettingsSectionIds.NotificationPermission,
             SettingsSectionIds.Paths,
         ];
 

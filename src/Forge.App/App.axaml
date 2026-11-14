@@ -60,6 +60,9 @@
     <DataTemplate DataType="vm:SpecTreeViewModel" x:DataType="vm:SpecTreeViewModel">
       <views:SpecTreeToolView />
     </DataTemplate>
+    <DataTemplate DataType="vm:ProblemsPanelViewModel" x:DataType="vm:ProblemsPanelViewModel">
+      <views:ProblemsPanelView />
+    </DataTemplate>
 
     <!-- Window overlays (MainWindowViewModel.Palette/Checks/Plan/Inspector/Onboarding): placeholders until their waves. -->
     <DataTemplate DataType="vm:PaletteViewModel" x:DataType="vm:PaletteViewModel">
@@ -120,6 +123,9 @@
                    Text="{Binding Hint}" />
       </Grid>
     </DataTemplate>
+
+    <!-- Settings sections added by later waves: registered through SectionViewTemplate.Register from their composition module. -->
+    <views:SectionViewTemplate />
 
     <!-- Settings sections: a feature registers a view model with SettingsSections and this is where it gets a body. -->
     <DataTemplate DataType="autoset:AutomationsSettingsViewModel" x:DataType="autoset:AutomationsSettingsViewModel">
@@ -546,6 +552,36 @@
                          Value="{Binding ChecksMaxWaitMinutes, Mode=TwoWay}"
                          AutomationProperties.AutomationId="git-checks-max-wait"
                          AutomationProperties.Name="{Binding [git.settings.checksMaxWait], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.checksNoChecks], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="1"
+                         Maximum="10"
+                         Increment="1"
+                         FormatString="0"
+                         Value="{Binding ChecksNoChecksConfirmations, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-checks-no-checks"
+                         AutomationProperties.Name="{Binding [git.settings.checksNoChecks], Source={x:Static loc:Loc.Instance}}" />
+        </Grid>
+        <Grid ColumnDefinitions="150,*" Margin="0,3">
+          <TextBlock Classes="label"
+                     VerticalAlignment="Center"
+                     Text="{Binding [git.settings.checksLogTail], Source={x:Static loc:Loc.Instance}}" />
+          <NumericUpDown Grid.Column="1"
+                         MinWidth="120"
+                         HorizontalAlignment="Left"
+                         Minimum="20"
+                         Maximum="2000"
+                         Increment="10"
+                         FormatString="0"
+                         Value="{Binding ChecksFailureLogTailLines, Mode=TwoWay}"
+                         AutomationProperties.AutomationId="git-checks-log-tail"
+                         AutomationProperties.Name="{Binding [git.settings.checksLogTail], Source={x:Static loc:Loc.Instance}}" />
         </Grid>
         <TextBlock Classes="caption"
                    TextWrapping="Wrap"

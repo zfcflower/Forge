@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:preview="using:Forge.App.ViewModels.Preview"
+             x:Class="Forge.App.Views.Preview.ImagePreviewView"
+             x:DataType="preview:ImageFilePreviewViewModel">
+  <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource SurfaceBrush}">
+    <TextBlock Classes="caption" Margin="12,6" Text="{Binding Caption}" />
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+      <Border HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Padding="12"
+              CornerRadius="6"
+              BorderThickness="1"
+              BorderBrush="{DynamicResource BorderStrongBrush}">
+        <Image Source="{Binding Image}" Stretch="None" />
+      </Border>
+    </ScrollViewer>
+    <TextBlock Grid.Row="2" Classes="caption" Margin="12,6" TextWrapping="Wrap"
+               Foreground="{DynamicResource DangerBrush}"
+               IsVisible="{Binding HasNotice}" Text="{Binding Notice}"
+               AutomationProperties.AutomationId="file-preview-notice" />
+  </Grid>
+</UserControl>

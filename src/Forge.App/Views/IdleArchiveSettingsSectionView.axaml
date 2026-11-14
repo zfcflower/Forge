@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Forge.App.Localization"
+             xmlns:settings="using:Forge.App.Settings"
+             x:Class="Forge.App.Views.IdleArchiveSettingsSectionView"
+             x:DataType="settings:IdleArchiveSettingsSectionViewModel">
+  <!-- The `idle-archive` section body: the switch that decides whether housekeeping archives at all, and the window and
+       scope it uses while it does. The two inputs grey out instead of disappearing, so the values stay readable. -->
+  <StackPanel Spacing="6">
+    <CheckBox Content="{Binding [idleArchive.enabled], Source={x:Static loc:Loc.Instance}}"
+              IsChecked="{Binding Enabled, Mode=TwoWay}"
+              AutomationProperties.AutomationId="idle-archive-enabled"
+              AutomationProperties.Name="{Binding [idleArchive.enabled], Source={x:Static loc:Loc.Instance}}" />
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [idleArchive.enabledHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3" IsEnabled="{Binding CanConfigure}">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [idleArchive.days], Source={x:Static loc:Loc.Instance}}" />
+      <NumericUpDown Grid.Column="1"
+                     MinWidth="120"
+                     HorizontalAlignment="Left"
+                     Minimum="{Binding MinDays}"
+                     Maximum="{Binding MaxDays}"
+                     Increment="1"
+                     FormatString="0"
+                     Value="{Binding Days, Mode=TwoWay}"
+                     AutomationProperties.AutomationId="idle-archive-days"
+                     AutomationProperties.Name="{Binding [idleArchive.days], Source={x:Static loc:Loc.Instance}}" />
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [idleArchive.daysHint], Source={x:Static loc:Loc.Instance}}" />
+    <Grid ColumnDefinitions="180,*" Margin="0,9,0,3" IsEnabled="{Binding CanConfigure}">
+      <TextBlock Classes="label"
+                 VerticalAlignment="Center"
+                 Text="{Binding [idleArchive.scope], Source={x:Static loc:Loc.Instance}}" />
+      <ComboBox Grid.Column="1"
+                MinWidth="220"
+                HorizontalAlignment="Left"
+                ItemsSource="{Binding Scopes}"
+                SelectedItem="{Binding SelectedScope, Mode=TwoWay}"
+                AutomationProperties.AutomationId="idle-archive-scope"
+                AutomationProperties.Name="{Binding [idleArchive.scope], Source={x:Static loc:Loc.Instance}}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="settings:IdleArchiveScopeOption">
+            <TextBlock Classes="caption" Text="{Binding Label}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
+    <TextBlock Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding [idleArchive.scopeHint], Source={x:Static loc:Loc.Instance}}" />
+  </StackPanel>
+</UserControl>

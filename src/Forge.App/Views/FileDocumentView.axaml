@@ -1,6 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Forge.App.ViewModels"
+             xmlns:preview="using:Forge.App.ViewModels.Preview"
+             xmlns:pv="using:Forge.App.Views.Preview"
              xmlns:wc="using:Forge.App.Workbench.Controls"
              xmlns:loc="using:Forge.App.Localization"
              xmlns:ae="using:AvaloniaEdit"
@@ -38,24 +40,46 @@
       <Setter Property="BoxShadow" Value="0 4 16 0 #40000000" />
     </Style>
   </UserControl.Styles>
+  <UserControl.DataTemplates>
+    <!-- The read-only previews: one view per preview view model, selected by runtime type. -->
+    <DataTemplate DataType="preview:ImageFilePreviewViewModel" x:DataType="preview:ImageFilePreviewViewModel">
+      <pv:ImagePreviewView />
+    </DataTemplate>
+    <DataTemplate DataType="preview:TableFilePreviewViewModel" x:DataType="preview:TableFilePreviewViewModel">
+      <pv:TablePreviewView />
+    </DataTemplate>
+    <DataTemplate DataType="preview:NotebookFilePreviewViewModel" x:DataType="preview:NotebookFilePreviewViewModel">
+      <pv:NotebookPreviewView />
+    </DataTemplate>
+    <DataTemplate DataType="preview:PlaceholderFilePreviewViewModel" x:DataType="preview:PlaceholderFilePreviewViewModel">
+      <pv:PlaceholderPreviewView />
+    </DataTemplate>
+  </UserControl.DataTemplates>
   <Grid RowDefinitions="Auto,Auto,*" Background="{DynamicResource SurfaceBrush}">
     <Border Classes="toolbar">
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
         <TextBlock Classes="mono" Text="{Binding PathDisplay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
         <TextBlock Grid.Column="1" Classes="caption" Margin="6,0" Text="*" IsVisible="{Binding IsDirty}" VerticalAlignment="Center" />
         <wc:PanelIconButton Grid.Column="2" Icon="{DynamicResource IconWrap}" Classes.active="{Binding WrapLines}"
                             Command="{Binding ToggleWrapCommand}" ToolTip.Tip="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="file-wrap" AutomationProperties.Name="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}" />
+                            AutomationProperties.AutomationId="file-wrap" AutomationProperties.Name="{Binding [files.wrap], Source={x:Static loc:Loc.Instance}}"
+                            IsVisible="{Binding HasDocument}" />
         <wc:PanelIconButton Grid.Column="3" Margin="2,0,0,0" Icon="{DynamicResource IconSave}" Command="{Binding SaveCommand}"
                             ToolTip.Tip="{Binding [files.save], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="file-save" AutomationProperties.Name="{Binding [files.save], Source={x:Static loc:Loc.Instance}}" />
+                            AutomationProperties.AutomationId="file-save" AutomationProperties.Name="{Binding [files.save], Source={x:Static loc:Loc.Instance}}"
+                            IsVisible="{Binding HasDocument}" />
         <wc:PanelIconButton Grid.Column="4" Margin="2,0,0,0" Icon="{DynamicResource IconCopy}" Click="OnCopyClick"
                             ToolTip.Tip="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="file-copy" AutomationProperties.Name="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}" />
-        <wc:PanelIconButton x:Name="EditorMenuButton" Grid.Column="5" Margin="2,0,0,0" Icon="{DynamicResource IconEllipsis}" Click="OnEditorMenuClick"
+                            AutomationProperties.AutomationId="file-copy" AutomationProperties.Name="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
+                            IsVisible="{Binding HasDocument}" />
+        <wc:PanelIconButton Grid.Column="5" Margin="2,0,0,0" Icon="{DynamicResource IconOpen}" Command="{Binding OpenExternallyCommand}"
+                            ToolTip.Tip="{Binding ExternalOpenLabel}"
+                            AutomationProperties.AutomationId="file-open-external" AutomationProperties.Name="{Binding ExternalOpenLabel}" />
+        <wc:PanelIconButton x:Name="EditorMenuButton" Grid.Column="6" Margin="2,0,0,0" Icon="{DynamicResource IconEllipsis}" Click="OnEditorMenuClick"
                             ToolTip.Tip="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="file-editor-menu" AutomationProperties.Name="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}" />
-        <Button x:Name="ReviewSendAll" Grid.Column="6" Margin="2,0,0,0" Classes="icon" IsVisible="False"
+                            AutomationProperties.AutomationId="file-editor-menu" AutomationProperties.Name="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}"
+                            IsVisible="{Binding HasDocument}" />
+        <Button x:Name="ReviewSendAll" Grid.Column="7" Margin="2,0,0,0" Classes="icon" IsVisible="False"
                 AutomationProperties.AutomationId="review-send-all">
           <wc:FluentIcon Classes="reviewGlyph" Data="{DynamicResource IconSend}" Width="14" Height="14" />
         </Button>
@@ -91,6 +115,8 @@
         <!-- The right-click menu and the toolbar ellipsis are built in code (one builder, two hosts): an
              Avalonia ContextMenu can only be opened on the control it is attached to, so the toolbar cannot reuse it. -->
       </ae:TextEditor>
+      <ContentControl x:Name="PreviewHost" Content="{Binding Preview}" IsVisible="{Binding HasPreview}"
+                      AutomationProperties.AutomationId="file-preview" />
       <Canvas x:Name="ReviewLayer" ClipToBounds="True">
         <Button x:Name="ReviewIconButton" Classes="reviewIcon" Width="26" Height="26" IsVisible="False"
                 AutomationProperties.AutomationId="review-add">

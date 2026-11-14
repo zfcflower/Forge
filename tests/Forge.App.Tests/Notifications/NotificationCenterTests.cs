@@ -255,6 +255,27 @@ public sealed class NotificationCenterTests
     }
 
     [Fact]
+    public async Task A_desktop_notification_the_platform_dropped_leaves_the_center_unchanged()
+    {
+        // The fake answers TryNotifyAsync with false (the notifier ran and the platform dropped the notification).
+        var time = new NotificationFakeTime();
+        var desktop = new NotificationFakeNotifier { Taken = false };
+        using var center = new NotificationCenter(() => true, desktop, post: action => action(), time: time);
+
+        center.IsBackground = true;
+        await center.NotifyAsync(NotificationLevel.Warning, LocText.Literal("t"), LocText.Literal("b"));
+
+        // Nothing reaches the caller and nothing is shown; the notification was attempted exactly once.
+        Assert.Empty(center.Items);
+        Assert.Single(desktop.Calls);
+
+        center.IsBackground = false;
+        await center.NotifyAsync(NotificationLevel.Info, LocText.Literal("t"), LocText.Literal("b"));
+        Assert.Single(center.Items);
+        Assert.Single(desktop.Calls);
+    }
+
+    [Fact]
     public async Task Cancelled_token_throws_and_shows_nothing()
     {
         using var center = NewCenter(out var time, out var desktop);
@@ -455,6 +476,9 @@ public sealed class NotificationCenterTests
         private readonly List<(string Title, string Body)> calls = [];
         private readonly object gate = new();
 
+        /// <summary>What <see cref="TryNotifyAsync"/> reports; false is a notification the platform dropped.</summary>
+        public bool Taken { get; init; } = true;
+
         public IReadOnlyList<(string Title, string Body)> Calls
         {
             get
@@ -466,7 +490,9 @@ public sealed class NotificationCenterTests
             }
         }
 
-        public Task NotifyAsync(string title, string body, CancellationToken ct)
+        public Task NotifyAsync(string title, string body, CancellationToken ct) => TryNotifyAsync(title, body, ct);
+
+        public Task<bool> TryNotifyAsync(string title, string body, CancellationToken ct)
         {
             ArgumentNullException.ThrowIfNull(title);
             ArgumentNullException.ThrowIfNull(body);
@@ -476,7 +502,7 @@ public sealed class NotificationCenterTests
                 calls.Add((title, body));
             }
 
-            return Task.CompletedTask;
+            return Task.FromResult(Taken);
         }
     }
 }
