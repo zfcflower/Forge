@@ -50,6 +50,13 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     private Task watch = Task.CompletedTask;
 
     /// <summary>
+    /// The panel's own lifetime: every platform call outside the poll (a row's log, the hand-off's logs, mark-ready) runs
+    /// under it, so closing the panel stops them too and a hand-off that was still reading logs never reaches the agent.
+    /// Cancelled, never disposed, for the same reason as the watch source (see <see cref="Dispose"/>).
+    /// </summary>
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>
     /// Which poll the fields belong to. Cancelling the previous watch does not stop a read that is already in flight from
     /// posting its result, so every post carries the generation it started under and a stale one is dropped: a refresh must
     /// not be overwritten by the poll it replaced, and its "reading" indicator must not be cleared by that poll's tail.
@@ -100,8 +107,8 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
         poller = new PrChecksPoller(platform, this.time);
 
         RefreshCommand = new AsyncRelayCommand(_ => RestartAsync(), () => !disposed);
-        MarkReadyCommand = new AsyncRelayCommand(_ => MarkReadyAsync(), () => !disposed && IsDraft);
-        FixCommand = new AsyncRelayCommand(_ => FixAsync(), () => !disposed && CanFix);
+        MarkReadyCommand = new AsyncRelayCommand(_ => MarkReadyAsync(), () => !disposed && IsDraft, ReportActionFailure);
+        FixCommand = new AsyncRelayCommand(_ => FixAsync(), () => !disposed && CanFix, ReportActionFailure);
         CloseCommand = new RelayCommand(Close);
         OpenPullRequestCommand = new RelayCommand(() => Open(this.pullRequestUrl), () => HasPullRequestUrl);
 
@@ -302,6 +309,7 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
         var source = watchSource;
         watchSource = null;
         source?.Cancel();
+        lifetime.Cancel();
     }
 
     /// <summary>Cancels the read in flight and starts a new one; the returned task is the new watch.</summary>
@@ -329,15 +337,37 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
         try
         {
             var settings = options();
+            var confirmations = Math.Max(1, settings.NoChecksConfirmations);
             var started = time.GetTimestamp();
+            var noChecksStreak = 0;
+            var failures = 0;
             while (!ct.IsCancellationRequested)
             {
                 var read = await poller.ObserveAsync(workingDirectory, pullRequestNumber, ct).ConfigureAwait(false);
 
                 // Decided off the UI thread: the post may run later, and whether the poll continues must not depend on it.
-                var settled = read.Success && read.Value is { } reading && PrChecksPoller.Verdict(reading) is not null;
-                post(() => ApplyIfCurrent(read, generation));
-                if (settled)
+                // The same rules as the wait mode: "no CI" needs the configured number of consecutive empty successful
+                // reads (a failed read breaks the run), and the platform CLI missing or MaxConsecutiveFailures failed reads
+                // in a row stop the poll instead of asking gh every interval for nothing.
+                PrWaitOutcome? verdict = null;
+                bool stop;
+                if (read.Success && read.Value is { } reading)
+                {
+                    failures = 0;
+                    noChecksStreak = reading.Checks.NoneReported ? noChecksStreak + 1 : 0;
+                    verdict = PrChecksPoller.Verdict(reading, noChecksStreak, confirmations);
+                    stop = verdict is not null;
+                }
+                else
+                {
+                    failures++;
+                    noChecksStreak = 0;
+                    stop = failures >= PrChecksPoller.MaxConsecutiveFailures
+                        || read.Reason == PrFailureReason.PlatformNotInstalled;
+                }
+
+                post(() => ApplyIfCurrent(read, verdict, generation));
+                if (stop)
                 {
                     return;
                 }
@@ -387,16 +417,16 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Applies a reading unless the poll it came from was replaced or the panel closed; runs on the UI thread.</summary>
-    private void ApplyIfCurrent(PrResult<PrChecksObservation> read, int generation)
+    private void ApplyIfCurrent(PrResult<PrChecksObservation> read, PrWaitOutcome? verdict, int generation)
     {
         if (generation == watchGeneration)
         {
-            Apply(read);
+            Apply(read, verdict);
         }
     }
 
-    /// <summary>Writes one reading into the panel; runs on the UI thread.</summary>
-    private void Apply(PrResult<PrChecksObservation> read)
+    /// <summary>Writes one reading and the verdict the poll reached for it into the panel; runs on the UI thread.</summary>
+    private void Apply(PrResult<PrChecksObservation> read, PrWaitOutcome? verdict)
     {
         if (disposed)
         {
@@ -411,7 +441,7 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
 
         problem = string.Empty;
         observation = reading;
-        outcome = PrChecksPoller.Verdict(reading);
+        outcome = verdict;
         hasRead = true;
         ApplyChecks(reading.Checks);
         RaiseReading();
@@ -432,18 +462,21 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     /// Replaces the rows with the latest reading, keeping the instance of a check that is still there, so a log the user
     /// opened survives the next poll.
     /// </summary>
+    /// <remarks>Each carried row is adopted at most once: two checks of one reading can share a key (an external status
+    /// context reported twice under one name), and handing both the same instance would put one row in the list twice.
+    /// </remarks>
     private void ApplyChecks(PrChecksSnapshot snapshot)
     {
-        var carried = new Dictionary<string, ChecksRowViewModel>(StringComparer.Ordinal);
+        var carried = new Dictionary<string, ChecksRowViewModel>(Checks.Count, StringComparer.Ordinal);
         foreach (var row in Checks)
         {
-            carried[row.Key] = row;
+            carried.TryAdd(row.Key, row);
         }
 
         Checks.Clear();
         foreach (var check in Ordered(snapshot.Checks))
         {
-            Checks.Add(carried.TryGetValue(KeyOf(check), out var existing) ? existing.Adopt(check) : Create(check));
+            Checks.Add(carried.Remove(KeyOf(check), out var existing) ? existing.Adopt(check) : Create(check));
         }
     }
 
@@ -470,7 +503,8 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     private async Task<PrChecksJobLog> ReadLogAsync(ChecksRowViewModel row, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
-        return await ReadLogAsync(row.Check, ct).ConfigureAwait(true);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.Token);
+        return await ReadLogAsync(row.Check, linked.Token).ConfigureAwait(true);
     }
 
     private async Task<PrChecksJobLog> ReadLogAsync(PrCheck check, CancellationToken ct)
@@ -511,7 +545,13 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
         var logs = new List<PrChecksJobLog>(reading.FailingChecks.Count);
         foreach (var check in reading.FailingChecks)
         {
-            logs.Add(await ReadLogAsync(check, CancellationToken.None).ConfigureAwait(true));
+            logs.Add(await ReadLogAsync(check, lifetime.Token).ConfigureAwait(true));
+        }
+
+        // Closed while the logs were read (the token only stops a platform call that honours it): nothing is handed over.
+        if (disposed)
+        {
+            return;
         }
 
         var message = PrChecksFixMessage.Build(pullRequestNumber, pullRequestUrl, reading, logs, failureLogTailLines());
@@ -527,8 +567,13 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
     /// <summary>Marks a draft ready for review, then re-reads: the merge state and the checks both usually move on it.</summary>
     private async Task MarkReadyAsync()
     {
-        var marked = await platform.MarkPullRequestReadyAsync(workingDirectory, pullRequestNumber, CancellationToken.None)
+        var marked = await platform.MarkPullRequestReadyAsync(workingDirectory, pullRequestNumber, lifetime.Token)
             .ConfigureAwait(true);
+        if (disposed)
+        {
+            return;
+        }
+
         SetStatus(marked.Success
             ? Loc.Instance[ChecksStrings.MarkReadyDone]
             : Loc.Instance.Format(ChecksStrings.MarkReadyFailed, marked.Status.Message));
@@ -567,6 +612,15 @@ internal sealed class ChecksPanelViewModel : ObservableObject, IDisposable
         foreach (var row in Checks)
         {
             row.Relocalize();
+        }
+    }
+
+    /// <summary>A hand-off or mark-ready that threw: the reason goes on the status line instead of vanishing.</summary>
+    private void ReportActionFailure(Exception exception)
+    {
+        if (!disposed)
+        {
+            SetStatus(Loc.Instance.Format(ChecksStrings.ActionFailed, exception.Message));
         }
     }
 
@@ -627,7 +681,7 @@ internal sealed class ChecksRowViewModel : NotifyingObject
         this.check = check;
         this.openLink = openLink;
         this.loadLog = loadLog;
-        ToggleLogCommand = new AsyncRelayCommand(_ => ToggleLogAsync(), () => IsFailing);
+        ToggleLogCommand = new AsyncRelayCommand(_ => ToggleLogAsync(), () => IsFailing, OnLogFailure);
         OpenLinkCommand = new RelayCommand(OpenLink, () => HasLink);
     }
 
@@ -651,7 +705,7 @@ internal sealed class ChecksRowViewModel : NotifyingObject
 
     public bool HasDescription => DescriptionText.Length > 0;
 
-    /// <summary>The raw state ("IN_PROGRESS", "FAILURE"), kept so the row shows what the platform actually said.</summary>
+    /// <summary>The bucket the state falls in, in the user's language.</summary>
     public string BucketText => Loc.Instance[check.Bucket switch
     {
         PrCheckBucket.Pass => ChecksStrings.BucketPass,
@@ -782,6 +836,14 @@ internal sealed class ChecksRowViewModel : NotifyingObject
             isLogLoading = false;
             RaiseLog();
         }
+    }
+
+    /// <summary>A log read that threw (not a cancellation, which the command swallows): shown as the row's log problem.</summary>
+    private void OnLogFailure(Exception exception)
+    {
+        logProblem = Loc.Instance.Format(ChecksStrings.LogFailed, exception.Message);
+        isLogOpen = true;
+        RaiseLog();
     }
 
     private void OpenLink()

@@ -30,6 +30,9 @@ internal static class PrChecksFixMessage
     /// <summary>Characters the whole log section may take; the rest of the message is the digest and the instruction.</summary>
     internal const int MaxTotalLogCharacters = 20000;
 
+    /// <summary>Characters kept of one "the log could not be read" reason; gh's stderr can be long.</summary>
+    internal const int MaxErrorCharacters = 500;
+
     /// <summary>
     /// Builds the message for <paramref name="number"/>. <paramref name="logs"/> is the list the panel loaded (one entry
     /// per failing check it could ask about); a failing check with no entry is named as missing rather than silently
@@ -51,13 +54,15 @@ internal static class PrChecksFixMessage
         message.Append("\n== Failed job logs ==\n");
 
         var spent = 0;
-        var omitted = 0;
+        List<PrCheck>? omitted = null;
         foreach (var log in logs)
         {
             if (log.Error is { Length: > 0 } error)
             {
+                // gh's reason can be its whole stderr; one line of bounded length is what the agent needs.
+                var reason = error.Length > MaxErrorCharacters ? error[..MaxErrorCharacters] + "..." : error;
                 message.Append("### ").Append(log.Check.Name).Append('\n');
-                message.Append("The log could not be read: ").Append(error).Append("\n\n");
+                message.Append("The log could not be read: ").Append(reason.ReplaceLineEndings(" ")).Append("\n\n");
                 continue;
             }
 
@@ -65,7 +70,7 @@ internal static class PrChecksFixMessage
 
             if (spent + tail.Length > MaxTotalLogCharacters)
             {
-                omitted++;
+                (omitted ??= []).Add(log.Check);
                 continue;
             }
 
@@ -80,10 +85,16 @@ internal static class PrChecksFixMessage
             message.Append('\n');
         }
 
-        if (omitted > 0)
+        if (omitted is { Count: > 0 })
         {
-            message.Append(omitted.ToString(CultureInfo.InvariantCulture))
-                .Append(" more failed job log(s) were left out: the message is bounded. Read them with pr_ci_log if they matter.\n\n");
+            message.Append(omitted.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(" more failed job log(s) were left out: the message is bounded. Read them with pr_ci_log if they matter:\n");
+            foreach (var check in omitted)
+            {
+                message.Append("- ").Append(Header(check)).Append('\n');
+            }
+
+            message.Append('\n');
         }
 
         message.Append("== What to do ==\n");

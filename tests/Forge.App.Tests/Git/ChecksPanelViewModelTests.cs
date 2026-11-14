@@ -492,6 +492,173 @@ public sealed class ChecksPanelViewModelTests
         Assert.Equal(1, platform.LogCalls);
     }
 
+    // ------------------------------------------------------------ no-CI, failure stop, lifetime
+
+    [Fact]
+    public async Task Empty_reads_conclude_no_ci_after_the_configured_confirmations()
+    {
+        var clock = new ChecksPanelClock();
+        var platform = new ChecksPanelPlatform(ChecksSample.EmptyRead());
+
+        using var panel = NewPanel(platform, clock, confirmations: 2);
+        panel.Start();
+        await panel.Watch.WaitAsync(Budget);
+
+        // The same rule as the wait mode: two consecutive empty successful reads, then "no CI" and the poll stops.
+        Assert.Equal(2, platform.ChecksCalls);
+        Assert.Equal(PrWaitOutcome.NoCi, panel.Outcome);
+        Assert.Equal(Loc.Instance[ChecksStrings.VerdictNoCi], panel.VerdictText);
+        Assert.True(panel.IsReady);
+        Assert.False(panel.IsReading);
+        Assert.Single(clock.Delays);
+    }
+
+    [Fact]
+    public async Task A_failed_read_breaks_the_run_of_empty_reads()
+    {
+        var platform = new ChecksPanelPlatform(
+            ChecksSample.EmptyRead(),
+            ChecksSample.FailedRead(),
+            ChecksSample.EmptyRead(),
+            ChecksSample.EmptyRead());
+
+        using var panel = NewPanel(platform, confirmations: 2);
+        panel.Start();
+        await panel.Watch.WaitAsync(Budget);
+
+        Assert.Equal(4, platform.ChecksCalls);
+        Assert.Equal(PrWaitOutcome.NoCi, panel.Outcome);
+        Assert.False(panel.HasProblem);
+    }
+
+    [Fact]
+    public async Task Consecutive_failed_reads_stop_the_poll()
+    {
+        var platform = new ChecksPanelPlatform(ChecksSample.FailedRead(GitRemoteFailureKind.Network, "gh: network down"));
+
+        using var panel = NewPanel(platform);
+        panel.Start();
+        await panel.Watch.WaitAsync(Budget);
+
+        Assert.Equal(PrChecksPoller.MaxConsecutiveFailures, platform.ChecksCalls);
+        Assert.True(panel.HasProblem);
+        Assert.Contains("gh: network down", panel.ProblemText, StringComparison.Ordinal);
+        Assert.False(panel.IsReading);
+    }
+
+    [Fact]
+    public async Task A_missing_gh_stops_the_poll_after_one_read()
+    {
+        var platform = new ChecksPanelPlatform(
+            ChecksSample.FailedRead(GitRemoteFailureKind.Other, "gh is not installed", PrFailureReason.PlatformNotInstalled));
+
+        using var panel = NewPanel(platform);
+        panel.Start();
+        await panel.Watch.WaitAsync(Budget);
+
+        Assert.Equal(1, platform.ChecksCalls);
+        Assert.True(panel.HasProblem);
+    }
+
+    [Fact]
+    public async Task Two_checks_that_share_a_key_keep_two_rows_across_polls()
+    {
+        // An external status context reported twice under one name: no job id, same workflow, so the same key.
+        var first = ChecksSample.Check("status", PrCheckBucket.Pass);
+        var second = ChecksSample.Check("status", PrCheckBucket.Pass);
+        var platform = new ChecksPanelPlatform(ChecksSample.Poll(PrMergeStateStatus.Clean, first, second));
+
+        using var panel = NewPanel(platform);
+        panel.Start();
+        await panel.Watch.WaitAsync(Budget);
+        panel.RefreshCommand.Execute(null);
+        await panel.Watch.WaitAsync(Budget);
+
+        Assert.Equal(2, panel.Checks.Count);
+        Assert.NotSame(panel.Checks[0], panel.Checks[1]);
+    }
+
+    [Fact]
+    public async Task Closing_the_panel_while_the_fix_reads_logs_hands_nothing_to_the_agent()
+    {
+        var platform = new ChecksPanelPlatform(ChecksSample.Poll(
+            PrMergeStateStatus.Clean,
+            ChecksSample.Check("build", PrCheckBucket.Fail, run: 11, job: 22)))
+        {
+            HoldLogs = true,
+        };
+        var handed = 0;
+
+        var panel = NewPanel(platform, handToAgent: _ =>
+        {
+            handed++;
+            return Task.FromResult(ChecksHandOff.Ran);
+        });
+        panel.Start();
+        panel.FixCommand.Execute(null);
+        Assert.Equal(1, platform.LogCalls);
+
+        // Dispose raises the command's CanExecuteChanged once itself; the command's own end raises it a second time.
+        var raised = 0;
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        panel.FixCommand.CanExecuteChanged += (_, _) =>
+        {
+            if (Interlocked.Increment(ref raised) == 2)
+            {
+                ended.TrySetResult();
+            }
+        };
+
+        panel.Dispose();
+        await ended.Task.WaitAsync(Budget);
+
+        // The log read was cancelled with the panel's lifetime; the command ended without a hand-off.
+        Assert.Equal(0, handed);
+        Assert.False(panel.HasStatus);
+    }
+
+    [Fact]
+    public async Task Closing_the_panel_cancels_a_row_log_that_is_being_read()
+    {
+        var platform = new ChecksPanelPlatform(ChecksSample.Poll(
+            PrMergeStateStatus.Clean,
+            ChecksSample.Check("build", PrCheckBucket.Fail, run: 11, job: 22)))
+        {
+            HoldLogs = true,
+        };
+
+        var panel = NewPanel(platform);
+        panel.Start();
+        var row = Assert.Single(panel.Checks);
+        row.ToggleLogCommand.Execute(null);
+        Assert.True(row.IsLogLoading);
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        row.ToggleLogCommand.CanExecuteChanged += (_, _) => ended.TrySetResult();
+
+        panel.Dispose();
+        await ended.Task.WaitAsync(Budget);
+
+        Assert.False(row.IsLogLoading);
+        Assert.False(row.HasLogTail);
+    }
+
+    [Fact]
+    public void A_hand_off_that_throws_reports_the_reason_on_the_status_line()
+    {
+        var platform = new ChecksPanelPlatform(ChecksSample.Poll(
+            PrMergeStateStatus.Clean,
+            ChecksSample.Check("build", PrCheckBucket.Fail, run: 11, job: 22)))
+            .Log(11, 22, "exit code 1");
+
+        using var panel = NewPanel(platform, handToAgent: _ => throw new InvalidOperationException("the session is gone"));
+        panel.Start();
+
+        panel.FixCommand.Execute(null);
+
+        Assert.Equal(Loc.Instance.Format(ChecksStrings.ActionFailed, "the session is gone"), panel.StatusText);
+        Assert.True(panel.FixCommand.CanExecute(null));
+    }
+
     // ------------------------------------------------------------ links, close and dispose
 
     [Fact]
@@ -567,13 +734,18 @@ public sealed class ChecksPanelViewModelTests
         string? url = "https://example.test/acme/forge/pull/12",
         Action<string>? openLink = null,
         Func<string, Task<ChecksHandOff>>? handToAgent = null,
-        Action? close = null) =>
+        Action? close = null,
+        int confirmations = 3) =>
         new(
             WorkDirectory,
             Number,
             url,
             platform,
-            () => new PrChecksPollerOptions { Interval = interval ?? TimeSpan.FromSeconds(1) },
+            () => new PrChecksPollerOptions
+            {
+                Interval = interval ?? TimeSpan.FromSeconds(1),
+                NoChecksConfirmations = confirmations,
+            },
             () => 40,
             action => action(),
             openLink,
@@ -690,6 +862,9 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
 
     /// <summary>The first read index that only ends by cancellation instead of answering at once.</summary>
     public int HoldFrom { get; init; } = int.MaxValue;
+
+    /// <summary>Every failed-job-log read waits for its cancellation instead of answering.</summary>
+    public bool HoldLogs { get; init; }
 
     /// <summary>What <c>gh pr ready</c> answers; a success for the number it was asked about unless a test pins a failure.</summary>
     public PrResult<PrReference>? ReadyResult { get; set; }
@@ -811,8 +986,18 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
         return Task.FromResult(ReadyResult ?? PrResult<PrReference>.Ok(new PrReference(number, string.Empty)));
     }
 
-    public Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default)
+    public async Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default)
     {
+        if (HoldLogs)
+        {
+            lock (gate)
+            {
+                logRequests.Add((runId, jobId));
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
+        }
+
         PrResult<PrText> answer;
         lock (gate)
         {
@@ -822,7 +1007,7 @@ internal sealed class ChecksPanelPlatform(params ChecksPoll[] polls) : IPrPlatfo
                 : PrResult<PrText>.Fail(GitRemoteFailureKind.Other, $"no log pinned for job {jobId}");
         }
 
-        return Task.FromResult(answer);
+        return answer;
     }
 
     public Task<PrResult<IReadOnlyList<PrReviewThread>>> GetReviewThreadsAsync(string workingDirectory, int number, CancellationToken ct = default) =>

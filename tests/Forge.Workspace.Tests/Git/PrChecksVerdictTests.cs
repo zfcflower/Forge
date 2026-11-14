@@ -43,6 +43,34 @@ public sealed class PrChecksVerdictTests
         Assert.Null(PrChecksPoller.Verdict(Observe(PrCheckSample.Merge())));
     }
 
+    [Theory]
+    [InlineData(1, 3)]
+    [InlineData(2, 3)]
+    public void An_empty_series_below_the_confirmations_stays_open(int streak, int confirmations)
+    {
+        Assert.Null(PrChecksPoller.Verdict(Observe(PrCheckSample.Merge()), streak, confirmations));
+    }
+
+    [Theory]
+    [InlineData(3, 3)]
+    [InlineData(5, 3)]
+    [InlineData(1, 1)]
+    public void An_empty_series_that_reached_the_confirmations_is_no_ci(int streak, int confirmations)
+    {
+        Assert.Equal(
+            PrWaitOutcome.NoCi,
+            PrChecksPoller.Verdict(Observe(PrCheckSample.Merge()), streak, confirmations));
+    }
+
+    [Fact]
+    public void The_counted_verdict_rejects_a_negative_streak_and_zero_confirmations()
+    {
+        var empty = Observe(PrCheckSample.Merge());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrChecksPoller.Verdict(empty, -1, 3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PrChecksPoller.Verdict(empty, 1, 0));
+    }
+
     [Fact]
     public void Every_check_passed_and_clean_is_ready()
     {

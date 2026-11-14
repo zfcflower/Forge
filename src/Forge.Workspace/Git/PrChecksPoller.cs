@@ -183,6 +183,19 @@ public sealed class PrChecksPoller
     }
 
     /// <summary>
+    /// The verdict of one reading in a series a caller counts itself: <paramref name="noChecksStreak"/> is how many
+    /// consecutive successful reads (this one included) reported no checks, so the app's checks panel reaches "no CI" after
+    /// the same <paramref name="noChecksConfirmations"/> empty reads <see cref="WaitAsync"/> needs, and by the same rule.
+    /// </summary>
+    public static PrWaitOutcome? Verdict(PrChecksObservation observation, int noChecksStreak, int noChecksConfirmations)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        ArgumentOutOfRangeException.ThrowIfNegative(noChecksStreak);
+        ArgumentOutOfRangeException.ThrowIfLessThan(noChecksConfirmations, 1);
+        return Evaluate(observation, noChecksStreak, noChecksConfirmations);
+    }
+
+    /// <summary>
     /// One reading: the checks and the merge state, requested concurrently. Expected failures (auth, network, missing
     /// pull request) come back as a failed result – the first failing call wins; only cancellation throws.
     /// </summary>

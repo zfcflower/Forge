@@ -140,6 +140,9 @@ internal static class ChecksStrings
     /// <summary>Marking it ready failed: <c>{0}</c> is the platform's message.</summary>
     public const string MarkReadyFailed = "checks.markReady.failed";
 
+    /// <summary>A hand-off or mark-ready that threw instead of answering: <c>{0}</c> is the reason.</summary>
+    public const string ActionFailed = "checks.action.failed";
+
     /// <summary>Registers this table before any code of the assembly runs (module initializer, AOT safe).</summary>
     [ModuleInitializer]
     internal static void Initialize() => Register();
@@ -215,5 +218,6 @@ internal static class ChecksStrings
         Loc.Register(FixNothing, "没有失败的检查", "No check failed");
         Loc.Register(MarkReadyDone, "已标记为可评审", "Marked ready for review");
         Loc.Register(MarkReadyFailed, "标记失败:{0}", "Could not mark it ready: {0}");
+        Loc.Register(ActionFailed, "操作失败:{0}", "It did not work: {0}");
     }
 }

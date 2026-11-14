@@ -110,6 +110,45 @@ public sealed class GitSyncShipFinaleTests
     }
 
     [Fact]
+    public async Task A_merge_follow_up_only_fast_forwards_even_when_the_pull_setting_rebases()
+    {
+        using var sandbox = GitTestSandbox.Create();
+        var (work, root) = SessionAndRoot(sandbox, "finale-ff-only");
+        var merged = MergeLandsOnMain(sandbox, "finale-ff-only");
+        // A local commit on the root's main that origin does not have: a rebase would rewrite it behind the user's back.
+        sandbox.CommitFile(root, "local.txt", "local\n", "a local commit on the root checkout");
+        var localHead = HeadOf(root);
+
+        var platform = new ShipPlatform { Current = PullRequest(baseRefName: "main") };
+        var session = SharedUi.Session;
+        var panel = NewPanel(platform, GitPullStrategy.Rebase);
+        try
+        {
+            await AttachAndWaitAsync(session, panel, work, root);
+
+            await ExecuteAndWaitAsync(session, panel, panel.MergePullRequestCommand);
+
+            var state = await session.Dispatch(
+                () => new { panel.MessageText, panel.MessageIsError },
+                CancellationToken.None);
+
+            // The fast-forward is refused and reported; the merge itself still reads as done, and the checkout is untouched.
+            Assert.True(state.MessageIsError);
+            Assert.StartsWith(
+                Loc.Instance.Format(GitStrings.ShipMergedFinaleProblem, Number, string.Empty).TrimEnd(),
+                state.MessageText,
+                StringComparison.Ordinal);
+            Assert.Equal(localHead, HeadOf(root));
+            Assert.Equal(merged, RefOf(root, "origin/main"));
+            Assert.False(File.Exists(Path.Combine(root, "merged.txt")));
+        }
+        finally
+        {
+            await session.Dispatch(() => panel.Dispose(), CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task A_dirty_root_checkout_is_fetched_but_the_base_branch_is_not_pulled()
     {
         using var sandbox = GitTestSandbox.Create();
@@ -649,10 +688,10 @@ public sealed class GitSyncShipFinaleTests
 
     // ------------------------------------------------------------ the row
 
-    private static GitSyncViewModel NewPanel(ShipPlatform platform) =>
+    private static GitSyncViewModel NewPanel(ShipPlatform platform, GitPullStrategy strategy = GitPullStrategy.FastForwardOnly) =>
         new(
             new GitCli(),
-            new GitPanelSettings(() => GitPullStrategy.FastForwardOnly, () => TimeSpan.FromSeconds(30)),
+            new GitPanelSettings(() => strategy, () => TimeSpan.FromSeconds(30)),
             openFile: null,
             notifications: null,
             pullRequests: platform,

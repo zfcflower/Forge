@@ -136,6 +136,42 @@ public sealed class PrChecksFixMessageTests
         Assert.Contains("== What to do ==", message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Logs_left_out_by_the_total_cap_are_named_with_their_ids()
+    {
+        var big = new string('y', PrChecksFixMessage.MaxJobLogCharacters - 1);
+        var checks = Enumerable.Range(1, 7)
+            .Select(index => Check("job" + index, PrCheckBucket.Fail, run: 11, job: 100 + index))
+            .ToArray();
+        var logs = checks.Select(check => new PrChecksJobLog(check, big, false, null)).ToList();
+
+        var message = PrChecksFixMessage.Build(Number, null, Observation(checks), logs, 40);
+
+        // Five fit; the sixth and seventh are listed by name and ids so the agent can read them with pr_ci_log.
+        Assert.Contains("2 more failed job log(s) were left out", message, StringComparison.Ordinal);
+        Assert.Contains("- job6 (CI) run_id=11 job_id=106\n", message, StringComparison.Ordinal);
+        Assert.Contains("- job7 (CI) run_id=11 job_id=107\n", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("- job5 ", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_long_unreadable_reason_is_cut_to_one_bounded_line()
+    {
+        var build = Check("build", PrCheckBucket.Fail, run: 11, job: 22);
+        var reason = "first line\nsecond line " + new string('e', 5000) + "END-OF-STDERR";
+
+        var message = PrChecksFixMessage.Build(
+            Number,
+            null,
+            Observation(build),
+            [new PrChecksJobLog(build, string.Empty, false, reason)],
+            40);
+
+        Assert.Contains("The log could not be read: first line second line ", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("END-OF-STDERR", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('e', PrChecksFixMessage.MaxErrorCharacters), message, StringComparison.Ordinal);
+    }
+
     // ------------------------------------------------------------ logs that did not come back, or came back cut
 
     [Fact]

@@ -47,6 +47,9 @@ internal sealed partial class MainWindowViewModel
             return;
         }
 
+        // A panel that is already open (another pull request, or the same one clicked again) is replaced, and its poll and
+        // language subscription released, instead of being dropped with both still running.
+        CloseChecks();
         var panel = new ChecksPanelViewModel(
             workDirectory,
             number,
@@ -55,7 +58,7 @@ internal sealed partial class MainWindowViewModel
             () => GitToolPreferences.ChecksOptions(composition.Preferences),
             () => composition.Preferences.GitChecksFailureLogTailLines,
             action => Dispatcher.UIThread.Post(action),
-            OpenChecksLink,
+            url => OpenChecksLink(url),
             message => HandChecksToAgentAsync(session, message),
             CloseChecks);
         Checks = panel;
@@ -85,7 +88,7 @@ internal sealed partial class MainWindowViewModel
 
         if (!session.IsAutomationIdle)
         {
-            session.Draft = message;
+            QueueChecksMessage(session, message);
             return ChecksHandOff.Queued;
         }
 
@@ -102,20 +105,41 @@ internal sealed partial class MainWindowViewModel
 
             // Withdrawn between the idle check and the turn (the tab was taken over, archived or removed): the message was
             // not delivered and must not be lost, so it goes where a draft would.
-            session.Draft = message;
+            QueueChecksMessage(session, message);
             return ChecksHandOff.Queued;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             AppLogs.Session.ZLogWarning($"checks hand-off failed: {exception.Message}");
-            session.Draft = message;
+            QueueChecksMessage(session, message);
             return ChecksHandOff.Queued;
         }
     }
 
-    /// <summary>Opens a link from the panel in the system browser; a failure is traced, never thrown into the click.</summary>
-    private static void OpenChecksLink(string url)
+    /// <summary>
+    /// Puts the message in the session's composer after whatever the user already typed there: a queued hand-off must not
+    /// erase a draft the user was writing.
+    /// </summary>
+    private static void QueueChecksMessage(SessionWorkspaceViewModel session, string message)
     {
+        session.Draft = ComposeQueuedDraft(session.Draft, message);
+    }
+
+    /// <summary>The composer text after a queued hand-off: the existing draft, a blank line, then the message.</summary>
+    internal static string ComposeQueuedDraft(string? draft, string message) =>
+        string.IsNullOrWhiteSpace(draft) ? message : draft.TrimEnd() + "\n\n" + message;
+
+    /// <summary>Opens a link from the panel in the system browser; a failure is traced, never thrown into the click.</summary>
+    /// <remarks>Only http and https links are opened: a check's link is whatever the CI integration reported, and a
+    /// <c>file:</c> or custom-scheme target is not something a click on a check should launch.</remarks>
+    internal static bool OpenChecksLink(string url)
+    {
+        if (!IsWebLink(url))
+        {
+            AppLogs.Session.ZLogDebug($"checks link not opened, not http(s): '{url}'");
+            return false;
+        }
+
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -123,10 +147,18 @@ internal sealed partial class MainWindowViewModel
                 FileName = url,
                 UseShellExecute = true,
             });
+            return true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             AppLogs.Session.ZLogWarning($"could not open '{url}': {exception.Message}");
+            return false;
         }
     }
+
+    /// <summary>An absolute http or https URL.</summary>
+    internal static bool IsWebLink(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && (string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase));
 }

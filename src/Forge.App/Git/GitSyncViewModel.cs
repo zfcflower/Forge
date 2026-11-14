@@ -1110,16 +1110,18 @@ internal sealed class GitSyncViewModel : ObservableObject, IDisposable
             return GitRemoteResult.Ok(Loc.Instance.Format(GitStrings.ShipFinaleDirty, baseBranch));
         }
 
-        var pulled = await git.PullAsync(root, settings.PullStrategy(), network, ct).ConfigureAwait(false);
+        // Always a fast-forward, whatever the row's pull strategy says: this step runs without a question on a checkout the
+        // user did not ask to change, so a base branch with local commits of its own is left alone (and the refusal
+        // reported) rather than rebased or merged behind the user's back.
+        var pulled = await git.PullAsync(root, GitPullStrategy.FastForwardOnly, network, ct).ConfigureAwait(false);
         if (!pulled.Success)
         {
             return pulled;
         }
 
-        // Where the base branch landed: the short commit when git can name it, else the branch the head read reports.
-        var head = await git.GetHeadAsync(root, ct).ConfigureAwait(false);
+        // Where the base branch landed: the short commit when git can name it, else the base branch itself.
         var commit = await git.RevParseAsync(root, "HEAD", ct).ConfigureAwait(false);
-        var updated = commit is { Length: > 0 } ? Shorten(commit) : head.Branch ?? baseBranch;
+        var updated = commit is { Length: > 0 } ? Shorten(commit) : baseBranch;
         return GitRemoteResult.Ok(Loc.Instance.Format(GitStrings.ShipFinaleUpdated, baseBranch, updated));
     }
 
