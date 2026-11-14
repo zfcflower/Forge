@@ -96,13 +96,13 @@ public sealed class LiveSwitchTests(HeadlessSessionFixture fixture)
                 await shell.SwitchAsync(UiLanguage.Chinese, token);
                 var chinese = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
                 Assert.Equal(
-                    ["项目", "文件", "会话", "子 Agent", "预览", "TODO | 评审 | 规格树", "TODO", "评审", "规格树"],
+                    ["项目", "文件", "会话", "子 Agent", "预览", "TODO | 评审 | 规格树 | 问题", "TODO", "评审", "规格树"],
                     chinese);
 
                 await shell.SwitchAsync(UiLanguage.English, token);
                 var english = await session.Dispatch(() => LiveShell.ReadPanelTitles(shell.ViewModel), token);
                 Assert.Equal(
-                    ["Projects", "Files", "Sessions", "Sub-agents", "Preview", "TODO | Review | Spec tree", "TODO", "Review", "Spec tree"],
+                    ["Projects", "Files", "Sessions", "Sub-agents", "Preview", "TODO | Review | Spec tree | Problems", "TODO", "Review", "Spec tree"],
                     english);
 
                 await shell.SwitchAsync(UiLanguage.Chinese, token);
