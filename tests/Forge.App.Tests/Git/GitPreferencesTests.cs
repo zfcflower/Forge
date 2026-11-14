@@ -181,8 +181,7 @@ public sealed class GitPreferencesTests : IDisposable
     public void ApplyLoaded_applies_git_values_without_raising_PropertyChanged()
     {
         var preferences = new AppPreferences();
-        var raised = new List<string?>();
-        preferences.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(preferences);
 
         preferences.ApplyLoaded(
             new PreferencesSection { GitPullStrategy = "rebase", GitNetworkTimeoutSeconds = 33 },

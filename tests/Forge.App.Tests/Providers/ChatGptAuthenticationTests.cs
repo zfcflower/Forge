@@ -725,49 +725,23 @@ public sealed class ChatGptAuthenticationCredentialTests : IDisposable
 /// Answers in order, one queued response per request, and records what was asked: the device flow is a sequence, so a
 /// handler that answers everything the same way cannot express "pending, then approved".
 /// </summary>
-internal sealed class ScriptedChatGptHandler : HttpMessageHandler
+internal sealed class ScriptedChatGptHandler : ScriptedAuthHandler<RecordedAuthRequest>
 {
-    private readonly List<(HttpStatusCode Status, string Body)> queued = [];
-
-    public List<RecordedAuthRequest> Requests { get; } = [];
-
-    public static ScriptedChatGptHandler Answering(HttpStatusCode status, string body) =>
-        new ScriptedChatGptHandler().Then(status, body);
-
-    /// <summary>Runs just before the answer goes back, so a test can change the store while a request is on the wire.</summary>
-    public Action<RecordedAuthRequest>? BeforeResponding { get; set; }
-
-    /// <summary>When set, every answer waits for this task, so a test can keep a request on the wire as long as it needs.</summary>
-    public Task? Hold { get; set; }
-
-    public ScriptedChatGptHandler Then(HttpStatusCode status, string body)
+    public static ScriptedChatGptHandler Answering(HttpStatusCode status, string body)
     {
-        queued.Add((status, body));
-        return this;
+        var handler = new ScriptedChatGptHandler();
+        handler.Then(status, body);
+        return handler;
     }
 
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-        Requests.Add(new RecordedAuthRequest(
+    protected override RecordedAuthRequest Record(HttpRequestMessage request, string body) =>
+        new(
             request.RequestUri,
             body,
             [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)],
             request.Headers.ToDictionary(static header => header.Key, static header => string.Join(',', header.Value), StringComparer.OrdinalIgnoreCase),
-            request.Content?.Headers.ContentType?.MediaType ?? string.Empty));
-        BeforeResponding?.Invoke(Requests[^1]);
-        if (Hold is { } hold)
-        {
-            await hold.ConfigureAwait(false);
-        }
+            request.Content?.Headers.ContentType?.MediaType ?? string.Empty);
 
-        var (status, responseBody) = queued[Math.Min(Requests.Count - 1, queued.Count - 1)];
-        return new HttpResponseMessage(status)
-        {
-            Content = new StringContent(
-                responseBody,
-                Encoding.UTF8,
-                responseBody.StartsWith("data:", StringComparison.Ordinal) ? "text/event-stream" : "application/json"),
-        };
-    }
+    protected override string ContentTypeFor(string body) =>
+        body.StartsWith("data:", StringComparison.Ordinal) ? "text/event-stream" : "application/json";
 }

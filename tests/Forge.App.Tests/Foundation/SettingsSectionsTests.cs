@@ -78,8 +78,7 @@ public sealed class SettingsSectionsTests : IDisposable
             CoreStrings.SettingsSectionProvider,
             SettingsSectionIds.ProviderOrder,
             new object());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         Loc.Instance.Language = UiLanguage.Chinese;
         section.RaiseTitle();

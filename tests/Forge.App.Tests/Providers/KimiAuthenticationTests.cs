@@ -615,46 +615,20 @@ public sealed class KimiAuthenticationCredentialTests : IDisposable
 /// Answers in order, one queued response per request, and records what was asked: the device flow is a sequence, so a
 /// handler that answers everything the same way cannot express "pending, then approved".
 /// </summary>
-internal sealed class ScriptedKimiHandler : HttpMessageHandler
+internal sealed class ScriptedKimiHandler : ScriptedAuthHandler<RecordedKimiRequest>
 {
-    private readonly List<(HttpStatusCode Status, string Body)> queued = [];
-
-    public List<RecordedKimiRequest> Requests { get; } = [];
-
-    public static ScriptedKimiHandler Answering(HttpStatusCode status, string body) =>
-        new ScriptedKimiHandler().Then(status, body);
-
-    /// <summary>Runs just before the answer goes back, so a test can change the store while a request is on the wire.</summary>
-    public Action<RecordedKimiRequest>? BeforeResponding { get; set; }
-
-    /// <summary>When set, every answer waits for this task, so a test can keep a request on the wire as long as it needs.</summary>
-    public Task? Hold { get; set; }
-
-    public ScriptedKimiHandler Then(HttpStatusCode status, string body)
+    public static ScriptedKimiHandler Answering(HttpStatusCode status, string body)
     {
-        queued.Add((status, body));
-        return this;
+        var handler = new ScriptedKimiHandler();
+        handler.Then(status, body);
+        return handler;
     }
 
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-        Requests.Add(new RecordedKimiRequest(
+    protected override RecordedKimiRequest Record(HttpRequestMessage request, string body) =>
+        new(
             request.RequestUri,
             body,
-            [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)]));
-        BeforeResponding?.Invoke(Requests[^1]);
-        if (Hold is { } hold)
-        {
-            await hold.ConfigureAwait(false);
-        }
-
-        var (status, responseBody) = queued[Math.Min(Requests.Count - 1, queued.Count - 1)];
-        return new HttpResponseMessage(status)
-        {
-            Content = new StringContent(responseBody, Encoding.UTF8, "application/json"),
-        };
-    }
+            [.. request.Headers.Accept.Select(static accept => accept.MediaType ?? string.Empty)]);
 }
 
 /// <summary>One request a scripted flow made, captured so a test can assert the wire shape.</summary>

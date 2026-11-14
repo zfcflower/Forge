@@ -172,8 +172,7 @@ public sealed class GapPlanPreferencesTests
     public void Int_setters_raise_PropertyChanged_only_when_the_clamped_value_changes(string name, int min, int max, int expectedDefault)
     {
         var p = new AppPreferences();
-        var raised = new List<string?>();
-        p.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(p);
 
         Set(p, name, expectedDefault);
         Assert.Empty(raised);
@@ -194,8 +193,7 @@ public sealed class GapPlanPreferencesTests
     public void Boolean_settings_store_and_notify_once_per_change()
     {
         var p = new AppPreferences();
-        var raised = new List<string?>();
-        p.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(p);
 
         p.AgentsSubAgentsEnabled = false;
         p.IdleArchiveEnabled = false;

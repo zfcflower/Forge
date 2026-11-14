@@ -304,12 +304,8 @@ public sealed class FilePreviewDocumentTests : IDisposable
         Assert.Contains(nameof(FilePreviewViewModel.Notice), changes);
     }
 
-    private static List<string?> Track(System.ComponentModel.INotifyPropertyChanged source)
-    {
-        var names = new List<string?>();
-        source.PropertyChanged += (_, e) => names.Add(e.PropertyName);
-        return names;
-    }
+    private static List<string?> Track(System.ComponentModel.INotifyPropertyChanged source) =>
+        PropertyChangeLog.For(source);
 
     private string NewRoot()
     {

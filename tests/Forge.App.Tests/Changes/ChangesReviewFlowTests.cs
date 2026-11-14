@@ -469,8 +469,7 @@ public sealed class ChangesReviewFlowTests
         {
             using var rig = await Rig.CreateAsync();
             using var vm = await rig.OpenAsync();
-            var changed = new List<string?>();
-            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+            var changed = PropertyChangeLog.For(vm);
 
             Assert.True(vm.IsInline);
             Assert.False(vm.IsSplit);

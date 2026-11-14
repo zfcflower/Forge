@@ -145,8 +145,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
     public void The_gh_path_raises_no_change_notification_because_the_box_is_edited_character_by_character()
     {
         using var section = new GitSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.GhPath = "C:\\tools\\gh.exe";
 
@@ -203,8 +202,7 @@ public sealed class GitSettingsSectionGitTests : IDisposable
     public void Every_edited_property_raises_its_own_change_notification()
     {
         using var section = new GitSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.SelectedPullStrategy = section.PullStrategies[2];
         section.NetworkTimeoutSeconds = 45;

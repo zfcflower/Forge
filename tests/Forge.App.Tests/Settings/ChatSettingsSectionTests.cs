@@ -42,8 +42,7 @@ public sealed class ChatSettingsSectionTests
     public void A_clamped_edit_notifies_so_the_box_shows_the_value_that_was_kept()
     {
         var section = new ChatSettingsSectionViewModel(new AppPreferences());
-        var raised = new List<string?>();
-        section.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(section);
 
         section.ThumbnailEdge = 1;
 

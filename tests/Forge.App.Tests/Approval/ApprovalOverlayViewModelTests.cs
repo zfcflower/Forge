@@ -82,8 +82,7 @@ public sealed class ApprovalOverlayViewModelTests : IDisposable
     public async Task Dispose_detaches_so_late_queue_events_raise_nothing()
     {
         // HasItems and Count read the live queue, so detachment is observed through the notifications.
-        var raised = new List<string?>();
-        viewModel.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var raised = PropertyChangeLog.For(viewModel);
         Assert.True(await queue.EnqueueAsync(ToolCard(), CancellationToken.None));
         Assert.Contains("HasItems", raised);
         Assert.Contains("Count", raised);
