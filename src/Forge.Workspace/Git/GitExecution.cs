@@ -52,4 +52,11 @@ public sealed record GitRunOptions
     public Action<string>? OnStandardOutputLine { get; init; }
 
     public Action<string>? OnStandardErrorLine { get; init; }
+
+    /// <summary>
+    /// Also ends a line at a bare carriage return, and treats CRLF as one break. Git's progress reporters rewrite one line in
+    /// place (<c>git clone --progress</c>, <c>fetch --progress</c>), so without this every update of a phase arrives at once
+    /// when the phase ends instead of as it happens. Off by default: a normal command's output is split on LF exactly as before.
+    /// </summary>
+    public bool CarriageReturnEndsLine { get; init; }
 }

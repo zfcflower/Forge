@@ -5,7 +5,7 @@ using Xunit;
 namespace Forge.App.Tests;
 
 /// <summary>
-/// Pins <see cref="Services.FileIndex"/> behavior: a large flat directory indexes fast with no duplicate
+/// Pins <see cref="Forge.App.Services.FileIndex"/> behavior: a large flat directory indexes fast with no duplicate
 /// siblings, nested paths build the right parent/child relations, and the non-git walk skips the tool
 /// folders while a git listing honours <c>.gitignore</c>.
 /// </summary>
@@ -44,7 +44,7 @@ public sealed class FileIndexTests : IDisposable
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var index = await Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
+        var index = await Forge.App.Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
         stopwatch.Stop();
 
         Assert.Equal(files, index.FileCount);
@@ -64,7 +64,7 @@ public sealed class FileIndexTests : IDisposable
         Write(root, "a/d.txt");
         Write(root, "e.txt");
 
-        var index = await Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
+        var index = await Forge.App.Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
 
         Assert.Equal(3, index.FileCount);
         var roots = index.List(string.Empty);
@@ -95,7 +95,7 @@ public sealed class FileIndexTests : IDisposable
         Write(root, "src/ok.txt");
         Write(root, "README.md");
 
-        var index = await Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
+        var index = await Forge.App.Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
 
         Assert.Equal(2, index.FileCount);
         var roots = index.List(string.Empty).Select(static entry => entry.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -122,7 +122,7 @@ public sealed class FileIndexTests : IDisposable
         Write(root, "debug.log");
         Write(root, "top.txt");
 
-        var index = await Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
+        var index = await Forge.App.Services.FileIndex.BuildAsync(root, git, CancellationToken.None);
 
         var all = CollectAll(index);
         Assert.Contains("kept/keep.txt", all);
@@ -131,7 +131,7 @@ public sealed class FileIndexTests : IDisposable
         Assert.DoesNotContain("debug.log", all);
     }
 
-    private static HashSet<string> CollectAll(Services.FileIndex index)
+    private static HashSet<string> CollectAll(Forge.App.Services.FileIndex index)
     {
         var found = new HashSet<string>(StringComparer.Ordinal);
         var pending = new Stack<string>();
