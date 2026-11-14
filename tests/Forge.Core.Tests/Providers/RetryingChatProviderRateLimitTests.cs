@@ -368,7 +368,8 @@ public class RetryingChatProviderRateLimitTests
     [Fact]
     public async Task The_retry_middleware_charges_only_the_limiter_it_was_given()
     {
-        var shared = ProviderRateLimiter.Shared;
+        // A private limiter on a frozen clock: the process-wide one refills in real time and is shared with parallel tests.
+        var shared = new ProviderRateLimiter(new SteppingTimeProvider(Start));
         var none = new Forge.Core.Providers.Internal.RetryMiddleware();
         var endpoint = new ScriptedEndpoint("middleware-default-id", Completes(), Completes(), Completes());
         var provider = none.Apply(endpoint);
