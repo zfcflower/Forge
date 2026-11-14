@@ -315,6 +315,26 @@ public class McpServerManagerApplyTests
     }
 
     [Fact]
+    public async Task ApplyConfig_lets_the_last_of_two_entries_with_the_same_name_win()
+    {
+        var config = new McpConfig([Stdio("dup", disabled: true), Stdio("dup")], []);
+        await using var fixture = new ManagerFixture(Of());
+        var manager = fixture.Manager;
+
+        await manager.ApplyConfigAsync(config, CancellationToken.None);
+
+        Assert.Equal(["dup"], manager.ServerNames);
+        var state = Assert.Single(manager.States);
+        Assert.True(state.Enabled);
+        Assert.Equal("fake-dup", manager.GetServer("dup").Command);
+
+        await manager.StartAsync("dup", CancellationToken.None);
+
+        Assert.Equal(["dup__echo"], manager.Tools.Select(tool => tool.ExposedName));
+        Assert.Equal(1, fixture.TransportCount("dup"));
+    }
+
+    [Fact]
     public async Task Probe_reports_ready_with_the_tool_count_and_the_elapsed_time()
     {
         await using var fixture = new ManagerFixture(Of(Stdio("srv")));
@@ -361,7 +381,38 @@ public class McpServerManagerApplyTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe);
     }
 
-    [Fact(Skip = "缺陷: McpServerManager.ProbeAsync (McpServerManager.cs:264) 对未知名字在 catch 块调 GetState 再抛 McpException，未按“失败以结果返回”的契约返回 Failed")]
+    [Fact]
+    public async Task Probe_failure_carries_the_stderr_tail_of_the_server_state()
+    {
+        var options = FakeStdioServer.Options();
+        var config = new McpConfig(
+            [new McpServerConfig { Name = "fake", Command = options.Command, Args = options.Args }],
+            []);
+        await using var manager = new McpServerManager(config, new McpServerManagerOptions
+        {
+            RequestTimeout = Wait,
+            InitialReconnectDelay = TimeSpan.FromMilliseconds(20),
+            MaxReconnectAttempts = 0,
+        });
+        await manager.StartAsync("fake", CancellationToken.None);
+
+        var exit = manager.Tools.Single(tool => tool.ToolName == "exit");
+        await exit.InvokeAsync(new ToolCall("1", exit.ExposedName, "{}"), new ToolContext("s", Path.GetTempPath()), CancellationToken.None);
+        await Eventually.AssertAsync(
+            () => manager.GetState("fake") is { Status: McpServerStatus.Failed, StderrTail: { } tail } &&
+                  tail.Contains("fake-ready", StringComparison.Ordinal),
+            "the exited server to reach a failed state with its stderr captured");
+
+        await manager.SetEnabledAsync("fake", false, CancellationToken.None);
+
+        var probe = await manager.ProbeAsync("fake", CancellationToken.None);
+
+        Assert.Equal(McpServerStatus.Failed, probe.Status);
+        Assert.Contains("disabled", probe.Error);
+        Assert.Contains("fake-ready", probe.StderrTail ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Probe_of_an_unknown_server_reports_failed_instead_of_throwing()
     {
         await using var fixture = new ManagerFixture(Of(Stdio("srv")));

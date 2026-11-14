@@ -44,11 +44,12 @@ public class McpConfigFileTests
     [Theory]
     [InlineData("""{"mcpServers":[]}""")]
     [InlineData("""{"mcpServers":"no"}""")]
-    public void Read_does_not_throw_when_mcpServers_is_not_an_object(string json)
+    public void Read_reports_a_non_object_mcpServers_as_a_diagnostic(string json)
     {
         var result = McpConfigFile.Read(json, "shape.json");
 
         Assert.Empty(result.Entries);
+        Assert.Equal("\"mcpServers\" is not an object.", Assert.Single(result.Diagnostics).Message);
     }
 
     [Fact]
@@ -157,7 +158,7 @@ public class McpConfigFileTests
         Assert.Equal(entry.TimeoutSeconds, again.TimeoutSeconds);
     }
 
-    [Fact(Skip = "缺陷: McpConfigFile.SetArray (McpConfigFile.cs:309) 把条目数写进了数组首元素")]
+    [Fact]
     public void ToNode_writes_args_and_read_only_tools_verbatim()
     {
         var entry = new McpServerEntry { Name = "s", Command = "c", Args = ["-y", "x"], ReadOnlyTools = ["view"] };
@@ -459,10 +460,44 @@ public class McpConfigFileTests
         Assert.Equal(7, root.GetProperty("otherRoot").GetInt32());
     }
 
-    [Fact]
-    public void Import_rejects_an_invalid_entry()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Import_rejects_a_blank_name(string name)
     {
-        Assert.Throws<ArgumentException>(() => McpConfigFile.Import(null, [new McpServerEntry { Name = "bad" }]));
+        var entry = new McpServerEntry { Name = name, Command = "cmd" };
+
+        Assert.Throws<ArgumentException>(() => McpConfigFile.Import(null, [entry]));
+    }
+
+    [Fact]
+    public void Import_copies_an_entry_this_app_would_reject()
+    {
+        const string foreign = """{"mcpServers":{"s":{"args":["-y"],"type":"sse"}}}""";
+        var entry = Assert.Single(McpConfigFile.Read(foreign, "other.json").Entries);
+        Assert.Equal([new McpEntryIssue(McpEntryField.Transport, McpEntryProblem.NeitherSet)], entry.Validate());
+
+        var text = McpConfigFile.Import(null, [entry]);
+
+        var written = JsonNode.Parse(text)!["mcpServers"]!["s"]!;
+        Assert.Equal(JsonNode.Parse(entry.RawNodeJson!)!.ToJsonString(), written.ToJsonString());
+    }
+
+    [Fact]
+    public void Import_keeps_a_non_string_env_value_as_it_was_written()
+    {
+        const string foreign = """{"mcpServers":{"remote":{"command":"npx","type":"sse","env":{"PORT":8080}}}}""";
+        var entry = Assert.Single(McpConfigFile.Read(foreign, "other.json").Entries);
+        Assert.Equal(new KeyValuePair<string, string>("PORT", "8080"), Assert.Single(entry.Env));
+
+        var text = McpConfigFile.Import(null, [entry]);
+
+        using var document = JsonDocument.Parse(text);
+        var remote = document.RootElement.GetProperty("mcpServers").GetProperty("remote");
+        Assert.Equal("sse", remote.GetProperty("type").GetString());
+        var port = remote.GetProperty("env").GetProperty("PORT");
+        Assert.Equal(JsonValueKind.Number, port.ValueKind);
+        Assert.Equal(8080, port.GetInt32());
     }
 
     [Fact]

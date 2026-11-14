@@ -118,4 +118,38 @@ public class McpToolSearchToolTests
         Assert.Contains("- srv__echo [srv]: [MCP server \"srv\"] Echoes text", result.Content);
         Assert.DoesNotContain("needs approval", result.Content);
     }
+
+    [Fact]
+    public async Task The_answer_keeps_only_the_first_line_of_a_multiline_description()
+    {
+        var scripted = new ScriptedServer().On(McpProtocol.ToolsList, _ =>
+            """{"tools":[{"name":"echo","description":"first line\nsecond line","inputSchema":{"type":"object"}}]}""");
+        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => scripted);
+        await fixture.Manager.StartAsync("srv", CancellationToken.None);
+        var tool = new McpToolSearchTool((_, _) => fixture.Manager.Tools);
+
+        var result = await tool.InvokeAsync(Call("""{"query":"echo"}"""), Context, CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.Contains("- srv__echo [srv, executes; needs approval]: [MCP server \"srv\"] first line", result.Content);
+        Assert.DoesNotContain("second line", result.Content);
+    }
+
+    [Fact]
+    public async Task The_answer_truncates_a_long_description_to_200_characters()
+    {
+        var description = new string('d', 300);
+        var scripted = new ScriptedServer().On(McpProtocol.ToolsList, _ =>
+            "{\"tools\":[{\"name\":\"echo\",\"description\":\"" + description + "\",\"inputSchema\":{\"type\":\"object\"}}]}");
+        await using var fixture = new ManagerFixture(Of(Stdio("srv")), _ => scripted);
+        await fixture.Manager.StartAsync("srv", CancellationToken.None);
+        var tool = new McpToolSearchTool((_, _) => fixture.Manager.Tools);
+
+        var result = await tool.InvokeAsync(Call("""{"query":"echo"}"""), Context, CancellationToken.None);
+
+        var truncated = ("[MCP server \"srv\"] " + description)[..199] + "…";
+        Assert.False(result.IsError);
+        Assert.Contains("]: " + truncated, result.Content);
+        Assert.DoesNotContain(new string('d', 181), result.Content);
+    }
 }
