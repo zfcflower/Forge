@@ -26,6 +26,9 @@ internal static class ModelsVisibilityStrings
     /// <summary>Shown instead of the list while no provider is connected.</summary>
     public const string EmptyKey = "modelsVisibility.empty";
 
+    /// <summary>The button that clears every hidden model, listed or not.</summary>
+    public const string ShowAllKey = "modelsVisibility.showAll";
+
     public static string SectionTitle => Loc.Instance[SectionTitleKey];
 
     public static string Hint => Loc.Instance[HintKey];
@@ -38,6 +41,8 @@ internal static class ModelsVisibilityStrings
 
     public static string Empty => Loc.Instance[EmptyKey];
 
+    public static string ShowAll => Loc.Instance[ShowAllKey];
+
     [ModuleInitializer]
     internal static void Initialize() => Register();
 
@@ -47,9 +52,10 @@ internal static class ModelsVisibilityStrings
         Loc.Register(SectionTitleKey, "模型可见性", "Model visibility");
         Loc.Register(
             HintKey,
-            "取消勾选后,该模型不再出现在输入框的选型器和内置 Agent 的默认模型下拉里。当前正在用的模型与已保存的默认值照常显示,随时可以改回来。搜索只过滤本页列表,不是偏好项。",
-            "An unchecked model is no longer offered by the chat model picker or the built-in agents' default-model combo. The model in use and a stored default still show, and can be chosen again. The search only filters this page — it is not a preference.");
+            "取消勾选后,该模型不再出现在输入框的选型器和内置 Agent 的默认模型下拉里。当前正在用的模型、已固定的模型与已保存的默认值照常显示,随时可以改回来。搜索只过滤本页列表,不是偏好项。",
+            "An unchecked model is no longer offered by the chat model picker or the built-in agents' default-model combo. The model in use, a pinned model and a stored default still show, and can be chosen again. The search only filters this page — it is not a preference.");
 
+        Loc.Register(ShowAllKey, "全部显示", "Show all");
         Loc.Register(SearchPlaceholderKey, "搜索模型", "Search models");
         Loc.Register(VisibilityColumnKey, "在选型器中显示", "Shown in pickers");
         Loc.Register(HiddenCountKeyBase + ".one", "{0} 个模型已隐藏", "{0} model hidden");

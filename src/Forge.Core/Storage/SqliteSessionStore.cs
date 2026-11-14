@@ -851,6 +851,14 @@ public sealed partial class SqliteSessionStore : ISessionStore, ISessionCatalog,
         {
             var seq = await sequences.NextAsync(connection, transaction, sessionId).ConfigureAwait(false);
             await store.InsertMessageAsync(connection, transaction, sessionId, seq, message, usage, at).ConfigureAwait(false);
+            // A message is activity: the idle-archive sweep must see a session whose turn just started as active, not wait for the reply.
+            await using var touch = connection.CreateCommand();
+            touch.Transaction = transaction;
+            touch.CommandText = "UPDATE sessions SET last_active_at = $at, last_active_ticks = $ticks WHERE id = $id";
+            touch.Parameters.AddWithValue("$at", StorageDb.FormatTimestamp(at));
+            touch.Parameters.AddWithValue("$ticks", StorageDb.TimestampTicks(at));
+            touch.Parameters.AddWithValue("$id", sessionId);
+            await touch.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
             return seq;
         }
     }

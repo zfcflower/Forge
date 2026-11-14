@@ -972,10 +972,13 @@ internal sealed partial class ComposerViewModel : NotifyingObject, IDisposable
         }
     }
 
-    /// <summary>Whether one row survives the search box and the hidden set; the current model is never filtered out.</summary>
+    /// <summary>
+    /// Whether one row survives the search box and the hidden set. The current model and a pinned one are never filtered
+    /// out: hiding is for the long tail of the catalogue, and a pin is the user saying "keep this one in reach".
+    /// </summary>
     private bool Shows(ComposerModelOption option, string query)
     {
-        if (appPreferences?.IsModelHidden(option.Name) == true && !IsCurrentModel(option))
+        if (appPreferences?.IsModelHidden(option.Name) == true && !IsCurrentModel(option) && !option.IsPinned)
         {
             return false;
         }

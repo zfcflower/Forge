@@ -18,6 +18,12 @@ internal sealed class AgentSlotPool
     private readonly Queue<Waiter> waiters = new();
     private int limit;
 
+    /// <summary>Cancelled waiters still sitting in <see cref="waiters"/>; compacted away once they outnumber the live ones.</summary>
+    private int cancelledQueued;
+
+    /// <summary>The queue is only rebuilt past this many cancelled entries, so a small queue never pays for the scan.</summary>
+    private const int CompactThreshold = 32;
+
     /// <summary>
     /// Permits currently owned by <see cref="AgentSlot"/> instances, including a permit already handed to a
     /// waiter that has not resumed yet. Detached slots are not counted, which is the point of detaching.
@@ -54,11 +60,17 @@ internal sealed class AgentSlotPool
     /// revokes a permit already handed out, because an agent in the middle of a turn must not be interrupted.
     /// A lower cap therefore only stops new grants until the outstanding count drops below it.
     /// </summary>
-    public void SetLimit(int limit)
+    /// <returns>Whether the cap moved.</returns>
+    public bool SetLimit(int limit)
     {
         var clamped = Math.Max(1, limit);
         lock (gate)
         {
+            if (this.limit == clamped)
+            {
+                return false;
+            }
+
             this.limit = clamped;
         }
 
@@ -78,7 +90,7 @@ internal sealed class AgentSlotPool
 
             if (granted is null)
             {
-                return;
+                return true;
             }
 
             granted.Completion.TrySetResult(true);
@@ -126,6 +138,61 @@ internal sealed class AgentSlotPool
         return TryTakePermit() ? ValueTask.CompletedTask : AcquirePermitSlowAsync(ct);
     }
 
+    /// <summary>
+    /// Counts a waiter that cancelled in place and, once the dead entries outnumber the live ones, drops them in one pass.
+    /// Without it a saturated pool would keep every cancelled acquire until a grant happened to dequeue it. Called under
+    /// <see cref="gate"/>.
+    /// </summary>
+    private void NoteCancelledWaiter()
+    {
+        cancelledQueued++;
+        if (cancelledQueued < CompactThreshold || cancelledQueued * 2 < waiters.Count)
+        {
+            return;
+        }
+
+        var live = new Queue<Waiter>(waiters.Count - cancelledQueued);
+        foreach (var waiter in waiters)
+        {
+            if (waiter.State == WaiterState.Queued)
+            {
+                live.Enqueue(waiter);
+            }
+        }
+
+        waiters.Clear();
+        foreach (var waiter in live)
+        {
+            waiters.Enqueue(waiter);
+        }
+
+        cancelledQueued = 0;
+    }
+
+    /// <summary>Entries in the wait queue, live or cancelled; a test reads it to see that cancelled waiters do not pile up.</summary>
+    internal int QueuedEntries
+    {
+        get
+        {
+            lock (gate)
+            {
+                return waiters.Count;
+            }
+        }
+    }
+
+    /// <summary>The cap in force; the one copy of it, so no mirror can disagree with the pool.</summary>
+    internal int Limit
+    {
+        get
+        {
+            lock (gate)
+            {
+                return limit;
+            }
+        }
+    }
+
     private bool TryTakePermit()
     {
         lock (gate)
@@ -151,6 +218,7 @@ internal sealed class AgentSlotPool
             var waiter = waiters.Dequeue();
             if (waiter.State != WaiterState.Queued)
             {
+                cancelledQueued--;
                 continue;
             }
 
@@ -241,6 +309,7 @@ internal sealed class AgentSlotPool
                 }
 
                 State = WaiterState.Cancelled;
+                pool.NoteCancelledWaiter();
             }
 
             Completion.TrySetCanceled(ct);
