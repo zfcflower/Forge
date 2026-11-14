@@ -31,6 +31,12 @@ public sealed record ToolResultBlock(string CallId, IReadOnlyList<ContentBlock> 
     /// <summary>The flattened text of <see cref="Blocks"/>; see <see cref="ToolResultBlocks.Flatten"/>.</summary>
     public string Content => ToolResultBlocks.Flatten(Blocks);
 
+    /// <summary>The tool's own words, without a placeholder for its images; see <see cref="ToolResultBlocks.TextOnly"/>.</summary>
+    public string Text => ToolResultBlocks.TextOnly(Blocks);
+
+    /// <summary>Whether the result carries a picture, without building a list of them.</summary>
+    public bool HasImages => ToolResultBlocks.HasImage(Blocks);
+
     public bool Equals(ToolResultBlock? other) =>
         other is not null && CallId == other.CallId && IsError == other.IsError && ToolResultBlocks.SequenceEqual(Blocks, other.Blocks);
 

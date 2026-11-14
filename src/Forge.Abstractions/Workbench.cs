@@ -95,6 +95,13 @@ public sealed record TodoStepFields(string? CommitSubject = null, string? Summar
 /// <summary>The session-level plan summary (Summary / Changes / Testing sections) that becomes the PR body.</summary>
 public sealed record PlanSummary(string SessionId, string Text, DateTimeOffset UpdatedAt);
 
+/// <summary>
+/// One replaced plan summary: the text the session's plan summary held before it was overwritten, and the moment it was
+/// replaced. A store keeps the newest revisions of a session and drops older ones, so the list is a bounded edit history
+/// of the plan rather than a log that grows with every rewrite.
+/// </summary>
+public sealed record PlanRevision(string SessionId, string Text, DateTimeOffset ReplacedAt);
+
 /// <summary>Per-session checklist edited by both the user and the agent; <see cref="Changed"/> carries the session id.</summary>
 public interface ITodoStore
 {
@@ -165,9 +172,20 @@ public interface ITodoStore
     /// <summary>The session's plan summary, or null when none was written.</summary>
     Task<PlanSummary?> GetPlanSummaryAsync(string sessionId, CancellationToken ct) => Task.FromResult<PlanSummary?>(null);
 
-    /// <summary>Replaces the session's plan summary and raises <see cref="Changed"/> with the session id.</summary>
+    /// <summary>
+    /// Replaces the session's plan summary and raises <see cref="Changed"/> with the session id. A store that keeps plan
+    /// history also records the replaced text as a <see cref="PlanRevision"/> in the same write, unless the new text equals
+    /// the stored one.
+    /// </summary>
     Task<PlanSummary> SetPlanSummaryAsync(string sessionId, string text, CancellationToken ct) =>
         throw new NotSupportedException("This todo store does not keep plan summaries.");
+
+    /// <summary>
+    /// The session's replaced plan summaries, newest first, at most <paramref name="limit"/>. A store without plan history
+    /// returns none; the default body is that answer, so a test double keeps working.
+    /// </summary>
+    Task<IReadOnlyList<PlanRevision>> ListPlanRevisionsAsync(string sessionId, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<PlanRevision>>([]);
 }
 
 public enum StepCommitOutcome

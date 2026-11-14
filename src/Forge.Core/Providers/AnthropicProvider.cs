@@ -351,7 +351,7 @@ public sealed class AnthropicProvider : HttpChatProvider
             {
                 var block = message.Blocks[i];
                 var nextSource = i + 1 < message.Blocks.Count ? message.Blocks[i + 1].Source : -1;
-                WriteBlock(writer, block.Block, cacheControl: block.Source == cacheIndex && nextSource != cacheIndex, messageTtl);
+                WriteBlock(writer, block.Block, cacheControl: block.Source == cacheIndex && nextSource != cacheIndex, messageTtl, request.IncludeToolImages);
             }
 
             writer.WriteEndArray();
@@ -470,7 +470,7 @@ public sealed class AnthropicProvider : HttpChatProvider
         return false;
     }
 
-    private static void WriteBlock(Utf8JsonWriter writer, ContentBlock block, bool cacheControl, string? ttl)
+    private static void WriteBlock(Utf8JsonWriter writer, ContentBlock block, bool cacheControl, string? ttl, bool includeToolImages)
     {
         writer.WriteStartObject();
         switch (block)
@@ -489,7 +489,7 @@ public sealed class AnthropicProvider : HttpChatProvider
             case ToolResultBlock result:
                 writer.WriteString("type", "tool_result");
                 writer.WriteString("tool_use_id", result.CallId);
-                writer.WriteString("content", result.Content);
+                WriteToolResultContent(writer, result, includeToolImages);
                 if (result.IsError)
                 {
                     writer.WriteBoolean("is_error", true);
@@ -510,12 +510,7 @@ public sealed class AnthropicProvider : HttpChatProvider
                 writer.WriteString("text", ProviderJson.RenderArtifact(artifact));
                 break;
             case ImageBlock image:
-                writer.WriteString("type", "image");
-                writer.WriteStartObject("source");
-                writer.WriteString("type", "base64");
-                writer.WriteString("media_type", image.MediaType);
-                writer.WriteString("data", image.Data);
-                writer.WriteEndObject();
+                WriteImageProperties(writer, image);
                 break;
             case FileBlock file when ProviderAttachments.IsPdf(file.MediaType):
                 writer.WriteString("type", "document");
@@ -536,6 +531,58 @@ public sealed class AnthropicProvider : HttpChatProvider
             WriteCacheControl(writer, ttl);
         }
 
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// The <c>content</c> of a <c>tool_result</c>: the plain string when there is no picture to send — byte-identical to what
+    /// this provider wrote before tool results could carry one — and otherwise the block array Anthropic accepts, the result's
+    /// text first and then each image. The images go here rather than in a following user turn because a <c>tool_result</c> is
+    /// itself the user-turn content that answers the call.
+    /// </summary>
+    private static void WriteToolResultContent(Utf8JsonWriter writer, ToolResultBlock result, bool includeToolImages)
+    {
+        if (!includeToolImages || !result.HasImages)
+        {
+            writer.WriteString("content", result.Content);
+            return;
+        }
+
+        writer.WriteStartArray("content");
+        if (result.Text is { Length: > 0 } text)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "text");
+            writer.WriteString("text", text);
+            writer.WriteEndObject();
+        }
+
+        foreach (var block in result.Blocks)
+        {
+            if (block is not ImageBlock image)
+            {
+                continue;
+            }
+
+            writer.WriteStartObject();
+            WriteImageProperties(writer, image);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    /// <summary>
+    /// The fields of one <c>image</c> block, written into the object the caller already opened: both the user-turn block and the
+    /// element of a <c>tool_result</c> content array have this shape, so only the surrounding object differs.
+    /// </summary>
+    private static void WriteImageProperties(Utf8JsonWriter writer, ImageBlock image)
+    {
+        writer.WriteString("type", "image");
+        writer.WriteStartObject("source");
+        writer.WriteString("type", "base64");
+        writer.WriteString("media_type", image.MediaType);
+        writer.WriteString("data", image.Data);
         writer.WriteEndObject();
     }
 

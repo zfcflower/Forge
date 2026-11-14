@@ -14,6 +14,9 @@ namespace Forge.App.Git;
 /// default <c>true</c> (a TODO item marked done commits that step; missing means the default);
 /// <c>gitChecksPollSeconds</c> = integer clamped to [10, 300], default 30 (wait mode: time between two polls);
 /// <c>gitChecksMaxWaitMinutes</c> = integer clamped to [1, 180], default 30 (wait mode: longest wait);
+/// <c>gitChecksNoChecksConfirmations</c> = integer clamped to [1, 10], default 3 (wait mode: polls in a row that must find
+/// no checks before it concludes there is no CI); <c>gitChecksFailureLogTailLines</c> = integer clamped to [20, 2000],
+/// default 200 (lines of a failed check's log handed to the agent);
 /// <c>gitGhPath</c> = string, default empty meaning <c>gh</c> from PATH, trimmed. The end of a wait is one notification
 /// through <see cref="INotifications"/>; whether notifications are wanted at all is the <c>notifications</c> switch of the
 /// notification section, not a git preference.</para>
@@ -112,6 +115,28 @@ internal sealed class GitSettingsSectionViewModel : ObservableObject, IDisposabl
         set
         {
             preferences.GitChecksMaxWaitMinutes = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Polls in a row that must find no checks before wait mode concludes there is no CI (1 to 10).</summary>
+    public int ChecksNoChecksConfirmations
+    {
+        get => preferences.GitChecksNoChecksConfirmations;
+        set
+        {
+            preferences.GitChecksNoChecksConfirmations = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Lines of a failed check's log handed to the agent (20 to 2000).</summary>
+    public int ChecksFailureLogTailLines
+    {
+        get => preferences.GitChecksFailureLogTailLines;
+        set
+        {
+            preferences.GitChecksFailureLogTailLines = value;
             OnPropertyChanged();
         }
     }

@@ -1,8 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="Forge.App.Changes.Markdown.MarkdownDiffView">
-  <!-- Rendered Markdown preview of one file's diff. Everything the renderer builds is styled here by class (md-*). -->
+  <!-- Rendered Markdown preview of one file's diff. The Markdown presentation itself (md-text, md-h1..h6, lists, quotes,
+       code, tables) is shared with the plan panel and lives in Resources/MarkdownStyles.axaml; what stays here is what frames
+       a diff: the change bars, the fold rows and the gap markers. -->
   <UserControl.Styles>
+    <StyleInclude Source="avares://Forge.App/Resources/MarkdownStyles.axaml" />
     <Style Selector="Border.md-block">
       <Setter Property="BorderThickness" Value="3,0,0,0" />
       <Setter Property="BorderBrush" Value="Transparent" />
@@ -31,78 +34,6 @@
     <Style Selector="Border.md-gap TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
       <Setter Property="FontSize" Value="{DynamicResource FontSizeSm}" />
-    </Style>
-
-    <Style Selector="SelectableTextBlock.md-text">
-      <Setter Property="TextWrapping" Value="Wrap" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-h1">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeXl}" />
-      <Setter Property="FontWeight" Value="Bold" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-h2">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeLg}" />
-      <Setter Property="FontWeight" Value="Bold" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-h3">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeMd}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-h4, SelectableTextBlock.md-h5">
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-h6">
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
-    </Style>
-    <Style Selector="TextBlock.md-marker">
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeBase}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-    </Style>
-    <Style Selector="TextBlock.md-task-done">
-      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
-    </Style>
-
-    <Style Selector="Border.md-quote">
-      <Setter Property="BorderThickness" Value="3,0,0,0" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
-      <Setter Property="Padding" Value="10,0,0,0" />
-    </Style>
-    <Style Selector="Border.md-quote SelectableTextBlock.md-text">
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-    </Style>
-    <Style Selector="Border.md-rule">
-      <Setter Property="Height" Value="1" />
-      <Setter Property="Margin" Value="0,6" />
-      <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
-    </Style>
-    <Style Selector="Border.md-code">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
-      <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
-      <Setter Property="Padding" Value="10,8" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-code-text">
-      <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
-      <Setter Property="FontSize" Value="{DynamicResource FontSizeCode}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    </Style>
-    <Style Selector="Border.md-table">
-      <Setter Property="BorderThickness" Value="1,1,0,0" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-      <Setter Property="HorizontalAlignment" Value="Stretch" />
-    </Style>
-    <Style Selector="Border.md-cell">
-      <Setter Property="BorderThickness" Value="0,0,1,1" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-      <Setter Property="Padding" Value="8,4" />
-    </Style>
-    <Style Selector="Border.md-cell-head">
-      <Setter Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
-    </Style>
-    <Style Selector="SelectableTextBlock.md-th">
-      <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
   </UserControl.Styles>
   <StackPanel x:Name="Root" />

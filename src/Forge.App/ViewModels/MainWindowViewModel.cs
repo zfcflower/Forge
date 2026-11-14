@@ -256,7 +256,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             ComposePullRequestAsync,
             ComposePullRequestMergeAsync,
             ConfirmGitRowActionAsync,
-            DescribePullRequestAsync);
+            DescribePullRequestAsync,
+            OpenChecksForPullRequest);
         Files = new FilesPanelViewModel(
             composition.Git,
             path => OpenFile(path, newTab: false),
@@ -323,6 +324,14 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         // The resource inspector's panel and the row of the strip's resources menu that opens it (wave W8). Created before
         // the window binds anything, because the sessions built below are handed OpenInspector as a callback.
         InitializeInspector();
+
+        // The plan panel's view model and the command that opens it (wave W7). Created before the window binds, so the
+        // overlay in MainWindow.axaml has its data context from the first frame.
+        InitializePlan();
+
+        // The palette's view model and its three opening gestures. Created here, before the window binds, so the overlay
+        // in MainWindow.axaml has its data context from the first frame.
+        InitializePalette();
 
         clock = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         clock.Tick += OnClockTick;
@@ -418,6 +427,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
             if (Set(ref activeSession, value))
             {
                 previous?.Instruments.SetGit(null);
+                CloseChecks();
                 SetTreesActiveSession(activeSession?.SessionId);
                 OnPropertyChanged(nameof(HasActiveSession));
                 OnPropertyChanged(nameof(ActiveSessionTitle));
@@ -3147,6 +3157,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         clock.Stop();
         layoutSaveTimer.Stop();
+        CloseChecks();
 
         // Terminals are ended before the final layout capture, so no terminal tab can end up in a snapshot, and before the
         // composition root tears the extension host down.
@@ -3198,6 +3209,9 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
 
         // The long-lived owners subscribe to the string table themselves; they drop it with the window.
         Loc.Instance.LanguageChanged -= OnLanguageChanged;
+        PropertyChanged -= OnPaletteActiveSessionChanged;
+        paletteViewModel.PropertyChanged -= OnPaletteOpenChanged;
+        paletteViewModel.Dispose();
         Status.Dispose();
         Settings.Dispose();
         Projects.Dispose();
@@ -3207,6 +3221,8 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         Todos.Dispose();
         Reviews.Dispose();
         Specs.Dispose();
+        ClosePlan();
+        PropertyChanged -= OnPlanActiveSessionChanged;
         Problems.Dispose();
         problemsDiagnostics?.Dispose();
         Workbench.Dispose();

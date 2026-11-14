@@ -143,6 +143,48 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
     }
 
     [Fact]
+    public async Task The_chat_and_files_sections_draw_their_bodies()
+    {
+        var session = fixture.Session;
+        await using var shell = await OpensAsync(session);
+        var token = new CancellationTokenSource(StepBudget).Token;
+
+        // A section body is built by its data template, which needs a layout pass; a loaded machine needs more than one, so
+        // each wait pumps until the section's own hint line appears instead of assuming one tick is enough.
+        async Task<string[]> TextsOf(string id, string expected)
+        {
+            var texts = Array.Empty<string>();
+            for (var attempt = 0; attempt < PanelWaitAttempts; attempt++)
+            {
+                texts = await session.Dispatch(
+                    () =>
+                    {
+                        shell.ViewModel.Settings.SelectedSection =
+                            shell.ViewModel.Settings.Sections.Items.First(section => section.Id == id);
+                        SharedUi.Settle(shell.Window);
+                        return PanelShell.SelectedTexts(shell.Window).ToArray();
+                    },
+                    token);
+                if (texts.Contains(expected, StringComparer.Ordinal))
+                {
+                    break;
+                }
+            }
+
+            return texts;
+        }
+
+        // A section whose data template is missing draws nothing at all, so the hint line proves the template resolved.
+        var chat = await TextsOf(SettingsSectionIds.Chat, Loc.Instance[ChatStrings.SettingsHint]);
+        Assert.Contains(Loc.Instance[ChatStrings.SettingsHint], chat);
+        Assert.Contains(Loc.Instance[ChatStrings.SettingsSendToolImages], chat);
+
+        var files = await TextsOf(SettingsSectionIds.Files, Loc.Instance[PreviewStrings.SettingsHintKey]);
+        Assert.Contains(Loc.Instance[PreviewStrings.SettingsHintKey], files);
+        Assert.Contains(Loc.Instance[PreviewStrings.SettingsRowsKey], files);
+    }
+
+    [Fact]
     public async Task A_narrow_column_folds_itself_and_the_toggle_overrides_the_width()
     {
         var session = fixture.Session;
@@ -452,8 +494,10 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.Prompts,
             Forge.App.Web.WebSettingsSectionViewModel.SectionId,
             SettingsSectionIds.Appearance,
+            SettingsSectionIds.Chat,
             SettingsSectionIds.Language,
             SettingsSectionIds.Editor,
+            SettingsSectionIds.Files,
             SettingsSectionIds.Terminal,
             SettingsSectionIds.Git,
             SettingsSectionIds.Extensions,
@@ -466,6 +510,7 @@ public sealed class SettingsPanelTests : IClassFixture<SettingsPanelFixture>
             SettingsSectionIds.ModelsVisibility,
             SettingsSectionIds.Agents,
             SettingsSectionIds.IdleArchive,
+            SettingsSectionIds.Palette,
             SettingsSectionIds.NotificationPermission,
             SettingsSectionIds.Paths,
             SettingsSectionIds.Inspector,

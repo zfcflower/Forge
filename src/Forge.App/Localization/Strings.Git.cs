@@ -26,6 +26,8 @@ internal static class GitStrings
     public const string SettingsStepCommitsHint = "git.settings.stepCommitsHint";
     public const string SettingsChecksPoll = "git.settings.checksPoll";
     public const string SettingsChecksMaxWait = "git.settings.checksMaxWait";
+    public const string SettingsChecksNoChecks = "git.settings.checksNoChecks";
+    public const string SettingsChecksLogTail = "git.settings.checksLogTail";
     public const string SettingsChecksHint = "git.settings.checksHint";
     public const string SettingsGhPath = "git.settings.ghPath";
     public const string SettingsGhPathHint = "git.settings.ghPathHint";
@@ -232,6 +234,35 @@ internal static class GitStrings
     public const string ShipMergeCommitTitle = "git.ship.mergeCommitTitle";
     public const string ShipMergeCommitMessage = "git.ship.mergeCommitMessage";
     public const string ShipMergedNumber = "git.ship.mergedNumber";
+
+    /// <summary>The ship row that takes a draft pull request out of draft.</summary>
+    public const string ShipMarkReady = "git.ship.markReady";
+
+    /// <summary>Format: <c>{0}</c> is the pull request number the platform took out of draft.</summary>
+    public const string ShipReadyNumber = "git.ship.readyNumber";
+
+    public const string ShipReadyNotDraft = "git.ship.readyNotDraft";
+
+    /// <summary>The ship row that opens the checks panel for this branch's pull request.</summary>
+    public const string ShipChecks = "git.ship.checks";
+
+    public const string ShipChecksNoPullRequest = "git.ship.checksNoPullRequest";
+
+    /// <summary>Format: <c>{0}</c> the merged pull request number, <c>{1}</c> what the post-merge follow-up did.</summary>
+    public const string ShipMergedWithFinale = "git.ship.mergedWithFinale";
+
+    /// <summary>Format: <c>{0}</c> the merged pull request number, <c>{1}</c> why the follow-up failed.</summary>
+    public const string ShipMergedFinaleProblem = "git.ship.mergedFinaleProblem";
+
+    /// <summary>Format: <c>{0}</c> the base branch, <c>{1}</c> the commit it now points at.</summary>
+    public const string ShipFinaleUpdated = "git.ship.finaleUpdated";
+
+    /// <summary>Format: <c>{0}</c> the base branch the root checkout is not on, <c>{1}</c> the branch it is on.</summary>
+    public const string ShipFinaleSkipped = "git.ship.finaleSkipped";
+
+    /// <summary>Format: <c>{0}</c> the base branch that was not pulled.</summary>
+    public const string ShipFinaleDirty = "git.ship.finaleDirty";
+
     public const string ShipMergeDraft = "git.ship.mergeDraft";
     public const string ShipMerged = "git.ship.merged";
     public const string ShipClosed = "git.ship.closed";
@@ -287,10 +318,12 @@ internal static class GitStrings
 
         Loc.Register(SettingsChecksPoll, "检查轮询间隔（秒）", "Checks poll interval (seconds)");
         Loc.Register(SettingsChecksMaxWait, "检查最长等待（分钟）", "Checks maximum wait (minutes)");
+        Loc.Register(SettingsChecksNoChecks, "无检查确认次数", "No-checks confirmations");
+        Loc.Register(SettingsChecksLogTail, "失败日志尾行数", "Failed log tail lines");
         Loc.Register(
             SettingsChecksHint,
-            "“等待检查”每隔多少秒向 GitHub 查询一次（10–300 秒），最长等待多少分钟（1–180 分钟）；改动对下一次等待生效。",
-            "How often waiting for checks asks GitHub (10–300 seconds) and the longest it keeps waiting (1–180 minutes); a change applies to the next wait.");
+            "“等待检查”每隔多少秒向 GitHub 查询一次（10–300 秒）、最长等待多少分钟（1–180 分钟）、连续几轮读不到检查才判定没有 CI（1–10 次），以及失败日志交给 Agent 的尾行数（20–2000 行）；改动对下一次等待生效。",
+            "How often waiting for checks asks GitHub (10–300 seconds), the longest it keeps waiting (1–180 minutes), how many polls in a row must find no checks before it concludes there is no CI (1–10), and how many tail lines of a failed log the agent gets (20–2000); a change applies to the next wait.");
         Loc.Register(SettingsGhPath, "gh 可执行文件", "gh executable");
         Loc.Register(
             SettingsGhPathHint,
@@ -422,6 +455,16 @@ internal static class GitStrings
         Loc.Register(ShipMergeDialogMerge, "创建合并提交", "Create a merge commit");
         Loc.Register(ShipMergeDialogRebase, "变基并合并", "Rebase and merge");
 
+        Loc.Register(ShipMarkReady, "标记为可评审", "Mark ready for review");
+        Loc.Register(ShipReadyNumber, "PR #{0} 已标记为可评审", "Pull request #{0} is ready for review");
+        Loc.Register(ShipReadyNotDraft, "只有草稿 PR 才能标记为可评审", "Only a draft pull request can be marked ready for review");
+        Loc.Register(ShipChecks, "PR 检查…", "PR checks…");
+        Loc.Register(ShipChecksNoPullRequest, "还没有读到 PR 编号，检查面板没有可打开的对象", "No pull request number was read, so the checks panel has nothing to open");
+        Loc.Register(ShipMergedWithFinale, "PR #{0} 已合并;{1}", "Merged pull request #{0}; {1}");
+        Loc.Register(ShipMergedFinaleProblem, "PR #{0} 已合并,但收尾失败:{1}", "Merged pull request #{0}, but the follow-up failed: {1}");
+        Loc.Register(ShipFinaleUpdated, "{0} 已更新到 {1}", "{0} is now at {1}");
+        Loc.Register(ShipFinaleSkipped, "已抓取并清理远端分支;根检出不在 {0} 上(当前 {1}),基础分支未拉动", "Fetched and pruned; the root checkout is not on {0} (it is on {1}), so the base branch was not pulled");
+        Loc.Register(ShipFinaleDirty, "已抓取,但根检出有未提交的改动,基础分支 {0} 未拉动", "Fetched, but the root checkout has uncommitted changes, so the base branch {0} was not pulled");
         Loc.Register(ShipMergeDraft, "草稿 PR 不能合并", "A draft pull request cannot be merged");
         Loc.Register(ShipMerged, "这个 PR 已经合并", "This pull request is already merged");
         Loc.Register(ShipClosed, "这个 PR 已关闭", "This pull request is closed");

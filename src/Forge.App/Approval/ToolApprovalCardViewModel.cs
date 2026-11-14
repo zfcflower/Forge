@@ -18,12 +18,15 @@ internal sealed record ToolApprovalCardRequest(
     string ToolName,
     ToolSideEffect SideEffect,
     string WorkingDirectory,
-    string ArgumentsJson);
+    string ArgumentsJson,
+    McpApprovalServer? McpServer = null);
 
 /// <summary>
 /// One tool call waiting for the user: session, tool name, side effect, working directory and the arguments as indented
-/// JSON (formatted on a pool thread, collapsed when long). The buttons allow once, deny, or allow and remember the
-/// decision for this session / this project / always; <c>extension_delete</c> and plugin commands have no "remember" buttons
+/// JSON (formatted on a pool thread, collapsed when long), plus - when the tool belongs to an MCP server - the server's
+/// name, transport, command line, working directory, URL and env/header key names, and a revoke button for every
+/// remembered rule that names this tool. The buttons allow once, deny, or allow and remember the decision for this
+/// session / this project / always; <c>extension_delete</c> and plugin commands have no "remember" buttons
 /// (the first is the deletion confirmation, the second is decided per call).
 /// </summary>
 internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
@@ -36,18 +39,26 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
     /// <summary>Hard cap so a pathological argument cannot build an unbounded text block.</summary>
     private const int MaxArgumentsChars = 200_000;
 
+    /// <summary>Hard cap so a pathological MCP command line cannot build an unbounded text block.</summary>
+    private const int MaxMcpCommandLineChars = 4_000;
+
     private readonly ToolApprovalCardRequest request;
     private readonly IApprovalDispatcher dispatcher;
+    private readonly ApprovalRules? rules;
+    private readonly McpApprovalServer? mcpServer;
     private string argumentsText = string.Empty;
+    private string mcpCommandLine = string.Empty;
     private bool isArgumentsLong;
     private bool isArgumentsExpanded;
 
-    public ToolApprovalCardViewModel(ToolApprovalCardRequest request, IApprovalDispatcher dispatcher)
+    public ToolApprovalCardViewModel(ToolApprovalCardRequest request, IApprovalDispatcher dispatcher, ApprovalRules? rules = null)
         : base("tool:" + Guid.NewGuid().ToString("N"), request.SessionId, request.SessionTitle, DateTimeOffset.UtcNow)
     {
         ArgumentNullException.ThrowIfNull(request);
         this.request = request;
         this.dispatcher = dispatcher ?? UiThreadDispatcher.Instance;
+        this.rules = rules;
+        mcpServer = request.McpServer;
 
         AllowCommand = new RelayCommand(() => Decide(ApprovalCardDecision.Allow, remember: null), () => !IsDecided);
         DenyCommand = new RelayCommand(() => Decide(ApprovalCardDecision.Deny, remember: null), () => !IsDecided);
@@ -58,14 +69,64 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
         RememberGlobalCommand = new RelayCommand(
             () => Decide(ApprovalCardDecision.Allow, ApprovalScope.Global), () => CanRemember && !IsDecided);
         ToggleArgumentsCommand = new RelayCommand(ToggleArguments);
+        McpRevokeCommand = new RelayCommand(RevokeMcp, () => CanRevokeRemembered && !IsDecided);
 
         AttachLanguageChanged(OnLanguageChanged);
         _ = FormatArgumentsAsync();
+        if (mcpServer is not null)
+        {
+            _ = FormatMcpCommandLineAsync();
+        }
     }
 
     public string ToolName => request.ToolName;
 
     public string WorkingDirectory => request.WorkingDirectory;
+
+    /// <summary>True when the card carries what the tool's MCP server is; the whole server block binds to this.</summary>
+    public bool HasMcpServer => mcpServer is not null;
+
+    public string McpServerName => mcpServer?.ServerName ?? string.Empty;
+
+    /// <summary>The transport in the current language; a token that is neither <c>stdio</c> nor <c>http</c> shows as it arrived.</summary>
+    public string McpTransportText => mcpServer is null ? string.Empty : ExtensionsStrings.ToolMcpTransportText(mcpServer.Transport);
+
+    public bool HasMcpCommand => mcpServer is { } server && (!string.IsNullOrEmpty(server.Command) || server.Args.Count > 0);
+
+    /// <summary>The <c>command + args</c> line, empty until the background formatting finished.</summary>
+    public string McpCommandLine => mcpCommandLine;
+
+    public bool HasMcpWorkingDirectory => mcpServer is { WorkingDirectory.Length: > 0 };
+
+    public string McpWorkingDirectory => mcpServer?.WorkingDirectory ?? string.Empty;
+
+    public bool HasMcpUrl => mcpServer is { Url.Length: > 0 };
+
+    public string McpUrl => mcpServer?.Url ?? string.Empty;
+
+    public bool HasMcpEnvKeys => mcpServer is { EnvKeys.Count: > 0 };
+
+    public string McpEnvKeysText => mcpServer is null ? string.Empty : string.Join(", ", mcpServer.EnvKeys);
+
+    public bool HasMcpHeaderKeys => mcpServer is { HeaderKeys.Count: > 0 };
+
+    public string McpHeaderKeysText => mcpServer is null ? string.Empty : string.Join(", ", mcpServer.HeaderKeys);
+
+    /// <summary>Always true: the card shows only key names, so the hint row under them is always there.</summary>
+    public bool McpHidesValues => true;
+
+    /// <summary>True while at least one remembered rule names this card's tool; a null rule store means never.</summary>
+    public bool CanRevokeRemembered => RememberedRuleCount() > 0;
+
+    /// <summary>The revoke button text with the count of remembered rules, in the current language.</summary>
+    public string RememberedRulesText
+    {
+        get
+        {
+            var count = RememberedRuleCount();
+            return count == 0 ? string.Empty : ExtensionsStrings.ToolMcpRevokeRemembered(count);
+        }
+    }
 
     /// <summary>Side effect of the call in the current language.</summary>
     public string SideEffectText => ApprovalText.SideEffect(request.SideEffect);
@@ -131,6 +192,9 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
 
     public RelayCommand ToggleArgumentsCommand { get; }
 
+    /// <summary>Revokes every remembered rule that names this card's tool; the card's own decision is untouched.</summary>
+    public RelayCommand McpRevokeCommand { get; }
+
     /// <summary>
     /// Indents a JSON argument so a tool call is readable on the card. A value that is not JSON is shown as it arrived;
     /// the only other transformation is the hard length cap.
@@ -160,6 +224,108 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
         }
 
         return text.Length <= MaxArgumentsChars ? text : text[..MaxArgumentsChars] + "…";
+    }
+
+    /// <summary>
+    /// Renders the server's command line for the card: the command and its arguments joined by spaces; an argument that
+    /// contains whitespace or is empty is wrapped in double quotes. The only other transformation is the hard length cap.
+    /// </summary>
+    public static string FormatMcpCommandLine(McpApprovalServer server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        var builder = new StringBuilder();
+        if (!string.IsNullOrEmpty(server.Command))
+        {
+            builder.Append(server.Command);
+        }
+
+        foreach (var arg in server.Args)
+        {
+            if (builder.Length > 0)
+            {
+                builder.Append(' ');
+            }
+
+            if (arg.Length == 0 || arg.Any(static character => char.IsWhiteSpace(character)))
+            {
+                builder.Append('"').Append(arg).Append('"');
+            }
+            else
+            {
+                builder.Append(arg);
+            }
+        }
+
+        var text = builder.ToString();
+        return text.Length <= MaxMcpCommandLineChars ? text : text[..MaxMcpCommandLineChars] + "…";
+    }
+
+    private async Task FormatMcpCommandLineAsync()
+    {
+        var server = mcpServer;
+        if (server is null)
+        {
+            return;
+        }
+
+        var formatted = await Task.Run(() => FormatMcpCommandLine(server)).ConfigureAwait(false);
+        try
+        {
+            await dispatcher
+                .InvokeAsync(
+                    () =>
+                    {
+                        mcpCommandLine = formatted;
+                        OnPropertyChanged(nameof(McpCommandLine));
+                    })
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The dispatcher went away while the card was being formatted (application shutdown): nothing to show.
+            AppLogs.Approval.ZLogWarning($"the MCP command line could not be shown: {exception.Message}");
+        }
+    }
+
+    /// <summary>How many remembered rules name this card's tool, across all scopes.</summary>
+    private int RememberedRuleCount()
+    {
+        if (rules is null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var rule in rules.Rules)
+        {
+            if (string.Equals(rule.Key.ToolName, request.ToolName, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private void RevokeMcp()
+    {
+        if (rules is null || IsDecided)
+        {
+            return;
+        }
+
+        // The snapshot is taken once: revoking a rule inside the loop never invalidates it.
+        foreach (var rule in rules.Rules)
+        {
+            if (string.Equals(rule.Key.ToolName, request.ToolName, StringComparison.Ordinal))
+            {
+                rules.Revoke(rule.Key);
+            }
+        }
+
+        OnPropertyChanged(nameof(CanRevokeRemembered));
+        OnPropertyChanged(nameof(RememberedRulesText));
+        McpRevokeCommand.NotifyCanExecuteChanged();
     }
 
     private async Task FormatArgumentsAsync()
@@ -230,5 +396,8 @@ internal sealed class ToolApprovalCardViewModel : ApprovalCardViewModel
         OnPropertyChanged(nameof(Note));
         OnPropertyChanged(nameof(RememberProjectHint));
         OnPropertyChanged(nameof(ArgumentsToggleText));
+        OnPropertyChanged(nameof(McpTransportText));
+        OnPropertyChanged(nameof(RememberedRulesText));
+        OnPropertyChanged(nameof(CanRevokeRemembered));
     }
 }

@@ -13,6 +13,7 @@ using Forge.App.Localization;
 using Forge.App.Network;
 using Forge.App.Notifications;
 using Forge.App.Preferences;
+using Forge.App.ViewModels;
 using Forge.App.ViewModels.Settings;
 using Forge.App.Services;
 using Forge.Approval;
@@ -420,7 +421,7 @@ internal sealed class AppComposition : IAsyncDisposable
             {
                 Timeout = Timeout.InfiniteTimeSpan,
             };
-            mcp = McpServices.Create(paths, notifications, mcpHttp);
+            mcp = McpServices.Create(paths, preferences, notifications, mcpHttp);
             mcpHttp = null; // owned (and disposed) by the MCP services from here on
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
@@ -431,6 +432,12 @@ internal sealed class AppComposition : IAsyncDisposable
         {
             // Create failed (with any exception): nobody owns the client, so its handler and pooled sockets go here.
             mcpHttp?.Dispose();
+        }
+
+        // The MCP services exist, so the approval cards can now describe the server a tool call belongs to.
+        if (mcp is { } mcpServices)
+        {
+            approvals.McpToolInfo = mcpServices.DescribeForApproval;
         }
 
         // 5. Editor.
@@ -559,6 +566,11 @@ internal sealed class AppComposition : IAsyncDisposable
         // (catalog snapshot → provider report → default context window → per-model override).
         runtimeServices.ContextWindow = model => providers.Catalog.MetadataFor(model.Model, model.ProviderId).ContextWindow;
         runtimeServices.MaxOutputTokens = model => providers.ModelCatalog.View.Find(null, model.Model)?.MaxOutputTokens;
+        // A model the catalog knows to take no image input gets a tool result's text, not its pictures; unknown stays
+        // "may take images", the same rule the composer applies to a user attachment.
+        runtimeServices.ModelInputs = model =>
+            providers.Catalog.MetadataFor(model.Model, model.ProviderId).Capabilities?.Inputs;
+        runtimeServices.SendToolImages = () => preferences.Current.ChatToolImagesToModel;
         // Read before every turn and re-applied to every live session on each save, so a change reaches a running turn at
         // its next model request.
         runtimeServices.CompactionChanges = compactionSettings;
@@ -580,6 +592,7 @@ internal sealed class AppComposition : IAsyncDisposable
             () => preferences.Current.GitStepCommits,
             notifications);
         runtimeServices.StepCommitter = stepCommitter;
+        runtimeServices.Mcp = mcp;
         runtimeServices.ToolRouter = toolRouter;
         runtimeServices.Artifacts = artifacts;
         var runtimes = new AgentRuntimeManager(runtimeServices);

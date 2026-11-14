@@ -15,7 +15,9 @@ internal sealed class ManagerFixture : IAsyncDisposable
         TimeSpan? initialReconnectDelay = null,
         TimeSpan? requestTimeout = null,
         int maxResultChars = 64 * 1024,
-        Func<McpServerConfig, LoopbackTransport>? transportFor = null)
+        Func<McpServerConfig, LoopbackTransport>? transportFor = null,
+        int maxToolSchemaChars = 64 * 1024,
+        int maxToolDescriptionChars = 4 * 1024)
     {
         this.serverFor = serverFor ?? (_ => new ScriptedServer());
         this.transportFor = transportFor;
@@ -26,6 +28,8 @@ internal sealed class ManagerFixture : IAsyncDisposable
             MaxReconnectDelay = TimeSpan.FromSeconds(10),
             MaxReconnectAttempts = maxReconnectAttempts,
             MaxResultChars = maxResultChars,
+            MaxToolSchemaChars = maxToolSchemaChars,
+            MaxToolDescriptionChars = maxToolDescriptionChars,
             TransportFactory = Create,
         });
     }
@@ -45,10 +49,16 @@ internal sealed class ManagerFixture : IAsyncDisposable
 
     public int TransportCount(string name) => Transports.Count(transport => transport.Name == name);
 
-    public static McpServerConfig Stdio(string name, bool disabled = false, IReadOnlyList<string>? readOnlyTools = null, TimeSpan? timeout = null) => new()
+    public static McpServerConfig Stdio(
+        string name,
+        bool disabled = false,
+        IReadOnlyList<string>? readOnlyTools = null,
+        TimeSpan? timeout = null,
+        IReadOnlyList<string>? args = null) => new()
     {
         Name = name,
         Command = "fake-" + name,
+        Args = args ?? [],
         Disabled = disabled,
         ReadOnlyTools = readOnlyTools ?? [],
         Timeout = timeout,

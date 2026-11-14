@@ -39,9 +39,34 @@ internal static class ExtensionsStrings
     public const string ToolDecidedAllow = "Extensions.Tool.DecidedAllow";
     public const string ToolDecidedDeny = "Extensions.Tool.DecidedDeny";
 
+    // The MCP server block of a tool card (nothing of the env/header values is ever on the card).
+    public const string ToolMcpServer = "Extensions.Tool.McpServer";
+    public const string ToolMcpTransport = "Extensions.Tool.McpTransport";
+    public const string ToolMcpTransportStdio = "Extensions.Tool.McpTransport.Stdio";
+    public const string ToolMcpTransportHttp = "Extensions.Tool.McpTransport.Http";
+    public const string ToolMcpCommand = "Extensions.Tool.McpCommand";
+    public const string ToolMcpWorkingDirectory = "Extensions.Tool.McpWorkingDirectory";
+    public const string ToolMcpUrl = "Extensions.Tool.McpUrl";
+    public const string ToolMcpEnvKeys = "Extensions.Tool.McpEnvKeys";
+    public const string ToolMcpHeaderKeys = "Extensions.Tool.McpHeaderKeys";
+    public const string ToolMcpKeysOnly = "Extensions.Tool.McpKeysOnly";
+    public const string ToolMcpRevokeRememberedBase = "Extensions.Tool.McpRevokeRemembered";
+
     public const string SideEffectReadOnly = "Extensions.SideEffect.ReadOnly";
     public const string SideEffectWrite = "Extensions.SideEffect.Write";
     public const string SideEffectExecute = "Extensions.SideEffect.Execute";
+
+    /// <summary>The transport of an MCP server in the current language; a token that is neither <c>stdio</c> nor <c>http</c> shows as it arrived.</summary>
+    public static string ToolMcpTransportText(string transport) => transport switch
+    {
+        "stdio" => Loc.Instance[ToolMcpTransportStdio],
+        "http" => Loc.Instance[ToolMcpTransportHttp],
+        _ => transport,
+    };
+
+    /// <summary>The card's revoke button text with the count of remembered rules for this tool.</summary>
+    public static string ToolMcpRevokeRemembered(long count) =>
+        Loc.Instance.FormatPlural(ToolMcpRevokeRememberedBase, count);
 
     // ---------------------------------------------------------------- extension card
 
@@ -160,6 +185,24 @@ internal static class ExtensionsStrings
         Loc.Register(ToolNoProject, "没有项目，无法记住本项目。", "There is no project, so this cannot be remembered for one.");
         Loc.Register(ToolDecidedAllow, "已允许", "Allowed");
         Loc.Register(ToolDecidedDeny, "已拒绝", "Denied");
+        Loc.Register(ToolMcpServer, "服务器", "Server");
+        Loc.Register(ToolMcpTransport, "传输方式", "Transport");
+        Loc.Register(ToolMcpTransportStdio, "标准输入输出 (stdio)", "Standard input/output (stdio)");
+        Loc.Register(ToolMcpTransportHttp, "HTTP", "HTTP");
+        Loc.Register(ToolMcpCommand, "命令", "Command");
+        Loc.Register(ToolMcpWorkingDirectory, "工作目录", "Working directory");
+        Loc.Register(ToolMcpUrl, "URL", "URL");
+        Loc.Register(ToolMcpEnvKeys, "环境变量键", "Environment variable keys");
+        Loc.Register(ToolMcpHeaderKeys, "请求头键", "Header keys");
+        Loc.Register(ToolMcpKeysOnly, "只显示键名；值永远不会显示。", "Only key names are shown; values are never displayed.");
+        Loc.Register(
+            LocText.PluralKey(ToolMcpRevokeRememberedBase, 1),
+            "撤销 {0} 条已记住的规则",
+            "Revoke {0} remembered rule");
+        Loc.Register(
+            LocText.PluralKey(ToolMcpRevokeRememberedBase, 2),
+            "撤销 {0} 条已记住的规则",
+            "Revoke {0} remembered rules");
 
         Loc.Register(SideEffectReadOnly, "只读", "Read-only");
         Loc.Register(SideEffectWrite, "写入", "Write");

@@ -19,7 +19,7 @@ public sealed class StorageSchemaV10MigrationTests
             await store.GetStateAsync("x", Ct);
         }
 
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "automation_runs"));
         Assert.True(await TodoSchemaRaw.TableExistsAsync(directory, "automation_state"));
         var sessionColumns = await TodoSchemaRaw.ColumnsAsync(directory, "sessions");
@@ -58,7 +58,7 @@ public sealed class StorageSchemaV10MigrationTests
             Assert.True(await store.TryInsertAsync(AutomationRuns.Make("r1"), Ct));
         }
 
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
         await using var sessions = new SqliteSessionStore(directory.Path);
         var kept = await sessions.GetSessionAsync(sessionId, Ct);
         Assert.NotNull(kept);
@@ -87,7 +87,7 @@ public sealed class StorageSchemaV10MigrationTests
 
         await using var reopened = new SqliteAutomationRunStore(directory.Path);
         Assert.NotNull(await reopened.GetAsync("r1", Ct));
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public sealed class StorageSchemaV10MigrationTests
         SqliteConnection.ClearAllPools();
         await using var repaired = new SqliteAutomationRunStore(directory.Path);
         await repaired.GetStateAsync("x", Ct);
-        Assert.Equal(10L, await TodoSchemaRaw.UserVersionAsync(directory));
+        Assert.Equal(11L, await TodoSchemaRaw.UserVersionAsync(directory));
     }
 
     [Fact]

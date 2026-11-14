@@ -692,6 +692,14 @@ public sealed partial class SqliteSessionStore
             plans.Parameters.AddWithValue("$to", to);
             plans.Parameters.AddWithValue("$from", from);
             await plans.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+
+            await using var revisions = Command(
+                connection,
+                transaction,
+                "INSERT INTO plan_summary_revisions (session_id, text, replaced_at) SELECT $to, text, replaced_at FROM plan_summary_revisions WHERE session_id = $from ORDER BY id");
+            revisions.Parameters.AddWithValue("$to", to);
+            revisions.Parameters.AddWithValue("$from", from);
+            await revisions.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -774,7 +782,7 @@ public sealed partial class SqliteSessionStore
             }
 
             var search = store.Fts5Available ? "messages_fts" : "messages_text";
-            foreach (var table in new[] { "messages", search, "summaries", "todos", "todo_groups", "plan_summaries", "turn_checkpoints" })
+            foreach (var table in new[] { "messages", search, "summaries", "todos", "todo_groups", "plan_summaries", "plan_summary_revisions", "turn_checkpoints" })
             {
                 await using var delete = Command(connection, transaction, $"DELETE FROM {table} WHERE session_id IN (SELECT value FROM json_each($ids))");
                 delete.Parameters.AddWithValue("$ids", json);

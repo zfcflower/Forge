@@ -316,6 +316,32 @@ public sealed class GitHubPlatform : IPrPlatform
             : Failure<PrReference>(result, "Could not merge the pull request.");
     }
 
+    /// <summary>
+    /// <c>gh pr ready</c>. gh (and GitHub) refuse a pull request that is already ready with a non-zero exit code; that is
+    /// the state the caller asked for, so it is reported as success rather than as a failure the user has to read.
+    /// </summary>
+    public async Task<PrResult<PrReference>> MarkPullRequestReadyAsync(
+        string workingDirectory,
+        int number,
+        CancellationToken ct = default)
+    {
+        if (number <= 0)
+        {
+            return Invalid<PrReference>($"{number} is not a valid pull request number.");
+        }
+
+        var arguments = new List<string> { "pr", "ready", Number(number) };
+        var result = await gh.RunAsync(workingDirectory, arguments, null, ct).ConfigureAwait(false);
+        if (result.Success)
+        {
+            return ReferenceFrom(result, "Could not mark the pull request ready.", number);
+        }
+
+        return IsAlreadyReady(result)
+            ? PrResult<PrReference>.Ok(new PrReference(number, string.Empty), result.StandardOutput.Trim())
+            : Failure<PrReference>(result, "Could not mark the pull request ready.");
+    }
+
     public async Task<PrResult<PrText>> GetFailedJobLogAsync(string workingDirectory, long? runId, long jobId, CancellationToken ct = default)
     {
         if (jobId <= 0 || runId is <= 0)
@@ -602,6 +628,23 @@ public sealed class GitHubPlatform : IPrPlatform
         arguments.AddRange(fields);
         return gh.RunAsync(workingDirectory, arguments, null, ct);
     }
+
+    /// <summary>
+    /// gh answers "pull request #7 is already ready" (older versions: "already ready for review") when nothing is left to
+    /// do. Any real failure – missing pull request, no permission – says something else.
+    /// </summary>
+    private static bool IsAlreadyReady(GhCommandResult result)
+    {
+        if (result.TimedOut || result.StartFailed)
+        {
+            return false;
+        }
+
+        return ContainsAlreadyReady(result.StandardError) || ContainsAlreadyReady(result.StandardOutput);
+    }
+
+    private static bool ContainsAlreadyReady(string text) =>
+        text.Contains("already ready", StringComparison.OrdinalIgnoreCase);
 
     private static PrResult<PrReference> ReferenceFrom(GhCommandResult result, string action, int? fallbackNumber)
     {

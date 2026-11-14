@@ -66,7 +66,8 @@ public abstract record HandoverTarget
     /// A new root session. The store copies <c>fork_of_branch</c>, <c>fork_base_sha</c> and <c>lineage_root_id</c>
     /// from the old session (the values in <see cref="Create"/> are ignored for those three) and writes
     /// <see cref="InitialMessages"/> (0-2 messages: handover summary and / or inheritance note) in the same transaction.
-    /// <see cref="CopyTodosAndPlans"/> copies todos, todo groups and the plan summary of the old session.
+    /// <see cref="CopyTodosAndPlans"/> copies todos, todo groups, the plan summary of the old session and the history of
+    /// plan summaries it replaced (newest first, the same order the panel reads them in).
     /// </summary>
     public sealed record NewSession(SessionCreate Create) : HandoverTarget
     {
