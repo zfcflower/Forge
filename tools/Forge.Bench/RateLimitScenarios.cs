@@ -345,9 +345,12 @@ internal static class RateLimitScenarios
                         var baseSpread = comparison.Baseline?.Observation is { } baseObservation ? Spread(baseObservation) : double.NaN;
                         var authorized = comparison.Implementation.Signature;
 
-                        // The allowance is 8000 tokens at one per request, plus whatever the refill clock added during the window
-                        // (a few, at this length). Anything above that is over-admission: the budget was handed out twice.
-                        var allowance = authorized >= FairnessBudget && authorized <= FairnessBudget + ContendedThreads;
+                        // The allowance is 8000 requests, plus whatever the refill clock added while the batch ran: 8000/60 per
+                        // second, so the bound is taken from this row's own slowest sample rather than a constant that a loaded
+                        // machine would turn into a false red. Anything above it is over-admission: the budget was handed out
+                        // twice.
+                        var refilled = (long)(FairnessBudget / 60.0 * (comparison.Implementation.P99Ms / 1000.0)) + 1;
+                        var allowance = authorized >= FairnessBudget && authorized <= FairnessBudget + refilled;
 
                         // The spread is reported, not asserted: with a budget this small the whole share-out lasts a few hundred
                         // microseconds, so it measures how the eight tasks wake up as much as who wins the counter (one run gave
@@ -357,7 +360,7 @@ internal static class RateLimitScenarios
                             $"a budget of {FairnessBudget} is spent once under eight threads (no over-admission)",
                             observation + string.Create(
                                 CultureInfo.InvariantCulture,
-                                $" authorized={authorized} base_spread={baseSpread:0.00}"),
+                                $" authorized={authorized} of {FairnessBudget}+{refilled} base_spread={baseSpread:0.00}"),
                             allowance);
                     },
                 });

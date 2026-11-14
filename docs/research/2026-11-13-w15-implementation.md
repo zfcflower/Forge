@@ -79,10 +79,12 @@
 
 | 行 | 实现 | 基线(锁) | 比值 | 分配 |
 |---|---|---|---|---|
-| `ratelimit.acquire.authorized` | 38.8 ns/acquire | 62.8 ns/acquire | 0.62x | 0 字节/次 |
-| `ratelimit.acquire.wait` | 77.1 ns/acquire | 65.9 ns/acquire | 1.17x | 0 字节/次 |
-| `ratelimit.acquire.contended.8t` | 72.3 ns/op、15.0 Mitems/s | 185.7 ns/op | 0.39x | 每次调用 ~2.9 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
-| `ratelimit.acquire.fairness.8t` | 16.8 ms / 8000 授权 | 33.1 ms | 0.51x | 同上;per-thread 计数见下 |
+| `ratelimit.acquire.authorized` | 37.4 ns/acquire | 61 ns/acquire | 0.62x | 0 字节/次 |
+| `ratelimit.acquire.wait` | 70.1 ns/acquire | 65 ns/acquire | 1.17x | 0 字节/次 |
+| `ratelimit.acquire.contended.8t` | 58.3 ns/op、15 Mitems/s | ~150 ns/op | 0.39x | 每次调用 ~2.4 KB(8 线程的 Task/状态机,不是桶);spread 1.00 |
+| `ratelimit.acquire.fairness.8t` | 8000 请求预算花 8001(补充给 1 个) | 锁基线的 spread 本轮 532 | 0.5x | 同上;per-thread 计数见下 |
+
+数值按"机器安静时的一轮"记录,同一份代码在不同轮之间会上下浮动 20–50%(这批行只有几十纳秒到几十毫秒),比值(impl/base)比绝对值稳。
 
 **等待路径是有意慢一点的那条**(1.17x):拒绝必须读时钟、算补充、算精确 retryTime,而锁版本只做一次减法;它仍在 100 ns 以内,而且只在预算真的用完时才走到。
 
@@ -118,7 +120,7 @@
 | `dotnet test tests/Forge.Core.Tests`(承载改动的项目全量,L2) | 2296 通过 / 0 失败 |
 | `dotnet test tests/Forge.Core.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~Forge.Core.Tests.Providers"` | 612 通过(新增 49 个:桶 18、限速器 23、响应头 8+28 参数、重试层 8+4 参数) |
 | `dotnet test tests/Forge.App.Tests --filter "FullyQualifiedName~RateLimit\|FullyQualifiedName~QuotaResume\|FullyQualifiedName~Localization\|FullyQualifiedName~MinorRegression\|FullyQualifiedName~Settings\|FullyQualifiedName~Views"` | 799 通过(新增 App 侧 14 个;另改写 `QuotaResumeTests` 的 4 个预留用例) |
-| `dotnet run -c Release --project tools/Forge.Bench -- ratelimit` | 3/3 验收通过(数字见第五节) |
+| `dotnet run -c Release --project tools/Forge.Bench -- ratelimit` | 4/4 验收通过(数字见第五节) |
 
 **一次失败记录**:上述 App 过滤第一次跑时 testhost 在 438 个用例后崩溃(无失败断言、无堆栈),重跑同一过滤 799 全绿;按仓库既有经验属该 headless UI 会话的偶发中断,不是本波的断言。
 
