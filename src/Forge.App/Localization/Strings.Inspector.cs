@@ -3,8 +3,9 @@ using System.Runtime.CompilerServices;
 namespace Forge.App.Localization;
 
 /// <summary>
-/// The inspector's table: the files panel, the preview, the changes document, TODO, review and the spec tree.
-/// <para>Keys: <c>files.*</c>, <c>changes.*</c>, <c>todo.*</c>, <c>review.*</c>, <c>spec.*</c>. Each key has a Chinese and an English text; parameterized texts are exposed as typed accessor
+/// The inspector's table: the files panel, the preview, the changes document, TODO, review, the spec tree, the problems
+/// list and the editor's language features (references, diagnostics wording).
+/// <para>Keys: <c>files.*</c>, <c>changes.*</c>, <c>todo.*</c>, <c>review.*</c>, <c>spec.*</c>, <c>problems.*</c>. Each key has a Chinese and an English text; parameterized texts are exposed as typed accessor
 /// methods (formatted through <see cref="Loc.Format"/>), parameterless ones as properties that read
 /// <see cref="Loc.Instance"/>, so callers never cache a resolved string across a language switch.</para>
 /// <para>Texts that are stored now and shown later (a read failure, an unreadable diff, a git status description) are
