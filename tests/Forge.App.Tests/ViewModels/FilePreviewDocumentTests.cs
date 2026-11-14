@@ -1,4 +1,5 @@
 using System.Text;
+using Forge.App.Localization;
 using Forge.App.Preferences;
 using Forge.App.ViewModels;
 using Forge.App.ViewModels.Preview;
@@ -69,7 +70,6 @@ public sealed class FilePreviewDocumentTests : IDisposable
         Assert.False(model.HasError, model.Error);
         Assert.False(model.HasDocument);
         var card = Assert.IsType<PlaceholderFilePreviewViewModel>(model.Preview);
-        Assert.Null(card.ShowSourceCommand);
         Assert.Null(card.LfsOid);
     }
 
@@ -228,22 +228,31 @@ public sealed class FilePreviewDocumentTests : IDisposable
     }
 
     [Fact]
-    public async Task An_html_preview_switches_to_the_text_path_when_show_source_runs()
+    public async Task An_html_page_opens_as_editable_source_and_offers_the_browser()
     {
         var path = Write("page.html", "<html>hello</html>\n");
         var model = FileDocumentViewModel.Create();
         await model.LoadAsync(path, CancellationToken.None);
 
-        var card = Assert.IsType<PlaceholderFilePreviewViewModel>(model.Preview);
-        Assert.NotNull(card.ShowSourceCommand);
-        Assert.False(model.HasDocument);
-
-        await model.ShowPreviewSourceAsync(CancellationToken.None);
-
+        // No card for a page: the panel never renders HTML, and refusing the source would only cost a click.
         Assert.False(model.HasError, model.Error);
         Assert.Null(model.Preview);
+        Assert.False(model.HasPreview);
         Assert.True(model.HasDocument);
         Assert.Equal("<html>hello</html>\n", model.EditText);
+        Assert.True(model.IsHtmlDocument);
+        Assert.Equal(Loc.Instance[PreviewStrings.OpenInBrowserKey], model.ExternalOpenLabel);
+    }
+
+    [Fact]
+    public async Task A_non_page_document_words_the_same_button_as_the_system_app()
+    {
+        var path = Write("notes.txt", "text\n");
+        var model = FileDocumentViewModel.Create();
+        await model.LoadAsync(path, CancellationToken.None);
+
+        Assert.False(model.IsHtmlDocument);
+        Assert.Equal(Loc.Instance[PreviewStrings.OpenExternalKey], model.ExternalOpenLabel);
     }
 
     [Fact]

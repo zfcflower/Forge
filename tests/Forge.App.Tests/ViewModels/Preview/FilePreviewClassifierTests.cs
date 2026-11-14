@@ -17,8 +17,9 @@ public sealed class FilePreviewClassifierTests
     [InlineData("data.tsv", "Table")]
     [InlineData("notes.ipynb", "Notebook")]
     [InlineData("report.pdf", "Pdf")]
-    [InlineData("page.html", "Html")]
-    [InlineData("page.htm", "Html")]
+    // A page is not a preview kind: it opens as editable source and the toolbar hands it to the browser.
+    [InlineData("page.html", "Text")]
+    [InlineData("page.htm", "Text")]
     [InlineData("readme.md", "Text")]
     [InlineData("source.cs", "Text")]
     [InlineData("archive.tar.gz", "Text")]

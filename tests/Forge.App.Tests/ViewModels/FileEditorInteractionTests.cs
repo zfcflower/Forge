@@ -49,7 +49,7 @@ public sealed class FileEditorInteractionTests : IDisposable
                 var path = Path.Combine(NewRoot(), name + ".txt");
                 await File.WriteAllBytesAsync(path, [.. encoding.GetPreamble(), .. encoding.GetBytes(text)]);
                 // The HTML half is about the editor, so it opens the source; the placeholder routing is pinned elsewhere.
-                var model = await TestDocuments.LoadAsync(path, forceText: path.EndsWith(".html", StringComparison.Ordinal));
+                var model = await TestDocuments.LoadAsync(path);
                 Assert.False(model.HasError, name + ": " + model.Error);
                 Assert.Equal(text, model.EditText);
                 var edited = text.Replace("alpha", "ALPHA", StringComparison.Ordinal);
@@ -97,7 +97,7 @@ public sealed class FileEditorInteractionTests : IDisposable
             foreach (var path in new[] { html, plain })
             {
                 // The HTML half is about the editor, so it opens the source; the placeholder routing is pinned elsewhere.
-                var model = await TestDocuments.LoadAsync(path, forceText: path.EndsWith(".html", StringComparison.Ordinal));
+                var model = await TestDocuments.LoadAsync(path);
                 var host = Show(model);
                 var scroller = host.Editor.GetVisualDescendants().OfType<ScrollViewer>().First();
                 Assert.True(scroller.Viewport.Width <= 240.5, path + " viewport " + scroller.Viewport.Width);

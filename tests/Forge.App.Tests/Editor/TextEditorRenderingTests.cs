@@ -43,7 +43,7 @@ public sealed class TextEditorRenderingTests : IDisposable
         await Ui(async () =>
         {
             // The HTML sample is opened as source: the file panel shows a placeholder card for it, which this test is not about.
-            var model = await TestDocuments.LoadAsync(path, forceText: name.EndsWith(".html", StringComparison.Ordinal));
+            var model = await TestDocuments.LoadAsync(path);
             var host = Show(model, width: 900, height: 600);
             Assert.Equal(text.Split('\n'), EditorUi.RenderedLines(host.Editor).Take(text.Split('\n').Length).ToArray());
             await WaitUntil(() => EditorUi.TokenColors(host.Editor).Count >= 2);
@@ -67,7 +67,7 @@ public sealed class TextEditorRenderingTests : IDisposable
             {
                 var path = Write(name + ".txt", text, encoding);
                 // The HTML sample is opened as source: the file panel shows a placeholder card for it, which this test is not about.
-            var model = await TestDocuments.LoadAsync(path, forceText: name.EndsWith(".html", StringComparison.Ordinal));
+            var model = await TestDocuments.LoadAsync(path);
                 var host = Show(model, width: 600);
                 model.IsEditing = true;
                 WorkbenchUi.Settle(host.Window);

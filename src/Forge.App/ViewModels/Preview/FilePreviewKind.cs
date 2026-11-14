@@ -21,8 +21,6 @@ internal enum FilePreviewKind
     /// <summary>A PDF: no internal rendering, handed to the OS.</summary>
     Pdf,
 
-    /// <summary>An HTML page: no internal rendering, handed to the OS (the source stays readable).</summary>
-    Html,
 }
 
 /// <summary>
@@ -50,7 +48,6 @@ internal static class FilePreviewClassifier
             ".csv" or ".tsv" => FilePreviewKind.Table,
             ".ipynb" => FilePreviewKind.Notebook,
             ".pdf" => FilePreviewKind.Pdf,
-            ".html" or ".htm" => FilePreviewKind.Html,
             _ => FilePreviewKind.Text,
         };
     }

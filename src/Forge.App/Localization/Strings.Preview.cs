@@ -17,8 +17,10 @@ internal static class PreviewStrings
     public const string SettingsHintKey = "files.preview.settings.hint";
 
     public const string OpenExternalKey = "files.preview.openExternal";
+
+    /// <summary>The same open button, worded for a page: the default program for an .html file is the browser.</summary>
+    public const string OpenInBrowserKey = "files.preview.openInBrowser";
     public const string OpenFailedKey = "files.preview.openFailed";
-    public const string ShowSourceKey = "files.preview.showSource";
     public const string SizeKey = "files.preview.size";
     public const string TruncatedKey = "files.preview.truncated";
 
@@ -34,8 +36,6 @@ internal static class PreviewStrings
     public const string PdfCaptionKey = "files.preview.pdf.caption";
     public const string PdfReasonKey = "files.preview.pdf.reason";
 
-    public const string HtmlCaptionKey = "files.preview.html.caption";
-    public const string HtmlReasonKey = "files.preview.html.reason";
 
     public const string ImageCaptionKey = "files.preview.image.caption";
     public const string ImageDecodeFailedKey = "files.preview.image.decodeFailed";
@@ -70,8 +70,8 @@ internal static class PreviewStrings
         Loc.Register(SettingsHintKey, "文件预览的读取上限：表格预览解析的行数、Notebook 单个输出的字符数、图片预览允许的最大文件大小。超过图片上限的文件显示占位卡片而不解码。",
             "Limits for the file viewer: rows parsed for a CSV/TSV table, characters kept per notebook output, and the largest file the image preview decodes. Files above the image limit show a placeholder card instead of being decoded.");
         Loc.Register(OpenExternalKey, "用系统程序打开", "Open with the system app");
+        Loc.Register(OpenInBrowserKey, "在浏览器中打开", "Open in browser");
         Loc.Register(OpenFailedKey, "无法用系统程序打开 {0}：{1}", "Could not open {0} with the system app: {1}");
-        Loc.Register(ShowSourceKey, "查看源码", "Show source");
         Loc.Register(SizeKey, "{0} 字节", "{0} bytes");
         Loc.Register(TruncatedKey, "…（已截断）", "... (truncated)");
         Loc.Register(LfsCaptionKey, "Git LFS 指针", "Git LFS pointer");
@@ -83,8 +83,6 @@ internal static class PreviewStrings
         Loc.Register(BinaryReasonKey, "二进制内容无法作为文本显示。", "Binary content cannot be shown as text.");
         Loc.Register(PdfCaptionKey, "PDF 文档", "PDF document");
         Loc.Register(PdfReasonKey, "PDF 文档在此处不渲染；请用系统查看器打开。", "PDF documents are not rendered here; open this one with the system viewer.");
-        Loc.Register(HtmlCaptionKey, "HTML 文档", "HTML document");
-        Loc.Register(HtmlReasonKey, "网页在此处不渲染；请用系统浏览器打开，或查看源码。", "Web pages are not rendered here; open in the system browser, or show the source.");
         Loc.Register(ImageCaptionKey, "{0} 图片 · {1}×{2} · {3}", "{0} image · {1}×{2} · {3}");
         Loc.Register(ImageDecodeFailedKey, "无法解码 {0}。", "Could not decode {0}.");
         Loc.Register(ImageReadFailedKey, "无法读取 {0}：{1}", "Could not read {0}: {1}");

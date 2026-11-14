@@ -73,8 +73,8 @@
                             AutomationProperties.AutomationId="file-copy" AutomationProperties.Name="{Binding [files.copy], Source={x:Static loc:Loc.Instance}}"
                             IsVisible="{Binding HasDocument}" />
         <wc:PanelIconButton Grid.Column="5" Margin="2,0,0,0" Icon="{DynamicResource IconOpen}" Command="{Binding OpenExternallyCommand}"
-                            ToolTip.Tip="{Binding [files.preview.openExternal], Source={x:Static loc:Loc.Instance}}"
-                            AutomationProperties.AutomationId="file-open-external" AutomationProperties.Name="{Binding [files.preview.openExternal], Source={x:Static loc:Loc.Instance}}" />
+                            ToolTip.Tip="{Binding ExternalOpenLabel}"
+                            AutomationProperties.AutomationId="file-open-external" AutomationProperties.Name="{Binding ExternalOpenLabel}" />
         <wc:PanelIconButton x:Name="EditorMenuButton" Grid.Column="6" Margin="2,0,0,0" Icon="{DynamicResource IconEllipsis}" Click="OnEditorMenuClick"
                             ToolTip.Tip="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}"
                             AutomationProperties.AutomationId="file-editor-menu" AutomationProperties.Name="{Binding [editor.menu.label], Source={x:Static loc:Loc.Instance}}"

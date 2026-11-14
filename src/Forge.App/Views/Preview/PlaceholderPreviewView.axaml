@@ -45,11 +45,6 @@
                   Command="{Binding OpenExternallyCommand}"
                   Content="{Binding [files.preview.openExternal], Source={x:Static loc:Loc.Instance}}"
                   AutomationProperties.AutomationId="file-preview-open-external" />
-          <Button Classes="ghost"
-                  IsVisible="{Binding HasShowSource}"
-                  Command="{Binding ShowSourceCommand}"
-                  Content="{Binding [files.preview.showSource], Source={x:Static loc:Loc.Instance}}"
-                  AutomationProperties.AutomationId="file-preview-show-source" />
         </StackPanel>
       </StackPanel>
     </Border>

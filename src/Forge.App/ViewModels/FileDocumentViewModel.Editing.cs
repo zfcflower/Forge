@@ -139,7 +139,7 @@ internal sealed partial class FileDocumentViewModel
         FilePreviewSettings? previewSettings = null) =>
         new(grammars) { sessions = sessions, imageDecoder = imageDecoder, previewSettings = previewSettings };
 
-    public async Task LoadAsync(string filePath, CancellationToken ct, bool discardEdits = false, bool forceText = false)
+    public async Task LoadAsync(string filePath, CancellationToken ct, bool discardEdits = false)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -171,12 +171,14 @@ internal sealed partial class FileDocumentViewModel
             Path = full;
             fileName = System.IO.Path.GetFileName(full);
             OnPropertyChanged(nameof(TabTitle));
+            OnPropertyChanged(nameof(ExternalOpenLabel));
+            OnPropertyChanged(nameof(IsHtmlDocument));
             SetError(default);
             SetSaveError(default);
             SetLspStatus(default);
             ReportEditorNotice(default);
             IsLoading = true;
-            var read = await Task.Run(() => ReadFileAsync(full, forceText, token), token).ConfigureAwait(true);
+            var read = await Task.Run(() => ReadFileAsync(full, token), token).ConfigureAwait(true);
             try
             {
                 token.ThrowIfCancellationRequested();
@@ -283,7 +285,7 @@ internal sealed partial class FileDocumentViewModel
         }
     }
 
-    private async Task<FileRead> ReadFileAsync(string full, bool forceText, CancellationToken ct)
+    private async Task<FileRead> ReadFileAsync(string full, CancellationToken ct)
     {
         var info = new FileInfo(full);
         if (!info.Exists)
@@ -291,38 +293,34 @@ internal sealed partial class FileDocumentViewModel
             return new FileRead(null, null, true, 0);
         }
 
-        if (!forceText)
+        // The kind decides before anything is read as text: a preview kind returns here, text and binary fall through.
+        var firstBytes = ReadFirstBytes(full);
+        switch (FilePreviewClassifier.Classify(full, firstBytes))
         {
-            var firstBytes = ReadFirstBytes(full);
-            switch (FilePreviewClassifier.Classify(full, firstBytes))
-            {
-                case FilePreviewKind.Lfs:
-                    return new FileRead(null, PlaceholderFilePreviewViewModel.ForLfs(full, info.Length, firstBytes), false, 0);
-                case FilePreviewKind.Image:
-                    return ReadImagePreview(full, info);
-                case FilePreviewKind.Table:
-                    return new FileRead(
-                        null,
-                        TableFilePreviewViewModel.Build(
-                            full,
-                            info.Length,
-                            PreviewSettings.PreviewRows,
-                            FilePreviewClassifier.TableSeparator(full),
-                            PreviewSettings.TableCharWidth,
-                            ct),
-                        false,
-                        0);
-                case FilePreviewKind.Notebook:
-                    return new FileRead(
-                        null,
-                        NotebookFilePreviewViewModel.Build(full, info.Length, PreviewSettings.NotebookOutputChars, imageDecoder, ct),
-                        false,
-                        0);
-                case FilePreviewKind.Pdf:
-                    return new FileRead(null, PlaceholderFilePreviewViewModel.ForPdf(full, info.Length), false, 0);
-                case FilePreviewKind.Html:
-                    return new FileRead(null, PlaceholderFilePreviewViewModel.ForHtml(full, info.Length, ShowPreviewSourceAsync), false, 0);
-            }
+            case FilePreviewKind.Lfs:
+                return new FileRead(null, PlaceholderFilePreviewViewModel.ForLfs(full, info.Length, firstBytes), false, 0);
+            case FilePreviewKind.Image:
+                return ReadImagePreview(full, info);
+            case FilePreviewKind.Table:
+                return new FileRead(
+                    null,
+                    TableFilePreviewViewModel.Build(
+                        full,
+                        info.Length,
+                        PreviewSettings.PreviewRows,
+                        FilePreviewClassifier.TableSeparator(full),
+                        PreviewSettings.TableCharWidth,
+                        ct),
+                    false,
+                    0);
+            case FilePreviewKind.Notebook:
+                return new FileRead(
+                    null,
+                    NotebookFilePreviewViewModel.Build(full, info.Length, PreviewSettings.NotebookOutputChars, imageDecoder, ct),
+                    false,
+                    0);
+            case FilePreviewKind.Pdf:
+                return new FileRead(null, PlaceholderFilePreviewViewModel.ForPdf(full, info.Length), false, 0);
         }
 
         if (info.Length > MaxFileBytes)
@@ -391,6 +389,19 @@ internal sealed partial class FileDocumentViewModel
     /// </summary>
     public RelayCommand OpenExternallyCommand => openExternallyCommand ??= new RelayCommand(OpenExternally);
 
+    /// <summary>
+    /// What the toolbar's open button says for the current file. A page is not rendered inside the panel — the editor shows
+    /// its source — so for an <c>.html</c> file the same button reads "open in browser", the default program for a page.
+    /// Read on every access, so a language switch and a new file both land.
+    /// </summary>
+    public string ExternalOpenLabel =>
+        Loc.Instance[IsHtmlDocument ? PreviewStrings.OpenInBrowserKey : PreviewStrings.OpenExternalKey];
+
+    /// <summary>Whether the current file is a page: opened as editable source, handed to the browser in one click.</summary>
+    public bool IsHtmlDocument =>
+        path.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".htm", StringComparison.OrdinalIgnoreCase);
+
     private void OpenExternally()
     {
         if (path.Length == 0)
@@ -410,9 +421,6 @@ internal sealed partial class FileDocumentViewModel
         OnPropertyChanged(nameof(Preview));
         OnPropertyChanged(nameof(HasPreview));
     }
-
-    /// <summary>The HTML placeholder's "show the source": the same file, but classified as text.</summary>
-    internal Task ShowPreviewSourceAsync(CancellationToken ct) => LoadAsync(path, ct, forceText: true);
 
     private static bool IsLspFailure(Exception exception) =>
         exception is LspProtocolException or LanguageServerCrashedException or LanguageServerNotFoundException
